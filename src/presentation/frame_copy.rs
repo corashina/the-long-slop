@@ -1,4 +1,4 @@
-//! Persistent fullscreen copies for source camera callbacks and final display.
+//! Persistent fullscreen copy for the final display.
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::{binding_types::*, *},
@@ -18,7 +18,6 @@ impl FrameCopy {
         shader: Handle<Shader>,
         source: &TextureView,
         format: TextureFormat,
-        samples: u32,
     ) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
             "source_frame_copy",
@@ -40,14 +39,7 @@ impl FrameCopy {
             },
             fragment: Some(FragmentState {
                 shader,
-                entry_point: Some(
-                    if format.is_srgb() {
-                        "display_copy"
-                    } else {
-                        "copy"
-                    }
-                    .into(),
-                ),
+                entry_point: Some("display_copy".into()),
                 targets: vec![Some(ColorTargetState {
                     format,
                     blend: None,
@@ -55,10 +47,6 @@ impl FrameCopy {
                 })],
                 ..default()
             }),
-            multisample: MultisampleState {
-                count: samples,
-                ..default()
-            },
             ..default()
         });
         let sampler = device.create_sampler(&SamplerDescriptor {
@@ -96,7 +84,6 @@ impl FrameCopy {
         encoder: &mut CommandEncoder,
         cache: &PipelineCache,
         output: &WgpuTextureView,
-        resolve: Option<&TextureView>,
     ) -> bool {
         let Some(pipeline) = cache.get_render_pipeline(self.pipeline) else {
             return false;
@@ -104,7 +91,7 @@ impl FrameCopy {
         let colors = [Some(RenderPassColorAttachment {
             view: output,
             depth_slice: None,
-            resolve_target: resolve.map(|v| &**v),
+            resolve_target: None,
             ops: Operations {
                 load: LoadOp::Load,
                 store: StoreOp::Store,

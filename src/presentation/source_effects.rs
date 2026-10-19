@@ -1,12 +1,12 @@
-//! Source camera effects and legacy callback copies share one submitted stack token.
+//! Source camera effects share one submitted stack token.
+//! Uber writes every MSAA sample and the resolve, so legacy callback copies are not encoded.
 use super::{
-    frame_copy::FrameCopy,
     frame_graph::SourceGraphProgress,
     lighting_assets::{LightingAssets, LightingRenderAssets},
     lighting_scene::SourceSceneLighting,
     materials::RenderingState,
     postprocessing::chain::{PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain},
-    render_targets::{HDR_FORMAT, SourceColorTargets},
+    render_targets::SourceColorTargets,
     source_lighting::{SourceExecutionGate, SourceLightingStatus},
     surface_graph::{SourceSurface, SourceSurfaceStage, SurfaceViewTargets},
     surface_views::{SourceSurfaceView, SurfaceResources},
@@ -65,7 +65,6 @@ pub(crate) struct EffectsAudit {
     ao_frame: u32,
     ao_token: u32,
     post_mask: u8,
-    callback_mask: u8,
     submitted_token: u32,
     pipelines_ready: bool,
     inputs_ready: bool,
@@ -74,13 +73,11 @@ pub(crate) struct EffectsAudit {
     extent: [u32; 2],
     chain_bytes: [u64; 3],
     ao_bytes: u64,
-    callback_bytes: u64,
     total_bytes: u64,
     startup_counts: [u32; 3],
     resize_counts: [u32; 3],
     ao_startup_count: u32,
     ao_resize_count: u32,
-    callback_allocations: u32,
     validation: u32,
     validated: bool,
     delta_seconds: f32,
@@ -95,7 +92,6 @@ impl EffectsAudit {
             && self.submitted_token == token
             && self.completed_tokens == [token; 3]
             && self.post_mask == 7
-            && self.callback_mask == 31
             && self.validated
     }
 }
@@ -103,10 +99,6 @@ struct EffectTargets {
     colors: Arc<SourceColorTargets>,
     ao: Option<SourceAoChain>,
     chains: [Option<SourcePostChain>; 3],
-    _scratch: Texture,
-    scratch: TextureView,
-    to_scratch: FrameCopy,
-    copyback: FrameCopy,
 }
 #[derive(Resource, Default)]
 pub(crate) struct SourceEffects {
@@ -122,8 +114,6 @@ impl SourceEffects {
                     .chains
                     .iter()
                     .all(|chain| chain.as_ref().unwrap().ready(cache))
-                && targets.to_scratch.ready(cache)
-                && targets.copyback.ready(cache)
         })
     }
     pub(crate) fn encoded(&self, index: usize, frame: u32, token: u32) -> bool {
@@ -134,19 +124,12 @@ impl SourceEffects {
     }
     fn failure(&self, cache: &PipelineCache) -> Option<String> {
         let targets = self.targets.as_ref()?;
-        targets
-            .ao
-            .as_ref()
-            .unwrap()
-            .failure(cache)
-            .or_else(|| {
-                targets
-                    .chains
-                    .iter()
-                    .find_map(|chain| chain.as_ref().unwrap().failure(cache))
-            })
-            .or_else(|| targets.to_scratch.failure(cache))
-            .or_else(|| targets.copyback.failure(cache))
+        targets.ao.as_ref().unwrap().failure(cache).or_else(|| {
+            targets
+                .chains
+                .iter()
+                .find_map(|chain| chain.as_ref().unwrap().failure(cache))
+        })
     }
 }
 pub fn install(app: &mut App) {
@@ -305,54 +288,10 @@ fn prepare(
                 previous.as_mut().and_then(|old| old.chains[index].take()),
             )?);
         }
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("source_callback_scratch"),
-            size: Extent3d {
-                width: extent[0],
-                height: extent[1],
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: HDR_FORMAT,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let scratch = texture.create_view(&default());
-        let (to_scratch, copyback) = if let Some(mut old) = previous.take() {
-            old.to_scratch
-                .rebind(&device, &cache, colors.resolved.sampled.as_ref().unwrap());
-            old.copyback.rebind(&device, &cache, &scratch);
-            (old.to_scratch, old.copyback)
-        } else {
-            (
-                FrameCopy::new(
-                    &device,
-                    &cache,
-                    shaders.copy.clone(),
-                    colors.resolved.sampled.as_ref().unwrap(),
-                    HDR_FORMAT,
-                    1,
-                ),
-                FrameCopy::new(
-                    &device,
-                    &cache,
-                    shaders.copy.clone(),
-                    &scratch,
-                    HDR_FORMAT,
-                    8,
-                ),
-            )
-        };
         Ok(EffectTargets {
             colors,
             ao: Some(ao),
             chains,
-            _scratch: texture,
-            scratch,
-            to_scratch,
-            copyback,
         })
     })();
     match result {
@@ -368,11 +307,8 @@ fn prepare(
             effects.audit.ao_bytes = ao.logical_bytes;
             effects.audit.ao_startup_count = ao.startup_count;
             effects.audit.ao_resize_count = ao.resize_count;
-            effects.audit.callback_bytes = u64::from(extent[0]) * u64::from(extent[1]) * 8;
-            effects.audit.total_bytes = effects.audit.chain_bytes.iter().sum::<u64>()
-                + effects.audit.ao_bytes
-                + effects.audit.callback_bytes;
-            effects.audit.callback_allocations += 1;
+            effects.audit.total_bytes =
+                effects.audit.chain_bytes.iter().sum::<u64>() + effects.audit.ao_bytes;
             effects.audit.validation = 0;
             effects.audit.validated = false;
             effects.targets = Some(targets);
@@ -391,7 +327,6 @@ fn begin_frame(
     effects.audit.ao_frame = 0;
     effects.audit.ao_token = 0;
     effects.audit.post_mask = 0;
-    effects.audit.callback_mask = 0;
     effects.audit.encoded_tokens = [0; 3];
     effects.audit.pipelines_ready = effects.ready(&cache);
     effects.audit.inputs_ready = input.frame == frame.frame;
@@ -474,33 +409,13 @@ fn encode_post(
         targets.colors.resolve_target().unwrap(),
     );
     match encoded {
-        Ok(true) => {}
-        Ok(false) => return,
-        Err(error) => {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
-            return;
+        Ok(true) => {
+            effects.audit.encoded_tokens[index] = frame.main_token;
+            effects.audit.post_mask |= 1 << index;
         }
+        Ok(false) => {}
+        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
     }
-    // Far: PP callback then native copyback. Main: PP callback then enabled zero-weight heat callback.
-    if index < 2 {
-        if !targets
-            .to_scratch
-            .encode(context.command_encoder(), &cache, &targets.scratch, None)
-            || !targets.copyback.encode(
-                context.command_encoder(),
-                &cache,
-                targets.colors.attachment(),
-                targets.colors.resolve_target(),
-            )
-        {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source camera callback did not encode".into());
-            return;
-        }
-        effects.audit.callback_mask |= 3 << (index * 2);
-    }
-    effects.audit.encoded_tokens[index] = frame.main_token;
-    effects.audit.post_mask |= 1 << index;
 }
 pub(crate) fn submitted(
     mut effects: ResMut<SourceEffects>,
@@ -518,7 +433,6 @@ pub(crate) fn submitted(
         && stamp == frame.frame
         && token == frame.main_token
         && effects.audit.post_mask == 7
-        && effects.audit.callback_mask == 15
         && effects.audit.encoded_tokens == [token; 3]
         && token > effects.audit.submitted_token
     {
@@ -551,8 +465,6 @@ pub(crate) fn submitted(
             effects.audit.first_after = after;
         }
         effects.audit.submitted_token = token;
-        // Foreground's final callback is the existing display copy; presented proves its encode.
-        effects.audit.callback_mask |= 16;
         if effects.audit.validation == 0 {
             effects.audit.validation = gate.watch_submission(&queue);
         }

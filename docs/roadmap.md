@@ -96,7 +96,7 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 4. **Remove redundant fullscreen image copies.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
+   Status: Implemented, not measured. Uber writes all MSAA samples, so both copies were removed. On some GPUs, the copies could spread Inf or NaN from a neighbor pixel. That no longer occurs. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
    Effect: Remove only post-Uber Far and Main copies that produce equivalent pixels and submissions.
    Prompt:
    ```text
