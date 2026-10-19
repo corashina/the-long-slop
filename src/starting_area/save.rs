@@ -1,3 +1,5 @@
+mod finalize;
+
 use super::{GarageRuntime, StartingArea};
 use crate::reference::ReferenceManifest;
 use crate::save::*;
@@ -172,68 +174,14 @@ impl GarageRuntime {
                 &mut self.physics,
             )?;
         }
-        self.persistent_world.sync(
-            reference,
-            &mut self.area,
-            &mut self.wheels,
-            &self.stream,
-            &mut self.physics,
-        )?;
-        self.area
-            .interaction
-            .sync_parts(&mut self.area.items, &mut self.physics)?;
-        self.wheels
-            .refresh_conditions(&self.area.conditions, &self.area.items);
-        self.wheels.sync(&mut self.area.items, &mut self.physics)?;
-        self.area.items.sync_poses(&self.physics);
-        self.area.commit_poses(&self.physics, true);
-
-        self.physics.edit_bodies(|_, body, colliders| {
-            if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(colliders);
-            }
-        });
-        for record in &pending.motion {
-            let handle = match &record.identity {
-                BodyIdentity::Source { source } => {
-                    self.area.bodies.get(&ids.bodies[source]).copied()
-                }
-                BodyIdentity::Assembly { root } => {
-                    self.area.items.get(ids.item(root)?).and_then(|i| i.body)
-                }
-            };
-            if let Some(handle) = handle.filter(|h| self.physics.body_active(*h)) {
-                self.physics.edit_body(handle, |body| {
-                    body.set_linvel(record.linear_velocity.into(), false);
-                    body.set_angvel(record.angular_velocity.into(), false);
-                    if record.sleeping {
-                        body.sleep();
-                    } else {
-                        body.wake_up(true);
-                    }
-                });
-            }
+        finalize::RestoreFinalizer {
+            area: &mut self.area,
+            physics: &mut self.physics,
+            wheels: &mut self.wheels,
+            persistent: &mut self.persistent_world,
+            stream: &mut self.stream,
         }
-        if !pending.motion.is_empty() {
-            for (key, change) in self.stream.changes().iter() {
-                if let (Some(id), Some(snapshot)) =
-                    (self.area.items.resolve_key(key), &change.snapshot)
-                {
-                    if snapshot.attachment.is_none() {
-                        crate::world::changes::restore_motion(
-                            id,
-                            snapshot,
-                            &self.area.items,
-                            &mut self.physics,
-                        );
-                    }
-                }
-            }
-        }
-        pending.motion.clear();
-        self.stream
-            .release_saved_item_locations(&self.area.items, &pending.items);
-        self.physics.refresh_queries();
+        .deferred(reference, ids, &mut pending.motion, &pending.items)?;
         pending.carry = None;
         pending.inventory = None;
         pending.ready = true;
@@ -353,83 +301,14 @@ impl GarageRuntime {
             .stream
             .request_at(saved.player.pose.position, vehicle.body.pose.position);
         candidate.persistent_world = PersistentWorld::restore(saved, &ids)?;
-        candidate.persistent_world.sync(
-            reference,
-            &mut candidate.area,
-            &mut candidate.wheels,
-            &candidate.stream,
-            &mut candidate.physics,
-        )?;
-        candidate
-            .area
-            .interaction
-            .sync_mechanisms(&mut candidate.physics);
-        candidate
-            .area
-            .sync_attachments(&mut candidate.physics, false);
-        candidate.area.sync_compound(&mut candidate.physics);
-        candidate
-            .area
-            .interaction
-            .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
-        candidate.area.sync_portable_mass(&mut candidate.physics);
-        candidate
-            .wheels
-            .sync(&mut candidate.area.items, &mut candidate.physics)?;
-        candidate
-            .area
-            .items
-            .restore_save(&ids, &saved.items, reference)?;
-        candidate.area.items.sync_poses(&candidate.physics);
-        // Rapier defers collider and additional-mass updates until a step or recomputation.
-        // Commit them while paused, before restoring motion and sleep.
-
-        candidate.physics.edit_bodies(|_, body, colliders| {
-            if body.is_dynamic() {
-                body.recompute_mass_properties_from_colliders(colliders);
-            }
-        });
-        // Mass and collider assembly may wake bodies. Restore velocities and sleep last.
-        for record in saved
-            .bodies
-            .iter()
-            .chain(saved.vehicles.iter().map(|v| &v.body))
-        {
-            let handle = match &record.identity {
-                BodyIdentity::Source { source } => candidate.area.bodies[&ids.bodies[source]],
-                BodyIdentity::Assembly { root } => candidate
-                    .area
-                    .items
-                    .get(ids.item(root)?)
-                    .and_then(|i| i.body)
-                    .ok_or_else(|| {
-                        SaveError::ReconstructionFailure("Missing assembly body".into())
-                    })?,
-            };
-            if candidate.physics.body_active(handle) {
-                candidate.physics.edit_body(handle, |body| {
-                    body.set_linvel(
-                        rapier3d::math::Vector::from_array(record.linear_velocity),
-                        false,
-                    );
-                    body.set_angvel(
-                        rapier3d::math::Vector::from_array(record.angular_velocity),
-                        false,
-                    );
-                    if record.sleeping {
-                        body.sleep();
-                    } else {
-                        body.wake_up(true);
-                    }
-                });
-            }
+        finalize::RestoreFinalizer {
+            area: &mut candidate.area,
+            physics: &mut candidate.physics,
+            wheels: &mut candidate.wheels,
+            persistent: &mut candidate.persistent_world,
+            stream: &mut candidate.stream,
         }
-        candidate
-            .area
-            .interaction
-            .cleaning
-            .sync_wash_colliders(&candidate.area.conditions, &mut candidate.physics);
-        candidate.physics.refresh_queries();
+        .initial(reference, &ids, saved)?;
         candidate.area.player.restore_save(
             &saved.player,
             &ids,
