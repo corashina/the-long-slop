@@ -386,14 +386,3 @@ impl PlateAttachments {
     // Target offsets and shape offsets are local. PhysicsWorld rebases retained loose bodies.
     pub fn rebase(&mut self, _shift: [f32; 3]) {}
 }
-
-#[cfg(test)]
-impl PlateAttachments {
-    pub(super) fn empty_for_wheel_actions() -> Self {
-        Self {
-            plates: Vec::new(),
-            targets: Vec::new(),
-            bound: false,
-        }
-    }
-}

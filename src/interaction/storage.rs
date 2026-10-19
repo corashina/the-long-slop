@@ -501,21 +501,3 @@ impl StorageLocks {
 fn error(message: &str) -> ReferenceError {
     ReferenceError(message.into())
 }
-
-#[cfg(test)]
-impl StorageLocks {
-    pub(super) fn empty_for_wheel_actions() -> Self {
-        Self {
-            flashlights: Vec::new(),
-            volumes: Vec::new(),
-            part_usables: Vec::new(),
-            mount_mask: 1,
-            drop_delay: 1.,
-            scan_interval: 1.,
-            elapsed: 0.,
-            last_scan: 0.,
-            startup_frame: 0,
-            bound: false,
-        }
-    }
-}

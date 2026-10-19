@@ -910,30 +910,3 @@ pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePos
         rotation: rotation.to_array(),
     })
 }
-
-#[cfg(test)]
-impl ItemStore {
-    pub(super) fn wheel_actions_fixture(states: Vec<ItemState>) -> Self {
-        Self {
-            indices: states
-                .iter()
-                .enumerate()
-                .map(|(i, state)| (state.id, i))
-                .collect(),
-            body_ids: states.iter().map(|state| BodyId(state.id.0)).collect(),
-            names: states
-                .iter()
-                .map(|state| format!("wheel fixture {}", state.id.0))
-                .collect(),
-            next_generated: states.iter().map(|state| state.id.0).max().unwrap() + 1,
-            states,
-            dirty: HashSet::new(),
-            vehicle_tanks: Vec::new(),
-            vehicle_items: Vec::new(),
-            slot_owners: HashMap::new(),
-            generated: HashMap::new(),
-            initialized_supplies: HashSet::new(),
-            origin: WorldOrigin::default(),
-        }
-    }
-}
