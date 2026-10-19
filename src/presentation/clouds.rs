@@ -1,5 +1,5 @@
 //! Source cloud geometry and transparent draws. No full-screen cloud approximation.
-use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT};
+use super::render_targets::{DEPTH_FORMAT, HDR_FORMAT, MSAA_SAMPLES};
 use crate::reference::lighting_scene::LightingRecord;
 use bevy::asset::AssetId;
 use bevy::ecs as bevy_ecs;
@@ -115,7 +115,7 @@ impl CloudPass {
                 bias: default(),
             }),
             multisample: MultisampleState {
-                count: record.msaa_samples,
+                count: MSAA_SAMPLES,
                 ..default()
             },
             ..default()

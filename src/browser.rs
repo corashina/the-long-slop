@@ -141,6 +141,27 @@ extern "C" {
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]
     pub fn game_measurements(json: &str);
 
+    #[wasm_bindgen(js_namespace = window, js_name = gameTerrainSubmit)]
+    pub fn game_terrain_submit(input: &[u8]) -> u32;
+    /// -1 idle, -2 busy, else the id of the ready result. Worker failures throw.
+    #[wasm_bindgen(catch, js_namespace = window, js_name = gameTerrainPoll)]
+    pub fn game_terrain_poll() -> Result<i32, JsValue>;
+    #[wasm_bindgen(js_namespace = window, js_name = gameTerrainVertexCount)]
+    pub fn game_terrain_vertex_count() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameTerrainTriangleCount)]
+    pub fn game_terrain_triangle_count() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameTerrainRead)]
+    pub fn game_terrain_read(
+        vertices: &mut [f32],
+        normals: &mut [f32],
+        tangents: &mut [f32],
+        uv: &mut [f32],
+        colors: &mut [f32],
+        triangles: &mut [u32],
+    );
+    #[wasm_bindgen(js_namespace = window, js_name = gameTerrainDiscard)]
+    pub fn game_terrain_discard();
+
     #[wasm_bindgen(js_namespace = window, js_name = gameReady)]
     pub fn game_ready();
     #[wasm_bindgen(js_namespace = window, js_name = gameFailure)]

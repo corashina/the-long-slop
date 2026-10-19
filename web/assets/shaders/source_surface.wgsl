@@ -11,7 +11,7 @@
 
 #import source_view_lighting::{lighting, diffuse_sh, indirect_specular, direct_attenuation, fog_factor, sun_cookie, sun_cookie_sampler}
 
-#import "shaders/source_lighting.wgsl"::{lamp_lighting, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
+#import "shaders/source_lighting.wgsl"::{lamp_lighting, object_first_light, receiver, cookies, cookie_sampler, attenuation, default_cookie, default_sampler, attenuation_sampler}
 
 struct SourceUniform {
     color: vec4<f32>,
@@ -109,6 +109,9 @@ fn fragment(
     @location(9) @interpolate(flat) source_renderer: vec3<f32>,
     @location(10) source_fog: f32,
     @location(11) source_screen: vec4<f32>,
+#ifdef SOURCE_FORWARD_ADD
+    @location(12) @interpolate(flat) source_lights: vec2<u32>,
+#endif
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     if !source_lod_keep(in.position.xy, bitcast<f32>(receiver.y)) { discard; }
@@ -182,11 +185,18 @@ fn fragment(
     let receive_shadows = (u32(source_renderer.z) & 2u) != 0u;
     let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
     light = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
-    for (var i = 0u; i < lamp_lighting.counts.x; i += 1u) {
+    // Visit low bits first. Floating-point accumulation keeps source slot order.
+    var remaining = source_lights;
+    loop {
+        var word = 0u;
+        if remaining.x == 0u {
+            if remaining.y == 0u { break; }
+            word = 1u;
+        }
+        let bit = object_first_light(remaining[word]);
+        remaining[word] &= remaining[word] - 1u;
+        let i = word * 32u + bit;
         let lamp = lamp_lighting.lights[i];
-        if lamp.direction_kind.w == 0.0 { continue; }
-        if (receiver.x & lamp.mask.x) == 0u { continue; }
-        if max(lamp.color.r, max(lamp.color.g, lamp.color.b)) <= 0.0 { continue; }
         var direction = -lamp.direction_kind.xyz;
         var weight = 1.0;
         let local = lamp.cookie_from_world * in.world_position;

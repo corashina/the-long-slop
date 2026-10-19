@@ -19,18 +19,17 @@ These checks ran on the feature branch. They do not verify the merged tree.
 
 ## Merged-tree checks
 
-These checks passed on merge commit `1c104988fa18853e8dbf447d5fe7ef8c95a0c559` in one container with exit code 0. The container image was `sha256:b3b065a8a465210384242521959d701e952aad17ddcfdd4102d42dc68f21d96c`.
+Rust checks passed on merge commit `1c104988fa18853e8dbf447d5fe7ef8c95a0c559` in one container. They passed again after the remote merge at `8eca150d90e7d0fa216823276c01825f8b1189d1`. Both runs used image `sha256:b3b065a8a465210384242521959d701e952aad17ddcfdd4102d42dc68f21d96c`; the final container exited 0.
 
 - `cargo fmt --all -- --check` passed.
 - `cargo test --locked --lib cache`: 2 passed.
 - `cargo test --locked --lib hash_matches_keep_original_order`: 1 passed.
 - `cargo test --locked --lib membership_revisions_cover_push_remove_and_retain -- --include-ignored`: 1 passed.
 - `cargo check --locked --target wasm32-unknown-unknown --lib` passed.
-- `node --test tests/web/content-index-benchmark.test.mjs`: 3 passed.
 
-The first web test attempt could not access localhost in the sandbox (`EACCES`). The elevated retry passed. Rust reported existing warnings in unrelated renderer and material files. No fixes were needed.
+The web suite ran on Windows outside the container at `1c10498` and passed 3 tests. Its files did not change through `8eca150`. The first attempt could not access localhost in the sandbox (`EACCES`); the elevated retry passed.
 
-The merged-check log is `.cache/merge-content-lookup/merged-checks.log`. Full tests, release builds, and browser acceptance were not rerun during integration. Garage and driving frame times remain unmeasured. No A/B/A samples were collected, so no performance gain is verified.
+The initial and final Rust logs are `.cache/merge-content-lookup/merged-checks.log` and `.cache/merge-content-lookup/final-checks.log`. Rust reported existing warnings in unrelated renderer and material files. Full tests, release builds, and browser acceptance were not rerun. Garage and driving frame times remain unmeasured. No A/B/A samples were collected, so no performance gain is verified.
 
 ## Historical release evidence
 

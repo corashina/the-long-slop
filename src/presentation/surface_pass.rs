@@ -124,6 +124,9 @@ pub fn prepare_surface_passes(
             };
             let mut add = descriptor.clone();
             add.label = Some("source_surface_add".into());
+            add.vertex
+                .shader_defs
+                .push(ShaderDefVal::Bool("SOURCE_FORWARD_ADD".into(), true));
             let fragment = add.fragment.as_mut().unwrap();
             fragment.shader_defs.retain(
                 |value| !matches!(value,ShaderDefVal::Bool(name,_) if name == "SOURCE_REPLACEMENT"),

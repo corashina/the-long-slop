@@ -10,7 +10,7 @@ impl SaveSnapshot {
         let roads = crate::world::RoadIndex::new(
             crate::world::RoadSequence::new(&reference.world, self.world.seed)
                 .map_err(|e| invalid(&e.0))?,
-            crate::world::TerrainEvaluator::new(&reference.world, self.world.seed),
+            crate::world::terrain_evaluator(&reference.world, self.world.seed),
         );
         roads
             .validate_index(&self.world.generation.roads)

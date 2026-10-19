@@ -14,7 +14,10 @@ import {createLoading} from './loading.js';
 import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
+import {createTerrain,installTerrainBridge} from './terrain.js';
 import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes} from './world-assets.js';
+// Start the terrain worker and its WASM download early.
+installTerrainBridge(window,createTerrain(new Worker(new URL('./terrain-worker.js',import.meta.url),{type:'module'})));
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;

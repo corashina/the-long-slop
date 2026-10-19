@@ -1,6 +1,5 @@
 //! Native 2D noise and managed terrain math in the frozen source generation frame.
 use super::SourceRandom;
-use crate::reference::WorldReference;
 
 // Checked UnityPlayer lookup at RVA 0x1a6a9e0. The second half repeats these values.
 const PERMUTATION: [u8; 256] = [
@@ -165,22 +164,24 @@ fn random_offset(random: &mut SourceRandom) -> [f32; 2] {
     std::array::from_fn(|_| (random.next_range(-100000, 100000) as f64 * 1E-05_f32 as f64) as f32)
 }
 
+/// Source terrain inputs. The seed is the resolved terrain seed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainSettings {
+    pub seed: i32,
+    pub edge: f32,
+    pub edge_gradient: f32,
+}
+
 /// Coordinates are source terrain X/Z, before presentation or physics rebasing.
 pub struct TerrainEvaluator {
+    settings: TerrainSettings,
     layers: [Layer; 4],
     colors: [Noise; 3],
-    edge: f32,
-    edge_gradient: f32,
 }
 
 impl TerrainEvaluator {
-    pub fn new(reference: &WorldReference, seed: i32) -> Self {
-        let terrain = &reference.terrain;
-        let seed = if terrain.random_seed != 0 {
-            seed
-        } else {
-            terrain.seed
-        };
+    pub fn new(settings: TerrainSettings) -> Self {
+        let seed = settings.seed;
         let mut random = SourceRandom::new(seed);
         // TerrainGenerationJob constants, in source addition and seed draw order.
         let layers = [
@@ -215,11 +216,14 @@ impl TerrainEvaluator {
             )
         });
         Self {
+            settings,
             layers,
             colors,
-            edge: terrain.edge_of_world,
-            edge_gradient: terrain.edge_of_world_gradient,
         }
+    }
+
+    pub fn settings(&self) -> TerrainSettings {
+        self.settings
     }
 
     pub fn base_height(&self, xz: [f32; 2], edge: bool) -> f32 {
@@ -233,9 +237,10 @@ impl TerrainEvaluator {
             height += layer.noise.sample(xz) as f64 * mask as f64;
         }
         if edge {
-            let inner = (self.edge as f64 - self.edge_gradient as f64) as f32;
-            let x = inverse_lerp(self.edge, inner, xz[0].abs());
-            let z = inverse_lerp(self.edge, inner, xz[1].abs());
+            let edge = self.settings.edge;
+            let inner = (edge as f64 - self.settings.edge_gradient as f64) as f32;
+            let x = inverse_lerp(edge, inner, xz[0].abs());
+            let z = inverse_lerp(edge, inner, xz[1].abs());
             height *= x as f64 * z as f64;
         }
         height as f32

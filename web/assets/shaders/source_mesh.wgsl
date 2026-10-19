@@ -9,6 +9,9 @@
 }
 
 #import source_view_lighting::{lighting, probe_weight, fog_factor}
+#ifdef SOURCE_FORWARD_ADD
+#import "shaders/source_lighting.wgsl"::object_light_mask
+#endif
 
 struct SourceVertexOutput {
     // This is `clip position` when the struct is used as a vertex stage output
@@ -19,6 +22,9 @@ struct SourceVertexOutput {
     @location(9) @interpolate(flat) source_renderer: vec3<f32>,
     @location(10) source_fog: f32,
     @location(11) source_screen: vec4<f32>,
+#ifdef SOURCE_FORWARD_ADD
+    @location(12) @interpolate(flat) source_lights: vec2<u32>,
+#endif
 #ifdef VERTEX_UVS_A
     @location(2) uv: vec2<f32>,
 #endif
@@ -147,6 +153,17 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
     out.position = lighting.clip_from_world * out.world_position;
 #endif
     out.source_renderer = vec3(probe_weight(world_from_local,bounds_center_usage,bounds_extents_flags),bounds_extents_flags.w);
+#ifdef SOURCE_FORWARD_ADD
+    // Authored bounds do not prove the full extent of skinning or morph displacement.
+    var bounded = true;
+#ifdef SKINNED
+    bounded = false;
+#endif
+#ifdef MORPH_TARGETS
+    bounded = false;
+#endif
+    out.source_lights = object_light_mask(mesh_world_from_local, bounds_center_usage.xyz, bounds_extents_flags.xyz, bounded);
+#endif
     out.source_fog = out.position.z;
 #ifdef SOURCE_UNLIT
     // Installed Unlit/Color vertex6 evaluates FOG_EXP2 before interpolation.

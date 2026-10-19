@@ -1,5 +1,5 @@
 //! Source startup ownership, alignment, and hole coordinates.
-use super::{TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoint, TerrainTile};
+use super::{TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoint};
 use crate::reference::{ReferenceError, WorldReference, WorldValue};
 use rapier3d::math::Vector;
 
@@ -106,7 +106,7 @@ impl StartupTerrain {
                 node = get(parent)?;
             }
         };
-        let tile = TerrainTile::new(reference, 0)?;
+        let tile = super::terrain_tile(reference, 0)?;
         let mut result = Self::default();
         let mut shared = None;
         // Source runs the shared roots, player root, then each fixed root.

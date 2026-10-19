@@ -50,8 +50,8 @@ Stopped at the user's request. Branch: `codex/inventory-clothing`.
 ## Performance improvements
 
 These 15 improvements are ordered from easiest to hardest, not by execution order. No performance gain is verified.
-Review each proposal against current source and profile evidence before implementation. Items 2 and 5 change image quality and need specific approval.
-Item 4 is implemented. Start profiling with items 3 or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+Review each proposal against current source and profile evidence before implementation. Item 2 changes image quality and needs specific approval.
+Items 1 to 5, 7 to 9, and 14 are merged. Items 6, 10 to 13, and 15 are proposed.
 
 Use this prompt preamble for each item:
 
@@ -93,23 +93,32 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    See the [validation note](content-lookup-cache.md) for merged-tree checks and historical benchmark limits.
 
 4. **Remove redundant fullscreen image copies.**
-   Status: Implemented, not measured. Uber writes all MSAA samples, so both copies were removed. On some GPUs, the copies could spread Inf or NaN from a neighbor pixel. That no longer occurs. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).
-   Effect: Remove only post-Uber Far and Main copies that produce equivalent pixels and submissions.
-   Prompt:
-   ```text
-   Trace both Far and Main image copies after Uber in source_effects.rs. Prove equivalence for half-float rounding, NaN, infinity, pixel sampling, and MSAA before removing each copy. Preserve effects, display, and resize behavior. Update submission audits to count actual work, and report any case that cannot be proven equivalent.
-   ```
+   Status: Implemented and merged into master at `2c80503`. Source commit: `2e3d483`.
+   Owner: [source effects](../src/presentation/source_effects.rs).
+   Uber writes one value to all MSAA samples and the resolve. Far and Main no longer copy it to a scratch image and back.
+   The scratch image and its callback audit counts are removed. The display copy keeps only its sRGB path.
+   Finite values, half-float rounding, pixel sampling, and MSAA are unchanged.
+   One case differs: on some GPUs, the bilinear copy could spread Inf or NaN from a neighbor pixel. That no longer occurs.
+   Checks: Native and WASM Clippy show no new warnings. WASM check passed.
+   Remaining: Check the image in a browser with a fresh export. Measure garage and driving average, p95, and p99 frame times.
 
 5. **Reduce MSAA8 to 4.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
-   Effect: Offer a fixed 4-sample profile as an optional image-quality change. This item needs specific approval before implementation.
+   Status: Merged, not measured. Approved by the user. `MSAA_SAMPLES` sets 4 samples for all three cameras, targets, and pipelines. The source export still records 8. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
+   Effect: Halve the multisample color and depth memory and resolve cost. Edges, glass, and particles are not compared in a browser.
    Prompt:
    ```text
    After specific approval, inspect all sample-count checks and render targets. Add one fixed 4-sample profile and keep camera, target, pipeline, effect, and device counts consistent. Preserve layers, shadows, and effects. Check edge detail, glass, particles, and resize. Compare image quality and GPU cost with the current 8-sample profile.
    ```
 
 6. **Split expensive streaming steps.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
+   Status: Implemented and merged into master on 2026-10-19. Source commit: `760af3d`. Worker integration: `f13afc7`.
+   Terrain work resumes at deadline checks in the shared terrain crate.
+   Native worker polling uses the deadline. Browser terrain runs in the worker from item 14.
+   Native terrain measurements selected the stage. Native tests and the WASM compile check passed.
+   Browser testing is deferred by request. Driving frame times and runtime acceptance remain unverified.
+   Earlier profiling hit mouse capture and Load failures.
+   Checks and profiling commands: [Streaming stage measurements](performance/2026-10-19-streaming-steps.md).
+   Difficulty: Hard. Estimate: 3–5 days. Owner: [world runtime](../src/presentation/world/runtime.rs).
    Effect: Bound measured long driving stages as resumable work within the current frame budget.
    Prompt:
    ```text
@@ -117,7 +126,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 7. **Batch opaque shadows across surface materials.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Status: Implemented and merged into master on 2026-10-19 at `1989b3a`. Source commit: `3b17ccc`.
+   Runtime performance remains unverified.
+   Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Scope and checks: [opaque shadow batching](performance/2026-10-19-opaque-shadow-material-batching.md).
    Effect: Reduce draw splits by material identity for proven equivalent opaque casters.
    Prompt:
    ```text
@@ -125,15 +137,20 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 8. **Update shadow scenes incrementally.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [shadow scene](../src/presentation/shadow_scene.rs).
-   Effect: Reuse cached caster data and skip copies when the scene has not changed.
-   Prompt:
-   ```text
-   Reuse existing shadow caches. Track caster addition, removal, visibility, material and scene changes, origin shifts, and recovery. Skip unchanged scans and copies while preserving camera-dependent caster selection and fitting. Verify moving objects during driving, stream changes, origin shifts, and repeated Load.
-   ```
+   Status: Implemented and merged into master on 2026-10-19 at `5004b7e`. Source commit: `194e5ec`.
+   Runtime performance remains unverified.
+   Owner: [shadow scene](../src/presentation/shadow_scene.rs).
+   Caster component changes update cached rows. Membership, scene, origin, and recovery changes rebuild the ordered collection.
+   Revisions skip unchanged caster and mask copies. Camera-dependent selection, fitting, and per-frame visibility remain.
+   See the [implementation note](performance/2026-10-19-incremental-shadow-scene.md) for checks and limits.
 
 9. **Select local lights per object.**
-   Status: Proposed. Difficulty: Hard. Estimate: 4–7 days. Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   Status: Implemented and merged into master on 2026-10-19. Source commit: `f7b7e53`.
+   Runtime acceptance and performance remain unverified.
+   Owner: [surface shader](../web/assets/shaders/source_surface.wgsl).
+   The additive vertex pass builds a conservative 64-bit mask from full renderer bounds.
+   Selected lights keep source slot order. Deformed meshes retain all eligible local lights.
+   See the [implementation and check note](performance/2026-10-19-object-local-lights.md).
    Effect: Skip only local lights that cannot affect an object's full bounds.
    Prompt:
    ```text
@@ -173,7 +190,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
     ```
 
 14. **Move terrain work to a Web Worker.**
-    Status: Proposed. Difficulty: Architectural. Estimate: 2–3 weeks. Owner: [terrain generation](../src/world/terrain.rs).
+    Status: Merged, not measured. Owners: [terrain crate](../crates/terrain/src/lib.rs), [worker](../web/terrain-worker.js), [client](../src/world/terrain.rs).
+    Tile meshes come from one Web Worker with a 42 KB WASM. Results match the old job bit for bit in native checks.
     Effect: Evaluate pure terrain data in one worker with its own WASM; keep engine ownership on the main thread.
     Prompt:
     ```text
