@@ -80,6 +80,21 @@ pub struct SurfaceKey {
     glass: bool,
     glass_shader: Option<Handle<Shader>>,
 }
+impl SurfaceKey {
+    /// ForwardAdd uses back-face culling, LEqual depth, and One One blending.
+    /// With the same base state and replace blending, one draw adds both results.
+    pub fn single_pass(&self) -> bool {
+        self.cull >= 2
+            && self.standard
+            && !self.unlit
+            && !self.transparent
+            && !self.glass
+            && self.src == 1
+            && self.dst == 0
+            && self.z_write
+            && self.z_test == 4
+    }
+}
 impl From<&SourceSurface> for SurfaceKey {
     fn from(value: &SourceSurface) -> Self {
         value.state.clone()
@@ -1385,6 +1400,8 @@ impl MaterialExtension for SourceExtension {
             ("SOURCE_UNLIT", state.unlit),
             ("SOURCE_TRANSPARENT", state.transparent),
             ("SOURCE_OBJECT_REFLECTED", state.reflected),
+            ("SOURCE_FORWARD_ONE", state.single_pass()),
+            ("SOURCE_LAMPS", state.single_pass()),
         ] {
             if value || name == "SOURCE_OBJECT_REFLECTED" {
                 descriptor

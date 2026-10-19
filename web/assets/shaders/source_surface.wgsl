@@ -109,7 +109,7 @@ fn fragment(
     @location(9) @interpolate(flat) source_renderer: vec3<f32>,
     @location(10) source_fog: f32,
     @location(11) source_screen: vec4<f32>,
-#ifdef SOURCE_FORWARD_ADD
+#ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
 #endif
     @builtin(front_facing) is_front: bool,
@@ -179,12 +179,35 @@ fn fragment(
         diffuse *= alpha;
         alpha = 1.0 - one_minus_reflectivity + alpha * one_minus_reflectivity;
     }
-    var light: vec3<f32>;
-#ifdef SOURCE_FORWARD_ADD
+    // Preserve source Standard OutputForward alpha, including premultiplied specular.
+    var output_alpha = alpha;
+    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { output_alpha = 1.0; }
+#ifdef SOURCE_UNLIT
+    let fog = clamp(source_fog,0.0,1.0);
+#else
+    let fog = fog_factor(source_fog,lighting.near_far.x,lighting.near_far.y);
+#endif
+    var out: FragmentOutput;
+#ifndef SOURCE_FORWARD_ADD
+    // ForwardBase stays before the lamp loop, so its implicit derivatives remain in uniform control flow.
+    var light = diffuse * diffuse_sh(pbr.N) * occlusion;
+    if !source_flag(7u) {
+        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.xy);
+    }
+    // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
+    if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }
+    var base_alpha = output_alpha;
+    if source.flags.z == 1u { light = source.color.rgb; base_alpha = 1.0; }
+    out.color = vec4(mix(lighting.fog_color_density.xyz,light,fog),base_alpha);
+#ifdef SOURCE_REPLACEMENT
+    out.color = half4(out.color);
+#endif
+#endif
+#ifdef SOURCE_LAMPS
     let view_depth = -(mesh_view_bindings::view.view_from_world * in.world_position).z;
     let receive_shadows = (u32(source_renderer.z) & 2u) != 0u;
     let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
-    light = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
+    var direct = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
     let world_dx = dpdx(in.world_position);
     let world_dy = dpdy(in.world_position);
     // Visit low bits first. Floating-point accumulation keeps source slot order.
@@ -229,34 +252,15 @@ fn fragment(
                 weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, uv_dx * scale, uv_dy * scale).a;
             }
         }
-        light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
+        direct += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }
-
-#else
-    light = diffuse * diffuse_sh(pbr.N) * occlusion;
-    if !source_flag(7u) {
-        light += indirect_specular(specular,one_minus_reflectivity,smoothness,pbr.N,pbr.V,occlusion,source_renderer.xy);
-    }
-    // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
-    if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }
-    if source.flags.z == 1u { light = source.color.rgb; alpha = 1.0; }
-#endif
-    // Preserve source Standard OutputForward alpha, including premultiplied specular.
-    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { alpha = 1.0; }
-#ifdef SOURCE_UNLIT
-    let fog = clamp(source_fog,0.0,1.0);
-#else
-    let fog = fog_factor(source_fog,lighting.near_far.x,lighting.near_far.y);
-#endif
+    let added = vec4(direct * fog, output_alpha);
 #ifdef SOURCE_FORWARD_ADD
-    light *= fog;
+    out.color = added;
 #else
-    light = mix(lighting.fog_color_density.xyz,light,fog);
+    // Same result as the ForwardAdd draw with One One blending over this base output.
+    out.color += added;
 #endif
-    var out: FragmentOutput;
-    out.color = vec4(light,alpha);
-#ifdef SOURCE_REPLACEMENT
-    out.color = half4(out.color);
 #endif
     return out;
 }
