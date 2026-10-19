@@ -28,6 +28,13 @@ pub struct SpecularMaterial {
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<bevy::asset::AssetId<Image>>>>,
 }
 impl SpecularMaterial {
+    pub(crate) fn shadow_batch_state(&self) -> crate::presentation::shadow_batch::CasterBatchState {
+        crate::presentation::shadow_batch::CasterBatchState::opaque_specular(
+            self.uniform.flags.x,
+            self.lod_fade,
+        )
+    }
+
     pub fn set_color(&mut self, color: Color) {
         self.base.base_color = color;
         self.uniform.color = Vec4::from_array(color.to_linear().to_f32_array());

@@ -54,6 +54,8 @@ export async function createContentIndexBenchmarkServer({webRoot=resolve(project
    }
    let mount=web,name=pathname==='/'?'index.html':pathname.slice(1);
    if(pathname==='/__measure.mjs'){mount=scripts;name='measure-content-index.mjs';}
+   else if(pathname==='/__scene-measure.mjs'){mount=scripts;name='measure-scene-resolution.mjs';}
+   else if(pathname==='/measure-content-index.mjs'){mount=scripts;name='measure-content-index.mjs';}
    else if(pathname==='/__input.mjs'){mount=scripts;name='benchmark-input.mjs';}
    else if(pathname.startsWith('/pkg/')){mount=pkg;name=pathname.slice(5);}
    else if(pathname.startsWith('/assets/')){mount=assets;name=pathname.slice(8);}

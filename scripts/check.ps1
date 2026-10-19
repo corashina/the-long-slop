@@ -21,7 +21,7 @@ $root = Split-Path $PSScriptRoot -Parent
 try {
     if ($Full -or $WebTest) {
         $suites = if ($Full) {
-            @('audio', 'loading', 'input', 'performance', 'save-storage', 'save-session',
+            @('audio', 'loading', 'input', 'menu', 'performance', 'save-storage', 'save-session',
                 'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution', 'terrain')
         } else { $WebTest }
         $webFiles = @(foreach ($suite in $suites) {

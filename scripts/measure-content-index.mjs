@@ -10,15 +10,21 @@ export function contentIndexSampleFailures(sample) {
  if(!(sample.stateAfter.totalSteps>sample.stateBefore.totalSteps))failures.push('physics-did-not-step');
  if(sample.scenario==='garage'&&!sample.settled)failures.push('garage-work-not-settled');
  if(sample.scenario==='driving'&&(!sample.stateBefore.seated||!sample.stateAfter.seated||sample.unseatedFrames||!(sample.travelDeltaM>0)))failures.push('driving-not-observed');
+ if(sample.sceneResolution){
+  const {scale,native,changedDuringSample}=sample.sceneResolution;
+  const expected=native.map(side=>Math.max(1,Math.floor(side*scale)));
+  if(changedDuringSample||[sample.auditBefore,sample.auditAfter].some(audit=>!audit.graph.presented||audit.graph.extent.some((side,i)=>side!==expected[i])))failures.push('scene-resolution-mismatch');
+ }
  return failures;
 }
 
-export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,label='sample',scenario='garage'}={}) {
+export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,label='sample',scenario='garage',sceneScale=null}={}) {
  if(!Number.isFinite(durationMs)||durationMs<1000)throw Error('durationMs must be at least 1000');
  if(typeof instrument!=='boolean')throw Error('instrument must be a boolean');
  if(typeof profileStreaming!=='boolean')throw Error('profileStreaming must be a boolean');
  if(instrument&&profileStreaming)throw Error('Collect streaming stages and WebGL calls separately');
  if(!['garage','driving'].includes(scenario))throw Error('scenario must be garage or driving');
+ if(sceneScale!==null&&![1,.75].includes(sceneScale))throw Error('Use scene scale 1 or 0.75');
  if(!/^[a-z0-9][a-z0-9-]{0,95}$/.test(label))throw Error('Invalid receipt label');
  const configResponse=await fetch('/__benchmark-config');
  if(!configResponse.ok)throw Error('Benchmark server configuration is unavailable');
@@ -30,6 +36,8 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  const snapshot=()=>({...window.gameState,fluidVolumes:undefined,inventory:undefined});
  const before=await window.measureWorld();
  const stateBefore=snapshot(),auditBefore=JSON.parse(source_render_audit());
+ const sceneResolution=sceneScale===null?null:{scale:sceneScale,native:[canvas.width,canvas.height],changedDuringSample:false};
+ const resized=()=>{if(sceneResolution)sceneResolution.changedDuringSample=true;};
  const originalFrame=window.gamePerformanceFrame,originals=new Map(),counts={};
  const intervals=[],input={trustedEvents:0,syntheticEvents:0,trustedEventsWithPointerLock:0,codes:[],pointerLockSeen:document.pointerLockElement===canvas};
  const codes=new Set();
@@ -52,12 +60,14 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   document.addEventListener('visibilitychange',visibilityChanged);
   document.addEventListener('pointerlockchange',pointerLockChanged);
   window.addEventListener('blur',blurred);
+  window.addEventListener('resize',resized);
   for(const type of eventTypes)document.addEventListener(type,inputEvent,true);
   window.gamePerformanceFrame=function(physicsMs,worldMs){
    const now=performance.now();if(last!==null)intervals.push(now-last);last=now;frames++;
    if(window.gameState.paused)pausedFrames++;
    if(!window.gameState.started)notStartedFrames++;
    if(!window.gameState.seated)unseatedFrames++;
+   if(sceneResolution)sceneResolution.changedDuringSample||=canvas.width!==sceneResolution.native[0]||canvas.height!==sceneResolution.native[1]||window.gameSceneScale()!==sceneScale;
    return originalFrame.call(this,physicsMs,worldMs);
   };
   if(instrument)for(const name of ['drawArrays','drawElements','drawArraysInstanced','drawElementsInstanced','useProgram','bindBuffer']){
@@ -74,6 +84,7 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   document.removeEventListener('visibilitychange',visibilityChanged);
   document.removeEventListener('pointerlockchange',pointerLockChanged);
   window.removeEventListener('blur',blurred);
+  window.removeEventListener('resize',resized);
  }
  const auditAfter=JSON.parse(source_render_audit()),stateAfter=snapshot();
  const after=await window.measureWorld();
@@ -81,9 +92,9 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  const percentile=p=>intervals.length?intervals[Math.ceil(intervals.length*p)-1]:null;
  const info=gl.getExtension('WEBGL_debug_renderer_info');
  input.codes=[...codes].sort();
- const result={label,scenario,instrument,profileStreaming,streamingProfile,configuration,recordedAt:new Date().toISOString(),
+ const result={label,scenario,instrument,profileStreaming,streamingProfile,sceneResolution,configuration,recordedAt:new Date().toISOString(),
   elapsedMs:elapsed,requestedDurationMs:durationMs,frames,fps:frames*1000/elapsed,
-  intervals:{count:intervals.length,meanMs:intervals.length?intervals.reduce((sum,value)=>sum+value,0)/intervals.length:null,p95Ms:percentile(.95),p99Ms:percentile(.99),maxMs:intervals.at(-1)??null},
+  intervals:{count:intervals.length,meanMs:intervals.length?intervals.reduce((sum,value)=>sum+value,0)/intervals.length:null,p50Ms:percentile(.5),p95Ms:percentile(.95),p99Ms:percentile(.99),maxMs:intervals.at(-1)??null},
   submissionDelta:auditAfter.graph.effects.submitted_token-auditBefore.graph.effects.submitted_token,
   pausedFrames,notStartedFrames,unseatedFrames,hiddenDuringSample,unfocusedDuringSample,
   settled:[before,after].every(value=>value.world.pending_work===0&&value.world.generation_jobs===0),

@@ -47,6 +47,7 @@ pub struct AimTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotTarget {
     Wheel(WheelSlotId),
+    Tire(ItemId),
     Part(PartSlotId),
     Attachment(AttachmentTargetId),
 }
@@ -1436,6 +1437,10 @@ impl InteractionState {
                             target: slot,
                         });
                     }
+                    SlotTarget::Tire(rim) => {
+                        self.carry.cancel_input();
+                        action = Some(InteractionAction::WheelJoin { rim, tire: held });
+                    }
                     SlotTarget::Attachment(target) => {
                         self.mount_plate(held, target, items, physics)
                             .expect("validated plate mount");
@@ -1454,9 +1459,6 @@ impl InteractionState {
                         )));
                     }
                 }
-            } else if let (Some(rim), Some(tire)) = (available.rim, available.tire) {
-                self.carry.cancel_input();
-                action = Some(InteractionAction::WheelJoin { rim, tire });
             }
         }
         if input.pressed & keys::GRAB != 0
@@ -1551,18 +1553,6 @@ impl InteractionState {
                     });
                 }
             }
-        }
-        if input.pressed & keys::ASSEMBLE != 0
-            && available.actions.0 & ActionMask::SPLIT != 0
-            && let Some(item) = self
-                .held()
-                .or_else(|| grab_target.map(|target| target.item))
-            && matches!(self.kinds.get(&item), Some(ItemKind::Wheel | ItemKind::Rim))
-            && items.get(item).is_some_and(|item| {
-                matches!(item.location, ItemLocation::Held | ItemLocation::World)
-            })
-        {
-            action = Some(InteractionAction::WheelSplit(item));
         }
         if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
@@ -1792,6 +1782,59 @@ impl InteractionState {
         self.parts.sync(items, physics)?;
         Ok(())
     }
+    pub fn join_wheel(
+        &mut self,
+        rim: ItemId,
+        tire: ItemId,
+        wheels: &mut wheels::WheelAssemblies,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        if self.held() != Some(tire)
+            || items
+                .get(rim)
+                .is_none_or(|item| item.location != ItemLocation::World)
+        {
+            return Err(ReferenceError("Hold the tire beside a loose rim".into()));
+        }
+        wheels.can_assemble(rim, tire, items)?;
+        self.drop_held(items, physics);
+        wheels.assemble(rim, tire, items, physics)?;
+        Ok(())
+    }
+
+    pub fn split_wheel(
+        &mut self,
+        rim: ItemId,
+        point: [f32; 3],
+        player: &PlayerState,
+        wheels: &mut wheels::WheelAssemblies,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<ItemId, ReferenceError> {
+        if self.held().is_some()
+            || items
+                .get(rim)
+                .is_none_or(|item| item.location != ItemLocation::World)
+        {
+            return Err(ReferenceError(
+                "Release the wheel before tire removal".into(),
+            ));
+        }
+        let tire = wheels.can_split(rim, items)?;
+        if !self
+            .carry
+            .allows_pickup(tire, player.seat().is_some(), true)
+        {
+            return Err(ReferenceError("Cannot remove this tire".into()));
+        }
+        let body = items.get(rim).unwrap().body.unwrap();
+        self.carry.can_acquire(tire, point, player, body, physics)?;
+        wheels.split(rim, items, physics)?;
+        self.carry.pickup(tire, point, player, items, physics)?;
+        Ok(tire)
+    }
+
     pub fn mount_plate(
         &mut self,
         item: ItemId,

@@ -306,7 +306,7 @@ fn bind(world: &mut World) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
             let material_identity = 0x80000000
                 | u32::try_from(record.material.source.path_id).map_err(|e| e.to_string())?;
-            let sort = super::transparent::SourceSortData {
+            let sort = super::renderer_visibility::SourceSortData {
                 material_identity,
                 material_key: crate::reference::sorting::material_sort_key(
                     material_identity,

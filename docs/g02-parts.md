@@ -1,7 +1,7 @@
 # G02 Lada part verification
 
 Scope: build 11140890, one Lada, and the current garage.
-The G02 change is approved for merge to `master`. Browser acceptance remains open.
+Integration target: `master`. Browser acceptance remains open.
 
 Changed files:
 
@@ -78,7 +78,7 @@ The build used the development profile with optimization level 1 and no debug in
 Four existing unused-variable warnings remain in presentation code.
 
 The isolated single-Lada runtime export passed its existing validation.
-The package receipt is `.cache/g02/package-receipt.json`.
+The package receipt is `.cache/g02/premerge-2026-10-19/checks/package-receipt.json`.
 It records the manifest, main WASM, terrain WASM, and JavaScript hashes.
 The build input hashes did not change during the final compilation.
 
@@ -101,13 +101,29 @@ The isolated export first lacked the retained world samples.
 The samples were copied into the worktree and passed their existing validation.
 The queued native run timed out before asset export completed. It ran no behavior tests.
 
+## Integration checks, 2026-10-19
+
+The G02 source was checked with master at `63e9493` before integration.
+Formatting passed. All three G02 native tests and the shared wheel-input test passed.
+The WASM compile check passed for the main library and terrain worker.
+The native check reported one existing unused-method warning in world streaming.
+The WASM check reported the same four presentation warnings.
+
+```sh
+cargo fmt --all -- --check
+cargo test --locked --test garage_parts --test wheel_input -- --ignored --nocapture
+cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop -p terrain-worker
+```
+
+Browser acceptance, full checks, and release builds remain deferred.
+
 ## Browser status
 
 The earlier main-checkout package reached New game and the pause menu.
 Continue failed in the embedded browser because pointer lock was rejected.
 That package still contained two cars and does not establish acceptance for this worktree.
 
-Current worktree browser transitions remain unverified.
+G02 browser transitions remain unverified.
 Computer Use was stopped with Escape before worktree browser acceptance.
 G01 session start, mouse capture, and active input remain unconfirmed for this package.
 Full checks and release builds are deferred.
