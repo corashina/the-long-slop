@@ -117,15 +117,17 @@ impl PlayerState {
         self.collisions.clear();
         self.grounded = false;
         self.support_body = None;
-        let body = &mut physics.rapier_mut().bodies[self.body];
-        body.set_position(self.pose, false);
-        body.set_next_kinematic_position(self.pose);
-        let collider = &mut physics.rapier_mut().colliders[self.collider];
-        collider.set_enabled(self.occupancy.is_none());
-        collider.set_shape(if self.crouched {
-            self.crouching.clone()
-        } else {
-            self.standing.clone()
+        physics.edit_body(self.body, |body| {
+            body.set_position(self.pose, false);
+            body.set_next_kinematic_position(self.pose);
+        });
+        physics.edit_collider(self.collider, |collider| {
+            collider.set_enabled(self.occupancy.is_none());
+            collider.set_shape(if self.crouched {
+                self.crouching.clone()
+            } else {
+                self.standing.clone()
+            });
         });
         physics.refresh_queries();
         if self.occupancy.is_none() {
@@ -167,7 +169,7 @@ impl PlayerState {
             reference.exit_capsule_radius,
         );
         let pose = to_rapier(pose);
-        let (body, collider) = physics.rapier_mut().insert(
+        let (body, collider) = physics.insert(
             RigidBodyBuilder::kinematic_position_based().pose(pose),
             ColliderBuilder::new(standing.clone()).mass(reference.mass_kg),
         );
@@ -265,7 +267,9 @@ impl PlayerState {
             self.yaw = self.yaw.clamp(seat.yaw_limits[0], seat.yaw_limits[1]);
             self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
                 * seat.local_pose;
-            physics.rapier_mut().bodies[self.body].set_next_kinematic_position(self.pose);
+            physics.edit_body(self.body, |body| {
+                body.set_next_kinematic_position(self.pose)
+            });
             return;
         }
         if self.push_gripping {
@@ -284,10 +288,14 @@ impl PlayerState {
             self.support_body =
                 ground.and_then(|(collider, _)| physics.rapier().colliders[collider].parent());
             if self.grounded && input.pressed & keys::SPACE != 0 {
-                physics.rapier_mut().bodies[self.body].apply_impulse(
-                    Vector::Y * self.reference.jump_force * self.reference.source_force_interval,
-                    true,
-                );
+                physics.edit_body(self.body, |body| {
+                    body.apply_impulse(
+                        Vector::Y
+                            * self.reference.jump_force
+                            * self.reference.source_force_interval,
+                        true,
+                    )
+                });
                 self.grounded = false;
             }
             return;
@@ -354,9 +362,10 @@ impl PlayerState {
             },
         );
         if !self.collisions.is_empty() {
-            self.controller.solve_character_collision_impulses(
+            physics.solve_character_collision_impulses(
+                &self.controller,
                 dt,
-                &mut physics.queries_mut(filter),
+                filter,
                 shape.as_ref(),
                 self.reference.mass_kg,
                 &self.collisions,
@@ -373,7 +382,9 @@ impl PlayerState {
         {
             self.vertical_velocity = 0.0;
         }
-        physics.rapier_mut().bodies[self.body].set_next_kinematic_position(self.pose);
+        physics.edit_body(self.body, |body| {
+            body.set_next_kinematic_position(self.pose)
+        });
     }
 
     fn update_crouch(&mut self, want_crouch: bool, physics: &mut PhysicsWorld) {
@@ -397,7 +408,7 @@ impl PlayerState {
         } else {
             self.standing.clone()
         };
-        physics.rapier_mut().colliders[self.collider].set_shape(shape);
+        physics.edit_collider(self.collider, |collider| collider.set_shape(shape));
     }
 
     fn clearance(
@@ -464,8 +475,8 @@ impl PlayerState {
         self.grounded = false;
         self.running = false;
         self.vertical_velocity = 0.0;
-        physics.rapier_mut().colliders[self.collider].set_enabled(false);
-        physics.rapier_mut().bodies[self.body].set_position(seated_pose, false);
+        physics.edit_collider(self.collider, |collider| collider.set_enabled(false));
+        physics.edit_body(self.body, |body| body.set_position(seated_pose, false));
         physics.refresh_queries();
         true
     }
@@ -562,10 +573,12 @@ impl PlayerState {
         self.crouched = false;
         self.grounded = false;
         self.running = false;
-        let rapier = physics.rapier_mut();
-        rapier.colliders[self.collider].set_shape(self.standing.clone());
-        rapier.colliders[self.collider].set_enabled(true);
-        rapier.bodies[self.body].set_position(candidate, false);
+
+        physics.edit_collider(self.collider, |collider| {
+            collider.set_shape(self.standing.clone())
+        });
+        physics.edit_collider(self.collider, |collider| collider.set_enabled(true));
+        physics.edit_body(self.body, |body| body.set_position(candidate, false));
         physics.refresh_queries();
         true
     }
@@ -602,22 +615,23 @@ impl PlayerState {
         if self.push_gripping == active {
             return;
         }
-        let body = &mut physics.rapier_mut().bodies[self.body];
-        if active {
-            body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
-            body.set_enabled_rotations(false, false, false, true);
-        } else {
-            self.pose.translation = body.position().translation;
-            let velocity = body.linvel();
-            self.recoil_velocity = Vector::new(velocity.x, 0.0, velocity.z);
-            self.vertical_velocity = velocity.y;
-            body.set_body_type(
-                rapier3d::prelude::RigidBodyType::KinematicPositionBased,
-                true,
-            );
-            body.set_enabled_rotations(true, true, true, true);
-            body.set_next_kinematic_position(self.pose);
-        }
+        physics.edit_body(self.body, |body| {
+            if active {
+                body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, true);
+                body.set_enabled_rotations(false, false, false, true);
+            } else {
+                self.pose.translation = body.position().translation;
+                let velocity = body.linvel();
+                self.recoil_velocity = Vector::new(velocity.x, 0.0, velocity.z);
+                self.vertical_velocity = velocity.y;
+                body.set_body_type(
+                    rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                    true,
+                );
+                body.set_enabled_rotations(true, true, true, true);
+                body.set_next_kinematic_position(self.pose);
+            }
+        });
         self.push_gripping = active;
     }
     pub fn follow_push_grip(&mut self, turn_degrees: f32) {
@@ -672,7 +686,7 @@ impl PlayerState {
     }
     pub(crate) fn align_startup(&mut self, offset: f32, physics: &mut PhysicsWorld) {
         self.pose.translation.y += offset;
-        physics.rapier_mut().bodies[self.body].set_position(self.pose, false);
+        physics.edit_body(self.body, |body| body.set_position(self.pose, false));
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.pose.translation -= Vector::from_array(shift);

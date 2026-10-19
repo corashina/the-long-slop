@@ -24,15 +24,16 @@ Carried, stored, equipped, mounted, and attached items keep their records after 
 The imported garage, both cars, and their attachment dependencies remain required.
 
 Source: `codex/single-camera-roadside` at `46e9c0f`.
-The merged tree passed `scripts/check.ps1 -Full`: 47 web and 73 native checks passed; 51 source fixtures were ignored.
-The WASM development check passed in 0.56 s. Fourteen focused terrain, roadside, and fixed-behavior checks passed after a test-adapter fix.
+The combined roadside, terrain, and physics-query tree passed `scripts/check.ps1 -Full`: 49 web and 84 native checks passed; 52 source fixtures were ignored.
+The WASM development check passed in 11.75 s. The scoped physics-query integration review passed.
+Fourteen focused checks passed on the combined tree: one terrain, nine roadside, and four fixed-behavior checks.
 The merged renderer keeps one world camera, six probe views, and 4× MSAA.
 New Game and Save passed. The generated fixture loaded twice. Scenes 2 and 3 validated and presented.
 Scripted physics advanced from 0 to 552 steps and submitted 149 frames.
 These runtime results are from the feature branch. Real input, driving, and full source parity remain unverified.
 A fresh cold Load stopped when the browser tab closed; the cause is unknown. No valid matched A/B/A run measured an FPS gain.
-The merged tree has no new release build or browser acceptance run.
-Local evidence: `.cache/integration/single-camera-roadside-46e9c0f/benchmark/acceptance-report.md` and `merge-focused-*.log`.
+No release build or browser acceptance run covers this combined tree.
+Local evidence: `.cache/integration/single-camera-roadside-46e9c0f/benchmark/acceptance-report.md`, `merge-focused-*.log`, and `merge-remote-critical-source.log`.
 
 ## Work order
 
@@ -177,8 +178,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 10. **Track physics query mutations.**
-    Status: Proposed. Difficulty: Hard. Estimate: 5–8 days. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
-    Effect: Replace repeated query-bound scans with complete mutation tracking.
+    Status: Merged into master from `codex/physics-query-mutations`. Targeted native query checks and WASM compilation passed after integration. Runtime acceptance and performance remain unverified. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
+    Effect: Replace repeated query-bound scans with complete mutation tracking. Evidence: [checks and limits](performance/2026-10-19-physics-query-mutations.md).
     Prompt:
     ```text
     Audit every collider write, including rapier_mut, position and shape changes, attachments, enabled state, add, remove, and generation. Track all query-bound mutations. Preserve physics notifications and any intervening refresh mechanism. Compare existing query results for wheels, doors, parts, contacts, and Save/Load.

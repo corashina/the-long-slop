@@ -3394,9 +3394,13 @@ impl WorldStream {
         };
         let appearance = self.contents.appearance(&placement.id);
         for (index, body) in prototype.bodies.iter().enumerate() {
-            physics.rapier_mut().bodies[instance.bodies[index]].set_enabled(
-                super::spawn_appearance::node_active(prototype, body.node as usize, appearance),
-            );
+            physics.edit_body(instance.bodies[index], |state| {
+                state.set_enabled(super::spawn_appearance::node_active(
+                    prototype,
+                    body.node as usize,
+                    appearance,
+                ))
+            });
         }
         for (source, handle) in &instance.colliders {
             let collider = prototype
@@ -3404,14 +3408,16 @@ impl WorldStream {
                 .iter()
                 .find(|c| &c.source == source)
                 .unwrap();
-            physics.rapier_mut().colliders[*handle].set_enabled(
-                collider.enabled
-                    && super::spawn_appearance::node_active(
-                        prototype,
-                        collider.node as usize,
-                        appearance,
-                    ),
-            );
+            physics.edit_collider(*handle, |state| {
+                state.set_enabled(
+                    collider.enabled
+                        && super::spawn_appearance::node_active(
+                            prototype,
+                            collider.node as usize,
+                            appearance,
+                        ),
+                )
+            });
         }
         for point in points {
             self.supplies.push(PublishedSupply {
@@ -3557,7 +3563,9 @@ impl WorldStream {
                     .ok_or_else(|| ReferenceError("Missing source collider owner".into()))?;
                 if matches!(record.fields.get("m_GameObject"), Some(crate::reference::WorldValue::Link(value)) if value == owner)
                 {
-                    physics.rapier_mut().colliders[*handle].user_data = cap.0 as u128 + 1;
+                    physics.edit_collider(*handle, |collider| {
+                        collider.user_data = cap.0 as u128 + 1;
+                    });
                     interaction.bind_surface(
                         *handle,
                         crate::reference::ActionBinding {
@@ -3620,17 +3628,19 @@ impl WorldStream {
             let recipe = &reference.survival.foods[food.prototype_index];
             for (source, handle) in &instance.colliders {
                 if let Some(collider) = recipe.colliders.iter().find(|c| &c.source == source) {
-                    physics.rapier_mut().colliders[*handle].set_enabled(
-                        content.restored
-                            && !item.removed
-                            && collider.enabled
-                            && crate::starting_area::active_food_part(
-                                reference,
-                                collider.node,
-                                &recipe.parts,
-                                food.bite,
-                            ),
-                    );
+                    physics.edit_collider(*handle, |state| {
+                        state.set_enabled(
+                            content.restored
+                                && !item.removed
+                                && collider.enabled
+                                && crate::starting_area::active_food_part(
+                                    reference,
+                                    collider.node,
+                                    &recipe.parts,
+                                    food.bite,
+                                ),
+                        )
+                    });
                 }
             }
         }

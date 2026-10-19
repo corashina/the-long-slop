@@ -67,7 +67,7 @@ impl PushState {
     }
     pub fn stop(&mut self, player: &mut PlayerState, physics: &mut PhysicsWorld) {
         if let Some(grip) = self.grip.take() {
-            physics.rapier_mut().impulse_joints.remove(grip.joint, true);
+            physics.remove_impulse_joint(grip.joint, true);
         }
         player.set_push_gripping(false, physics);
         self.steer = None;
@@ -203,12 +203,8 @@ impl PushState {
                 let joint = GenericJointBuilder::new(JointAxesMask::LIN_X | JointAxesMask::LIN_Z)
                     .local_frame1(Pose::IDENTITY)
                     .local_frame2(car_pose.inverse() * player_pose);
-                let joint = physics.rapier_mut().impulse_joints.insert(
-                    player.body_handle(),
-                    body_handle,
-                    joint,
-                    true,
-                );
+                let joint =
+                    physics.insert_impulse_joint(player.body_handle(), body_handle, joint, true);
                 self.grip = Some(Grip {
                     owner: target.item,
                     body: body_handle,
@@ -239,14 +235,16 @@ impl PushState {
                 * forward;
             let up = car_pose.rotation * Vector::Y;
             let projected = (direction - up * direction.dot(up)).normalize_or_zero();
-            physics.rapier_mut().bodies[body_handle].apply_impulse_at_point(
-                projected
-                    * self.player.grip_speed
-                    * self.player.grip_force
-                    * self.player.source_force_interval,
-                position,
-                true,
-            );
+            physics.edit_body(body_handle, |body| {
+                body.apply_impulse_at_point(
+                    projected
+                        * self.player.grip_speed
+                        * self.player.grip_force
+                        * self.player.source_force_interval,
+                    position,
+                    true,
+                )
+            });
             return Some(target.item);
         }
         if self.grip.is_some() {
@@ -263,16 +261,18 @@ impl PushState {
             direction = projected;
         }
         let mass = physics.rapier().bodies[body_handle].mass();
-        physics.rapier_mut().bodies[body_handle].apply_impulse_at_point(
-            direction
-                * mass
-                * self.player.push_force
-                * dt
-                * rule.modifier
-                * self.player.source_force_interval,
-            Vector::from_array(target.point),
-            true,
-        );
+        physics.edit_body(body_handle, |body| {
+            body.apply_impulse_at_point(
+                direction
+                    * mass
+                    * self.player.push_force
+                    * dt
+                    * rule.modifier
+                    * self.player.source_force_interval,
+                Vector::from_array(target.point),
+                true,
+            )
+        });
         if !player.grounded() {
             player.apply_recoil(
                 -forward * self.player.airborne_push_force * self.player.source_force_interval,

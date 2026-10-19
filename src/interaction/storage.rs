@@ -186,10 +186,10 @@ impl StorageLocks {
                 shape.handle = Some(handle);
                 shape.loose_local =
                     physics.rapier().bodies[body].position().inverse() * *collider.position();
-                physics.rapier_mut().colliders[handle].set_density(0.0);
+                physics.edit_collider(handle, |collider| collider.set_density(0.0));
             }
             if !light.active {
-                physics.rapier_mut().bodies[body].set_enabled(false);
+                physics.edit_body(body, |body| body.set_enabled(false));
             }
         }
         for volume in &mut self.volumes {
@@ -307,18 +307,22 @@ impl StorageLocks {
         for shape in &light.shapes {
             let handle = shape.handle.unwrap();
             let world_pose = *physics.rapier().colliders[handle].position();
-            let world = physics.rapier_mut();
-            world
-                .colliders
-                .set_parent(handle, Some(parent), &mut world.bodies);
-            world.colliders[handle].set_position_wrt_parent(parent_pose.inverse() * world_pose);
+
+            physics.set_collider_parent(handle, Some(parent));
+            physics.edit_collider(handle, |collider| {
+                collider.set_position_wrt_parent(parent_pose.inverse() * world_pose)
+            });
             if vehicle.is_some() {
-                world.colliders[handle].user_data |= VEHICLE_COLLIDER_FLAG;
+                physics.edit_collider(handle, |collider| {
+                    collider.user_data |= VEHICLE_COLLIDER_FLAG;
+                });
             } else {
-                world.colliders[handle].user_data &= !VEHICLE_COLLIDER_FLAG;
+                physics.edit_collider(handle, |collider| {
+                    collider.user_data &= !VEHICLE_COLLIDER_FLAG;
+                });
             }
         }
-        physics.rapier_mut().bodies[body].set_enabled(false);
+        physics.edit_body(body, |body| body.set_enabled(false));
         if let Some(vehicle) = vehicle {
             let mass = physics.rapier().bodies[parent].mass() + light.mass;
             physics.set_vehicle_mass(vehicle, mass);
@@ -358,21 +362,24 @@ impl StorageLocks {
             physics.set_vehicle_mass(vehicle, mass);
         }
         {
-            let loose = &mut physics.rapier_mut().bodies[body];
-            loose.set_position(loose_pose, true);
-            loose.set_enabled(true);
-            loose.set_linvel(velocity, true);
-            loose.set_angvel(angular, true);
+            physics.edit_body(body, |loose| {
+                loose.set_position(loose_pose, true);
+                loose.set_enabled(true);
+                loose.set_linvel(velocity, true);
+                loose.set_angvel(angular, true);
+            });
         }
         for shape in &light.shapes {
             let handle = shape.handle.unwrap();
-            let world = physics.rapier_mut();
-            world
-                .colliders
-                .set_parent(handle, Some(body), &mut world.bodies);
-            world.colliders[handle].set_position_wrt_parent(shape.loose_local);
-            world.colliders[handle].set_enabled(shape.enabled);
-            world.colliders[handle].user_data &= !VEHICLE_COLLIDER_FLAG;
+
+            physics.set_collider_parent(handle, Some(body));
+            physics.edit_collider(handle, |collider| {
+                collider.set_position_wrt_parent(shape.loose_local)
+            });
+            physics.edit_collider(handle, |collider| collider.set_enabled(shape.enabled));
+            physics.edit_collider(handle, |collider| {
+                collider.user_data &= !VEHICLE_COLLIDER_FLAG;
+            });
         }
         let state = items.get_mut(item).unwrap();
         state.body = Some(body);

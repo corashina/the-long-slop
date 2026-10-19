@@ -246,23 +246,21 @@ impl StructureRecipe {
         });
         let mut bodies = Vec::with_capacity(self.bodies.len());
         let mut colliders = Vec::with_capacity(self.colliders.len());
-        let world = physics.rapier_mut();
+
         for body in &self.bodies {
             let mut body = body.builder.clone().pose(root * body.pose).build();
             if fixed_decoration {
                 body.set_body_type(rapier3d::prelude::RigidBodyType::Fixed, false);
             }
-            bodies.push(world.insert_body(body));
+            bodies.push(physics.insert_body(body));
         }
         for source in &self.colliders {
             let mut collider = source.collider.clone();
             let handle = if let Some(body) = source.body {
-                world
-                    .colliders
-                    .insert_with_parent(collider, bodies[body], &mut world.bodies)
+                physics.insert_collider_with_parent(collider, bodies[body])
             } else {
                 collider.set_position(root * *collider.position());
-                world.colliders.insert(collider)
+                physics.insert_collider(collider)
             };
             colliders.push((source.source.clone(), handle));
         }
@@ -283,7 +281,7 @@ impl StructureInstance {
             physics.remove_collider(collider);
         }
         for body in self.bodies {
-            physics.rapier_mut().remove_body(body);
+            physics.remove_body(body);
         }
         physics.refresh_queries();
     }

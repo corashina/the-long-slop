@@ -97,7 +97,8 @@ fn structure_refresh_accumulates_both_foci_and_forced_refreshes() {
     let capture_and_prepare = |run: &mut GarageRuntime, player, vehicle, expected| {
         let mut pose = *run.physics.rapier().bodies[body].position();
         pose.translation.y += 0.125;
-        run.physics.rapier_mut().bodies[body].set_position(pose, true);
+        run.physics
+            .edit_body(body, |body| body.set_position(pose, true));
         run.area.items.sync_poses(&run.physics);
         run.stream.request_at(player, vehicle);
         let captured = run.stream.changes.revision();
@@ -461,7 +462,9 @@ fn move_player(run: &mut GarageRuntime, position: [f32; 3]) {
         .rebase(std::array::from_fn(|i| old[i] - position[i]));
     let pose = run.area.player.body_pose(&run.physics);
     let body = run.area.player.body_handle();
-    run.physics.rapier_mut().bodies[body].set_position(crate::vehicle::to_rapier(pose), true);
+    run.physics.edit_body(body, |body| {
+        body.set_position(crate::vehicle::to_rapier(pose), true)
+    });
     run.physics.refresh_queries();
 }
 fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
@@ -550,13 +553,16 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         run.physics.body_active(chassis),
         "vehicle must be active for the swept guard"
     );
-    run.physics.rapier_mut().bodies[chassis].set_linvel(Vector::ZERO, true);
+    run.physics
+        .edit_body(chassis, |body| body.set_linvel(Vector::ZERO, true));
     withdraw_terrain(run, key);
     assert!(
         run.world_supported(),
         "stationary car remains in the prepared region"
     );
-    run.physics.rapier_mut().bodies[chassis].set_linvel(Vector::new(120., 0., 0.), true);
+    run.physics.edit_body(chassis, |body| {
+        body.set_linvel(Vector::new(120., 0., 0.), true)
+    });
     assert!(
         !run.world_supported(),
         "vehicle swept support includes its next step: pose={:?} velocity={:?} origin={:?} boundary={}",
@@ -2920,7 +2926,8 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         for (axis, offset) in travel.into_iter().enumerate() {
             pose.translation[axis] += offset;
         }
-        run.physics.rapier_mut().bodies[body].set_position(pose, true);
+        run.physics
+            .edit_body(body, |state| state.set_position(pose, true));
     }
     run.area.items.sync_poses(&run.physics);
     run.area
@@ -3160,13 +3167,17 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     let original_pose = *loaded.physics.rapier().bodies[restored_body].position();
     let mut shifted_pose = original_pose;
     shifted_pose.translation.x += 1.;
-    loaded.physics.rapier_mut().bodies[restored_body].set_position(shifted_pose, true);
+    loaded
+        .physics
+        .edit_body(restored_body, |body| body.set_position(shifted_pose, true));
     loaded.area.items.sync_poses(&loaded.physics);
     assert!(
         (loaded.area.items.get(oil).unwrap().pose.position[0] - child_before[0] - 1.).abs()
             < 0.0001
     );
-    loaded.physics.rapier_mut().bodies[restored_body].set_position(original_pose, true);
+    loaded
+        .physics
+        .edit_body(restored_body, |body| body.set_position(original_pose, true));
     loaded.area.items.sync_poses(&loaded.physics);
     assert!(
         loaded

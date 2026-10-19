@@ -86,7 +86,7 @@ pub(super) fn bind(
         {
             body
         } else {
-            let body = physics.rapier_mut().bodies.insert(
+            let body = physics.insert_body(
                 rapier3d::prelude::RigidBodyBuilder::kinematic_position_based()
                     .pose(to_rapier(items.get(root_item).unwrap().pose))
                     .build(),
@@ -194,8 +194,9 @@ pub(super) fn bind(
                         );
                         if id.0 == 0 {
                             id = interaction.allocate_generated_collider()?;
-                            physics.rapier_mut().colliders[*handle].user_data |=
-                                (id.0 as u128) << 64;
+                            physics.edit_collider(*handle, |collider| {
+                                collider.user_data |= (id.0 as u128) << 64;
+                            });
                         }
                         interaction.bind_generated_mechanism_surface(recipe.item, *handle, id);
                     }
@@ -250,10 +251,10 @@ pub(super) fn sync(
         if let Some(parent) = parent {
             let local = physics.rapier().bodies[parent].position().inverse() * world;
             if physics.rapier().colliders[c.handle].position_wrt_parent() != Some(&local) {
-                physics.rapier_mut().colliders[c.handle].set_position_wrt_parent(local);
+                physics.edit_collider(c.handle, |collider| collider.set_position_wrt_parent(local));
             }
         } else if physics.rapier().colliders[c.handle].position() != &world {
-            physics.rapier_mut().colliders[c.handle].set_position(world);
+            physics.edit_collider(c.handle, |collider| collider.set_position(world));
         }
     }
 }

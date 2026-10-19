@@ -264,12 +264,13 @@ impl CleaningTools {
                 .is_none_or(|body| {
                     physics.body_active(body) && physics.rapier().bodies[body].is_enabled()
                 });
-            let collider = &mut physics.rapier_mut().colliders[handle];
-            let enabled = authored && active && conditions.wash(wash).visible();
-            if collider.is_enabled() != enabled {
-                crate::vehicle::set_collider_enabled(collider, enabled);
-                changed = true;
-            }
+            physics.edit_collider(handle, |collider| {
+                let enabled = authored && active && conditions.wash(wash).visible();
+                if collider.is_enabled() != enabled {
+                    crate::vehicle::set_collider_enabled(collider, enabled);
+                    changed = true;
+                }
+            });
         }
         if changed {
             physics.refresh_queries();

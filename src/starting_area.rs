@@ -102,9 +102,8 @@ impl StartingArea {
                 .instances
                 .iter()
                 .any(|instance| instance.node == body.node && !instance.startup_active);
-            let handle = physics
-                .rapier_mut()
-                .insert_body(builder.enabled(!inactive_flashlight).pose(to_rapier(pose)));
+            let handle =
+                physics.insert_body(builder.enabled(!inactive_flashlight).pose(to_rapier(pose)));
             bodies.insert(body.id, handle);
         }
         for record in &reference.colliders {
@@ -157,11 +156,8 @@ impl StartingArea {
                 }
                 _ => owner,
             };
-            let rapier = physics.rapier_mut();
-            let handle =
-                rapier
-                    .colliders
-                    .insert_with_parent(collider, physical_parent, &mut rapier.bodies);
+
+            let handle = physics.insert_collider_with_parent(collider, physical_parent);
             if physical_parent != owner {
                 let source = reference
                     .bodies
@@ -192,7 +188,7 @@ impl StartingArea {
             }
         }
         // The vehicle constructor owns these shapes. Add only their aim identity.
-        for (_, collider) in physics.rapier_mut().colliders.iter_mut() {
+        physics.edit_colliders(|_, collider| {
             if collider
                 .parent()
                 .is_some_and(|parent| reference.vehicles.iter().any(|v| bodies[&v.body] == parent))
@@ -213,7 +209,7 @@ impl StartingArea {
                         | item.map_or(0, |id| id.0 as u128 + 1);
                 }
             }
-        }
+        });
         for (&id, &handle) in &bodies {
             items.bind_body(id, handle);
             interaction.bind_body(id, handle);
@@ -229,8 +225,8 @@ impl StartingArea {
                         | ((slot.id.0 as u128) << 96)
                         | (slot.wheel.0 as u128 + 1),
                 );
-            let rapier = physics.rapier_mut();
-            let handle = rapier.colliders.insert(builder);
+
+            let handle = physics.insert_collider(builder);
             interaction.bind_wheel_sensor(handle, slot.rim, physics);
         }
         for (handle, collider) in physics.rapier().colliders.iter() {
@@ -243,7 +239,9 @@ impl StartingArea {
         interaction.sync_mechanisms(physics);
         for collider in &compound_colliders {
             let local = collider.local_pose(&interaction);
-            physics.rapier_mut().colliders[collider.handle].set_position_wrt_parent(local);
+            physics.edit_collider(collider.handle, |collider| {
+                collider.set_position_wrt_parent(local)
+            });
         }
         interaction.parts.bind(&mut items, physics)?;
         interaction.attachments.bind(&mut items, physics)?;
@@ -269,7 +267,7 @@ impl StartingArea {
                             &reference.survival.starter_parts,
                             food.bite,
                         );
-                    physics.rapier_mut().colliders[handle].set_enabled(enabled);
+                    physics.edit_collider(handle, |collider| collider.set_enabled(enabled));
                 }
             }
         }
@@ -435,7 +433,7 @@ impl StartingArea {
                     })
                     .sum::<f32>();
             if (mass - *current).abs() > 0.0001 {
-                physics.rapier_mut().bodies[*handle].set_additional_mass(mass, true);
+                physics.edit_body(*handle, |body| body.set_additional_mass(mass, true));
                 *current = mass;
             }
         }
@@ -471,10 +469,11 @@ impl StartingArea {
                 continue;
             }
             let local = record.local_pose(&self.interaction);
-            let collider = &mut physics.rapier_mut().colliders[record.handle];
-            if collider.position_wrt_parent() != Some(&local) {
-                collider.set_position_wrt_parent(local);
-            }
+            physics.edit_collider(record.handle, |collider| {
+                if collider.position_wrt_parent() != Some(&local) {
+                    collider.set_position_wrt_parent(local);
+                }
+            });
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
@@ -524,12 +523,13 @@ impl StartingArea {
             } else {
                 *physics.rapier().bodies[parent].position()
             };
-            let body = &mut physics.rapier_mut().bodies[handle];
-            let pose = parent_pose * local;
-            if !next {
-                body.set_position(pose, false);
-            }
-            body.set_next_kinematic_position(pose);
+            physics.edit_body(handle, |body| {
+                let pose = parent_pose * local;
+                if !next {
+                    body.set_position(pose, false);
+                }
+                body.set_next_kinematic_position(pose);
+            });
         }
     }
 }
@@ -1559,11 +1559,9 @@ impl GarageRuntime {
                 * factor
                 * FIXED_DT;
             let chassis = self.physics.chassis_handle(index);
-            self.physics.rapier_mut().bodies[chassis].apply_impulse_at_point(
-                impulse,
-                engine.translation + offset,
-                true,
-            );
+            self.physics.edit_body(chassis, |body| {
+                body.apply_impulse_at_point(impulse, engine.translation + offset, true)
+            });
         }
         let pushed = self
             .area
@@ -1761,10 +1759,11 @@ impl GarageRuntime {
                 source = parent;
             }
             let handle = self.area.bodies[&body.id];
-            let body = &mut self.physics.rapier_mut().bodies[handle];
-            let mut pose = *body.position();
-            pose.translation.y += offset;
-            body.set_position(pose, true);
+            self.physics.edit_body(handle, |body| {
+                let mut pose = *body.position();
+                pose.translation.y += offset;
+                body.set_position(pose, true);
+            });
         }
         self.area
             .player
@@ -1783,10 +1782,11 @@ fn transport_body(
     delta: rapier3d::math::Pose,
 ) {
     let pose = delta * *physics.rapier().bodies[handle].position();
-    let body = &mut physics.rapier_mut().bodies[handle];
-    body.set_position(pose, true);
-    body.set_linvel(rapier3d::math::Vector::ZERO, true);
-    body.set_angvel(rapier3d::math::Vector::ZERO, true);
+    physics.edit_body(handle, |body| {
+        body.set_position(pose, true);
+        body.set_linvel(rapier3d::math::Vector::ZERO, true);
+        body.set_angvel(rapier3d::math::Vector::ZERO, true);
+    });
 }
 
 fn start_sample(seed: u64, attempt: u64) -> f32 {

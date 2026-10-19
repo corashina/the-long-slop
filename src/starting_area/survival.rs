@@ -22,7 +22,7 @@ pub(crate) fn spawn_consumable(
         return Err(ReferenceError("Duplicate food item".into()));
     }
     let root = to_rapier(super::node_pose(reference, prototype.root)?);
-    let body = physics.rapier_mut().insert_body(
+    let body = physics.insert_body(
         RigidBodyBuilder::dynamic()
             .pose(to_rapier(pose))
             .ccd_enabled(true)
@@ -48,12 +48,8 @@ pub(crate) fn spawn_consumable(
             .user_data(id.0 as u128 + 1)
             .build();
         collider.set_position(root.inverse() * node * *collider.position());
-        let rapier = physics.rapier_mut();
-        handles.push(
-            rapier
-                .colliders
-                .insert_with_parent(collider, body, &mut rapier.bodies),
-        );
+
+        handles.push(physics.insert_collider_with_parent(collider, body));
     }
     area.items
         .insert_consumable(id, prototype_index, prototype, pose, body)?;
@@ -119,8 +115,9 @@ pub(crate) fn sync_consumable_colliders(
                 .map(|entry| (entry.node, entry.enabled))
         };
         if let Some((node, enabled)) = record {
-            physics.rapier_mut().colliders[handle]
-                .set_enabled(enabled && active_part(reference, node, parts, food.bite));
+            physics.edit_collider(handle, |collider| {
+                collider.set_enabled(enabled && active_part(reference, node, parts, food.bite))
+            });
         }
     }
     physics.refresh_queries();
@@ -386,7 +383,7 @@ impl GarageRuntime {
             self.area.items.object_key(item),
             crate::world::ObjectKey::Generated(_)
         ) {
-            self.physics.rapier_mut().bodies[body].set_enabled(false);
+            self.physics.edit_body(body, |body| body.set_enabled(false));
             let state = self.area.items.get_mut(item).unwrap();
             state.location = ItemLocation::World;
             state.removed = true;
@@ -394,7 +391,7 @@ impl GarageRuntime {
             return Ok(());
         }
         let body_id = self.area.items.body_id(item).unwrap();
-        self.physics.rapier_mut().remove_body(body);
+        self.physics.remove_body(body);
         self.physics.refresh_queries();
         self.area
             .attachments
