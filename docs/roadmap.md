@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-15.
+Updated: 2026-10-19.
 
 ## Current status
 
@@ -303,6 +303,50 @@ Source inputs are recovered. Finish package preparation before expanding gamepla
    Add clothing with inventory and towing with cargo. Connect settings, custom music, and remaining effects through their existing owners.
    Include save support and source comparison with each new feature.
 7. **Add multiplayer last.** Synchronize stable local gameplay, object identities, and persistent state.
+
+Performance proposals are listed below. They do not change this work order or authorize implementation.
+
+## Performance improvements
+
+These 15 proposals are ordered from easiest to hardest, not by execution order. No gain is measured or confirmed.
+Review each proposal against current source and profile evidence before implementation. Items 2 and 5 change image quality and need specific approval.
+Start profiling with items 3, 4, or 7 for fidelity-preserving work, or item 1 for startup. This suggestion does not change the work order.
+
+Use this prompt preamble for each item:
+
+> Recheck the current code and source behavior before editing. Preserve dirty files. Use a separate `codex/` branch and worktree for approved implementation. Design first and get approval at each required design stage. Use Steam build `11140890` as the source authority, except for an explicitly approved image-quality change. Reuse project dependencies and remove obsolete paths. Avoid per-frame allocations and repeated setup. Measure release builds with matched A/B/A runs and exclusive benchmark windows. Record instrumented call counts separately. Report garage and driving average, p95, and p99 frame times. Measure startup separately. Check real input, active physics, submitted frames, streaming, and Save/Load. Report blockers and unverified cases. Do not merge.
+
+Effort estimates include developer work, builds, critical checks, and browser verification. One day means eight hours. Blockers can extend these estimates.
+
+1. **Compress startup downloads — proposed.** Difficulty: Easy. Estimate: 1–2 days. [Startup server](../scripts/serve.mjs) currently serves raw startup data. Add build-time Brotli for WASM and JSON. Negotiate `Content-Encoding`; set `Vary`, `ETag`, and `HEAD` behavior. In [world assets](../web/world-assets.js), distinguish encoded header length from decoded receipt bytes and hashes. Do not recompress compressed images. Measure cold and cached startup separately. Prompt: Implement Brotli delivery and verify decoded receipts, cache behavior, and both startup cases.
+
+2. **Lower internal rendering resolution — proposed.** Difficulty: Easy to moderate. Estimate: 1–2 days. [Canvas sizing](../src/app.rs) fits the render canvas to the window. Add an optional 0.75 scene scale, which uses 56% of the pixels and softens the image. Keep UI and text at native resolution. Check projection, input, resize, and probe behavior independently. Prompt: Add the optional scene scale and verify rendering, input, resize, and probes.
+
+3. **Reuse unchanged content lookup tables — proposed.** Difficulty: Moderate. Estimate: 1–2 days. [Content indexing](../src/content_index.rs) and [instance handling](../src/instances.rs) sort data unconditionally. Cache by session, membership, and order revision. Cover insert, remove, replace, `swap_remove`, static controls, and lamp bindings. Preserve exact identity, duplicates, and order. Read live pose and appearance. Prompt: Cache only unchanged lookup tables; verify mutation paths and ordering.
+
+4. **Remove redundant fullscreen image copies — proposed.** Difficulty: Moderate. Estimate: 1–3 days. [Source effects](../src/presentation/source_effects.rs) copies each Far and Main image twice after Uber. Prove equivalence for half-float rounding, NaN, infinity, pixel sampling, and MSAA. Remove only work proven equivalent. Update audits to count actual submissions; do not claim completion from estimates. Preserve effects, display, and resize behavior. Prompt: Trace each copy, prove equivalent output, and remove only redundant submissions.
+
+5. **Reduce MSAA8 to 4 — proposed.** Difficulty: Moderate. Estimate: 2–3 days. This is an optional image-quality change and needs specific approval. Use a fixed 4-sample profile. Keep sample counts consistent across cameras, targets, pipelines, effects, and device checks. Preserve layers, shadows, and effects. Check edges, glass, particles, and resize. Prompt: After approval, implement the 4-sample profile and compare image quality and GPU cost.
+
+6. **Split expensive streaming steps — proposed.** Difficulty: Hard. Estimate: 3–5 days. [World runtime](../src/world/runtime.rs) checks time after a step. First measure each driving stage. Split work into resumable bounded units within the existing budget. Preserve deterministic output, ownership, budgets, cancellation, collision priority, publication, and source road timing. Compare matched-route p95 and p99. Prompt: Profile driving stages, then bound the measured costly stage without changing source timing.
+
+7. **Batch opaque shadows across surface materials — proposed.** Difficulty: Hard. Estimate: 3–5 days. [Shadow phase](../src/presentation/shadow_phase.rs) splits draws by material identity. Prove opaque caster equivalence and shared geometry and pipeline. Exclude cutouts, transparency, grass, impostors, and LOD fades. Preserve transforms, cascade masks, offscreen casters, and exact instances. Report draw counts separately from FPS. Prompt: Batch only equivalent opaque casters and verify each cascade and excluded material class.
+
+8. **Update shadow scenes incrementally — proposed.** Difficulty: Hard. Estimate: 4–7 days. [Shadow scene](../src/presentation/shadow_scene.rs) scans casters and copies data. Reuse existing caches. Track caster additions, removals, visibility, materials, scenes, origin changes, and recovery. Skip unchanged copies. Preserve camera-dependent selection and fitting. Check moving objects, driving, streaming, and repeated Load. Prompt: Track scene changes and verify selection, fitting, and recovery paths.
+
+9. **Select local lights per object — proposed.** Difficulty: Hard. Estimate: 4–7 days. [Surface shader](../src/presentation/source_surface.wgsl) loops over lamps. Exclude a light only when the full object bounds prove it cannot affect that object. Preserve light order, cookies, attenuation limits, sunlight, and moving lights and objects. Check origin shifts and streaming. Compare image output and CPU cost with GPU gain. Prompt: Add conservative per-object light selection and compare CPU, GPU, and image results.
+
+10. **Track physics query mutations — proposed.** Difficulty: Hard. Estimate: 5–8 days. [Vehicle query bounds](../src/vehicle/query_bounds.rs) updates changed bounds but still scans. Audit every collider write, including `rapier_mut`, positions, shapes, attachments, enabled state, add, remove, and generation. Preserve physics notifications and intervening refreshes. Compare existing queries for wheels, doors, parts, contacts, and Save/Load. Prompt: Track all query-affecting changes and verify the existing query results and notifications.
+
+11. **Use native BC streamed texture arrays — proposed.** Difficulty: Very hard. Estimate: 5–9 days. Primary BC1 and BC3 support already exists; [world textures](../src/world_textures.rs) uses RGBA8. Reuse exporter eligibility and the primary loader. Preserve source blocks and mips. Use compatible arrays, block uploads, receipts, accounting, cancellation, and acknowledgement. Check normals, alpha, color, and terrain LODs. Do not apply generic recompression. Prompt: Stream eligible native BC data through the existing loader and verify receipts, formats, and LODs.
+
+12. **Split startup metadata and world chunks — proposed.** Difficulty: Very hard. Estimate: 7–12 days. [Reference loading](../src/reference.rs) and [web manifest](../web/main.js) load a full manifest of about 139 MB, reviewed at `2dadfc0`. Define the small garage dependency closure. Add hashed chunks with existing receipts and budgets. Preserve identities, validation, generations, save references, distant loads, and cancellation. Remove the monolithic path. Measure bytes, parse time, peak memory, and playable readiness. This needs architectural approval. Prompt: Design chunk ownership and validation first, then measure the smallest playable startup path.
+
+13. **Combine opaque base and additive lighting — proposed.** Difficulty: Very hard. Estimate: 1–3 weeks. [Source lighting](../src/presentation/source_lighting.rs) uses two draws. Reuse geometry and material samples for opaque standard materials only. Preserve transparent order, blend rounding, fog, emission, depth, sunlight, lamps, and shadows. Capture source images first. Report any inequivalence before changing fidelity. Prompt: Compare a combined opaque pass against source captures and document any pixel differences.
+
+14. **Move terrain work to a Web Worker — proposed.** Difficulty: Architectural. Estimate: 2–3 weeks. Run pure terrain evaluation in one worker with its own WASM. Bound transferable inputs and outputs. Keep Bevy, Rapier, admission, and publication on the main thread. Preserve session and job generations, stale-result cancellation, load and world replacement, origin rules, exact geometry, and budgets. Measure copies, duplicated RAM, and stalls. Do not rewrite the engine threading model. Prompt: Design the worker boundary, then measure transfer cost and terrain stalls under streaming.
+
+15. **Add a WebGPU renderer — proposed.** Difficulty: Architectural. Estimate: 2–4 weeks. [Cargo features](../Cargo.toml) currently select WebGL2. Check current Bevy and wgpu WebGPU support, then audit WebGL shaders, depth, formats, MSAA, and custom phases. Reuse dependencies where possible. Match quality before comparing backends. Add GPU-driven features only after that comparison. Check garage, driving, shadows, glass, streaming, resize, and Save/Load. Remove obsolete WebGL paths after acceptance. No gain is guaranteed. Prompt: Establish equal-quality backend behavior first, then measure matched workloads before adding features.
 
 ## Full-game feature gaps
 
