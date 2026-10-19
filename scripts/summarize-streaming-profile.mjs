@@ -49,17 +49,22 @@ function metrics(receipt){
  return out;
 }
 function workerCosts(receipt){
- const groups=new Map();
+ const groups=new Map(),excluded=[];
  for(const row of receipt.cpuProfile?.browser?.workers??[]){
   let fields=groups.get(row.kind);if(!fields){fields=new Map();groups.set(row.kind,fields);}
   for(const [prefix,record] of [['main',row],['worker',row.worker??{}]])for(const [name,value] of Object.entries(record)){
-   if(!name.endsWith('Ms')||!Number.isFinite(value))continue;
+   if(!name.endsWith('Ms'))continue;
+   const diagnostic=prefix==='main'&&name==='submitDeliveryMs'?row.timing?.submitDelivery:prefix==='main'&&name==='returnDeliveryMs'?row.timing?.returnDelivery:null;
+   const crossContext=prefix==='main'&&['submitDeliveryMs','returnDeliveryMs'].includes(name);
+   const reason=crossContext&&diagnostic?.valid!==true?diagnostic?.reason??'missing-clock-diagnostic':!Number.isFinite(value)?'unavailable-or-non-finite-duration':value<0?'negative-duration':null;
+   if(reason){excluded.push({kind:row.kind,id:row.id??null,phase:row.phase??null,metric:`${prefix}.${name}`,reason,rawValue:typeof value==='number'&&!Number.isFinite(value)?String(value):value,diagnostic});continue;}
    const key=`${prefix}.${name}`;let values=fields.get(key);if(!values){values=[];fields.set(key,values);}values.push(value);
   }
  }
- return Object.fromEntries([...groups].map(([kind,fields])=>[kind,Object.fromEntries([...fields].map(([name,values])=>{
+ const values=Object.fromEntries([...groups].map(([kind,fields])=>[kind,Object.fromEntries([...fields].map(([name,values])=>{
   values.sort((a,b)=>a-b);return [name,{count:values.length,meanMs:values.reduce((a,b)=>a+b,0)/values.length,p95Ms:values[Math.ceil(values.length*.95)-1],p99Ms:values[Math.ceil(values.length*.99)-1],maxMs:values.at(-1)}];
  }))]));
+ return {values,excluded};
 }
 
 export function summarizeWorkerComparison(baseline,candidate,recheck){
@@ -71,7 +76,8 @@ export function summarizeWorkerComparison(baseline,candidate,recheck){
  const a=metrics(baseline),b=metrics(candidate),c=metrics(recheck);
  if(canonical(Object.keys(a).sort())!==canonical(Object.keys(b).sort())||canonical(Object.keys(a).sort())!==canonical(Object.keys(c).sort()))throw Error('Comparison metric mismatch');
  const comparison=Object.fromEntries(Object.keys(a).map(name=>[name,{baseline:a[name],candidate:b[name],recheck:c[name],variation:Math.abs(a[name]-c[name]),saving:a[name]-b[name],regression:b[name]-a[name],withinVariation:b[name]-a[name]<=Math.abs(a[name]-c[name])}]));
- return {scenario:baseline.scenario,performanceSample:baseline.performanceSample&&candidate.performanceSample&&recheck.performanceSample,metrics:comparison,nestedStages:baseline.cpuProfile?.rust?.streaming?.nested_stages??baseline.streamingProfile?.nested_stages??[],workerCosts:[baseline,candidate,recheck].map(workerCosts),workerRecords:[baseline,candidate,recheck].map(r=>r.cpuProfile?.browser?.workers??[]),qualification:'Review main-thread savings, transfer costs, input trust, startup, and memory before selecting a worker.'};
+ const workers=[baseline,candidate,recheck].map(workerCosts);
+ return {scenario:baseline.scenario,performanceSample:baseline.performanceSample&&candidate.performanceSample&&recheck.performanceSample,metrics:comparison,nestedStages:baseline.cpuProfile?.rust?.streaming?.nested_stages??baseline.streamingProfile?.nested_stages??[],workerCosts:workers.map(row=>row.values),workerTimingExcluded:workers.map(row=>row.excluded),workerRecords:[baseline,candidate,recheck].map(r=>r.cpuProfile?.browser?.workers??[]),qualification:'Review main-thread savings, transfer costs, input trust, startup, and memory before selecting a worker. Excluded worker timings cannot support a gain claim.'};
 }
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){

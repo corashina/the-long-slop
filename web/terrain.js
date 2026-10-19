@@ -11,13 +11,18 @@ export function createTerrain(worker,profile,now=()=>performance.now()){
   }
   if(data.id!==job)return;
   profiledJob=false;
-  if(!profile?.enabled)record=null;
-  if(record){const received=now();record.resultReceived=received;record.worker=data.cpuProfile??null;
-   if(data.cpuProfile){record.outputBytes=data.cpuProfile.outputBytes;record.peakOutstandingTransferBytes=record.inputBytes+record.outputBytes;record.returnDeliveryMs=clock?workerDeliveryInterval(clock,{workerSent:data.cpuProfile.resultPostStart,windowReceived:received}):null;record.submitDeliveryMs=clock?workerInputDeliveryInterval(clock,{windowSent:record.messageSubmitStart,workerReceived:data.cpuProfile.workerReceived}):null;record.clockHandshake=clock;}
-   if(data.error!==undefined){record.error=data.error;profile.worker(record);record=null;}
-  }
+  // Publish transport ownership before processing optional timing diagnostics.
   job=null;
   if(data.error!==undefined)error=data.error;else result=data;
+  if(!profile?.enabled)record=null;
+  if(record){const received=now();record.resultReceived=received;record.worker=data.cpuProfile??null;
+   if(data.cpuProfile){record.outputBytes=data.cpuProfile.outputBytes;record.peakOutstandingTransferBytes=record.inputBytes+record.outputBytes;
+    const returnDelivery=workerDeliveryInterval(clock,{workerSent:data.cpuProfile.resultPostStart,windowReceived:received}),submitDelivery=workerInputDeliveryInterval(clock,{windowSent:record.messageSubmitStart,workerReceived:data.cpuProfile.workerReceived});
+    if(clock?.valid&&data.cpuProfile.workerOrigin!==clock.workerOrigin)for(const interval of [returnDelivery,submitDelivery]){interval.valid=false;interval.valueMs=null;interval.reason='worker-origin-mismatch';interval.raw.reportedWorkerOrigin=Number.isFinite(data.cpuProfile.workerOrigin)?data.cpuProfile.workerOrigin:String(data.cpuProfile.workerOrigin);}
+    record.returnDeliveryMs=returnDelivery.valueMs;record.submitDeliveryMs=submitDelivery.valueMs;record.timing={valid:returnDelivery.valid&&submitDelivery.valid,returnDelivery,submitDelivery};record.clockHandshake=clock;
+   }else record.timing={valid:false,reason:'missing-worker-diagnostics'};
+   if(data.error!==undefined){record.error=data.error;profile.worker(record);record=null;}
+  }
  });
  worker.addEventListener('error',event=>{error=event.message||'The terrain worker stopped.';if(profile?.enabled&&record){record.error=error;profile.worker(record);}record=null;profiledJob=false;handshakePending=false;});
  const ready=()=>{if(!result)throw Error('The terrain worker has no result.');return result;};

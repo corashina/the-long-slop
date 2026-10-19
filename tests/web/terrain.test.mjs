@@ -69,3 +69,28 @@ test('terrain profiling stays active until an already profiled worker job and ha
  worker.reply({cpuHandshake:{}});assert.deepEqual(terrain.profileState(),{jobActive:true,handshakeActive:false});
  worker.reply(result(id));assert.deepEqual(terrain.profileState(),{jobActive:false,handshakeActive:false});
 });
+
+test('rounded and invalid diagnostics preserve transferred terrain results and release the job',()=>{
+ for(const fault of ['rounded-input-clock','non-finite-result-clock','invalid-handshake','invalid-worker-origin']){
+  const worker=fakeWorker(),post=worker.postMessage,reply=worker.reply;
+  worker.postMessage=(data,transfer=[])=>post(structuredClone(data,{transfer}),transfer);
+  worker.reply=data=>reply(structuredClone(data,{transfer:Object.values(data).filter(value=>ArrayBuffer.isView(value)).map(value=>value.buffer)}));
+  let tick=57258;const now=()=>tick,profile=createCpuProfile(now,1792442468422.3);profile.enable(true);
+  const terrain=createTerrain(worker,profile,now);tick=57259;
+  assert.doesNotThrow(()=>worker.reply({cpuHandshake:{windowOrigin:1792442468422.3,windowSent:57258,windowReceived:57259,workerOrigin:fault==='invalid-handshake'?Infinity:1792442468588.5,workerReceived:57092,workerSent:57092}}),fault);
+  tick=57259.2;const input=new Uint8Array([7,8,9]),id=terrain.submit(input);
+  assert.deepEqual([...input],[7,8,9]);assert.equal(worker.posted.at(-1).transfer[0].byteLength,0);
+  const output=result(id);output.cpuProfile={workerOrigin:fault==='invalid-worker-origin'?Infinity:1792442468588.5,workerReceived:57093,resultPostStart:fault==='non-finite-result-clock'?Infinity:57093.5,workerReadyWaitMs:0,evaluateWithInputCopyMs:0.2,extractionMs:0.1,outputBytes:140};
+  tick=57260;assert.doesNotThrow(()=>worker.reply(output),fault);assert.equal(output.vertices.byteLength,0);assert.equal(terrain.poll(),id);
+  const vertices=new Float32Array(6),indices=new Uint32Array(3),f=n=>new Float32Array(n);
+  tick=57261;terrain.read(vertices,f(6),f(8),f(4),f(8),indices);
+  assert.deepEqual([...vertices],[1,2,3,4,5,6]);assert.deepEqual([...indices],[0,1,1]);assert.equal(terrain.poll(),-1);
+  const row=profile.snapshot().workers.at(-1);assert.equal(row.timing.valid,false);assert.equal(row.discarded,false);
+  assert.ok(row.totalJobMs>0);assert.equal(row.mainInputCopyMs,0);assert.equal(row.mainResultCopyMs,0);assert.equal(row.worker.evaluateWithInputCopyMs,0.2);
+  if(fault==='rounded-input-clock'){assert.equal(row.submitDeliveryMs,null);assert.ok(row.timing.submitDelivery.rawMs<0);assert.ok(row.timing.submitDelivery.arithmeticUncertaintyMs>0);assert.equal(row.timing.submitDelivery.clockResolutionMs,null);}
+  if(fault==='non-finite-result-clock')assert.equal(row.timing.returnDelivery.raw.workerSent,'Infinity');
+  if(fault==='invalid-handshake')assert.equal(row.clockHandshake.raw.workerOrigin,'Infinity');
+  if(fault==='invalid-worker-origin')assert.equal(row.timing.returnDelivery.reason,'worker-origin-mismatch');
+  assert.doesNotThrow(()=>terrain.submit(input));
+ }
+});

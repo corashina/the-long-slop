@@ -33,8 +33,10 @@ test('storage_is_bounded_and_pending_input_can_be_cleared',()=>{
 test('clock_handshake_keeps_context_origins_separate',()=>{
  const clock=workerClockHandshake({windowOrigin:1000,windowSent:100,windowReceived:120,workerOrigin:900,workerReceived:205,workerSent:210});
  assert.equal(clock.roundTripMs,15);
- assert.equal(workerDeliveryInterval(clock,{workerSent:215,windowReceived:130}),15);
- assert.throws(()=>workerDeliveryInterval(clock,{workerSent:500,windowReceived:130}),/negative/);
+ assert.equal(clock.valid,true);
+ assert.equal(workerDeliveryInterval(clock,{workerSent:215,windowReceived:130}).valueMs,15);
+ const invalid=workerDeliveryInterval(clock,{workerSent:500,windowReceived:130});
+ assert.equal(invalid.valid,false);assert.equal(invalid.valueMs,null);assert.ok(invalid.rawMs<0);
 });
 
 test('stage_statistics_and_session_clear_keep_their_measurement_boundaries',()=>{

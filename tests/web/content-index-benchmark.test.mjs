@@ -23,6 +23,18 @@ test('receipt_rejects_mixed_packages_and_invalid_samples',()=>{
  const missingMetadata=receipt();delete missingMetadata.seed;assert.throws(()=>summarizeWorkerComparison(a,missingMetadata,receipt()),/metadata/);
 });
 
+test('invalid worker timing cannot qualify a saved comparison',()=>{
+ const invalid={...receipt(),profileCpu:true,performanceSample:false,instrumentationMode:'cpu',cpuProfile:{browser:{stages:{},inputLatencies:{},workers:[{kind:'terrain',id:1,timing:{valid:false,submitDelivery:{valid:false,reason:'below-zero-within-arithmetic-uncertainty',rawMs:-0.00005},returnDelivery:{valid:true}},submitDeliveryMs:null,returnDeliveryMs:3,totalJobMs:12,worker:{evaluateWithInputCopyMs:2,extractionMs:-1}}]},rust:{stages:[],measurements:[],streaming:{stages:[],measurements:[]}}}};
+ const summary=summarizeWorkerComparison(invalid,invalid,invalid);
+ assert.equal(summary.workerCosts[0].terrain['main.submitDeliveryMs'],undefined);
+ assert.equal(summary.workerCosts[0].terrain['worker.extractionMs'],undefined);
+ assert.equal(summary.workerCosts[0].terrain['main.totalJobMs'].meanMs,12);
+ assert.equal(summary.workerCosts[0].terrain['worker.evaluateWithInputCopyMs'].meanMs,2);
+ assert.equal(summary.workerCosts[0].terrain['main.returnDeliveryMs'].meanMs,3);
+ assert.equal(summary.workerTimingExcluded[0][0].reason,'below-zero-within-arithmetic-uncertainty');
+ assert.equal(summary.workerRecords[0][0].timing.submitDelivery.rawMs,-0.00005);
+});
+
 test('saved browser traces attach to the same receipt with their content hash',async t=>{
  const root=await mkdtemp(resolve(tmpdir(),'cpu-trace-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const receiptPath=resolve(root,'receipt.json'),tracePath=resolve(root,'trace.json');
