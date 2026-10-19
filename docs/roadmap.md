@@ -111,7 +111,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 6. **Split expensive streaming steps.**
-   Status: Implemented. Terrain work resumes at deadline checks in the shared terrain crate. Source commit: `760af3d`.
+   Status: Implemented and merged into master on 2026-10-19. Source commit: `760af3d`. Worker integration: `f13afc7`.
+   Terrain work resumes at deadline checks in the shared terrain crate.
    Native worker polling uses the deadline. Browser terrain runs in the worker from item 14.
    Native terrain measurements selected the stage. Native tests and the WASM compile check passed.
    Browser testing is deferred by request. Driving frame times and runtime acceptance remain unverified.
