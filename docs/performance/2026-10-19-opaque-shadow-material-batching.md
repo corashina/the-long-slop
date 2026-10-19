@@ -1,7 +1,8 @@
 # Opaque shadow material batching
 
 Roadmap item 7 groups compatible opaque shadow casters across primary surface materials.
-The branch is `codex/opaque-shadow-material-batching`. It remains unmerged.
+The implementation branch was `codex/opaque-shadow-material-batching`, with source commit `3b17ccc`.
+Merge `1989b3a` added the change to master on 2026-10-19.
 The baseline is `8eca150d90e7d0fa216823276c01825f8b1189d1`.
 Steam build `11140890` remains the behavior reference.
 
@@ -51,6 +52,13 @@ The new native tests exercise the production eligibility function and batch key.
 They check alpha and fade exclusions, preparation revisions, geometry and pipeline separation, and all 15 nonzero cascade masks.
 Their fixtures compare exact entity and transform membership across all four cascades.
 These fixtures do not execute Bevy draws or a browser.
+
+## Master integration
+
+Merged master `1989b3a` passed formatting, eight targeted native tests, and the locked, offline WASM library check.
+No check failed. The existing native warning and five WASM warnings remain.
+The native count includes four shadow preparation tests after integration with roadmap item 8.
+The commands above reproduce these checks from the main repository through the project Docker toolchain.
 
 ## Runtime acceptance
 
