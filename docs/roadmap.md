@@ -88,12 +88,10 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    Runtime acceptance and performance gains remain unverified.
 
 3. **Reuse unchanged content lookup tables.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 1–2 days. Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).
-   Effect: Cache sorted lookup tables while session, membership, and ordering stay unchanged.
-   Prompt:
-   ```text
-   Inspect the unconditional sorts in content_index.rs and instances.rs. Cache the tables by session, membership, and order revision. Invalidate correctly on insert, remove, replace, swap_remove, static-control changes, and lamp-binding changes. Preserve exact identities, duplicates, and source order. Read live pose and appearance so the cache stores membership and order only.
-   ```
+   Status: Implemented and merged into master on 2026-10-19. Runtime performance remains unverified.
+   Owners: [content index](../src/world/content_index.rs), [instance presentation](../src/presentation/world/instances.rs).
+   The cache keeps membership and order. Lookups read live pose and appearance.
+   See the [validation note](content-lookup-cache.md) for feature-branch checks and historical benchmark limits.
 
 4. **Remove redundant fullscreen image copies.**
    Status: Proposed. Difficulty: Moderate. Estimate: 1–3 days. Owner: [source effects](../src/presentation/source_effects.rs).

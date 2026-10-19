@@ -135,6 +135,8 @@ pub(crate) struct SourceContents {
     pub state: SourceSpawnState,
     cursors: Vec<Cursor>,
     pub active: Vec<ContentInstance>,
+    // Membership and order only. Pose and appearance remain live.
+    active_revision: u64,
     next: usize,
     update: u64,
     selection: Option<(u64, u64)>,
@@ -143,6 +145,7 @@ pub(crate) struct SourceContents {
 }
 impl SourceContents {
     pub fn discard_replay_siblings(&mut self, wanted: &[Placement]) {
+        let previous = self.active.len();
         self.active.retain(|content| {
             content.item.is_some()
                 || wanted.iter().any(|p| p.id == content.content.placement.id)
@@ -155,6 +158,9 @@ impl SourceContents {
                         && !self.deferred.iter().any(|b| b.owner == c.parent.id)
                 })
         });
+        if self.active.len() != previous {
+            self.active_revision += 1;
+        }
     }
     pub fn has_replay(&self) -> bool {
         self.cursors.iter().any(|c| c.replay_only)
@@ -209,6 +215,7 @@ impl SourceContents {
             ),
             cursors: Vec::new(),
             active: Vec::new(),
+            active_revision: 0,
             deferred: Vec::new(),
             update: 0,
             selection: None,
@@ -237,6 +244,18 @@ impl SourceContents {
     }
     pub fn input_revision(&self) -> u64 {
         self.input_revision
+    }
+    pub fn active_revision(&self) -> u64 {
+        self.active_revision
+    }
+    fn push_active(&mut self, content: ContentInstance) {
+        self.active.push(content);
+        self.active_revision += 1;
+    }
+    pub fn remove_active(&mut self, index: usize) -> ContentInstance {
+        let content = self.active.swap_remove(index);
+        self.active_revision += 1;
+        content
     }
     pub fn select_revision(&mut self, session: u64, revision: u64) {
         if self.selection != Some((session, revision)) {
@@ -278,9 +297,13 @@ impl SourceContents {
         Ok(staging - bytes)
     }
     pub fn retain_requests(&mut self, structures: &[Placement], replays: &[Placement]) {
+        let previous = self.active.len();
         self.active.retain(|c| {
             !c.replay_only || c.item.is_some() || replays.iter().any(|p| p.id == c.origin.id)
         });
+        if self.active.len() != previous {
+            self.active_revision += 1;
+        }
         self.cursors.retain(|c| {
             let selected = if c.replay_only { replays } else { structures };
             selected.iter().any(|p| p.id == c.parent.id)
@@ -481,7 +504,7 @@ impl SourceContents {
                 {
                     continue;
                 }
-                self.active.push(ContentInstance {
+                self.push_active(ContentInstance {
                     replay_only: self.cursors[index].replay_only,
                     origin: self
                         .replay_origin(&content.placement.id)
@@ -649,7 +672,7 @@ impl SourceContents {
                     .iter()
                     .any(|c| c.content.placement.id == content.placement.id)
                 {
-                    self.active.push(ContentInstance {
+                    self.push_active(ContentInstance {
                         replay_only,
                         origin: self
                             .replay_origin(&content.placement.id)
@@ -774,7 +797,7 @@ impl SourceContents {
                     existing.content = content;
                 }
             } else {
-                self.active.push(ContentInstance {
+                self.push_active(ContentInstance {
                     replay_only,
                     origin: self
                         .replay_origin(&content.placement.id)
@@ -1300,6 +1323,46 @@ mod tests {
             });
         }
         contents
+    }
+
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn membership_revisions_cover_push_remove_and_retain() {
+        #[derive(serde::Deserialize)]
+        struct WorldOnly {
+            world: WorldReference,
+        }
+        let reference: WorldOnly =
+            serde_json::from_slice(&std::fs::read("web/assets/reference/manifest.json").unwrap())
+                .unwrap();
+        let mut contents = cursors(&reference.world);
+        let placements: Vec<_> = contents.cursors.iter().map(|c| c.parent.clone()).collect();
+        contents.push_active(ContentInstance::for_structure(placements[0].clone()));
+        contents.push_active(ContentInstance::for_structure(placements[1].clone()));
+        contents.push_active(ContentInstance::for_structure(placements[2].clone()));
+        assert_eq!(contents.active_revision(), 3);
+        contents.remove_active(0);
+        assert_eq!(contents.active_revision(), 4);
+        assert_eq!(contents.active[0].content.placement.id, placements[2].id);
+        contents.push_active(ContentInstance::for_structure(placements[3].clone()));
+        assert_eq!(contents.active.len(), 3);
+        assert_eq!(contents.active_revision(), 5);
+        contents.active[0].replay_only = true;
+        contents.retain_requests(&placements, &placements);
+        assert_eq!(contents.active_revision(), 5);
+        contents.retain_requests(&placements, &[]);
+        assert_eq!(contents.active_revision(), 6);
+        assert_eq!(contents.active.len(), 2);
+        contents.cursors[1].replay_only = true;
+        contents.cursors[1].building = None;
+        contents.discard_replay_siblings(&placements);
+        assert_eq!(contents.active_revision(), 6);
+        contents.discard_replay_siblings(&[]);
+        assert_eq!(contents.active_revision(), 7);
+        assert_eq!(contents.active.len(), 1);
+        assert_eq!(contents.active[0].content.placement.id, placements[3].id);
+        contents.discard_replay_siblings(&[]);
+        assert_eq!(contents.active_revision(), 7);
     }
 
     #[test]

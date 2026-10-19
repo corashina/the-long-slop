@@ -13,6 +13,7 @@ pub(super) struct ButtonPose {
     progress: f32,
     moving: bool,
 }
+
 pub(super) struct LampBinding {
     pub(super) button: Option<ButtonPose>,
     collision_dirty: bool,
@@ -45,6 +46,7 @@ impl WorldStream {
                 continue;
             }
             interaction.remove_generated_light(self.lamp_bindings.swap_remove(i).control);
+            self.lamp_binding_revision += 1;
         }
         loop {
             let next = self
@@ -194,6 +196,7 @@ impl WorldStream {
                 control,
                 baseline,
             });
+            self.lamp_binding_revision += 1;
         }
         for binding in &mut self.lamp_bindings {
             if !binding.collision_dirty
@@ -374,5 +377,105 @@ impl WorldStream {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::content_index::ContentIndex;
+    use super::*;
+    use crate::world::{AbsolutePose, WorldLayer};
+
+    #[test]
+    fn cached_buttons_keep_order_and_read_live_pose() {
+        let node = SourceId {
+            file: "test.assets".into(),
+            path_id: 1,
+        };
+        let parent = GeneratedId {
+            layer: WorldLayer::Building,
+            generator: node.clone(),
+            unit: [0; 2],
+            ordinal: 0,
+            children: Vec::new(),
+        };
+        let mut other = parent.clone();
+        other.children.push((node.clone(), 0));
+        let pose = |x| Transform {
+            translation: [x, 0., 0.],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        };
+        let binding = |parent: GeneratedId, x| LampBinding {
+            parent,
+            source: node.clone(),
+            control: LightControlId(x as u32),
+            collision_dirty: false,
+            button: Some(ButtonPose {
+                node: node.clone(),
+                pose: pose(x),
+                target: pose(x + 1.),
+                progress: 0.,
+                moving: true,
+            }),
+            baseline: ObjectSnapshot {
+                pose: AbsolutePose {
+                    position: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                },
+                condition: 1.,
+                food: None,
+                temperature: None,
+                fluid_quantities: None,
+                valve: None,
+                lamp: Some(false),
+                linear_velocity: [0.; 3],
+                angular_velocity: [0.; 3],
+                sleeping: false,
+                held: false,
+                attachment: None,
+                mechanism: None,
+            },
+        };
+        let mut lamps = vec![
+            binding(other.clone(), 9.),
+            binding(parent.clone(), 1.),
+            binding(other.clone(), 8.),
+            binding(parent.clone(), 2.),
+        ];
+        let mut no_button = binding(parent.clone(), 3.);
+        no_button.button = None;
+        lamps.push(no_button);
+        let mut index = ContentIndex::default();
+        index.update_lamps((1, 0), &lamps);
+        assert_eq!(index.rebuilds, [0, 1]);
+        let positions = |index: &ContentIndex, lamps: &[LampBinding]| {
+            index
+                .buttons(lamps, &parent)
+                .map(|(_, pose)| pose.translation[0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(positions(&index, &lamps), [1., 2.]);
+        assert_eq!(index.buttons(&lamps, &parent).next().unwrap().0, &node);
+        let mut missing = parent.clone();
+        missing.ordinal = 9;
+        assert_eq!(index.buttons(&lamps, &missing).count(), 0);
+        lamps[1].button.as_mut().unwrap().pose = pose(2.);
+        lamps[3].button.as_mut().unwrap().pose = pose(3.);
+        index.update_lamps((1, 0), &lamps);
+        assert_eq!(index.rebuilds, [0, 1]);
+        assert_eq!(positions(&index, &lamps), [2., 3.]);
+
+        lamps.swap_remove(1);
+        lamps.push(binding(parent.clone(), 5.));
+        index.update_lamps((1, 1), &lamps);
+        assert_eq!(index.rebuilds, [0, 2]);
+        assert_eq!(positions(&index, &lamps), [3., 5.]);
+        lamps[0].parent = parent.clone();
+        index.update_lamps((2, 1), &lamps);
+        assert_eq!(index.rebuilds, [0, 3]);
+        assert_eq!(positions(&index, &lamps), [9., 3., 5.]);
+        index.update_lamps((2, 1), &lamps);
+        assert_eq!(index.rebuilds, [0, 3]);
     }
 }

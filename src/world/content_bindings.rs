@@ -286,6 +286,7 @@ impl WorldStream {
             }
             content.suspended_bodies.reserve(instance.bodies.len());
             self.static_controls.push(content);
+            self.static_control_revision += 1;
         }
         Ok(())
     }
@@ -923,7 +924,7 @@ impl WorldStream {
                 index += 1;
                 continue;
             }
-            let content = self.contents.active.swap_remove(index);
+            let content = self.contents.remove_active(index);
             for binding in &content.bindings {
                 interaction.parts.remove_generated(binding.item);
             }
