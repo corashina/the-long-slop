@@ -2,8 +2,7 @@
 use super::{
     materials::{self, SourceMaterial, SourceMaterials},
     reference::ReferenceVisuals,
-    renderers::SourceRenderer,
-    transparent::SourceSortData,
+    renderer_visibility::{SourceMaterialWarmup, SourceRenderer, SourceSortData},
 };
 use crate::{
     app::{Drive, RuntimeReference},
@@ -256,7 +255,7 @@ fn prepare(
                             let mut warm = world.spawn((
                                 Mesh3d(mesh.clone()),
                                 MeshMaterial3d(material.clone()),
-                                materials::SourceMaterialWarmup,
+                                SourceMaterialWarmup,
                                 far,
                                 Visibility::Visible,
                                 bevy::light::NotShadowCaster,
@@ -350,7 +349,7 @@ fn prepare(
                 let mut warm = world.spawn((
                     Mesh3d(mesh.clone()),
                     MeshMaterial3d(material.clone()),
-                    materials::SourceMaterialWarmup,
+                    SourceMaterialWarmup,
                     far,
                     Visibility::Visible,
                     bevy::light::NotShadowCaster,

@@ -90,7 +90,6 @@ impl<P: PhaseItem, const DONE: bool> RenderCommand<P> for DepthMark<DONE> {
     }
 }
 type DrawCameraDepth = (
-    super::renderers::SourceCameraVisible,
     SetCameraDepth,
     DepthMark<false>,
     SetSourceViewCamera,

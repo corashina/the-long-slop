@@ -32,6 +32,9 @@ gltf = { version = "=1.4.1", default-features = false, features = ["utils", "nam
 console_error_panic_hook = "=0.1.7"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bevy = { version = "=0.19.1", default-features = false, features = [
+    "std", "bevy_asset", "bevy_mesh", "bevy_camera",
+] }
 naga = { version = "=29.0.4", features = ["wgsl-in", "glsl-out"] }
 
 [profile.release]
