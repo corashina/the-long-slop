@@ -66,7 +66,7 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 2. **Lower internal rendering resolution.**
-   Status: Proposed. Difficulty: Easy to moderate. Estimate: 1–2 days. Owner: [canvas sizing](../src/app.rs).
+   Status: Implemented in `codex/scene-resolution`; runtime acceptance and performance remain unverified. See [checks and export blocker](performance/2026-10-19-scene-resolution.md). Difficulty: Easy to moderate. Estimate: 1–2 days. Owner: [canvas sizing](../src/app.rs).
    Effect: An optional 0.75 scene scale uses 56% of the pixels and softens the scene image. Keep UI and text at native resolution.
    Prompt:
    ```text

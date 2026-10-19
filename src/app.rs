@@ -157,6 +157,8 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
+        .init_resource::<crate::render_scale::SceneScale>()
+        .add_systems(PreUpdate, update_scene_scale)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
             reference.content_base.clone(),
             Arc::clone(&reference.file_catalog),
@@ -307,6 +309,23 @@ fn initialize_storage(
     }
 }
 
+fn update_scene_scale(
+    mut scale: ResMut<crate::render_scale::SceneScale>,
+    status: Res<presentation::source_lighting::SourceLightingStatus>,
+) {
+    match crate::render_scale::SceneScale::from_factor(game_scene_scale()) {
+        Ok(value) => {
+            if *scale != value {
+                *scale = value;
+            }
+        }
+        Err(error) => {
+            *status.0.lock().unwrap() =
+                presentation::materials::RenderingState::Failed(error.into());
+        }
+    }
+}
+
 fn check_ready(
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -337,11 +356,13 @@ fn check_ready(
         Res<presentation::lighting_scene::ProbeActivation>,
         Query<(&presentation::surface_views::SourceSurfaceView, &Camera)>,
         Query<&Window>,
+        Res<crate::render_scale::SceneScale>,
     ),
 ) {
     let (lighting, source_lighting, fixed, status) = lighting;
-    let (plates, particles, submissions, view_clock, epoch, graph, activation, cameras, windows) =
-        plates;
+    let (
+        plates, particles, submissions, view_clock, epoch, graph, activation, cameras, windows, scale,
+    ) = plates;
     graph.content_checked(None);
     let shared_status = status.0.lock().unwrap();
     if let presentation::materials::RenderingState::Failed(error) = &*shared_status {
@@ -520,7 +541,7 @@ fn check_ready(
                                 window.physical_width() == target.x
                                     && window.physical_height() == target.y
                             }))
-                        .then_some(extent.to_array())
+                        .then_some(scale.extent(extent.to_array()))
                     });
             let enabled = activation
                 .enabled

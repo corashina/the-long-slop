@@ -264,10 +264,8 @@ pub struct SurfaceTargets {
     pub logical_bytes: u64,
 }
 impl SurfaceTargets {
-    pub fn new(device: &RenderDevice, width: u32, height: u32) -> Result<Self, String> {
+    pub fn new(device: &RenderDevice, width: u32, height: u32, atlas: u32) -> Result<Self, String> {
         use std::sync::Arc;
-        let atlas = crate::reference::shadows::source_atlas_size(width, height)
-            .ok_or("Source stack atlas extent is invalid")?;
         let capture_atlas = crate::reference::shadows::source_atlas_size(64, 64).unwrap();
         let stack = Arc::new(SourceColorTargets::new(device, width, height, 8)?);
         let capture = Arc::new(SourceColorTargets::new(device, 64, 64, 1)?);
@@ -300,9 +298,8 @@ impl SurfaceTargets {
         device: &RenderDevice,
         width: u32,
         height: u32,
+        atlas: u32,
     ) -> Result<(), String> {
-        let atlas = crate::reference::shadows::source_atlas_size(width, height)
-            .ok_or("Source stack atlas extent is invalid")?;
         let stack = std::sync::Arc::new(SourceColorTargets::new(device, width, height, 8)?);
         for index in 0..3 {
             self.views[index] =

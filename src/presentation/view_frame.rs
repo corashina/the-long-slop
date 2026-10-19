@@ -142,6 +142,7 @@ impl SourceViewClock {
 #[derive(Clone, Copy)]
 pub struct ViewSnapshot {
     pub extent: UVec2,
+    pub native_extent: UVec2,
     pub view_from_world: Mat4,
     pub implicit_projection: Mat4,
     pub raster_projection: Mat4,
@@ -243,6 +244,7 @@ pub(crate) fn snapshot(
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<SourceLightingStatus>,
+    scale: Res<crate::render_scale::SceneScale>,
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
@@ -338,9 +340,13 @@ pub(crate) fn snapshot(
                 scene.probe_position[clock.probe_index].to_array(),
             ))
         };
-        Some(camera_snapshot(
+        let mut snapshot = camera_snapshot(
             extent, view, near, far, fov, mask, distance,
-        ))
+        );
+        if index < PROBE_START {
+            snapshot.extent = UVec2::from_array(scale.extent(extent.to_array()));
+        }
+        Some(snapshot)
     });
     let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
@@ -418,6 +424,7 @@ pub fn apply_render_snapshot(
             view.clip_from_view = snapshot.raster_projection;
             view.clip_from_world = Some(snapshot.raster_projection * snapshot.view_from_world);
             view.invert_culling = state.index < 3;
+            view.viewport = UVec4::new(0, 0, snapshot.extent.x, snapshot.extent.y);
             state.clip_from_world = snapshot.raster_projection * snapshot.view_from_world;
             state.near = snapshot.near;
             state.far = snapshot.far;
@@ -502,10 +509,12 @@ pub fn apply_sky_snapshot(
     mut views: Query<&mut ExtractedView, With<super::frame_graph::SourceSkyCamera>>,
 ) {
     if let Some(clip) = frame.sky_clip_from_world {
+        let Some(main) = frame.views[1] else { return };
         for mut view in &mut views {
             view.clip_from_view = clip * view.world_from_view.to_matrix();
             view.clip_from_world = Some(clip);
             view.invert_culling = true;
+            view.viewport = UVec4::new(0, 0, main.extent.x, main.extent.y);
         }
     }
 }
@@ -542,6 +551,7 @@ pub(crate) fn camera_snapshot(
     );
     ViewSnapshot {
         extent,
+        native_extent: extent,
         view_from_world: view,
         implicit_projection: implicit,
         raster_projection: gpu_projection(implicit),

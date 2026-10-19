@@ -1,3 +1,5 @@
+import {installSceneResolution} from './scene-resolution.js';
+installSceneResolution(window,document.querySelector('#scene-resolution'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage} from './save-storage.js';

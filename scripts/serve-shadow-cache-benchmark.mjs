@@ -9,6 +9,7 @@ createServer(async(req,res)=>{try{
  if(req.method==='POST'&&/^\/__benchmark-result\/[a-z0-9-]+$/.test(pathname)){const chunks=[];for await(const chunk of req)chunks.push(chunk);const dir=resolve(root,'.cache/benchmark/results');await mkdir(dir,{recursive:true});const label=pathname.split('/').at(-1);const body=Buffer.concat(chunks);JSON.parse(body.toString());await writeFile(resolve(dir,label+'.json'),body);res.writeHead(200).end('saved');return;}
  let path=resolve(web,'.'+(pathname==='/'?'/index.html':pathname));
  if(pathname==='/__input.mjs')path=resolve(root,'scripts/benchmark-input.mjs');
+ else if(pathname==='/__scene-measure.mjs')path=resolve(root,'scripts/measure-scene-resolution.mjs');
  else if(pathname==='/__measure.mjs')path=resolve(root,'scripts/measure-shadow-cache.mjs');
  else if(baseline&&pathname.startsWith('/pkg/')){const pkg=resolve(root,'.cache/benchmark/master-baseline/pkg');path=resolve(pkg,pathname.slice(5));if(!path.startsWith(pkg+sep))throw Error('Invalid package path');}
  else if(!path.startsWith(web+sep))throw Error('Invalid path');
