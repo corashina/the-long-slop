@@ -319,7 +319,7 @@ Use this prompt preamble for each item:
 Effort estimates include developer work, builds, critical checks, and browser verification. One day means eight hours. Blockers can extend these estimates.
 
 1. **Compress startup downloads.**
-   Status: Implemented on `codex/startup-brotli`; unmerged. Playable startup remains blocked by a WASM/export mismatch.
+   Status: Implemented and merged into local master at `499b685`. Playable startup remains blocked by a WASM/export mismatch.
    Checks: [Brotli delivery results](performance/2026-10-19-startup-brotli.md). No startup speed gain is verified.
    Difficulty: Easy. Estimate: 1–2 days. Owners: [startup server](../scripts/serve.mjs), [world assets](../web/world-assets.js).
    Effect: Serve startup WASM and JSON with build-time Brotli compression. Preserve receipt checks and avoid recompressing compressed images.

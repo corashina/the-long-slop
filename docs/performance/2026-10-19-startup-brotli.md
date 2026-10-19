@@ -1,7 +1,7 @@
 # Startup Brotli delivery
 
-Date: 2026-10-19. Branch: `codex/startup-brotli`. Base: `1103368e8f99ae0c1d20c7514820876b7166a7c7`.
-The branch remains unmerged.
+Date: 2026-10-19. Source branch: `codex/startup-brotli`. Base: `1103368e8f99ae0c1d20c7514820876b7166a7c7`.
+Merged into local master at source commit `499b685f170ccea284cd4951d14f68991f9f2c52`.
 
 ## Changes
 
