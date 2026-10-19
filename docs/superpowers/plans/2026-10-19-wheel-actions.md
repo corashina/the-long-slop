@@ -10,7 +10,7 @@
 
 **Spec:** [Approved wheel action specification](../specs/2026-10-19-wheel-actions-design.md).
 
-Status: Implementation complete. Independent reviews pending.
+Status: Complete. Independent reviews passed. Browser acceptance remains deferred.
 Worktree: `C:/Users/Corashina/.codex/worktrees/codebase-architecture/the-long-drive-wasm`.
 Branch: `codex/codebase-architecture`.
 Starting commit: `3157f5a`.
@@ -211,13 +211,13 @@ Stage only the files in this plan that changed.
 Commit with `refactor: complete wheel actions within interaction`.
 Keep the branch unmerged.
 
-- [ ] **Step 7: Complete independent reviews.**
+- [x] **Step 7: Complete independent reviews.**
 
 Use one fresh subagent for specification compliance and one fresh subagent for code quality.
 Reviewers must inspect the complete change and actual check output.
 Correct findings in the same worktree. Repeat only checks affected by those corrections.
 
-- [ ] **Step 8: Report the section result.**
+- [x] **Step 8: Report the section result.**
 
 Report commits, changed ownership, executed checks, failures, and deferred checks.
 State that browser behavior and source parity remain unverified.
@@ -232,3 +232,16 @@ Reviewers can read independently after the complete implementation is ready.
 
 Implementation starts after the user reviews this plan.
 Keep the user's selected subagent method. Do not ask for that choice again.
+
+## Section result
+
+Implementation commit: `8179297c430c5d237288ebd5fee8ab3baf25151f`.
+The fourteen baseline query-bound tests passed before product edits.
+The expected RED compile failed on missing wheel interfaces.
+All nine wheel-action tests passed after implementation.
+Formatting, workspace WASM compilation, scope checks, and whole-branch whitespace checks passed.
+Compiler warning messages and source files match the unchanged baseline.
+Specification, code-quality, and final whole-branch reviews passed without findings.
+Full checks, release builds, and browser acceptance remain deferred.
+Browser behavior, audible playback, and Steam build parity remain unverified.
+The branch and managed worktree remain unmerged and preserved.
