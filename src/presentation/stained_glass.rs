@@ -1,5 +1,5 @@
 //! Installed unnamed GrabPass capture and noninstanced pass-cache state.
-use super::render_targets::{HDR_FORMAT, SourceColorTargets};
+use super::render_targets::{HDR_FORMAT, MSAA_SAMPLES, SourceColorTargets};
 use bevy::ecs::{query::ROQueryItem, system::SystemParamItem};
 use bevy::render::{
     render_phase::{PhaseItem, RenderCommand, RenderCommandResult, TrackedRenderPass},
@@ -233,7 +233,7 @@ impl SourceGlassView {
         colors: &SourceColorTargets,
     ) -> Result<(), &'static str> {
         if self.extent != UVec2::new(colors.width, colors.height)
-            || !matches!(colors.samples, 1 | 8)
+            || !matches!(colors.samples, 1 | MSAA_SAMPLES)
             || !colors
                 .resolved
                 .texture

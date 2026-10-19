@@ -103,8 +103,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 5. **Reduce MSAA8 to 4.**
-   Status: Proposed. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
-   Effect: Offer a fixed 4-sample profile as an optional image-quality change. This item needs specific approval before implementation.
+   Status: Implemented, not measured. Approved by the user. `MSAA_SAMPLES` sets 4 samples for all three cameras, targets, and pipelines. The source export still records 8. Difficulty: Moderate. Estimate: 2–3 days. Owner: [render targets](../src/presentation/render_targets.rs).
+   Effect: Halve the multisample color and depth memory and resolve cost. Edges, glass, and particles are not compared in a browser.
    Prompt:
    ```text
    After specific approval, inspect all sample-count checks and render targets. Add one fixed 4-sample profile and keep camera, target, pipeline, effect, and device counts consistent. Preserve layers, shadows, and effects. Check edge detail, glass, particles, and resize. Compare image quality and GPU cost with the current 8-sample profile.

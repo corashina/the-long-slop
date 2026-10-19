@@ -356,7 +356,7 @@ pub fn spawn_cameras(
             ..default()
         }),
         Transform::from_rotation(pose.rotation),
-        Msaa::Sample8,
+        Msaa::from_samples(super::render_targets::MSAA_SAMPLES),
         bevy::core_pipeline::tonemapping::Tonemapping::None,
     ));
     let mut image = Image::new_fill(
@@ -381,7 +381,7 @@ pub fn spawn_cameras(
                 c.field_of_view,
                 c.mask,
                 c.order as isize,
-                Msaa::Sample8,
+                Msaa::from_samples(super::render_targets::MSAA_SAMPLES),
             )
         } else {
             let p = &record.probes[0];
@@ -607,7 +607,7 @@ fn sky_depth(device: &RenderDevice, width: u32, height: u32) -> Texture {
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 8,
+        sample_count: super::render_targets::MSAA_SAMPLES,
         dimension: TextureDimension::D2,
         format: super::render_targets::DEPTH_FORMAT,
         usage: TextureUsages::RENDER_ATTACHMENT,
