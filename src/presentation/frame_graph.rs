@@ -589,7 +589,6 @@ fn prepare_frame(
         assets.shaders.copy.clone(),
         colors.resolved.sampled.as_ref().unwrap(),
         format,
-        1,
     );
     commands.insert_resource(FrameResources {
         colors,
@@ -917,7 +916,7 @@ fn finish_surface(
         };
         if resources
             .display
-            .encode(context.command_encoder(), &cache, output.view, None)
+            .encode(context.command_encoder(), &cache, output.view)
         {
             state.presented = true;
             state.token = frame.main_token;
