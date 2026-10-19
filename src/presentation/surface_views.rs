@@ -243,16 +243,16 @@ pub fn prepare_views(
                 return;
             };
             if timing.enabled() {
-                timing.work(
-                    2,
-                    usize::from(glass.unchanged(&glass_value))
-                        + usize::from(binding.unchanged(&uniform)),
-                    2,
-                );
-                timing.upload(
-                    GlassViewUniform::min_size().get()
-                        + super::source_lighting::LightingUniform::min_size().get(),
-                );
+                let glass_unchanged = glass.unchanged(&glass_value);
+                let lighting_unchanged = binding.unchanged(&uniform);
+                let writes = usize::from(!glass_unchanged) + usize::from(!lighting_unchanged);
+                timing.work(2, 2 - writes, writes);
+                if !glass_unchanged {
+                    timing.upload(GlassViewUniform::min_size().get());
+                }
+                if !lighting_unchanged {
+                    timing.upload(super::source_lighting::LightingUniform::min_size().get());
+                }
             }
             if let Err(error) = glass.write(glass_value, &device, &queue) {
                 *status.0.lock().unwrap() = RenderingState::Failed(error.into());

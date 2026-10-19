@@ -710,18 +710,15 @@ pub(crate) fn sync_conditions(world: &mut World) {
             let local =
                 Transform::from_matrix(Mat4::from(basis.inverse() * desired.compute_affine()));
             if let Some(mut transform) = world.get_mut::<Transform>(*model) {
+                let next = Transform {
+                    translation: local.translation,
+                    rotation: local.rotation,
+                    ..*transform
+                };
+                let changed = transform.set_if_neq(next);
                 if timing.enabled() {
-                    timing.work(
-                        1,
-                        usize::from(
-                            transform.translation == local.translation
-                                && transform.rotation == local.rotation,
-                        ),
-                        1,
-                    );
+                    timing.work(1, usize::from(!changed), usize::from(changed));
                 }
-                transform.translation = local.translation;
-                transform.rotation = local.rotation;
             }
         }
     });

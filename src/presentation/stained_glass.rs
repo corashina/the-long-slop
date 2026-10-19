@@ -224,6 +224,9 @@ impl SourceGlassView {
         {
             return Err("Source glass view requires physical resize");
         }
+        if self.unchanged(&value) {
+            return Ok(());
+        }
         self.uniform.set(value);
         self.uniform.write_buffer(device, queue);
         Ok(())

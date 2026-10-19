@@ -140,6 +140,9 @@ impl SourceViewLighting {
     }
     /// Update every view before graph execution. This does not allocate GPU resources.
     pub fn write(&mut self, value: LightingUniform, device: &RenderDevice, queue: &RenderQueue) {
+        if self.unchanged(&value) {
+            return;
+        }
         self.uniform.set(value);
         self.uniform.write_buffer(device, queue);
     }

@@ -659,18 +659,15 @@ pub(crate) fn sync_control_visuals(
     for &(index, entity) in &source.control_poses {
         if let Ok(mut pose) = poses.get_mut(entity) {
             let output = &drive.runtime.lighting.control_poses()[index].local_pose;
+            let next = Transform {
+                translation: Vec3::from_array(output.translation),
+                rotation: Quat::from_array(output.rotation),
+                ..*pose
+            };
+            let changed = pose.set_if_neq(next);
             if timing.enabled() {
-                timing.work(
-                    1,
-                    usize::from(
-                        pose.translation == Vec3::from_array(output.translation)
-                            && pose.rotation == Quat::from_array(output.rotation),
-                    ),
-                    1,
-                );
+                timing.work(1, usize::from(!changed), usize::from(changed));
             }
-            pose.translation = Vec3::from_array(output.translation);
-            pose.rotation = Quat::from_array(output.rotation);
         }
     }
     for &(index, entity) in &source.visibility {
@@ -1042,12 +1039,17 @@ fn upload_lighting(
         super::reflection_preparation::Stage::LightingUpload,
         &frame,
     );
+    let unchanged = gpu.uniform.get() == &extracted.uniform;
     if timing.enabled() {
-        timing.work(1, usize::from(gpu.uniform.get() == &extracted.uniform), 1);
-        timing.upload(LightingUniform::min_size().get());
+        timing.work(1, usize::from(unchanged), usize::from(!unchanged));
+        if !unchanged {
+            timing.upload(LightingUniform::min_size().get());
+        }
     }
-    gpu.uniform.set(extracted.uniform);
-    gpu.uniform.write_buffer(&device, &queue);
+    if !unchanged {
+        gpu.uniform.set(extracted.uniform);
+        gpu.uniform.write_buffer(&device, &queue);
+    }
     if gpu.cookies.is_none() {
         if let Some(ids) = extracted.cookies {
             if ids.iter().all(|id| images.get(*id).is_some()) {
