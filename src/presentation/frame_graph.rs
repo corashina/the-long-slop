@@ -267,6 +267,7 @@ impl Plugin for SourceFramePlugin {
                 Update,
                 bind_sky_extras.after(super::materials::bind_materials),
             );
+        app.add_systems(Startup, cpu_clustering);
         app.add_systems(
             Update,
             cpu_boundaries.after(super::materials::bind_authored_materials),
@@ -1206,6 +1207,10 @@ fn resource_stamp<T: Resource>(world: &World) -> Option<u32> {
     world
         .get_resource_ref::<T>()
         .map(|resource| resource.last_changed().get())
+}
+/// Source cameras cluster lights on the CPU on every backend. GPU clustering fails on the zero-cluster sky camera.
+fn cpu_clustering(mut settings: ResMut<bevy::light::cluster::GlobalClusterSettings>) {
+    settings.gpu_clustering = None;
 }
 /// Source passes draw CPU-batched phases on every backend.
 fn cpu_batching(mut support: ResMut<GpuPreprocessingSupport>) {
