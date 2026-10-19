@@ -129,7 +129,7 @@ pub(crate) fn extract_shadows_only(
         Query<(Entity, &SourceRenderer), Without<super::save::HiddenWorld>>,
     >,
     mut target: ResMut<ShadowsOnly>,
-    frame: Res<super::view_frame::SourceViewFrame>,
+    frame: bevy::render::Extract<Res<super::view_frame::SourceViewFrame>>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::ShadowMembership,

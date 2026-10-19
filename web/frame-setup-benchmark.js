@@ -3,6 +3,10 @@
 export async function measureFrameSetup({instrument = false, label = 'frame-setup', ...options} = {}) {
   const {measureContentIndex} = await import('/__measure.mjs');
   const wasm = await import('/pkg/my_summer_slop.js');
+  const state = window.gameState;
+  if (JSON.parse(wasm.source_render_audit()).state !== 'Ready' || !state?.started || state.paused) {
+    throw Error('Frame setup measurement requires active gameplay and a ready renderer.');
+  }
   const gl = document.querySelector('#game').getContext('webgl2');
   const saved = new Map();
   const uploads = {bufferData: 0, bufferSubData: 0, bytes: 0};

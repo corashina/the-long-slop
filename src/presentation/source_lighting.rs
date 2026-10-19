@@ -140,6 +140,7 @@ impl SourceViewLighting {
     pub fn unchanged(&self, value: &LightingUniform) -> bool {
         self.uniform.get() == value
     }
+    /// Update every view before graph execution. This does not allocate GPU resources.
     pub fn write(&mut self, value: LightingUniform, device: &RenderDevice, queue: &RenderQueue) {
         self.uniform.set(value);
         self.uniform.write_buffer(device, queue);
