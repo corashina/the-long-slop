@@ -12,12 +12,10 @@ pub use types::*;
 mod lamps;
 mod source_lights;
 pub use source_lights::{WorldLight, required_world_lights};
-mod noise;
 mod placement;
 mod prop_layers;
 mod props;
 pub use props::{PropCandidate, PropGenerator};
-mod random;
 pub mod spawn_state;
 mod unity_random;
 pub use placement::{
@@ -28,8 +26,6 @@ pub use placement::{
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;
-pub use noise::{TerrainEvaluator, source_perlin};
-pub use random::{RandomState, SourceRandom};
 pub use road::{
     ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadBlock, RoadCheckpoint, RoadCurve,
     RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState, deform_road,
@@ -51,9 +47,13 @@ pub use stream::{
 mod startup;
 pub use startup::StartupTerrain;
 mod terrain;
+pub use ::terrain::{
+    RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,
+    TerrainRoadPoint, TerrainTile, biome, source_perlin,
+};
 pub use terrain::{
-    TerrainContext, TerrainFoundation, TerrainRoadPoint, TerrainSurfaceJob, TerrainTile, biome,
-    terrain_surface,
+    TerrainPoll, TerrainWorker, terrain_evaluator, terrain_output_bound, terrain_settings,
+    terrain_tile,
 };
 
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;

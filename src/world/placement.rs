@@ -693,7 +693,7 @@ impl Inputs {
             .fold(f32::INFINITY, f32::min);
         assert!(minimum > 0.0 && rules.min_start_dist >= 0.0);
         let max_buildings = (SOURCE_END / minimum as f64).ceil() as usize + 1;
-        let terrain = TerrainEvaluator::new(reference, seed);
+        let terrain = super::terrain_evaluator(reference, seed);
         let zero_height = terrain.base_height([0.0; 2], false);
         let road_height =
             terrain.base_height([0.0; 2], reference.road.align_edge_of_the_world != 0);
