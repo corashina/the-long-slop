@@ -280,6 +280,7 @@ pub fn queue(world: &mut World) {
                             let material = world.resource::<RenderMaterialInstances>().instances
                                 [&main]
                                 .asset_id;
+                            let material = super::caster_material::shadow_material(world, material);
                             let next = QueuedShadow {
                                 key: ShadowBatchKey {
                                     pipeline,

@@ -10,6 +10,7 @@ pub mod materials;
 pub mod mechanisms;
 pub mod reference;
 pub mod save;
+mod shadow_batch;
 mod shadow_cache;
 pub mod world;
 
