@@ -18,6 +18,8 @@ That file exists. Session validation looks for its lazy prototype in the eager s
 ## Work order
 
 Keep each layer working before you add the next.
+Use [targeted checks](../README.md#export-build-and-run) during edits. The check script does not build release WASM.
+Run full checks and release builds only on explicit request or at an agreed milestone.
 
 1. **Fix New game asset validation.** Match eager checks to the eager scene owners.
    Keep strict checks for loaded scenes and for each lazy prototype's owner.

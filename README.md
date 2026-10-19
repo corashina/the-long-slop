@@ -26,10 +26,38 @@ Press Ctrl+C in the server terminal to stop it.
 The exporter does not change Steam files. Git excludes exported assets and `web/pkg`.
 A missing or invalid export stops loading.
 
-Run formatting, native tests, and the release WASM check:
+Run routine formatting and WASM compile checks:
 
 ```powershell
 ./scripts/check.ps1
+```
+
+Run selected native tests by integration target, name filter, or both:
+
+```powershell
+./scripts/check.ps1 -Test inventory
+./scripts/check.ps1 -Filter roadside_
+./scripts/check.ps1 -Test inventory -Filter inventory
+```
+
+Native test commands also check formatting and WASM compilation.
+Run selected web suites by filename stem. This command skips Docker and Rust checks:
+
+```powershell
+./scripts/check.ps1 -WebTest input,save-bridge
+```
+
+Run all retained web and native tests, formatting, and WASM compile checks only when requested or agreed:
+
+```powershell
+./scripts/check.ps1 -Full
+```
+
+Checks do not create a browser package. WASM compile checks do not prove runtime behavior.
+Run a release build only when requested or at an agreed milestone:
+
+```powershell
+./scripts/build.ps1
 ```
 
 The build script writes the browser package to `web/pkg`.

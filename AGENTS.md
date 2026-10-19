@@ -12,3 +12,10 @@
 - Do not implement reduced-motion variants or prefers-reduced-motion handling unless the user explicitly requests it.
 - Use the pstack unslop skill when writing or editing UI text and documentation.
 - Use GPT-6.1 Sol with high reasoning for most work. Use GPT-6 Luna for merges and simpler tasks. Never use GPT-6 Astra.
+- Run targeted checks automatically for changed behavior.
+- For web-only changes, run relevant web tests. Skip Rust checks.
+- For Rust changes, run relevant native tests and a WASM compile check.
+- Run full test suites, release builds, and browser acceptance only on explicit request or at an agreed milestone.
+- Task completion alone does not authorize these checks.
+- Report checks run, failures, and deferred checks. Do not claim unverified runtime behavior.
+- Use `scripts/check.ps1 -Full` for full checks and `scripts/build.ps1` for release builds.

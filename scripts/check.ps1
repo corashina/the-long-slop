@@ -1,21 +1,57 @@
-param([string]$Test)
+[CmdletBinding(DefaultParameterSetName = 'Routine')]
+param(
+    [Parameter(Mandatory, ParameterSetName = 'NativeTarget')]
+    [ValidatePattern('^[a-z_][a-z0-9_]*$')]
+    [string]$Test,
+
+    [Parameter(Mandatory, ParameterSetName = 'NativeFilter')]
+    [Parameter(ParameterSetName = 'NativeTarget')]
+    [ValidatePattern('^[a-zA-Z_][a-zA-Z0-9_:]*$')]
+    [string]$Filter,
+
+    [Parameter(Mandatory, ParameterSetName = 'Web')]
+    [ValidatePattern('^[a-z0-9]+(?:-[a-z0-9]+)*$')]
+    [string[]]$WebTest,
+
+    [Parameter(Mandatory, ParameterSetName = 'Full')]
+    [switch]$Full
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-. "$PSScriptRoot/cargo-target.ps1"
-$cargoTarget = Get-CargoTargetDirectory $root
-$image = 'my-summer-slop-toolchain'
 try {
+    if ($Full -or $WebTest) {
+        $suites = if ($Full) {
+            @('audio', 'loading', 'input', 'performance', 'save-storage', 'save-session',
+                'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution')
+        } else { $WebTest }
+        $webFiles = @(foreach ($suite in $suites) {
+            $file = "$root/tests/web/$suite.test.mjs"
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+                throw "Unknown web test suite: $suite"
+            }
+            $file
+        })
+        & node --test @webFiles
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($WebTest) { exit 0 }
+    }
+
+    $checks = 'cargo fmt --all -- --check'
+    if ($Test) {
+        $checks += " && cargo test --locked --test $Test"
+        if ($Filter) { $checks += " $Filter" }
+    } elseif ($Filter) {
+        $checks += " && cargo test --locked --lib $Filter"
+    } elseif ($Full) {
+        $checks += ' && cargo test --locked'
+    }
+    $checks += ' && cargo check --locked --target wasm32-unknown-unknown --lib'
+
+    . "$PSScriptRoot/cargo-target.ps1"
+    $cargoTarget = Get-CargoTargetDirectory $root
+    $image = 'my-summer-slop-toolchain'
     & docker build --tag $image --file "$root/tools/Dockerfile" $root
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    if (-not $Test) {
-        & node --test "$root/tests/web/audio.test.mjs" "$root/tests/web/loading.test.mjs" "$root/tests/web/input.test.mjs" "$root/tests/web/performance.test.mjs" "$root/tests/web/save-storage.test.mjs" "$root/tests/web/save-session.test.mjs" "$root/tests/web/save-bridge.test.mjs" "$root/tests/web/http-compression.test.mjs" "$root/tests/web/serve.test.mjs" "$root/tests/web/world-assets.test.mjs" "$root/tests/web/scene-resolution.test.mjs"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    }
-    $checks = 'cargo fmt --all -- --check && cargo test --locked && cargo build --locked --release --target wasm32-unknown-unknown --lib'
-    if ($Test) {
-        if ($Test -notmatch '^[a-z_]+$') { throw 'Use a test target name.' }
-        $checks = "cargo test --locked --test $Test"
-    }
     & docker run --rm --mount "type=bind,source=$root,target=/workspace" `
         --mount 'type=volume,source=tld-wasm-cargo,target=/cargo' `
         --mount 'type=volume,source=tld-wasm-target,target=/target' `
