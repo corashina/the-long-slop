@@ -6,6 +6,7 @@ import {parseArgs} from 'node:util';
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createContentIndexBenchmarkServer} from './serve-content-index-benchmark.mjs';
+import {poll} from './benchmark-poll.mjs';
 const {chromium} = createRequire(import.meta.url)('playwright');
 const {values} = parseArgs({options: {
   assets: {type:'string'}, package: {type:'string'}, variant: {type:'string'},
@@ -41,14 +42,14 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`, {waitUntil:'domcontentloaded', timeout});
   result.configuration = await page.evaluate(async () => (await fetch('/__benchmark-config')).json());
   if (values.profile) {
-    await page.waitForFunction(async () => {
+    await poll(() => page.evaluate(async () => {
       const wasm = await import('/pkg/my_summer_slop.js');
       try {
         wasm.reflection_preparation_profile(true);
         wasm.shadow_preparation_profile?.(true);
         return true;
       } catch { return false; } // The main module initializes the WASM instance asynchronously.
-    }, null, {timeout,polling:500});
+    }), timeout);
   }
   await page.waitForFunction(() => {
     if (!window.gameStartupDone?.()) return false;
@@ -72,10 +73,10 @@ try {
   await page.locator('#resume').click();
   await page.waitForFunction(() => window.gameState?.started && !window.gameState.paused, null, {timeout:30000});
   stage = 'settle';
-  await page.waitForFunction(async () => {
+  await poll(() => page.evaluate(async () => {
     const world = await window.measureWorld();
     return !world.world.pending_work && !world.world.generation_jobs;
-  }, null, {timeout});
+  }), timeout);
   result.render = await page.evaluate(() => {
     const canvas = document.querySelector('#game'), gl = canvas.getContext('webgl2');
     if (!gl) throw Error('WebGL2 is unavailable');

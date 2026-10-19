@@ -18,8 +18,6 @@ fn shadow_upload_inputs_invalidate_for_epoch_fit_bias_projection_and_target_chan
         atlas_size: 256,
         primary: true,
     };
-    assert_eq!(cascade, cascade);
-    assert_eq!(collector, collector);
     for changed in [
         ViewRevision { session: 2, ..view },
         ViewRevision { scene: 2, ..view },
