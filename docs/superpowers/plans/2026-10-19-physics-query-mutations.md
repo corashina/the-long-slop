@@ -84,19 +84,19 @@ Do not repeat a successful check without another change or an unresolved concern
 - Produce test helpers `empty_world() -> crate::vehicle::PhysicsWorld` and `assert_matches_scan(world: &mut crate::vehicle::PhysicsWorld, scan: &mut ScanBounds, samples: &[Vector])`.
 - Produce `ray_hit(world: &crate::vehicle::PhysicsWorld, x: f32, z: f32) -> Option<ColliderHandle>`.
 
-- [ ] **Step 1: Record a clean baseline.**
+- [x] **Step 1: Record a clean baseline.**
 
 Run `git status --short --branch` and `./scripts/check.ps1 -Filter query_bounds`.
 Expect the current four query-bound tests to pass. Preserve unrelated changes and record any baseline failure.
 
-- [ ] **Step 2: Move the existing tests and copy the reference scan.**
+- [x] **Step 2: Move the existing tests and copy the reference scan.**
 
 Move the current inline tests into `tests.rs` without changing their assertions.
 Copy the pre-change index algorithm and state into `reference.rs` as `ScanBounds`.
 Compile the reference module only under `cfg(test)`.
 Keep the production implementation unchanged during this task.
 
-- [ ] **Step 3: Add `scan_comparison_covers_hits_overlaps_and_bounds`.**
+- [x] **Step 3: Add `scan_comparison_covers_hits_overlaps_and_bounds`.**
 
 Construct two separate, non-overlapping balls and one attached box in `empty_world`.
 Use sample points at the old positions, the new positions, and empty space.
@@ -117,7 +117,7 @@ assert_matches_scan(&mut world, &mut scan, &samples);
 These are baseline characterization checks. They are expected to pass before optimization.
 Do not manufacture a failing implementation for this extraction.
 
-- [ ] **Step 4: Verify and commit.**
+- [x] **Step 4: Verify and commit.**
 
 Run `./scripts/check.ps1 -Filter query_bounds` and `git diff --check`.
 Expect the four preserved tests and the new comparison test to pass.
@@ -168,7 +168,7 @@ fn pending_counts(&self) -> (usize, usize, usize); // cfg(test): bodies, collide
 fn step_counts(&self) -> (usize, usize);          // cfg(test): bodies, colliders
 ```
 
-- [ ] **Step 1: Write `tracked_edits_cover_optional_handles_and_lifecycle`.**
+- [x] **Step 1: Write `tracked_edits_cover_optional_handles_and_lifecycle`.**
 
 Create a fixed parent and a child through the new insertion methods.
 Run one refresh, then edit the same body and collider repeatedly.
@@ -185,7 +185,7 @@ assert!(!world.rapier().colliders.contains(child));
 Run `./scripts/check.ps1 -Filter query_bounds`.
 Expect compilation to fail because the new owner methods do not exist yet.
 
-- [ ] **Step 2: Add reusable mutation queues and the owner methods.**
+- [x] **Step 2: Add reusable mutation queues and the owner methods.**
 
 Store pending query work and since-step explicit mutations separately within `QueryBounds`.
 Use full handles, slot markers, and reused vectors. Upgrade an existing collider's geometry flag with logical OR.
@@ -200,7 +200,7 @@ Existing mesh and box helpers retain their current refresh calls.
 The current production scan continues to serve queries until Task 3 replaces it.
 A refresh clears pending query work but retains since-step mutation queues.
 
-- [ ] **Step 3: Migrate all callers and remove the old mutable methods in the same change.**
+- [x] **Step 3: Migrate all callers and remove the old mutable methods in the same change.**
 
 Use scoped edits for body and collider setters. Read needed values before entering an edit closure.
 Use optional edit methods where current code uses `get_mut` or an optional handle.
@@ -216,7 +216,7 @@ Run `rg -n 'rapier_mut|queries_mut' src tests`.
 Expect no matches and exit code 1. This is a structural check, not proof of complete tracking.
 Review every remaining `QueryPipelineMut` construction as a private controller operation or test fixture.
 
-- [ ] **Step 4: Verify and commit the complete caller migration.**
+- [x] **Step 4: Verify and commit the complete caller migration.**
 
 Run `./scripts/check.ps1 -Filter query_bounds` and `git diff --check`.
 Expect all library callers to compile, critical native tests to pass, and the WASM check to pass.
@@ -237,7 +237,7 @@ Stage only the migration files listed above. Commit as `Track physics edits thro
 - Add test-only `QueryBounds::last_work(&self) -> RefreshWork` and `queue_capacities(&self) -> Vec<usize>`.
 - Include every production queue and marker capacity in `retained_bytes()`.
 
-- [ ] **Step 1: Write the incremental-work and differential tests.**
+- [x] **Step 1: Write the incremental-work and differential tests.**
 
 Instrument the current scan with test-only work counters before changing its algorithm.
 Add `idle_refresh_and_sparse_edits_visit_only_queued_handles`.
@@ -281,13 +281,13 @@ Use a separate character collision fixture to call the character impulse adapter
 Assert changed body velocity, retained contact behavior, and post-step equality with the scan.
 Use primitive shapes and fixed values. Load no source export.
 
-- [ ] **Step 2: Run the tests before replacing the scan.**
+- [x] **Step 2: Run the tests before replacing the scan.**
 
 Run `./scripts/check.ps1 -Filter query_bounds`.
 Expect the new work-count assertions to fail against the current full scans.
 Differential correctness checks may already pass. Preserve that baseline rather than forcing unrelated failures.
 
-- [ ] **Step 3: Implement incremental query refresh and simulation coverage.**
+- [x] **Step 3: Implement incremental query refresh and simulation coverage.**
 
 Seed every initial collider once before the constructor's first refresh.
 Reuse existing insertion loops where possible. Any separate seed iteration runs only during construction.
@@ -312,7 +312,7 @@ Audit the pinned pipeline's position, enablement, and collider update paths agai
 Give any uncovered write a precise tracking path before proceeding.
 Do not add a periodic scan or weaken the differential assertions.
 
-- [ ] **Step 4: Verify and commit.**
+- [x] **Step 4: Verify and commit.**
 
 Run `./scripts/check.ps1 -Filter query_bounds` and `git diff --check`.
 Expect all differential cases and work-count assertions to pass.
@@ -326,7 +326,7 @@ Stage the four task files. Commit as `Refresh physics query bounds from tracked 
 **Interfaces:** Consume the tracked owner API, comparison fixture, `PhysicsWorld::rebase`, `capture_body_save`, and `WorldOrigin`.
 No new public runtime API is required.
 
-- [ ] **Step 1: Add source-independent mutation replay tests.**
+- [x] **Step 1: Add source-independent mutation replay tests.**
 
 Add `wheel_door_part_and_retirement_sequences_match_scan`.
 Replay the write order from `WheelAssemblies::place_part`, `MechanismState::sync`, and `PartAttachments` synchronization.
@@ -355,7 +355,7 @@ This checks body snapshot reconstruction and world ownership. It does not substi
 Use existing ignored source-dependent inventory and streaming checks only when their assets are available and execution is authorized.
 Report unavailable scenarios explicitly.
 
-- [ ] **Step 2: Run targeted verification.**
+- [x] **Step 2: Run targeted verification.**
 
 Run `./scripts/check.ps1 -Filter query_bounds` and `git diff --check`.
 Run `rg -n 'rapier_mut|queries_mut' src tests` and expect no matches.
@@ -363,7 +363,7 @@ Inspect all remaining direct writes inside the vehicle module against the tracki
 Do not run full checks, release builds, or browser acceptance in this plan's default execution.
 If another integration target changed during implementation, run its relevant native filter through `scripts/check.ps1 -Test`.
 
-- [ ] **Step 3: Record evidence and update item 10.**
+- [x] **Step 3: Record evidence and update item 10.**
 
 Record exact commands, pass counts, ignored cases, failures, and deferred checks in the performance note.
 Record retained-byte accounting and deterministic idle and sparse work counts.
@@ -372,7 +372,7 @@ Mark item 10 implemented only after the targeted checks pass.
 State that runtime behavior and frame-time improvement remain unverified without the required measurements.
 Keep the branch unmerged.
 
-- [ ] **Step 4: Review the diff and commit.**
+- [x] **Step 4: Review the diff and commit.**
 
 Run `git diff --check` and inspect the complete branch diff against the recorded base.
 Confirm that obsolete mutable APIs and production scan discovery are absent.

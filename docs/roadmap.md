@@ -141,8 +141,8 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 10. **Track physics query mutations.**
-    Status: Proposed. Difficulty: Hard. Estimate: 5–8 days. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
-    Effect: Replace repeated query-bound scans with complete mutation tracking.
+    Status: Implemented on `codex/physics-query-mutations`, unmerged. Native mutation checks and WASM compilation passed. Runtime acceptance and performance remain unverified. Owner: [vehicle query bounds](../src/vehicle/query_bounds.rs).
+    Effect: Replace repeated query-bound scans with complete mutation tracking. Evidence: [checks and limits](performance/2026-10-19-physics-query-mutations.md).
     Prompt:
     ```text
     Audit every collider write, including rapier_mut, position and shape changes, attachments, enabled state, add, remove, and generation. Track all query-bound mutations. Preserve physics notifications and any intervening refresh mechanism. Compare existing query results for wheels, doors, parts, contacts, and Save/Load.

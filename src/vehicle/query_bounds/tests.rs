@@ -870,3 +870,213 @@ fn private_controller_impulses_keep_post_step_queries_current() {
     );
     assert_matches_scan(&mut character_world, &mut character_scan, &[point]);
 }
+
+#[test]
+fn wheel_door_part_and_retirement_sequences_match_scan() {
+    let mut world = empty_world();
+    world.set_gravity(Vector::ZERO);
+    let (loose, part) = world.insert(
+        RigidBodyBuilder::dynamic().translation(-Vector::X * 8.0),
+        ColliderBuilder::cuboid(0.4, 0.25, 0.1),
+    );
+    let fixed = world.insert_body(RigidBodyBuilder::fixed().translation(Vector::X * 8.0));
+    let door = world
+        .insert_body(RigidBodyBuilder::kinematic_position_based().translation(Vector::X * 16.0));
+    let samples = [
+        -Vector::X * 12.0,
+        -Vector::X * 8.0,
+        Vector::X * 10.0,
+        Vector::X * 18.0,
+        Vector::X * 26.0,
+    ];
+    let mut scan = super::reference::ScanBounds::default();
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, -8.0, 0.0), Some(part));
+
+    // WheelAssemblies::place_part reparents before it edits local pose and collider state.
+    world.set_collider_parent(part, Some(fixed));
+    world.edit_collider(part, |collider| {
+        collider.set_position_wrt_parent(Pose::from_translation(Vector::X * 2.0));
+        crate::vehicle::set_collider_enabled(collider, true);
+        collider.set_density(0.0);
+        collider.user_data |= crate::vehicle::VEHICLE_COLLIDER_FLAG;
+    });
+    world.edit_body(loose, |body| body.set_enabled(false));
+    world.recompute_body_mass(fixed);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, -8.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 10.0, 0.0), Some(part));
+
+    let mut door_pose = Pose::from_parts(
+        Vector::X * 16.0,
+        Rotation::from_rotation_y(std::f32::consts::FRAC_PI_2),
+    );
+    // MechanismState::sync commits the pose before its next kinematic target.
+    world.try_edit_body(door, |body| {
+        body.set_position(door_pose, false);
+        body.set_next_kinematic_position(door_pose);
+    });
+    // PartAttachments synchronizes the parent before its body-local collider pose.
+    world.set_collider_parent(part, Some(door));
+    world.edit_collider(part, |collider| {
+        collider.set_position_wrt_parent(Pose::from_translation(Vector::Z * 2.0));
+        crate::vehicle::set_collider_enabled(collider, true);
+        collider.user_data &= !crate::vehicle::VEHICLE_COLLIDER_FLAG;
+    });
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 10.0, 0.0), None);
+    assert_eq!(ray_hit(&world, 18.0, 0.0), Some(part));
+
+    door_pose.translation = Vector::X * 24.0;
+    world.try_edit_body(door, |body| body.set_next_kinematic_position(door_pose));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 18.0, 0.0), Some(part));
+    world.step_physics();
+    assert_eq!(ray_hit(&world, 26.0, 0.0), Some(part));
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    for enabled in [false, true] {
+        world.edit_collider(part, |collider| {
+            crate::vehicle::set_collider_enabled(collider, enabled)
+        });
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        assert_eq!(ray_hit(&world, 26.0, 0.0), enabled.then_some(part));
+    }
+    world.edit_collider(part, |collider| collider.user_data ^= 1);
+    world.refresh_queries();
+    assert_eq!(
+        world.query_bounds.last_work(),
+        RefreshWork {
+            bodies: 0,
+            colliders: 1,
+            aabbs: 1,
+        }
+    );
+    assert_matches_scan(&mut world, &mut scan, &samples);
+
+    // Detachment restores the loose body before the part returns to that body.
+    world.edit_body(loose, |body| {
+        body.set_position(Pose::from_translation(-Vector::X * 12.0), true);
+        body.set_enabled(true);
+        body.set_linvel(Vector::ZERO, true);
+        body.set_angvel(Vector::ZERO, true);
+    });
+    world.set_collider_parent(part, Some(loose));
+    world.edit_collider(part, |collider| {
+        collider.set_position_wrt_parent(Pose::IDENTITY);
+        crate::vehicle::set_collider_enabled(collider, true);
+        collider.set_density(1.0);
+    });
+    world.recompute_body_mass(loose);
+    assert!(world.rapier().bodies[loose].mass() > 0.0);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert_eq!(ray_hit(&world, 26.0, 0.0), None);
+    assert_eq!(ray_hit(&world, -12.0, 0.0), Some(part));
+    world.remove_body(loose);
+    assert_eq!(world.query_bounds.pending_counts().2, 1);
+    assert_matches_scan(&mut world, &mut scan, &samples);
+    assert!(!world.rapier().colliders.contains(part));
+    assert_eq!(ray_hit(&world, -12.0, 0.0), None);
+    assert!(world.query_bounds.bvh.is_empty());
+}
+
+#[test]
+fn rebase_and_save_replacement_keep_query_state_local() {
+    use crate::save::{BodyIdentity, BodySnapshot, SourceKey};
+    use crate::vehicle::{VehiclePose, capture_body_save, to_rapier};
+    use crate::world::WorldOrigin;
+
+    for sleeping in [false, true] {
+        let mut world = empty_world();
+        world.set_gravity(Vector::ZERO);
+        let (body, collider) = world.insert(
+            RigidBodyBuilder::dynamic().translation(Vector::X * 12.0),
+            ColliderBuilder::ball(0.5),
+        );
+        let standalone =
+            world.insert_collider(ColliderBuilder::ball(0.5).translation(Vector::X * 20.0));
+        world.edit_body(body, |body| {
+            body.set_linvel(Vector::new(2.0, 0.0, 1.0), false);
+            body.set_angvel(Vector::Y * 0.25, false);
+            if sleeping {
+                body.sleep();
+            }
+        });
+        let mut scan = super::reference::ScanBounds::default();
+        let samples = [4.0, 12.0, 20.0].map(|x| Vector::X * x);
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        let mut origin = WorldOrigin::default();
+        world.rebase([8.0, 0.0, 0.0]);
+        origin.shift([8.0, 0.0, 0.0]);
+        assert_eq!(ray_hit(&world, 4.0, 0.0), Some(collider));
+        assert_eq!(ray_hit(&world, 12.0, 0.0), Some(standalone));
+        assert_eq!(ray_hit(&world, 20.0, 0.0), None);
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        let snapshot = capture_body_save(
+            &world.rapier().bodies[body],
+            BodyIdentity::Source {
+                source: SourceKey {
+                    file: "query-fixture".into(),
+                    path_id: "1".into(),
+                },
+            },
+            &origin,
+        );
+        assert_eq!(snapshot.pose.position, [12.0, 0.0, 0.0]);
+        assert_eq!(snapshot.sleeping, sleeping);
+        let bytes = serde_json::to_vec(&snapshot).unwrap();
+        let decoded: BodySnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, snapshot);
+        world.remove_body(body);
+        assert_eq!(world.query_bounds.pending_counts().2, 1);
+
+        let mut restored = empty_world();
+        assert_eq!(restored.query_bounds.pending_counts(), (0, 0, 0));
+        assert_eq!(restored.query_bounds.step_counts(), (0, 0));
+        assert!(restored.query_bounds.bvh.is_empty());
+        let (restored_body, restored_collider) =
+            restored.insert(RigidBodyBuilder::dynamic(), ColliderBuilder::ball(0.5));
+        // Fresh arenas can reuse complete handles from the world awaiting retirement.
+        assert_eq!(restored_body, body);
+        assert_eq!(restored_collider, collider);
+        restored.edit_body(restored_body, |body| {
+            body.set_position(
+                to_rapier(VehiclePose {
+                    position: origin.local(decoded.pose.position),
+                    rotation: decoded.pose.rotation,
+                }),
+                false,
+            );
+        });
+        restored.recompute_body_mass(restored_body);
+        // GarageRuntime::from_save restores velocity and sleep after pose and mass.
+        restored.edit_body(restored_body, |body| {
+            body.set_linvel(Vector::from_array(decoded.linear_velocity), false);
+            body.set_angvel(Vector::from_array(decoded.angular_velocity), false);
+            if decoded.sleeping {
+                body.sleep();
+            } else {
+                body.wake_up(true);
+            }
+        });
+        assert_eq!(world.query_bounds.pending_counts().2, 1);
+        assert_eq!(restored.query_bounds.pending_counts(), (1, 1, 0));
+        let mut restored_scan = super::reference::ScanBounds::default();
+        assert_matches_scan(&mut restored, &mut restored_scan, &samples);
+        assert_eq!(restored.rapier().bodies[restored_body].translation().x, 4.0);
+        assert_eq!(ray_hit(&world, 12.0, 0.0), Some(standalone));
+        assert_eq!(ray_hit(&restored, 4.0, 0.0), Some(restored_collider));
+        assert_eq!(ray_hit(&restored, 12.0, 0.0), None);
+        assert_eq!(
+            capture_body_save(
+                &restored.rapier().bodies[restored_body],
+                decoded.identity.clone(),
+                &origin,
+            ),
+            snapshot
+        );
+        assert_matches_scan(&mut world, &mut scan, &samples);
+        assert_matches_scan(&mut restored, &mut restored_scan, &samples);
+        assert_eq!(ray_hit(&world, 4.0, 0.0), None);
+        assert_eq!(ray_hit(&restored, 4.0, 0.0), Some(restored_collider));
+    }
+}
