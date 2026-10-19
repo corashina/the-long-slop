@@ -1,7 +1,7 @@
 # Startup alignment ownership
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
@@ -15,7 +15,7 @@ This refactor preserves the inspected behavior. It does not establish source par
 No source algorithm, gameplay, scope, or save schema change belongs to this work.
 
 The user approved the design in chat.
-This written specification requires user review before an implementation plan or code changes.
+The user approved this written specification. Implementation planning is authorized.
 
 ## Current behavior and evidence
 

@@ -1,7 +1,7 @@
 # Pipeline ownership
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
@@ -9,7 +9,7 @@ Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
 Give the existing `PipelineOwners` module one complete candidate pipeline lifecycle.
 Preserve current behavior and the complete Lada garage scope.
-The user approved the design in chat. Written approval is required before an implementation plan or product changes.
+The user approved this written specification. Implementation planning is authorized.
 The stated base is authoritative. Changes on `master` are outside this work.
 
 ## Current ownership

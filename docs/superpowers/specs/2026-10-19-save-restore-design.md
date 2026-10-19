@@ -1,7 +1,7 @@
 # Save restore finalization
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
@@ -16,7 +16,7 @@ It adds no retained state, frame allocation, or repeated setup during unchanged 
 This is a refactor of current behavior.
 The save schema, source identities, gameplay rules, and build `11140890` authority remain unchanged.
 Source parity and browser behavior remain unverified.
-Plans and product edits require the later review stage.
+The user approved this written specification. Implementation planning is authorized.
 
 ## Current evidence
 

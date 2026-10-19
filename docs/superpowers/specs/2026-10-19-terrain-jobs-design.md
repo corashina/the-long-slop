@@ -1,7 +1,7 @@
 # Terrain job ownership
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
@@ -11,7 +11,7 @@ Give terrain execution one owner for queued input, worker identity, cancellation
 Keep terrain selection and global resource policy in `WorldStream`.
 
 The user approved this design in chat.
-This written specification requires user review before implementation planning or product edits.
+The user approved this written specification. Implementation planning is authorized.
 
 ## Current behavior
 

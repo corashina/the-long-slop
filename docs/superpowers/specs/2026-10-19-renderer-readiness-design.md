@@ -1,7 +1,7 @@
 # Renderer readiness
 
 Date: 2026-10-19.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-19.
 Branch: `codex/codebase-architecture`.
 Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
@@ -9,7 +9,7 @@ Base: `97783a10444c9d5faef9d1c5a10b2ff21469d33c`.
 
 Give one renderer owner the current completion proof and its invalidation rules.
 App code retains content preparation, failure reporting, and gameplay start.
-The user approved the design in chat. Written approval is required before an implementation plan or product changes.
+The user approved this written specification. Implementation planning is authorized.
 The stated base is authoritative. Changes on `master` are outside this work.
 
 The scope remains one complete Lada garage experience.
