@@ -25,14 +25,14 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     stream.set_presentation_allocation(allocation).unwrap();
 
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
 
     allocation.pending -= 1;
     stream.set_presentation_allocation(allocation).unwrap();
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
     stream.set_presentation_allocation(allocation).unwrap();
 
@@ -44,7 +44,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
             break;
         }
     }
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_some());
     let bytes = stream.metrics().pending_bytes;
     stream.ready = None;
@@ -52,19 +52,28 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
 
     // A stale request cannot finish or publish its retained terrain work.
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     let bytes = stream.metrics().pending_bytes;
     stream.request.revision += 1;
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert!(stream.metrics().pending_bytes < bytes);
-    assert_eq!(
-        stream.terrain_worker.poll(|| true).unwrap(),
-        TerrainPoll::Idle
+    assert!(
+        stream
+            .terrain_execution
+            .advance(stream.request, || true)
+            .unwrap()
+            .is_none()
     );
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.as_ref().unwrap().id.is_some());
+    for _ in 0..1000 {
+        stream.prepare_terrain(|| true);
+        if stream.ready.is_some() {
+            break;
+        }
+    }
+    assert!(stream.ready.is_some());
 }
 
 #[test]

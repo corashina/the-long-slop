@@ -51,10 +51,7 @@ pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,
     TerrainRoadPoint, TerrainTile, biome, source_perlin,
 };
-pub use terrain::{
-    TerrainPoll, TerrainWorker, terrain_evaluator, terrain_output_bound, terrain_settings,
-    terrain_tile,
-};
+pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;
