@@ -1141,6 +1141,19 @@ pub struct SourceMaterial {
     pub extension: SourceExtension,
 }
 impl SourceMaterial {
+    pub(crate) fn shadow_batch_state(&self) -> super::shadow_batch::CasterBatchState {
+        let surface = &self.extension.surface;
+        super::shadow_batch::CasterBatchState {
+            standard: surface.state.standard && !surface.state.transparent && !surface.state.glass,
+            opaque: self.base.alpha_mode == AlphaMode::Opaque
+                && surface.state.z_write
+                && surface.state.z_test == 4
+                && surface.state.src == 1
+                && surface.state.dst == 0,
+            flags: surface.data.flags.x,
+            lod_fade: self.extension.lod_fade,
+        }
+    }
     pub(crate) fn caster_data(&self) -> SourceUniform {
         let mut data = self.extension.surface.data;
         if let Some(color) = &self.retained_color {

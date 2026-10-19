@@ -119,7 +119,9 @@ Effort estimates include developer work, builds, critical checks, and browser ve
    ```
 
 7. **Batch opaque shadows across surface materials.**
-   Status: Proposed. Difficulty: Hard. Estimate: 3–5 days. Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Status: Implemented on `codex/opaque-shadow-material-batching`. Not merged. Runtime performance remains unverified.
+   Owner: [shadow phase](../src/presentation/shadow_phase.rs).
+   Scope and checks: [opaque shadow batching](performance/2026-10-19-opaque-shadow-material-batching.md).
    Effect: Reduce draw splits by material identity for proven equivalent opaque casters.
    Prompt:
    ```text
