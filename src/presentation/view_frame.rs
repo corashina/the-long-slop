@@ -340,9 +340,7 @@ pub(crate) fn snapshot(
                 scene.probe_position[clock.probe_index].to_array(),
             ))
         };
-        let mut snapshot = camera_snapshot(
-            extent, view, near, far, fov, mask, distance,
-        );
+        let mut snapshot = camera_snapshot(extent, view, near, far, fov, mask, distance);
         if index < PROBE_START {
             snapshot.extent = UVec2::from_array(scale.extent(extent.to_array()));
         }

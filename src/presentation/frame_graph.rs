@@ -877,7 +877,10 @@ fn finish_surface(
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
         native_extent: frame.views[source.index].unwrap().native_extent.to_array(),
-        projection: frame.views[source.index].unwrap().raster_projection.to_cols_array(),
+        projection: frame.views[source.index]
+            .unwrap()
+            .raster_projection
+            .to_cols_array(),
     };
     if source.index >= 3 {
         let Some(probes) = probe.as_mut() else { return };

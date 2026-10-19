@@ -2171,7 +2171,9 @@ impl WorldStream {
         })
     }
     fn prepare_terrain(&mut self) {
-        if self.terrain_work.is_none() && self.available_external_jobs() == 0 {
+        if self.terrain_work.is_none()
+            && (self.available_external_jobs() == 0 || !self.can_request_independent(1))
+        {
             return;
         }
         if self.terrain_work.is_none() {

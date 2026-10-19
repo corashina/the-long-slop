@@ -11,6 +11,45 @@ fn reference() -> ReferenceManifest {
 
 #[test]
 #[ignore = "requires the installed source export"]
+fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
+    let reference = reference();
+    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    stream.initial_generation_ready = true;
+    stream.terrain_ready[0] = true;
+    stream.wanted_tiles.push(SurfaceKey {
+        layer: WorldLayer::Terrain,
+        unit: [0, 0],
+    });
+    let mut allocation = stream.presentation_allocation();
+    allocation.pending = MAX_PENDING;
+    stream.set_presentation_allocation(allocation).unwrap();
+
+    stream.prepare_terrain();
+    assert!(stream.terrain_work.is_none());
+    assert!(stream.ready.is_none());
+    assert_eq!(stream.metrics().pending_work, MAX_PENDING);
+
+    allocation.pending -= 1;
+    stream.set_presentation_allocation(allocation).unwrap();
+    stream.prepare_terrain();
+    assert!(stream.terrain_work.is_some());
+    assert_eq!(stream.metrics().pending_work, MAX_PENDING);
+    stream.set_presentation_allocation(allocation).unwrap();
+
+    for _ in 0..1000 {
+        stream.prepare_terrain();
+        assert!(stream.failure.is_none(), "{:?}", stream.failure);
+        assert_eq!(stream.metrics().pending_work, MAX_PENDING);
+        if stream.ready.is_some() {
+            break;
+        }
+    }
+    assert!(stream.terrain_work.is_none());
+    assert!(stream.ready.is_some());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
 fn structure_refresh_accumulates_both_foci_and_forced_refreshes() {
     let reference = reference();
     let mut run = GarageRuntime::new(&reference).unwrap();

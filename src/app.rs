@@ -361,7 +361,16 @@ fn check_ready(
 ) {
     let (lighting, source_lighting, fixed, status) = lighting;
     let (
-        plates, particles, submissions, view_clock, epoch, graph, activation, cameras, windows, scale,
+        plates,
+        particles,
+        submissions,
+        view_clock,
+        epoch,
+        graph,
+        activation,
+        cameras,
+        windows,
+        scale,
     ) = plates;
     graph.content_checked(None);
     let shared_status = status.0.lock().unwrap();

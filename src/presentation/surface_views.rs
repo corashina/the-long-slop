@@ -161,7 +161,9 @@ pub fn prepare_views(
             RenderingState::Failed("Source surface view extents disagree".into());
         return;
     }
-    let Some(snapshot) = frame.views[1] else { return };
+    let Some(snapshot) = frame.views[1] else {
+        return;
+    };
     let native = snapshot.native_extent;
     let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
         *status.0.lock().unwrap() =
@@ -169,13 +171,17 @@ pub fn prepare_views(
         return;
     };
     let needs_targets = existing.as_ref().is_none_or(|value| {
-        value.targets.stack.width != main.x || value.targets.stack.height != main.y
+        value.targets.stack.width != main.x
+            || value.targets.stack.height != main.y
             || value.targets.views[0].atlas_size != atlas
     });
     if needs_targets {
         if let Some(existing) = existing.as_mut() {
             // Window resize does not invalidate the fixed-resolution published probe.
-            match existing.targets.resize_stack(&device, main.x, main.y, atlas) {
+            match existing
+                .targets
+                .resize_stack(&device, main.x, main.y, atlas)
+            {
                 Ok(()) => {}
                 Err(error) => {
                     *status.0.lock().unwrap() = RenderingState::Failed(error);
