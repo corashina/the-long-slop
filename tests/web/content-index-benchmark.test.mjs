@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {contentIndexSampleFailures} from '../../scripts/measure-content-index.mjs';
+import {registerHooks} from 'node:module';
+import {contentIndexSampleFailures,assertCpuProfileMode,measureContentIndex} from '../../scripts/measure-content-index.mjs';
+import {createCpuProfile} from '../../web/cpu-profile.js';
 import {createContentIndexBenchmarkServer} from '../../scripts/serve-content-index-benchmark.mjs';
 import {summarizeWorkerComparison,attachBrowserTrace} from '../../scripts/summarize-streaming-profile.mjs';
 
@@ -52,7 +54,7 @@ test('driving permits pending work and requires seated movement',()=>{
 });
 
 test('startup and save-load receipts require their own scenario evidence',()=>{
- const startup={...sample(),scenario:'startup-cold',cacheState:'cold',startupTrace:{completed:true,inputReady:true,failure:null}};
+ const startup={...sample(),scenario:'startup-cold',cacheState:'cold',profileCpu:false,startupTrace:{completed:true,inputReady:true,failure:null,hiddenDuringStartup:false,unfocusedDuringStartup:false,profileCpu:false}};
  startup.stateBefore.started=false;startup.stateAfter.started=false;
  assert.deepEqual(contentIndexSampleFailures(startup),[]);
  assert.ok(contentIndexSampleFailures({...startup,cacheState:'warm'}).includes('startup-cache-state-mismatch'));
@@ -60,6 +62,42 @@ test('startup and save-load receipts require their own scenario evidence',()=>{
  const save={...sample(),scenario:'save-load',pausedFrames:2,saveOperations:[{kind:'Capture'},{kind:'Prepare'},{kind:'Commit'}]};
  assert.deepEqual(contentIndexSampleFailures(save),[]);
  assert.ok(contentIndexSampleFailures({...save,saveOperations:[]}).includes('save-load-not-observed'));
+});
+
+test('uninstrumented sampling rejects active startup CPU, Rust, terrain, and render instrumentation',()=>{
+ const profile=createCpuProfile(()=>10,1000);profile.enable(true);
+ const inactive={browserEnabled:false,rustEnabled:false,streamingEnabled:false,terrain:{jobActive:false,handshakeActive:false},startupRenderTraceActive:false};
+ assert.throws(()=>assertCpuProfileMode(false,false,{...inactive,browserEnabled:profile.enabled}),/profiling is active/);
+ profile.enable(false);
+ assert.doesNotThrow(()=>assertCpuProfileMode(false,false,{...inactive,browserEnabled:profile.enabled}));
+ for(const active of [{rustEnabled:true},{streamingEnabled:true},{terrain:{jobActive:true,handshakeActive:false}},{terrain:{jobActive:false,handshakeActive:true}},{startupRenderTraceActive:true}])assert.throws(()=>assertCpuProfileMode(false,false,{...inactive,...active}),/profiling is active/);
+ assert.doesNotThrow(()=>assertCpuProfileMode(false,true,{...inactive,streamingEnabled:true}));
+});
+
+test('the real sampler rejects a false-profile request before measuring or writing a receipt',async t=>{
+ const previous={window:globalThis.window,document:globalThis.document,fetch:globalThis.fetch,fixture:globalThis.cpuReceiptFixture};
+ t.after(()=>{globalThis.window=previous.window;globalThis.document=previous.document;globalThis.fetch=previous.fetch;globalThis.cpuReceiptFixture=previous.fixture;});
+ const wasm='data:text/javascript,'+encodeURIComponent('export const cpu_profile_audit=()=>JSON.stringify({enabled:globalThis.cpuReceiptFixture.rustEnabled}); export const streaming_profile_audit=()=>JSON.stringify({enabled:globalThis.cpuReceiptFixture.streamingEnabled});');
+ const hooks=registerHooks({resolve(specifier,context,next){return specifier==='/pkg/my_summer_slop.js'?{url:wasm,shortCircuit:true}:next(specifier,context);}});t.after(()=>hooks.deregister());
+ const profile=createCpuProfile(()=>10,1000);profile.enable(true);
+ let measurements=0,writes=0;
+ globalThis.cpuReceiptFixture={rustEnabled:true,streamingEnabled:true};
+ globalThis.window={gameCpuInstrumentationState:()=>({browserEnabled:profile.enabled,terrain:{jobActive:false,handshakeActive:false},startupRenderTraceActive:false}),gamePerformanceFrame(){},measureWorld(){measurements++;throw Error('unexpected measurement');}};
+ globalThis.document={querySelector:()=>({getContext:()=>({})})};
+ globalThis.fetch=async path=>{if(path!=='/__benchmark-config')writes++;return {ok:true,json:async()=>({})};};
+ await assert.rejects(measureContentIndex({profileCpu:false}),/profiling is active/);
+ profile.enable(false);globalThis.cpuReceiptFixture.streamingEnabled=false;
+ await assert.rejects(measureContentIndex({profileCpu:false}),/profiling is active/);
+ assert.equal(measurements,0);assert.equal(writes,0);
+});
+
+test('startup validity uses stored startup visibility and focus after the page becomes visible and focused',()=>{
+ const startup={...sample(),scenario:'startup-warm',cacheState:'warm',profileCpu:false,startupTrace:{completed:true,inputReady:true,failure:null,hiddenDuringStartup:false,unfocusedDuringStartup:false,profileCpu:false}};
+ assert.deepEqual(contentIndexSampleFailures(startup),[]);
+ for(const [key,failure] of [['hiddenDuringStartup','startup-hidden-tab'],['unfocusedDuringStartup','startup-unfocused-tab']])assert.ok(contentIndexSampleFailures({...startup,startupTrace:{...startup.startupTrace,[key]:true}}).includes(failure));
+ assert.ok(contentIndexSampleFailures({...startup,startupTrace:{...startup.startupTrace,profileCpu:true}}).includes('startup-instrumentation-mismatch'));
+ const missing={...startup,startupTrace:{completed:true,inputReady:true,failure:null}};
+ assert.ok(contentIndexSampleFailures(missing).includes('startup-environment-missing'));
 });
 
 test('server selects frozen inputs, confines paths, and preserves separate receipts',async t=>{

@@ -58,3 +58,14 @@ test('disabled terrain profiling reads no clock and enabled jobs use a validated
  const records=profile.snapshot().workers;assert.equal(records[0].phase,'initialization');
  const record=records[1];assert.ok(record.returnDeliveryMs>=0);assert.ok(record.submitDeliveryMs>=0);assert.equal(record.inputBytes,2);assert.equal(record.outputBytes,100);assert.equal(record.discarded,true);
 });
+
+test('terrain profiling stays active until an already profiled worker job and handshake finish',()=>{
+ const worker=fakeWorker();let disabled=false,calls=0;
+ const now=()=>{if(disabled)throw Error('disabled main clock');return ++calls;};
+ const profile=createCpuProfile(now,1000);profile.enable(true);
+ const terrain=createTerrain(worker,profile,now),id=terrain.submit(new Uint8Array(2));
+ profile.enable(false);disabled=true;
+ assert.deepEqual(terrain.profileState(),{jobActive:true,handshakeActive:true});
+ worker.reply({cpuHandshake:{}});assert.deepEqual(terrain.profileState(),{jobActive:true,handshakeActive:false});
+ worker.reply(result(id));assert.deepEqual(terrain.profileState(),{jobActive:false,handshakeActive:false});
+});

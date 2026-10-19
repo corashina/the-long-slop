@@ -2,7 +2,7 @@
 import {workerClockHandshake,workerDeliveryInterval,workerInputDeliveryInterval} from './cpu-profile.js';
 export function createTerrain(worker,profile,now=()=>performance.now()){
  let next=0,job=null,result=null,error=null;
- let clock=null,handshakePending=false,record=null;
+ let clock=null,handshakePending=false,profiledJob=false,record=null;
  const profileHandshake=()=>{if(!profile?.enabled||handshakePending)return;const sent=now();worker.postMessage({cpuHandshake:{windowOrigin:profile.timeOrigin,windowSent:sent}});handshakePending=true;};
  worker.addEventListener('message',({data})=>{
   if(data.cpuHandshake){
@@ -10,6 +10,7 @@ export function createTerrain(worker,profile,now=()=>performance.now()){
    handshakePending=false;return;
   }
   if(data.id!==job)return;
+  profiledJob=false;
   if(!profile?.enabled)record=null;
   if(record){const received=now();record.resultReceived=received;record.worker=data.cpuProfile??null;
    if(data.cpuProfile){record.outputBytes=data.cpuProfile.outputBytes;record.peakOutstandingTransferBytes=record.inputBytes+record.outputBytes;record.returnDeliveryMs=clock?workerDeliveryInterval(clock,{workerSent:data.cpuProfile.resultPostStart,windowReceived:received}):null;record.submitDeliveryMs=clock?workerInputDeliveryInterval(clock,{windowSent:record.messageSubmitStart,workerReceived:data.cpuProfile.workerReceived}):null;record.clockHandshake=clock;}
@@ -18,11 +19,12 @@ export function createTerrain(worker,profile,now=()=>performance.now()){
   job=null;
   if(data.error!==undefined)error=data.error;else result=data;
  });
- worker.addEventListener('error',event=>{error=event.message||'The terrain worker stopped.';if(profile?.enabled&&record){record.error=error;profile.worker(record);}record=null;});
+ worker.addEventListener('error',event=>{error=event.message||'The terrain worker stopped.';if(profile?.enabled&&record){record.error=error;profile.worker(record);}record=null;profiledJob=false;handshakePending=false;});
  const ready=()=>{if(!result)throw Error('The terrain worker has no result.');return result;};
  profileHandshake();
  return {
   profileHandshake,
+  profileState:()=>({jobActive:profiledJob,handshakeActive:handshakePending}),
   // The input is a view of WASM memory, so copy it before transfer.
   submit(input){
    if(job!==null||result)throw Error('The terrain worker is busy.');
@@ -31,6 +33,7 @@ export function createTerrain(worker,profile,now=()=>performance.now()){
     if(!clock)profileHandshake();
     record={kind:'terrain',id:job,inputBytes:input.byteLength,mainCopyStart:now()};
    }else record=null;
+   profiledJob=record!==null;
    const copy=input.slice();
    if(record){record.mainInputCopyMs=now()-record.mainCopyStart;record.messageSubmitStart=now();}
    worker.postMessage(record?{id:job,input:copy,profileCpu:true}:{id:job,input:copy},[copy.buffer]);

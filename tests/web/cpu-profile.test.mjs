@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createCpuProfile,workerClockHandshake,workerDeliveryInterval} from '../../web/cpu-profile.js';
+import {createStartupTrace} from '../../web/startup-trace.js';
 
 test('disabled_profile_has_no_clock_reads',()=>{
  let calls=0,throwClock=false;
@@ -45,4 +46,13 @@ test('stage_statistics_and_session_clear_keep_their_measurement_boundaries',()=>
  p.input(2,clock,true);p.consume(2,2);p.submitFrame(1);
  // The old token already submitted before event 2 was consumed.
  assert.equal(p.snapshot().inputs[1].token,null);p.submitFrame(2);assert.equal(p.snapshot().inputs[1].token,2);
+});
+
+test('startup_environment_remains_frozen_after_focus_and_visibility_recover',()=>{
+ let clock=0;const trace=createStartupTrace(()=>clock,{hidden:false,focused:true,profileCpu:true});
+ trace.environment(true,true);trace.environment(false,false);trace.environment(false,true);
+ clock=50;trace.finish({inputReady:true});trace.environment(false,true);
+ const snapshot=trace.snapshot();assert.equal(snapshot.hiddenDuringStartup,true);assert.equal(snapshot.unfocusedDuringStartup,true);assert.equal(snapshot.profileCpu,true);
+ const initial=createStartupTrace(()=>clock,{hidden:true,focused:false});initial.environment(false,true);initial.finish({inputReady:true});
+ assert.equal(initial.snapshot().hiddenDuringStartup,true);assert.equal(initial.snapshot().unfocusedDuringStartup,true);
 });

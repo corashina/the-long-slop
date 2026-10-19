@@ -1,13 +1,17 @@
 /** Run in DevTools after starting and focusing the game. Hooks restore after each sample. */
 export function contentIndexSampleFailures(sample) {
  const failures=[];
- if(sample.hiddenDuringSample)failures.push('hidden-tab');
- if(sample.unfocusedDuringSample)failures.push('unfocused-tab');
  if(sample.scenario.startsWith('startup-')){
+  if(typeof sample.startupTrace?.hiddenDuringStartup!=='boolean'||typeof sample.startupTrace?.unfocusedDuringStartup!=='boolean')failures.push('startup-environment-missing');
+  if(sample.startupTrace?.hiddenDuringStartup)failures.push('startup-hidden-tab');
+  if(sample.startupTrace?.unfocusedDuringStartup)failures.push('startup-unfocused-tab');
+  if(sample.startupTrace?.profileCpu!==sample.profileCpu)failures.push('startup-instrumentation-mismatch');
   if(!sample.startupTrace?.completed||!sample.startupTrace?.inputReady||sample.startupTrace?.failure)failures.push('startup-not-complete');
   if(sample.cacheState!==(sample.scenario==='startup-cold'?'cold':'warm'))failures.push('startup-cache-state-mismatch');
   return failures;
  }
+ if(sample.hiddenDuringSample)failures.push('hidden-tab');
+ if(sample.unfocusedDuringSample)failures.push('unfocused-tab');
  if(sample.auditBefore.state!=='Ready'||sample.auditAfter.state!=='Ready')failures.push('renderer-not-ready');
  if(sample.frames<2||sample.submissionDelta!==sample.frames)failures.push('submitted-frame-mismatch');
  if(!sample.stateBefore.started||!sample.stateAfter.started||sample.notStartedFrames)failures.push('game-not-started');
@@ -17,6 +21,11 @@ export function contentIndexSampleFailures(sample) {
  if(sample.scenario==='driving'&&(!sample.stateBefore.seated||!sample.stateAfter.seated||sample.unseatedFrames||!(sample.travelDeltaM>0)))failures.push('driving-not-observed');
  if(sample.scenario==='save-load'&&(!sample.saveOperations?.some(row=>row.kind==='Capture'&&!row.error)||!sample.saveOperations?.some(row=>row.kind==='Prepare'&&!row.error)||!sample.saveOperations?.some(row=>row.kind==='Commit'&&!row.error)))failures.push('save-load-not-observed');
  return failures;
+}
+
+export function assertCpuProfileMode(profileCpu,profileStreaming,state){
+ if(profileCpu)return;
+ if(state.browserEnabled||state.rustEnabled||state.startupRenderTraceActive||state.terrain.jobActive||state.terrain.handshakeActive||state.streamingEnabled&&!profileStreaming)throw Error('CPU or streaming profiling is active; stop it before this sample');
 }
 
 export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,profileCpu=false,label='sample',scenario='garage',cacheState='unknown',route='unspecified',seed=null,browserTrace=null,traceRecording=false}={}) {
@@ -38,6 +47,9 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  if(!gl||typeof window.gamePerformanceFrame!=='function'||typeof window.measureWorld!=='function')throw Error('The game is unavailable');
  const {source_render_audit,streaming_profile,streaming_profile_audit,cpu_profile_audit}=await import('/pkg/my_summer_slop.js');
  const startupScenario=scenario.startsWith('startup-');
+ if(!window.gameCpuInstrumentationState||!cpu_profile_audit||!streaming_profile_audit)throw Error('Instrumentation state is unavailable');
+ const assertActiveMode=()=>assertCpuProfileMode(profileCpu,profileStreaming,{...window.gameCpuInstrumentationState(),rustEnabled:JSON.parse(cpu_profile_audit()).enabled,streamingEnabled:JSON.parse(streaming_profile_audit()).enabled});
+ assertActiveMode();
  if(profileCpu&&(!window.gameCpuProfile||!cpu_profile_audit))throw Error('CPU profiler is unavailable');
  if(startupScenario&&profileCpu&&!window.gameCpuProfileSnapshot?.().enabled)throw Error('Reload with ?profileCpu=1 before startup profiling');
  if(profileStreaming&&(!streaming_profile||!streaming_profile_audit))throw Error('Streaming profiler is unavailable');
@@ -95,6 +107,7 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   window.removeEventListener('blur',blurred);
  }
  const auditAfter=JSON.parse(source_render_audit()),stateAfter=snapshot();
+ assertActiveMode();
  const after=await window.measureWorld();
  intervals.sort((a,b)=>a-b);
  const percentile=p=>intervals.length?intervals[Math.ceil(intervals.length*p)-1]:null;

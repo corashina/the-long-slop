@@ -11,10 +11,17 @@ import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
 const startupCpuProfile=new URL(location.href).searchParams.get('profileCpu')==='1';
+const startup=createStartupTrace(()=>performance.now(),{hidden:document.hidden,focused:document.hasFocus(),profileCpu:startupCpuProfile});
+const startupVisibilityChanged=()=>startup.environment(document.hidden,document.hasFocus());
+const startupBlurred=()=>startup.environment(document.hidden,false);
+document.addEventListener('visibilitychange',startupVisibilityChanged);
+window.addEventListener('blur',startupBlurred);
+function stopStartupEnvironment(){startupVisibilityChanged();document.removeEventListener('visibilitychange',startupVisibilityChanged);window.removeEventListener('blur',startupBlurred);}
 cpuProfile.enable(startupCpuProfile);
 let rustCpuProfile,profileStep=0,startupRenderTrace=startupCpuProfile?observeRenderMainThread():null;
 window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled)terrainClient.profileHandshake();};
 window.gameCpuProfileSnapshot=()=>cpuProfile.snapshot();
+window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,terrain:terrainClient.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
 window.gameCpuStartupRenderTrace=()=>{const trace=startupRenderTrace?.stop()??null;startupRenderTrace=null;return trace;};
 window.gameCpuInputConsumed=()=>input?.consume(++profileStep);
 window.gameCpuClearInput=()=>cpuProfile.clearInput();
@@ -39,7 +46,6 @@ window.sourceInputMetadataBytes=worldInputMetadataBytes;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
 const loading=createLoading();
 performance.setResourceTimingBufferSize?.(16000);
-const startup=createStartupTrace(()=>performance.now());
 let startupFailureDetails=null,startupDone=false,startupReady=false;
 function fetched(record){
  const entry=performance.getEntriesByName?.(new URL(record.path,location.href).href)?.at(-1);
@@ -126,8 +132,8 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
-function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));startup.finish({inputReady:true});startupDone=true;}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.finish({inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
 window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();startupReady=true;finishStartup();};
