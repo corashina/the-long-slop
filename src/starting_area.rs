@@ -1213,6 +1213,12 @@ impl GarageRuntime {
             }
             let index = audio.vehicle_index;
             let output = self.vehicles[index].engine_output;
+            let engine_active = self
+                .area
+                .items
+                .get(reference.vehicles[index].engine.item)
+                .and_then(|item| item.body)
+                .is_some_and(|body| self.physics.body_active(body));
             let active = self.physics.body_active(self.physics.chassis_handle(index));
             let car_controls = self.area.player.seat_vehicle() == Some(index)
                 && (self.area.player.driving() || self.area.player.driving2());
@@ -1220,16 +1226,11 @@ impl GarageRuntime {
                 crate::audio::VehicleAudioInput {
                     rpm: output.rpm,
                     ignition: active && self.vehicles[index].ignition.ignition,
-                    running: active && output.running,
-                    starter: active && output.starter,
+                    running: engine_active && output.running,
+                    starter: engine_active && output.starter,
                     horn: active && car_controls && input.held & keys::HORN != 0,
                     ambient_temperature: self.lighting.cycle.output().ambient_temperature,
                     electronics_output: audio.reference.radio.electronics_output,
-                    engine_present: active
-                        && self
-                            .area
-                            .items
-                            .mounted(reference.vehicles[index].engine.item),
                 },
                 FIXED_DT,
                 audio.game_seconds,
@@ -1590,6 +1591,9 @@ impl GarageRuntime {
     }
 
     fn clear_driving_input(&mut self) {
+        if let Some(audio) = &mut self.audio {
+            audio.starter_enabled = false;
+        }
         self.driving_input.clear();
         for vehicle in &mut self.vehicles {
             vehicle.ignition.clear_input();

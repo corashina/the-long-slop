@@ -1333,11 +1333,6 @@ fn publish_audio(
     audio.survival_events.clear();
     for emitter in &audio.reference.emitters {
         let alive = audio.owner_alive(emitter.id)
-            && (emitter.id != audio.reference.engine.emitter
-                || runtime
-                    .area
-                    .items
-                    .mounted(reference.0.vehicles[audio.vehicle_index].engine.item))
             && emitter.item.is_none_or(|id| {
                 runtime
                     .area
