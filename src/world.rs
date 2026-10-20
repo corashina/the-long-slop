@@ -26,9 +26,10 @@ pub use placement::{
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;
+pub mod road_worker;
 pub use road::{
     ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadBlock, RoadCheckpoint, RoadCurve,
-    RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState, deform_road,
+    RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState,
 };
 mod instances;
 pub use instances::{StructureInstance, StructureRecipe};

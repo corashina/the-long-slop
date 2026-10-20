@@ -3,7 +3,6 @@ use super::{
     AbsolutePose, Placement, PlacementIndex, RoadIndex, RoadSegment, RoadSequence, StartupTerrain,
     TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob, TerrainPoll, TerrainRoadPoint,
     TerrainTile, TerrainWorker, WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface,
-    deform_road,
 };
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
@@ -163,6 +162,7 @@ pub struct WorldStream {
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
+    road_prototypes: [Option<road_mesh::RoadPrototype>; 3],
     placements: PlacementIndex,
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
@@ -698,6 +698,7 @@ impl WorldStream {
             recovery: None,
             recovery_search: None,
             roads,
+            road_prototypes: [const { None }; 3],
             placements: PlacementIndex::new(world, seed),
             props: super::prop_layers::PropLayers::new(world, seed)?,
             contents,
@@ -1046,12 +1047,28 @@ impl WorldStream {
         if self.admissions.contains_key(&source) {
             return Ok(());
         }
+        let road_index = self
+            .reference
+            .road
+            .prototypes
+            .iter()
+            .position(|id| id == &source);
+        let road_input = road_index
+            .filter(|&index| self.road_prototypes[index].is_none())
+            .map(|_| {
+                self.reference
+                    .prototypes
+                    .iter()
+                    .find(|p| p.source == source)
+                    .expect("validated road prototype")
+            });
+        let road_bytes = road_input.map_or(0, super::road::road_prototype_bytes);
         let current = self.metrics();
         let owner_bytes =
             super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity();
         if current
             .prototype_cpu_bytes
-            .checked_add(cpu.saturating_add(owner_bytes))
+            .checked_add(cpu.saturating_add(owner_bytes).saturating_add(road_bytes))
             .is_none_or(|v| v > PROTOTYPE_CPU)
             || current
                 .prototype_gpu_bytes
@@ -1062,6 +1079,10 @@ impl WorldStream {
                 "Source prototype budget {}:{}",
                 source.file, source.path_id
             )));
+        }
+        if let Some(prototype) = road_input {
+            self.road_prototypes[road_index.unwrap()] =
+                Some(super::road::road_prototype(prototype));
         }
         self.admissions.insert(
             source,
@@ -1145,6 +1166,15 @@ impl WorldStream {
             }
         }
         self.admissions.remove(source);
+        if let Some(index) = self
+            .reference
+            .road
+            .prototypes
+            .iter()
+            .position(|id| id == source)
+        {
+            self.road_prototypes[index] = None;
+        }
         self.recipes.remove(source);
         Ok(())
     }
@@ -2208,7 +2238,7 @@ impl WorldStream {
                     .map(|n| n.source.file.capacity())
                     .sum::<usize>();
             let bytes = (self.selected_roads.capacity() + 1) * std::mem::size_of::<SelectedRoad>()
-                + prototype.nodes.len() * std::mem::size_of::<super::road::RoadFrame>()
+                + prototype.nodes.len() * std::mem::size_of::<road_mesh::RoadFrame>()
                 + 2 * (std::mem::size_of::<super::WorldLight>() + light_heap)
                 + (self.wanted_structures.capacity() + 1) * std::mem::size_of::<Placement>()
                 + 2 * light_heap;
@@ -2297,8 +2327,26 @@ impl WorldStream {
         if !self.can_request_independent(1) || !self.admit_generation(pending_bytes) {
             return;
         }
-        let mut surface = WorldSurface::default();
-        deform_road(&self.reference, &segment, &mut surface);
+        let prototype = self.road_prototypes[segment.biome as usize]
+            .as_ref()
+            .expect("admitted road prototype");
+        let mesh = road_mesh::deform(
+            prototype,
+            &road_mesh::RoadPose {
+                origin: segment.position(),
+                rotations: segment.source_rotations,
+            },
+        );
+        let surface = WorldSurface {
+            origin: mesh.origin,
+            vertices: mesh.vertices,
+            normals: mesh.normals,
+            tangents: mesh.tangents,
+            uv: mesh.uv,
+            triangles: mesh.triangles,
+            submeshes: mesh.submeshes,
+            colors: Vec::new(),
+        };
         self.next_geometry += 1;
         self.ready = Some(PreparedSurface {
             pending_bytes,
@@ -4090,6 +4138,12 @@ impl WorldStream {
                     .recipes
                     .keys()
                     .map(|id| id.file.capacity())
+                    .sum::<usize>()
+                + self
+                    .road_prototypes
+                    .iter()
+                    .flatten()
+                    .map(road_mesh::RoadPrototype::retained_bytes)
                     .sum::<usize>()
                 + self.road_light.retained_bytes()
                 + self.contents.rules.retained_bytes()
