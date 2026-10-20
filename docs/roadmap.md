@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-19. Approved scope: one complete garage repair and driving experience.
+Updated: 2026-10-20. Approved scope: one complete garage repair and driving experience.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
@@ -51,7 +51,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
 | G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Partial | Verify pickup, drop, throw, rotation, distance, recenter, and pushing. Complete source action priority and resolve control conflicts. |
 | G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Partial | Complete explicit equip and release, source Tab behavior, slot selection, swapping, and ownership rules. |
-| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, crouching, and seat transitions. Add source lean, zoom, and full low-posture behavior. |
+| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Verify | Verify walking, running, jumping, continuous posture, lean, zoom, seat transitions, recovery, and saved posture through normal input. |
 | G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs) | Hard | Verify | Verify doors, hood, trunk, switches, seats, lights, horn, built-in radio, and gauges through normal input. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
 | G12 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | Hard | Verify | Drive out, turn, brake, park, and return. Verify nearby collision, ground seams, re-entry, and loose-object stability. |
@@ -65,6 +65,19 @@ Three targeted native tests passed. They cover 20 general parts and both plates 
 Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicate attachment, and source-fixed seats.
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
+
+G09 implementation, 2026-10-20: the isolated `codex/g09-player-movement` branch implements the approved source contract.
+Ctrl and wheel control continuous posture. Ten ordered sensors limit rising. Collision includes the source foot sphere.
+Q hold provides independent look on foot and positional lean in seats. Q tap toggles standing positional lean.
+Z or Y zooms. Empty-hand RMB also zooms. World and sky views share effective FOV. Probe faces retain 90 degrees.
+Seat entry follows source usable identity. Tab retains carried-object priority. Exit checks angle and placement before transfer.
+Recovery preserves posture. Save schema 7 stores posture and rejects schema 6. Load clears temporary lean and zoom.
+One resolved view supplies separate source head and camera poses to gameplay, rendering, and prepared load state.
+The final native player checks passed 21 tests. Existing checks passed 4 projection, 5 source, and 14 input and menu tests.
+The source audit found no scoped code gap. Final installed checks await a verified branch export.
+Normal-input garage, driving, carry, seats, recovery, and save/load acceptance remain open. G09 is Verify for code coverage.
+Full checks, release builds, and browser acceptance were not run. The branch remains unmerged.
+See the [G09 specification](superpowers/specs/2026-10-20-g09-player-movement-design.md) for the approved source contract.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
