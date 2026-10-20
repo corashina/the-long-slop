@@ -142,10 +142,6 @@ def prepare_package(manifest, output):
     from .lighting import export_manifest_texture_batches
     export_manifest_texture_batches(manifest, output)
     manifest['file_catalog'] = build_file_catalog(manifest, output)
-    shaders = Path(__file__).resolve().parents[2] / 'web/assets/shaders'
-    shutil.copytree(shaders, output / 'shaders', dirs_exist_ok=True)
-    manifest['file_catalog']['files'].extend(file_receipt(path, f'shaders/{path.relative_to(shaders).as_posix()}')
-        for path in sorted(shaders.rglob('*')) if path.is_file())
     manifest['content_base'] = f"assets/runtime/{package_id(manifest)}/"
 
 

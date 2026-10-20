@@ -61,6 +61,10 @@ impl AssetReader for SourceAssetReader {
         let path = path
             .to_str()
             .ok_or_else(|| invalid("Invalid source path".into()))?;
+        // Build shaders never come from the exported package.
+        if let Some(source) = crate::reference::fixed_reservation::shader_source(path) {
+            return Ok(VecReader::new(source.as_bytes().to_vec()));
+        }
         let receipt = self
             .catalog
             .file(path)
