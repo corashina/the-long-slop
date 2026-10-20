@@ -37,8 +37,8 @@ window.gameStartupStage=(stage,started)=>{if(started)startup.begin(stage);else s
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
-let wasmMemory,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
-const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength);
+let wasmMemory,renderAudit,rendererName,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
+const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength,()=>renderAudit&&{name:rendererName,audit:JSON.parse(renderAudit())});
 window.gamePerformanceFrame=(physicsMs,worldMs)=>performancePanel.frame(performance.now(),physicsMs,worldMs);
 window.gamePerformanceCounters=performancePanel.counters;
 const measurementWaiters=[];
@@ -123,6 +123,7 @@ async function load(){
  startup.begin('graphics');
  // ?renderer=webgpu selects the WebGPU build. WebGL2 stays the default until WebGPU acceptance.
  const webgpu=new URLSearchParams(location.search).get('renderer')==='webgpu',name=webgpu?'my_summer_slop_webgpu':'my_summer_slop';
+ rendererName=webgpu?'WebGPU':'WebGL2';
  if(webgpu){
   if(!await navigator.gpu?.requestAdapter())throw Error('This browser cannot use WebGPU.');
  }else{
@@ -142,8 +143,8 @@ async function load(){
  const bytes=new Uint8Array(await response.arrayBuffer());
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
- const [{default:init,run,manifest_shell,source_render_failure},module]=await code;
- const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;
+ const [{default:init,run,manifest_shell,source_render_failure,source_render_audit},module]=await code;
+ const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;renderAudit=source_render_audit;
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);

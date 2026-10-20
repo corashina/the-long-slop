@@ -559,7 +559,7 @@ pub(crate) fn graph_ready(
         && loading.is_ready()
         && surface.ready(&cache, &owners)
         && caster.ready(&cache, &owners)
-        && collector.is_some_and(|c| c.prepared_frame == frame.frame && c.ready(&cache))
+        && collector.is_some_and(|c| c.prepared_frame == frame.frame)
         && !status.failure().is_some()
 }
 pub fn collector_encoded(

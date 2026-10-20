@@ -60,6 +60,7 @@ impl SceneLighting {
         clip_from_world: Mat4,
         near: f32,
         far: f32,
+        sun_shadow: super::shadow_collector::SunShadowUniform,
     ) -> LightingUniform {
         LightingUniform {
             ambient_sh: self.ambient_sh,
@@ -74,6 +75,7 @@ impl SceneLighting {
             source_time: self.source_time,
             clip_from_world,
             near_far: Vec4::new(near, far, 0., 0.),
+            sun_shadow,
         }
     }
 }

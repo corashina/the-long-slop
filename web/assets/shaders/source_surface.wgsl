@@ -108,7 +108,6 @@ fn fragment(
 #endif
     @location(9) @interpolate(flat) source_renderer: vec2<f32>,
     @location(10) source_fog: f32,
-    @location(11) source_screen: vec4<f32>,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
 #endif
@@ -206,7 +205,7 @@ fn fragment(
 #ifdef SOURCE_LAMPS
     let view_depth = -(mesh_view_bindings::view.view_from_world * in.world_position).z;
     let receive_shadows = (u32(source_renderer.y) & 2u) != 0u;
-    let sun_attenuation = direct_attenuation(in.world_position.xyz,source_screen.xy/source_screen.w,view_depth,receive_shadows);
+    let sun_attenuation = direct_attenuation(in.world_position.xyz,view_depth,receive_shadows);
     var direct = source_brdf(diffuse,specular,smoothness,pbr.N,pbr.V,lighting.direction_to_sun.xyz)*lighting.sun_radiance.xyz*sun_attenuation;
     let world_dx = dpdx(in.world_position);
     let world_dy = dpdy(in.world_position);
