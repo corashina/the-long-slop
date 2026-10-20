@@ -3289,7 +3289,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             .area
             .interaction
             .equipment
-            .release(&mut reset.area.items, &mut reset.physics),
+            .detach(&mut reset.area.items, &mut reset.physics),
         Some(reset_held)
     );
     reset.area.sync_inventory();

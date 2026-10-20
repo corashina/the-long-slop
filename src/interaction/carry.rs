@@ -211,7 +211,7 @@ impl CarryState {
             })
             .transpose()
     }
-    pub(super) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
+    pub(crate) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
         self.rules.get(&id)
     }
     pub fn held(&self) -> Option<ItemId> {
@@ -252,6 +252,42 @@ impl CarryState {
         self.throwing = false;
         self.throw_charge = 0.0;
         Some(held.item)
+    }
+    pub fn can_receive_equipment(
+        &self,
+        id: ItemId,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.held.is_none()
+            && item.location == ItemLocation::Equipped
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && self.allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && self
+                .rules
+                .get(&id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && body.body_type() == rapier3d::prelude::RigidBodyType::KinematicPositionBased
+            && body.is_enabled()
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+            && player
+                .view_pose(physics)
+                .position
+                .iter()
+                .all(|value| value.is_finite())
     }
     pub fn can_acquire(
         &self,

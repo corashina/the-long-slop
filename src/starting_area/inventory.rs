@@ -1,11 +1,80 @@
 use super::*;
 use crate::{
-    interaction::items::ItemLocation,
+    interaction::{equipment::EquipmentPlacement, items::ItemLocation},
     inventory::{InventoryCommand, InventoryContext},
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 
 impl StartingArea {
+    pub fn equip_carried(&mut self, physics: &mut PhysicsWorld) -> Result<bool, ReferenceError> {
+        let Some(id) = self.interaction.held() else {
+            return Ok(false);
+        };
+        let Some(item) = self.items.get(id) else {
+            return Ok(false);
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return Ok(false);
+        };
+        if self.interaction.equipment.item().is_some()
+            || item.location != ItemLocation::Held
+            || item.removed
+            || item.pending_attachment
+            || item.inactive_pose.is_some()
+            || !body.is_enabled()
+            || !body.is_dynamic()
+            || self.interaction.carry.body() != item.body
+            || !self
+                .interaction
+                .pickup_rule(id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            || !self.interaction.carry.allows_pickup(
+                id,
+                self.player.seat().is_some(),
+                self.items.mounted(id),
+            )
+            || !physics.body_active(item.body.unwrap())
+            || physics.vehicle_of(item.body.unwrap()).is_some()
+        {
+            return Ok(false);
+        }
+        self.interaction.carry.drop(&mut self.items, physics);
+        self.interaction.equipment.equip(
+            id,
+            EquipmentPlacement::Animated,
+            &mut self.items,
+            physics,
+        );
+        physics.refresh_queries();
+        Ok(true)
+    }
+    pub fn release_equipped(&mut self, physics: &mut PhysicsWorld) -> Result<bool, ReferenceError> {
+        let Some(id) = self.interaction.equipment.item() else {
+            return Ok(false);
+        };
+        if !self
+            .interaction
+            .carry
+            .can_receive_equipment(id, &self.player, &self.items, physics)
+        {
+            return Ok(false);
+        }
+        self.interaction.equipment.detach(&mut self.items, physics);
+        self.interaction
+            .pickup_item(
+                id,
+                self.player.view_pose(physics).position,
+                &self.player,
+                &mut self.items,
+                physics,
+            )
+            .expect("validated equipment receipt");
+        physics.refresh_queries();
+        Ok(true)
+    }
     pub fn sync_inventory(&mut self) {
         for slot in &mut self.inventory.slots {
             if slot.is_some_and(|id| {
@@ -93,16 +162,33 @@ impl StartingArea {
                     .interaction
                     .pickup_rule(id)
                     .is_some_and(|p| p.can_inventory)
-                || !(body.is_dynamic() || item.location == ItemLocation::Equipped)
+                || item.pending_attachment
+                || !physics.body_active(item.body.unwrap())
+                || physics.vehicle_of(item.body.unwrap()).is_some()
+                || !self.interaction.carry.allows_pickup(
+                    id,
+                    self.player.seat().is_some(),
+                    self.items.mounted(id),
+                )
                 || item.inactive_pose.is_some()
             {
                 return Ok(false);
             }
             if Some(id) == outgoing {
-                if !(held == Some(id) || equipped == Some(id)) {
+                let carried = held == Some(id)
+                    && item.location == ItemLocation::Held
+                    && self.interaction.carry.body() == item.body
+                    && body.is_dynamic();
+                let equipped = equipped == Some(id)
+                    && item.location == ItemLocation::Equipped
+                    && body.body_type() == rapier3d::prelude::RigidBodyType::KinematicPositionBased;
+                if !body.is_enabled() || !(carried || equipped) {
                     return Ok(false);
                 }
-            } else if item.location != ItemLocation::Stored(index as u8) {
+            } else if item.location != ItemLocation::Stored(index as u8)
+                || !body.is_dynamic()
+                || body.is_enabled()
+            {
                 return Ok(false);
             }
         }
@@ -131,7 +217,7 @@ impl StartingArea {
                 self.interaction.carry.drop(&mut self.items, physics);
             }
             if self.interaction.equipment.item() == Some(id) {
-                self.interaction.equipment.release(&mut self.items, physics);
+                self.interaction.equipment.detach(&mut self.items, physics);
             }
             let item = self.items.get_mut(id).unwrap();
             item.location = ItemLocation::Stored(selected as u8);
@@ -158,9 +244,12 @@ impl StartingArea {
             physics.edit_body(body, |body| body.set_enabled(true));
             self.items.get_mut(id).unwrap().location = ItemLocation::World;
             if to_hand {
-                self.interaction
-                    .equipment
-                    .retrieve(id, &mut self.items, physics);
+                self.interaction.equipment.equip(
+                    id,
+                    EquipmentPlacement::Immediate,
+                    &mut self.items,
+                    physics,
+                );
             } else {
                 let rule = self.interaction.pickup_rule(id).unwrap();
                 let view = to_rapier(self.player.view_pose(physics));
@@ -214,7 +303,7 @@ impl StartingArea {
             self.interaction.equipment.sync(
                 &self.pose,
                 &self.items,
-                self.interaction.pickup_rule(id).unwrap(),
+                self.interaction.carry.rule(id).unwrap(),
                 physics,
             );
         }
