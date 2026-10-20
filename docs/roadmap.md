@@ -44,15 +44,8 @@ Verify = code exists; only acceptance remains. Partial = known behavior gaps. Mi
 
 | ID | Task and starting code | Difficulty | Status | Remaining work |
 | --- | --- | --- | --- | --- |
-| G01 | Reliable session start. [Session](../src/app/save.rs), [menu](../web/menu.js) | Hard | Verify | Accept New game, mouse capture, pause, Continue, restart, and cold Load in a browser with working mouse capture. |
-| G02 | Remove and install Lada parts. [Parts](../src/interaction/parts.rs), [verification](g02-parts.md) | Hard | Verify | Accept part removal and installation through normal input in a browser. |
-| G04 | Fill and drain fluids. [Fluids](../src/fluids.rs), [evidence](superpowers/reports/2026-10-20-g04-fluids.md) | Hard | Verify | Accept aiming, visible flow, audio, and browser reload. Run the two ignored reference-loading runtime cases. |
-| G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs), [specification](superpowers/specs/2026-10-20-g05-engine-design.md) | Hard | Verify | Accept input capture, dashboard, engine audio, and driving in a browser. |
-| G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
-| G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Verify | Accept pickup, drop, throw, rotation, push, and reset through normal input in a browser. |
-| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [verification](g08-inventory.md) | Hard | Verify | Accept equip, release, Tab, slot selection, swapping, and saved ownership in a browser. |
-| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Fix Rapier slope normals over flat floors near 2000 units. Accept movement, posture, seats, and schema 9 save/load in a browser. |
-| G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [verification](g10-controls.md) | Hard | Verify | Accept the twelve normal-input scenarios. Verify gauge readability and audible output. |
+| G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Complete spray refraction and soft-particle depth fading. |
+| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Fix Rapier slope normals over flat floors near 2000 units. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
 | G12 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | Hard | Verify | Drive out, turn, brake, park, and return. Verify nearby collision, ground seams, re-entry, and loose-object stability. |
 | G13 | Preserve garage progress. [Save](../src/save/schema.rs), [restore](../src/starting_area/save.rs) | Hard | Partial | Save radio controls. Preserve all garage and car state through save, browser reload, load, and continued driving. |
