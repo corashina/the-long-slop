@@ -3,9 +3,9 @@ pub mod carry;
 pub mod cleaning;
 pub mod consumption;
 pub mod equipment;
+pub(crate) mod equipment_input;
 pub mod feedback;
 pub mod fluid_contact;
-mod hand_controls;
 mod input;
 pub use input::InteractionOutcome;
 pub mod items;
@@ -162,7 +162,6 @@ pub struct InteractionState {
     cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
     seat_action_latched: bool,
     cancelled_input: u32,
-    hand_controls: hand_controls::HandControls,
     usable_light_controls: HashSet<LightControlId>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
@@ -184,6 +183,7 @@ pub struct InteractionState {
     seats: Vec<SeatState>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
+    pub(crate) equipment_input: equipment_input::EquipmentInput,
     push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
@@ -499,7 +499,6 @@ impl InteractionState {
             cabin_doors,
             seat_action_latched: false,
             cancelled_input: 0,
-            hand_controls: hand_controls::HandControls::new(reference.inventory.equip_hold_seconds),
             next_generated_light: reference
                 .lighting
                 .controllers
@@ -557,6 +556,9 @@ impl InteractionState {
             seats,
             carry: carry::CarryState::new(reference)?,
             equipment: equipment::EquipmentState::new(reference),
+            equipment_input: equipment_input::EquipmentInput::new(
+                reference.inventory.equip_hold_seconds,
+            ),
             push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
@@ -627,11 +629,51 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    pub(crate) fn can_equip_carried(
+        &self,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(id) = self.held() else {
+            return false;
+        };
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.equipment.item().is_none()
+            && item.location == ItemLocation::Held
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && body.is_enabled()
+            && body.is_dynamic()
+            && self.carry.body() == item.body
+            && self
+                .pickup_rule(id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && self
+                .carry
+                .allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+    }
+    pub fn owned_light_control(&self, item: ItemId) -> Option<LightControlId> {
+        (self.equipment.item() == Some(item) || self.held() == Some(item))
+            .then(|| self.held_controls.get(&item).copied())
+            .flatten()
+    }
     pub fn held_light_control(&self) -> Option<LightControlId> {
         self.equipment
             .item()
-            .or(self.held())
-            .and_then(|item| self.held_controls.get(&item).copied())
+            .and_then(|item| self.owned_light_control(item))
+            .or_else(|| self.held().and_then(|item| self.owned_light_control(item)))
     }
     pub fn pickup_stored_item(
         &mut self,
@@ -655,7 +697,6 @@ impl InteractionState {
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.storage.unlock(item, items, physics)?;
         self.carry.pickup(item, point, player, items, physics)?;
-        self.hand_controls.owner_changed();
         Ok(item)
     }
     pub fn allocate_generated_light(&mut self) -> Result<LightControlId, ReferenceError> {
@@ -1132,6 +1173,7 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.equipment_input.cancel_input();
         self.cancelled_input = keys::GRAB
             | keys::RECENTER
             | keys::TRANSLATE
@@ -1143,7 +1185,6 @@ impl InteractionState {
         self.fill_opening = None;
         self.f_gesture_consumed = false;
         self.carry.cancel_input();
-        self.hand_controls.cancel();
         self.push.cancel_input();
         self.latched_mechanism = None;
         self.use_consumed = false;
@@ -1159,7 +1200,6 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
         let item = self.carry.drop(items, physics)?;
-        self.hand_controls.owner_changed();
         self.cleaning.reset_contact();
         self.storage.mark_dropped(item);
         Some(item)
@@ -1173,7 +1213,6 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.carry.pickup(item, point, player, items, physics)?;
-        self.hand_controls.owner_changed();
         Ok(())
     }
 
@@ -1213,8 +1252,10 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> InteractionOutcome {
         self.finish_cancelled_input(player, physics);
-        input = self.filter_cancelled_input(input);
-        if self.cleaning.reserves_lmb(self.held()) {
+        if self
+            .cleaning
+            .reserves_lmb(self.equipment.item(), self.held())
+        {
             input.held &= !keys::PRIMARY;
             input.pressed &= !keys::PRIMARY;
             input.released &= !keys::PRIMARY;
@@ -1233,7 +1274,6 @@ impl InteractionState {
         self.mechanisms.begin_audio_step();
         let mut cap_sounds = [None; 2];
         self.pending_drink_contacts.clear();
-        let recenter = self.step_hand_controls(input, player, items, physics, dt);
         let acquisition_release = self.carry.acquisition_held();
         let reach = self.reach;
         let valid = |target: AimTarget| {
@@ -1254,16 +1294,10 @@ impl InteractionState {
         self.carry.release_acquisition(input);
         let grab_input = resolved.grab_input;
         let use_input = resolved.use_input;
-        let held_switch_pressed =
-            use_input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
-        let light_action = if held_switch_pressed {
-            self.held_light_control()
-        } else {
-            availability.light_control.filter(|_| {
-                use_input.pressed & keys::USE != 0
-                    || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
-            })
-        };
+        let light_action = availability.light_control.filter(|_| {
+            use_input.pressed & keys::USE != 0
+                || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+        });
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
@@ -1321,7 +1355,6 @@ impl InteractionState {
                 match slot {
                     SlotTarget::Wheel(slot) => {
                         self.carry.cancel_input();
-                        self.hand_controls.cancel();
                         action = Some(InteractionAction::Wheel(WheelAction::Install {
                             item: held,
                             target: slot,
@@ -1329,7 +1362,6 @@ impl InteractionState {
                     }
                     SlotTarget::Tire(rim) => {
                         self.carry.cancel_input();
-                        self.hand_controls.cancel();
                         action = Some(InteractionAction::Wheel(WheelAction::Join {
                             rim,
                             tire: held,
@@ -1420,9 +1452,7 @@ impl InteractionState {
                     items.mark_dirty(target.item);
                 }
                 if use_input.pressed & keys::USE != 0
-                    || (!held_switch_pressed
-                        && use_input.pressed & keys::PRIMARY != 0
-                        && availability.lmb_use)
+                    || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
                 {
                     for opening in &mut self.openings {
                         if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -1486,8 +1516,7 @@ impl InteractionState {
                 }
                 if self.mechanisms.contains(target.item)
                     && (use_input.pressed & keys::USE != 0
-                        || (!held_switch_pressed
-                            && use_input.pressed & keys::PRIMARY != 0
+                        || (use_input.pressed & keys::PRIMARY != 0
                             && self.mechanisms.primary_switch(target.item)
                             && availability.lmb_use)
                         || use_input.held & keys::USE != 0
@@ -1579,7 +1608,7 @@ impl InteractionState {
                 }
             }
         }
-        if self.carry.step(carry_input, recenter, player, physics, dt)
+        if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
         {
             self.complete_carry_release(&mut action, InteractionAction::Drop(item));
@@ -1588,8 +1617,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         let mut filled_destination = None;
-        if !held_switch_pressed
-            && input.held & keys::PRIMARY != 0
+        if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target
@@ -1807,7 +1835,6 @@ impl InteractionState {
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.attachments.remove(item, items, physics)?;
         self.carry.pickup(item, point, player, items, physics)?;
-        self.hand_controls.owner_changed();
         self.parts.sync(items, physics)?;
         Ok(())
     }
@@ -1861,3 +1888,6 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
         ((value - start) / (end - start)).clamp(0.0, 1.0)
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod garage_handling;

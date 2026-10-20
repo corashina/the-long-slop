@@ -71,6 +71,7 @@ impl RestoreFinalizer<'_> {
         self.wheels
             .refresh_conditions(&self.area.conditions, &self.area.items);
         self.wheels.sync(&mut self.area.items, self.physics)?;
+        self.area.sync_equipment(reference, self.physics);
         self.area.items.sync_poses(self.physics);
         self.area.commit_poses(self.physics, true);
         recompute_dynamic_mass(self.physics);

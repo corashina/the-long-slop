@@ -1,5 +1,5 @@
 //! Source build 11140890 action order and input ownership.
-use my_summer_slop::{
+use crate::{
     interaction::{
         AimTarget, InteractionAction, InteractionBlock, InteractionOutcome, ResolvedAim,
         feedback::ActionMask,
@@ -20,7 +20,50 @@ fn source_scene() -> (ReferenceManifest, GarageRuntime) {
     let run = GarageRuntime::new(&reference).unwrap();
     (reference, run)
 }
+fn source_reference() -> ReferenceManifest {
+    ReferenceManifest::from_runtime_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap()
+}
+fn handling_frame(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    input: FrameInput,
+    dt: f32,
+) -> FrameInput {
+    crate::world::stream::tests::prepare_ready(run, reference);
+    run.sync_world_activity(reference).unwrap();
+    run.started = true;
+    assert!(run.world_supported());
+    let view = run.area.player.view_pose(&run.physics);
+    let frame = run.advance_inventory_frame(reference, input, dt, view);
+    assert!(!frame.actions_blocked);
+    frame.fixed_input
+}
 fn step_input(run: &mut GarageRuntime, input: FrameInput, aim: ResolvedAim) -> InteractionOutcome {
+    let input = if (input.held | input.pressed | input.released) & keys::RECENTER != 0 {
+        let reference = source_reference();
+        run.aim = aim;
+        handling_frame(run, &reference, input, FIXED_DT)
+    } else {
+        let input = run.area.interaction.filter_cancelled_input(input);
+        let available = run.area.interaction.available_actions(
+            &aim,
+            &run.area.player,
+            &run.area.items,
+            &run.physics,
+            run.survival.output(),
+        );
+        run.area.interaction.route_frame_input(input, &available)
+    };
+    step_fixed_input(run, input, aim)
+}
+fn step_fixed_input(
+    run: &mut GarageRuntime,
+    input: FrameInput,
+    aim: ResolvedAim,
+) -> InteractionOutcome {
     run.area.interaction.step(
         input,
         aim,
@@ -290,19 +333,19 @@ fn action_priority_and_input_ownership() {
         blocked,
     );
     assert_eq!(outcome.action, Some(InteractionAction::Drop(loose)));
-    // Reset must suppress held controls and their later releases until neutral.
+    // Reset suppresses stale held input and release. A fresh pressed edge is separate.
     run.area.interaction.cancel_input();
-    let held = keys::GRAB | keys::RECENTER | keys::TRANSLATE | keys::ROTATE;
+    let held =
+        keys::GRAB | keys::RECENTER | keys::TRANSLATE | keys::ROTATE | keys::USE | keys::PRIMARY;
     let outcome = step_input(
         &mut run,
         FrameInput {
             held,
-            pressed: held,
             mouse: [1., 2.],
             wheel: 1.,
             ..Default::default()
         },
-        aim,
+        both,
     );
     assert!(outcome.action.is_none());
     assert!(run.area.interaction.held().is_none());
@@ -325,14 +368,13 @@ fn action_priority_and_input_ownership() {
     );
     assert_eq!(outcome.action, Some(InteractionAction::Pickup(loose)));
     step_input(&mut run, FrameInput::default(), ResolvedAim::default());
-    let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
+    let ids = crate::save::IdentityMap::new(&reference).unwrap();
     let before = run.area.interaction.capture_carry_save(&ids).unwrap();
     run.area.interaction.cancel_input();
     let outcome = step_input(
         &mut run,
         FrameInput {
             held,
-            pressed: held,
             mouse: [1., 2.],
             wheel: 1.,
             ..Default::default()
@@ -362,7 +404,6 @@ fn action_priority_and_input_ownership() {
             &mut run,
             FrameInput {
                 held: modifier,
-                pressed: modifier,
                 mouse: [1., 2.],
                 wheel: 0.02,
                 ..Default::default()
@@ -521,10 +562,7 @@ fn action_priority_and_input_ownership() {
     assert_eq!(before.rotation, after.rotation);
 }
 
-fn place_for_carry(
-    run: &mut GarageRuntime,
-    item: my_summer_slop::reference::ItemId,
-) -> ResolvedAim {
+fn place_for_carry(run: &mut GarageRuntime, item: crate::reference::ItemId) -> ResolvedAim {
     let view = run.area.player.view_pose(&run.physics);
     let state = run.area.items.get(item).unwrap();
     let body = state.body.unwrap();
@@ -551,7 +589,7 @@ fn place_for_carry(
     }
 }
 #[track_caller]
-fn acquire(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
+fn acquire(run: &mut GarageRuntime, item: crate::reference::ItemId) {
     let aim = place_for_carry(run, item);
     let out = step_input(
         run,
@@ -582,7 +620,7 @@ fn acquire(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
 }
 fn anchor_handle(
     run: &GarageRuntime,
-    item: my_summer_slop::reference::ItemId,
+    item: crate::reference::ItemId,
 ) -> rapier3d::prelude::RigidBodyHandle {
     let body = run.area.items.get(item).unwrap().body.unwrap();
     run.physics
@@ -605,7 +643,7 @@ fn near_rotation(actual: Rotation, expected: Rotation) {
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn carry_release_and_pose_follow_source() {
-    use my_summer_slop::interaction::items::ItemLocation;
+    use crate::interaction::items::ItemLocation;
     let (reference, mut run) = source_scene();
     // Keep collision-free release assertions separate from the collision case below.
     run.area.player.rebase([0., -50., 0.]);
@@ -794,7 +832,7 @@ fn carry_release_and_pose_follow_source() {
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn carry_pose_uses_source_frames_and_gestures() {
-    use my_summer_slop::{reference::ItemId, save::IdentityMap};
+    use crate::{reference::ItemId, save::IdentityMap};
     let (reference, mut run) = source_scene();
     run.area.player.rebase([0., -50., 0.]);
     let ids = IdentityMap::new(&reference).unwrap();
@@ -1072,15 +1110,16 @@ fn carry_release_shares_tuning_input() {
     assert_eq!(run.area.interaction.held(), None);
     assert_ne!(run.area.interaction.opening_valve(opening.id), valve_before);
     assert!(
-        matches!(run.area.interaction.pop_sound(), Some(my_summer_slop::interaction::InteractionSound::Cap { id, tune: Some(_), .. }) if id == opening.id)
+        matches!(run.area.interaction.pop_sound(), Some(crate::interaction::InteractionSound::Cap { id, tune: Some(_), .. }) if id == opening.id)
     );
 }
 
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn carry_release_preserves_held_switch() {
-    use my_summer_slop::{interaction::InteractionSound, save::IdentityMap};
+    use crate::{interaction::InteractionSound, save::IdentityMap};
     let (reference, mut run) = source_scene();
+    handling_frame(&mut run, &reference, FrameInput::default(), FIXED_DT);
     run.area.player.rebase([0., -50., 0.]);
     let item = reference
         .flashlights
@@ -1147,21 +1186,19 @@ fn carry_release_preserves_held_switch() {
                 ResolvedAim::default(),
             );
         }
-        let out = step_input(
+        let input = handling_frame(
             &mut run,
+            &reference,
             FrameInput {
                 pressed: keys::PRIMARY,
                 released: if forced { 0 } else { keys::GRAB },
                 ..Default::default()
             },
-            ResolvedAim::default(),
+            FIXED_DT,
         );
+        let out = step_fixed_input(&mut run, input, ResolvedAim::default());
+        assert_eq!(out.action, Some(InteractionAction::Drop(item)));
         assert_eq!(run.area.interaction.held(), None);
-        assert_eq!(out.action, Some(InteractionAction::LightControl(control)));
-        // Execute the external owner from GarageRuntime's action match.
-        if let Some(InteractionAction::LightControl(control)) = out.action {
-            run.lighting.use_control(&reference.lighting, control);
-        }
         let after = run
             .lighting
             .capture_save(&reference.lighting, &ids)
@@ -1173,7 +1210,7 @@ fn carry_release_preserves_held_switch() {
             .on;
         assert_ne!(before, after);
         assert!(
-            matches!(run.area.interaction.pop_sound(), Some(InteractionSound::Action(InteractionAction::Drop(dropped))) if dropped == item)
+            matches!(run.area.interaction.pop_sound(), Some(InteractionSound::Action(InteractionAction::LightControl(used))) if used == control)
         );
         assert!(run.area.interaction.pop_sound().is_none());
     }
@@ -1182,7 +1219,7 @@ fn carry_release_preserves_held_switch() {
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn carry_mass_save_and_assembly_lifecycle() {
-    use my_summer_slop::{
+    use crate::{
         interaction::items::ItemLocation,
         reference::ItemKind,
         save::{CameraSave, SourceHash, SourceStamp},
@@ -1510,7 +1547,7 @@ fn carry_mass_save_and_assembly_lifecycle() {
             .count(),
         1
     );
-    let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
+    let ids = crate::save::IdentityMap::new(&reference).unwrap();
     assert_eq!(
         saved.player.carry,
         restored.area.interaction.capture_carry_save(&ids).unwrap()
@@ -1523,7 +1560,7 @@ fn carry_mass_save_and_assembly_lifecycle() {
         .unwrap()
         .pose;
     let after = *restored.physics.rapier().bodies[restored_body].position()
-        * my_summer_slop::vehicle::to_rapier(restored.area.items.get(oil).unwrap().local_pose);
+        * crate::vehicle::to_rapier(restored.area.items.get(oil).unwrap().local_pose);
     let absolute = restored
         .stream
         .origin
@@ -1585,7 +1622,7 @@ fn carry_mass_save_and_assembly_lifecycle() {
     }
 }
 
-fn drain_tank(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId, amount: f32) {
+fn drain_tank(run: &mut GarageRuntime, item: crate::reference::ItemId, amount: f32) {
     let fluid = run
         .area
         .items
@@ -1722,16 +1759,19 @@ fn carry_body_follows_solver_pose_and_collision() {
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn tab_recenter_has_one_owner() {
-    use my_summer_slop::{interaction::items::ItemLocation, reference::ItemId, save::IdentityMap};
+    use crate::{interaction::items::ItemLocation, reference::ItemId, save::IdentityMap};
 
     fn frame(
+        reference: &ReferenceManifest,
         run: &mut GarageRuntime,
         held: u32,
         pressed: u32,
         released: u32,
         dt: f32,
     ) -> InteractionOutcome {
-        let out = run.area.interaction.step(
+        let input = handling_frame(
+            run,
+            reference,
             FrameInput {
                 held,
                 pressed,
@@ -1739,6 +1779,10 @@ fn tab_recenter_has_one_owner() {
                 mouse: [0.2, 0.1],
                 ..Default::default()
             },
+            dt,
+        );
+        let out = run.area.interaction.step(
+            input,
             ResolvedAim::default(),
             &mut run.area.player,
             &mut run.area.items,
@@ -1758,7 +1802,7 @@ fn tab_recenter_has_one_owner() {
             .unwrap()
             .offset
     }
-    fn light(run: &mut GarageRuntime, id: ItemId) {
+    fn pickup(run: &mut GarageRuntime, id: ItemId) {
         if run.area.interaction.storage.stored(id) {
             let point = run.area.items.get(id).unwrap().pose.position;
             run.area
@@ -1771,35 +1815,53 @@ fn tab_recenter_has_one_owner() {
                     &mut run.physics,
                 )
                 .unwrap();
-            step_input(run, FrameInput::default(), ResolvedAim::default());
-        } else {
-            place_for_carry(run, id);
-            let point = run.area.items.get(id).unwrap().pose.position;
             run.area
                 .interaction
-                .pickup_item(
-                    id,
-                    point,
-                    &run.area.player,
-                    &mut run.area.items,
-                    &mut run.physics,
-                )
-                .unwrap();
+                .drop_held(&mut run.area.items, &mut run.physics);
         }
+        place_for_carry(run, id);
+        let point = run.area.items.get(id).unwrap().pose.position;
+        run.area
+            .interaction
+            .pickup_item(
+                id,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        let item = run.area.items.get(id).unwrap();
+        assert!(run.physics.rapier().bodies[item.body.unwrap()].is_enabled());
+        let rule = run.area.interaction.pickup_rule(id).unwrap();
+        assert!(rule.can_hold_right_hand && rule.can_inventory);
         run.area.sync_inventory();
     }
-    fn equip(run: &mut GarageRuntime, id: ItemId) {
-        light(run, id);
-        frame(run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-        frame(run, 0, 0, keys::RECENTER, 0.125);
+    fn equip(reference: &ReferenceManifest, run: &mut GarageRuntime, id: ItemId) {
+        handling_frame(run, reference, FrameInput::default(), FIXED_DT);
+        pickup(run, id);
+        frame(reference, run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+        frame(reference, run, 0, 0, keys::RECENTER, 0.125);
         assert_eq!(run.area.interaction.equipment.item(), Some(id));
         assert_eq!(run.area.interaction.held(), None);
     }
 
     let (reference, mut run) = source_scene();
+    handling_frame(&mut run, &reference, FrameInput::default(), FIXED_DT);
     assert_eq!(reference.inventory.equip_hold_seconds, 0.25);
     let ids = IdentityMap::new(&reference).unwrap();
-    let lamp = ItemId(127);
+    let lamp = ItemId(126);
+    let other = ItemId(132);
+    assert!(
+        reference
+            .flashlights
+            .instances
+            .iter()
+            .any(|f| f.item == lamp && f.startup_active)
+    );
+    let spray = reference.items.iter().find(|i| i.id == other).unwrap();
+    assert_eq!(spray.source.file, "level1");
+    assert_eq!(spray.source.path_id, 30986);
     let oil = ItemId(120);
     assert_eq!(
         run.area
@@ -1817,18 +1879,25 @@ fn tab_recenter_has_one_owner() {
             .recenter_distance,
         0.
     );
-    light(&mut run, lamp);
+    pickup(&mut run, lamp);
     let body = run.area.items.get(lamp).unwrap().body.unwrap();
     let authored = run.physics.authored_body_mass(body);
     let slots_before = run.area.inventory.slots;
     let before = offset(&run, &ids);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
     assert_eq!(
         offset(&run, &ids),
         before,
         "short Tab must not recenter on press"
     );
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.equipment.item(), Some(lamp));
     assert_eq!(run.area.interaction.held(), None);
     assert_eq!(
@@ -1848,6 +1917,7 @@ fn tab_recenter_has_one_owner() {
     );
     // Tab-down releases equipment, but its release cannot equip it again.
     let outcome = frame(
+        &reference,
         &mut run,
         keys::RECENTER | keys::ROTATE,
         keys::RECENTER,
@@ -1862,22 +1932,36 @@ fn tab_recenter_has_one_owner() {
     assert_eq!(run.area.interaction.held(), Some(lamp));
     near_mass(run.physics.rapier().bodies[body].mass(), 1.);
     assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 0.);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.held(), Some(lamp));
     assert_eq!(run.area.inventory.slots, slots_before);
 
     // Both comparisons are strict at the source threshold.
     let before = offset(&run, &ids);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-    frame(&mut run, keys::RECENTER, 0, 0, 0.25);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    frame(&reference, &mut run, keys::RECENTER, 0, 0, 0.25);
     assert_eq!(offset(&run, &ids), before);
-    frame(&mut run, keys::RECENTER, 0, 0, 0.001);
+    frame(&reference, &mut run, keys::RECENTER, 0, 0, 0.001);
     let centered = (Vector::from_array(reference.player.carry_anchor_offset) * -0.5).to_array();
     assert_eq!(offset(&run, &ids), centered);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.01);
     assert_eq!(run.area.interaction.held(), Some(lamp));
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.25);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.25);
     assert_eq!(run.area.interaction.equipment.item(), None);
 
     // Reset discards the timer and blocks held input until release.
@@ -1890,15 +1974,29 @@ fn tab_recenter_has_one_owner() {
         ResolvedAim::default(),
     );
     let cancelled_offset = offset(&run, &ids);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
     run.area.interaction.cancel_input();
-    frame(&mut run, keys::RECENTER, 0, 0, 0.5);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    frame(&reference, &mut run, keys::RECENTER, 0, 0, 0.5);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.01);
     assert_eq!(run.area.interaction.held(), Some(lamp));
     assert_eq!(run.area.interaction.equipment.item(), None);
     assert_eq!(offset(&run, &ids), cancelled_offset);
     // A new carried identity cannot finish the previous gesture.
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
     run.area
         .interaction
         .drop_held(&mut run.area.items, &mut run.physics);
@@ -1916,15 +2014,22 @@ fn tab_recenter_has_one_owner() {
         )
         .unwrap();
     let before = offset(&run, &ids);
-    frame(&mut run, keys::RECENTER, 0, 0, 0.5);
+    frame(&reference, &mut run, keys::RECENTER, 0, 0, 0.5);
     assert_eq!(
         offset(&run, &ids),
         before,
         "item change suppresses stale recenter"
     );
-    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.01);
     assert_eq!(run.area.interaction.equipment.item(), None);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
     assert_eq!(offset(&run, &ids), [0.; 3], "OilCan recenters immediately");
     let anchor = anchor_handle(&run, oil);
     let saved = run
@@ -1938,14 +2043,21 @@ fn tab_recenter_has_one_owner() {
         Rotation::from_array(run.area.player.view_pose(&run.physics).rotation)
             * Rotation::from_array(saved.local_grip.rotation).inverse(),
     );
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.held(), Some(oil));
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
     run.area
         .interaction
         .drop_held(&mut run.area.items, &mut run.physics);
-    light(&mut run, lamp);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    pickup(&mut run, lamp);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(
         run.area.interaction.equipment.item(),
         None,
@@ -1959,26 +2071,40 @@ fn tab_recenter_has_one_owner() {
     assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 1.);
 
     let (_, mut run) = source_scene();
-    equip(&mut run, ItemId(126));
-    light(&mut run, lamp);
+    equip(&reference, &mut run, other);
+    pickup(&mut run, lamp);
     let slots_before = run.area.inventory.slots;
     let before = offset(&run, &ids);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(offset(&run, &ids), before);
-    assert_eq!(run.area.interaction.equipment.item(), Some(ItemId(126)));
-    assert_eq!(run.area.interaction.held(), Some(ItemId(127)));
+    assert_eq!(run.area.interaction.equipment.item(), Some(other));
+    assert_eq!(run.area.interaction.held(), Some(lamp));
     assert_eq!(run.area.inventory.slots, slots_before);
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-    frame(&mut run, keys::RECENTER, 0, 0, 0.251);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    frame(&reference, &mut run, keys::RECENTER, 0, 0, 0.251);
     assert_eq!(offset(&run, &ids), centered);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
-    assert_eq!(run.area.interaction.equipment.item(), Some(ItemId(126)));
-    assert_eq!(run.area.interaction.held(), Some(ItemId(127)));
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.01);
+    assert_eq!(run.area.interaction.equipment.item(), Some(other));
+    assert_eq!(run.area.interaction.held(), Some(lamp));
     assert_eq!(run.area.inventory.slots, slots_before);
 
     let (_, mut run) = source_scene();
-    equip(&mut run, lamp);
+    equip(&reference, &mut run, lamp);
     let slots_before = run.area.inventory.slots;
     let seat = &reference.seats[0];
     assert!(run.area.player.enter(
@@ -1989,13 +2115,20 @@ fn tab_recenter_has_one_owner() {
         },
         &mut run.physics
     ));
-    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(
+        &reference,
+        &mut run,
+        keys::RECENTER,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.equipment.item(), Some(lamp));
     assert_eq!(run.area.interaction.held(), None);
     run.area.sync_equipment(&reference, &mut run.physics);
     // Held MMB transfers equipment even while seated and claims look input.
-    let out = frame(&mut run, keys::ROTATE, 0, 0, 0.125);
+    let out = frame(&reference, &mut run, keys::ROTATE, 0, 0, 0.125);
     assert_eq!(out.look_mouse, [0.; 2]);
     assert_eq!(run.area.interaction.equipment.item(), None);
     assert_eq!(run.area.interaction.held(), Some(lamp));
@@ -2009,14 +2142,14 @@ fn tab_recenter_has_one_owner() {
             .count(),
         1
     );
-    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    frame(&reference, &mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.equipment.item(), None);
 }
 
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn push_force_grip_and_cancellation() {
-    use my_summer_slop::reference::{ColliderId, ItemId};
+    use crate::reference::{ColliderId, ItemId};
     let (reference, mut run) = source_scene();
     let rule = reference
         .pushables
@@ -2087,7 +2220,7 @@ fn push_force_grip_and_cancellation() {
     run.physics.recompute_body_mass(body);
     let mass = run.physics.rapier().bodies[body].mass();
     assert!(mass > 100.);
-    let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
+    let ids = crate::save::IdentityMap::new(&reference).unwrap();
     let recoil = |r: &GarageRuntime| {
         Vector::from_array(
             r.area
@@ -2455,7 +2588,7 @@ fn near_vector(actual: Vector, expected: Vector) {
     );
 }
 fn push_support(reference: &ReferenceManifest, run: &mut GarageRuntime, same_body: bool) {
-    use my_summer_slop::player::PlayerState;
+    use crate::player::PlayerState;
     use rapier3d::prelude::ColliderBuilder;
     let rule = reference
         .pushables
@@ -2551,7 +2684,7 @@ fn push_support(reference: &ReferenceManifest, run: &mut GarageRuntime, same_bod
     }
 }
 fn source_push_aim(reference: &ReferenceManifest, run: &GarageRuntime, grip: bool) -> ResolvedAim {
-    use my_summer_slop::reference::ColliderId;
+    use crate::reference::ColliderId;
     let id = ColliderId(if grip { 398 } else { 303 });
     let binding = reference
         .action_bindings
@@ -2595,7 +2728,7 @@ fn assert_push_released(run: &GarageRuntime, baseline_joints: usize) {
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn garage_handling_combined_save_restore() {
-    use my_summer_slop::{
+    use crate::{
         interaction::{SlotTarget, items::ItemLocation},
         reference::ItemId,
         save::{CameraSave, SourceHash, SourceStamp},
@@ -2896,8 +3029,7 @@ fn push_feedback_matches_source_support() {
     let pose = run.area.player.body_pose(&run.physics);
     run.physics
         .edit_body(run.area.player.body_handle(), |b| b.set_enabled(false));
-    run.area.player =
-        my_summer_slop::player::PlayerState::new(&reference.player, pose, &mut run.physics);
+    run.area.player = crate::player::PlayerState::new(&reference.player, pose, &mut run.physics);
     assert!(!run.area.player.grounded());
     let airborne_grip = masks(&run, &grip) & ActionMask::GRIP;
     assert_eq!(
@@ -2941,7 +3073,7 @@ fn source_door_aim(reference: &ReferenceManifest, run: &GarageRuntime) -> Resolv
 #[test]
 #[ignore = "requires build 11140890 export"]
 fn active_drag_independent_carry_release() {
-    use my_summer_slop::interaction::items::ItemLocation;
+    use crate::interaction::items::ItemLocation;
     let (reference, mut run) = source_scene();
     let item = reference
         .items
@@ -3159,4 +3291,198 @@ fn active_drag_independent_grip_release() {
         "drag must still change the source door"
     );
     assert_push_released(&run, baseline_joints);
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn frame_recenter_keeps_source_pose_and_later_handling() {
+    use crate::{reference::ItemId, save::IdentityMap};
+    let (reference, mut run) = source_scene();
+    handling_frame(&mut run, &reference, FrameInput::default(), FIXED_DT);
+    let oil = ItemId(120);
+    run.area.player.rebase([0., -50., 0.]);
+    acquire(&mut run, oil);
+    let ids = IdentityMap::new(&reference).unwrap();
+    let mut pending = FrameInput {
+        held: keys::TRANSLATE,
+        carry: crate::simulation::CarryDeltas {
+            owner: Some(oil),
+            mouse: [10., 11.],
+            wheel: 12.,
+        },
+        ..Default::default()
+    };
+    let view = run.area.player.view_pose(&run.physics);
+    let frame = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::RECENTER | keys::ROTATE | keys::TRANSLATE,
+            pressed: keys::RECENTER,
+            mouse: [2., 3.],
+            wheel: 4.,
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    assert_eq!(frame.recentered, Some(oil));
+    frame.merge_fixed_input(&mut pending);
+    assert_eq!(pending.carry, crate::simulation::CarryDeltas::default());
+    assert_eq!(pending.mouse, [0.; 2]);
+    let recentered = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    assert_eq!(recentered.offset, [0.; 3]);
+    step_fixed_input(&mut run, pending.take_step(), ResolvedAim::default());
+    let saved = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.offset, recentered.offset);
+    near_rotation(
+        run.physics.rapier().bodies[anchor_handle(&run, oil)]
+            .next_position()
+            .rotation,
+        Rotation::from_array(view.rotation)
+            * Rotation::from_array(saved.local_grip.rotation).inverse(),
+    );
+    let frame = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::RECENTER | keys::TRANSLATE,
+            mouse: [7., 8.],
+            wheel: 9.,
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    frame.merge_fixed_input(&mut pending);
+    // No fixed step runs between recenter and this separate handling gesture.
+    let later = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::TRANSLATE,
+            mouse: [0.2, 0.3],
+            wheel: 0.4,
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    later.merge_fixed_input(&mut pending);
+    assert_eq!(pending.carry.mouse, [0.2, 0.3]);
+    assert_eq!(pending.carry.wheel, 0.4);
+    step_fixed_input(&mut run, pending.take_step(), ResolvedAim::default());
+    assert_ne!(
+        run.area
+            .interaction
+            .capture_carry_save(&ids)
+            .unwrap()
+            .unwrap()
+            .offset,
+        recentered.offset
+    );
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn frame_recenter_preserves_queued_and_current_drag_input() {
+    let (reference, mut run) = source_scene();
+    handling_frame(&mut run, &reference, FrameInput::default(), FIXED_DT);
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    acquire(&mut run, oil);
+    let aim = source_door_aim(&reference, &run);
+    let door = aim.use_target.unwrap().item;
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::USE,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+    run.aim = aim;
+    let view = run.area.player.view_pose(&run.physics);
+    let prior = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::USE | keys::ROTATE,
+            mouse: [0.2, 0.3],
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    assert_eq!(prior.fixed_input.mouse, [0.2, 0.3]);
+    assert_eq!(prior.fixed_input.carry.mouse, [0.; 2]);
+    let mut pending = FrameInput::default();
+    prior.merge_fixed_input(&mut pending);
+    let current = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::USE | keys::ROTATE | keys::RECENTER,
+            pressed: keys::RECENTER,
+            mouse: [0.4, 0.5],
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    assert_eq!(current.recentered, Some(oil));
+    assert_eq!(current.fixed_input.mouse, [0.4, 0.5]);
+    current.merge_fixed_input(&mut pending);
+    assert_eq!(pending.mouse, [0.6, 0.8]);
+    assert_eq!(pending.carry, crate::simulation::CarryDeltas::default());
+    let before = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    let out = step_fixed_input(&mut run, pending.take_step(), aim);
+    assert_eq!(out.action, Some(InteractionAction::Mechanism(door)));
+    assert_eq!(out.look_mouse, [0.; 2]);
+    let during = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    // Source limits can reject one drag direction at the closed angle.
+    let opposite = run.advance_inventory_frame(
+        &reference,
+        FrameInput {
+            held: keys::USE | keys::ROTATE,
+            mouse: [-0.6, -0.8],
+            ..Default::default()
+        },
+        FIXED_DT,
+        view,
+    );
+    assert_eq!(opposite.fixed_input.mouse, [-0.6, -0.8]);
+    opposite.merge_fixed_input(&mut pending);
+    let out = step_fixed_input(&mut run, pending.take_step(), aim);
+    assert_eq!(out.action, Some(InteractionAction::Mechanism(door)));
+    let after = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    assert!(
+        before != during || during != after,
+        "drag must change the source door within its limits"
+    );
 }

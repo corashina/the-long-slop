@@ -27,6 +27,10 @@ impl ActionMask {
     pub const HELD_SWITCH: u32 = 2097152;
     pub const WASH: u32 = 4194304;
     pub const SCRUB: u32 = 8388608;
+    pub const EQUIP: u32 = 1 << 24;
+    pub const RECENTER: u32 = 1 << 25;
+    pub const RELEASE_EQUIPMENT: u32 = 1 << 26;
+    pub const RELEASE_EQUIPMENT_SEATED: u32 = 1 << 27;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -152,7 +156,11 @@ impl InteractionState {
             a.item = Some(id);
         }
         if let Some(held) = self.held() {
-            a.actions.0 |= ActionMask::DROP | ActionMask::THROW | ActionMask::ROTATE;
+            a.actions.0 |=
+                ActionMask::DROP | ActionMask::THROW | ActionMask::ROTATE | ActionMask::RECENTER;
+            if self.can_equip_carried(player, items, physics) {
+                a.actions.0 |= ActionMask::EQUIP;
+            }
             if items
                 .get(held)
                 .is_some_and(|item| item.food.is_some() && !item.removed)
@@ -178,6 +186,17 @@ impl InteractionState {
                 a.actions.0 |= ActionMask::HELD_SWITCH;
                 a.context = FeedbackContext::LightSwitch;
             }
+        }
+        if self
+            .equipment
+            .item()
+            .is_some_and(|id| self.carry.can_receive_equipment(id, player, items, physics))
+        {
+            a.actions.0 |= if player.seat().is_some() {
+                ActionMask::RELEASE_EQUIPMENT_SEATED
+            } else {
+                ActionMask::RELEASE_EQUIPMENT
+            };
         }
         if let Some(t) = use_target {
             if self.mechanisms.contains(t.item) {
@@ -420,7 +439,9 @@ impl InteractionState {
             && !latched_fill
             && !drink_guard
             && !food_guard
-            && !self.cleaning.reserves_lmb(self.held());
+            && !self
+                .cleaning
+                .reserves_lmb(self.equipment.item(), self.held());
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()
@@ -454,10 +475,10 @@ impl InteractionState {
         if !a.active_drag && a.actions.0 & ActionMask::MOUNT != 0 {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
-        if let Some(held) = self
-            .held()
-            .filter(|_| self.cleaning.reserves_lmb(self.held()))
-        {
+        if let Some(held) = self.equipment.item().filter(|_| {
+            self.cleaning
+                .reserves_lmb(self.equipment.item(), self.held())
+        }) {
             a.item = Some(held);
             a.actions.0 &= !(ActionMask::DOOR
                 | ActionMask::FILL

@@ -210,6 +210,7 @@ fn process_request(
             drive.previous = drive.current;
             drive.rendered = drive.current;
             drive.input.clear();
+            drive.frame_input.clear();
             drive.clock = StepClock::default();
             drive.frame_steps = 0;
             drive.render_delta_seconds = 0.;

@@ -163,8 +163,9 @@ impl GarageRuntime {
                 {
                     return Err(SaveError::InvalidLinks("Equipment ownership".into()));
                 }
-                self.area.interaction.equipment.retrieve(
+                self.area.interaction.equipment.equip(
                     id,
+                    crate::interaction::equipment::EquipmentPlacement::Immediate,
                     &mut self.area.items,
                     &mut self.physics,
                 );
@@ -345,8 +346,9 @@ impl GarageRuntime {
             .filter(|i| matches!(i, InstanceId::Initial { .. }))
         {
             let id = ids.item(instance)?;
-            candidate.area.interaction.equipment.retrieve(
+            candidate.area.interaction.equipment.equip(
                 id,
+                crate::interaction::equipment::EquipmentPlacement::Immediate,
                 &mut candidate.area.items,
                 &mut candidate.physics,
             );

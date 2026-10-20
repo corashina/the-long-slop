@@ -50,7 +50,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
 | G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Verify | Verify source pickup, drop, throw, rotation, distance, recenter, action ownership, push force, grip, and reset through normal input. |
-| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Partial | Complete explicit equip and release, source Tab behavior, slot selection, swapping, and ownership rules. |
+| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Verify | Verify explicit equip and release, source Tab behavior, slot selection, swapping, tool roles, and saved ownership. Browser acceptance remains open. See [G08 verification](g08-inventory.md). |
 | G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, crouching, and seat transitions. Add source lean, zoom, and full low-posture behavior. |
 | G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs) | Hard | Verify | Verify doors, hood, trunk, switches, seats, lights, horn, built-in radio, and gauges through normal input. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
@@ -97,18 +97,24 @@ Integration review found no blocking issue. Targeted engine, runtime, audio, and
 The merged result passed five engine tests, four runtime tests, two audio tests, and six web tests.
 Formatting and both WASM backend checks passed. Existing compiler warnings remain.
 Full checks, release builds, and browser acceptance remain deferred. G05 stays Verify.
+G08 integration, 2026-10-20: G08 is merged into master with the current road and grass worker tasks.
+Targeted merged native, web, formatting, and WASM checks passed. Existing compiler warnings remain.
+The G08 worktree records 22 distinct native tests and six web tests across its implementation runs.
+Browser acceptance, full checks, and product release builds remain open. G08 stays Verify.
+See [G08 verification](g08-inventory.md) for commands and limits.
 
-G07 update, 2026-10-20: held F can change push targets. Feedback and dispatch share source eligibility.
-Active drag permits carried F charge, drop, throw, and existing grip release. Drag retains mouse ownership.
-Web `input` and `menu` passed. Native `garage_handling` passed 13 tests with `RUST_TEST_THREADS=1`.
-The default parallel handling check hit `ENOMEM` while reading the manifest.
-Native `interaction::carry::tests`, `garage_parts`, `wheel_input`, and `startup_physics` passed.
-Format and both WebGL2 and WebGPU WASM checks passed. Native tests call interaction, physics, and carry restoration owners directly.
-Normal `GarageRuntime::step` and browser acceptance remain open. Real world publication still blocks supported gameplay and loose restored reacquisition.
-The `inventory` check retains its proven baseline `Save restore is pending` failure. Its assertion and readiness gate remain unchanged.
+G07 integration, 2026-10-20: G07 now uses the G08 frame coordinator and its sole source-identity-bound Tab timer.
+Active drag retains mouse ownership and permits separate carried F charge, drop, throw, and grip release.
+Carry input stays bound to its source item across zero-fixed-step slot transfers. Recenter clears only that item's carry input.
+Shared mechanism wheel input and player look remain available. Obsolete hand-control paths were removed.
+The handling suite moved to a native library module. Existing renderer-receipt helpers publish its fixtures through current readiness gates.
+The native matrix passed 57 tests before the owner correction. All 33 affected tests passed after it, covering 59 distinct tests overall.
+The current handling suite passed 15 tests. Current G08 inventory tests supersede the historical external restore-pending failure.
+Web input, menu, and feedback checks passed 11 tests. Native checks used `RUST_TEST_THREADS=1` inside Docker.
+Formatting and both WASM backend checks passed. Existing compiler warnings remain. The earlier parallel handling check hit `ENOMEM`.
+Native fixtures verify frame actions and fixed owners. Renderer uploads, submitted browser frames, normal input, and full gameplay acceptance remain unverified.
 Source lean with wheel input belongs to G09. Support attribution at edges or stacked bodies remains unverified.
-Full checks and release builds did not run. G07 stays Verify.
-
+Full checks, release builds, and browser acceptance did not run. G07 stays Verify.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.

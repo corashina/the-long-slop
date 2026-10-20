@@ -222,7 +222,7 @@ impl CarryState {
             })
             .transpose()
     }
-    pub(super) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
+    pub(crate) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
         self.rules.get(&id)
     }
     pub fn held(&self) -> Option<ItemId> {
@@ -260,6 +260,42 @@ impl CarryState {
         self.throwing = false;
         self.throw_charge = 0.0;
         Some(held.item)
+    }
+    pub fn can_receive_equipment(
+        &self,
+        id: ItemId,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.held.is_none()
+            && item.location == ItemLocation::Equipped
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && self.allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && self
+                .rules
+                .get(&id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && body.body_type() == rapier3d::prelude::RigidBodyType::KinematicPositionBased
+            && body.is_enabled()
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+            && player
+                .view_pose(physics)
+                .position
+                .iter()
+                .all(|value| value.is_finite())
     }
     pub fn can_acquire(
         &self,
@@ -339,10 +375,33 @@ impl CarryState {
         Ok(())
     }
 
+    pub fn recenter(&mut self, player: &PlayerState, physics: &PhysicsWorld) {
+        let Some(held) = self.held.as_mut() else {
+            return;
+        };
+        let rule = &self.rules[&held.item];
+        let view = to_rapier(player.view_pose(physics));
+        let rotation_frame = if rule.no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        held.offset = if rule.use_recenter_position {
+            Vector::from_array(rule.recenter_position)
+        } else {
+            Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
+        };
+        held.rotation = rotation_frame.inverse()
+            * view.rotation
+            * if rule.use_recenter_rotation {
+                Rotation::from_array(rule.recenter_rotation)
+            } else {
+                Rotation::IDENTITY
+            };
+    }
     pub fn step(
         &mut self,
         input: FrameInput,
-        recenter: bool,
         player: &PlayerState,
         physics: &mut PhysicsWorld,
         dt: f32,
@@ -372,75 +431,60 @@ impl CarryState {
         let rotation_gain = ((mass - self.reference.carry_max_weight * 2.0)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight * 2.0))
             .clamp(0.0, 1.0);
-        if recenter {
-            held.offset = if rule.use_recenter_position {
-                Vector::from_array(rule.recenter_position)
+        let rotating = input.held & keys::ROTATE != 0;
+        let moving = input.held & keys::TRANSLATE != 0;
+        if input.wheel.is_finite() && !rotating {
+            let direction = if rule.move_with_rotation {
+                (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
+                    .normalize_or_zero()
             } else {
-                Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
+                -Vector::Z
             };
-            held.rotation = view_in_frame
-                * if rule.use_recenter_rotation {
-                    Rotation::from_array(rule.recenter_rotation)
-                } else {
-                    Rotation::IDENTITY
-                };
-        } else {
-            let rotating = input.held & keys::ROTATE != 0;
-            let moving = input.held & keys::TRANSLATE != 0;
-            if input.wheel.is_finite() && !rotating {
-                let direction = if rule.move_with_rotation {
-                    (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
-                        .normalize_or_zero()
-                } else {
-                    -Vector::Z
-                };
-                held.offset += direction
-                    * input.wheel
-                    * self.reference.scroll_sensitivity
-                    * dt
-                    * self.reference.obj_move_sensitivity;
-            }
-            if input.mouse.iter().all(|delta| delta.is_finite()) {
-                if rotating {
-                    let sensitivity =
-                        dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
-                    let x = input.mouse[0] * sensitivity;
-                    let y = input.mouse[1] * sensitivity;
-                    let rotation = if moving {
-                        if rule.move_with_rotation {
-                            held.rotation * Rotation::from_rotation_z(-x.to_radians())
-                        } else {
-                            Rotation::from_axis_angle(view_in_frame * Vector::Z, -x.to_radians())
-                                * held.rotation
-                        }
-                    } else {
-                        Rotation::from_axis_angle(view_in_frame * Vector::Y, x.to_radians())
-                            * held.rotation
-                    };
-                    held.rotation = if !rule.move_with_rotation || !moving {
-                        Rotation::from_axis_angle(view_in_frame * Vector::X, y.to_radians())
-                            * rotation
-                    } else {
-                        rotation
-                    };
-                } else if moving && !rotating {
+            held.offset += direction
+                * input.wheel
+                * self.reference.scroll_sensitivity
+                * dt
+                * self.reference.obj_move_sensitivity;
+        }
+        if input.mouse.iter().all(|delta| delta.is_finite()) {
+            if rotating {
+                let sensitivity =
+                    dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
+                let x = input.mouse[0] * sensitivity;
+                let y = input.mouse[1] * sensitivity;
+                let rotation = if moving {
                     if rule.move_with_rotation {
-                        let sensitivity = dt * 20.0 * self.reference.obj_move_sensitivity;
-                        let rotation =
-                            Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
-                                * Rotation::from_rotation_x(
-                                    (-input.mouse[1] * sensitivity).to_radians(),
-                                );
-                        let position =
-                            Vector::from_array(self.reference.carry_anchor_offset) + held.offset;
-                        held.offset = rotation * position
-                            - Vector::from_array(self.reference.carry_anchor_offset);
+                        held.rotation * Rotation::from_rotation_z(-x.to_radians())
                     } else {
-                        held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.0)
-                            * dt
-                            * 0.25
-                            * self.reference.obj_move_sensitivity;
+                        Rotation::from_axis_angle(view_in_frame * Vector::Z, -x.to_radians())
+                            * held.rotation
                     }
+                } else {
+                    Rotation::from_axis_angle(view_in_frame * Vector::Y, x.to_radians())
+                        * held.rotation
+                };
+                held.rotation = if !rule.move_with_rotation || !moving {
+                    Rotation::from_axis_angle(view_in_frame * Vector::X, y.to_radians()) * rotation
+                } else {
+                    rotation
+                };
+            } else if moving && !rotating {
+                if rule.move_with_rotation {
+                    let sensitivity = dt * 20.0 * self.reference.obj_move_sensitivity;
+                    let rotation =
+                        Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
+                            * Rotation::from_rotation_x(
+                                (-input.mouse[1] * sensitivity).to_radians(),
+                            );
+                    let position =
+                        Vector::from_array(self.reference.carry_anchor_offset) + held.offset;
+                    held.offset = rotation * position
+                        - Vector::from_array(self.reference.carry_anchor_offset);
+                } else {
+                    held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.0)
+                        * dt
+                        * 0.25
+                        * self.reference.obj_move_sensitivity;
                 }
             }
         }
@@ -689,7 +733,6 @@ mod tests {
                 mouse: [1., 1.],
                 ..Default::default()
             },
-            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,
@@ -709,7 +752,6 @@ mod tests {
         assert_eq!(restored.capture_save(&ids).unwrap(), Some(saved));
         restored.step(
             FrameInput::default(),
-            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,
@@ -733,7 +775,6 @@ mod tests {
         );
         restored.step(
             FrameInput::default(),
-            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,

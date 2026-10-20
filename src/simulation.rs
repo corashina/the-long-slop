@@ -43,6 +43,13 @@ pub mod keys {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CarryDeltas {
+    pub owner: Option<crate::reference::ItemId>,
+    pub mouse: [f32; 2],
+    pub wheel: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
@@ -51,6 +58,7 @@ pub struct FrameInput {
     pub inventory_released: u8,
     pub mouse: [f32; 2],
     pub wheel: f32,
+    pub carry: CarryDeltas,
 }
 
 impl FrameInput {
@@ -68,6 +76,32 @@ impl FrameInput {
         if frame.wheel.is_finite() {
             self.wheel += frame.wheel;
         }
+        if self.carry.owner != frame.carry.owner {
+            self.carry = CarryDeltas {
+                owner: frame.carry.owner,
+                ..CarryDeltas::default()
+            };
+        }
+        for (pending, delta) in self.carry.mouse.iter_mut().zip(frame.carry.mouse) {
+            if delta.is_finite() {
+                *pending += delta;
+            }
+        }
+        if frame.carry.wheel.is_finite() {
+            self.carry.wheel += frame.carry.wheel;
+        }
+    }
+
+    /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn take_frame(&mut self, skip_elapsed: &mut bool, blocked: bool) -> Option<Self> {
+        if std::mem::take(skip_elapsed) {
+            if blocked {
+                self.clear();
+            }
+            return None;
+        }
+        Some(std::mem::take(self))
     }
 
     pub fn take_step(&mut self) -> Self {
