@@ -389,7 +389,7 @@ impl InteractionState {
             a.context = FeedbackContext::Push;
         } else if self.held().is_none()
             && let Some(t) = valid(aim.push_target)
-            && self.push.supports(t.item)
+            && self.push.can_start(t, &self.bodies, player, physics)
         {
             a.actions.0 |= if self
                 .collider_bindings

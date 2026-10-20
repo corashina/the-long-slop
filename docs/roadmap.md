@@ -49,7 +49,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G04 | Fill and drain fluids. [Fluids](../src/fluids.rs), [interaction](../src/interaction.rs) | Hard | Verify | Operate caps and containers. Verify pouring, spilling, mixtures, empty supplies, and fluid retention after part removal. |
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
-| G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Partial | Verify pickup, drop, throw, rotation, distance, recenter, and pushing. Complete source action priority and resolve control conflicts. |
+| G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Verify | Verify source pickup, drop, throw, rotation, distance, recenter, action ownership, push force, grip, and reset through normal input. |
 | G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Partial | Complete explicit equip and release, source Tab behavior, slot selection, swapping, and ownership rules. |
 | G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, crouching, and seat transitions. Add source lean, zoom, and full low-posture behavior. |
 | G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs) | Hard | Verify | Verify doors, hood, trunk, switches, seats, lights, horn, built-in radio, and gauges through normal input. |
@@ -65,6 +65,16 @@ Three targeted native tests passed. They cover 20 general parts and both plates 
 Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicate attachment, and source-fixed seats.
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
+
+G07 update, 2026-10-20: held F can change push targets. Feedback and dispatch share source eligibility.
+Web `input` and `menu` passed. Native `garage_handling` passed 11 tests with `RUST_TEST_THREADS=1`.
+The default parallel handling check hit `ENOMEM` while reading the manifest.
+Native `interaction::carry::tests`, `garage_parts`, `wheel_input`, and `startup_physics` passed.
+Format and both WebGL2 and WebGPU WASM checks passed. Native tests call interaction, physics, and carry restoration owners directly.
+Normal `GarageRuntime::step` and browser acceptance remain open. Real world publication still blocks supported gameplay and loose restored reacquisition.
+The `inventory` check retains its proven baseline `Save restore is pending` failure. Its assertion and readiness gate remain unchanged.
+Source lean with wheel input belongs to G09. Support attribution at edges or stacked bodies remains unverified.
+Full checks and release builds did not run. G07 stays Verify.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.

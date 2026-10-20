@@ -550,6 +550,7 @@ fn place_for_carry(
         ..Default::default()
     }
 }
+#[track_caller]
 fn acquire(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
     let aim = place_for_carry(run, item);
     let out = step_input(
@@ -2010,4 +2011,897 @@ fn tab_recenter_has_one_owner() {
     );
     frame(&mut run, 0, 0, keys::RECENTER, 0.125);
     assert_eq!(run.area.interaction.equipment.item(), None);
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn push_force_grip_and_cancellation() {
+    use my_summer_slop::reference::{ColliderId, ItemId};
+    let (reference, mut run) = source_scene();
+    let rule = reference
+        .pushables
+        .iter()
+        .find(|r| r.owner == ItemId(27))
+        .unwrap();
+    assert_eq!(rule.body.0, 2);
+    assert_eq!(rule.modifier, 1.);
+    assert!(rule.only_projected);
+    assert!(!rule.both);
+    assert!(!rule.push_even_if_same_parent);
+    assert_eq!(rule.grip.as_ref().unwrap().colliders, [ColliderId(398)]);
+    assert_eq!(reference.player.push_force, 500.);
+    assert_eq!(reference.player.airborne_push_force, 2500.);
+    let binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| b.push_owner == Some(rule.owner) && b.collider == ColliderId(303))
+        .unwrap();
+    assert_eq!(binding.use_owner, None);
+    assert_eq!(binding.pickup_owner, None);
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == binding.collider.0)
+        .unwrap()
+        .0;
+    let body = run.physics.rapier().colliders[collider].parent().unwrap();
+    assert_eq!(body, run.physics.chassis_handle(0));
+    let aim = ray_aim(&run, collider, |a| {
+        a.push_target.is_some_and(|t| t.item == rule.owner)
+    });
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(
+        out.action,
+        Some(InteractionAction::Push(rule.owner)),
+        "held F starts ordinary push after aim changes"
+    );
+    // Authored force is mass-scaled. Horizontal projection keeps its source magnitude.
+    run.area.player.rebase([0., -50., 0.]);
+    run.area.player.step(
+        FrameInput {
+            mouse: [0., 30.],
+            ..Default::default()
+        },
+        &mut run.physics,
+        FIXED_DT,
+    );
+    assert!(!run.area.player.grounded());
+    run.physics.recompute_body_mass(body);
+    let mass = run.physics.rapier().bodies[body].mass();
+    assert!(mass > 100.);
+    let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
+    let recoil = |r: &GarageRuntime| {
+        Vector::from_array(
+            r.area
+                .player
+                .capture_save(&ids, &r.stream.origin, &r.physics, None)
+                .unwrap()
+                .recoil_velocity,
+        )
+    };
+    let forward =
+        Rotation::from_array(run.area.player.view_pose(&run.physics).rotation) * -Vector::Z;
+    let projected = Vector::new(forward.x, 0., forward.z);
+    let impulse =
+        projected * mass * 500. * FIXED_DT * rule.modifier * reference.player.source_force_interval;
+    let mut current_aim = aim;
+    for side in [-1., 1.] {
+        let com = run.physics.rapier().bodies[body].center_of_mass();
+        let point = com + Vector::X * side;
+        current_aim.push_target.as_mut().unwrap().point = point.to_array();
+        run.physics.edit_body(body, |b| {
+            b.set_linvel(Vector::ZERO, true);
+            b.set_angvel(Vector::ZERO, true);
+        });
+        let before = recoil(&run);
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                ..Default::default()
+            },
+            current_aim,
+        );
+        assert_eq!(out.action, Some(InteractionAction::Push(rule.owner)));
+        let pushed = &run.physics.rapier().bodies[body];
+        near_vector(pushed.linvel(), impulse / mass);
+        let torque = (point - com).cross(impulse);
+        assert!(
+            pushed.angvel().dot(torque) > 0.,
+            "current hit point must produce its torque"
+        );
+        near_vector(
+            recoil(&run) - before,
+            -forward * 2500. * reference.player.source_force_interval / reference.player.mass_kg,
+        );
+    }
+    let before = run.physics.rapier().bodies[body].linvel();
+    step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        current_aim,
+    );
+    near_vector(run.physics.rapier().bodies[body].linvel(), before);
+    let baseline_joints = run.physics.rapier().impulse_joints.len();
+    assert_push_released(&run, baseline_joints);
+
+    // The actual source ray bindings reserve use and pickup before push.
+    let use_binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| {
+            b.push_owner == Some(rule.owner) && b.use_owner.is_some() && b.pickup_owner.is_some()
+        })
+        .unwrap();
+    let handle = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == use_binding.collider.0)
+        .unwrap()
+        .0;
+    let reserved = ray_aim(&run, handle, |a| {
+        a.use_target.is_some() || a.grab_target.is_some()
+    });
+    assert!(
+        reserved.push_target.is_none(),
+        "use or pickup reservation blocks push"
+    );
+    let before = run.physics.rapier().bodies[body].linvel();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        reserved,
+    );
+    assert!(!matches!(out.action, Some(InteractionAction::Push(_))));
+    near_vector(run.physics.rapier().bodies[body].linvel(), before);
+
+    // A supported grip requires F-down. Held F over a new grip is insufficient.
+    push_support(&reference, &mut run, false);
+    let ordinary_aim = source_push_aim(&reference, &run, false);
+    let before_recoil = recoil(&run);
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        ordinary_aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Push(rule.owner)));
+    near_vector(recoil(&run), before_recoil);
+    let grip_aim = source_push_aim(&reference, &run, true);
+    let available = run.area.interaction.available_actions(
+        &grip_aim,
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+        run.survival.output(),
+    );
+    assert_ne!(available.actions.0 & ActionMask::GRIP, 0);
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        grip_aim,
+    );
+    assert_push_released(&run, baseline_joints);
+    for _ in 0..3 {
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+            grip_aim,
+        );
+        assert_eq!(out.action, Some(InteractionAction::Push(rule.owner)));
+        assert!(run.area.interaction.push_gripping());
+        assert_eq!(
+            run.physics.rapier().impulse_joints.len(),
+            baseline_joints + 1
+        );
+        // Looking away and releasing F retain the grip.
+        step_input(
+            &mut run,
+            FrameInput {
+                released: keys::GRAB,
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        assert!(run.area.interaction.push_gripping());
+        for (movement, steer, sign) in [
+            (keys::FORWARD | keys::LEFT, 1., 1.),
+            (keys::BACK | keys::RIGHT, -1., -1.),
+            (
+                keys::FORWARD | keys::BACK | keys::LEFT | keys::RIGHT,
+                0.,
+                0.,
+            ),
+        ] {
+            run.physics
+                .edit_body(body, |b| b.set_linvel(Vector::ZERO, true));
+            step_input(
+                &mut run,
+                FrameInput {
+                    held: movement,
+                    ..Default::default()
+                },
+                ResolvedAim::default(),
+            );
+            assert_eq!(run.area.interaction.push_steering(), Some((body, steer)));
+            let car = run.physics.rapier().bodies[body].position();
+            let direction = Rotation::from_rotation_y(steer * 40_f32.to_radians())
+                * (car.rotation * -Vector::Z)
+                * sign;
+            let up = car.rotation * Vector::Y;
+            let expected = (direction - up * direction.dot(up)).normalize_or_zero()
+                * 10.
+                * 300.
+                * reference.player.source_force_interval
+                / mass;
+            near_vector(run.physics.rapier().bodies[body].linvel(), expected);
+            assert_eq!(
+                run.physics.rapier().impulse_joints.len(),
+                baseline_joints + 1
+            );
+        }
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        assert_push_released(&run, baseline_joints);
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                ..Default::default()
+            },
+            grip_aim,
+        );
+        assert_push_released(&run, baseline_joints);
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    }
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        grip_aim,
+    );
+    run.physics.edit_body(run.area.player.body_handle(), |b| {
+        b.set_translation(b.translation() + Vector::X * 10., true)
+    });
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::FORWARD,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    assert_push_released(&run, baseline_joints);
+    run.area.player.rebase([10., 0., 0.]);
+    run.physics.edit_body(run.area.player.body_handle(), |b| {
+        let mut pose = *b.position();
+        pose.translation -= Vector::X * 10.;
+        b.set_position(pose, true);
+        b.set_next_kinematic_position(pose);
+    });
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        grip_aim,
+    );
+    assert!(run.area.interaction.push_gripping());
+    run.clear_input();
+    assert!(!run.area.interaction.push_gripping());
+    assert!(run.area.interaction.push_steering().is_none());
+    run.area
+        .interaction
+        .finish_cancelled_input(&mut run.area.player, &mut run.physics);
+    assert_push_released(&run, baseline_joints);
+    let before = run.physics.rapier().bodies[body].linvel();
+    let ordinary_aim = source_push_aim(&reference, &run, false);
+    for held in [keys::GRAB | keys::FORWARD, 0] {
+        step_input(
+            &mut run,
+            FrameInput {
+                held,
+                ..Default::default()
+            },
+            ordinary_aim,
+        );
+        assert_push_released(&run, baseline_joints);
+        near_vector(run.physics.rapier().bodies[body].linvel(), before);
+    }
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        grip_aim,
+    );
+    assert!(run.area.interaction.push_gripping());
+    let grip_collider = grip_aim.push_target.unwrap().collider;
+    run.physics
+        .edit_collider(grip_collider, |c| c.set_enabled(false));
+    step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    assert_push_released(&run, baseline_joints);
+    run.physics
+        .edit_collider(grip_collider, |c| c.set_enabled(true));
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        grip_aim,
+    );
+    assert!(run.area.interaction.push_gripping());
+    run.physics.edit_body(body, |b| b.set_enabled(false));
+    step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    assert_push_released(&run, baseline_joints);
+
+    // Same-support rejection and its authored override use the real Lada body.
+    for override_support in [false, true] {
+        let mut authored = reference.clone();
+        authored
+            .pushables
+            .iter_mut()
+            .find(|r| r.owner == rule.owner)
+            .unwrap()
+            .push_even_if_same_parent = override_support;
+        let mut run = GarageRuntime::new(&authored).unwrap();
+        push_support(&authored, &mut run, true);
+        let aim = source_push_aim(&authored, &run, false);
+        let available = run.area.interaction.available_actions(
+            &aim,
+            &run.area.player,
+            &run.area.items,
+            &run.physics,
+            run.survival.output(),
+        );
+        assert_eq!(
+            available.actions.0 & ActionMask::PUSH,
+            if override_support {
+                ActionMask::PUSH
+            } else {
+                0
+            }
+        );
+        let before = run.physics.rapier().bodies[run.physics.chassis_handle(0)].linvel();
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+            aim,
+        );
+        assert_eq!(
+            out.action,
+            override_support.then_some(InteractionAction::Push(rule.owner))
+        );
+        if !override_support {
+            near_vector(
+                run.physics.rapier().bodies[run.physics.chassis_handle(0)].linvel(),
+                before,
+            );
+        }
+        let grip_aim = source_push_aim(&authored, &run, true);
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+            grip_aim,
+        );
+        assert_push_released(&run, run.physics.rapier().impulse_joints.len());
+    }
+}
+
+fn near_vector(actual: Vector, expected: Vector) {
+    assert!(
+        (actual - expected).length() < 0.0002,
+        "{actual:?} != {expected:?}"
+    );
+}
+fn push_support(reference: &ReferenceManifest, run: &mut GarageRuntime, same_body: bool) {
+    use my_summer_slop::player::PlayerState;
+    use rapier3d::prelude::ColliderBuilder;
+    let rule = reference
+        .pushables
+        .iter()
+        .find(|r| r.owner.0 == 27)
+        .unwrap();
+    let body = run.physics.chassis_handle(0);
+    // Keep the source chassis and grip. Move the chassis into clear space.
+    let shift = Vector::Y * 30.;
+    run.physics.edit_body(body, |b| {
+        b.set_translation(b.translation() + shift, true);
+        b.set_linvel(Vector::ZERO, true);
+        b.set_angvel(Vector::ZERO, true);
+    });
+    run.physics.refresh_queries();
+    let grip = *run.physics.rapier().bodies[body].position()
+        * Vector::from_array(rule.grip.as_ref().unwrap().local_pose.translation);
+    let player_position = grip
+        + run.physics.rapier().bodies[body].position().rotation * -Vector::X * 1.2
+        + Vector::Y * 0.5;
+    let floor = player_position - Vector::Y * (reference.player.standing_height * 0.5 + 0.12);
+    let platform = ColliderBuilder::cuboid(0.4, 0.1, 0.4);
+    let platform_handle = if same_body {
+        let local = run.physics.rapier().bodies[body].position().inverse() * floor;
+        run.physics
+            .insert_collider_with_parent(platform.translation(local), body)
+    } else {
+        run.physics.insert_collider(platform.translation(floor))
+    };
+    run.physics
+        .edit_body(run.area.player.body_handle(), |b| b.set_enabled(false));
+    run.area.player = PlayerState::new(
+        &reference.player,
+        VehiclePose {
+            position: player_position.to_array(),
+            rotation: [0., 0., 0., 1.],
+        },
+        &mut run.physics,
+    );
+    run.physics.refresh_queries();
+    assert!(!run.area.player.grounded());
+    let aim = source_push_aim(reference, run, true);
+    let joints = run.physics.rapier().impulse_joints.len();
+    step_input(
+        run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_push_released(run, joints);
+    for _ in 0..60 {
+        run.area
+            .player
+            .step(FrameInput::default(), &mut run.physics, FIXED_DT);
+        if run.area.player.grounded() {
+            break;
+        }
+    }
+    assert!(
+        run.area.player.grounded(),
+        "source grip needs real ground contact"
+    );
+    let position = Vector::from_array(run.area.player.body_pose(&run.physics).position);
+    let ground = run
+        .physics
+        .queries(
+            rapier3d::prelude::QueryFilter::default()
+                .exclude_sensors()
+                .exclude_rigid_body(run.area.player.body_handle()),
+        )
+        .cast_ray(
+            &rapier3d::prelude::Ray::new(position, -Vector::Y),
+            reference.player.standing_height * 0.5 + 0.1,
+            true,
+        );
+    assert_eq!(run.area.player.support_body(), same_body.then_some(body));
+    let (ground_collider, toi) = ground.unwrap();
+    assert_eq!(ground_collider, platform_handle);
+    assert!(toi > 0.);
+    assert_eq!(
+        run.physics.rapier().colliders[ground_collider].parent(),
+        same_body.then_some(body)
+    );
+    for _ in 0..4 {
+        run.area
+            .player
+            .step(FrameInput::default(), &mut run.physics, FIXED_DT);
+        assert!(run.area.player.grounded());
+        assert_eq!(run.area.player.support_body(), same_body.then_some(body));
+    }
+}
+fn source_push_aim(reference: &ReferenceManifest, run: &GarageRuntime, grip: bool) -> ResolvedAim {
+    use my_summer_slop::reference::ColliderId;
+    let id = ColliderId(if grip { 398 } else { 303 });
+    let binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| b.collider == id)
+        .unwrap();
+    assert_eq!(binding.push_owner.unwrap().0, 27);
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == id.0)
+        .unwrap()
+        .0;
+    assert_eq!(
+        run.physics.rapier().colliders[collider].parent(),
+        Some(run.physics.chassis_handle(0))
+    );
+    ResolvedAim {
+        push_target: Some(AimTarget {
+            item: binding.push_owner.unwrap(),
+            collider,
+            distance: 1.,
+            point: run.physics.rapier().colliders[collider]
+                .compute_aabb()
+                .center()
+                .to_array(),
+            slot: None,
+        }),
+        ..Default::default()
+    }
+}
+#[track_caller]
+fn assert_push_released(run: &GarageRuntime, baseline_joints: usize) {
+    assert!(!run.area.interaction.push_gripping());
+    assert!(run.area.interaction.push_steering().is_none());
+    assert_eq!(run.physics.rapier().impulse_joints.len(), baseline_joints);
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn garage_handling_combined_save_restore() {
+    use my_summer_slop::{
+        interaction::{SlotTarget, items::ItemLocation},
+        reference::ItemId,
+        save::{CameraSave, SourceHash, SourceStamp},
+    };
+    let (reference, mut run) = source_scene();
+    let original_items = run.area.items.iter().count();
+    let baseline_joints = run.physics.rapier().impulse_joints.len();
+    let chassis = run.physics.chassis_handle(0);
+    // Installation owns F-release and cannot also push the Lada.
+    let part = reference
+        .items
+        .iter()
+        .find(|i| i.name == "FRDoor")
+        .unwrap()
+        .id;
+    assert_eq!(part, ItemId(61));
+    let binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| b.pickup_owner == Some(part) && b.use_owner.is_some())
+        .unwrap();
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == binding.collider.0)
+        .unwrap()
+        .0;
+    let target = AimTarget {
+        item: part,
+        collider,
+        distance: 1.,
+        point: run.area.items.get(part).unwrap().pose.position,
+        slot: None,
+    };
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim {
+            grab_target: Some(target),
+            ..Default::default()
+        },
+    );
+    assert_eq!(out.action, Some(InteractionAction::PartRemove(part)));
+    step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let slot = reference
+        .part_slots
+        .iter()
+        .find(|s| s.part == Some(part))
+        .unwrap();
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| {
+            slot.colliders
+                .iter()
+                .any(|id| id.0 == (c.user_data >> 64) as u32)
+        })
+        .unwrap()
+        .0;
+    let mut aim = source_push_aim(&reference, &run, false);
+    aim.installation_target = Some(AimTarget {
+        item: part,
+        collider,
+        distance: 1.,
+        point: target.point,
+        slot: Some(SlotTarget::Part(slot.id)),
+    });
+    let available = run.area.interaction.available_actions(
+        &aim,
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+        run.survival.output(),
+    );
+    assert_ne!(available.actions.0 & ActionMask::MOUNT, 0);
+    assert_eq!(
+        available.actions.0 & (ActionMask::PUSH | ActionMask::GRIP),
+        0
+    );
+    let before = run.physics.rapier().bodies[chassis].linvel();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert!(!matches!(out.action, Some(InteractionAction::Push(_))));
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::PartInstall(part)));
+    near_vector(run.physics.rapier().bodies[chassis].linvel(), before);
+    assert_eq!(
+        run.area.items.get(part).unwrap().location,
+        ItemLocation::PartSlot(slot.id)
+    );
+    assert_push_released(&run, baseline_joints);
+
+    run.area.player.rebase([0., -50., 0.]);
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    acquire(&mut run, oil);
+    let body = run.area.items.get(oil).unwrap().body.unwrap();
+    let authored = run.physics.authored_body_mass(body);
+    let before = *run.physics.rapier().bodies[body].position();
+    run.area.player.rebase([0.2, 0., 0.]);
+    for _ in 0..20 {
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [1., 0.5],
+                wheel: 0.01,
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        run.physics.step_physics();
+    }
+    let handled = *run.physics.rapier().bodies[body].position();
+    assert!(handled.translation.distance(before.translation) > 0.1);
+    assert!(handled.rotation.dot(before.rotation).abs() < 0.999);
+    assert_eq!(run.area.interaction.held(), Some(oil));
+    assert_eq!(
+        run.physics.rapier().impulse_joints.len(),
+        baseline_joints + 1
+    );
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    assert_eq!(out.action, Some(InteractionAction::Drop(oil)));
+    near_mass(run.physics.rapier().bodies[body].mass(), authored);
+    assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 1.);
+    assert_push_released(&run, baseline_joints);
+    let aim = source_push_aim(&reference, &run, false);
+    let before = run.physics.rapier().bodies[chassis].linvel();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Push(ItemId(27))));
+    assert!(
+        run.physics.rapier().bodies[chassis]
+            .linvel()
+            .distance(before)
+            > 0.01
+    );
+    run.physics.step_physics();
+    step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    run.area.items.sync_poses(&run.physics);
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: reference.app_id,
+        build_id: reference.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: reference
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    acquire(&mut run, oil);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T15:00:00Z",
+        )
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert_eq!(run.area.items.iter().count(), original_items);
+    assert_eq!(restored.area.items.iter().count(), original_items);
+    for item in run.area.items.iter() {
+        let restored_item = restored.area.items.get(item.id).unwrap();
+        assert_eq!(restored_item.location, item.location);
+        assert_eq!(restored_item.fluid, item.fluid);
+    }
+    assert_eq!(restored.physics.vehicle_count(), 1);
+    assert_push_released(&restored, baseline_joints + 1);
+    step_input(&mut restored, FrameInput::default(), ResolvedAim::default());
+    assert_eq!(restored.area.interaction.held(), Some(oil));
+    let body = restored.area.items.get(oil).unwrap().body.unwrap();
+    assert_eq!(restored.physics.rapier().bodies[body].mass(), 1.);
+    let before = *restored.physics.rapier().bodies[body].position();
+    restored.area.player.rebase([0.2, 0., 0.]);
+    for _ in 0..20 {
+        step_input(
+            &mut restored,
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [1., 0.5],
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        restored.physics.step_physics();
+    }
+    let after = *restored.physics.rapier().bodies[body].position();
+    assert!(after.translation.distance(before.translation) > 0.1);
+    assert!(after.rotation.dot(before.rotation).abs() < 0.999);
+    restored
+        .area
+        .interaction
+        .drop_held(&mut restored.area.items, &mut restored.physics);
+    near_mass(restored.physics.rapier().bodies[body].mass(), authored);
+    assert_push_released(&restored, baseline_joints);
+    assert_eq!(restored.area.items.iter().count(), original_items);
+    // Direct owners execute real gameplay here. Normal Runtime::step remains unverified.
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn push_feedback_matches_source_support() {
+    let (reference, mut run) = source_scene();
+    push_support(&reference, &mut run, true);
+    let ordinary = source_push_aim(&reference, &run, false);
+    let grip = source_push_aim(&reference, &run, true);
+    let masks = |run: &GarageRuntime, aim: &ResolvedAim| {
+        run.area
+            .interaction
+            .available_actions(
+                aim,
+                &run.area.player,
+                &run.area.items,
+                &run.physics,
+                run.survival.output(),
+            )
+            .actions
+            .0
+    };
+    let same_support_push = masks(&run, &ordinary) & ActionMask::PUSH;
+    let same_support_grip = masks(&run, &grip) & ActionMask::GRIP;
+    let pose = run.area.player.body_pose(&run.physics);
+    run.physics
+        .edit_body(run.area.player.body_handle(), |b| b.set_enabled(false));
+    run.area.player =
+        my_summer_slop::player::PlayerState::new(&reference.player, pose, &mut run.physics);
+    assert!(!run.area.player.grounded());
+    let airborne_grip = masks(&run, &grip) & ActionMask::GRIP;
+    assert_eq!(
+        (same_support_push, same_support_grip, airborne_grip),
+        (0, 0, 0),
+        "feedback must share source push and grip eligibility"
+    );
 }

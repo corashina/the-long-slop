@@ -331,7 +331,6 @@ impl PlayerState {
         let desired = self.pose.rotation * direction * speed * dt
             + self.recoil_velocity * dt
             + Vector::Y * self.vertical_velocity * dt;
-        let mut support_body = None;
         self.collisions.clear();
         let shape = if self.crouched {
             &self.crouching
@@ -349,9 +348,6 @@ impl PlayerState {
             &self.pose,
             desired,
             |collision| {
-                if collision.hit.normal1.y > 0.5 {
-                    support_body = rapier.colliders[collision.handle].parent();
-                }
                 let dynamic = rapier.colliders[collision.handle]
                     .parent()
                     .is_some_and(|body| rapier.bodies[body].is_dynamic());
@@ -373,7 +369,23 @@ impl PlayerState {
         }
         self.pose.translation += movement.translation;
         self.grounded = movement.grounded && self.vertical_velocity <= 0.0;
-        self.support_body = if self.grounded { support_body } else { None };
+        self.support_body = if self.grounded {
+            let height = if self.crouched {
+                self.reference.crouch_height
+            } else {
+                self.reference.standing_height
+            };
+            physics
+                .queries(filter)
+                .cast_ray(
+                    &Ray::new(self.pose.translation, -Vector::Y),
+                    height * 0.5 + 0.1,
+                    true,
+                )
+                .and_then(|(collider, _)| physics.rapier().colliders[collider].parent())
+        } else {
+            None
+        };
         if self.grounded {
             self.recoil_velocity = Vector::ZERO;
         }
