@@ -112,7 +112,10 @@ fn installed_spawn_alignment_and_settling() {
     let settle_seconds = 2.0_f32;
     let settle_steps = (settle_seconds / FIXED_DT).round() as usize;
     for _ in 0..settle_steps {
-        run.area.player.step(
+        run.area
+            .player
+            .step_view(FrameInput::default(), Default::default(), FIXED_DT);
+        run.area.player.step_movement(
             FrameInput::default(),
             Default::default(),
             &mut run.physics,

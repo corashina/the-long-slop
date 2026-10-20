@@ -169,7 +169,7 @@ impl SeatReference {
                 && [77843, 76381, 65840, 69296, 66466].contains(&self.source.path_id)
                 && self.yaw_limits_degrees == [-179.0, 179.0]
                 && self.pitch_limits_degrees == [-89.0, 89.0]
-                && self.default_yaw_degrees == 0.0
+                && self.default_pitch_degrees == 0.0
                 && self.min_exit_angle_degrees == 65.0
                 && (self.source.path_id != 69296 || (self.driver && self.driving2)),
             "selected seat view",

@@ -138,11 +138,53 @@ impl From<&OpeningRecord> for OpeningRules {
         }
     }
 }
+// Source 17825 compares usable components, including null, rather than seat identities.
+#[derive(Clone, Copy)]
+struct SeatPress {
+    usable: Option<ItemId>,
+    duration: f32,
+}
+impl SeatPress {
+    fn matches(self, usable: Option<ItemId>) -> bool {
+        self.usable == usable
+            && (usable.is_none() || crate::player::source_short_hold(self.duration, 0.2))
+    }
+}
+fn seat_usable(
+    reference: &ReferenceManifest,
+    seat: &crate::reference::SeatReference,
+) -> Result<Option<ItemId>, ReferenceError> {
+    let mut result = None;
+    for (index, hit) in seat.hit_nodes.iter().enumerate() {
+        let mut node = Some(*hit);
+        let mut usable = None;
+        while let Some(id) = node {
+            if let Some(item) = reference.items.iter().find(|item| {
+                item.node == id && reference.mechanisms.iter().any(|m| m.item == item.id)
+            }) {
+                usable = Some(item.id);
+                break;
+            }
+            node = reference
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .and_then(|n| n.parent);
+        }
+        if index > 0 && result != usable {
+            return Err(ReferenceError("Seat hit usable components differ".into()));
+        }
+        result = usable;
+    }
+    Ok(result)
+}
+
 struct SeatState {
     id: SeatId,
     item: ItemId,
     pose: VehiclePose,
     exit: ExitReference,
+    usable: Option<ItemId>,
 }
 
 pub struct InteractionState {
@@ -157,6 +199,7 @@ pub struct InteractionState {
     light_nodes: HashMap<ColliderId, NodeId>,
     /// Door usable and owner per lighting controller. Only cabin controllers have links.
     cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
+    seat_press: Option<SeatPress>,
     seat_action_latched: bool,
     usable_light_controls: HashSet<LightControlId>,
     fill_opening: Option<OpeningId>,
@@ -351,6 +394,7 @@ impl InteractionState {
                     rotation: anchor.transform.rotation,
                 },
                 exit: ExitReference::from_reference(&reference.player, seat),
+                usable: seat_usable(reference, seat)?,
             });
         }
         let mut pickup_layers = HashMap::new();
@@ -492,6 +536,7 @@ impl InteractionState {
                 .collect(),
             storage: storage::StorageLocks::new(reference)?,
             cabin_doors,
+            seat_press: None,
             seat_action_latched: false,
             next_generated_light: reference
                 .lighting
@@ -1113,6 +1158,7 @@ impl InteractionState {
     }
     pub fn cancel_input(&mut self) {
         self.cleaning.reset_contact();
+        self.seat_press = None;
         self.seat_action_latched = false;
         self.fill_opening = None;
         self.f_gesture_consumed = false;
@@ -1208,6 +1254,41 @@ impl InteractionState {
         if input.held & keys::USE == 0 {
             self.seat_action_latched = false;
         }
+        let ray_actions_blocked = player.view(physics).ray_actions_blocked;
+        let aim = if ray_actions_blocked {
+            ResolvedAim::default()
+        } else {
+            aim
+        };
+        if ray_actions_blocked {
+            self.latched_mechanism = None;
+        }
+        if input.pressed & keys::USE != 0 {
+            let usable = aim.use_target.and_then(|target| {
+                self.seats
+                    .iter()
+                    .find(|seat| seat.item == target.item)
+                    .map_or_else(
+                        || self.mechanisms.contains(target.item).then_some(target.item),
+                        |seat| seat.usable,
+                    )
+            });
+            self.seat_press = Some(SeatPress {
+                usable,
+                duration: 0.,
+            });
+        }
+        if input.held & keys::USE != 0
+            && let Some(press) = &mut self.seat_press
+        {
+            press.duration += dt;
+        }
+        let seat_release = if input.released & keys::USE != 0 {
+            self.seat_press.take()
+        } else {
+            None
+        };
+
         let availability = self.available_actions(&aim, player, items, physics, needs);
         let held_switch_pressed =
             input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
@@ -1294,7 +1375,11 @@ impl InteractionState {
                             && (opening.reference.can_toggle || opening.reference.can_tune)
                     })
             });
-        if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
+        if !ray_actions_blocked
+            && input.pressed & keys::USE != 0
+            && player.seat().is_some()
+            && !can_use_target
+        {
             if let Some(seat) = self
                 .seats
                 .iter()
@@ -1367,8 +1452,8 @@ impl InteractionState {
             }
             if input.released & keys::USE != 0
                 && !released_mechanism
-                && self.held().is_none()
                 && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
+                && seat_release.is_some_and(|press| press.matches(seat.usable))
                 && player.enter(seat.id, seat.pose, physics)
             {
                 self.seat_action_latched = true;
@@ -1392,8 +1477,12 @@ impl InteractionState {
                     mechanism_input.held &= !keys::PRIMARY;
                     mechanism_input.pressed &= !keys::PRIMARY;
                 }
-                self.mechanisms
-                    .step(target.item, mechanism_input, player.view_pose(physics), dt);
+                self.mechanisms.step(
+                    target.item,
+                    mechanism_input,
+                    player.view(physics).camera_pose,
+                    dt,
+                );
                 carry_input.wheel = 0.0;
                 action = Some(InteractionAction::Mechanism(target.item));
             }
@@ -1550,8 +1639,13 @@ impl InteractionState {
                 }
             }
         }
-        if self.carry.step(carry_input, player, physics, dt)
-            && let Some(item) = self.drop_held(items, physics)
+        if self.carry.step(
+            carry_input,
+            player,
+            availability.actions.0 & ActionMask::TUNE != 0,
+            physics,
+            dt,
+        ) && let Some(item) = self.drop_held(items, physics)
         {
             action = Some(InteractionAction::Drop(item));
         }
@@ -1684,7 +1778,7 @@ impl InteractionState {
                     emission_speed = particles.max_speed * fill * factor;
                 }
             }
-            let view = to_rapier(player.view_pose(physics));
+            let view = to_rapier(player.view(physics).head_pose);
             let cap_center = view.translation + view.rotation * self.drink_collider_center;
             if poured.is_some() {
                 contact.set_color(fractions);
@@ -1826,5 +1920,66 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
         0.0
     } else {
         ((value - start) / (end - start)).clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod seat_press_tests {
+    use super::*;
+    #[test]
+    fn seat_target_press_release_matches() {
+        let first = Some(ItemId(1));
+        let second = Some(ItemId(2));
+        let duration = (0..10).fold(0., |elapsed, _| elapsed + crate::simulation::FIXED_DT);
+        assert!(
+            !SeatPress {
+                usable: first,
+                duration
+            }
+            .matches(first)
+        );
+
+        assert!(
+            SeatPress {
+                usable: first,
+                duration: 0.19
+            }
+            .matches(first)
+        );
+        assert!(
+            !SeatPress {
+                usable: first,
+                duration: 0.2
+            }
+            .matches(first)
+        );
+        assert!(
+            !SeatPress {
+                usable: first,
+                duration: 0.1
+            }
+            .matches(second)
+        );
+        assert!(
+            !SeatPress {
+                usable: first,
+                duration: 0.1
+            }
+            .matches(None)
+        );
+        assert!(
+            !SeatPress {
+                usable: None,
+                duration: 0.1
+            }
+            .matches(first)
+        );
+        assert!(
+            SeatPress {
+                usable: None,
+                duration: 10.
+            }
+            .matches(None)
+        );
     }
 }

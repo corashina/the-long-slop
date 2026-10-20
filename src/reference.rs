@@ -666,7 +666,7 @@ pub struct PlayerReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeatReference {
-    pub default_yaw_degrees: f32,
+    pub default_pitch_degrees: f32,
     pub pitch_limits_degrees: [f32; 2],
     pub id: SeatId,
     pub source: SourceId,

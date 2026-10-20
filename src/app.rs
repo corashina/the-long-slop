@@ -126,7 +126,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
         runtime.stream.frame().request.session,
         fixed,
     );
-    let current = runtime.area.player.view_pose(&runtime.physics);
+    let current = runtime.area.player.view(&runtime.physics).camera_pose;
     App::new()
         .insert_resource(graph)
         .insert_resource(allocation)
@@ -601,6 +601,12 @@ fn clear_input(drive: &mut Drive) {
     drive.tool_lmb = false;
     drive.tool_delta_seconds = 0.;
     drive.runtime.clear_input();
+    drive.current = drive
+        .runtime
+        .area
+        .player
+        .view(&drive.runtime.physics)
+        .camera_pose;
     drive.clock.reset();
     drive.previous = drive.current;
     drive.rendered = drive.current;
@@ -653,7 +659,12 @@ fn read_input(
 
     if actions & 16 != 0 {
         drive.runtime.recover(&reference.0);
-        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        drive.current = drive
+            .runtime
+            .area
+            .player
+            .view(&drive.runtime.physics)
+            .camera_pose;
         clear_input(&mut drive);
     }
     let requested = game_driving_assists();
@@ -728,7 +739,12 @@ fn advance_physics(
         for i in 0..3 {
             drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
         }
-        drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+        drive.current = drive
+            .runtime
+            .area
+            .player
+            .view(&drive.runtime.physics)
+            .camera_pose;
         if drive.runtime.paused {
             drive.clock.reset();
             break;
@@ -874,7 +890,12 @@ fn sync_world(
     match result {
         Ok(moved) => {
             if moved || (!was_aligned && drive.runtime.startup_aligned) {
-                drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+                drive.current = drive
+                    .runtime
+                    .area
+                    .player
+                    .view(&drive.runtime.physics)
+                    .camera_pose;
                 clear_input(&mut drive);
             }
         }

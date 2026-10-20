@@ -1050,7 +1050,7 @@ impl AudioState {
             return;
         };
         let settings = &self.reference.mixer_controls.outside.sensor;
-        let mut pose = to_rapier(area.player.view_pose(physics));
+        let mut pose = to_rapier(area.player.view(physics).head_pose);
         pose.translation += pose.rotation
             * rapier3d::math::Vector::from_array(settings.local_position.unwrap_or([0.; 3]));
         let Some(mask) = settings.mask else {

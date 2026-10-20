@@ -484,7 +484,7 @@ impl GarageRuntime {
             .find(|b| b.kind == kind as u32)
             .unwrap();
         let pose = if kind == crate::audio::AudioKind::Eat {
-            self.area.player.view_pose(&self.physics)
+            self.area.player.view(&self.physics).head_pose
         } else {
             self.area.player.body_pose(&self.physics)
         };
@@ -722,7 +722,7 @@ impl GarageRuntime {
             || {
                 self.stream
                     .origin
-                    .absolute(self.area.player.view_pose(&self.physics).position)
+                    .absolute(self.area.player.view(&self.physics).head_pose.position)
             },
             |camera| camera.absolute_position,
         );
@@ -744,7 +744,7 @@ impl GarageRuntime {
         use rapier3d::math::{Rotation, Vector};
         use rapier3d::prelude::{QueryFilter, Ray};
         let body = self.area.player.body_handle();
-        let view = to_rapier(self.area.player.view_pose(&self.physics));
+        let view = to_rapier(self.area.player.view(&self.physics).camera_pose);
         let mut cap = to_rapier(self.area.player.body_pose(&self.physics));
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
         let surfaces = |_: rapier3d::prelude::ColliderHandle, c: &rapier3d::prelude::Collider| {

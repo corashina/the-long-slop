@@ -33,8 +33,15 @@ class PlayerMovementTests(unittest.TestCase):
         from tools.reference.player_movement import recover_seat_view
         for identity in (77843, 76381, 65840, 69296, 66466):
             seat = recover_seat_view(self.source, self.source.get('level1', identity))
-            self.assertEqual(seat['default_yaw_degrees'], 0.0)
+            self.assertEqual(seat['default_pitch_degrees'], 0.0)
             self.assertEqual(seat['pitch_limits_degrees'], [-89.0, 89.0])
+            reader = self.source.get('level1', identity)
+            transform = self.source.transform_for(self.source.resolve(reader, self.source.read(reader)['m_GameObject']))
+            while transform:
+                _, components = self.source.components(transform)
+                self.assertFalse(any(component.type.name == 'MonoBehaviour'
+                    and self.source.class_name(component) in ('usablescript', 'pickupable') for component in components))
+                transform = self.source.resolve(transform, self.source.read(transform)['m_Father'])
 
     def test_ordered_clearance_spheres(self):
         value = self.recover()
@@ -123,3 +130,12 @@ class PlayerMovementTests(unittest.TestCase):
             with self.subTest(seat_field=field), patch.object(source, 'read', side_effect=wrong_seat):
                 with self.assertRaises(ValueError):
                     recover_seat_view(source, source.get('level1', 69296))
+
+    def test_pickupable_seat_ancestor_is_rejected(self):
+        from tools.reference.player_movement import recover_seat_view
+        source = self.source
+        original = source.class_name
+        with patch.object(source, 'class_name', side_effect=lambda reader:
+                'pickupable' if key(reader) == ('level1', 69296) else original(reader)):
+            with self.assertRaisesRegex(ValueError, 'Selected seat pickup ancestry differs'):
+                recover_seat_view(source, source.get('level1', 69296))

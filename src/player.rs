@@ -1,9 +1,12 @@
 pub mod collision;
 pub mod pose;
 mod posture;
+mod view;
 use collision::PlayerSweepShape;
 use posture::{MovementSpeed, PostureState};
 use rapier3d::parry::shape::Shape;
+pub use view::PlayerView;
+use view::ViewState;
 
 use rapier3d::control::{CharacterCollision, KinematicCharacterController};
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -18,15 +21,25 @@ use crate::vehicle::{PhysicsWorld, VehiclePose};
 
 #[derive(Clone, Copy, Debug)]
 pub struct PlayerStepContext {
+    pub duck_allowed: bool,
     pub wheel_posture_allowed: bool,
     pub mouse_consumed: bool,
     pub picked_up: bool,
     pub recenter_consumed: bool,
     pub movement_multiplier: f32,
 }
+impl PlayerStepContext {
+    pub fn can_duck(input: FrameInput, tuning_available: bool, picked_up: bool) -> bool {
+        !tuning_available
+            && (!picked_up
+                || (input.player_held & crate::simulation::player_keys::LEAN != 0
+                    && input.held & keys::TRANSLATE == 0))
+    }
+}
 impl Default for PlayerStepContext {
     fn default() -> Self {
         Self {
+            duck_allowed: false,
             wheel_posture_allowed: false,
             mouse_consumed: false,
             picked_up: false,
@@ -40,6 +53,11 @@ impl Default for PlayerStepContext {
 pub enum PlayerMode {
     Walking,
     Seated,
+}
+
+// Two relative f32 rounding units cover the ten-step source tap accumulation.
+pub(crate) fn source_short_hold(duration: f32, limit: f32) -> bool {
+    duration < limit - 2. * f32::EPSILON * limit
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +88,8 @@ struct Occupancy {
     id: SeatId,
     local_pose: Pose,
     yaw_limits: [f32; 2],
+    pitch_limits: [f32; 2],
+    default_pitch: f32,
     vehicle: usize,
     driver: bool,
     driving2: bool,
@@ -81,6 +101,7 @@ pub struct PlayerState {
     sweep: PlayerSweepShape,
     posture: PostureState,
     movement_speed: MovementSpeed,
+    view_state: ViewState,
     exit_capsule: SharedShape,
     body: RigidBodyHandle,
     collider: ColliderHandle,
@@ -131,6 +152,8 @@ impl PlayerState {
                     .ok_or_else(|| crate::save::SaveError::InvalidLinks("Seat vehicle".into()))?,
                 local_pose: to_rapier(crate::save::local_pose(&record.local_pose)),
                 yaw_limits: seat.yaw_limits_degrees,
+                pitch_limits: seat.pitch_limits_degrees,
+                default_pitch: seat.default_pitch_degrees,
                 driver: seat.driver,
                 driving2: seat.driving2,
             })
@@ -141,6 +164,7 @@ impl PlayerState {
             self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
                 * seat.local_pose;
         }
+        self.cancel_view_input();
         self.push_gripping = false;
         self.collisions.clear();
         self.grounded = false;
@@ -202,6 +226,11 @@ impl PlayerState {
             sweep,
             posture: PostureState::new(1.0),
             movement_speed: MovementSpeed::default(),
+            view_state: ViewState::new(
+                &reference.posture,
+                &reference.view,
+                reference.scroll_sensitivity,
+            ),
             exit_capsule,
             body,
             collider,
@@ -278,7 +307,47 @@ impl PlayerState {
     }
 
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
-    pub fn step(
+    pub fn step_view(&mut self, input: FrameInput, context: PlayerStepContext, dt: f32) {
+        if !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        let seated = self.occupancy.is_some();
+        if let Some(seat) = self.occupancy
+            && !context.recenter_consumed
+            && input.held & keys::RECENTER != 0
+        {
+            self.view_state.recenter();
+            let amount = (dt * self.reference.posture.rise_rate).min(1.);
+            self.yaw += (0. - self.yaw) * amount;
+            self.pitch += (seat.default_pitch - self.pitch) * amount;
+        }
+        let head_rotation = self.head_rotation();
+        let ordinary_look = self.view_state.step(
+            input,
+            context,
+            self.posture.value(),
+            seated,
+            head_rotation,
+            dt,
+        );
+        if ordinary_look {
+            if input.mouse[0].is_finite() {
+                self.yaw += input.mouse[0];
+            }
+            if input.mouse[1].is_finite() {
+                self.pitch += input.mouse[1];
+            }
+        }
+        self.pitch = self.pitch.clamp(-89.0, 89.0);
+        if let Some(seat) = self.occupancy {
+            self.yaw = self.yaw.clamp(seat.yaw_limits[0], seat.yaw_limits[1]);
+            self.pitch = self.pitch.clamp(seat.pitch_limits[0], seat.pitch_limits[1]);
+        } else {
+            self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
+            self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
+        }
+    }
+    pub fn step_movement(
         &mut self,
         input: FrameInput,
         context: PlayerStepContext,
@@ -288,15 +357,7 @@ impl PlayerState {
         if !dt.is_finite() || dt <= 0.0 {
             return;
         }
-        if !context.mouse_consumed && input.mouse[0].is_finite() {
-            self.yaw += input.mouse[0];
-        }
-        if !context.mouse_consumed && input.mouse[1].is_finite() {
-            self.pitch += input.mouse[1];
-        }
-        self.pitch = self.pitch.clamp(-89.0, 89.0);
         if let Some(seat) = self.occupancy {
-            self.yaw = self.yaw.clamp(seat.yaw_limits[0], seat.yaw_limits[1]);
             self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
                 * seat.local_pose;
             physics.edit_body(self.body, |body| {
@@ -304,8 +365,6 @@ impl PlayerState {
             });
             return;
         }
-        self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
-        self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
         if self.push_gripping {
             self.pose.translation = physics.rapier().bodies[self.body].position().translation;
         }
@@ -514,11 +573,12 @@ impl PlayerState {
         let Some(seat) = self.seats.iter().find(|seat| seat.id == id) else {
             return false;
         };
+        let old_head = to_rapier(self.view(physics).head_pose);
         let local_pose = to_rapier(pose);
         let chassis = physics.chassis_handle(seat.vehicle);
         let seated_pose = *physics.rapier().bodies[chassis].position() * local_pose;
-        self.yaw =
-            (self.yaw - yaw_from_rotation(seated_pose.rotation) + 180.0).rem_euclid(360.0) - 180.0;
+        let head_in_seat = seated_pose.inverse() * old_head;
+        self.yaw = yaw_from_rotation(head_in_seat.rotation);
         self.yaw = self
             .yaw
             .clamp(seat.yaw_limits_degrees[0], seat.yaw_limits_degrees[1]);
@@ -526,12 +586,15 @@ impl PlayerState {
             id,
             local_pose,
             yaw_limits: seat.yaw_limits_degrees,
+            pitch_limits: seat.pitch_limits_degrees,
+            default_pitch: seat.default_pitch_degrees,
             vehicle: seat.vehicle,
             driver: seat.driver,
             driving2: seat.driving2,
         });
         self.pose = seated_pose;
         self.posture.restore(1.0);
+        self.view_state.enter(head_in_seat);
         self.grounded = false;
         self.running = false;
         self.vertical_velocity = 0.0;
@@ -545,16 +608,11 @@ impl PlayerState {
         if self.occupancy.is_none() {
             return None;
         }
-        let view = to_rapier(self.view_pose(physics));
+        let resolved = self.view(physics);
+        let view = to_rapier(resolved.head_pose);
+        let camera = to_rapier(resolved.camera_pose);
         let body = to_rapier(self.body_pose(physics));
-        let forward = view.rotation * -Vector::Z;
-        let seat_forward = body.rotation * -Vector::Z;
-        let angle = forward
-            .dot(seat_forward)
-            .clamp(-1.0, 1.0)
-            .acos()
-            .to_degrees();
-        if angle < limits.minimum_look_angle_degrees {
+        if !view::exit_permission(camera, body, limits.minimum_look_angle_degrees) {
             return None;
         }
         // Unity rays ignore colliders containing the ray origin.
@@ -572,15 +630,6 @@ impl PlayerState {
                 .exclude_rigid_body(self.body)
                 .predicate(&ray_targets),
         );
-        let max_distance = queries
-            .cast_ray_and_get_normal(&Ray::new(view.translation, forward), limits.distance, true)
-            .map_or(limits.distance, |(_, hit)| {
-                let displacement = forward * hit.time_of_impact
-                    + hit.normal * (self.reference.posture.maximum_radius + 0.05);
-                Vector::new(displacement.x, 0.0, displacement.z)
-                    .length()
-                    .min(limits.distance)
-            });
         let exit_mask = self.reference.get_out_layer_mask;
         let exit_targets = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
             collider.is_enabled() && collider.collision_groups().memberships.bits() & exit_mask != 0
@@ -591,29 +640,14 @@ impl PlayerState {
                 .exclude_rigid_body(self.body)
                 .predicate(&exit_targets),
         );
-        let mut vertical = 0.0;
-        for horizontal_index in 0..limits.horizontal_steps {
-            let distance = horizontal_index as f32 * limits.horizontal_step;
-            if distance >= max_distance {
-                break;
-            }
-            for _ in 0..limits.vertical_steps {
-                let head = view.translation + forward * distance + Vector::Y * vertical;
-                if exit_queries
-                    .intersect_shape(Pose::from_translation(head), self.exit_capsule.as_ref())
-                    .next()
-                    .is_none()
-                {
-                    // Source GetOut places the body origin at the checked head point.
-                    let mut candidate = Pose::from_translation(head);
-                    candidate.rotation =
-                        Rotation::from_rotation_y(-yaw_from_rotation(view.rotation).to_radians());
-                    return Some(candidate);
-                }
-                vertical += limits.vertical_step;
-            }
-        }
-        None
+        view::search_exit(
+            view,
+            limits,
+            self.reference.posture.maximum_radius + 0.05,
+            self.exit_capsule.as_ref(),
+            &queries,
+            &exit_queries,
+        )
     }
     pub fn can_exit(&self, physics: &PhysicsWorld, limits: &ExitReference) -> bool {
         self.exit_pose(physics, limits).is_some()
@@ -630,6 +664,7 @@ impl PlayerState {
         self.recoil_velocity = Vector::new(inherited.x, 0.0, inherited.z);
         self.occupancy = None;
         self.posture.restore(1.0);
+        self.cancel_view_input();
         self.grounded = false;
         self.running = false;
 
@@ -723,27 +758,41 @@ impl PlayerState {
         });
         from_rapier(pose)
     }
-    pub fn head_pose_at(&self, body_pose: VehiclePose) -> VehiclePose {
-        let mut pose = to_rapier(body_pose);
-        let lower = Vector::from_array(self.reference.posture.prone_head.translation);
-        let head = lower.lerp(
-            Vector::from_array(self.reference.posture.standing_head.translation),
-            self.posture.value(),
-        );
-        pose.translation += pose.rotation * head;
-        if self.occupancy.is_some() {
-            pose.rotation *= Rotation::from_rotation_y(-self.yaw.to_radians());
-        }
-        pose.rotation *= Rotation::from_rotation_x(-self.pitch.to_radians());
-        from_rapier(pose)
+    fn head_rotation(&self) -> Rotation {
+        let yaw = if self.occupancy.is_some() {
+            Rotation::from_rotation_y(-self.yaw.to_radians())
+        } else {
+            Rotation::IDENTITY
+        };
+        yaw * Rotation::from_rotation_x(-self.pitch.to_radians())
     }
-    pub fn view_pose(&self, physics: &PhysicsWorld) -> VehiclePose {
-        self.head_pose_at(self.body_pose(physics))
+    pub fn neutral_view_at(&self, body_pose: VehiclePose) -> PlayerView {
+        self.view_state.resolve(
+            to_rapier(body_pose),
+            self.head_rotation(),
+            self.occupancy.is_some(),
+            Some(self.posture.value()),
+        )
+    }
+    pub fn view(&self, physics: &PhysicsWorld) -> PlayerView {
+        self.view_state.resolve(
+            to_rapier(self.body_pose(physics)),
+            self.head_rotation(),
+            self.occupancy.is_some(),
+            None,
+        )
+    }
+    pub(crate) fn view_owns_look_input(&self) -> bool {
+        self.view_state.looking()
+    }
+    pub fn cancel_view_input(&mut self) {
+        self.view_state.cancel(self.posture.value());
     }
     pub(crate) fn recover(&mut self, pose: VehiclePose, physics: &mut PhysicsWorld) {
         self.pose = to_rapier(pose);
         self.yaw = yaw_from_rotation(self.pose.rotation);
         self.posture.restore(self.posture.value());
+        self.cancel_view_input();
         self.movement_speed = MovementSpeed::default();
         self.vertical_velocity = 0.0;
         self.recoil_velocity = Vector::ZERO;
@@ -757,7 +806,7 @@ impl PlayerState {
         self.update_geometry(physics);
     }
     pub fn focus_position(&self, physics: &PhysicsWorld) -> [f32; 3] {
-        self.view_pose(physics).position
+        self.view(physics).camera_pose.position
     }
     pub(crate) fn align_startup(&mut self, offset: f32, physics: &mut PhysicsWorld) {
         self.pose.translation.y += offset;

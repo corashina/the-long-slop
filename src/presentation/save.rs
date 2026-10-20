@@ -216,7 +216,7 @@ impl PreparedPresentation {
         candidate.stream.advance_generation();
         candidate.stream.set_overlap(self.overlap(world))?;
         candidate.initialize_storage_frame(FIXED_DT)?;
-        let pose = candidate.area.player.view_pose(&candidate.physics);
+        let pose = candidate.area.player.view(&candidate.physics).camera_pose;
         let camera = if let Some(sleep) = candidate.sleep_camera() {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
         } else if mode == super::camera::CameraMode::Chase && candidate.area.player.seat().is_some()

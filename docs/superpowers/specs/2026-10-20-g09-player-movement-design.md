@@ -134,7 +134,8 @@ Existing chase and sleep selection remains explicit, with no first-person lean t
 `PlayerReference` owns recovered anchors, sensor records, movement constants, lean constants, and view constants.
 `SeatReference` owns the selected seats' source angle limits and default view angles.
 Their records are `level1:77843`, `76381`, `65840`, `69296`, and `66466`.
-All five seats use yaw limits of -179 and 179 degrees, with default yaw zero.
+All five seats use yaw limits of -179 and 179 degrees, with default pitch zero.
+Seated Tab approaches yaw zero and the recovered default pitch.
 Seated pitch is limited to -89 and 89 degrees.
 Exit requires an angle of at least 65 degrees from seat-forward.
 No entry tilt limit applies. The source `BcantSitAngle` field is false.
@@ -195,8 +196,10 @@ Update control help with Q hold, Q tap, zoom, and continuous posture behavior.
 Seat entry clears standing lean and walking posture transitions according to source `GetIn`.
 Use recovered seat angles and positional lean. Do not substitute a generic seat limit.
 Seated posture is always one, as in source line 15905.
-Seat entry requires E release to match the usable target recorded on E press.
-For seats with a usable component, the hold duration must be below source `holdButtonTime`.
+Seat entry compares the usable component on release with the component recorded on press.
+Null components compare equal, including different seats with no usable component.
+For seats with a usable component, the hold duration must be strictly below 0.2 seconds, from source line 17825.
+Seats without a usable component have no hold-duration limit.
 Source entry predicates are at lines 17819-17827.
 Seat exit angle permission uses camera-forward. Its placement search uses head position and head-forward.
 Preserve the existing source capsule search and masks, at lines 17247-17279.

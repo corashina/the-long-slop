@@ -246,7 +246,7 @@ fn installed_player_movement_contract() {
     for seat in &reference.seats {
         assert_eq!(seat.yaw_limits_degrees, [-179.0, 179.0]);
         assert_eq!(seat.pitch_limits_degrees, [-89.0, 89.0]);
-        assert_eq!(seat.default_yaw_degrees, 0.0);
+        assert_eq!(seat.default_pitch_degrees, 0.0);
         assert_eq!(seat.min_exit_angle_degrees, 65.0);
     }
     for mutate in [
@@ -256,7 +256,7 @@ fn installed_player_movement_contract() {
         |r: &mut ReferenceManifest| r.player.posture.feet.center[0] = f32::NAN,
         |r: &mut ReferenceManifest| r.player.posture.standing_head.translation[1] = f32::INFINITY,
         |r: &mut ReferenceManifest| r.player.view.tap_seconds = 0.3,
-        |r: &mut ReferenceManifest| r.seats[0].default_yaw_degrees = 1.0,
+        |r: &mut ReferenceManifest| r.seats[0].default_pitch_degrees = 1.0,
         |r: &mut ReferenceManifest| r.seats[0].pitch_limits_degrees = [-90.0, 90.0],
     ] {
         let mut invalid = reference.clone();

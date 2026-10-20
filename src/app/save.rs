@@ -203,7 +203,12 @@ fn process_request(
                 audio.sync_lamps(&reference.lighting, &runtime.lighting);
             }
             drive.camera = candidate.camera;
-            drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+            drive.current = drive
+                .runtime
+                .area
+                .player
+                .view(&drive.runtime.physics)
+                .camera_pose;
             drive.previous = drive.current;
             drive.rendered = drive.current;
             drive.input.clear();

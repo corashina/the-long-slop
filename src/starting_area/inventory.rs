@@ -163,7 +163,7 @@ impl StartingArea {
                     .retrieve(id, &mut self.items, physics);
             } else {
                 let rule = self.interaction.pickup_rule(id).unwrap();
-                let view = to_rapier(self.player.view_pose(physics));
+                let view = to_rapier(self.player.view(physics).head_pose);
                 let offset = if rule.use_recenter_position {
                     Vector::from_array(rule.recenter_position)
                 } else {
@@ -185,7 +185,7 @@ impl StartingArea {
                 self.interaction
                     .pickup_item(
                         id,
-                        self.player.view_pose(physics).position,
+                        self.player.view(physics).head_pose.position,
                         &self.player,
                         &mut self.items,
                         physics,
@@ -200,7 +200,7 @@ impl StartingArea {
     }
     pub fn sync_equipment(&mut self, reference: &ReferenceManifest, physics: &mut PhysicsWorld) {
         self.pose.set_frames(
-            self.player.view_pose(physics),
+            self.player.view(physics).head_pose,
             self.player.body_pose(physics),
         );
         self.pose.update(

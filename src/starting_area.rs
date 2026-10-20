@@ -889,6 +889,53 @@ impl GarageRuntime {
         self.lighting.advance_fades(&reference.lighting, dt);
     }
 
+    fn player_step_context(
+        &self,
+        input: FrameInput,
+        availability: crate::interaction::feedback::ActionAvailability,
+        reference: &ReferenceManifest,
+    ) -> PlayerStepContext {
+        let picked_up = self.area.interaction.held().is_some();
+        let mouse_consumed = (input.held & (keys::USE | keys::PRIMARY) != 0
+            && self.area.interaction.dragging_mechanism().is_some())
+            || (input.held & keys::USE != 0
+                && availability.actions.0 & crate::interaction::feedback::ActionMask::TUNE != 0)
+            || (input.held & keys::PRIMARY != 0
+                && availability.lmb_use
+                && availability
+                    .item
+                    .is_some_and(|id| self.area.interaction.mechanisms.radio_tunable(id)))
+            || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0 && picked_up)
+            || (input.held & keys::USE != 0
+                && availability
+                    .item
+                    .is_some_and(|id| self.area.interaction.mechanisms.contains(id)));
+        let movement_multiplier = self.area.interaction.carry.body().map_or(1.0, |body| {
+            let mass = self.physics.rapier().bodies[body].mass();
+            ((mass - reference.player.carry_max_weight)
+                / (reference.player.carry_min_weight - reference.player.carry_max_weight))
+                .clamp(0.0, 1.0)
+        });
+        let slideable = self
+            .area
+            .interaction
+            .dragging_mechanism()
+            .is_some_and(|id| self.area.interaction.mechanisms.slideable(id));
+        let duck_allowed = PlayerStepContext::can_duck(
+            input,
+            availability.actions.0 & crate::interaction::feedback::ActionMask::TUNE != 0,
+            picked_up,
+        );
+        PlayerStepContext {
+            duck_allowed,
+            wheel_posture_allowed: duck_allowed && !slideable,
+            mouse_consumed,
+            picked_up,
+            recenter_consumed: picked_up && (input.held | input.pressed) & keys::RECENTER != 0,
+            movement_multiplier,
+        }
+    }
+
     pub fn step(&mut self, reference: &ReferenceManifest, mut input: FrameInput) {
         self.wheels
             .refresh_conditions(&self.area.conditions, &self.area.items);
@@ -939,14 +986,31 @@ impl GarageRuntime {
 
         self.update_inventory(reference, input);
         self.area.begin_step();
-        let aim = if self.sleeping() {
+        let preliminary_aim = if self.sleeping() {
             ResolvedAim::default()
         } else {
             self.area.interaction.resolve(
                 &self.physics,
-                self.area.player.view_pose(&self.physics),
+                self.area.player.view(&self.physics).camera_pose,
                 &self.area.items,
             )
+        };
+        let preliminary_availability = self.area.interaction.available_actions(
+            &preliminary_aim,
+            &self.area.player,
+            &self.area.items,
+            &self.physics,
+            self.survival.output(),
+        );
+        let view_context = self.player_step_context(input, preliminary_availability, reference);
+        self.area.player.step_view(input, view_context, FIXED_DT);
+        let view = self.area.player.view(&self.physics);
+        let aim = if self.sleeping() || view.ray_actions_blocked {
+            ResolvedAim::default()
+        } else {
+            self.area
+                .interaction
+                .resolve(&self.physics, view.camera_pose, &self.area.items)
         };
         if !self.aim.same_actions(&aim) || input.pressed & (keys::GRAB | keys::USE) != 0 {
             self.notice = "";
@@ -954,13 +1018,6 @@ impl GarageRuntime {
         self.aim = aim;
         let previous_seat = self.area.player.seat();
         let seated = previous_seat.is_some();
-        let availability = self.area.interaction.available_actions(
-            &aim,
-            &self.area.player,
-            &self.area.items,
-            &self.physics,
-            self.survival.output(),
-        );
         let action = self.area.interaction.step(
             input,
             aim,
@@ -1092,48 +1149,17 @@ impl GarageRuntime {
         } else if input.mouse != [0.0; 2] {
             self.notice = "";
         }
-        let mut walking_input = input;
-        if (input.held & (keys::USE | keys::PRIMARY) != 0
-            && self.area.interaction.dragging_mechanism().is_some())
-            || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & keys::PRIMARY != 0
-                && availability.lmb_use
-                && availability
-                    .item
-                    .is_some_and(|id| self.area.interaction.mechanisms.radio_tunable(id)))
-            || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
-                && self.area.interaction.held().is_some())
-        {
-            walking_input.mouse = [0.0; 2];
-        }
-        let picked_up = self.area.interaction.held().is_some();
-        let movement_multiplier = self.area.interaction.carry.body().map_or(1.0, |body| {
-            let mass = self.physics.rapier().bodies[body].mass();
-            ((mass - reference.player.carry_max_weight)
-                / (reference.player.carry_min_weight - reference.player.carry_max_weight))
-                .clamp(0.0, 1.0)
-        });
-        let slideable = self
-            .area
-            .interaction
-            .dragging_mechanism()
-            .is_some_and(|id| self.area.interaction.mechanisms.slideable(id));
-        let context = PlayerStepContext {
-            wheel_posture_allowed: availability.actions.0
-                & crate::interaction::feedback::ActionMask::TUNE
-                == 0
-                && !slideable
-                && (!picked_up
-                    || (input.player_held & crate::simulation::player_keys::LEAN != 0
-                        && input.held & keys::TRANSLATE == 0)),
-            mouse_consumed: walking_input.mouse != input.mouse,
-            picked_up,
-            recenter_consumed: picked_up && (input.held | input.pressed) & keys::RECENTER != 0,
-            movement_multiplier,
-        };
+        let final_availability = self.area.interaction.available_actions(
+            &aim,
+            &self.area.player,
+            &self.area.items,
+            &self.physics,
+            self.survival.output(),
+        );
+        let context = self.player_step_context(input, final_availability, reference);
         self.area
             .player
-            .step(walking_input, context, &mut self.physics, FIXED_DT);
+            .step_movement(input, context, &mut self.physics, FIXED_DT);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
         self.area
@@ -1538,6 +1564,7 @@ impl GarageRuntime {
     }
 
     pub fn clear_input(&mut self) {
+        self.area.player.cancel_view_input();
         self.sleep.cancel_charge();
         self.clear_driving_input();
         self.area.interaction.cancel_input();

@@ -251,7 +251,7 @@ impl PushState {
             self.stop(player, physics);
             return None;
         }
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).camera_pose);
         let forward = view.rotation * -Vector::Z;
         let mut direction = forward;
         let projected = Vector::new(direction.x, 0.0, direction.z);

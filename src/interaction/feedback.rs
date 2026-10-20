@@ -116,7 +116,7 @@ impl InteractionState {
         physics: &PhysicsWorld,
         needs: crate::survival::NeedsOutput,
     ) -> ActionAvailability {
-        if needs.dead {
+        if needs.dead || player.view(physics).ray_actions_blocked {
             return ActionAvailability::default();
         }
         let valid = |target: Option<AimTarget>| {
@@ -214,10 +214,7 @@ impl InteractionState {
                     a.actions.0 |= ActionMask::TUNE;
                 }
             }
-            if self.seats.iter().any(|s| s.item == t.item)
-                && self.held().is_none()
-                && player.seat().is_none()
-            {
+            if self.seats.iter().any(|s| s.item == t.item) && player.seat().is_none() {
                 a.actions.0 |= ActionMask::ENTER;
                 a.context = FeedbackContext::Seat;
             }

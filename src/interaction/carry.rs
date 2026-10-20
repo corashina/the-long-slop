@@ -36,6 +36,12 @@ pub struct CarryState {
     charge_stopped: bool,
 }
 
+// Source 17488 keeps RMB as an override and always excludes MMB rotation.
+pub(super) fn wheel_allowed(input: FrameInput, tuning_available: bool, looking: bool) -> bool {
+    ((!tuning_available && !looking) || input.held & keys::TRANSLATE != 0)
+        && input.held & keys::ROTATE == 0
+}
+
 impl CarryState {
     pub(crate) fn restore_save(
         &mut self,
@@ -177,7 +183,7 @@ impl CarryState {
         }
         let charge = self.throw_charge;
         let body = self.body()?;
-        let direction = to_rapier(player.view_pose(physics)).rotation * -Vector::Z;
+        let direction = to_rapier(player.view(physics).head_pose).rotation * -Vector::Z;
         let item = self.drop(items, physics)?;
         if charge > self.reference.throw_minimum {
             physics.edit_body(body, |body| {
@@ -301,7 +307,7 @@ impl CarryState {
         });
         physics.edit_body(anchor, |body| body.set_position(pose, false));
         let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), true);
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).head_pose);
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
         physics.edit_body(body, |body| body.enable_ccd(true));
@@ -327,6 +333,7 @@ impl CarryState {
         &mut self,
         input: FrameInput,
         player: &PlayerState,
+        tuning_available: bool,
         physics: &mut PhysicsWorld,
         dt: f32,
     ) -> bool {
@@ -340,7 +347,7 @@ impl CarryState {
         let Some(anchor) = self.anchor else {
             return false;
         };
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).head_pose);
         let rule = &self.rules[&held.item];
         let mass = physics.rapier().bodies[held.body].mass();
         let movement_gain = ((mass - self.reference.carry_max_weight)
@@ -363,7 +370,9 @@ impl CarryState {
         } else {
             let rotating = input.held & keys::ROTATE != 0;
             let moving = input.held & keys::TRANSLATE != 0;
-            if input.wheel.is_finite() && !rotating {
+            if input.wheel.is_finite()
+                && wheel_allowed(input, tuning_available, player.view_owns_look_input())
+            {
                 let direction = if rule.move_with_rotation {
                     (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
                         .normalize_or_zero()
@@ -481,5 +490,30 @@ impl CarryState {
         }
         physics.edit_body(anchor, |body| body.set_next_kinematic_position(desired));
         false
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    #[test]
+    fn source_carry_wheel_tuning_look_and_mouse_buttons() {
+        for tuning in [false, true] {
+            for looking in [false, true] {
+                for rmb in [false, true] {
+                    for mmb in [false, true] {
+                        let input = FrameInput {
+                            held: (if rmb { keys::TRANSLATE } else { 0 })
+                                | (if mmb { keys::ROTATE } else { 0 }),
+                            ..Default::default()
+                        };
+                        assert_eq!(
+                            wheel_allowed(input, tuning, looking),
+                            !mmb && (rmb || (!tuning && !looking))
+                        );
+                    }
+                }
+            }
+        }
     }
 }

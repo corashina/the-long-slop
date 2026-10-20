@@ -11,7 +11,7 @@ use crate::{
 use std::collections::HashMap;
 pub struct PlayerPoseState {
     frames: HashMap<NodeId, (VehiclePose, VehiclePose, bool)>,
-    view: VehiclePose,
+    head: VehiclePose,
     body: VehiclePose,
     pub inventory: NodeId,
 }
@@ -39,18 +39,18 @@ impl PlayerPoseState {
             .chain([inventory])
         {
             let mut parent = Some(id);
-            let mut camera_relative = false;
+            let mut head_relative = false;
             while let Some(node) = parent {
                 if node == head {
-                    camera_relative = true;
+                    head_relative = true;
                     break;
                 }
                 parent = r.nodes.iter().find(|n| n.id == node).and_then(|n| n.parent);
             }
             let local = from_rapier(
-                &((if camera_relative { camera } else { body }) * to_rapier(node_pose(r, id)?)),
+                &((if head_relative { camera } else { body }) * to_rapier(node_pose(r, id)?)),
             );
-            frames.insert(id, (local, local, camera_relative));
+            frames.insert(id, (local, local, head_relative));
         }
         let identity = VehiclePose {
             position: [0.; 3],
@@ -58,13 +58,13 @@ impl PlayerPoseState {
         };
         Ok(Self {
             frames,
-            view: identity,
+            head: identity,
             body: identity,
             inventory,
         })
     }
-    pub fn set_frames(&mut self, view: VehiclePose, body: VehiclePose) {
-        self.view = view;
+    pub fn set_frames(&mut self, head: VehiclePose, body: VehiclePose) {
+        self.head = head;
         self.body = body;
     }
     pub fn update(
@@ -75,10 +75,10 @@ impl PlayerPoseState {
         _reference: &ClothingReference,
         _dt: f32,
     ) {
-        let view = to_rapier(self.view);
+        let head = to_rapier(self.head);
         let body = to_rapier(self.body);
-        for (local, world, camera) in self.frames.values_mut() {
-            *world = from_rapier(&((if *camera { view } else { body }) * to_rapier(*local)));
+        for (local, world, head_relative) in self.frames.values_mut() {
+            *world = from_rapier(&((if *head_relative { head } else { body }) * to_rapier(*local)));
         }
     }
     pub fn inventory_pose(&self, body: VehiclePose) -> VehiclePose {

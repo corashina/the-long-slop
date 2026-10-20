@@ -63,7 +63,7 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.CONSUME,'eat','[LMB]: Eat'],
   [ACTION.DRINK,'drink','Hold [LMB]: Drink'],
   [ACTION.TUNE,'tune','[E]+[Mouse] / [Scroll]: Open/Close'],
-  [ACTION.ENTER,'enter','[E]: Drive'],
+  [ACTION.ENTER,'enter','Release [E]: Sit'],
   [ACTION.EXIT,'exit','[E]: Get out/stand'],
   [ACTION.SWITCH,'switch','[E]: Switch'],
   [ACTION.PRIMARY_SWITCH,'primary','[E] / [LMB]: Switch'],
@@ -77,8 +77,8 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.SCRUB,'scrub','[LMB]: Scrub']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
  let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='';
- const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
- const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
+ const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center\n[Q]+[Scroll]: Posture';
+ const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
  const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};

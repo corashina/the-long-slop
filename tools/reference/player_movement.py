@@ -102,8 +102,17 @@ def recover_seat_view(source, reader):
         raise ValueError('Selected seat view differs')
     if key(reader)[1] == 69296 and not (data['driverSeat0'] and data['driverSeat1']):
         raise ValueError('Selected driver seat flags differ')
-    managed_evidence(source, ['FyRot = Mathf.Clamp(FyRot, -89f, 89f);'])
-    return dict(default_yaw_degrees=data['defYrot'], pitch_limits_degrees=[-89.0, 89.0])
+    transform = source.transform_for(source.resolve(reader, data['m_GameObject']))
+    while transform:
+        _, components = source.components(transform)
+        if any(component.type.name == 'MonoBehaviour' and source.class_name(component) == 'pickupable'
+               for component in components):
+            raise ValueError('Selected seat pickup ancestry differs')
+        transform = source.resolve(transform, source.read(transform)['m_Father'])
+    managed_evidence(source, ['FyRot = Mathf.Clamp(FyRot, -89f, 89f);',
+        'FyRot = Mathf.Lerp(FyRot, seat.defYrot, FduckLerp * dt);',
+        'Time.time - usePressedTime < 0.2f || seatUse == null'])
+    return dict(default_pitch_degrees=data['defYrot'], pitch_limits_degrees=[-89.0, 89.0])
 
 
 def validate_player_movement(value):

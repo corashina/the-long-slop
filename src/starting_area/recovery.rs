@@ -264,15 +264,19 @@ pub fn recovery_clearance(
                     })
             })
         };
-    let old_view = to_rapier(area.player.view_pose(physics));
+    let old_view = to_rapier(area.player.view(physics).head_pose);
     if area.player.seat().is_some() {
-        if !held.iter().all(|body| clear_body(*body, delta)) {
+        let neutral = area.player.neutral_view_at(crate::vehicle::from_rapier(
+            &(delta * to_rapier(area.player.body_pose(physics))),
+        ));
+        let held_delta = to_rapier(neutral.head_pose) * old_view.inverse();
+        if !held.iter().all(|body| clear_body(*body, held_delta)) {
             return None;
         }
         return Some(RecoveryTransport {
             vehicle: pose,
             player: None,
-            held_delta: delta,
+            held_delta,
         });
     }
     let shape = area.player.sweep_shape();
@@ -301,7 +305,8 @@ pub fn recovery_clearance(
             }
             let view = to_rapier(
                 area.player
-                    .head_pose_at(crate::vehicle::from_rapier(&candidate)),
+                    .neutral_view_at(crate::vehicle::from_rapier(&candidate))
+                    .head_pose,
             );
             let held_delta = view * old_view.inverse();
             if !held.iter().all(|body| clear_body(*body, held_delta)) {
