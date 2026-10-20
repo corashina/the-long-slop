@@ -3,6 +3,7 @@ pub mod carry;
 pub mod cleaning;
 pub mod consumption;
 pub mod equipment;
+pub(crate) mod equipment_input;
 pub mod feedback;
 pub mod fluid_contact;
 pub mod items;
@@ -179,6 +180,7 @@ pub struct InteractionState {
     seats: Vec<SeatState>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
+    pub(crate) equipment_input: equipment_input::EquipmentInput,
     push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
@@ -550,6 +552,9 @@ impl InteractionState {
             seats,
             carry: carry::CarryState::new(reference)?,
             equipment: equipment::EquipmentState::new(reference),
+            equipment_input: equipment_input::EquipmentInput::new(
+                reference.inventory.equip_hold_seconds,
+            ),
             push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
@@ -1117,6 +1122,7 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.equipment_input.cancel_input();
         self.cleaning.reset_contact();
         self.seat_action_latched = false;
         self.fill_opening = None;
@@ -1217,16 +1223,10 @@ impl InteractionState {
             self.seat_action_latched = false;
         }
         let availability = self.available_actions(&aim, player, items, physics, needs);
-        let held_switch_pressed =
-            input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
-        let light_action = if held_switch_pressed {
-            self.held_light_control()
-        } else {
-            availability.light_control.filter(|_| {
-                input.pressed & keys::USE != 0
-                    || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
-            })
-        };
+        let light_action = availability.light_control.filter(|_| {
+            input.pressed & keys::USE != 0
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+        });
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
@@ -1290,9 +1290,6 @@ impl InteractionState {
         };
         let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
-        if held_switch_pressed {
-            carry_input.pressed &= !keys::PRIMARY;
-        }
         self.tuning_opening = None;
         let can_use_target = availability.light_control.is_some()
             || use_target.is_some_and(|target| {
@@ -1320,9 +1317,7 @@ impl InteractionState {
                 items.mark_dirty(target.item);
             }
             if input.pressed & keys::USE != 0
-                || (!held_switch_pressed
-                    && input.pressed & keys::PRIMARY != 0
-                    && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -1384,8 +1379,7 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (!held_switch_pressed
-                        && input.pressed & keys::PRIMARY != 0
+                    || (input.pressed & keys::PRIMARY != 0
                         && self.mechanisms.primary_switch(target.item)
                         && availability.lmb_use)
                     || input.held & keys::USE != 0
@@ -1567,8 +1561,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         let mut filled_destination = None;
-        if !held_switch_pressed
-            && input.held & keys::PRIMARY != 0
+        if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target

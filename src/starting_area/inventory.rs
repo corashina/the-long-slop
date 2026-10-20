@@ -113,7 +113,9 @@ impl StartingArea {
             carried,
             equipped: self.interaction.equipment.item(),
             ancestor_carry,
-            seated_clutch: self.player.seat().is_some() && input.held & keys::CLUTCH != 0,
+            seated_clutch: self.inventory_clutch_conflict
+                && self.player.seat().is_some()
+                && input.held & keys::CLUTCH != 0,
         }
     }
     pub fn apply_inventory_command(
@@ -229,6 +231,7 @@ impl StartingArea {
                 self.inventory.swap_progress = 0.;
             }
             InventoryCommand::Swap(_) => {
+                self.inventory.record_swap();
                 self.inventory.slots.swap(selected, index);
                 self.inventory_offsets.swap(selected, index);
                 if index != selected
@@ -339,31 +342,222 @@ impl StartingArea {
             .map(|i| i.location)
     }
 }
+/// One gameplay-frame result for the pending fixed-step input.
+pub struct InventoryFrame {
+    pub fixed_input: FrameInput,
+    pub primary_reserved: bool,
+    pub actions_blocked: bool,
+}
+impl StartingArea {
+    fn equipment_context(&self) -> crate::interaction::equipment_input::EquipmentContext {
+        crate::interaction::equipment_input::EquipmentContext {
+            carried_can_equip: self
+                .interaction
+                .held()
+                .and_then(|id| self.interaction.pickup_rule(id))
+                .is_some_and(|r| r.can_hold_right_hand),
+            has_carry: self.interaction.held().is_some(),
+            has_equipment: self.interaction.equipment.item().is_some(),
+            seated: self.player.seat().is_some(),
+        }
+    }
+}
 impl GarageRuntime {
-    pub(super) fn update_inventory(&mut self, reference: &ReferenceManifest, input: FrameInput) {
+    pub fn advance_inventory_frame(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: FrameInput,
+        dt: f32,
+        view: VehiclePose,
+    ) -> InventoryFrame {
+        use crate::interaction::{
+            cleaning::{ToolFrame, ToolOwner},
+            equipment_input::EquipAction,
+        };
+        let dead = self.needs_output().dead;
+        if !self.started
+            || self.paused
+            || self.recovering
+            || !self.world_supported()
+            || self.sleeping()
+            || dead
+            || !dt.is_finite()
+            || dt <= 0.
+        {
+            self.clear_input();
+            self.sync_tool_audio(reference);
+            return InventoryFrame {
+                fixed_input: FrameInput {
+                    mouse: if dead { input.mouse } else { [0.; 2] },
+                    ..Default::default()
+                },
+                primary_reserved: false,
+                actions_blocked: true,
+            };
+        }
+        self.area
+            .interaction
+            .finish_cancelled_input(&mut self.area.player, &mut self.physics);
         self.area.sync_inventory();
+        let context = self.area.equipment_context();
+        match self
+            .area
+            .interaction
+            .equipment_input
+            .begin_frame(input, dt, context)
+        {
+            Some(EquipAction::Equip) => {
+                if self
+                    .area
+                    .equip_carried(&mut self.physics)
+                    .expect("checked equipment bindings")
+                {
+                    self.area.interaction.equipment_input.record_equipped();
+                }
+            }
+            Some(EquipAction::Recenter) => self.area.interaction.carry.recenter(),
+            None => {}
+        }
         let context = self.area.inventory_context(&self.physics, input);
-        if let Some(command) = self.area.inventory.step(input, FIXED_DT, context) {
+        if let Some(command) = self
+            .area
+            .inventory
+            .released_command(input.inventory_released, context)
+        {
             self.area
                 .apply_inventory_command(command, reference, &mut self.physics)
                 .expect("checked inventory bindings");
-            // InventoryStuff processes key-up selection before the held-key phase.
-            if matches!(command, InventoryCommand::Select(_)) {
-                let context = self.area.inventory_context(&self.physics, input);
-                if let Some(command) = self.area.inventory.step(
-                    FrameInput {
-                        released: 0,
-                        ..input
-                    },
-                    FIXED_DT,
-                    context,
-                ) {
-                    self.area
-                        .apply_inventory_command(command, reference, &mut self.physics)
-                        .expect("checked inventory bindings");
-                }
-            }
         }
+        let context = self.area.inventory_context(&self.physics, input);
+        if let Some(command) = self
+            .area
+            .inventory
+            .held_command(input.inventory_held, dt, context)
+        {
+            self.area
+                .apply_inventory_command(command, reference, &mut self.physics)
+                .expect("checked inventory bindings");
+        }
+        self.area.sync_equipment(reference, &mut self.physics);
+        if let Some(id) = self.area.interaction.equipment.item() {
+            self.area.interaction.equipment.advance_hand(
+                dt,
+                &self.area.pose,
+                &self.area.items,
+                self.area.interaction.carry.rule(id).unwrap(),
+                &mut self.physics,
+            );
+        }
+        self.area.items.sync_poses(&self.physics);
+        self.physics.refresh_queries();
+        let frame = ToolFrame {
+            lmb: input.held & keys::PRIMARY != 0,
+            active: true,
+            dt,
+            view,
+            origin: self.stream.origin.offset,
+        };
+        let mut primary_reserved = self.area.interaction.cleaning.reserves_lmb(
+            self.area.interaction.equipment.item(),
+            self.area.interaction.held(),
+        );
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        self.area.interaction.cleaning.begin_frame(frame);
+        if let Some(id) = self.area.interaction.equipment.item() {
+            self.advance_owned_tool(
+                reference,
+                input,
+                frame,
+                ToolOwner::Equipped(id),
+                id,
+                &mut primary_reserved,
+            );
+        }
+        let context = self.area.equipment_context();
+        if self
+            .area
+            .interaction
+            .equipment_input
+            .should_release(input, context)
+            && self
+                .area
+                .release_equipped(&mut self.physics)
+                .expect("checked equipment release")
+        {
+            self.area.interaction.equipment_input.record_released();
+        }
+        self.area.sync_equipment(reference, &mut self.physics);
+        self.area.items.sync_poses(&self.physics);
+        self.physics.refresh_queries();
+        if let Some(id) = self.area.interaction.held() {
+            self.advance_owned_tool(
+                reference,
+                input,
+                frame,
+                ToolOwner::Carried(id),
+                id,
+                &mut primary_reserved,
+            );
+        }
+        self.area.interaction.cleaning.finish_frame(
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
+        self.area
+            .interaction
+            .cleaning
+            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+        self.sync_tool_audio(reference);
+        self.area.interaction.equipment_input.finish_frame(input);
+        let mut fixed_input = input;
+        fixed_input.held &= !keys::RECENTER;
+        fixed_input.pressed &= !keys::RECENTER;
+        fixed_input.released &= !keys::RECENTER;
+        fixed_input.inventory_held = 0;
+        fixed_input.inventory_released = 0;
+        if primary_reserved {
+            fixed_input.held &= !keys::PRIMARY;
+            fixed_input.pressed &= !keys::PRIMARY;
+            fixed_input.released &= !keys::PRIMARY;
+        }
+        InventoryFrame {
+            fixed_input,
+            primary_reserved,
+            actions_blocked: false,
+        }
+    }
+    fn advance_owned_tool(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: FrameInput,
+        frame: crate::interaction::cleaning::ToolFrame,
+        owner: crate::interaction::cleaning::ToolOwner,
+        id: ItemId,
+        primary_reserved: &mut bool,
+    ) {
+        if !*primary_reserved
+            && input.pressed & keys::PRIMARY != 0
+            && let Some(control) = self.area.interaction.owned_light_control(id)
+        {
+            self.use_light_control(reference, control);
+            *primary_reserved = true;
+        }
+        self.area.interaction.cleaning.advance_owner(
+            owner,
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
     }
 }
 

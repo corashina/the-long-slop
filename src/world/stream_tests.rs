@@ -3375,3 +3375,563 @@ fn roadside_views(stream: &WorldStream) -> [super::super::RequiredView; 1] {
         origin: stream.origin.offset,
     }]
 }
+
+fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
+    let mut run = GarageRuntime::new(reference).unwrap();
+    prepare_ready(&mut run, reference);
+    run.sync_world_activity(reference).unwrap();
+    run.started = true;
+    assert!(run.world_supported());
+    run
+}
+fn g08_pickup(run: &mut GarageRuntime, item: crate::reference::ItemId) {
+    let point = run.area.items.get(item).unwrap().pose.position;
+    if run.area.interaction.storage.stored(item) {
+        run.area
+            .interaction
+            .pickup_stored_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+    } else {
+        run.area
+            .interaction
+            .pickup_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+    }
+    run.area.sync_inventory();
+}
+fn g08_frame(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    input: crate::simulation::FrameInput,
+    dt: f32,
+) -> crate::starting_area::InventoryFrame {
+    let view = run.area.player.view_pose(&run.physics);
+    run.advance_inventory_frame(reference, input, dt, view)
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_combined_input_and_cancellation() {
+    use crate::{
+        interaction::items::ItemLocation,
+        simulation::{FrameInput, keys},
+    };
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        held: keys::ROTATE,
+        ..Default::default()
+    };
+    g08_frame(&mut run, &reference, down, 0.02);
+    g08_frame(&mut run, &reference, up, 0.1);
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    assert_eq!(run.area.interaction.held(), None);
+    // The guard ends next frame. Held MMB can now release.
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::ROTATE,
+            ..Default::default()
+        },
+        0.02,
+    );
+    assert_eq!(run.area.interaction.held(), Some(tool));
+    g08_frame(&mut run, &reference, FrameInput::default(), 0.3);
+    g08_frame(&mut run, &reference, down, 0.02);
+    let selected = run.area.inventory.selected;
+    let target = (selected + 1) % 4;
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << selected,
+            ..up
+        },
+        0.1,
+    );
+    assert_eq!(
+        run.area.interaction.equipment.item(),
+        Some(tool),
+        "explicit equip precedes slot retrieval and retains its update guard"
+    );
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << target,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert_eq!(run.area.inventory.selected, target);
+    assert_eq!(
+        run.area.items.get(tool).unwrap().location,
+        ItemLocation::Stored(selected)
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        None,
+        "Tab equip must occur before selection stores the owner"
+    );
+    // Each number phase executes once. Selection resets progress, then held adds 0.5.
+    let next = (target + 1) % 4;
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << next,
+            inventory_held: 1 << selected,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert_eq!(run.area.inventory.selected, next);
+    assert!((run.area.inventory.swap_progress - 0.5).abs() < 0.00001);
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << selected,
+            held: keys::ROTATE,
+            ..Default::default()
+        },
+        0.02,
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "immediate retrieval does not set the explicit-equip guard"
+    );
+    for pause in [true, false] {
+        g08_frame(&mut run, &reference, down, 0.02);
+        if pause {
+            run.paused = true;
+            g08_frame(&mut run, &reference, up, 0.1);
+            run.paused = false;
+        } else {
+            run.clear_input();
+        }
+        g08_frame(&mut run, &reference, up, 0.1);
+        assert_eq!(run.area.interaction.held(), Some(tool));
+        assert_eq!(run.area.interaction.equipment.item(), None);
+    }
+    // Reset creates fresh gesture state. A stale release cannot equip.
+    let mut reset = g08_ready(&reference);
+    g08_pickup(&mut reset, tool);
+    g08_frame(&mut reset, &reference, up, 0.1);
+    assert_eq!(reset.area.interaction.equipment.item(), None);
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_zero_and_multiple_fixed_steps() {
+    use crate::{
+        simulation::{FrameInput, keys},
+        vehicle::to_rapier,
+    };
+    let reference = reference();
+    let spray = reference.conditions.sprays[0].item;
+    let sample = |steps: usize| {
+        let mut run = g08_ready(&reference);
+        g08_pickup(&mut run, spray);
+        assert!(run.area.equip_carried(&mut run.physics).unwrap());
+        run.area.sync_equipment(&reference, &mut run.physics);
+        let anchor = reference.clothing.pose.anchors["RH"].node;
+        let item = run.area.items.get(spray).unwrap();
+        let local = to_rapier(item.local_pose);
+        let initial = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
+            * run.physics.rapier().bodies[item.body.unwrap()].position()
+            * local;
+        let rule = run.area.interaction.pickup_rule(spray).unwrap();
+        let target = if rule.disable_rh_fix {
+            rapier3d::math::Pose::IDENTITY
+        } else {
+            to_rapier(crate::vehicle::VehiclePose {
+                position: rule.right_hand_position,
+                rotation: rule.right_hand_rotation,
+            })
+        };
+        let gain = (0.04 * reference.inventory.hand_interpolation_factor).clamp(0., 1.);
+        let expected_position = initial
+            .translation
+            .lerp(target.translation, gain)
+            .lerp(target.translation, gain);
+        let expected_rotation = initial
+            .rotation
+            .lerp(target.rotation, gain)
+            .lerp(target.rotation, gain);
+        let input = FrameInput {
+            held: keys::PRIMARY,
+            inventory_held: 2,
+            ..Default::default()
+        };
+        g08_frame(&mut run, &reference, input, 0.04);
+        let before_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let before_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let frame = g08_frame(&mut run, &reference, input, 0.04);
+        let mut pending = FrameInput::default();
+        pending.merge(frame.fixed_input);
+        for _ in 0..steps {
+            run.step(&reference, pending.take_step());
+        }
+        let after_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let after_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let anchor = reference.clothing.pose.anchors["RH"].node;
+        let hand = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
+            * run.physics.rapier().bodies[run.area.items.get(spray).unwrap().body.unwrap()]
+                .position()
+            * local;
+        assert!(
+            (hand.translation - expected_position).length() < 0.0001,
+            "hand time advances once per frame"
+        );
+        assert!(hand.rotation.dot(expected_rotation).abs() > 0.99999);
+        (
+            after_quantity - before_quantity,
+            after_age - before_age,
+            run.area.inventory.swap_progress,
+            hand,
+        )
+    };
+    let expected = sample(0);
+    assert!(expected.0 < 0.);
+    assert!((expected.1 - 0.04).abs() < 0.00001);
+    for steps in [1, 2] {
+        let actual = sample(steps);
+        assert!((actual.0 - expected.0).abs() < 0.00001);
+        assert!((actual.1 - expected.1).abs() < 0.00001);
+        assert!((actual.2 - expected.2).abs() < 0.00001);
+        assert!((actual.3.translation - expected.3.translation).length() < 0.0001);
+        assert!(actual.3.rotation.dot(expected.3.rotation).abs() > 0.99999);
+    }
+    let mut run = g08_ready(&reference);
+    let light = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|l| l.startup_active)
+        .unwrap()
+        .item;
+    g08_pickup(&mut run, light);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    let control = run.area.interaction.owned_light_control(light).unwrap();
+    let index = reference
+        .lighting
+        .controllers
+        .iter()
+        .position(|c| c.id == control)
+        .unwrap();
+    let carried_spray = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, carried_spray);
+    let quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(carried_spray)
+        .unwrap()
+        .quantity
+        .unwrap();
+    let on = run.lighting.controllers[index].on;
+    let frame = g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            pressed: keys::PRIMARY | keys::USE,
+            held: keys::PRIMARY,
+            mouse: [0.2, 0.3],
+            ..Default::default()
+        },
+        0.04,
+    );
+    assert!(
+        run.area
+            .interaction
+            .cleaning
+            .get(carried_spray)
+            .unwrap()
+            .quantity
+            .unwrap()
+            < quantity,
+        "flashlight reservation preserves raw LMB for carried spray"
+    );
+    assert!(frame.primary_reserved);
+    assert_eq!(run.lighting.controllers[index].on, !on);
+    assert_eq!(frame.fixed_input.pressed & keys::PRIMARY, 0);
+    let mut pending = FrameInput::default();
+    pending.merge(frame.fixed_input);
+    let empty = g08_frame(&mut run, &reference, FrameInput::default(), 0.01);
+    pending.merge(empty.fixed_input);
+    let step = pending.take_step();
+    assert_eq!(step.pressed & keys::USE, keys::USE);
+    assert_eq!(step.mouse, [0.2, 0.3]);
+    run.step(&reference, step);
+    assert_eq!(
+        run.lighting.controllers[index].on, !on,
+        "fixed interaction cannot repeat consumed PRIMARY"
+    );
+    assert_eq!(pending.take_step().pressed & keys::USE, 0);
+    let body = run.area.items.get(light).unwrap().body.unwrap();
+    let hand_before = *run.physics.rapier().bodies[body].position();
+    run.paused = true;
+    let blocked = g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.2,
+    );
+    assert!(blocked.actions_blocked);
+    assert_eq!(
+        *run.physics.rapier().bodies[body].position(),
+        hand_before,
+        "blocked frame does not advance hand animation"
+    );
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_blocked_states_do_not_mutate() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    for blocked in 0..11 {
+        let mut run = g08_ready(&reference);
+        let tool = reference.conditions.sprays[0].item;
+        g08_pickup(&mut run, tool);
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::PRIMARY,
+                ..Default::default()
+            },
+            0.04,
+        );
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::RECENTER,
+                pressed: keys::RECENTER,
+                ..Default::default()
+            },
+            0.02,
+        );
+        match blocked {
+            0 => run.started = false,
+            1 => run.paused = true,
+            2 => run.recovering = true,
+            3 => run.startup_aligned = false,
+            4 => {
+                let input = crate::sleep::SleepInput {
+                    held: true,
+                    active: true,
+                    camera_allowed: true,
+                    dead: false,
+                };
+                run.sleep
+                    .step(&reference.sleep, input, 1., 1. / reference.sleep.hold_gain);
+                run.sleep.step(&reference.sleep, input, 1.1, 0.02);
+                assert!(run.sleeping());
+            }
+            5 => run.survival.damage_instant(&reference.survival, 10000.),
+            _ => {}
+        }
+        let snapshot = |run: &GarageRuntime| {
+            let item = run.area.items.get(tool).unwrap();
+            let body = &run.physics.rapier().bodies[item.body.unwrap()];
+            format!(
+                "{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}",
+                run.area.inventory.slots,
+                run.area.inventory.selected,
+                run.area.interaction.held(),
+                run.area.interaction.equipment.item(),
+                item,
+                body.body_type(),
+                body.is_enabled(),
+                body.position(),
+                run.area.interaction.cleaning.get(tool).unwrap().quantity,
+                reference
+                    .conditions
+                    .surfaces
+                    .iter()
+                    .map(|s| format!("{:?}", run.area.conditions.get(s.id)))
+                    .collect::<Vec<_>>()
+            )
+        };
+        let particles_before: Vec<_> = run
+            .area
+            .interaction
+            .cleaning
+            .spray_particles(0, 0)
+            .iter()
+            .map(|p| p.age)
+            .collect();
+        assert!(!particles_before.is_empty());
+        let physical = |run: &GarageRuntime| {
+            let body = run.area.items.get(tool).unwrap().body.unwrap();
+            let colliders: Vec<_> = run.physics.rapier().bodies[body]
+                .colliders()
+                .iter()
+                .map(|h| format!("{:?}", run.physics.rapier().colliders[*h]))
+                .collect();
+            let joints: Vec<_> = run
+                .physics
+                .rapier()
+                .impulse_joints
+                .iter()
+                .map(|(h, j)| format!("{h:?}{j:?}"))
+                .collect();
+            (colliders, joints)
+        };
+        let physical_before = physical(&run);
+        let before = snapshot(&run);
+        let dt = match blocked {
+            6 => 0.,
+            7 => -0.1,
+            8 => f32::NAN,
+            9 => f32::INFINITY,
+            10 => f32::NEG_INFINITY,
+            _ => 0.1,
+        };
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::PRIMARY | keys::ROTATE,
+                released: keys::RECENTER,
+                inventory_released: 2,
+                inventory_held: 4,
+                ..Default::default()
+            },
+            dt,
+        );
+        assert!(result.actions_blocked, "blocked state {blocked}");
+        assert_eq!(snapshot(&run), before, "blocked state {blocked}");
+        assert_eq!(
+            physical(&run),
+            physical_before,
+            "blocked physical ownership {blocked}"
+        );
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .spray_particles(0, 0)
+                .iter()
+                .map(|p| p.age)
+                .collect::<Vec<_>>(),
+            particles_before,
+            "blocked particle ages {blocked}"
+        );
+        run.started = true;
+        run.paused = false;
+        run.recovering = false;
+        run.startup_aligned = true;
+        run.sleep.interrupt();
+        // Death remains blocked. All other states resume with the old release canceled.
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                released: keys::RECENTER,
+                ..Default::default()
+            },
+            0.1,
+        );
+        assert_eq!(
+            run.area.interaction.equipment.item(),
+            None,
+            "stale release in state {blocked}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_clutch_binding_collision() {
+    use crate::{
+        reference::DrivingAction,
+        simulation::{FrameInput, keys},
+        vehicle::VehiclePose,
+    };
+    for collision in [false, true] {
+        let mut reference = reference();
+        if collision {
+            reference
+                .driving
+                .bindings
+                .iter_mut()
+                .find(|b| b.action == DrivingAction::Clutch)
+                .unwrap()
+                .codes
+                .push("Digit1".into());
+        }
+        let mut run = g08_ready(&reference);
+        let seat = &reference.seats[0];
+        let anchor = reference
+            .anchors
+            .iter()
+            .find(|a| a.id == seat.anchor)
+            .unwrap();
+        assert!(run.area.player.enter(
+            seat.id,
+            VehiclePose {
+                position: anchor.transform.translation,
+                rotation: anchor.transform.rotation
+            },
+            &mut run.physics
+        ));
+        let input = FrameInput {
+            held: keys::CLUTCH,
+            inventory_released: 2,
+            inventory_held: 4,
+            ..Default::default()
+        };
+        assert_eq!(
+            run.area
+                .inventory_context(&run.physics, input)
+                .seated_clutch,
+            collision
+        );
+        g08_frame(&mut run, &reference, input, 0.1);
+        assert_eq!(run.area.inventory.selected, if collision { 0 } else { 1 });
+        assert_eq!(
+            run.area.inventory.swap_progress,
+            if collision { 0. } else { 0.5 }
+        );
+    }
+}

@@ -796,7 +796,7 @@ fn g08_tools_require_the_correct_owner() {
         let mut v = view;
         v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
         let f = tool_frame(&game, v);
-        game.advance_tools(&reference, f);
+        advance_tool_owners(&mut game, &reference, f);
     }
     assert_eq!(
         game.area.conditions.get(target).repair_progress,
@@ -815,7 +815,7 @@ fn g08_tools_require_the_correct_owner() {
         let mut v = view;
         v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
         let f = tool_frame(&game, v);
-        game.advance_tools(&reference, f);
+        advance_tool_owners(&mut game, &reference, f);
     }
     assert_ne!(
         game.area.conditions.get(target).repair_progress,
@@ -927,12 +927,12 @@ fn g08_tools_require_the_correct_owner() {
         let mut v = view;
         v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
         let f = tool_frame(&game, v);
-        game.advance_tools(&reference, f);
+        advance_tool_owners(&mut game, &reference, f);
     }
     let progress = game.area.conditions.get(target).repair_progress;
     game.paused = true;
     let f = tool_frame(&game, view);
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert!(
         game.area
             .interaction
@@ -942,7 +942,7 @@ fn g08_tools_require_the_correct_owner() {
             .all(|s| !s.playing && s.force == 0.)
     );
     game.paused = false;
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert_eq!(game.area.conditions.get(target).repair_progress, progress);
     let selected = game.area.inventory.selected;
     assert!(
@@ -955,7 +955,7 @@ fn g08_tools_require_the_correct_owner() {
             .unwrap()
     );
     let f = tool_frame(&game, view);
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert!(
         game.area
             .interaction
@@ -975,7 +975,7 @@ fn g08_tools_require_the_correct_owner() {
     );
     assert!(game.area.release_equipped(&mut game.physics).unwrap());
     let f = tool_frame(&game, view);
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert!(
         game.area
             .interaction
@@ -1050,7 +1050,7 @@ fn g08_tools_require_the_correct_owner() {
     let head_before = game.area.conditions.get(target).color;
     let nozzle_before = game.area.conditions.get(nozzle_target).color;
     let f = tool_frame(&game, view);
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert_ne!(
         game.area.conditions.get(target).color,
         head_before,
@@ -1060,7 +1060,7 @@ fn g08_tools_require_the_correct_owner() {
     assert!(game.area.release_equipped(&mut game.physics).unwrap());
     let head_before = game.area.conditions.get(target).color;
     let f = tool_frame(&game, view);
-    game.advance_tools(&reference, f);
+    advance_tool_owners(&mut game, &reference, f);
     assert_eq!(game.area.conditions.get(target).color, head_before);
     assert_ne!(
         game.area.conditions.get(nozzle_target).color,
@@ -1091,7 +1091,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
             .unwrap()
     });
     let frame = tool_frame(&game, view);
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     for (i, id) in [equipped, carried].into_iter().enumerate() {
         let tool = game.area.interaction.cleaning.get(id).unwrap();
         let rule = &reference.conditions.sprays[i];
@@ -1119,13 +1119,13 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
         .first()
         .expect("spray emitted particles")
         .age;
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     let particle = &game.area.interaction.cleaning.spray_particles(0, 0)[0];
     assert!((particle.age - previous - 0.04).abs() < 0.00001);
     let open_valve = game.area.interaction.cleaning.get(equipped).unwrap().valve;
     let mut released_frame = frame;
     released_frame.lmb = false;
-    game.advance_tools(&reference, released_frame);
+    advance_tool_owners(&mut game, &reference, released_frame);
     let tool = game.area.interaction.cleaning.get(equipped).unwrap();
     assert!((tool.valve - open_valve * 0.6).abs() < 0.00001);
     let signal = game
@@ -1174,7 +1174,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
             < 0.00001
     );
     game.paused = true;
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     assert!(
         game.area
             .interaction
@@ -1192,7 +1192,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
         .interaction
         .drop_held(&mut game.area.items, &mut game.physics);
     let frame = tool_frame(&game, view);
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     assert!(
         game.area
             .interaction
@@ -1204,7 +1204,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
     pickup(&mut game, equipped);
     assert!(game.area.equip_carried(&mut game.physics).unwrap());
     let frame = tool_frame(&game, view);
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     let other = (game.area.inventory.selected + 1) % 4;
     game.area
         .apply_inventory_command(
@@ -1214,7 +1214,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
         )
         .unwrap();
     let frame = tool_frame(&game, view);
-    game.advance_tools(&reference, frame);
+    advance_tool_owners(&mut game, &reference, frame);
     assert!(
         game.area
             .interaction
@@ -1223,4 +1223,52 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
             .iter()
             .all(|s| !s.playing && !s.doing_work && s.force == 0.)
     );
+}
+
+// Local owner phases isolate tools. Library frame tests cover runtime guards.
+fn advance_tool_owners(
+    game: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    mut frame: my_summer_slop::interaction::cleaning::ToolFrame,
+) {
+    use my_summer_slop::interaction::cleaning::ToolOwner;
+    frame.active &= game.started && !game.paused && !game.needs_output().dead && !game.sleeping();
+    game.area
+        .interaction
+        .cleaning
+        .sync_wash_colliders(&game.area.conditions, &mut game.physics);
+    game.area.interaction.cleaning.begin_frame(frame);
+    for owner in [
+        game.area
+            .interaction
+            .equipment
+            .item()
+            .map(ToolOwner::Equipped),
+        game.area.interaction.held().map(ToolOwner::Carried),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        game.area.interaction.cleaning.advance_owner(
+            owner,
+            frame,
+            reference,
+            &mut game.area.conditions,
+            &game.area.items,
+            &game.physics,
+            &game.area.interaction.parts,
+        );
+    }
+    game.area.interaction.cleaning.finish_frame(
+        frame,
+        reference,
+        &mut game.area.conditions,
+        &game.area.items,
+        &game.physics,
+        &game.area.interaction.parts,
+    );
+    game.area
+        .interaction
+        .cleaning
+        .sync_wash_colliders(&game.area.conditions, &mut game.physics);
 }

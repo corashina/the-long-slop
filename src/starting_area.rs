@@ -52,6 +52,7 @@ pub struct StartingArea {
     pub inventory: crate::inventory::InventoryState,
     pub pose: crate::player::pose::PlayerPoseState,
     inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
+    inventory_clutch_conflict: bool,
     pub player: PlayerState,
     pub origin: [f64; 3],
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
@@ -369,6 +370,10 @@ impl StartingArea {
             conditions,
             inventory: crate::inventory::InventoryState::new(&reference.inventory),
             inventory_offsets: [None; 4],
+            inventory_clutch_conflict: reference.driving.bindings.iter().any(|binding| {
+                binding.action == crate::reference::DrivingAction::Clutch
+                    && binding.codes.iter().any(|code| code == "Digit1")
+            }),
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
             bodies,
             items,
@@ -630,6 +635,7 @@ impl VehicleRuntime {
 }
 
 mod inventory;
+pub use inventory::InventoryFrame;
 mod save;
 
 pub struct GarageRuntime {
@@ -811,52 +817,32 @@ impl GarageRuntime {
         })
     }
 
-    pub fn advance_tools(
+    fn use_light_control(
         &mut self,
         reference: &ReferenceManifest,
-        mut frame: crate::interaction::cleaning::ToolFrame,
+        control: crate::reference::LightControlId,
     ) {
-        frame.active &=
-            self.started && !self.paused && !self.needs_output().dead && !self.sleeping();
-        self.area
-            .interaction
-            .cleaning
-            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
-        use crate::interaction::cleaning::ToolOwner;
-        self.area.interaction.cleaning.begin_frame(frame);
-        for owner in [
-            self.area
-                .interaction
-                .equipment
-                .item()
-                .map(ToolOwner::Equipped),
-            self.area.interaction.held().map(ToolOwner::Carried),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            self.area.interaction.cleaning.advance_owner(
-                owner,
-                frame,
-                reference,
-                &mut self.area.conditions,
-                &self.area.items,
-                &self.physics,
-                &self.area.interaction.parts,
-            );
+        match self.stream.use_generated_light(control) {
+            Ok(false) => self.lighting.use_control(&reference.lighting, control),
+            Ok(true) => {}
+            Err(error) => self.stream.fail(error),
         }
-        self.area.interaction.cleaning.finish_frame(
-            frame,
-            reference,
-            &mut self.area.conditions,
-            &self.area.items,
-            &self.physics,
-            &self.area.interaction.parts,
-        );
         self.area
             .interaction
-            .cleaning
-            .sync_wash_colliders(&self.area.conditions, &mut self.physics);
+            .completed_action(InteractionAction::LightControl(control));
+        if let Some(audio) = &mut self.audio
+            && reference.lighting.controllers.iter().any(|c| {
+                c.id == control
+                    && c.kind == crate::reference::LightControllerKind::Headlight
+                    && c.vehicle == Some(audio.vehicle_index)
+            })
+        {
+            audio.light_switch();
+        }
+        self.notice = "";
+    }
+
+    fn sync_tool_audio(&mut self, reference: &ReferenceManifest) {
         if let Some(audio) = &mut self.audio {
             for (b, s) in reference
                 .conditions
@@ -960,7 +946,6 @@ impl GarageRuntime {
             );
         }
 
-        self.update_inventory(reference, input);
         self.area.begin_step();
         let aim = if self.sleeping() {
             ResolvedAim::default()
@@ -1027,24 +1012,7 @@ impl GarageRuntime {
                 }
             }
             Some(InteractionAction::LightControl(control)) => {
-                match self.stream.use_generated_light(control) {
-                    Ok(false) => self.lighting.use_control(&reference.lighting, control),
-                    Ok(true) => {}
-                    Err(error) => self.stream.fail(error),
-                }
-                self.area
-                    .interaction
-                    .completed_action(InteractionAction::LightControl(control));
-                if let Some(audio) = &mut self.audio
-                    && reference.lighting.controllers.iter().any(|c| {
-                        c.id == control
-                            && c.kind == crate::reference::LightControllerKind::Headlight
-                            && c.vehicle == Some(audio.vehicle_index)
-                    })
-                {
-                    audio.light_switch();
-                }
-                self.notice = "";
+                self.use_light_control(reference, control)
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(

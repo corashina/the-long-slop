@@ -359,6 +359,22 @@ impl CarryState {
         Ok(())
     }
 
+    pub fn recenter(&mut self) {
+        let Some(held) = self.held.as_mut() else {
+            return;
+        };
+        let rule = &self.rules[&held.item];
+        held.offset = if rule.use_recenter_position {
+            Vector::from_array(rule.recenter_position)
+        } else {
+            Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
+        };
+        held.rotation = if rule.use_recenter_rotation {
+            Rotation::from_array(rule.recenter_rotation)
+        } else {
+            Rotation::IDENTITY
+        };
+    }
     pub fn step(
         &mut self,
         input: FrameInput,
@@ -385,71 +401,58 @@ impl CarryState {
         let rotation_gain = ((mass - self.reference.carry_max_weight * 2.0)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight * 2.0))
             .clamp(0.0, 1.0);
-        if (input.held | input.pressed) & keys::RECENTER != 0 {
-            held.offset = if rule.use_recenter_position {
-                Vector::from_array(rule.recenter_position)
+        let rotating = input.held & keys::ROTATE != 0;
+        let moving = input.held & keys::TRANSLATE != 0;
+        if input.wheel.is_finite() && !rotating {
+            let direction = if rule.move_with_rotation {
+                (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
+                    .normalize_or_zero()
             } else {
-                Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
+                -Vector::Z
             };
-            held.rotation = if rule.use_recenter_rotation {
-                Rotation::from_array(rule.recenter_rotation)
-            } else {
-                Rotation::IDENTITY
-            };
-        } else {
-            let rotating = input.held & keys::ROTATE != 0;
-            let moving = input.held & keys::TRANSLATE != 0;
-            if input.wheel.is_finite() && !rotating {
-                let direction = if rule.move_with_rotation {
-                    (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
-                        .normalize_or_zero()
-                } else {
-                    -Vector::Z
-                };
-                held.offset += direction
-                    * input.wheel
-                    * self.reference.scroll_sensitivity
-                    * dt
-                    * self.reference.obj_move_sensitivity;
-            }
-            if input.mouse.iter().all(|delta| delta.is_finite()) {
-                if rotating && !rule.no_rotation {
-                    let sensitivity =
-                        dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
-                    let x = input.mouse[0] * sensitivity;
-                    let y = input.mouse[1] * sensitivity;
-                    let rotation = if moving {
-                        if rule.move_with_rotation {
-                            held.rotation * Rotation::from_rotation_z(-x.to_radians())
-                        } else {
-                            Rotation::from_rotation_z(-x.to_radians()) * held.rotation
-                        }
-                    } else {
-                        Rotation::from_rotation_y(x.to_radians()) * held.rotation
-                    };
-                    held.rotation = if !rule.move_with_rotation || !moving {
-                        Rotation::from_rotation_x(y.to_radians()) * rotation
-                    } else {
-                        rotation
-                    };
-                } else if moving && !rotating {
+            held.offset += direction
+                * input.wheel
+                * self.reference.scroll_sensitivity
+                * dt
+                * self.reference.obj_move_sensitivity;
+        }
+        if input.mouse.iter().all(|delta| delta.is_finite()) {
+            if rotating && !rule.no_rotation {
+                let sensitivity =
+                    dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
+                let x = input.mouse[0] * sensitivity;
+                let y = input.mouse[1] * sensitivity;
+                let rotation = if moving {
                     if rule.move_with_rotation {
-                        let sensitivity = dt * 20.0 * self.reference.obj_move_sensitivity;
-                        let rotation =
-                            Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
-                                * Rotation::from_rotation_x(
-                                    (-input.mouse[1] * sensitivity).to_radians(),
-                                );
-                        let position =
-                            Vector::from_array(self.reference.carry_anchor_offset) + held.offset;
-                        held.offset = rotation * position
-                            - Vector::from_array(self.reference.carry_anchor_offset);
+                        held.rotation * Rotation::from_rotation_z(-x.to_radians())
                     } else {
-                        held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.0)
-                            * dt
-                            * 0.25
-                            * self.reference.obj_move_sensitivity;
+                        Rotation::from_rotation_z(-x.to_radians()) * held.rotation
                     }
+                } else {
+                    Rotation::from_rotation_y(x.to_radians()) * held.rotation
+                };
+                held.rotation = if !rule.move_with_rotation || !moving {
+                    Rotation::from_rotation_x(y.to_radians()) * rotation
+                } else {
+                    rotation
+                };
+            } else if moving && !rotating {
+                if rule.move_with_rotation {
+                    let sensitivity = dt * 20.0 * self.reference.obj_move_sensitivity;
+                    let rotation =
+                        Rotation::from_rotation_y((-input.mouse[0] * sensitivity).to_radians())
+                            * Rotation::from_rotation_x(
+                                (-input.mouse[1] * sensitivity).to_radians(),
+                            );
+                    let position =
+                        Vector::from_array(self.reference.carry_anchor_offset) + held.offset;
+                    held.offset = rotation * position
+                        - Vector::from_array(self.reference.carry_anchor_offset);
+                } else {
+                    held.offset += Vector::new(input.mouse[0], -input.mouse[1], 0.0)
+                        * dt
+                        * 0.25
+                        * self.reference.obj_move_sensitivity;
                 }
             }
         }
