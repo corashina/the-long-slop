@@ -172,7 +172,7 @@ impl WorldPresentation<'_, '_> {
                 &mut self.grass,
                 &mut self.writers,
             )?;
-            self.grass.release_domains();
+            self.grass.release_domains(stream)?;
             self.materials.cache.begin_world_session();
             self.surfaces
                 .retire_session(&mut self.commands, &mut self.meshes);

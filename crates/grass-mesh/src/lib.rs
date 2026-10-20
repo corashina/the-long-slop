@@ -18,7 +18,7 @@ pub struct GrassView {
     pub screen_height: f32,
     pub clip_planes: [Vec4; 4],
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct GrassSettings {
     pub edge_length: f32,
     pub max_tessellation: u32,

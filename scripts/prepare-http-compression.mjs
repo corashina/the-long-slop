@@ -25,7 +25,7 @@ export async function prepareStartupCompression({webRoot = resolve(projectRoot, 
   const manifest = JSON.parse(await readFile(resolve(webRoot, 'assets/reference/manifest.json'), 'utf8'));
   if (!/^assets\/runtime\/[a-zA-Z0-9_-]+\/$/.test(manifest.content_base)
     || !Array.isArray(manifest.file_catalog?.files)) throw Error('Invalid runtime package catalog.');
-  const paths = new Set(['pkg/my_summer_slop_bg.wasm', 'pkg/terrain_worker_bg.wasm', 'pkg/road_worker_bg.wasm', 'assets/reference/manifest.json']);
+  const paths = new Set(['pkg/my_summer_slop_bg.wasm', 'pkg/terrain_worker_bg.wasm', 'pkg/road_worker_bg.wasm', 'pkg/grass_worker_bg.wasm', 'assets/reference/manifest.json']);
   for (const receipt of manifest.file_catalog.files) {
     if (!canonical(receipt.file)) throw Error('Invalid runtime receipt path.');
     if (receipt.file.endsWith('.json')) paths.add(manifest.content_base + receipt.file);

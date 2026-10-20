@@ -23,6 +23,12 @@ pub(crate) struct WorldPerformance {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize)]
 pub struct WorldMetrics {
+    /// Actual grass worker linear-memory capacity, separate from logical buffers.
+    pub grass_worker_wasm_bytes: usize,
+    /// Subset of active CPU: installed grass datasets and shared domains.
+    pub grass_worker_cache_bytes: usize,
+    /// Subset of active CPU: admitted grass worker capacity high-water bound.
+    pub grass_worker_reserved_bytes: usize,
     pub shared_input_cpu_bytes: usize,
     /// Subset of active CPU: imported item snapshots retained for change capture.
     pub imported_snapshot_bytes: usize,
@@ -406,7 +412,7 @@ pub(crate) mod browser {
             ),
             process_bytes: None,
             driver_bytes: None,
-            limits: "World values are capacity charges and reservations; pending overlaps active/prototype charges. Road worker WASM bytes report linear-memory capacity separately. Asset values count unique logical mesh/image storage and retained CPU payloads. They exclude ECS/physics allocator overhead, skins, uniforms, and renderer-internal targets. Imported asset payloads are a partial baseline. Logical handles do not prove GPU allocation or residency. Snapshot scratch and JSON are transient development allocations.",
+            limits: "World values are capacity charges and reservations; pending overlaps active/prototype charges. Road and grass worker WASM bytes report linear-memory capacity separately. Asset values count unique logical mesh/image storage and retained CPU payloads. They exclude ECS/physics allocator overhead, skins, uniforms, and renderer-internal targets. Imported asset payloads are a partial baseline. Logical handles do not prove GPU allocation or residency. Snapshot scratch and JSON are transient development allocations.",
         };
         if let Ok(json) = serde_json::to_string(&snapshot) {
             crate::browser::game_measurements(&json);

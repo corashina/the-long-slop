@@ -42,6 +42,9 @@ pub struct WorldRequest {
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PresentationAllocation {
+    pub grass_worker_wasm_bytes: usize,
+    pub grass_worker_cache_bytes: usize,
+    pub grass_worker_reserved_bytes: usize,
     pub active_cpu: usize,
     pub active_gpu: usize,
     pub prototype_cpu: usize,
@@ -4364,6 +4367,9 @@ impl WorldStream {
         let mut metrics = WorldMetrics {
             shared_input_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0) + self.dependency_metadata,
             road_worker_wasm_bytes: self.road_worker.wasm_bytes(),
+            grass_worker_wasm_bytes: self.presentation.grass_worker_wasm_bytes,
+            grass_worker_cache_bytes: self.presentation.grass_worker_cache_bytes,
+            grass_worker_reserved_bytes: self.presentation.grass_worker_reserved_bytes,
             road_worker_cache_bytes: self.road_worker.cache_bytes(),
             imported_snapshot_bytes,
             road_checkpoints: self.roads.checkpoint_count(),
@@ -4634,6 +4640,9 @@ impl WorldStream {
             metrics.prototype_gpu_bytes += allocation.gpu;
         }
         metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
+        metrics.grass_worker_wasm_bytes += self.overlap.grass_worker_wasm_bytes;
+        metrics.grass_worker_cache_bytes += self.overlap.grass_worker_cache_bytes;
+        metrics.grass_worker_reserved_bytes += self.overlap.grass_worker_reserved_bytes;
         metrics.road_worker_cache_bytes += self.overlap.road_worker_cache_bytes;
         metrics.active_cpu_bytes += self.overlap.active_cpu_bytes;
         metrics.active_gpu_bytes += self.overlap.active_gpu_bytes;

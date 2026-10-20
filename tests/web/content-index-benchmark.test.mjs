@@ -78,7 +78,7 @@ test('startup and save-load receipts require their own scenario evidence',()=>{
 
 test('uninstrumented sampling rejects active startup CPU, Rust, terrain, and render instrumentation',()=>{
  const profile=createCpuProfile(()=>10,1000);profile.enable(true);
- const inactive={browserEnabled:false,rustEnabled:false,streamingEnabled:false,terrain:{jobActive:false,handshakeActive:false},road:{jobActive:false,handshakeActive:false,publicationActive:false},startupRenderTraceActive:false};
+ const inactive={browserEnabled:false,rustEnabled:false,streamingEnabled:false,terrain:{jobActive:false,handshakeActive:false},road:{jobActive:false,handshakeActive:false,publicationActive:false},grass:{jobActive:false,handshakeActive:false,publicationActive:false},startupRenderTraceActive:false};
  assert.throws(()=>assertCpuProfileMode(false,false,{...inactive,browserEnabled:profile.enabled}),/profiling is active/);
  profile.enable(false);
  assert.doesNotThrow(()=>assertCpuProfileMode(false,false,{...inactive,browserEnabled:profile.enabled}));
@@ -94,7 +94,7 @@ test('the real sampler rejects a false-profile request before measuring or writi
  const profile=createCpuProfile(()=>10,1000);profile.enable(true);
  let measurements=0,writes=0;
  globalThis.cpuReceiptFixture={rustEnabled:true,streamingEnabled:true};
- globalThis.window={gameCpuInstrumentationState:()=>({browserEnabled:profile.enabled,terrain:{jobActive:false,handshakeActive:false},road:{jobActive:false,handshakeActive:false,publicationActive:false},startupRenderTraceActive:false}),gamePerformanceFrame(){},measureWorld(){measurements++;throw Error('unexpected measurement');}};
+ globalThis.window={gameCpuInstrumentationState:()=>({browserEnabled:profile.enabled,terrain:{jobActive:false,handshakeActive:false},road:{jobActive:false,handshakeActive:false,publicationActive:false},grass:{jobActive:false,handshakeActive:false,publicationActive:false},startupRenderTraceActive:false}),gamePerformanceFrame(){},measureWorld(){measurements++;throw Error('unexpected measurement');}};
  globalThis.document={querySelector:()=>({getContext:()=>({})})};
  globalThis.fetch=async path=>{if(path!=='/__benchmark-config')writes++;return {ok:true,json:async()=>({})};};
  await assert.rejects(measureContentIndex({profileCpu:false}),/profiling is active/);

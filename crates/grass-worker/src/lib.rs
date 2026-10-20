@@ -1,6 +1,6 @@
 //! Grass worker entry. Immutable input and planned output belong to this WASM instance.
 use grass_mesh::{GrassDomain, GrassExpansion, GrassMeshData, GrassPatch, GrassSettings};
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 use wasm_bindgen::prelude::*;
 
 struct Dataset {
@@ -10,7 +10,9 @@ struct Dataset {
 }
 #[derive(Default)]
 struct State {
-    dataset: Option<Dataset>,
+    datasets: BTreeMap<u64, Dataset>,
+    domains: Option<Arc<[GrassDomain; 4]>>,
+    owner: Option<u64>,
     task: Option<GrassExpansion>,
 }
 thread_local! {
@@ -21,24 +23,31 @@ fn error(message: String) -> JsError {
 }
 
 #[wasm_bindgen]
-pub fn install(input: &[u8]) -> Result<(), JsError> {
+pub fn install(owner: u64, input: &[u8]) -> Result<(), JsError> {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
-        if state.dataset.is_some() || state.task.is_some() {
+        if state.datasets.contains_key(&owner) {
             return Err(JsError::new("Grass source is already installed"));
         }
         let (patches, settings) = grass_mesh::decode_dataset(input).map_err(error)?;
-        let domains = [
-            GrassDomain::new(2).map_err(error)?,
-            GrassDomain::new(4).map_err(error)?,
-            GrassDomain::new(8).map_err(error)?,
-            GrassDomain::new(16).map_err(error)?,
-        ];
-        state.dataset = Some(Dataset {
-            patches: patches.into(),
-            settings,
-            domains: Arc::new(domains),
-        });
+        if state.domains.is_none() {
+            let domains = [
+                GrassDomain::new(2).map_err(error)?,
+                GrassDomain::new(4).map_err(error)?,
+                GrassDomain::new(8).map_err(error)?,
+                GrassDomain::new(16).map_err(error)?,
+            ];
+            state.domains = Some(Arc::new(domains));
+        }
+        let domains = Arc::clone(state.domains.as_ref().unwrap());
+        state.datasets.insert(
+            owner,
+            Dataset {
+                patches: patches.into(),
+                settings,
+                domains,
+            },
+        );
         Ok(())
     })
 }
@@ -64,7 +73,7 @@ impl GrassAllocation {
     }
 }
 #[wasm_bindgen]
-pub fn plan(input: &[u8]) -> Result<GrassAllocation, JsError> {
+pub fn plan(owner: u64, input: &[u8]) -> Result<GrassAllocation, JsError> {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         if state.task.is_some() {
@@ -72,8 +81,8 @@ pub fn plan(input: &[u8]) -> Result<GrassAllocation, JsError> {
         }
         let view = grass_mesh::decode_view(input).map_err(error)?;
         let dataset = state
-            .dataset
-            .as_ref()
+            .datasets
+            .get(&owner)
             .ok_or_else(|| JsError::new("Grass source is not installed"))?;
         // Main reserves planning scratch before dispatch, then reserves output after this reply.
         let mut task = GrassExpansion::new(
@@ -90,6 +99,7 @@ pub fn plan(input: &[u8]) -> Result<GrassAllocation, JsError> {
             }
         };
         state.task = Some(task);
+        state.owner = Some(owner);
         Ok(GrassAllocation(allocation))
     })
 }
@@ -118,8 +128,9 @@ impl GrassSurface {
 #[wasm_bindgen]
 pub fn evaluate() -> Result<GrassSurface, JsError> {
     STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.owner = None;
         let mut task = state
-            .borrow_mut()
             .task
             .take()
             .ok_or_else(|| JsError::new("Grass plan is not awaiting approval"))?;
@@ -127,5 +138,27 @@ pub fn evaluate() -> Result<GrassSurface, JsError> {
         while !task.prepare().map_err(error)? {}
         let (_, mesh, _) = task.finish();
         Ok(GrassSurface(mesh))
+    })
+}
+
+#[wasm_bindgen]
+pub fn discard() {
+    STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        s.task = None;
+        s.owner = None;
+    });
+}
+#[wasm_bindgen]
+pub fn retire(owner: u64) -> Result<(), JsError> {
+    STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        if s.owner == Some(owner) {
+            return Err(JsError::new("Grass dataset has an owned plan"));
+        }
+        s.datasets
+            .remove(&owner)
+            .ok_or_else(|| JsError::new("Grass dataset is not installed"))?;
+        Ok(())
     })
 }

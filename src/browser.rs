@@ -1,6 +1,57 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace=window,js_name=gameGrassCreate,catch)]
+    pub fn game_grass_create() -> Result<GrassTransport, JsValue>;
+    #[wasm_bindgen(js_name = Object)]
+    pub type GrassTransport;
+    #[wasm_bindgen(method,structural,catch,js_name=initialized)]
+    pub fn grass_initialized(this: &GrassTransport) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=capacityLimit)]
+    pub fn grass_capacity_limit(this: &GrassTransport, bytes: f64) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,js_name=wasmBytes)]
+    pub fn grass_wasm_bytes(this: &GrassTransport) -> f64;
+    #[wasm_bindgen(method,structural,catch,js_name=installRaw)]
+    pub fn grass_install(
+        this: &GrassTransport,
+        id: &[u8],
+        input: &[u8],
+        scratch: u32,
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=installedRaw)]
+    pub fn grass_installed(this: &GrassTransport, entity: &[u8]) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=retireRaw)]
+    pub fn grass_retire(this: &GrassTransport, entity: &[u8]) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=submitRaw)]
+    pub fn grass_submit(this: &GrassTransport, id: &[u8], input: &[u8]) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=poll)]
+    pub fn grass_poll(this: &GrassTransport) -> Result<i32, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=planRaw)]
+    pub fn grass_plan(this: &GrassTransport, out: &mut [u32]) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=approveRaw)]
+    pub fn grass_approve(this: &GrassTransport, id: &[u8], bytes: f64) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=readRaw)]
+    pub fn grass_read(
+        this: &GrassTransport,
+        anchors: &mut [f32],
+        uvs: &mut [f32],
+        blades: &mut [f32],
+        patches: &mut [u32],
+        indices: &mut [u32],
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,js_name=packingStarted)]
+    pub fn grass_packing_started(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=packingEnded)]
+    pub fn grass_packing_ended(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=publicationStartedRaw)]
+    pub fn grass_publication_started(this: &GrassTransport, entity: &[u8]);
+    #[wasm_bindgen(method,structural,js_name=publicationEndedRaw)]
+    pub fn grass_publication_ended(this: &GrassTransport, entity: &[u8], accepted: bool);
+    #[wasm_bindgen(method,structural,js_name=discard)]
+    pub fn grass_discard(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=dispose)]
+    pub fn grass_dispose(this: &GrassTransport);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameSceneScale)]
     pub fn game_scene_scale() -> f32;
     #[wasm_bindgen(js_name = gameAudioError)]

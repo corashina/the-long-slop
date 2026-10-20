@@ -43,3 +43,7 @@ mod shared_material_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "presentation/probe_activation.rs"]
 mod probe_activation_tests;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "presentation/world/grass_worker.rs"]
+pub mod grass_worker;
