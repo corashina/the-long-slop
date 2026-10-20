@@ -628,8 +628,8 @@ fn read_input(
         ],
         wheel: game_wheel(),
     };
-    drive.frame_input.clear();
     if requests.pending() {
+        drive.frame_input.clear();
         return;
     }
     if actions & 2 != 0 {
@@ -677,7 +677,7 @@ fn read_input(
         };
     }
     drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
-    drive.frame_input = frame;
+    drive.frame_input.merge(frame);
 }
 fn advance_physics(
     time: Res<Time<Real>>,
@@ -690,41 +690,23 @@ fn advance_physics(
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
-    if drive.skip_elapsed {
-        drive.skip_elapsed = false;
-        if !drive.runtime.recovering
-            && drive.runtime.world_supported()
-            && !drive.runtime.sleeping()
-            && !drive.runtime.needs_output().dead
-        {
-            let mut pending = drive.frame_input;
-            pending.held &= !keys::RECENTER;
-            pending.pressed &= !keys::RECENTER;
-            pending.released &= !keys::RECENTER;
-            pending.inventory_held = 0;
-            pending.inventory_released = 0;
-            if drive
-                .runtime
-                .area
-                .interaction
-                .held_light_control()
-                .is_some()
-                || drive.runtime.area.interaction.cleaning.reserves_lmb(
-                    drive.runtime.area.interaction.equipment.item(),
-                    drive.runtime.area.interaction.held(),
-                )
-            {
-                pending.held &= !keys::PRIMARY;
-                pending.pressed &= !keys::PRIMARY;
-                pending.released &= !keys::PRIMARY;
-            }
-            drive.input.merge(pending);
-        } else {
+    let blocked = drive.skip_elapsed
+        && (drive.runtime.recovering
+            || !drive.runtime.world_supported()
+            || drive.runtime.sleeping()
+            || drive.runtime.needs_output().dead);
+    let Drive {
+        frame_input,
+        skip_elapsed,
+        ..
+    } = &mut *drive;
+    let Some(raw) = frame_input.take_frame(skip_elapsed, blocked) else {
+        if blocked {
             drive.input.clear();
             drive.runtime.clear_input();
         }
         return;
-    }
+    };
     let started = game_now();
     if let Some(audio) = &mut drive.runtime.audio {
         let calendar = game_audio_calendar();
@@ -734,7 +716,6 @@ fn advance_physics(
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
     drive.runtime.area.conditions.update(delta, true);
-    let raw = drive.frame_input;
     let view = drive.rendered;
     let frame = drive
         .runtime

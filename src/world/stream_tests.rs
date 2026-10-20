@@ -4652,3 +4652,308 @@ fn g08_save_independent_equipment_and_both_owners() {
     g08_frame(&mut after_load, &reference, up, 0.02);
     assert_eq!(after_load.area.interaction.equipment.item(), Some(tool));
 }
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_after_recovery_retains_fresh_edges() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    run.recover(&reference);
+    assert!(run.recovering);
+    for _ in 0..10 {
+        prepare_ready(&mut run, &reference);
+        run.sync_world_activity(&reference).unwrap();
+        if run.advance_recovery(&reference).unwrap() {
+            break;
+        }
+    }
+    assert!(!run.recovering, "real recovery must complete");
+    assert!(run.world_supported());
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    // sync_world clears both buffers after physics and arms the next time skip.
+    run.clear_input();
+    let mut pending = FrameInput::default();
+    let mut skip = true;
+    pending.merge(FrameInput {
+        pressed: keys::RECENTER | keys::USE,
+        held: keys::RECENTER,
+        mouse: [0.2, 0.3],
+        ..Default::default()
+    });
+    assert!(pending.take_frame(&mut skip, false).is_none());
+    assert!(!skip);
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    pending.merge(FrameInput::default());
+    let raw = pending.take_frame(&mut skip, false).unwrap();
+    let result = g08_frame(&mut run, &reference, raw, 0.02);
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "fresh Tab press survives the recovery time skip"
+    );
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    assert_eq!(pending, FrameInput::default());
+    let mut fixed = FrameInput::default();
+    fixed.merge(result.fixed_input);
+    let first = fixed.take_step();
+    assert_eq!(first.pressed & keys::USE, keys::USE);
+    assert_eq!(first.mouse, [0.2, 0.3]);
+    assert_eq!(fixed.take_step().pressed, 0);
+    assert_eq!(fixed.take_step().mouse, [0.; 2]);
+    pending.merge(FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    });
+    g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.02,
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "the following Tab up cannot equip the released item"
+    );
+    run.clear_input();
+    skip = true;
+    pending.merge(FrameInput {
+        inventory_released: 2,
+        ..Default::default()
+    });
+    assert!(pending.take_frame(&mut skip, false).is_none());
+    assert_eq!(run.area.inventory.selected, 0);
+    pending.merge(FrameInput::default());
+    g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.02,
+    );
+    assert_eq!(
+        run.area.inventory.selected, 1,
+        "fresh number release survives the time skip"
+    );
+    assert_eq!(pending, FrameInput::default());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_skip_consumes_tools_and_particles_once() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let sample = |skip_first: bool| {
+        let mut run = g08_ready(&reference);
+        let light = reference
+            .flashlights
+            .instances
+            .iter()
+            .find(|l| l.startup_active)
+            .unwrap()
+            .item;
+        g08_pickup(&mut run, light);
+        assert!(run.area.equip_carried(&mut run.physics).unwrap());
+        let control = run.area.interaction.owned_light_control(light).unwrap();
+        let index = reference
+            .lighting
+            .controllers
+            .iter()
+            .position(|c| c.id == control)
+            .unwrap();
+        let on = run.lighting.controllers[index].on;
+        let spray = reference.conditions.sprays[0].item;
+        g08_pickup(&mut run, spray);
+        let quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let mut pending = FrameInput::default();
+        let mut skip = skip_first;
+        pending.merge(FrameInput {
+            pressed: keys::PRIMARY | keys::USE,
+            held: keys::PRIMARY,
+            mouse: [0.2, 0.3],
+            ..Default::default()
+        });
+        if skip_first {
+            assert!(pending.take_frame(&mut skip, false).is_none());
+            assert_eq!(run.lighting.controllers[index].on, on);
+            assert_eq!(
+                run.area
+                    .interaction
+                    .cleaning
+                    .get(spray)
+                    .unwrap()
+                    .quantity
+                    .unwrap(),
+                quantity
+            );
+            assert!(
+                run.area
+                    .interaction
+                    .cleaning
+                    .spray_particles(0, 0)
+                    .is_empty()
+            );
+            pending.merge(FrameInput {
+                held: keys::PRIMARY,
+                ..Default::default()
+            });
+        }
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            pending.take_frame(&mut skip, false).unwrap(),
+            0.04,
+        );
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert!(result.primary_reserved);
+        let after_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        assert!(after_quantity < quantity);
+        let ages: Vec<_> = run
+            .area
+            .interaction
+            .cleaning
+            .spray_particles(0, 0)
+            .iter()
+            .map(|p| p.age)
+            .collect();
+        assert!(!ages.is_empty());
+        assert_eq!(pending, FrameInput::default());
+        let mut fixed = FrameInput::default();
+        fixed.merge(result.fixed_input);
+        let input = fixed.take_step();
+        assert_eq!(input.pressed & keys::PRIMARY, 0);
+        assert_eq!(input.pressed & keys::USE, keys::USE);
+        assert_eq!(input.mouse, [0.2, 0.3]);
+        run.step(&reference, input);
+        run.step(&reference, fixed.take_step());
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .get(spray)
+                .unwrap()
+                .quantity
+                .unwrap(),
+            after_quantity
+        );
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .spray_particles(0, 0)
+                .iter()
+                .map(|p| p.age)
+                .collect::<Vec<_>>(),
+            ages
+        );
+        assert_eq!(fixed.take_step().pressed, 0);
+        assert_eq!(fixed.take_step().mouse, [0.; 2]);
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            pending.take_frame(&mut skip, false).unwrap(),
+            0.01,
+        );
+        assert_eq!(result.fixed_input.pressed, 0);
+        assert_eq!(result.fixed_input.mouse, [0.; 2]);
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .get(spray)
+                .unwrap()
+                .quantity
+                .unwrap(),
+            after_quantity
+        );
+        (quantity - after_quantity, ages)
+    };
+    assert_eq!(sample(true), sample(false));
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_blocked_skip_cancels_stale_edges() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            pressed: keys::RECENTER,
+            held: keys::RECENTER,
+            ..Default::default()
+        },
+        0.02,
+    );
+    let mut pending = FrameInput {
+        released: keys::RECENTER,
+        pressed: keys::USE,
+        inventory_released: 2,
+        mouse: [0.2, 0.3],
+        wheel: 1.,
+        ..Default::default()
+    };
+    let mut skip = true;
+    run.paused = true;
+    assert!(pending.take_frame(&mut skip, true).is_none());
+    assert_eq!(pending, FrameInput::default());
+    run.clear_input();
+    run.paused = false;
+    pending.merge(FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    });
+    let result = g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.1,
+    );
+    assert_eq!(run.area.interaction.held(), Some(tool));
+    assert_eq!(
+        run.area.interaction.equipment.item(),
+        None,
+        "canceled Tab press cannot equip on stale release"
+    );
+    assert_eq!(run.area.inventory.selected, 0);
+    assert_eq!(result.fixed_input.pressed, 0);
+    assert_eq!(result.fixed_input.mouse, [0.; 2]);
+    assert_eq!(result.fixed_input.wheel, 0.);
+    // A normal blocked frame still reaches the coordinator's death-look path.
+    run.survival.damage_instant(&reference.survival, 10000.);
+    pending.merge(FrameInput {
+        mouse: [0.4, 0.5],
+        ..Default::default()
+    });
+    let result = g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, true).unwrap(),
+        0.02,
+    );
+    assert!(result.actions_blocked);
+    assert_eq!(result.fixed_input.mouse, [0.4, 0.5]);
+    assert_eq!(pending, FrameInput::default());
+}

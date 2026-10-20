@@ -104,6 +104,45 @@ Log `cargo-20261020-105006-795.log` records that run.
 | `cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu` | Exit 0 | `cargo-20261020-105106-075.log` |
 The earlier 19-test milestone remains separate. Unchanged native filters and HUD web tests were not repeated.
 JavaScript did not change. Browser acceptance, full checks, and product release builds remain deferred.
+## Final review recovery fix
+
+Date: 2026-10-20. Base: `5425807`.
+Recovery completion calls application `clear_input` after physics. It arms the next frame's elapsed-time skip.
+The old active skip discarded fresh Tab and number edges. Ruling 9 is superseded for that path.
+The RED used real recovery and publication readiness. Fresh Tab failed to release retained equipment.
+It executed one test, with one failure. Log `cargo-20261020-110358-698.log` records the assertion.
+
+`Drive.frame_input` now merges raw samples until the coordinator consumes the buffer.
+The shared `FrameInput::take_frame` consumes the skip flag once.
+An active skipped frame retains input. A blocked skipped frame clears input.
+A normal frame takes and clears the buffer, including held values, before the coordinator runs.
+The coordinator still handles normal blocked frames and preserves death-look input.
+Blocked skipped frames also clear the fixed buffer and runtime gesture state.
+Pending save, pause, reset, load, and recovery retain their cancellation paths.
+Camera changes still inspect each fresh raw sample once.
+PRIMARY reservation and fixed-input merging now occur only after the coordinator.
+The fix adds no queue, state field, allocation, or zero-time simulation update.
+
+Three new native regressions use that production buffer method and the real inventory coordinator.
+They cover completed recovery, retained equipment Tab release, number release, and stale canceled input.
+They check once-only USE and mouse input, PRIMARY reservation, tool quantity, particles, and complete buffer consumption.
+Normal blocked death-look input also remains covered.
+These tests reuse private `prepare_ready`; they add no readiness hook.
+
+| Exact final-fix command | Result | Log |
+| --- | --- | --- |
+| `cargo test --locked --lib g08_app_input_ -- --ignored` | 3 passed, 0 failed | `cargo-20261020-110551-859.log` |
+| `cargo test --locked --lib g08_frame_ -- --ignored` | 5 passed, 0 failed | `cargo-20261020-110626-750.log` |
+| `cargo fmt --all -- --check` | Exit 0 | Runner named `cargo-20261020-110703-518.log`; no output file. |
+| `cargo check --locked --target wasm32-unknown-unknown --workspace --lib` | Exit 0 | `cargo-20261020-110717-616.log` |
+| `cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu` | Exit 0 | `cargo-20261020-110751-815.log` |
+| `scripts/check.ps1 -WebTest input` | 4 passed, 0 failed, 0 skipped | Terminal output. |
+
+The input web suite checks bridge edge cancellation and number masks because application input handling changed.
+It does not run the application scheduler. JavaScript remains unchanged.
+These eight native tests are separate from the earlier milestone. Unaffected passing suites were not repeated.
+Existing native and material warnings remain. No new warning was introduced.
+
 ## Failures and repairs
 
 The initial inventory unit baseline passed one test.
@@ -127,8 +166,9 @@ Existing native warnings remain for `PhysicalPipelineState`, `pipeline_states_dr
 The integration build also reports unused `startup_job_audit`. Existing material warnings remain in WASM checks.
 These warnings are outside G08.
 
-The application `skip_elapsed` input path has diff review and WASM compile evidence only.
-Native pending-input tests do not run that application branch.
+The production input buffer lifecycle now has native recovery and coordinator regression coverage.
+Native tests do not run Bevy `read_input`, `advance_physics`, or `sync_world` scheduling.
+Their application wiring and camera/cancellation call sites have diff review and WASM compile evidence.
 Full checks, product release builds, and browser acceptance were not run.
 Normal browser Tab, number, tool, and Save/Load input remains unverified on a packaged build.
 Native tests, DOM test doubles, and compilation do not establish browser acceptance or source parity.
