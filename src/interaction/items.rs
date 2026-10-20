@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
 
-use crate::fluids::{FluidContainer, VehicleFluids};
+use crate::fluids::{FluidContainer, FluidEntry, VehicleFluids, validate_fluid_entries};
 use crate::reference::{
     BodyId, FoodReference, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest,
     WheelSlotId,
@@ -100,11 +100,18 @@ impl ItemStore {
             });
             state.removed = record.removed;
             state.temperature = record.temperature;
-            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
-                fluid.mixture.quantities_liters = quantities;
+            if let (Some(fluid), Some(entries)) = (&mut state.fluid, &record.fluids) {
+                fluid.restore_entries(entries);
             }
         }
         Ok(())
+    }
+    pub(crate) fn cleanup_loaded_fluids(&mut self) {
+        for state in &mut self.states {
+            if let Some(fluid) = &mut state.fluid {
+                fluid.cleanup_one();
+            }
+        }
     }
     /// Stable generated identity and active physical state for change capture.
     pub fn mark_dirty(&mut self, id: ItemId) {
@@ -612,20 +619,25 @@ impl ItemStore {
         if !self.generated.values().any(|value| *value == id) {
             return Err(ReferenceError("Supply is not a generated item".into()));
         }
-        let mut mixture = crate::fluids::FluidMixture::default();
+        let mut entries = Vec::with_capacity(source.fluids.len());
         for fluid in &source.fluids {
-            if !(0..6).contains(&fluid.fluid_type)
-                || !fluid.amount.is_finite()
-                || fluid.amount < 0.0
-            {
-                return Err(ReferenceError("Invalid generated source fluid".into()));
-            }
-            mixture.quantities_liters[fluid.fluid_type as usize] += fluid.amount;
+            let fluid_type = u8::try_from(fluid.fluid_type)
+                .map_err(|_| ReferenceError("Invalid generated source fluid".into()))?;
+            entries.push(FluidEntry {
+                fluid_type,
+                amount: fluid.amount,
+            });
         }
-        if !source.capacity.is_finite() || source.capacity < mixture.total() {
+        if !validate_fluid_entries(&entries) || entries.iter().any(|entry| entry.amount < 0.) {
+            return Err(ReferenceError("Invalid generated source fluid".into()));
+        }
+        if !source.capacity.is_finite()
+            || source.capacity <= 0.
+            || source.capacity < entries.iter().map(|entry| entry.amount).sum::<f32>()
+        {
             return Err(ReferenceError("Invalid generated source capacity".into()));
         }
-        self.get_mut(id).unwrap().fluid = Some(FluidContainer::new(source.capacity, mixture));
+        self.get_mut(id).unwrap().fluid = Some(FluidContainer::new(source.capacity, &entries));
         self.initialized_supplies.insert(id);
         Ok(())
     }
@@ -651,10 +663,7 @@ impl ItemStore {
             condition: state.generated_condition.unwrap_or(1.),
             food: None,
             temperature: state.temperature,
-            fluid_quantities: state
-                .fluid
-                .as_ref()
-                .map(|fluid| fluid.mixture.quantities_liters),
+            fluids: state.fluid.as_ref().map(|fluid| fluid.entries().collect()),
             valve,
         })
     }
@@ -677,8 +686,9 @@ impl ItemStore {
             })
             || snapshot.temperature.is_some_and(|v| !v.is_finite())
             || snapshot
-                .fluid_quantities
-                .is_some_and(|values| values.iter().any(|v| !v.is_finite() || *v < 0.))
+                .fluids
+                .as_ref()
+                .is_some_and(|entries| !validate_fluid_entries(entries))
         {
             return Err(ReferenceError("Invalid generated object snapshot".into()));
         }
@@ -694,19 +704,12 @@ impl ItemStore {
             *condition = snapshot.condition;
         }
         item.temperature = snapshot.temperature;
-        if let Some(quantities) = snapshot.fluid_quantities {
+        if let Some(entries) = &snapshot.fluids {
             let fluid = item
                 .fluid
                 .as_mut()
                 .ok_or_else(|| ReferenceError("Source snapshot has no container".into()))?;
-            if quantities.iter().map(|v| f64::from(*v)).sum::<f64>()
-                > f64::from(fluid.capacity_liters) + 0.001
-            {
-                return Err(ReferenceError(
-                    "Restored fluid exceeds source capacity".into(),
-                ));
-            }
-            fluid.mixture.quantities_liters = quantities;
+            fluid.restore_entries(entries);
         }
         Ok(())
     }
@@ -845,38 +848,18 @@ impl ItemStore {
     }
 }
 
-/// Project source signed state into the nonnegative core save format without changing gameplay.
-fn capture_fluids(fluid: &FluidContainer) -> Result<[f32; 6], crate::save::SaveError> {
-    let mut quantities = fluid.mixture.quantities_liters;
+/// Capture exact source state without changing the tank.
+fn capture_fluids(fluid: &FluidContainer) -> Result<Vec<FluidEntry>, crate::save::SaveError> {
+    let entries: Vec<_> = fluid.entries().collect();
     if !fluid.capacity_liters.is_finite()
-        || fluid.capacity_liters < 0.
-        || quantities.iter().any(|amount| !amount.is_finite())
+        || fluid.capacity_liters <= 0.
+        || !validate_fluid_entries(&entries)
     {
         return Err(crate::save::SaveError::CorruptData(
             "Nonfinite fluid or invalid capacity".into(),
         ));
     }
-    for amount in &mut quantities {
-        *amount = amount.max(0.);
-    }
-    let total: f64 = quantities.iter().map(|amount| f64::from(*amount)).sum();
-    let capacity = f64::from(fluid.capacity_liters);
-    if total > capacity {
-        let scale = capacity / total;
-        let mut remaining = capacity;
-        for amount in &mut quantities {
-            let scaled = (f64::from(*amount) * scale).min(remaining);
-            let rounded = scaled as f32;
-            // Round toward zero so the saved positive sum stays within capacity.
-            *amount = if f64::from(rounded) > scaled {
-                rounded.next_down()
-            } else {
-                rounded
-            };
-            remaining = (remaining - f64::from(*amount)).max(0.);
-        }
-    }
-    Ok(quantities)
+    Ok(entries)
 }
 
 pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePose, ReferenceError> {
@@ -909,4 +892,34 @@ pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePos
         position: position.to_array(),
         rotation: rotation.to_array(),
     })
+}
+
+#[cfg(test)]
+mod g04_ordered_state {
+    use super::*;
+    #[test]
+    fn capture_preserves_signed_state_and_rejects_nonfinite_without_mutation() {
+        let entries = [
+            FluidEntry {
+                fluid_type: 3,
+                amount: 3.,
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 0.,
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: -0.25,
+            },
+        ];
+        let mut tank = FluidContainer::new(2., &entries);
+        assert_eq!(capture_fluids(&tank).unwrap(), entries);
+        tank.restore_entries(&[FluidEntry {
+            fluid_type: 3,
+            amount: f32::INFINITY,
+        }]);
+        assert!(capture_fluids(&tank).is_err());
+        assert_eq!(tank.entries().next().unwrap().amount, f32::INFINITY);
+    }
 }

@@ -409,7 +409,7 @@ impl WheelAssemblies {
                     .collect();
                 let initial_fluids: f32 = tanks
                     .iter()
-                    .map(|tank| tank.quantities_liters.iter().sum::<f32>())
+                    .map(|tank| tank.fluids.iter().map(|entry| entry.amount).sum::<f32>())
                     .sum();
                 let general_dry: f32 = general_mass
                     .iter()
@@ -1018,7 +1018,7 @@ impl WheelAssemblies {
                 .filter_map(|(id, dry)| {
                     let item = items.get(*id)?;
                     (item.body == Some(body))
-                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.mixture.total()))
+                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.mixture().total()))
                 })
                 .sum::<f32>();
         if self.parts[rim].last_mass != mass {
@@ -1081,7 +1081,7 @@ impl WheelAssemblies {
                     .get(*id)
                     .and_then(|item| item.fluid.as_ref())
                     .ok_or_else(|| error("Missing vehicle tank"))?
-                    .mixture
+                    .mixture()
                     .total();
             }
             if !state.last_mass.is_finite() || (mass - state.last_mass).abs() > 0.0001 {

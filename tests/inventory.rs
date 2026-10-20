@@ -165,7 +165,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters,
         game.area
             .items
@@ -174,7 +174,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters
     );
     // Stored food retains its bite, and exhausted food does not return on load.

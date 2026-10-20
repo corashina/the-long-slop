@@ -264,7 +264,7 @@ impl EngineState {
         let oil_penalty = inverse_lerp(
             fluids.sump.capacity_liters * 0.3,
             0.0,
-            fluids.sump.mixture.amount(reference.oil_fluid as usize),
+            fluids.sump.mixture().amount(reference.oil_fluid as usize),
         )
         .powi(3);
         let bounds = reference.globals.car_temperature_bounds;
@@ -417,13 +417,13 @@ impl EngineState {
                 radiator.thermostat_range[1],
                 self.temperature,
             );
-            let total = fluids.coolant.mixture.total();
+            let total = fluids.coolant.mixture().total();
             let water_blood = if total > 0.0 {
                 fluids
                     .coolant
-                    .mixture
+                    .mixture()
                     .amount(3)
-                    .max(fluids.coolant.mixture.amount(4))
+                    .max(fluids.coolant.mixture().amount(4))
                     / total
             } else {
                 0.0

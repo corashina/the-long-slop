@@ -737,14 +737,11 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
         tank_pose: reference.world.generation_frame,
         cap_pose: reference.world.generation_frame,
         fluids: source_tank
-            .quantities_liters
-            .into_iter()
-            .enumerate()
-            .filter_map(|(fluid_type, amount)| {
-                (amount > 0.).then_some(super::super::placement::SupplyFluid {
-                    fluid_type: fluid_type as i32,
-                    amount,
-                })
+            .fluids
+            .iter()
+            .map(|entry| super::super::placement::SupplyFluid {
+                fluid_type: entry.fluid_type as i32,
+                amount: entry.amount,
             })
             .collect(),
         capacity: source_tank.capacity_liters,
@@ -775,7 +772,14 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
     let supply_key = run.area.items.object_key(tank);
     let supply_baseline = run.area.items.generated_snapshot(tank, None).unwrap();
     let mut supply_changed = supply_baseline.clone();
-    supply_changed.fluid_quantities.as_mut().unwrap()[3] -= 1.;
+    supply_changed
+        .fluids
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry.fluid_type == 3)
+        .unwrap()
+        .amount -= 1.;
     run.stream
         .changes
         .record(supply_key.clone(), supply_changed, &supply_baseline);
@@ -1097,7 +1101,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         condition: 0.5,
         food: None,
         temperature: None,
-        fluid_quantities: None,
+        fluids: None,
         valve: None,
         lamp: None,
         linear_velocity: [0.; 3],

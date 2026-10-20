@@ -1,6 +1,6 @@
 //! Source player needs, toilet actions, and death timing.
 
-use crate::fluids::{FluidContainer, FluidMixture};
+use crate::fluids::FluidContainer;
 use crate::reference::{ConsumptionEffect, NeedValues, SurvivalReference};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -57,9 +57,7 @@ impl SurvivalState {
             needs: reference.initial,
             bladder: FluidContainer::new(
                 reference.bladder_capacity_liters,
-                FluidMixture {
-                    quantities_liters: reference.initial_bladder,
-                },
+                &reference.initial_bladder,
             ),
             pending: reference.initial_queue,
             maximum: reference.maximum,
@@ -207,7 +205,7 @@ impl SurvivalState {
             inverse_lerp(reference.maximum.bowel, 0., self.needs.bowel).min(inverse_lerp(
                 self.bladder.capacity_liters,
                 0.,
-                self.bladder.mixture.total(),
+                self.bladder.mixture().total(),
             ));
         let heal = inverse_lerp(0., reference.maximum.water, self.needs.water).min(inverse_lerp(
             0.,
@@ -274,13 +272,13 @@ impl SurvivalState {
         );
         if input.urinate {
             self.show_stats();
-            if self.bladder.mixture.total() <= reference.toilet.empty_amount {
+            if self.bladder.mixture().total() <= reference.toilet.empty_amount {
                 self.emptied_bladder = true;
             }
         } else {
             self.emptied_bladder = false;
         }
-        if self.valve > 0. && self.bladder.mixture.total() > 0. {
+        if self.valve > 0. && self.bladder.mixture().total() > 0. {
             let area =
                 reference.toilet.radius * reference.toilet.radius * std::f32::consts::PI * 0.025;
             let poured = area * self.valve * 2. * dt * fluid_scale;
@@ -333,7 +331,7 @@ impl SurvivalState {
         };
         NeedsOutput {
             needs: self.needs,
-            bladder_liters: self.bladder.mixture.total(),
+            bladder_liters: self.bladder.mixture().total(),
             can_eat: !self.dead && self.needs.bowel + self.pending.bowel < self.maximum.bowel,
             opacity,
             dead: self.dead,
@@ -350,9 +348,8 @@ impl SurvivalState {
     fn convert_water_to_bladder(&mut self, reference: &SurvivalReference, amount: f32) {
         self.needs.water = (self.needs.water - amount).clamp(0., reference.maximum.water);
         let addition = (amount * reference.water_to_piss_ratio)
-            .min((self.bladder.capacity_liters - self.bladder.mixture.total()).max(0.));
-        self.bladder.mixture.quantities_liters[3] += addition;
-        self.bladder.record_type(3);
+            .min((self.bladder.capacity_liters - self.bladder.mixture().total()).max(0.));
+        self.bladder.change_one(addition, 3);
     }
 
     fn eat_instant(&mut self, reference: &SurvivalReference, effect: ConsumptionEffect) {

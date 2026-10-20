@@ -32,7 +32,7 @@ pub struct ObjectSnapshot {
     pub condition: f32,
     pub food: Option<FoodSnapshot>,
     pub temperature: Option<f32>,
-    pub fluid_quantities: Option<[f32; 6]>,
+    pub fluids: Option<Vec<crate::fluids::FluidEntry>>,
     pub valve: Option<f32>,
     pub lamp: Option<bool>,
     pub linear_velocity: [f32; 3],
@@ -599,6 +599,9 @@ pub(crate) fn restore_motion(
 impl ObjectSnapshot {
     pub(crate) fn heap_bytes(&self) -> usize {
         self.food.as_ref().map_or(0, |f| f.source.file.capacity())
+            + self.fluids.as_ref().map_or(0, |entries| {
+                entries.capacity() * std::mem::size_of::<crate::fluids::FluidEntry>()
+            })
             + self.attachment.as_ref().map_or(0, |a| {
                 a.owner.as_ref().map_or(0, key_heap)
                     + a.slot.as_ref().map_or(0, |s| s.file.capacity())

@@ -68,11 +68,11 @@ impl SaveSnapshot {
             )?;
             let tank = reference.tanks.iter().find(|tank| tank.item == id);
             match (&item.fluids, tank) {
-                (Some(quantities), Some(tank)) => data(
-                    quantities.iter().all(|v| v.is_finite() && *v >= 0.)
-                        && quantities.iter().map(|v| f64::from(*v)).sum::<f64>()
-                            <= f64::from(tank.capacity_liters) + 0.001,
-                    "Fluid capacity",
+                (Some(entries), Some(tank)) => data(
+                    crate::fluids::validate_fluid_entries(entries)
+                        && tank.capacity_liters.is_finite()
+                        && tank.capacity_liters > 0.,
+                    "Fluid entries",
                 )?,
                 (None, None) => (),
                 _ => {

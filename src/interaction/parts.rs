@@ -1196,7 +1196,7 @@ impl PartAttachments {
                             .fluid
                             .as_ref()
                             .unwrap()
-                            .mixture
+                            .mixture()
                             .total()
                     })
                     .sum::<f32>())

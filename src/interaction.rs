@@ -1606,13 +1606,13 @@ impl InteractionState {
                         (source.fluid.as_mut(), destination_state.fluid.as_mut())
                 {
                     let mut amount = flow * dt;
-                    let source_total = source.mixture.total();
-                    let destination_total = destination_state.mixture.total();
+                    let source_total = source.mixture().total();
+                    let destination_total = destination_state.mixture().total();
                     if destination_rules.is_some_and(|rules| rules.slow_oil)
                         && source_total > 0.0
-                        && source.mixture.amount(1) / source_total > 0.25
+                        && source.mixture().amount(1) / source_total > 0.25
                         && destination_total > 0.05
-                        && destination_state.mixture.amount(1) / destination_total < 1.0
+                        && destination_state.mixture().amount(1) / destination_total < 1.0
                     {
                         amount = (amount * destination_total * self.slow_oil_modifier)
                             .max(0.0001)
@@ -1654,7 +1654,7 @@ impl InteractionState {
             let mut poured = None;
             let mut fractions = [0.; 6];
             if let Some(fluid) = item.fluid.as_mut() {
-                let fill = (fluid.mixture.total() / fluid.capacity_liters).clamp(0.0, 1.0);
+                let fill = (fluid.mixture().total() / fluid.capacity_liters).clamp(0.0, 1.0);
                 let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
                 let factor = if opening.reference.angle_disabled {
                     1.0
@@ -1662,18 +1662,21 @@ impl InteractionState {
                     inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
                         .max(inverse_lerp(90.0, 180.0, angle))
                 };
-                opening.empty_pour = fluid.mixture.total() <= 0.;
+                opening.empty_pour = fluid.mixture().total() <= 0.;
                 let emitting = opening.valve > 0.
                     && !opening.reference.spill_disabled
                     && !opening.reference.tube_connected
                     && filling != Some(opening.reference.tank)
                     && (opening.reference.angle_disabled || angle > threshold)
-                    && fluid.mixture.total() > 0.;
+                    && fluid.mixture().total() > 0.;
                 if emitting {
                     let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
                     let requested_liters = speed * dt * fluid_scale;
-                    let total = fluid.mixture.total();
-                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                    let total = fluid.mixture().total();
+                    fractions = fluid
+                        .mixture()
+                        .quantities_liters
+                        .map(|amount| amount / total);
                     let debited = spill(fluid, requested_liters);
                     if debited > 0. {
                         opening.flow = Some((false, speed));
@@ -1709,11 +1712,14 @@ impl InteractionState {
                     let Some(fluid) = item.fluid.as_ref() else {
                         continue;
                     };
-                    let total = fluid.mixture.total();
+                    let total = fluid.mixture().total();
                     if total <= 0. {
                         continue;
                     }
-                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                    fractions = fluid
+                        .mixture()
+                        .quantities_liters
+                        .map(|amount| amount / total);
                 }
                 if action.is_none() {
                     action = Some(InteractionAction::DrinkContact {

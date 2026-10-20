@@ -97,8 +97,8 @@ def recover_survival(source: LibrarySource, roots: dict, output: Path) -> dict:
     bladder=source.resolve(outlet,od['Tank']);bd=source.read(bladder)['F']
     maximum={name:d[field] for name,field in [('hp','maxHp'),('food','maxFood'),('water','maxWater'),('bowel','maxShit')]}
     initial={name:f32(value*f32(factor)) for (name,value),factor in zip(maximum.items(),[1.,.75,.6,.5])}
-    quantities=[0.]*6
-    for fluid in bd['fluids']:quantities[fluid['type']]=f32(quantities[fluid['type']]+fluid['amount'])
+    from .manifest import fluid_entries
+    quantities=fluid_entries(bd)
     evidence=managed_evidence(source,['water = maxWater * 0.6f;', 'food = maxFood * 0.75f;', 'shit = maxShit * 0.5f;',
         'currentWaterLoss = foodLoss * sleep *', 'piss.valve = Mathf.Lerp(piss.valve, (pissing && !emptiedBladder) ? 1f : 0f, dt * 3f);',
         'survival.shit -= survival.maxShit * 0.3f;', 'sleepEndTime = Time.time + sleepRealTime * 2f;',

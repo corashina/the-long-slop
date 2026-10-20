@@ -68,7 +68,12 @@ impl GarageRuntime {
                         bite: food.bite,
                     }),
                 temperature: item.temperature,
-                fluid_quantities: item.fluids,
+                fluids: self
+                    .area
+                    .items
+                    .get(ids.item(&item.instance)?)
+                    .and_then(|item| item.fluid.as_ref())
+                    .map(|fluid| fluid.entries().collect()),
                 valve: None,
                 lamp: None,
                 linear_velocity: [0.; 3],
@@ -380,6 +385,15 @@ impl GarageRuntime {
             .area
             .items
             .restore_save(&ids, &saved.items, reference)?;
+        candidate.area.items.cleanup_loaded_fluids();
+        candidate
+            .area
+            .interaction
+            .sync_parts(&mut candidate.area.items, &mut candidate.physics)?;
+        candidate.area.sync_portable_mass(&mut candidate.physics);
+        candidate
+            .wheels
+            .sync(&mut candidate.area.items, &mut candidate.physics)?;
         candidate.area.items.sync_poses(&candidate.physics);
         // Rapier defers collider and additional-mass updates until a step or recomputation.
         // Commit them while paused, before restoring motion and sleep.

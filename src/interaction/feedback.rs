@@ -106,7 +106,7 @@ impl InteractionState {
             && items
                 .get(source)
                 .and_then(|i| i.fluid.as_ref())
-                .is_some_and(|f| f.mixture.total() > 0.)
+                .is_some_and(|f| f.mixture().total() > 0.)
     }
     pub fn available_actions(
         &self,
@@ -164,7 +164,7 @@ impl InteractionState {
                 && items
                     .get(held)
                     .and_then(|item| item.fluid.as_ref())
-                    .is_some_and(|fluid| fluid.mixture.total() > 0.)
+                    .is_some_and(|fluid| fluid.mixture().total() > 0.)
                 && a.fill_reservation.is_none()
             {
                 a.actions.0 |= ActionMask::DRINK;
@@ -253,11 +253,11 @@ impl InteractionState {
                 && items
                     .get(source)
                     .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.mixture.total() > 0.)
+                    .is_some_and(|f| f.mixture().total() > 0.)
                 && items
                     .get(dest)
                     .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.mixture.total() < f.capacity_liters)
+                    .is_some_and(|f| f.mixture().total() < f.capacity_liters)
             {
                 a.actions.0 |= ActionMask::FILL;
             }
@@ -505,9 +505,9 @@ impl InteractionState {
                     .get(o.tank)
                     .and_then(|i| i.fluid.as_ref())
                     .map(|f| FluidFeedback {
-                        amount: f.mixture.total(),
+                        amount: f.mixture().total(),
                         capacity: f.capacity_liters,
-                        quantities: f.mixture.quantities_liters,
+                        quantities: f.mixture().quantities_liters,
                         presentation: &o.presentation,
                     })
             });

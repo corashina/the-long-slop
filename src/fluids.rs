@@ -1,6 +1,27 @@
 //! Six-fluid containers owned by the item store.
 
 use crate::reference::TankReference;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidEntry {
+    pub fluid_type: u8,
+    pub amount: f32,
+}
+
+pub fn validate_fluid_entries(entries: &[FluidEntry]) -> bool {
+    let mut seen = [false; 6];
+    entries.len() <= 6
+        && entries.iter().all(|entry| {
+            let index = entry.fluid_type as usize;
+            if index >= 6 || seen[index] || !entry.amount.is_finite() {
+                return false;
+            }
+            seen[index] = true;
+            true
+        })
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FluidMixture {
@@ -20,21 +41,43 @@ impl FluidMixture {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FluidContainer {
     pub capacity_liters: f32,
-    pub mixture: FluidMixture,
+    mixture: FluidMixture,
     order: [u8; 6],
     order_len: u8,
 }
 
 impl FluidContainer {
-    pub fn new(capacity_liters: f32, mixture: FluidMixture) -> Self {
+    pub fn new(capacity_liters: f32, entries: &[FluidEntry]) -> Self {
         let mut container = Self {
             capacity_liters,
-            mixture,
+            mixture: FluidMixture::default(),
             order: [0; 6],
             order_len: 0,
         };
-        container.track_positive_types();
+        container.restore_entries(entries);
         container
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = FluidEntry> + '_ {
+        self.order[..self.order_len as usize]
+            .iter()
+            .map(|&fluid_type| FluidEntry {
+                fluid_type,
+                amount: self.mixture.amount(fluid_type as usize),
+            })
+    }
+
+    pub fn mixture(&self) -> &FluidMixture {
+        &self.mixture
+    }
+
+    pub(crate) fn restore_entries(&mut self, entries: &[FluidEntry]) {
+        self.mixture = FluidMixture::default();
+        self.order_len = 0;
+        for entry in entries {
+            self.remember(entry.fluid_type as usize);
+            self.mixture.quantities_liters[entry.fluid_type as usize] = entry.amount;
+        }
     }
 
     fn remember(&mut self, index: usize) {
@@ -45,21 +88,7 @@ impl FluidContainer {
         self.order_len += 1;
     }
 
-    fn track_positive_types(&mut self) {
-        for index in 0..6 {
-            if self.mixture.quantities_liters[index] > 0. {
-                self.remember(index);
-            }
-        }
-    }
-
-    pub(crate) fn record_type(&mut self, index: usize) {
-        if self.mixture.quantities_liters[index] > 0. {
-            self.remember(index);
-        }
-    }
-
-    fn change_one(&mut self, amount: f32, index: usize) -> f32 {
+    pub(crate) fn change_one(&mut self, amount: f32, index: usize) -> f32 {
         let free = self.capacity_liters - self.mixture.total();
         let changed = if amount < f32::MIN {
             f32::MIN
@@ -82,7 +111,6 @@ impl FluidContainer {
 
     /// Source ChangeWithoutMix updates retained entries with each new total.
     pub(crate) fn change_without_mix(&mut self, amount: f32) {
-        self.track_positive_types();
         for position in 0..self.order_len as usize {
             let index = self.order[position] as usize;
             let total: f32 = self.order[..self.order_len as usize]
@@ -110,12 +138,7 @@ impl FluidContainer {
 
 impl From<&TankReference> for FluidContainer {
     fn from(reference: &TankReference) -> Self {
-        Self::new(
-            reference.capacity_liters,
-            FluidMixture {
-                quantities_liters: reference.quantities_liters,
-            },
-        )
+        Self::new(reference.capacity_liters, &reference.fluids)
     }
 }
 
@@ -133,15 +156,11 @@ pub fn transfer(source: &mut FluidContainer, destination: &mut FluidContainer, l
     let capacity = (destination.capacity_liters - destination.mixture.total()).max(0.0);
     let accepted = liters.min(total).min(capacity);
     let ratio = accepted / total;
-    source.track_positive_types();
-    for index in 0..6 {
-        let amount = source.mixture.quantities_liters[index] * ratio;
-        source.mixture.quantities_liters[index] -= amount;
-        destination.mixture.quantities_liters[index] += amount;
-    }
     for position in 0..source.order_len as usize {
         let index = source.order[position] as usize;
-        destination.record_type(index);
+        let amount = source.mixture.quantities_liters[index] * ratio;
+        source.mixture.quantities_liters[index] -= amount;
+        destination.change_one(amount, index);
     }
     source.cleanup_one();
     destination.cleanup_one();
@@ -173,8 +192,6 @@ pub fn drink_transfer(
     if !liters.is_finite() || liters <= 0. {
         return 0.;
     }
-    source.track_positive_types();
-    destination.track_positive_types();
     let mut debited = 0.;
     for position in 0..source.order_len as usize {
         let index = source.order[position] as usize;
@@ -205,7 +222,6 @@ pub fn contact_drink_transfer(
     if !liters.is_finite() || liters <= 0. {
         return;
     }
-    destination.track_positive_types();
     for position in 0..source.order_len as usize {
         let index = source.order[position] as usize;
         let fraction = fractions[index];
@@ -234,4 +250,77 @@ pub fn suitability(container: &FluidContainer, required: &FluidMixture) -> f32 {
         }
     }
     result.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod g04_ordered_state {
+    use super::*;
+    #[test]
+    fn preserves_and_validates_entries() {
+        let entries = [
+            FluidEntry {
+                fluid_type: 3,
+                amount: 1.0,
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 0.0,
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: -0.25,
+            },
+        ];
+        assert!(validate_fluid_entries(&entries));
+        let tank = FluidContainer::new(2.0, &entries);
+        assert_eq!(tank.entries().collect::<Vec<_>>(), entries);
+        assert_eq!(
+            serde_json::from_str::<Vec<FluidEntry>>(&serde_json::to_string(&entries).unwrap())
+                .unwrap(),
+            entries
+        );
+        assert!(!validate_fluid_entries(&[entries[0], entries[0]]));
+        assert!(!validate_fluid_entries(&[FluidEntry {
+            fluid_type: 6,
+            amount: 0.
+        }]));
+        assert!(!validate_fluid_entries(&[entries[0]; 7]));
+        assert!(!validate_fluid_entries(&[FluidEntry {
+            fluid_type: 0,
+            amount: f32::NAN
+        }]));
+    }
+}
+
+#[cfg(test)]
+mod g04_restore_test {
+    use super::*;
+    #[test]
+    fn g04_ordered_state_restore_assigns_all_entries_before_one_cleanup() {
+        let entries = [
+            FluidEntry {
+                fluid_type: 3,
+                amount: 0.,
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: -0.5,
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: 3.,
+            },
+        ];
+        let mut tank = FluidContainer::new(2., &[]);
+        tank.restore_entries(&entries);
+        tank.restore_entries(&entries);
+        assert_eq!(tank.entries().collect::<Vec<_>>(), entries);
+        tank.cleanup_one();
+        assert_eq!(tank.entries().collect::<Vec<_>>(), entries[1..]);
+        assert_eq!(tank.mixture().total(), 2.5);
+        assert!(
+            serde_json::from_str::<FluidEntry>(r#"{"fluid_type":3,"amount":1,"legacy":true}"#)
+                .is_err()
+        );
+    }
 }

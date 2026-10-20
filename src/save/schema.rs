@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,7 +162,7 @@ pub struct ItemSnapshot {
     pub local_pose: LocalPose,
     pub location: ItemLocationSave,
     pub temperature: Option<f32>,
-    pub fluids: Option<[f32; 6]>,
+    pub fluids: Option<Vec<crate::fluids::FluidEntry>>,
     pub food: Option<FoodSnapshot>,
     pub removed: bool,
 }
@@ -330,4 +330,16 @@ pub struct ToolSnapshot {
     pub quantity: Option<f32>,
     pub color: Option<[f32; 4]>,
     pub disabled: bool,
+}
+
+#[cfg(test)]
+mod g04_ordered_state {
+    use super::*;
+    #[test]
+    fn schema_six_is_rejected_before_payload_reconstruction() {
+        assert!(matches!(
+            SaveSnapshot::from_json(br#"{"schema_version":6}"#),
+            Err(SaveError::IncompatibleSources(_))
+        ));
+    }
 }
