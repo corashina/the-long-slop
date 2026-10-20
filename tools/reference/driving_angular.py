@@ -103,6 +103,16 @@ def validate_source_ownership(native,expected,original_id,original_key):
             raise ValueError('Angular original source wheel isolation changed')
 
 
+def validate_angular_inertia(body,declared,constraints,step=0,phase='initial'):
+    """Keep copied input separate from the observed frozen-axis solve state."""
+    expected=declared
+    # These checked rows freeze all rotation axes or none. PositionY adds no tensor rule.
+    if constraints & 112 == 112 and (step>1 or phase=='physics.exit'):
+        expected=dict(x=0.,y=0.,z=0.)
+    if body.get('constraints')!=constraints or body.get('inertia_tensor')!=expected:
+        raise ValueError('Angular constrained body inertia tensor or constraints differ')
+
+
 def validate_angular(run,scenario):
     spec=validate_angular_schedule(scenario)
     report=run.get('angular',{})
@@ -161,6 +171,8 @@ def validate_angular(run,scenario):
     initial_state=report.get('initial_state',{})
     initial_body=initial_state.get('body',{})
     rig=spec['rig']
+    validate_angular_inertia(held,body_input['inertia_tensor'],rig['constraints'])
+    validate_angular_inertia(initial_body,body_input['inertia_tensor'],rig['constraints'])
     if (not body_fields<=initial_body.keys() or initial_state.get('wheel_id')!=report['copied_wheel_id'] or not initial_state.get('enabled') or
         initial_state.get('event_revision')!=0 or initial_state.get('assignment_step')!=0 or
         initial_state.get('phase')!='before-first-assignment' or
@@ -193,7 +205,8 @@ def validate_angular(run,scenario):
                 raise ValueError('Angular measured wheel profile changed')
             if observation.get('sprung_mass_available') is not True or type(observation.get('sprung_mass')) not in (float,int):
                 raise ValueError('Angular native sprung mass is missing')
-            if any(body[k]!=held[k] for k in ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation','solver_iterations','solver_velocity_iterations','max_angular_velocity','detect_collisions','interpolation','collision_detection_mode')):
+            validate_angular_inertia(body,body_input['inertia_tensor'],rig['constraints'],step,sample['phase'])
+            if any(body[k]!=held[k] for k in ('mass','center_of_mass','inertia_tensor_rotation','solver_iterations','solver_velocity_iterations','max_angular_velocity','detect_collisions','interpolation','collision_detection_mode')):
                 raise ValueError('Angular copied body setup changed')
             rig=spec['rig']
             if any(body[k]!=v for k,v in [('constraints',rig['constraints']),('use_gravity',rig['use_gravity']),('drag',rig['drag']),('angular_drag',rig['angular_drag']),('sleep_threshold',rig['sleep_threshold'])]):

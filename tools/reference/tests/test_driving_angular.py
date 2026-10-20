@@ -30,6 +30,8 @@ def gate_fixture(index=0):
         state=dict(profile,body=deepcopy(body),event_revision=i+1,assignment_step=step,phase=event['phase'],enabled=True,active_self=True,active_hierarchy=True,wheel_id=50,sprung_mass=100.,sprung_mass_available=True)
         for phase,value in [('physics.entry',previous),('physics.exit',rpm)]:
             samples.append(dict(step=step,sequence=len(samples)+1,phase=phase,frame=step,delta_time=.02,time=step*.02,fixed_dt=.02,input_sequence=0,angular_state=deepcopy(state),native_wheels=deepcopy(native),wheels=[dict(rpm=value,motor_torque=event['motor_nm'],brake_torque=event['brake_nm'],contact=False)]))
+            if spec['rig']['constraints']==116 and (step>1 or phase=='physics.exit'):
+                samples[-1]['angular_state']['body']['inertia_tensor']=deepcopy(z)
         previous=rpm
     phases=('prepared-held','backlog-drained-held','before-dynamic','switched-dynamic','canonical-applied','canonical-transforms-synchronized','native-wheels-enabled','armed-after-canonical')
     return row,dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,initial=dict(fixed_dt=.02))
@@ -90,6 +92,57 @@ class AngularTests(unittest.TestCase):
                 if case=='body_change': sample['angular_state']['body']['inertia_tensor']['x']=4.
                 if case=='source_enabled': sample['native_wheels'][0]['enabled']=True
                 with self.assertRaises(ValueError): validate_angular(bad,row)
+
+    def test_frozen_tensor_changes_at_first_solve_exit(self):
+        row,run=gate_fixture()
+        original=deepcopy(run)
+        declared=run['angular']['body_input']['inertia_tensor']
+        self.assertEqual(run['angular']['copied_held_body']['inertia_tensor'],declared)
+        self.assertEqual(run['angular']['initial_state']['body']['inertia_tensor'],declared)
+        self.assertEqual(run['samples'][0]['angular_state']['body']['inertia_tensor'],declared)
+        self.assertTrue(all(s['angular_state']['body']['inertia_tensor']==dict(x=0.,y=0.,z=0.) for s in run['samples'][1:]))
+        self.assertEqual(validate_angular(run,row)['steps'],480)
+        self.assertEqual(run,original)
+
+    def test_reject_frozen_tensor_timing_and_partial_zeros(self):
+        row,run=gate_fixture()
+        cases=('initial_zero','first_entry_zero','late_transition','reversion','partial_zero','held_zero')
+        for case in cases:
+            with self.subTest(case=case):
+                bad=deepcopy(run)
+                declared=bad['angular']['body_input']['inertia_tensor']
+                if case=='initial_zero': bad['angular']['initial_state']['body']['inertia_tensor']=dict(x=0.,y=0.,z=0.)
+                if case=='first_entry_zero': bad['samples'][0]['angular_state']['body']['inertia_tensor']=dict(x=0.,y=0.,z=0.)
+                if case=='late_transition':
+                    for sample in bad['samples'][1:3]: sample['angular_state']['body']['inertia_tensor']=deepcopy(declared)
+                if case=='reversion': bad['samples'][241]['angular_state']['body']['inertia_tensor']=deepcopy(declared)
+                if case=='partial_zero': bad['samples'][1]['angular_state']['body']['inertia_tensor']=dict(x=0.,y=0.,z=3.)
+                if case=='held_zero': bad['angular']['copied_held_body']['inertia_tensor']=dict(x=0.,y=0.,z=0.)
+                with self.assertRaises(ValueError): validate_angular(bad,row)
+
+    def test_unconstrained_helper_tensor_remains_declared(self):
+        for index in (8,9):
+            row,run=gate_fixture(index)
+            original=deepcopy(run)
+            self.assertEqual(validate_angular(run,row)['steps'],480)
+            self.assertEqual(run,original)
+            for boundary in ('held','initial',0,1,241):
+                for tensor in (dict(x=0.,y=0.,z=0.),dict(x=1.,y=2.,z=4.),dict(x=0.,y=2.,z=3.)):
+                    with self.subTest(index=index,boundary=boundary,tensor=tensor):
+                        bad=deepcopy(run)
+                        body=bad['angular']['copied_held_body'] if boundary=='held' else bad['angular']['initial_state']['body'] if boundary=='initial' else bad['samples'][boundary]['angular_state']['body']
+                        body['inertia_tensor']=tensor
+                        with self.assertRaises(ValueError): validate_angular(bad,row)
+
+    def test_declared_constraints_stay_exact_at_all_tensor_boundaries(self):
+        for index in (0,8):
+            row,run=gate_fixture(index)
+            for boundary in ('held','initial',0,1,241):
+                with self.subTest(index=index,boundary=boundary):
+                    bad=deepcopy(run)
+                    body=bad['angular']['copied_held_body'] if boundary=='held' else bad['angular']['initial_state']['body'] if boundary=='initial' else bad['samples'][boundary]['angular_state']['body']
+                    body['constraints']=112 if index==0 else 4
+                    with self.assertRaises(ValueError): validate_angular(bad,row)
 
     def test_helper_baseline_keeps_free_body(self):
         row,run=gate_fixture(8)
