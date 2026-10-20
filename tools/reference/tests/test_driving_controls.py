@@ -310,6 +310,39 @@ class DrivingControlsTests(unittest.TestCase):
                 if corruption=='exit_revision':exit['controls']['input_revision']+=1
                 with self.subTest(frame=frame,corruption=corruption),self.assertRaises(ValueError):validate_run(run,scenario)
 
+    def test_required_manual_gears_reject_assisted_context(self):
+        from tools.reference.driving_probe import validate_run
+        for mode,clutch in (('force_automatic_transmission',.083334505558),
+                            ('force_automatic_transmission',1.),('auto_clutch',1.),
+                            ('auto_shift',1.),('force_manual',1.)):
+            run,scenario=self.required_gear_fixture()
+            if mode in ('auto_clutch','auto_shift'):
+                scenario['setup'][mode]=True
+            run['initial']['control_mode'][mode]=True
+            for sample in run['samples']:
+                sample['controls']['mode'][mode]=True
+                sample['clutch']=clutch
+            with self.subTest(mode=mode,clutch=clutch),self.assertRaises(ValueError):
+                validate_run(run,scenario)
+
+    def test_ordinary_assisted_gear_requests_keep_source_eligibility(self):
+        from tools.reference.driving_probe import validate_run
+        for mode in ('auto_clutch','force_automatic_transmission'):
+            run,scenario=self.required_gear_fixture()
+            del scenario['required_gear_changes']
+            if mode=='auto_clutch':scenario['setup'][mode]=True
+            run['initial']['control_mode'][mode]=True
+            for sample in run['samples']:
+                sample['controls']['mode'][mode]=True
+                sample['clutch']=.083334505558
+                sample['gear']=0
+            events=validate_run(run,scenario)['controls']['gear_events']
+            with self.subTest(mode=mode):
+                self.assertEqual(len(events),3)
+                self.assertTrue(all(e['clutch_eligible'] for e in events))
+                self.assertTrue(all(e['clutch']==.083334505558 for e in events))
+                self.assertEqual([(e['before_gear'],e['after_gear']) for e in events],[(0,0)]*3)
+
     def test_required_gear_metadata_is_strict(self):
         _,scenario=self.required_gear_fixture()
         changes=(None,[],[{}],[dict(frame=True,before_gear=0,after_gear=1)],

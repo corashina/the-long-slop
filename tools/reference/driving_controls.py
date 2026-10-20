@@ -78,6 +78,8 @@ def validate_schedule(scenario):
         changes = scenario['required_gear_changes']
         if isolated or not isinstance(changes, list) or not changes:
             raise ValueError('Required gear changes need explicit source event outcomes')
+        if any(scenario['setup'][key] is not False for key in ('auto_clutch', 'auto_shift')):
+            raise ValueError('Required gear changes need declared manual clutch and shift modes')
         events = {c['frame']: c.get('gear_press', '') for c in controls}
         previous = -1
         for change in changes:
@@ -123,6 +125,8 @@ def validate_mode(mode, scenario):
     expected = dict(MODE_FIELDS, auto_clutch=scenario['setup']['auto_clutch'], auto_shift=scenario['setup']['auto_shift'])
     if not isinstance(mode, dict) or not expected.keys() <= mode.keys() or any(type(mode[k]) is not bool or mode[k] != v for k, v in expected.items()) or type(mode.get('force_automatic_transmission')) is not bool:
         raise ValueError('Missing or different actual keyboard/digital mode evidence')
+    if scenario.get('required_gear_changes') and mode['force_automatic_transmission']:
+        raise ValueError('Required manual gear changes cannot use forced automatic transmission')
 
 
 def validate_controls(run, scenario):
@@ -298,8 +302,8 @@ def validate_required_gears(scenario, events):
         event = observed.get(required['frame'])
         if event is None or 'after_gear' not in event:
             raise ValueError('Required gear change lacks an original actuation outcome')
-        if not event['clutch_eligible']:
-            raise ValueError('Required gear change failed original source clutch eligibility')
+        if event['clutch'] <= .5 or not event['clutch_eligible']:
+            raise ValueError('Required manual gear change needs actual clutch above 0.5 and source eligibility')
         if event['before_gear'] != required['before_gear']:
             raise ValueError('Required gear change has the wrong source before gear')
         if event['after_gear'] == event['before_gear']:
