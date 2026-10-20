@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
-from .driving_curve import SCENARIO_ID, validate_curve_scenario, validate_curve_run, require_same_curve
+from .driving_curve import validate_curve_scenario, validate_curve_run, require_same_curve
 from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
@@ -31,7 +31,7 @@ def read_json(path):
     try:
         text = path.read_text(encoding='utf-8-sig')
         data = json.loads(text)
-        if isinstance(data, dict) and data.get('scenario') == SCENARIO_ID:
+        if isinstance(data, dict) and data.get('probe_kind') == 'curve':
             data['curves'] = json.loads(text, parse_float=Decimal).get('curves')
         return data
     except (OSError, ValueError) as error:
@@ -234,7 +234,13 @@ def validate_run(run, scenario):
     controls = validate_controls(run, checked_scenario)
     if scenario['probe_kind']=='wheel_angular':
         timing['angular'] = validate_angular(run, scenario)
-    return {**({'curve_holdout': curve} if curve is not None else {}),
+    domain = (dict(kind='native-engine-curve', input_boundary='reported native curve inputs',
+                   qualified_measurements=['enginescript.torqueCurve.Evaluate'],
+                   physical_measurements_qualified=False,
+                   unqualified_context=['chassis', 'driving', 'suspension'])
+              if curve is not None else dict(kind='physical', physical_measurements_qualified=True))
+    return {**({'engine_curve': curve} if curve is not None else {}),
+            'qualification_domain': domain,
             'samples': len(samples), 'physics_steps': run['physics_steps'],
             'phases': sorted(phases), 'controls': controls, **timing}
 
@@ -281,6 +287,16 @@ def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) 
     return result
 
 
+def repeat_state(run, scenario, result):
+    if scenario['probe_kind'] == 'curve':
+        return result['engine_curve']['input_state']
+    state = {key: value for key, value in run['initial'].items() if key != 'profile_path'}
+    state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
+    if scenario['probe_kind'] == 'wheel_angular':
+        state['angular_initial'] = angular_initial_inputs(run)
+    return state
+
+
 def verify(output_root: Path) -> dict:
     output = output_root.resolve()
     request = read_json(output / 'request.json')
@@ -300,13 +316,10 @@ def verify(output_root: Path) -> dict:
                 validate_angular_body_input(run, canonical_body_input, repeat==1)
                 if repeat==1: canonical_body_input = run['setup_state']['angular_body_input']
             result = validate_evidence(output, directory, run, scenario)
-            if scenario['id'] == SCENARIO_ID:
-                require_same_curve(first_curve, result['curve_holdout'])
-                first_curve = result['curve_holdout']
-            state = {key: value for key, value in run['initial'].items()
-                     if key != 'profile_path'}
-            state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
-            if scenario['probe_kind']=='wheel_angular': state['angular_initial'] = angular_initial_inputs(run)
+            if scenario['probe_kind'] == 'curve':
+                require_same_curve(first_curve, result['engine_curve'])
+                first_curve = result['engine_curve']
+            state = repeat_state(run, scenario, result)
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
@@ -386,13 +399,10 @@ def capture(source_root: Path, reference_root: Path,
             if row['probe_kind']=='wheel_angular':
                 validate_angular_body_input(native_run, None if setup_state is None else setup_state.get('angular_body_input'), repeat==1)
             result = validate_evidence(output, directory, native_run, row)
-            if row['id'] == SCENARIO_ID:
-                require_same_curve(first_curve, result['curve_holdout'])
-                first_curve = result['curve_holdout']
-            state = {key: value for key, value in native_run['initial'].items()
-                     if key != 'profile_path'}
-            state['physical_geometry'] = physical_inputs(next(row for row in native_run['geometry'] if row['phase'] == 'armed-after-canonical'))
-            if row['probe_kind']=='wheel_angular': state['angular_initial'] = angular_initial_inputs(native_run)
+            if row['probe_kind'] == 'curve':
+                require_same_curve(first_curve, result['engine_curve'])
+                first_curve = result['engine_curve']
+            state = repeat_state(native_run, row, result)
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state

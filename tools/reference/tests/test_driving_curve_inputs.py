@@ -109,7 +109,7 @@ class DrivingCurveInputTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError): validate_curve_scenario(row)
         old = scenario(); old['id'] = 'curve-boundaries'; old.pop(INPUT_FIELD); old.pop(PROVENANCE_FIELD)
         validate_curve_scenario(old)
-        self.assertIsNone(validate_curve_run({}, old))
+        with self.assertRaisesRegex(ValueError, 'Native engine torque curve is missing'): validate_curve_run({}, old)
 
     def test_serialized_and_native_wrap_domains_are_distinct(self):
         serialized = serialized_torque_curve()
@@ -183,7 +183,7 @@ class DrivingCurveInputTests(unittest.TestCase):
         with patch.object(probe, 'validate_timing', return_value={}), \
              patch.object(probe, 'validate_controls', return_value={}):
             result = probe.validate_run(run, scenario())
-            self.assertEqual(result['curve_holdout']['input_bits'], list(map(bits, PREFIX + FROZEN_INPUTS)))
+            self.assertEqual(result['engine_curve']['input_state']['input_bits'], list(map(bits, PREFIX + FROZEN_INPUTS)))
             run['curves'][0]['inputs'][52] = 0.
             with self.assertRaisesRegex(ValueError, 'prefix or suffix bits differ'):
                 probe.validate_run(run, scenario())
@@ -191,7 +191,7 @@ class DrivingCurveInputTests(unittest.TestCase):
     def test_native_decimal_tokens_stay_local_and_receipts_serialize(self):
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / 'runtime.json'
-            data = dict(scenario=SCENARIO_ID, curves=[torque_row()], initial={'rpm': .2})
+            data = dict(scenario=SCENARIO_ID, probe_kind='curve', curves=[torque_row()], initial={'rpm': .2})
             text = json.dumps(data).replace('0.25', '0.2500000000000000000000000000000000001', 1)
             path.write_text(text)
             read = probe.read_json(path)
@@ -274,12 +274,12 @@ class DrivingCurveInputTests(unittest.TestCase):
                         row = torque_row()
                         if corrupt == 'value' and len(launched) == 2: row['values'][52] += .5
                         if corrupt == 'serialized wraps': row.update(pre_wrap=2, post_wrap=2)
-                        probe.write_json(directory / 'runtime.json', dict(scenario=SCENARIO_ID, curves=[row],
+                        probe.write_json(directory / 'runtime.json', dict(scenario=SCENARIO_ID, probe_kind='curve', curves=[row],
                             initial={'rpm': .2}, setup_state={'held': True}, geometry=[dict(
                                 phase='armed-after-canonical', colliders=[], transforms=[])]))
                     return type('Result', (), {'returncode': 0})()
                 def validate(output, directory, run, row):
-                    return {'curve_holdout': validate_curve_run(run, row)}
+                    return {'engine_curve': validate_curve_run(run, row)}
                 with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value=pre), \
                      patch.object(probe.subprocess, 'run', side_effect=native), patch.object(probe, 'validate_evidence', side_effect=validate):
                     if corrupt != 'none':

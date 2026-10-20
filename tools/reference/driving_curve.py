@@ -91,7 +91,7 @@ def original_inputs(keys):
 
 def validate_curve_run(run, scenario):
     validate_curve_scenario(scenario)
-    if scenario.get('id') != SCENARIO_ID:
+    if scenario.get('probe_kind') != 'curve':
         return None
     curves = run.get('curves')
     if not isinstance(curves, list):
@@ -116,16 +116,24 @@ def validate_curve_run(run, scenario):
            for field, expected in zip(('pre_wrap', 'post_wrap'), NATIVE_TORQUE_WRAPS)):
         raise ValueError('Native engine torque wraps differ')
     inputs, values = row.get('inputs'), row.get('values')
-    if not isinstance(inputs, list) or not isinstance(values, list) or len(inputs) != 77 or len(values) != 77:
-        raise ValueError('Native engine torque requires 77 inputs and values')
-    expected = tuple(bits(value) for value in original_inputs(serialized['keys'])) + INPUT_BITS
-    if tuple(bits(value) for value in inputs) != expected:
+    expected = tuple(bits(value) for value in original_inputs(serialized['keys']))
+    if scenario['id'] == SCENARIO_ID:
+        expected += INPUT_BITS
+    count = len(expected)
+    if not isinstance(inputs, list) or not isinstance(values, list) or len(inputs) != count or len(values) != count:
+        raise ValueError(f'Native engine torque requires {count} inputs and values')
+    input_bits = [bits(value) for value in inputs]
+    if tuple(input_bits) != expected:
         raise ValueError('Native engine torque prefix or suffix bits differ')
-    # Keep native decimal tokens separately. Qualification compares the binary32 readouts only.
-    return {'input_bits': list(expected), 'value_bits': [bits(value) for value in values],
+    state = dict(owner=row['owner'], name=row['name'],
+        keys=[{name: value if name == 'weighted_mode' else bits(value)
+               for name, value in key.items()} for key in keys],
+        pre_wrap=row['pre_wrap'], post_wrap=row['post_wrap'], input_bits=input_bits)
+    # These are reported curve inputs. Later chassis observations stay raw context.
+    return {'input_state': state, 'value_bits': [bits(value) for value in values],
             'native_value_decimals': [str(value) for value in values]}
 
 
 def require_same_curve(first, current):
-    if first is not None and any(first[key] != current[key] for key in ('input_bits', 'value_bits')):
+    if first is not None and first['value_bits'] != current['value_bits']:
         raise ValueError('Fresh native repeats have different engine torque curve bits')
