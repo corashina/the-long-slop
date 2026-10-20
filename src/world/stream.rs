@@ -180,6 +180,7 @@ pub struct WorldStream {
     road_prototypes: [Option<road_mesh::RoadPrototype>; 3],
     road_source_revisions: [u64; 3],
     road_worker: RoadWorker,
+    road_worker_reserved_bytes: usize,
     road_work: Option<RoadWork>,
     placements: PlacementIndex,
     props: super::prop_layers::PropLayers,
@@ -723,6 +724,7 @@ impl WorldStream {
             road_prototypes: [const { None }; 3],
             road_source_revisions: [0; 3],
             road_worker: RoadWorker::default(),
+            road_worker_reserved_bytes: 0,
             road_work: None,
             placements: PlacementIndex::new(world, seed),
             props: super::prop_layers::PropLayers::new(world, seed)?,
@@ -1219,6 +1221,7 @@ impl WorldStream {
             }
             // Terminate only this world's actor before releasing any source or job charge.
             self.road_worker.dispose();
+            self.road_worker_reserved_bytes = 0;
             if let Some(work) = self.road_work.take() {
                 self.rewind_road(SurfaceKey {
                     layer: WorldLayer::Road,
@@ -2366,6 +2369,7 @@ impl WorldStream {
     }
     fn road_failure(&mut self, error: ReferenceError) {
         self.road_worker.dispose();
+        self.road_worker_reserved_bytes = 0;
         self.road_work = None;
         self.failure = Some(error.0);
     }
@@ -2509,6 +2513,43 @@ impl WorldStream {
         let cache_bytes = if install { layout.cache_bytes } else { 0 };
         if !self.can_request_independent(1) || !self.admit_generation(pending_bytes + cache_bytes) {
             return;
+        }
+        let capacity = self
+            .road_worker
+            .cache_bytes()
+            .checked_add(cache_bytes)
+            .and_then(|v| v.checked_add(pending_bytes))
+            .and_then(|v| v.checked_mul(2))
+            .and_then(|v| v.checked_add(super::road_worker::INITIAL_WASM_BYTES))
+            .and_then(usize::checked_next_power_of_two);
+        let Some(capacity) = capacity else {
+            self.road_failure(ReferenceError("Road capacity overflow".into()));
+            return;
+        };
+        // This is an admission estimate, separate from the logical operation charge.
+        let capacity = capacity.max(self.road_worker_reserved_bytes);
+        let delta = capacity - self.road_worker_reserved_bytes;
+        if self
+            .metrics()
+            .active_cpu_bytes
+            .saturating_add(pending_bytes + cache_bytes)
+            .saturating_add(delta)
+            > ACTIVE_CPU
+        {
+            self.road_failure(ReferenceError(
+                "Road worker capacity exceeds CPU budget".into(),
+            ));
+            return;
+        }
+        // Retain actor capacity before creation. Wait for initialization before packing or sends.
+        self.road_worker_reserved_bytes = capacity;
+        match self.road_worker.initialize(capacity) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                self.road_failure(error);
+                return;
+            }
         }
         let identity =
             match self
@@ -4367,6 +4408,7 @@ impl WorldStream {
         let mut metrics = WorldMetrics {
             shared_input_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0) + self.dependency_metadata,
             road_worker_wasm_bytes: self.road_worker.wasm_bytes(),
+            road_worker_reserved_bytes: self.road_worker_reserved_bytes,
             grass_worker_wasm_bytes: self.presentation.grass_worker_wasm_bytes,
             grass_worker_cache_bytes: self.presentation.grass_worker_cache_bytes,
             grass_worker_reserved_bytes: self.presentation.grass_worker_reserved_bytes,
@@ -4427,6 +4469,7 @@ impl WorldStream {
             changed_record_bytes: self.changes.retained_bytes(),
             changed_objects: self.changes.len(),
             active_cpu_bytes: std::mem::size_of::<Self>()
+                + self.road_worker_reserved_bytes
                 + self.road_worker.cache_bytes()
                 + self.lamp_material_choices.capacity()
                     * std::mem::size_of::<(SourceId, SourceId, Vec<SourceId>)>()
@@ -4640,6 +4683,7 @@ impl WorldStream {
             metrics.prototype_gpu_bytes += allocation.gpu;
         }
         metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
+        metrics.road_worker_reserved_bytes += self.overlap.road_worker_reserved_bytes;
         metrics.grass_worker_wasm_bytes += self.overlap.grass_worker_wasm_bytes;
         metrics.grass_worker_cache_bytes += self.overlap.grass_worker_cache_bytes;
         metrics.grass_worker_reserved_bytes += self.overlap.grass_worker_reserved_bytes;
@@ -4773,3 +4817,10 @@ mod content_lamps;
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 mod tests;
+
+impl Drop for WorldStream {
+    fn drop(&mut self) {
+        // Terminate before Rust drops source caches, job storage, or reservation ownership.
+        self.road_worker.dispose();
+    }
+}

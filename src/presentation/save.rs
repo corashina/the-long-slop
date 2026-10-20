@@ -436,6 +436,7 @@ impl PreparedPresentation {
         Ok(())
     }
     pub fn cancel(&mut self) {
+        self.grass.cancel();
         self.materials.preparation.cancel();
         self.materials.world_textures.cancel();
         self.prototypes.cancel();

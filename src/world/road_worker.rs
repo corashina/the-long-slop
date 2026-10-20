@@ -2,6 +2,9 @@
 use super::WorldSurface;
 use crate::reference::ReferenceError;
 
+// scripts/build.ps1 gives the road package this initial linear-memory capacity.
+pub(crate) const INITIAL_WASM_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RoadJobId {
     pub session: u64,
@@ -148,6 +151,21 @@ impl RoadWorker {
         #[cfg(not(target_arch = "wasm32"))]
         {
             0
+        }
+    }
+    pub(crate) fn initialize(&mut self, capacity: usize) -> Result<bool, ReferenceError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let transport = self.transport()?;
+            transport
+                .road_capacity_limit(capacity as f64)
+                .map_err(js_error)?;
+            transport.road_initialized().map_err(js_error)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = capacity;
+            Ok(true)
         }
     }
     #[cfg(target_arch = "wasm32")]

@@ -7,13 +7,13 @@ const same=(a,b)=>identityValid(a)&&identityValid(b)&&a.session===b.session&&a.r
 const fromBytes=bytes=>{if(!(bytes instanceof Uint8Array)||bytes.length!==28)throw Error('Invalid road identity.');const v=new DataView(bytes.buffer,bytes.byteOffset,28);return {kind:'road',session:v.getBigUint64(0,true).toString(),revision:v.getBigUint64(8,true).toString(),owner:v.getUint32(16,true),sequence:v.getBigUint64(20,true).toString()};};
 const metric=value=>({valid:Number.isFinite(value)&&value>=0,valueMs:Number.isFinite(value)&&value>=0?value:null,rawMs:Number.isFinite(value)?value:String(value),reason:!Number.isFinite(value)?'invalid-duration':value<0?'negative-duration':null});
 export function createRoad(worker,profile,now=()=>performance.now()){
- let state='Idle',job=null,result=null,failure=null,disposed=false,lastSequence=0n,wasmBytes=0,pendingInstalls=0;
+ let state='Idle',job=null,result=null,failure=null,disposed=false,initialized=false,capacityLimit=2097152,lastSequence=0n,wasmBytes=0,pendingInstalls=0;
  const sources=new Array(3).fill(null);
  let clock=null,handshakePending=false,packingStart=null,packingMs=null,publishedRecord=null;
  const diagnostic=fn=>{if(profile?.enabled){try{fn();}catch{/* Diagnostics never change transport ownership. */}}};
  const emit=record=>diagnostic(()=>profile.worker(record));
  const releaseRecord=(record,reason)=>{if(!record)return;diagnostic(()=>{record.releaseReason=reason;record.stagingReleasedAt=now();record.physicalReleaseAt=record.transferBuffersReleasedAt??record.stagingReleasedAt;record.totalJobMs=metric(record.stagingReleasedAt-record.mainCopyStart);emit(record);});};
- const clear=()=>{job=null;result=null;sources.fill(null);publishedRecord=null;state='Idle';wasmBytes=0;pendingInstalls=0;handshakePending=false;packingStart=packingMs=null;};
+ const clear=()=>{job=null;result=null;sources.fill(null);publishedRecord=null;state='Idle';initialized=false;wasmBytes=0;pendingInstalls=0;handshakePending=false;packingStart=packingMs=null;};
  const fail=message=>{if(disposed)return;failure=String(message);worker.terminate();diagnostic(()=>{if(job?.record)job.record.error=failure;for(const s of sources)if(s?.record)s.record.error=failure;emit({kind:'road',phase:'failure',error:failure});});releaseRecord(job?.record,'failure-termination');for(const s of sources)releaseRecord(s?.record,'failure-termination');releaseRecord(publishedRecord,'failure-termination');clear();state='Failed';};
  const live=()=>{if(disposed)throw Error('The road worker is disposed.');if(failure!==null)throw Error(failure);};
  const profileHandshake=()=>diagnostic(()=>{if(disposed||failure!==null||handshakePending)return;const sent=now();worker.postMessage({type:'handshake',windowOrigin:profile.timeOrigin,windowSent:sent});handshakePending=true;});
@@ -32,7 +32,8 @@ export function createRoad(worker,profile,now=()=>performance.now()){
   let received;diagnostic(()=>{received=now();});
   if(!data||typeof data!=='object'){fail('Malformed road worker message.');return;}
   if(data.type==='fatal'){fail(data.error??'The road worker stopped.');return;}
-  if(data.type==='initialized'){if(!Number.isSafeInteger(data.wasmBytes)||data.wasmBytes<0){fail('Invalid road WASM capacity.');return;}wasmBytes=data.wasmBytes;return;}
+  if(data.type!=='handshake'&&(!Number.isSafeInteger(data.wasmBytes)||data.wasmBytes<0||data.wasmBytes>capacityLimit)){fail('Road WASM capacity exceeds admission.');return;}
+  if(data.type==='initialized'){wasmBytes=data.wasmBytes;initialized=true;return;}
   if(data.type==='handshake'){
    handshakePending=false;
    diagnostic(()=>{clock=workerClockHandshake({...data,windowReceived:received});emit({kind:'road',phase:'initialization',clockHandshake:clock,worker:{initializationMs:data.initializationMs??null,retainedWasmBytes:data.wasmBytes??null}});});return;
@@ -75,7 +76,7 @@ export function createRoad(worker,profile,now=()=>performance.now()){
   diagnostic(()=>{if(record)record.mainCopyStart=now();});
   let copy;try{copy=input.slice();}catch(error){fail(error.message);throw error;}
   diagnostic(()=>{if(record){record.mainInputCopyMs=metric(now()-record.mainCopyStart);record.messageSubmitStart=now();}});
-  try{worker.postMessage({...message,input:copy,profileCpu:Boolean(record)},[copy.buffer]);}
+  try{worker.postMessage({...message,input:copy,capacityLimit,profileCpu:Boolean(record)},[copy.buffer]);}
   catch(error){fail(error.message);throw error;}
   diagnostic(()=>{if(record)record.messageSubmitMs=metric(now()-record.messageSubmitStart);});
  };
@@ -83,17 +84,19 @@ export function createRoad(worker,profile,now=()=>performance.now()){
   profileHandshake,
   profileState:()=>({jobActive:Boolean(job?.profiled||sources.some(s=>s?.profiled)),handshakeActive:handshakePending,publicationActive:publishedRecord!==null}),
   wasmBytes:()=>wasmBytes,
+  initialized(){live();return initialized;},
+  capacityLimit(bytes){live();if(!Number.isSafeInteger(bytes)||bytes<capacityLimit)throw Error('Invalid road capacity admission.');capacityLimit=bytes;},
   packingStarted(){diagnostic(()=>{packingStart=now();});},
   packingEnded(){diagnostic(()=>{if(packingStart!==null)packingMs=metric(now()-packingStart);packingStart=null;});},
   install(identity,input){
-   live();if(state!=='Idle'||pendingInstalls!==0||!identityValid(identity)||BigInt(identity.sequence)<=lastSequence||identity.owner>=3||sources[identity.owner]!==null||!Array.isArray(identity.layout)||identity.layout.length!==9||identity.layout.some(v=>!Number.isSafeInteger(v)||v<0))throw Error('Invalid road installation.');
+   live();if(!initialized||state!=='Idle'||pendingInstalls!==0||!identityValid(identity)||BigInt(identity.sequence)<=lastSequence||identity.owner>=3||sources[identity.owner]!==null||!Array.isArray(identity.layout)||identity.layout.length!==9||identity.layout.some(v=>!Number.isSafeInteger(v)||v<0))throw Error('Invalid road installation.');
    const layout=identity.layout.slice(),id={kind:'road',session:identity.session,revision:identity.revision,owner:identity.owner,sequence:identity.sequence};
    let record=null;diagnostic(()=>{record={kind:'road',phase:'install',identity:id,inputBytes:input.byteLength,inputPackingMs:packingMs,retainedSourceBytes:layout[6]};});packingMs=null;
    sources[id.owner]={identity:id,layout,pending:true,profiled:Boolean(record),record,installBytes:input.byteLength};pendingInstalls++;
    copyPost({type:'install',identity:id},input,record);
   },
   submit(identity,input){
-   live();if(state!=='Idle'||!identityValid(identity)||BigInt(identity.sequence)<=lastSequence||input.byteLength!==156)throw Error('Invalid road submission or worker busy.');
+   live();if(!initialized||state!=='Idle'||!identityValid(identity)||BigInt(identity.sequence)<=lastSequence||input.byteLength!==156)throw Error('Invalid road submission or worker busy.');
    const view=new DataView(input.buffer,input.byteOffset,input.byteLength),owner=view.getUint32(0,true),revision=view.getBigUint64(4,true).toString(),source=sources[owner];
    if(!source||source.identity.session!==identity.session||source.identity.revision!==revision)throw Error('Road source is not installed.');
    const id={...identity},origin=[view.getFloat64(12,true),view.getFloat64(20,true),view.getFloat64(28,true)];

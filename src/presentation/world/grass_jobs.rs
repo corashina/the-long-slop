@@ -133,6 +133,15 @@ impl GrassJobs {
             }
         }
     }
+    pub(crate) fn cancel(&mut self) {
+        // Keep every charge until release_all drops this canceled presentation.
+        self.worker.dispose();
+        for instance in &self.instances {
+            if let Some(continuation) = &instance.continuation {
+                continuation.stop_flight();
+            }
+        }
+    }
     pub(crate) fn drained(&self) -> bool {
         self.instances
             .iter()
@@ -289,7 +298,7 @@ impl GrassJobs {
             .checked_add(staging)
             .and_then(|v| v.checked_add(extra))
             .ok_or_else(|| ReferenceError("Grass capacity overflow".into()))?;
-        // Keep allocator growth and retained high-water capacity separate from live buffers.
+        // Estimate allocator growth separately from logical buffers. Retain the admitted high-water charge.
         let capacity = logical
             .checked_mul(2)
             .and_then(|v| v.checked_add(INITIAL_WASM_BYTES))
@@ -399,7 +408,14 @@ impl GrassJobs {
         let worker_staging: usize = self
             .instances
             .iter()
-            .map(|i| i.install_cpu + i.pending_cpu)
+            .map(|i| {
+                i.install_cpu
+                    + if matches!(i.pending, Some(Pending::Worker { .. })) {
+                        i.pending_cpu
+                    } else {
+                        0
+                    }
+            })
             .sum();
         for index in 0..self.instances.len() {
             let needs_child = self.instances[index].pending.is_none()
@@ -793,5 +809,11 @@ impl GrassJobs {
             self.release_worker(stream)?;
         }
         Ok(true)
+    }
+}
+
+impl Drop for GrassJobs {
+    fn drop(&mut self) {
+        self.worker.dispose();
     }
 }

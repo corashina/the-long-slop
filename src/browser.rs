@@ -202,6 +202,10 @@ extern "C" {
     pub type RoadTransport;
     #[wasm_bindgen(catch, js_namespace = window, js_name = gameRoadCreate)]
     pub fn game_road_create() -> Result<RoadTransport, JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = initialized)]
+    pub fn road_initialized(this: &RoadTransport) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = capacityLimit)]
+    pub fn road_capacity_limit(this: &RoadTransport, bytes: f64) -> Result<(), JsValue>;
     #[wasm_bindgen(method, structural, catch, js_name = installRaw)]
     pub fn road_install(
         this: &RoadTransport,

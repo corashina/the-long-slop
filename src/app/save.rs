@@ -174,10 +174,6 @@ fn process_request(
                 world,
             )?;
             let mut candidate = requests.take_candidate().unwrap();
-            candidate
-                .runtime
-                .stream
-                .set_overlap(crate::world::WorldMetrics::default())?;
             // The prepared commands and stable bindings make this boundary infallible.
             world.resource_scope(
                 |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
@@ -197,7 +193,13 @@ fn process_request(
                 .audio
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
+            // Assignment drops the old stream and terminates its road actor first.
             drive.runtime = candidate.runtime;
+            drive
+                .runtime
+                .stream
+                .set_overlap(crate::world::WorldMetrics::default())
+                .expect("retired world overlap only removes charges");
             let runtime = &mut drive.runtime;
             if let Some(audio) = &mut runtime.audio {
                 audio.reset(session);
