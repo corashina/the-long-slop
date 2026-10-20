@@ -152,9 +152,82 @@ class DrivingProbeTests(unittest.TestCase):
                 capture(Path(name), Path(name), output, Path(name) / 'scenarios.json', 2)
             self.assertFalse((output / 'receipt.json').exists())
 
+    def test_capture_reuses_presolve_setup(self):
+        with tempfile.TemporaryDirectory() as name:
+            project = Path(name).resolve()
+            output = project / '.cache/g11-driving/reset'
+            definitions = project / 'scenarios.json'
+            row = dict(self.scenario(), source_objects={}, setup={}, frame_schedule={})
+            definitions.write_text(json.dumps({'scenarios': [row]}))
+            setup = {'engine_rpm': 0., 'engine_temperature': 0., 'random_state': 'canonical-before-solve'}
+            observed = dict(setup, engine_temperature=1.)
+            launched = []
+            def native(arguments, **kwargs):
+                if arguments[arguments.index('-Mode') + 1] == 'Run':
+                    directory = Path(arguments[arguments.index('-RunRoot') + 1])
+                    launched.append(json.loads((directory / 'scenario.json').read_text()))
+                    run = self.sample_run()
+                    run.update(setup_state=setup, initial=observed)
+                    (directory / 'runtime.json').write_text(json.dumps(run))
+                return type('Result', (), {'returncode': 0})()
+            with patch('tools.reference.driving_probe.PROJECT', project), \
+                 patch('tools.reference.driving_probe.preflight', return_value={'powershell': 'pwsh', 'observer_revision': {}}), \
+                 patch('tools.reference.driving_probe.subprocess.run', side_effect=native), \
+                 patch('tools.reference.driving_probe.verify', return_value={'runs': [1, 2, 3]}), \
+                 patch('tools.reference.driving_probe.validate_evidence', side_effect=lambda output, directory, run, row: validate_run(run, row)):
+                capture(project, project, output, definitions, 3)
+            self.assertEqual(len(launched), 3)
+            self.assertNotIn('setup_state', launched[0])
+            for scenario in launched[1:]:
+                self.assertEqual(scenario['setup_state'], setup)
+                self.assertNotEqual(scenario['setup_state'], observed)
+                self.assertTrue(scenario['has_setup_state'])
+                self.assertNotIn('initial_state', scenario)
+
+    def test_capture_stops_on_first_invalid_run(self):
+        for corruption, expected_runs, message in (('readiness', 1, 'must initialize'),
+                ('runtime', 1, 'exception occurred before capture flush'),
+                ('initial', 2, 'different initial states')):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as name:
+                project = Path(name).resolve()
+                evidence = project / 'evidence'
+                evidence.mkdir()
+                self.envelope(evidence)
+                self.assertEqual(len(verify(evidence)['runs']), 3)
+                output = project / '.cache/g11-driving/reset'
+                definitions = project / 'scenarios.json'
+                row = dict(self.scenario(), source_objects={}, setup={}, frame_schedule={})
+                definitions.write_text(json.dumps({'scenarios': [row, dict(row, id='later-scenario')]}))
+                launched = []
+                def native(arguments, **kwargs):
+                    if arguments[arguments.index('-Mode') + 1] == 'Run':
+                        directory = Path(arguments[arguments.index('-RunRoot') + 1])
+                        launched.append(directory)
+                        run = self.sample_run()
+                        run['setup_state'] = {'canonical': True}
+                        if corruption == 'readiness': run['lada_ready'] = False
+                        if corruption == 'initial' and len(launched) == 2: run['initial']['engine_rpm'] = 1.
+                        for path in (evidence / 'launch-default/repeat-1').iterdir():
+                            if path.is_file(): (directory / path.name).write_bytes(path.read_bytes())
+                        (directory / 'runtime.json').write_text(json.dumps(run))
+                        (directory / 'process.json').write_text(json.dumps({'pid': 1,
+                            'executable': str(output / 'scratch/game/TheLongDrive.exe')}))
+                        if corruption == 'runtime':
+                            (directory / 'unity.log').write_text('OtherException\nG11_NATIVE_CAPTURE_FLUSHED completed=True')
+                    return type('Result', (), {'returncode': 0})()
+                with patch('tools.reference.driving_probe.PROJECT', project), \
+                     patch('tools.reference.driving_probe.preflight', return_value={'powershell': 'pwsh', 'observer_revision': {}}), \
+                     patch('tools.reference.driving_probe.subprocess.run', side_effect=native):
+                    with self.assertRaisesRegex(ValueError, message):
+                        capture(project, project, output, definitions, 3)
+                self.assertEqual(len(launched), expected_runs)
+                self.assertTrue((launched[-1] / 'runtime.json').exists())
+                self.assertFalse((output / 'receipt.json').exists())
+
     def test_capture_requires_declared_interval(self):
         for change, message in (('truncated', 'declared observation interval'),
                 ('missing_frame', 'frame coverage'),
+                ('rewound_origin', 'declared observation interval'),
                 ('final_control_not_consumed', 'control interval'),
                 ('event_after_end', 'control schedule'),
                 ('event_at_end', 'control schedule')):
@@ -167,6 +240,7 @@ class DrivingProbeTests(unittest.TestCase):
                 path = output / 'launch-default/repeat-3/runtime.json'
                 run = json.loads(path.read_text())
                 if change == 'truncated': row['duration_frames'] = 240
+                if change == 'rewound_origin': run['samples'][0]['frame'] = 1
                 if change == 'missing_frame':
                     for sample in run['samples']:
                         if sample['frame'] == 2: sample['frame'] = 1

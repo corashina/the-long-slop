@@ -117,6 +117,29 @@ function Observe($type,$name,$phase,$entry){
 }
 Observe 'mainmenuscript' 'Start' 'menu.exit' $false
 Observe 'carscript' 'Start' 'car.ready' $false
+Observe 'partslotscript' 'SpawnPart' 'slot.ready' $false
+# Preserve the original iterator result. Observe only its actual terminal false return.
+$storageIterator=@($main.MainModule.GetType('mountStuff').NestedTypes | Where-Object Name -Match '^<StartFreeze>d__')
+if($storageIterator.Count -ne 1){throw 'Expected one checked source storage StartFreeze iterator'}
+$storageOwner=@($storageIterator[0].Fields | Where-Object {$_.Name -ceq '<>4__this' -and $_.FieldType.FullName -ceq 'mountStuff'})
+$storageMove=@($storageIterator[0].Methods | Where-Object Name -ceq 'MoveNext')
+if($storageOwner.Count -ne 1 -or $storageMove.Count -ne 1 -or $storageMove[0].ReturnType.FullName -cne 'System.Boolean'){throw 'Unsupported source storage iterator identity'}
+$method=$storageMove[0];Mark $method;Expand $method
+$il=$method.Body.GetILProcessor();$call=HookMethod 'Observe'
+foreach($point in @($method.Body.Instructions | Where-Object {$_.OpCode.Code -eq 'Ret'})){
+    $point.OpCode=[Mono.Cecil.Cil.OpCodes]::Dup
+    $ret=$il.Create([Mono.Cecil.Cil.OpCodes]::Ret)
+    $branch=$il.Create([Mono.Cecil.Cil.OpCodes]::Brtrue,$ret)
+    $load=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldarg_0)
+    $owner=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldfld,$storageOwner[0])
+    $label=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldstr,'storage.ready')
+    $invoke=$il.Create([Mono.Cecil.Cil.OpCodes]::Call,$call)
+    $il.InsertAfter($point,$branch);$il.InsertAfter($branch,$load);$il.InsertAfter($load,$owner)
+    $il.InsertAfter($owner,$label);$il.InsertAfter($label,$invoke);$il.InsertAfter($invoke,$ret)
+}
+$changes.Add('Observe mountStuff.StartFreeze actual terminal MoveNext false; original yields, QuickFreeze calls, return value, and scheduling retained')
+
+Observe 'mainscript' 'FStart' 'world.entry' $true
 Observe 'mainscript' 'FStart' 'world.exit' $false
 Observe 'mainscript' 'SettingsRefreshed' 'settings.entry' $true
 foreach($spec in @(@('inputscript','DriveStuff','input'),@('carscript','Update','car'),@('enginescript','Update','engine'),@('carscript','AutoShift','autoshift'),@('carscript','Stuff','rpm'),@('carscript','GetPlayerInput','control'))){

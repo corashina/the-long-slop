@@ -47,8 +47,8 @@ public sealed class G11Capture : MonoBehaviour
         public string id, probe_kind;
         public int duration_frames;
         public Setup setup;
-        public Initial initial_state;
-        public bool replay_initial;
+        public Initial setup_state;
+        public bool has_setup_state;
         public Control[] controls;
     }
     [Serializable] public struct Wheel
@@ -107,24 +107,44 @@ public sealed class G11Capture : MonoBehaviour
         public int pre_wrap, post_wrap;
         public float[] inputs, values;
     }
+    [Serializable] public class Scalar { public string name, value; }
+    [Serializable] public class PartIdentity { public string path; public int category, item; }
+    [Serializable] public class AssemblyIdentity
+    {
+        public float mass;
+        public Vector3 center_of_mass;
+        public PartIdentity[] parts;
+        public Scalar[] engine_parameters;
+        public Key[] torque_keys;
+        public string fuel_recipe;
+        public WheelParameters[] wheels;
+    }
     [Serializable] public class PoseInput { public Vector3 position; public Quaternion rotation; }
-    [Serializable] public class Condition { public string path; public int state; }
+    [Serializable] public class Condition { public string path, material_type; public int index, state, state2, state3; public Color color; }
+    [Serializable] public class Tank { public int index; public string path, fluid_json; }
+    [Serializable] public class AssemblySetup { public Condition[] conditions; public Tank[] tanks; }
     [Serializable] public class Initial
     {
         public string car_path, engine_path, driver_seat_path, scene, random_state, profile_path, setup_json;
         public int car_type;
         public float mass, fixed_dt, engine_rpm, engine_temperature;
-        public Vector3 center_of_mass, position, velocity, angular_velocity, gravity;
-        public Quaternion rotation;
+        public Vector3 center_of_mass, position, velocity, angular_velocity, gravity, inertia_tensor;
+        public Quaternion rotation, inertia_tensor_rotation;
         public string fuel_json, oil_json, coolant_json;
         public bool auto_clutch, auto_shift, ignition, running, stored_handbrake;
         public int selected_gear;
         public Wheel[] wheel_state;
         public Condition[] conditions;
-        public PoseInput input_pose;
+        public AssemblySetup assembly_setup;
+        public AssemblyIdentity assembly_identity;
+        public PoseInput input_pose, spawn_pose;
         public WheelParameters[] wheels;
     }
-    [Serializable] public class Conditioning { public int step; public Initial before, after; }
+    [Serializable] public class SetupBoundary
+    {
+        public string phase; public int frame; public float time, fixed_time, delta_time; public bool kinematic;
+        public Vector3 inertia_tensor; public Quaternion rotation,inertia_tensor_rotation;
+    }
     [Serializable] public class Result
     {
         public int schema_version=1;
@@ -132,21 +152,32 @@ public sealed class G11Capture : MonoBehaviour
         public bool completed, menu_ready, lada_ready, control_capture_active, isolated_wheel_probe;
         public int physics_steps;
         public string units="metres; seconds; kilograms; degrees; rpm; newtons; newton metres; Unity WheelHit dimensionless slip";
-        public Initial initial;
+        public Initial initial, setup_state, observed_before_canonical;
+        public AssemblyIdentity authored_template, scene_assembly, scene_before_setup, prepared_assembly;
+        public bool target_held_before_activation;
+        public Condition[] held_conditions;
+        public AssemblyIdentity held_assembly;
+        public string template_source="level1/64898.StartCar02 -> level1/206 -> level1/17687 carscript level1/77839";
         public Sample[] samples;
+        public List<SetupBoundary> setup_boundaries=new List<SetupBoundary>();
         public List<Curve> curves=new List<Curve>();
-        public List<Conditioning> conditioning=new List<Conditioning>();
         public List<string> setup_changes=new List<string>();
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses"};
     }
+    static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
+    static readonly HashSet<mountStuff> completedStorage=new HashSet<mountStuff>();
+    static AssemblyIdentity assemblyIdentity;
+    static bool pendingArm;
+    static int armAfterFrame;
     static G11Capture instance;
     static Scenario scenario;
     static readonly Result result=new Result();
     static carscript car;
+    static AssemblySetup assemblySetup;
     static seatscript driverSeat;
     static Rigidbody body;
     static WheelCollider[] wheels, sourceWheels;
-    static PoseInput inputPose;
+    static PoseInput inputPose, spawnPose;
     static Sample[] buffer;
     static int used, sequence, step, startFrame, lastInput, lastEngine, lastCar, lastRpm;
     static bool active, finished, sourceContactAvailable;
@@ -185,13 +216,24 @@ public sealed class G11Capture : MonoBehaviour
     {
         try
         {
+            if(phase=="storage.ready")
+            {
+                completedStorage.Add((mountStuff)owner);
+                return;
+            }
+            if(phase=="slot.ready")
+            {
+                completedMounts.Add((partslotscript)owner);
+                return;
+            }
             if(phase=="car.ready")
             {
                 var ready=(carscript)owner;
                 if(ready.carType==itemdatabase.CarType.car02 && ready.RB!=null)
                 {
                     ready.RB.isKinematic=true;
-                    result.setup_changes.Add("Hold selected source Lada after original car Start, before native wheel history advances");
+                    foreach(var wheel in ready.allWH) wheel.enabled=false;
+                    result.setup_changes.Add("Hold source Lada body and disable native wheels after original car Start");
                 }
                 return;
             }
@@ -210,6 +252,20 @@ public sealed class G11Capture : MonoBehaviour
                 instance.StartCoroutine(instance.Load((mainmenuscript)owner));
                 return;
             }
+            if(phase=="world.entry")
+            {
+                var main=(mainscript)owner;
+                var start=main.terrainGenerationSettings.StartCar02;
+                if(start.activeInHierarchy) throw new InvalidOperationException("Authored StartCar02 already activated before pristine capture");
+                var authored=start.GetComponentsInChildren<carscript>(true).Single(c=>c.carType==itemdatabase.CarType.car02);
+                result.authored_template=DescribeAssembly(authored);
+                car=authored; body=car.RB;
+                body.isKinematic=true;
+                foreach(var wheel in car.GetComponentsInChildren<WheelCollider>(true)) wheel.enabled=false;
+                result.target_held_before_activation=true;
+                result.setup_changes.Add("Use the actual authored StartCar02 car in each fresh source process; hold body and disable every native wheel before original activation");
+                return;
+            }
             if(phase=="world.exit")
             {
                 instance.StartCoroutine(instance.Initialize((mainscript)owner));
@@ -218,9 +274,9 @@ public sealed class G11Capture : MonoBehaviour
             if(!active || finished) return;
             if(owner is carscript && owner!=car) return;
             if(owner is enginescript && owner!=car.Engine) return;
+            if(startFrame<0) startFrame=Time.frameCount;
             if(phase=="input.entry")
             {
-                if(lastInput==0) startFrame=Time.frameCount;
                 lastInput=sequence+1;
             }
             if(phase=="car.entry") lastCar=sequence+1;
@@ -249,108 +305,126 @@ public sealed class G11Capture : MonoBehaviour
     }
     IEnumerator Initialize(mainscript main)
     {
-        // Wait for original Start callbacks and source part assembly, without draining or replacing them.
+        // Each fresh process supplies the original authored scene instance, held before activation.
         for(int frame=0;frame<600;frame++)
         {
             yield return null;
-            car=UnityEngine.Object.FindObjectsOfType<carscript>().SingleOrDefault(c=>c.carType==itemdatabase.CarType.car02);
-            if(car!=null && car.RB!=null && car.Engine!=null && car.driverSeat!=null && car.allWH.Count==4 && main.player!=null)
-                break;
+            if(SourceAssemblyReady(car) && main.player!=null && main.player.mind) break;
         }
         try
         {
-            if(car==null || car.Engine==null || car.RB==null || car.allWH.Count!=4)
-                throw new InvalidOperationException("Original selected Lada did not initialize");
-            body=car.RB; sourceWheels=car.allWH.ToArray(); wheels=sourceWheels;
-            ApplySetup(main);
-            foreach(var wheel in wheels) if(wheel.GetGroundHit(out sourceContact)) { sourceContactAvailable=true; break; }
-            body.isKinematic=true;
-            foreach(var wheel in wheels) wheel.enabled=false;
-            result.setup_changes.Add("Hold body and disable native wheels during setup; enable native wheels at observation start");
-            yieldPending=true;
-        }
-        catch(Exception error) { Fail(error); }
-        if(!yieldPending) yield break;
-        // Allow original refresh coroutines and WheelCollider property updates to consume setup changes.
-        for(int frame=0;frame<120;frame++) yield return null;
-        try
-        {
-            if(!main.player.mind) throw new InvalidOperationException("Original source player initialization is incomplete");
+            if(!result.target_held_before_activation || !SourceAssemblyReady(car) || !main.player.mind)
+                throw new InvalidOperationException("Original selected Lada, source storage, and player did not initialize");
             main.PressedContinue();
+            body=car.RB;
+            body.isKinematic=true;
+            sourceWheels=car.allWH.ToArray(); wheels=sourceWheels;
+            if(wheels.Any(w=>w.enabled)) throw new InvalidOperationException("Original native wheels enabled before setup completion");
+            spawnPose=scenario.has_setup_state?scenario.setup_state.spawn_pose:
+                new PoseInput{position=car.transform.position,rotation=car.transform.rotation};
+            result.scene_before_setup=DescribeAssembly(car);
+            assemblySetup=scenario.has_setup_state?scenario.setup_state.assembly_setup:ReadAssemblySetup(car);
+            ApplyAssemblySetup(car,assemblySetup);
+            result.scene_assembly=DescribeAssembly(car);
+            assemblyIdentity=scenario.has_setup_state?scenario.setup_state.assembly_identity:result.scene_assembly;
+            RequireAssembly(assemblyIdentity,result.scene_assembly,"initialized original authored garage Lada across repeats");
+            ApplySetup(main);
+            foreach(var graphic in car.GetComponentsInChildren<wheelgraphicsscript>()) graphic.WheelSize();
             driverSeat=car.GetComponentsInChildren<seatscript>().Single(seat=>seat.driverSeat0 && seat.Car==car);
             main.player.GetIn(driverSeat);
-            if(!car.driving || !car.isPlayerDriving || main.player.Car!=car)
-                throw new InvalidOperationException("Original selected Lada controls did not activate");
+            if(!car.driving || !car.isPlayerDriving || main.player.Car!=car || driverSeat.Car!=car)
+                throw new InvalidOperationException("Original authored Lada driver ownership failed");
+            if(UnityEngine.Object.FindObjectsOfType<carscript>().Count(target=>target.carType==itemdatabase.CarType.car02)!=1)
+                throw new InvalidOperationException("Original authored Lada is not the sole active target");
             result.lada_ready=true;
-            result.setup_changes.Add("Original mainscript.PressedContinue and fpscontroller.GetIn selected Lada after initialization");
+            result.setup_changes.Add("Sample and control only the original authored Lada, its engine, and its original driver seat");
+            foreach(var wheel in wheels) if(wheel.GetGroundHit(out sourceContact)) { sourceContactAvailable=true; break; }
             if(scenario.probe_kind=="wheel_collider") CreateIsolatedProbe();
             foreach(var wheel in wheels) wheel.enabled=false;
-            if(scenario.replay_initial) ReplayInitial(scenario.initial_state);
+            if(scenario.has_setup_state) inputPose=scenario.setup_state.input_pose;
             else
             {
                 body.mass*=scenario.setup.load_multiplier;
                 if(scenario.setup.surface=="nearby-source-slope") PlaceOnSourceSlope();
                 if(scenario.setup.height=="one-source-suspension-drop") body.position+=Vector3.up*wheels[0].suspensionDistance;
                 if(scenario.setup.height=="wheels-clear") body.position+=Vector3.up*(wheels[0].radius*4+wheels[0].suspensionDistance);
+                inputPose=new PoseInput{position=body.transform.position,rotation=body.transform.rotation};
             }
-            inputPose=scenario.replay_initial?scenario.initial_state.input_pose:
-                new PoseInput{position=body.transform.position,rotation=body.transform.rotation};
-            body.position=inputPose.position; body.rotation=inputPose.rotation;
-            Physics.SyncTransforms();
-            body.isKinematic=false;
-            foreach(var wheel in wheels) wheel.enabled=true;
-            result.setup_changes.Add("Apply the same pre-normalization pose input once; synchronize native transforms; enable fresh native wheel state");
-            body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);
-            body.angularVelocity=Vector3.zero;
-            if(scenario.setup.height=="wheels-clear")
-            {
-                body.constraints=RigidbodyConstraints.FreezeAll;
-                result.setup_changes.Add("Hold lifted source body with rigid constraints; native wheels remain free");
-            }
-            foreach(var collider in UnityEngine.Object.FindObjectsOfType<Collider>())
-                surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
+            // The first repeat records pre-solve inputs and applies the same path as every later repeat.
+            result.prepared_assembly=DescribeAssembly(car);
+            result.observed_before_canonical=InitialState();
+            result.setup_state=scenario.has_setup_state?scenario.setup_state:result.observed_before_canonical;
+            result.setup_state.profile_path=null;
             if(!Physics.autoSimulation) throw new InvalidOperationException("Original native auto simulation is inactive");
-            result.setup_changes.Add("Two unpowered original native physics conditioning steps with the same reset input between them");
-        }
-        catch(Exception error) { Fail(error); }
-        if(finished) yield break;
-        float beforeCondition=Time.fixedTime;
-        result.conditioning.Add(new Conditioning{step=1,before=InitialState()});
-        yield return new WaitForFixedUpdate();
-        try
-        {
-            result.conditioning[0].after=InitialState();
-            foreach(var wheel in wheels) wheel.enabled=false;
-            body.position=inputPose.position; body.rotation=inputPose.rotation;
-            body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);
-            body.angularVelocity=Vector3.zero;
-            Physics.SyncTransforms();
-            foreach(var wheel in wheels) wheel.enabled=true;
-            result.conditioning.Add(new Conditioning{step=2,before=InitialState()});
-        }
-        catch(Exception error) { Fail(error); }
-        if(finished) yield break;
-        beforeCondition=Time.fixedTime;
-        yield return new WaitForFixedUpdate();
-        try
-        {
-            if(!Physics.autoSimulation || Time.fixedTime<=beforeCondition)
-                throw new InvalidOperationException("Native conditioning physics step did not advance");
-            body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);
-            body.angularVelocity=Vector3.zero;
-            result.initial=InitialState();
-            result.conditioning[1].after=result.initial;
             CaptureCurves();
-            // Reserve all callback samples and wheel records before the finite observation interval.
             buffer=new Sample[(scenario.duration_frames+1)*256];
             for(int index=0;index<buffer.Length;index++) buffer[index].wheels=new Wheel[4];
-            startFrame=Time.frameCount;
-            active=true;
-            StartCoroutine(AfterPhysics());
+            armAfterFrame=Time.frameCount+1;
+            pendingArm=true;
+            RecordSetupBoundary("prepared-held");
+            result.setup_changes.Add("Hold fresh body and wheels through the next source frame backlog; switch dynamic and apply canonical state at LateUpdate before arming");
         }
         catch(Exception error) { Fail(error); }
     }
-    bool yieldPending;
+    static bool SourceAssemblyReady(carscript target)
+    {
+        if(target==null || target.RB==null || target.Engine==null || target.allWH.Count!=4 ||
+           !target.Engine.transform.IsChildOf(target.transform)) return false;
+        foreach(var slot in target.GetComponentsInChildren<partslotscript>(true))
+        {
+            if(slot.isActiveAndEnabled && !completedMounts.Contains(slot)) return false;
+            if(slot.part!=null && (!slot.part.transform.IsChildOf(target.transform) ||
+               slot.part.slot!=slot || !slot.part.p.crafted || !slot.part.tosaveitem.started)) return false;
+        }
+        if(target.GetComponentsInChildren<mountStuff>(true).Any(m=>m.isActiveAndEnabled && !completedStorage.Contains(m))) return false;
+        return target.GetComponentsInChildren<partconditionscript>(true).All(p=>p.started);
+    }
+    static string ScalarValue(object value)
+    {
+        return value is float?((float)value).ToString("R",CultureInfo.InvariantCulture):
+            Convert.ToString(value,CultureInfo.InvariantCulture);
+    }
+    static string RelativePath(Transform root,Transform value)
+    {
+        if(value==root) return ".";
+        string path=value.name;
+        while(value.parent!=root)
+        {
+            value=value.parent;
+            if(value==null) throw new InvalidOperationException("Source assembly member is outside its car hierarchy");
+            path=value.name+"/"+path;
+        }
+        return path;
+    }
+    static AssemblyIdentity DescribeAssembly(carscript target)
+    {
+        var order=target.WHDriven.Concat(target.WHSteer).Concat(target.WHInvSteer)
+            .Concat(target.WHBrakeOnly).Concat(target.WHHandBrake).Distinct().ToArray();
+        if(order.Length!=4) throw new InvalidOperationException("Authored Lada must own four native wheel profiles");
+        var engine=target.GetComponentsInChildren<enginescript>(true).Single();
+        string[] parameters={"startChance","starterRpm","starterRpmLerp","alapRpm","maxRpm","shutdownRpm","maxNm",
+            "consumptionM","OilConsumptionModifier","motorBrakeModifier","rpmChangeModifier","engineStartTimeModifier",
+            "engineHeatGainMin","engineHeatGainMax","engineHeatLoss","engineHeatLossSpeedModifier","minOptimalTemp1",
+            "maxOptimalTemp1","minOptimalTemp2","maxOptimalTemp2","twostroke","maxRpmDifference","modifier","Oilfluid",
+            "noOverHeat","kickstart","autoShiftClutchRpm","autoShiftClutchRpmRange"};
+        return new AssemblyIdentity{mass=target.RB.mass,center_of_mass=target.RB.centerOfMass,
+            parts=target.GetComponentsInChildren<tosaveitemscript>(true).Select(p=>new PartIdentity{
+                path=RelativePath(target.transform,p.transform),category=p.category,item=p.id}).ToArray(),
+            engine_parameters=parameters.Select(name=>new Scalar{name=name,
+                value=ScalarValue(typeof(enginescript).GetField(name).GetValue(engine))}).ToArray(),
+            torque_keys=engine.torqueCurve.keys.Select(key=>new Key(key)).ToArray(),fuel_recipe=JsonUtility.ToJson(engine.FuelConsumption),
+            wheels=order.Select(w=>new WheelParameters{path=RelativePath(target.transform,w.transform),local_position=w.transform.localPosition,
+                local_rotation=w.transform.localRotation,center=w.center,radius=w.radius,mass=w.mass,damping=w.wheelDampingRate,
+                suspension_distance=w.suspensionDistance,force_application_distance=w.forceAppPointDistance,
+                spring_n_per_m=w.suspensionSpring.spring,damper_n_s_per_m=w.suspensionSpring.damper,spring_target=w.suspensionSpring.targetPosition,
+                forward=new Friction(w.forwardFriction),sideways=new Friction(w.sidewaysFriction),driven=target.WHDriven.Contains(w),
+                steer=target.WHSteer.Contains(w),service_brake=target.WHBrakeOnly.Contains(w),handbrake=target.WHHandBrake.Contains(w)}).ToArray()};
+    }
+    static void RequireAssembly(AssemblyIdentity expected,AssemblyIdentity observed,string phase)
+    {
+        if(JsonUtility.ToJson(expected)!=JsonUtility.ToJson(observed))
+            throw new InvalidOperationException("Source assembly membership, mass, engine, or native wheel profiles differ: "+phase);
+    }
     static void ApplySetup(mainscript main)
     {
         main.crsrLocked=true;
@@ -394,18 +468,76 @@ public sealed class G11Capture : MonoBehaviour
             part.gameObject.SetActive(false);
         }
     }
-    static void ReplayInitial(Initial initial)
+    static Condition[] ReadConditions(carscript target)
+    {
+        return target.GetComponentsInChildren<partconditionscript>(true).Select((c,index)=>new Condition{
+            index=index,path=RelativePath(target.transform,c.transform),state=c.state,state2=c.state2,state3=c.state3,
+            color=c.color,material_type=c.tipus}).ToArray();
+    }
+    static AssemblySetup ReadAssemblySetup(carscript target)
+    {
+        return new AssemblySetup{conditions=ReadConditions(target),
+            tanks=target.GetComponentsInChildren<tankscript>(true).Select((tank,index)=>new Tank{
+                index=index,path=RelativePath(target.transform,tank.transform),fluid_json=JsonUtility.ToJson(tank.F)}).ToArray()};
+    }
+    static void ApplyConditions(carscript target,Condition[] recorded)
+    {
+        var conditions=target.GetComponentsInChildren<partconditionscript>(true);
+        if(conditions.Length!=recorded.Length) throw new InvalidOperationException("Canonical source condition component count differs: expected "+recorded.Length+" observed "+conditions.Length);
+        foreach(var condition in recorded)
+        {
+            var component=conditions[condition.index];
+            if(RelativePath(target.transform,component.transform)!=condition.path)
+                throw new InvalidOperationException("Canonical source condition component order differs");
+            if(component.tipus!=condition.material_type)
+                throw new InvalidOperationException("Canonical source condition material type differs: "+condition.path);
+            component.state2=condition.state2; component.state3=condition.state3;
+            component.Refresh(condition.state,condition.color);
+        }
+        if(JsonUtility.ToJson(new AssemblySetup{conditions=ReadConditions(target)})!=
+           JsonUtility.ToJson(new AssemblySetup{conditions=recorded}))
+            throw new InvalidOperationException("Source condition Refresh did not retain the canonical record");
+    }
+    static void RefreshSourceWheels(carscript target)
+    {
+        foreach(var tire in target.GetComponentsInChildren<gumiscript>()) tire.Refresh();
+        foreach(var rim in target.GetComponentsInChildren<wheelscript>()) rim.Refresh();
+        foreach(var graphic in target.GetComponentsInChildren<wheelgraphicsscript>()) graphic.WheelSize();
+    }
+    static void ApplyAssemblySetup(carscript target,AssemblySetup recorded)
+    {
+        ApplyConditions(target,recorded.conditions);
+        var tanks=target.GetComponentsInChildren<tankscript>(true);
+        if(tanks.Length!=recorded.tanks.Length) throw new InvalidOperationException("Canonical source tank component count differs");
+        foreach(var tank in recorded.tanks)
+        {
+            if(RelativePath(target.transform,tanks[tank.index].transform)!=tank.path)
+                throw new InvalidOperationException("Canonical source tank component order differs");
+            JsonUtility.FromJsonOverwrite(tank.fluid_json,tanks[tank.index].F);
+        }
+        RefreshSourceWheels(target);
+        target.GetComponent<massScript>().Upd();
+        result.setup_changes.Add("Apply indexed source condition Refresh(state,color), tank records, gumiscript.Refresh, wheelscript.Refresh, wheelgraphicsscript.WheelSize, massScript.Upd before the initialized assembly check");
+    }
+    static void ApplyCanonical(Initial initial)
     {
         body.mass=initial.mass;
         body.centerOfMass=initial.center_of_mass;
-        UnityEngine.Random.state=JsonUtility.FromJson<UnityEngine.Random.State>(initial.random_state);
         car.Engine.rpm=initial.engine_rpm; car.Engine.temp=initial.engine_temperature;
         car.ignition=initial.ignition; car.Engine.running=initial.running; car.BhandBrake=initial.stored_handbrake;
         car.ShiftTo(initial.selected_gear,true);
         if(car.Tank!=null) JsonUtility.FromJsonOverwrite(initial.fuel_json,car.Tank.F);
         if(car.Engine.T!=null) JsonUtility.FromJsonOverwrite(initial.oil_json,car.Engine.T.F);
         if(car.coolant!=null) JsonUtility.FromJsonOverwrite(initial.coolant_json,car.coolant.coolant.F);
-        result.setup_changes.Add("Replay first repeat's native initial body, engine, gear, fluid, and handbrake values");
+        ApplyConditions(car,initial.conditions);
+        RefreshSourceWheels(car);
+        Physics.SyncTransforms();
+        if(body==car.RB) body.ResetInertiaTensor();
+        result.setup_changes.Add("Recompute original body inertia from synchronized source colliders with ResetInertiaTensor; retain native automatic inertia updates; never set a manual source body tensor");
+        body.position=inputPose.position; body.rotation=inputPose.rotation;
+        body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps); body.angularVelocity=Vector3.zero;
+        UnityEngine.Random.state=JsonUtility.FromJson<UnityEngine.Random.State>(initial.random_state);
+        result.setup_changes.Add("Apply one canonical pre-solve body, engine, fluid, condition, gear, and random record to every repeat");
     }
     static void PlaceOnSourceSlope()
     {
@@ -434,13 +566,14 @@ public sealed class G11Capture : MonoBehaviour
         return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
-            setup_json=JsonUtility.ToJson(scenario.setup), input_pose=inputPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            setup_json=JsonUtility.ToJson(scenario.setup), input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,
             auto_clutch=settingsscript.s.S.BAutoClutch,auto_shift=settingsscript.s.S.BAutoShift,
             ignition=car.ignition,running=car.Engine.running,stored_handbrake=car.BhandBrake,selected_gear=car.gear,
             wheel_state=wheels.Select(w=>ReadWheel(w)).ToArray(),
-            conditions=car.GetComponentsInChildren<partconditionscript>().Select(c=>new Condition{path=PathOf(c.transform),state=c.state}).ToArray(),
+            conditions=ReadConditions(car),assembly_setup=assemblySetup,assembly_identity=assemblyIdentity,
             fuel_json=car.Tank==null?"unavailable":JsonUtility.ToJson(car.Tank.F),
             oil_json=car.Engine.T==null?"unavailable":JsonUtility.ToJson(car.Engine.T.F),
             coolant_json=car.coolant==null?"unavailable":JsonUtility.ToJson(car.coolant.coolant.F),
@@ -527,7 +660,7 @@ public sealed class G11Capture : MonoBehaviour
     }
     static Control Current()
     {
-        int frame=active?Time.frameCount-startFrame:0;
+        int frame=active && startFrame>=0?Time.frameCount-startFrame:0;
         var selected=scenario.controls[0];
         for(int index=1;index<scenario.controls.Length;index++)
             if(scenario.controls[index].frame<=frame) selected=scenario.controls[index];
@@ -582,6 +715,7 @@ public sealed class G11Capture : MonoBehaviour
         if(!active || finished) return;
         try
         {
+            if(startFrame<0) startFrame=Time.frameCount;
             step++;
             if(result.isolated_wheel_probe)
             {
@@ -607,9 +741,44 @@ public sealed class G11Capture : MonoBehaviour
             catch(Exception error) { Fail(error); }
         }
     }
+    static void RecordSetupBoundary(string phase)
+    {
+        result.setup_boundaries.Add(new SetupBoundary{phase=phase,frame=Time.frameCount,time=Time.time,
+            fixed_time=Time.fixedTime,delta_time=Time.deltaTime,kinematic=body.isKinematic,
+            rotation=body.rotation,inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation});
+    }
     void LateUpdate()
     {
-        if(active && !finished && Time.frameCount-startFrame>=scenario.duration_frames)
+        if(pendingArm && !finished && Time.frameCount>=armAfterFrame)
+        {
+            pendingArm=false;
+            try
+            {
+                RecordSetupBoundary("backlog-drained-held");
+                result.held_conditions=ReadConditions(car);
+                result.held_assembly=DescribeAssembly(car);
+                if(!SourceAssemblyReady(car)) throw new InvalidOperationException("Source mounted assembly changed readiness during held boundary");
+                RequireAssembly(result.prepared_assembly,result.held_assembly,"stable authored membership through held boundary");
+                body.isKinematic=false;
+                RecordSetupBoundary("switched-dynamic");
+                if(scenario.setup.height=="wheels-clear") body.constraints=RigidbodyConstraints.FreezeAll;
+                ApplyCanonical(result.setup_state);
+                RecordSetupBoundary("canonical-applied");
+                Physics.SyncTransforms();
+                RecordSetupBoundary("canonical-transforms-synchronized");
+                foreach(var wheel in wheels) wheel.enabled=true;
+                RecordSetupBoundary("native-wheels-enabled");
+                foreach(var collider in UnityEngine.Object.FindObjectsOfType<Collider>())
+                    surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
+                result.initial=InitialState();
+                RecordSetupBoundary("armed-after-canonical");
+                startFrame=-1;
+                active=true;
+                StartCoroutine(AfterPhysics());
+            }
+            catch(Exception error) { Fail(error); }
+        }
+        if(active && !finished && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames)
         {
             try { result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
             catch(Exception error) { Fail(error); }

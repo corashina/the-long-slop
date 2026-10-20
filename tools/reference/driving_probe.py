@@ -219,6 +219,44 @@ def validate_run(run, scenario):
             'phases': sorted(phases), **timing}
 
 
+def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) -> dict:
+    result = validate_run(run, scenario)
+    marker = read_json(directory / 'completion.json')
+    process = read_json(directory / 'process.json')
+    exit_status = read_json(directory / 'exit.json')
+    if (exit_status.get('exit_code') != 0 or process.get('pid', 0) <= 0 or
+        Path(process.get('executable', '')).resolve() != output / 'scratch/game/TheLongDrive.exe'):
+        raise ValueError('Native player process evidence failed')
+    try:
+        log = (directory / 'unity.log').read_text(encoding='utf-8-sig')
+    except OSError as error:
+        raise ValueError('Native Unity log is missing') from error
+    flush = 'G11_NATIVE_CAPTURE_FLUSHED completed=True'
+    if flush not in log:
+        raise ValueError('Native completed-sample flush marker is missing')
+    before, after = log.split(flush, 1)
+    if 'Exception' in before:
+        raise ValueError('Native runtime exception occurred before capture flush')
+    concerns = []
+    lines = after.splitlines()
+    for index, line in enumerate(lines):
+        if 'Exception' not in line: continue
+        stack = lines[index:index + 5]
+        exact = len(stack) == 5 and stack[0].strip() == 'NullReferenceException'
+        expected = ('UnityEngine.Camera.CopyFrom(', 'S3DCamsHandlerScript.Upd (',
+                    'S3DCamsHandlerScript.Upd ()', 'computerscript.OnDestroy ()')
+        exact = exact and all(name in frame for name, frame in zip(expected, stack[1:]))
+        if not exact:
+            raise ValueError('Unclassified native exception occurred after capture flush')
+        concerns.append('Camera.CopyFrom -> S3DCamsHandlerScript.Upd -> computerscript.OnDestroy after sample flush')
+    result['post_capture_concerns'] = concerns
+    result['runtime_log_sha256'] = sha256(directory / 'unity.log')
+    if marker != {'completed': True, 'sample_count': len(run['samples']),
+                  'physics_steps': run['physics_steps']}:
+        raise ValueError('Native completion marker differs from samples')
+    return result
+
+
 def verify(output_root: Path) -> dict:
     output = output_root.resolve()
     request = read_json(output / 'request.json')
@@ -231,40 +269,7 @@ def verify(output_root: Path) -> dict:
             directory = output / scenario['id'] / f'repeat-{repeat}'
             path = directory / 'runtime.json'
             run = read_json(path)
-            result = validate_run(run, scenario)
-            marker = read_json(directory / 'completion.json')
-            process = read_json(directory / 'process.json')
-            exit_status = read_json(directory / 'exit.json')
-            if (exit_status.get('exit_code') != 0 or process.get('pid', 0) <= 0 or
-                Path(process.get('executable', '')).resolve() != output / 'scratch/game/TheLongDrive.exe'):
-                raise ValueError('Native player process evidence failed')
-            try:
-                log = (directory / 'unity.log').read_text(encoding='utf-8-sig')
-            except OSError as error:
-                raise ValueError('Native Unity log is missing') from error
-            flush = 'G11_NATIVE_CAPTURE_FLUSHED completed=True'
-            if flush not in log:
-                raise ValueError('Native completed-sample flush marker is missing')
-            before, after = log.split(flush, 1)
-            if 'Exception' in before:
-                raise ValueError('Native runtime exception occurred before capture flush')
-            concerns = []
-            lines = after.splitlines()
-            for index, line in enumerate(lines):
-                if 'Exception' not in line: continue
-                stack = lines[index:index + 5]
-                exact = len(stack) == 5 and stack[0].strip() == 'NullReferenceException'
-                expected = ('UnityEngine.Camera.CopyFrom(', 'S3DCamsHandlerScript.Upd (',
-                            'S3DCamsHandlerScript.Upd ()', 'computerscript.OnDestroy ()')
-                exact = exact and all(name in frame for name, frame in zip(expected, stack[1:]))
-                if not exact:
-                    raise ValueError('Unclassified native exception occurred after capture flush')
-                concerns.append('Camera.CopyFrom -> S3DCamsHandlerScript.Upd -> computerscript.OnDestroy after sample flush')
-            result['post_capture_concerns'] = concerns
-            result['runtime_log_sha256'] = sha256(directory / 'unity.log')
-            if marker != {'completed': True, 'sample_count': len(run['samples']),
-                          'physics_steps': run['physics_steps']}:
-                raise ValueError('Native completion marker differs from samples')
+            result = validate_evidence(output, directory, run, scenario)
             state = {key: value for key, value in run['initial'].items()
                      if key != 'profile_path'}
             if initial is not None and state != initial:
@@ -326,20 +331,26 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError(f'Native capture failed; evidence retained: {log}')
     invoke(['-Mode', 'Setup', '-RequestPath', str(output / 'request.json')], output / 'setup.log', 120)
     for row in rows:
-        initial_state = None
+        setup_state = None
+        initial = None
         for repeat in range(1, 4):
             directory = output / row['id'] / f'repeat-{repeat}'
             directory.mkdir(parents=True)
             run_scenario = dict(row)
-            if initial_state is not None:
-                run_scenario['initial_state'] = initial_state
-                run_scenario['replay_initial'] = True
+            if setup_state is not None:
+                run_scenario['setup_state'] = setup_state
+                run_scenario['has_setup_state'] = True
             write_json(directory / 'scenario.json', run_scenario)
             invoke(['-Mode', 'Run', '-RunRoot', str(directory), '-ProfileRoot', str(directory / 'profile')],
                    directory / 'launcher.log', 200)
             native_run = read_json(directory / 'runtime.json')
-            validate_run(native_run, row)
-            if initial_state is None: initial_state = native_run['initial']
+            validate_evidence(output, directory, native_run, row)
+            state = {key: value for key, value in native_run['initial'].items()
+                     if key != 'profile_path'}
+            if initial is not None and state != initial:
+                raise ValueError('Fresh native repeats have different initial states')
+            initial = state
+            if setup_state is None: setup_state = native_run['setup_state']
     receipt = verify(output)
     write_json(output / 'receipt.json', receipt)
     return receipt
