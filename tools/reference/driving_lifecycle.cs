@@ -154,6 +154,25 @@ public static class G11Lifecycle
             if(a.object_null && a.component_null && a.collider_null && a.removed==null) a.removed=At(callback+".Unity-null");
         }
     }
+    public static Audio RetiredCargoCollider(Collider collider,int instanceId)
+    {
+        // Unity-null alone is insufficient. Match the retained managed reference and its live native identity.
+        if(ReferenceEquals(collider,null) || collider!=null) return null;
+        var value=retained.SingleOrDefault(r=>ReferenceEquals(r.collider,collider) && r.record.collider_id==instanceId);
+        if(value==null) return null;
+        var a=value.record;
+        if(value.obj!=null || value.source!=null || value.collider!=null ||
+            !a.required || a.created_after_close || !a.original_destroy_requested ||
+            !a.object_null || !a.component_null || !a.collider_null ||
+            a.prefab!="sharedassets1.assets:21250" || a.object_id==0 || a.component_id==0 || a.collider_id==0 ||
+            a.prefab_id==0 || a.clip_id==0 || String.IsNullOrEmpty(a.source_owner) || String.IsNullOrEmpty(a.source_stack) ||
+            a.destroy_delay!=a.clip_length || a.created==null || a.destruction_requested==null || a.parent_observed==null || a.removed==null ||
+            a.destruction_requested.callback!="mainscript.PlayClipAtPoint.Destroy(Object,clip.length)" ||
+            (a.removed.callback!="driver.update.exit.Unity-null" && a.removed.callback!="observer.LateUpdate.Unity-null") ||
+            a.created.order>=a.destruction_requested.order || a.destruction_requested.order>=a.removed.order ||
+            a.parent_observed.order>=a.removed.order || !a.membership.Any(s=>s.member)) return null;
+        return a;
+    }
     public static bool AudioReady()
     {
         return report.owners_complete && retained.Any(r=>r.record.required) && retained.Where(r=>r.record.required).All(r=>r.record.original_destroy_requested && r.record.removed!=null);

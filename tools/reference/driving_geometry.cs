@@ -65,7 +65,15 @@ public static class G11Geometry
         public float body_mass;
         public Vector3 world_position,local_position,local_scale;
         public Quaternion world_rotation,local_rotation;
-        public string[] collider_owners;
+        public CargoCollider[] collider_owners;
+    }
+    [Serializable] public class CargoCollider
+    {
+        public string key,original_owner,owner;
+        public int instance_id,original_owner_instance_id,owner_instance_id;
+        public bool original_owner_is_null,present,owner_is_null,retired;
+        public G11Lifecycle.Audio[] retirement_audio;
+        public G11Lifecycle.Mark[] removed;
     }
     [Serializable] public class Mount
     {
@@ -97,6 +105,7 @@ public static class G11Geometry
     {
         public mountStuff mount; public pickupable cargo; public Rigidbody original_body;
         public Collider[] colliders; public Rigidbody[] original_owners; public string original;
+        public string[] collider_keys,owner_keys; public int[] collider_ids,owner_ids;
     }
     static carscript car;
     static readonly Dictionary<Transform,string> keys=new Dictionary<Transform,string>();
@@ -220,18 +229,26 @@ public static class G11Geometry
             var colliders=cargo.GetComponentsInChildren<Collider>(true);
             if(!locked.Any(value=>value.mount==mount && value.cargo==cargo))
             locked.Add(new Locked{mount=mount,cargo=cargo,original_body=cargo.RB!=null?cargo.RB:cargo.GetComponent<Rigidbody>(),
-                colliders=colliders,original_owners=colliders.Select(c=>c.attachedRigidbody).ToArray(),original=Key(cargo.transform)});
+                colliders=colliders,original_owners=colliders.Select(c=>c.attachedRigidbody).ToArray(),original=Key(cargo.transform),
+                collider_keys=colliders.Select(c=>Key(c)).ToArray(),collider_ids=colliders.Select(c=>c.GetInstanceID()).ToArray(),
+                owner_keys=colliders.Select(c=>Key(c.attachedRigidbody)).ToArray(),
+                owner_ids=colliders.Select(c=>c.attachedRigidbody==null?0:c.attachedRigidbody.GetInstanceID()).ToArray()});
         }
         Capture(phase,step,phase,completed,cargo);
     }
     static bool Ready(Locked item)
     {
         if(item.cargo==null || !item.mount.stored.Contains(item.cargo)) return true;
-        if(item.cargo.ragdoll!=null) return true; // Retained nested ownership stays explicit in cargo and shape records.
-        if(item.original_body!=null || item.cargo.GetComponent<Rigidbody>()!=null) return false;
+        if(item.cargo.ragdoll==null && (item.original_body!=null || item.cargo.GetComponent<Rigidbody>()!=null)) return false;
         for(int index=0;index<item.colliders.Length;index++)
         {
-            var shape=item.colliders[index];if(shape==null) return false;
+            var shape=item.colliders[index];
+            if(shape==null)
+            {
+                if(G11Lifecycle.RetiredCargoCollider(shape,item.collider_ids[index])==null) return false;
+                continue;
+            }
+            if(item.cargo.ragdoll!=null) continue; // Retained nested ownership stays explicit.
             var expected=item.original_owners[index];
             // Destroyed original owner becomes Unity null. Retained nested bodies must not transfer.
             if(shape.attachedRigidbody!=(expected==null?car.RB:expected)) return false;
@@ -243,12 +260,18 @@ public static class G11Geometry
         foreach(var item in locked)
         {
             if(item.cargo==null || !item.mount.stored.Contains(item.cargo)) continue;
-            if(item.cargo.ragdoll!=null) continue;
-            if(item.original_body!=null || item.cargo.GetComponent<Rigidbody>()!=null)
+            if(item.cargo.ragdoll==null && (item.original_body!=null || item.cargo.GetComponent<Rigidbody>()!=null))
                 return "Deferred source Rigidbody still present: "+item.original;
             for(int index=0;index<item.colliders.Length;index++)
             {
-                var shape=item.colliders[index];if(shape==null) return "Source cargo collider was destroyed: "+item.original;
+                var shape=item.colliders[index];
+                if(shape==null)
+                {
+                    if(G11Lifecycle.RetiredCargoCollider(shape,item.collider_ids[index])==null)
+                        return "Source cargo collider was destroyed without complete original audio retirement: "+item.original+" collider="+item.collider_ids[index];
+                    continue;
+                }
+                if(item.cargo.ragdoll!=null) continue;
                 var expected=item.original_owners[index];
                 if(shape.attachedRigidbody!=(expected==null?car.RB:expected))
                     return "Cargo owner transfer incomplete: "+Key(shape)+" observed="+Key(shape.attachedRigidbody)+" expected="+Key(expected==null?car.RB:expected)+
@@ -329,6 +352,16 @@ public static class G11Geometry
         else { shape.complete=false;shape.unknown_shape="Native shape data unavailable for discovered "+shape.type; }
         return shape;
     }
+    static CargoCollider ReadCargoCollider(Locked item,int index)
+    {
+        var shape=item.colliders[index];var owner=shape==null?null:shape.attachedRigidbody;
+        var audio=shape==null?G11Lifecycle.RetiredCargoCollider(shape,item.collider_ids[index]):null;
+        return new CargoCollider{key=item.collider_keys[index],instance_id=item.collider_ids[index],
+            original_owner=item.owner_keys[index],original_owner_instance_id=item.owner_ids[index],original_owner_is_null=item.owner_ids[index]==0,
+            present=shape!=null,owner=Key(owner),owner_instance_id=owner==null?0:owner.GetInstanceID(),owner_is_null=owner==null,
+            retired=audio!=null,retirement_audio=audio==null?new G11Lifecycle.Audio[0]:new[]{audio},
+            removed=audio==null?new G11Lifecycle.Mark[0]:new[]{audio.removed}};
+    }
     static Cargo ReadCargo(Locked item)
     {
         var cargo=item.cargo;var save=cargo.GetComponent<tosaveitemscript>();var rb=cargo.GetComponent<Rigidbody>();
@@ -339,7 +372,7 @@ public static class G11Geometry
             ownership_ready=Ready(item),retained_nested_body=cargo.ragdoll!=null,body_mass=rb==null?0:rb.mass,
             world_position=cargo.transform.position,world_rotation=cargo.transform.rotation,local_position=cargo.transform.localPosition,
             local_rotation=cargo.transform.localRotation,local_scale=cargo.transform.localScale,
-            collider_owners=item.colliders.Select(shape=>shape==null?"destroyed collider":Key(shape.attachedRigidbody)).ToArray()};
+            collider_owners=Enumerable.Range(0,item.colliders.Length).Select(index=>ReadCargoCollider(item,index)).ToArray()};
     }
     public static string Inputs(Snapshot snapshot)
     {

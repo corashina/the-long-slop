@@ -51,6 +51,62 @@ class DrivingProbeTests(unittest.TestCase):
         right['colliders'][0]['radius'] = 99.
         self.assertNotEqual(physical_inputs(left), physical_inputs(right))
 
+    def retirement_run(self):
+        run = self.sample_run()
+        audio = run['lifecycle']['audio'][0]
+        row = dict(key='retained-audio-collider', instance_id=audio['collider_id'],
+                   original_owner='cargo-body', original_owner_instance_id=123, original_owner_is_null=False,
+                   present=False, owner=None, owner_instance_id=0, owner_is_null=True, retired=True,
+                   retirement_audio=[deepcopy(audio)], removed=[deepcopy(audio['removed'])])
+        for snapshot in run['geometry']:
+            snapshot.update(frame=20, time=1., cargo=[dict(key='source-cargo', ownership_ready=True,
+                                                        collider_owners=[deepcopy(row)])])
+        return run
+
+    def test_exact_retained_source_audio_retirement_preserves_geometry_inputs(self):
+        run = self.retirement_run()
+        self.assertEqual(validate_geometry(run)['native_wheels'], 5)
+        snapshot = run['geometry'][2]
+        before = physical_inputs(snapshot)
+        # Native identities remain raw evidence. They are not physical comparison inputs.
+        owner = snapshot['cargo'][0]['collider_owners'][0]
+        owner['instance_id'] = -99
+        owner['original_owner_instance_id'] = -100
+        self.assertEqual(before, physical_inputs(snapshot))
+        with self.assertRaisesRegex(ValueError, 'exact original audio'): validate_geometry(run)
+
+    def test_destroyed_cargo_requires_complete_exact_source_audio_proof(self):
+        corruptions = ('unknown', 'missing_proof', 'duplicate', 'persistent_loss', 'lost_record', 'owner_id', 'live_claim',
+                       'missing_retired', 'missing_present', 'missing_original_owner_is_null', 'missing_owner_is_null',
+                       'missing_removed', 'wrong_removed', 'future_removal')
+        audio_fields = ('original_destroy_requested', 'object_null', 'component_null', 'collider_null',
+                        'required', 'scope_member', 'created_after_close', 'created', 'destruction_requested',
+                        'parent_observed', 'removed', 'source_stack', 'prefab', 'membership')
+        for corruption in (*corruptions, *('audio_missing_'+f for f in audio_fields),
+                           *('audio_false_'+f for f in ('original_destroy_requested', 'object_null', 'component_null', 'collider_null'))):
+            with self.subTest(corruption=corruption):
+                run = self.retirement_run()
+                self.assertEqual(validate_geometry(run)['native_wheels'], 5)
+                snapshot = run['geometry'][2]
+                owner = snapshot['cargo'][0]['collider_owners'][0]
+                audio = owner['retirement_audio'][0]
+                if corruption == 'unknown': owner['instance_id'] = 999
+                if corruption == 'live_claim': owner['present'] = True
+                if corruption == 'missing_proof': owner['retirement_audio'] = []
+                if corruption == 'duplicate': run['lifecycle']['audio'].append(deepcopy(audio))
+                if corruption == 'persistent_loss': owner.update(retired=False, retirement_audio=[], removed=[])
+                if corruption == 'lost_record': snapshot['cargo'][0]['collider_owners'] = []
+                if corruption == 'owner_id': owner['original_owner_instance_id'] = 0
+                if corruption.startswith('missing_') and corruption != 'missing_proof': del owner[corruption[8:]]
+                if corruption == 'wrong_removed': owner['removed'][0]['frame'] = 99
+                if corruption == 'future_removal': snapshot['frame'] = audio['removed']['frame'] - 1
+                if corruption.startswith('audio_missing_'): del audio[corruption[14:]]
+                if corruption.startswith('audio_false_'): audio[corruption[12:]] = False
+                if corruption.startswith('audio_'):
+                    # The matching global record must not rescue incomplete retirement proof.
+                    run['lifecycle']['audio'][0] = deepcopy(audio)
+                with self.assertRaises(ValueError): validate_geometry(run)
+
     def test_geometry_checkpoints_follow_the_declared_physical_path(self):
         isolated = self.sample_run('wheel_collider')
         self.assertNotIn('before-inertia-reset', {row['phase'] for row in isolated['geometry']})
@@ -204,7 +260,7 @@ class DrivingProbeTests(unittest.TestCase):
                       for key, parent in [('scene-transform', None), ('body-transform', 'scene-transform'),
                                           *[(f'wheel-transform-{i}', 'body-transform') for i in range(5)]]]
         run['geometry'] = [{'phase': phase, 'complete': True, 'physical_ready': True, 'unavailable': [],
-                            'colliders': deepcopy(wheels), 'transforms': deepcopy(transforms),
+                            'colliders': deepcopy(wheels), 'transforms': deepcopy(transforms), 'cargo': [],
                             'body': {'key': 'car-body', 'transform_key': 'body-transform', 'parent': 'scene-transform'}, 'nested_bodies': []}
                            for phase in phases]
         for sample in run['samples']:

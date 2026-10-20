@@ -2,6 +2,7 @@
 import math
 
 from .library.types import ObjectId
+from .driving_lifecycle import _mark, validate_audio
 
 
 def source_geometry_map(reader):
@@ -120,6 +121,53 @@ def validate_ownership(snapshot):
             raise ValueError('Physical collider owner is outside its transform parent chain')
 
 
+def validate_cargo(snapshot, lifecycle):
+    cargo = snapshot.get('cargo')
+    if not isinstance(cargo, list):
+        raise ValueError('Missing retained cargo owner observations')
+    identities = {}
+    for item in cargo:
+        key = item.get('key')
+        rows = item.get('collider_owners')
+        if not key or key in identities or not isinstance(rows, list) or type(item.get('ownership_ready')) is not bool:
+            raise ValueError('Incomplete retained cargo owner observations')
+        retained = []
+        for row in rows:
+            if (not row.get('key') or type(row.get('instance_id')) is not int or row['instance_id'] == 0 or
+                    any(type(row.get(k)) is not bool for k in ('original_owner_is_null', 'present', 'owner_is_null', 'retired'))):
+                raise ValueError('Missing retained cargo collider identity or explicit status')
+            for prefix in ('original_', ''):
+                owner, owner_id, owner_null = (row.get(prefix+k) for k in ('owner', 'owner_instance_id', 'owner_is_null'))
+                if (prefix+'owner' not in row or type(owner_id) is not int or
+                        (owner_null and (owner_id != 0 or owner)) or
+                        (not owner_null and (owner_id == 0 or not isinstance(owner, str) or not owner))):
+                    raise ValueError('Incomplete retained cargo native owner identity')
+            if not {'retirement_audio', 'removed'} <= row.keys():
+                raise ValueError('Missing explicit cargo retirement evidence')
+            retained.append((row['key'], row['instance_id'], row['original_owner'], row['original_owner_instance_id'], row['original_owner_is_null']))
+            if row['present']:
+                if row['retired'] or row['retirement_audio'] != [] or row['removed'] != []:
+                    raise ValueError('Live cargo collider conflicts with retirement evidence')
+                continue
+            evidence = row['retirement_audio']
+            audio = evidence[0] if isinstance(evidence, list) and len(evidence) == 1 else None
+            matches = [a for a in lifecycle.get('audio', []) if a.get('collider_id') == row['instance_id']]
+            if (row['retired'] is not True or not row['owner_is_null'] or not isinstance(audio, dict) or
+                    len(matches) != 1 or audio != matches[0] or audio.get('collider_id') != row['instance_id']):
+                raise ValueError('Destroyed cargo collider has no exact original audio retirement proof')
+            opened = _mark(lifecycle.get('opened'), 'world.entry')
+            closed = _mark(lifecycle.get('closed'), 'observer.prepared-held.close-cohort')
+            required, removed = validate_audio(audio, opened, closed)
+            if (not required or removed is None or row['removed'] != [audio['removed']] or
+                    type(snapshot.get('frame')) is not int or not scalar(snapshot.get('time')) or
+                    audio['removed']['frame'] > snapshot['frame'] or audio['removed']['time'] > snapshot['time']):
+                raise ValueError('Incomplete cargo source audio native removal at observation')
+        if len({r[1] for r in retained}) != len(retained):
+            raise ValueError('Repeated retained cargo collider identity')
+        identities[key] = retained
+    return identities
+
+
 def validate_geometry(run):
     snapshots = run.get('geometry', [])
     if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider'):
@@ -136,7 +184,13 @@ def validate_geometry(run):
         raise ValueError('Missing physical geometry checkpoints')
     if any(not row['complete'] or row['unavailable'] or not row['colliders'] for row in snapshots):
         raise ValueError('Incomplete discovered physical geometry')
+    retained_cargo = {}
     for row in snapshots:
+        current_cargo = validate_cargo(row, run.get('lifecycle', {}))
+        for key, owners in retained_cargo.items():
+            if current_cargo.get(key) != owners:
+                raise ValueError('Retained cargo collider or original owner record was lost')
+        retained_cargo = current_cargo
         if row['phase'] in required - {'world.entry'} and not row['physical_ready']:
             raise ValueError('Incomplete deferred cargo body removal or collider ownership')
         validate_ownership(row)
