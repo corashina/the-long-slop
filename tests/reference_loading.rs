@@ -263,6 +263,26 @@ fn installed_player_movement_contract() {
         mutate(&mut invalid);
         assert!(invalid.validate().is_err());
     }
+    for mutate in [
+        |r: &mut ReferenceManifest| r.world.capture_library.schema_version = 2,
+        |r: &mut ReferenceManifest| r.world.capture_library.manifest_sha256 = "f".repeat(64),
+        |r: &mut ReferenceManifest| r.world.capture_library.catalog_sha256 = "f".repeat(64),
+        |r: &mut ReferenceManifest| r.world.capture_library.source_manifest_sha256 = "f".repeat(64),
+        |r: &mut ReferenceManifest| r.world.library.manifest_sha256 = "f".repeat(64),
+    ] {
+        let mut invalid = reference.clone();
+        mutate(&mut invalid);
+        assert!(invalid.validate().is_err());
+    }
+    let mut missing_capture: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    missing_capture["world"]
+        .as_object_mut()
+        .unwrap()
+        .remove("capture_library");
+    assert!(
+        ReferenceManifest::from_runtime_json(&serde_json::to_vec(&missing_capture).unwrap())
+            .is_err()
+    );
     let mut missing: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     missing["player"].as_object_mut().unwrap().remove("view");
     assert!(ReferenceManifest::from_runtime_json(&serde_json::to_vec(&missing).unwrap()).is_err());

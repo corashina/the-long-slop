@@ -28,6 +28,7 @@ pub struct WorldReference {
     pub sample_payload_sha256: String,
     pub managed_sha256: String,
     pub library: LibraryProvenance,
+    pub capture_library: LibraryProvenance,
     pub settings_context: String,
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
@@ -530,13 +531,7 @@ impl WorldReference {
                 && transform(&self.generation_frame),
             "world source context/frame",
         )?;
-        require(
-            self.library.schema_version == 1
-                && self.library.manifest_sha256 == manifest.library.manifest_sha256
-                && self.library.catalog_sha256 == manifest.library.catalog_sha256
-                && self.library.source_manifest_sha256 == manifest.library.source_manifest_sha256,
-            "world library receipt",
-        )?;
+        validate_world_libraries(&self.library, &self.capture_library, &manifest.library)?;
         require(
             self.spawn_context.classification == "controlled_startup_before_garage"
                 && self.spawn_context.engine_sha256
@@ -1654,4 +1649,59 @@ where
         ));
     }
     Ok(values.into_boxed_slice().into_vec())
+}
+
+fn validate_world_libraries(
+    current: &LibraryProvenance,
+    capture: &LibraryProvenance,
+    accepted: &LibraryProvenance,
+) -> Result<(), ReferenceError> {
+    require(
+        current.schema_version == 1
+            && current.manifest_sha256 == accepted.manifest_sha256
+            && current.catalog_sha256 == accepted.catalog_sha256
+            && current.source_manifest_sha256 == accepted.source_manifest_sha256,
+        "world library receipt",
+    )?;
+    require(
+        capture.schema_version == 1
+            && capture.manifest_sha256
+                == "92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99"
+            && capture.catalog_sha256 == current.catalog_sha256
+            && capture.source_manifest_sha256 == current.source_manifest_sha256,
+        "world capture library receipt",
+    )
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    #[test]
+    fn original_capture_and_current_export_identities_are_independent() {
+        let accepted = LibraryProvenance {
+            schema_version: 1,
+            manifest_sha256: "a".repeat(64),
+            catalog_sha256: "b".repeat(64),
+            source_manifest_sha256: "c".repeat(64),
+        };
+        let capture = LibraryProvenance {
+            manifest_sha256: "92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99"
+                .into(),
+            ..accepted.clone()
+        };
+        assert!(validate_world_libraries(&accepted, &capture, &accepted).is_ok());
+        for mutate in [
+            |p: &mut LibraryProvenance| p.schema_version = 2,
+            |p: &mut LibraryProvenance| p.manifest_sha256 = "d".repeat(64),
+            |p: &mut LibraryProvenance| p.catalog_sha256 = "d".repeat(64),
+            |p: &mut LibraryProvenance| p.source_manifest_sha256 = "d".repeat(64),
+        ] {
+            let mut invalid = capture.clone();
+            mutate(&mut invalid);
+            assert!(validate_world_libraries(&accepted, &invalid, &accepted).is_err());
+            let mut invalid = accepted.clone();
+            mutate(&mut invalid);
+            assert!(validate_world_libraries(&invalid, &capture, &accepted).is_err());
+        }
+    }
 }

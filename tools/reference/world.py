@@ -153,9 +153,11 @@ def source_material(source, selected, owner, output, texture_source):
 
 def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, first_asset: int) -> dict:
     print("Verifying retained world samples",flush=True)
-    world_probe.verify(world_probe.PROBE_ROOT)
+    from .world_capture import verify_capture_inputs
+    from .export import provenance
+    capture_library = verify_capture_inputs(reader)
     samples=json.loads((world_probe.PROBE_ROOT/'samples.json').read_text())
-    if samples['payload_sha256']!=PAYLOAD_SHA256 or samples['library']['manifest_sha256']!=reader.receipt.manifest_sha256:
+    if samples['payload_sha256']!=PAYLOAD_SHA256:
         raise ValueError('World source sample/library receipt changed')
     print('World samples verified; selecting source records',flush=True)
     selected=Selection(source,reader)
@@ -392,7 +394,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     lod=recover_lod(source,selected)
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
-    world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':dict(schema_version=1,**samples['library']),
+    world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':provenance(reader.receipt),'capture_library':capture_library,
         'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'distances':draw_distance.distances(source.read(source.get('level0',16865)),assembled['distances']),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),**{k:main['GSettings'][k] for k in ('biome','homesickMode')}},
