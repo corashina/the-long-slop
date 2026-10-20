@@ -3570,4 +3570,89 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
             .collect::<Vec<_>>(),
         entries[2..]
     );
+
+    // Task 5's exact fixture uses the same real deferred-restore adapter.
+    let exact = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: 1.,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 1,
+            amount: -0.25,
+        },
+    ];
+    let oil_instance = crate::save::InstanceId::initial(
+        &r.items.iter().find(|item| item.id == oil).unwrap().source,
+    );
+    let dry_mass = third.physics.rapier().bodies[third_body].mass() - entries[3].amount;
+    third.area.items.get_mut(oil).unwrap().fluid = Some(FluidContainer::new(capacity, &exact));
+    let exact_save = third
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_save
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(exact.as_slice())
+    );
+    let expected = [exact[0], exact[2]];
+    let mut exact_load = GarageRuntime::from_save(&r, &stamp, &exact_save).unwrap();
+    assert_eq!(
+        exact_load
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        expected
+    );
+    prepare_ready(&mut exact_load, &r);
+    for _ in 0..3 {
+        assert!(exact_load.advance_saved_restore(&r).unwrap());
+        assert!(!exact_load.restore_pending());
+        assert_eq!(
+            exact_load
+                .area
+                .items
+                .get(oil)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .entries()
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let exact_body = exact_load.area.items.get(engine).unwrap().body.unwrap();
+    assert_ne!(exact_body, exact_load.physics.chassis_handle(0));
+    assert!(
+        (exact_load.physics.rapier().bodies[exact_body].mass() - dry_mass - 0.75).abs() < 0.001
+    );
+    let exact_recapture = exact_load
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_recapture
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(expected.as_slice())
+    );
 }

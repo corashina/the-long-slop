@@ -66,6 +66,13 @@ Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicat
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
 
+G04 update, 2026-10-20: ordered fluid state, direct fill, particle receipts, and detached tank checks are implemented.
+Targeted checks passed 30 native tests and five Python tests. Both WASM targets passed in each targeted check command.
+The installed checks include three engine and radiator cycles each, signed save reconstruction, cap ownership, collision ownership, and mass.
+Two reference-loading runtime cases remain ignored. Normal-input aiming, visible flow, audio, browser reload, and Unity callback timing remain unverified.
+Full-library checks previously failed because `records/managed/coverage.json` is missing. Selected runtime and package checks passed.
+See [G04 evidence](superpowers/reports/2026-10-20-g04-fluids.md) for commands, counts, rulings, and limits. G04 stays Verify.
+
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
 G13 follows the approved garage state. Saved survival needs remain deferred.

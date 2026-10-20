@@ -1,7 +1,8 @@
 # G04 fluid handling design
 
 Date: 2026-10-20.
-Status: Approved on 2026-10-20. Implementation plan review is pending.
+Status: Approved and implemented on 2026-10-20. G04 remains `Verify`.
+Normal-input browser acceptance and final branch review remain pending.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g04-fluids`.
 
@@ -22,7 +23,7 @@ The main checkout has unrelated local edits.
 All G04 files remain in the separate worktree.
 The branch remains unmerged until the user authorizes integration.
 
-## Authority and observed gaps
+## Authority and original gaps
 
 Behavior authority is `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs` in the main checkout.
 The file belongs to build `11140890`.
@@ -39,13 +40,13 @@ The implementation must use the matching installed garage export for integration
 | `tankscript.Upd` | 63615-63624 | Remove the first nonpositive entry on each update call. |
 | Source tank save and restore | 39861-39874, 40241-40251 | Preserve ordered quantities and run source load cleanup. |
 
-Current `src/fluids.rs` uses simultaneous proportional transfer and clamped spilling.
-These calculations differ from the ordered source mutations.
-Current particle collision handling reports only player contact.
-It cannot fill another tank.
-Current supply targeting can reverse direct fill direction.
-Export and save quantity arrays lose fluid list order.
-Save capture also clamps signed quantities and rescales totals.
+Before G04, `src/fluids.rs` used simultaneous proportional transfer and clamped spilling.
+Those calculations differed from the ordered source mutations.
+Particle collision handling reported only player contact.
+It could not fill another tank.
+Supply targeting could reverse direct fill direction.
+Export and save quantity arrays lost fluid list order.
+Save capture clamped signed quantities and rescaled totals.
 
 ## Selected approach
 
@@ -147,6 +148,9 @@ Generated particle registration remains outside this task.
 
 Serialized fluid state uses ordered entries with fluid type and exact quantity.
 The same contract applies to core item saves and existing world object snapshots.
+Core-save and reference lists use `Vec<FluidEntry>` at cold boundaries.
+In-memory world snapshots use a fixed `Copy` value to avoid per-frame allocations.
+Their serialized entry lists remain unchanged.
 Existing generated constructors and restore paths must use that contract.
 
 Input validation rejects unknown types, duplicate types, nonfinite quantities, and invalid capacity.

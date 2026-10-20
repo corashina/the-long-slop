@@ -1,4 +1,4 @@
-//! Critical G04 snapshot allocation check against the installed single-Lada export.
+//! Critical G04 fluid checks against the installed single-Lada export.
 use my_summer_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -630,4 +630,225 @@ fn g04_particle_receipt() {
         received,
         "actual source particles must fill installed receiver geometry"
     );
+}
+
+fn sync_fluid_mass(run: &mut GarageRuntime) {
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.wheels
+        .sync(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area.sync_portable_mass(&mut run.physics);
+}
+
+fn tank_total(run: &GarageRuntime, tank: my_summer_slop::reference::ItemId) -> f32 {
+    run.area
+        .items
+        .get(tank)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .total()
+}
+
+fn mass_near(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.005,
+        "mass {actual} != {expected}"
+    );
+}
+
+#[test]
+#[ignore = "requires the installed single-Lada export"]
+fn g04_detached_tanks_and_save() {
+    use my_summer_slop::{
+        interaction::{InteractionAction, ResolvedAim, items::ItemLocation},
+        reference::ItemId,
+        simulation::FrameInput,
+        vehicle::to_rapier,
+    };
+    use rapier3d::math::{Rotation, Vector};
+    let r = ReferenceManifest::from_runtime_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(r.build_id, 11140890);
+    assert_eq!(r.vehicles.len(), 1);
+    let mut run = GarageRuntime::new(&r).unwrap();
+    sync_fluid_mass(&mut run);
+    // The carry anchor is created once on first pickup.
+    hold_tank(&mut run, ItemId(120));
+    run.area
+        .interaction
+        .drop_held(&mut run.area.items, &mut run.physics);
+    let chassis = run.physics.chassis_handle(0);
+    let body_count = run.physics.rapier().bodies.len();
+    let collider_count = run.physics.rapier().colliders.len();
+    let engine = &r.vehicles[0].engine;
+    for (part, tank, source) in [
+        (engine.item, engine.oil_tank, ItemId(120)),
+        (engine.coolant_tank, engine.coolant_tank, ItemId(118)),
+    ] {
+        let slot = r
+            .part_slots
+            .iter()
+            .find(|s| s.part == Some(part))
+            .unwrap()
+            .id;
+        let opening = r.openings.iter().find(|o| o.tank == tank).unwrap();
+        let caps: Vec<_> = r
+            .openings
+            .iter()
+            .filter(|o| o.tank == tank)
+            .map(|o| o.cap)
+            .collect();
+        let part_reference = r.parts.iter().find(|p| p.item == part).unwrap();
+        let handles: Vec<_> = run
+            .physics
+            .rapier()
+            .colliders
+            .iter()
+            .filter(|(_, c)| {
+                part_reference
+                    .colliders
+                    .iter()
+                    .any(|id| id.0 == (c.user_data >> 64) as u32)
+            })
+            .map(|(handle, collider)| (handle, (collider.user_data >> 64) as u32))
+            .collect();
+        assert!(!handles.is_empty());
+        for cycle in 0..3 {
+            let original = run.area.items.get(tank).unwrap().fluid.clone();
+            let installed_mass = run.physics.rapier().bodies[chassis].mass();
+            run.area
+                .interaction
+                .parts
+                .can_remove(part, &run.area.player, &run.area.items)
+                .unwrap();
+            run.area
+                .interaction
+                .parts
+                .remove(part, &mut run.area.items, &mut run.physics)
+                .unwrap();
+            run.area.interaction.parts.detach_mechanism(
+                part,
+                &mut run.area.interaction.mechanisms,
+                &mut run.physics,
+            );
+            sync_fluid_mass(&mut run);
+            let loose = run.area.items.get(part).unwrap().body.unwrap();
+            assert_eq!(
+                run.area.items.get(part).unwrap().location,
+                ItemLocation::World
+            );
+            assert_ne!(loose, chassis);
+            assert_eq!(run.area.items.get(tank).unwrap().fluid, original);
+            let detached_mass = run.physics.rapier().bodies[loose].mass();
+            let detached_total = tank_total(&run, tank);
+            let remaining_mass = run.physics.rapier().bodies[chassis].mass();
+            mass_near(remaining_mass + detached_mass, installed_mass);
+            for id in caps.iter().copied().chain([tank]) {
+                assert_eq!(run.area.items.get(id).unwrap().id, id);
+                assert_eq!(run.area.items.get(id).unwrap().body, Some(loose));
+            }
+            for &(handle, identity) in &handles {
+                let collider = &run.physics.rapier().colliders[handle];
+                assert_eq!((collider.user_data >> 64) as u32, identity);
+                assert_eq!(collider.parent(), Some(loose));
+            }
+            let cap_before = run.area.items.get(opening.cap).unwrap().pose;
+            set_cap(&mut run, &r, opening.id, true);
+            // Move the detached opening upward to prevent free spill during direct fill.
+            let forward = to_rapier(run.area.items.get(opening.cap).unwrap().pose).rotation
+                * Vector::from_array(opening.tilt_axis);
+            run.physics.edit_body(loose, |body| {
+                let mut pose = *body.position();
+                pose.rotation =
+                    Rotation::from_rotation_arc(forward.normalize(), Vector::Y) * pose.rotation;
+                pose.translation += Vector::new(0., 5. + cycle as f32, 0.);
+                body.set_position(pose, true);
+            });
+            run.area.items.sync_poses(&run.physics);
+            sync_fluid_mass(&mut run);
+            assert_ne!(run.area.items.get(opening.cap).unwrap().pose, cap_before);
+            hold_tank(&mut run, source);
+            let before_fill = tank_total(&run, tank);
+            assert!(
+                matches!(fill_step(&mut run, &r, opening.cap), Some(InteractionAction::Fill { destination, .. }) if destination == tank)
+            );
+            let after_fill = tank_total(&run, tank);
+            assert!(after_fill > before_fill);
+            sync_fluid_mass(&mut run);
+            mass_near(
+                run.physics.rapier().bodies[loose].mass(),
+                detached_mass + after_fill - detached_total,
+            );
+            mass_near(run.physics.rapier().bodies[chassis].mass(), remaining_mass);
+            run.area
+                .interaction
+                .drop_held(&mut run.area.items, &mut run.physics);
+            let forward = to_rapier(run.area.items.get(opening.cap).unwrap().pose).rotation
+                * Vector::from_array(opening.tilt_axis);
+            run.physics.edit_body(loose, |body| {
+                let mut pose = *body.position();
+                pose.rotation =
+                    Rotation::from_rotation_arc(forward.normalize(), -Vector::Y) * pose.rotation;
+                body.set_position(pose, true);
+            });
+            run.area.items.sync_poses(&run.physics);
+            sync_fluid_mass(&mut run);
+            fluid_step(&mut run, FrameInput::default(), ResolvedAim::default());
+            let after_spill = tank_total(&run, tank);
+            assert!(
+                after_spill < after_fill,
+                "detached tank must spill through its open cap"
+            );
+            sync_fluid_mass(&mut run);
+            mass_near(
+                run.physics.rapier().bodies[loose].mass(),
+                detached_mass + after_spill - detached_total,
+            );
+            set_cap(&mut run, &r, opening.id, false);
+            let final_fluid = run.area.items.get(tank).unwrap().fluid.clone();
+            let final_total = tank_total(&run, tank);
+            sync_fluid_mass(&mut run);
+            mass_near(
+                run.physics.rapier().bodies[loose].mass(),
+                detached_mass + final_total - detached_total,
+            );
+            run.area
+                .interaction
+                .parts
+                .install(part, slot, &mut run.area.items, &mut run.physics)
+                .unwrap();
+            run.area
+                .interaction
+                .parts
+                .mount_mechanism(part, &mut run.area.interaction.mechanisms);
+            sync_fluid_mass(&mut run);
+            assert_eq!(run.area.interaction.parts.slot_item(slot), Some(part));
+            assert!(!run.physics.rapier().bodies[loose].is_enabled());
+            assert_eq!(run.area.items.get(tank).unwrap().fluid, final_fluid);
+            mass_near(
+                run.physics.rapier().bodies[chassis].mass(),
+                installed_mass + final_total - detached_total,
+            );
+            for id in caps.iter().copied().chain([tank]) {
+                assert_eq!(run.area.items.get(id).unwrap().id, id);
+                assert_eq!(run.area.items.get(id).unwrap().body, Some(chassis));
+            }
+            for &(handle, identity) in &handles {
+                let collider = &run.physics.rapier().colliders[handle];
+                assert_eq!((collider.user_data >> 64) as u32, identity);
+                assert_eq!(collider.parent(), Some(chassis));
+            }
+            assert_eq!(run.physics.rapier().bodies.len(), body_count);
+            assert_eq!(run.physics.rapier().colliders.len(), collider_count);
+        }
+    }
+    // Exact signed capture and completed deferred restore share the existing private test:
+    // world::stream::tests::g04_ordered_save_load_cleans_once_before_detached_mass_sync.
 }
