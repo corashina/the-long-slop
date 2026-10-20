@@ -126,13 +126,16 @@ See [G04 verification](superpowers/reports/2026-10-20-g04-fluids.md) for command
 G07 source handling is merged, including carry input ownership, mass publication, and push controls.
 Browser acceptance remains open. G07 stays Verify.
 
-G09 integration, 2026-10-20: source posture, Q lean, independent look, zoom, seat view, recenter, and recovery are integrated with G04 fluids, G05 engine, G07 carry, and G08 inventory.
-Save schema 9 stores the combined player view and garage state. Older schemas are rejected without migration.
-Integration preserves the registered Rapier 0.36 package. Source normals fail on far-coordinate slopes near 2000; the known gap keeps G09 Partial.
+G09 adds source posture, lean, look, zoom, seat views, recenter, and recovery.
+It integrates with G04 fluids, G05 engine, G07 carry, and G08 inventory.
+Save schema 9 stores persistent posture with combined garage state. It does not store temporary lean or zoom.
+Older schemas are rejected without migration. Registry Rapier 0.36 remains unchanged; no Rapier copy was added.
+Rapier normals fail over flat floors near 2000. This known gap keeps G09 Partial.
 The targeted interaction filter passed eight tests. Five reference-export tests remain ignored. The existing schema filter passed one test.
 Web input, feedback, and save-storage checks passed 13 tests. Both WASM check backends passed.
-The garage-fluid suite compiled but skipped all five export-dependent tests. Full checks, release builds, and browser acceptance remain open.
-Matching merged runtime assets and normal browser behavior remain unverified. No G09 tests or source documents were added. G09 stays Partial.
+The engine and garage-fluid suites compiled; each skipped five export-dependent tests. Full checks, release builds, and browser acceptance remain open.
+Private G09 assets predate integration and do not establish merged runtime parity. Browser behavior remains unverified.
+No runtime assets or G09 tests were added. G09 stays Partial.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
