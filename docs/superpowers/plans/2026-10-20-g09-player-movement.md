@@ -206,14 +206,17 @@ The next step must contain `(2, 0, 0)`. Clear must return `FrameInput::default()
 
 - [ ] **Step 2: Run `./scripts/check.ps1 -WebTest input,menu` and confirm the missing fields fail.**
 
-- [ ] **Step 3: Implement player sampling and correct mouse mappings.**
+- [ ] **Step 3: Implement player sampling and preserve source mouse mappings.**
 
 Map Q to LEAN and Z/Y to ZOOM. Recompute aliases from physical key state.
 Merge edge fields with OR. Replace held state. `take_step` retains held and clears edges.
 `InputState.clear()` discards edges without creating a Q release.
 Existing menu blur, visibility, and pointer-loss handlers must continue to request runtime pause.
-Set `Mouse1` to existing TRANSLATE bit 16384 and `Mouse2` to ROTATE bit 4096.
-Update mouse-control help atomically. Add Q and zoom help when Task 4 or Task 5 activates those actions.
+Preserve DOM `Mouse1` as ROTATE bit 4096 and `Mouse2` as TRANSLATE bit 16384.
+DOM button 1 is middle. DOM button 2 is right. Unity uses different numeric button indexes.
+Test actual `createInput` DOM events for MMB rotation and RMB translation.
+Reference: [W3C button values](https://www.w3.org/TR/pointerevents4/#the-button-property).
+Preserve source mouse-control help and verify that it agrees with physical-button behavior. Add Q and zoom help when Task 4 or Task 5 activates those actions.
 
 - [ ] **Step 4: Run the web suites and `./scripts/check.ps1 -Filter simulation::frame_input_tests`.**
 

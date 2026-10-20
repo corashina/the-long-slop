@@ -168,6 +168,8 @@ extern "C" {
     pub fn game_failure(message: &str);
     #[wasm_bindgen(js_namespace = window, js_name = gameKeys)]
     pub fn game_keys() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gamePlayerKeys)]
+    pub fn game_player_keys() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gamePressed)]
     pub fn game_pressed() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameReleased)]

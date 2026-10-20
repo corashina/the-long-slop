@@ -29,7 +29,7 @@ Recovery assumes a standing player.
 
 `FrameInput` carries a primary `u32` action mask. Only bit 13 is unused.
 Inventory already uses separate fields.
-The browser maps RMB to rotation and MMB to translation, contrary to source controls and current help.
+Browser mouse buttons follow DOM indexes. MMB rotates items, and RMB moves items, as the source controls and help require.
 Save schema 6 stores crouch as a Boolean.
 
 ## Source contract
@@ -147,7 +147,7 @@ Remove replaced derived-only fields after their consumers move to the new contra
 The browser bridge carries these fields separately from driving and inventory masks.
 Frame merge preserves edges until one gameplay step consumes them.
 Input clear removes all pending player fields. Multiple zoom keys preserve held state until all are released.
-Correct RMB and MMB mapping with the corresponding help and tests.
+Preserve RMB movement and MMB rotation. Test these actions through DOM mouse events.
 
 `PlayerState` owns body movement, posture, mode transitions, and one authoritative gameplay view.
 A focused `src/player/posture.rs` module owns posture transitions and dimensions.

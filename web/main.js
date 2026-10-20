@@ -65,6 +65,7 @@ window.gameSaveResult=(id,kind,payload,error)=>{
  settleSave(id,kind,payload,error);
 };
 window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
+window.gamePlayerKeys=()=>frame.playerHeld|(frame.playerPressed<<2)|(frame.playerReleased<<4);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;

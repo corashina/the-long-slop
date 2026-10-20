@@ -41,11 +41,19 @@ pub mod keys {
     pub const GEAR_6: u32 = 1 << 31;
 }
 
+pub mod player_keys {
+    pub const LEAN: u8 = 1;
+    pub const ZOOM: u8 = 2;
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
     pub released: u32,
+    pub player_held: u8,
+    pub player_pressed: u8,
+    pub player_released: u8,
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
@@ -57,6 +65,9 @@ impl FrameInput {
         self.held = frame.held;
         self.pressed |= frame.pressed;
         self.released |= frame.released;
+        self.player_held = frame.player_held;
+        self.player_pressed |= frame.player_pressed;
+        self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
         for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
@@ -73,6 +84,7 @@ impl FrameInput {
         let step = *self;
         *self = Self {
             held: step.held,
+            player_held: step.player_held,
             inventory_held: step.inventory_held,
             ..Self::default()
         };
@@ -174,5 +186,44 @@ mod step_clock_tests {
 
         assert_eq!(steps, 50);
         assert!((f64::from(FIXED_DT) * steps as f64 - 1.).abs() < 1.0e-6);
+    }
+}
+
+#[cfg(test)]
+mod frame_input_tests {
+    use super::{FrameInput, player_keys};
+
+    #[test]
+    fn player_edges_wait_for_one_step_and_clear_cancels_them() {
+        let mut pending = FrameInput::default();
+        pending.merge(FrameInput {
+            player_held: player_keys::LEAN,
+            player_pressed: player_keys::LEAN,
+            ..FrameInput::default()
+        });
+        pending.merge(FrameInput {
+            player_held: player_keys::ZOOM,
+            player_pressed: player_keys::ZOOM,
+            player_released: player_keys::LEAN,
+            ..FrameInput::default()
+        });
+        let step = pending.take_step();
+        assert_eq!(
+            (step.player_held, step.player_pressed, step.player_released),
+            (2, 3, 1)
+        );
+        let step = pending.take_step();
+        assert_eq!(
+            (step.player_held, step.player_pressed, step.player_released),
+            (2, 0, 0)
+        );
+        pending.merge(FrameInput {
+            player_held: player_keys::LEAN,
+            player_pressed: player_keys::LEAN,
+            player_released: player_keys::ZOOM,
+            ..FrameInput::default()
+        });
+        pending.clear();
+        assert_eq!(pending.take_step(), FrameInput::default());
     }
 }

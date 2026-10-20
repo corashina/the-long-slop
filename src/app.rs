@@ -620,8 +620,13 @@ fn read_input(
         runtime.area.player.driving(),
     );
     let actions = game_actions();
+    let held = game_keys();
+    let player = game_player_keys();
     let frame = FrameInput {
-        held: game_keys(),
+        held,
+        player_held: player as u8 & 3,
+        player_pressed: (player >> 2) as u8 & 3,
+        player_released: (player >> 4) as u8 & 3,
         pressed: game_pressed(),
         released: game_released(),
         inventory_held: game_inventory_keys() as u8 & 15,
