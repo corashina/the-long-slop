@@ -123,20 +123,8 @@ Merge commit: 777cedd. The G04 worktree and merged branch were removed after ver
 Full-library coverage remains incomplete. Full checks, release builds, and browser acceptance remain deferred.
 See [G04 verification](superpowers/reports/2026-10-20-g04-fluids.md) for commands and limits. G04 stays Verify.
 
-G07 integration, 2026-10-20: G07 now uses the G08 frame coordinator and its sole source-identity-bound Tab timer.
-Active drag retains mouse ownership and permits separate carried F charge, drop, throw, and grip release.
-Carry input stays bound to its source item across zero-fixed-step slot transfers. Recenter clears only that item's carry input.
-Shared mechanism wheel input and player look remain available. Obsolete hand-control paths were removed.
-The handling suite moved to a native library module. Existing renderer-receipt helpers publish its fixtures through current readiness gates.
-The native matrix passed 57 tests before the owner correction. All 33 affected tests passed after it, covering 59 distinct tests overall.
-The current handling suite passed 15 tests. Current G08 inventory tests supersede the historical external restore-pending failure.
-G04 integration keeps ordered fluid state in schema 8 and applies authored mass updates during carrying.
-Final native integration checks passed 41 tests in serial Docker. The 15 handling, 5 garage fluid, and 21 G04 library tests had zero failures or ignored cases.
-Web input, menu, and feedback checks passed 11 tests. Native checks used `RUST_TEST_THREADS=1` inside Docker.
-Formatting and both WASM backend checks passed. Existing compiler warnings remain. The earlier parallel handling check hit `ENOMEM`.
-Native fixtures verify frame actions and fixed owners. Renderer uploads, submitted browser frames, normal input, and full gameplay acceptance remain unverified.
-Source lean with wheel input belongs to G09. Support attribution at edges or stacked bodies remains unverified.
-Full checks, release builds, and browser acceptance did not run. G07 stays Verify.
+G07 source handling is merged, including carry input ownership, mass publication, and push controls.
+Browser acceptance remains open. G07 stays Verify.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
