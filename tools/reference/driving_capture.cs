@@ -145,6 +145,7 @@ public sealed class G11Capture : MonoBehaviour
         public AssemblyIdentity assembly_identity;
         public PoseInput input_pose, spawn_pose;
         public G11Driver.Input driver_input;
+        public G11Cargo.Input cargo_input;
         public WheelParameters[] wheels;
     }
     [Serializable] public class SetupBoundary
@@ -174,6 +175,7 @@ public sealed class G11Capture : MonoBehaviour
         public G11Driver.Report driver=G11Driver.report;
         public G11Lifecycle.Report lifecycle=G11Lifecycle.report;
         public G11BodyTrace.Report body_trace=G11BodyTrace.report;
+        public G11Cargo.Report cargo_input=G11Cargo.report;
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses", "Independent native engine, service, and parking brake torque decomposition"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
@@ -354,6 +356,9 @@ public sealed class G11Capture : MonoBehaviour
                 throw new InvalidOperationException("Original selected Lada, source storage, and player did not initialize; physical readiness: "+G11Geometry.ReadinessFailure()+"; source readiness: "+SourceReadinessFailure(car));
             }
             G11Geometry.Capture("source-physical-ready",observedPhysicsStep,"Initialize source readiness",completedStorage);
+            if(scenario.has_setup_state && (scenario.setup_state==null || scenario.setup_state.cargo_input==null))
+                throw new InvalidOperationException("Canonical source cargo input is missing");
+            G11Geometry.ApplyCargoInput(scenario.has_setup_state?scenario.setup_state.cargo_input:null,observedPhysicsStep,controlRevision,completedStorage);
             main.PressedContinue();
             body=car.RB;
             G11BodyTrace.Set(body,true,"System.Collections.IEnumerator G11Capture::Initialize(mainscript)",-1,"observer.Initialize");
@@ -641,7 +646,7 @@ public sealed class G11Capture : MonoBehaviour
         return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
-            setup_json=JsonUtility.ToJson(scenario.setup), driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            setup_json=JsonUtility.ToJson(scenario.setup), cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
             inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,

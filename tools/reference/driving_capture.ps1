@@ -57,6 +57,7 @@ Add-Type -Path "$PSHOME/Microsoft.CodeAnalysis.CSharp.dll"
 $references=[Collections.Generic.List[Microsoft.CodeAnalysis.MetadataReference]]::new()
 Get-ChildItem -LiteralPath $sourceManaged -Filter '*.dll' | ForEach-Object {$references.Add([Microsoft.CodeAnalysis.MetadataReference]::CreateFromFile($_.FullName))}
 $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_cargo.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_body_trace.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))

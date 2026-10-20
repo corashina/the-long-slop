@@ -1,5 +1,6 @@
 """Checked authored geometry identities and exact physical-input comparisons."""
 import math
+from copy import deepcopy
 
 from .library.types import ObjectId
 from .driving_lifecycle import _mark, validate_audio
@@ -168,6 +169,93 @@ def validate_cargo(snapshot, lifecycle):
     return identities
 
 
+def validate_cargo_input(run, by_phase):
+    report = run.get('cargo_input')
+    if not isinstance(report, dict) or report.get('applications') != 1 or report.get('phase') != 'source-physical-ready':
+        raise ValueError('Declared cargo input must apply exactly once at source-physical-ready')
+    declared = report.get('input')
+    if (not isinstance(declared, dict) or declared.get('phase') != 'source-physical-ready' or
+            any(type(declared.get(k)) is not int or declared[k] < 0 for k in ('frame', 'physics_step', 'input_revision')) or
+            not isinstance(declared.get('targets'), list) or report.get('arguments') != declared['targets'] or
+            any(run.get(name, {}).get('cargo_input') != declared for name in ('setup_state', 'initial'))):
+        raise ValueError('Missing or changed declared cargo input and exact setter arguments')
+    phases = [row['phase'] for row in run['geometry']]
+    if (phases.count('source-physical-ready') != 1 or phases.count('cargo-input-applied-held') != 1 or
+            phases.index('cargo-input-applied-held') != phases.index('source-physical-ready') + 1 or
+            phases.index('cargo-input-applied-held') >= phases.index('prepared-held')):
+        raise ValueError('Declared cargo application boundary order differs')
+    before, after = (by_phase[k] for k in ('source-physical-ready', 'cargo-input-applied-held'))
+    if any(row['body'].get('kinematic') is not True for row in (before, after)):
+        raise ValueError('Declared cargo input was not held')
+    for field in ('frame', 'physics_step'):
+        if type(report.get(field)) is not int or report[field] < 0 or any(report[field] != row.get(field) for row in (before, after)):
+            raise ValueError('Missing cargo application source stamp')
+    for field in ('time', 'fixed_time'):
+        if not scalar(report.get(field)) or any(report[field] != row.get(field) for row in (before, after)):
+            raise ValueError('Missing cargo application source clock')
+    if type(report.get('input_revision')) is not int or report['input_revision'] < 0:
+        raise ValueError('Missing cargo application input revision')
+    caches = report.get('caches_before')
+    if (not isinstance(caches, list) or caches != report.get('caches_after') or
+            any(not isinstance(value, str) or not value for value in caches) or before['cargo'] and not caches):
+        raise ValueError('Cargo source ownership or cache evidence changed or is missing')
+    targets = declared['targets']
+    keys = [target.get('key') for target in targets]
+    if (any(not isinstance(key, str) or not key for key in keys) or len(set(keys)) != len(keys) or
+            keys != sorted(keys) or set(keys) != {row['key'] for row in before['cargo']} or
+            set(keys) != {row['key'] for row in after['cargo']}):
+        raise ValueError('Declared cargo cohort is missing, duplicate, or extra')
+    for snapshot in (before, after):
+        if 'mounts' in snapshot:
+            stored = [key for mount in snapshot['mounts'] for key in mount['stored']]
+            if sorted(stored) != keys:
+                raise ValueError('Declared cargo cohort differs from source stored membership')
+    identities = dict(key='key', pickup='pickup', save='save', parent='parent', mount='lock_owner',
+                      lock_parent='lock_parent', body='car_body', category='category', item='item', lock_id='lock_id')
+    expected = deepcopy(physical_inputs(before))
+    actual = physical_inputs(after)
+    for target in targets:
+        key = target['key']
+        if (any(not isinstance(target.get(k), str) or not target[k] for k in ('pickup', 'save', 'parent', 'mount', 'lock_parent', 'body')) or
+                any(type(target.get(k)) is not int for k in ('category', 'item', 'lock_id')) or
+                not coordinates(target.get('local_position')) or not coordinates(target.get('local_scale')) or
+                not coordinates(target.get('local_rotation'), ('x', 'y', 'z', 'w'))):
+            raise ValueError('Incomplete declared cargo identity or exact local TRS')
+        for phase, evidence in ((before, 'before'), (after, 'after')):
+            cargo = next(row for row in phase['cargo'] if row['key'] == key)
+            rows = report.get(evidence)
+            observations = [row for row in rows if row.get('key') == key] if isinstance(rows, list) else []
+            if len(observations) != 1 or len(rows) != len(keys):
+                raise ValueError('Missing cargo native before or after observation')
+            observed = observations[0]
+            if (any(target[k] != cargo.get(v) for k, v in identities.items()) or
+                    cargo.get('locked') is not True or cargo.get('ownership_ready') is not True or
+                    any(cargo.get(k) is not False for k in ('body_present', 'original_body_present', 'deferred_destruction', 'retained_nested_body')) or
+                    type(cargo.get('lock_parent_id')) is not int or cargo['lock_parent_id'] != cargo.get('expected_lock_parent_id')):
+                raise ValueError('Declared cargo source parent, lock, or retired body differs')
+            for field, source in (('root_id', 'root_id'), ('pickup_id', 'pickup_id'), ('save_id', 'save_id'),
+                                  ('mount_id', 'mount_id'), ('body_id', 'car_body_id'), ('lock_parent_id', 'lock_parent_id')):
+                if type(observed.get(field)) is not int or observed[field] != cargo.get(source) or field != 'lock_parent_id' and observed[field] == 0:
+                    raise ValueError('Missing cargo raw native identity evidence')
+            live = [row for row in cargo['collider_owners'] if row['present']]
+            if (observed.get('owner_ids') != [row['owner_instance_id'] for row in live] or
+                    any(row['owner'] != target['body'] or row['owner_instance_id'] != observed['body_id'] for row in live)):
+                raise ValueError('Declared cargo native attached body differs')
+            for field in ('local_position', 'local_rotation', 'local_scale'):
+                if observed.get(field) != cargo.get(field):
+                    raise ValueError('Cargo native setter output differs from raw geometry observation')
+            poses = [row for row in phase['transforms'] if row['key'] == key]
+            if len(poses) != 1 or any(poses[0][field] != cargo[field] for field in ('local_position', 'local_rotation', 'local_scale')):
+                raise ValueError('Cargo root raw transform observation is missing or differs')
+        # Only declared roots can change local TRS at this boundary. Native output is never replaced in stored records.
+        source = next(row for row in expected['transforms'] if row['key'] == key)
+        native = next(row for row in actual['transforms'] if row['key'] == key)
+        for field in ('local_position', 'local_rotation', 'local_scale'):
+            source[field] = native[field]
+    if expected != actual:
+        raise ValueError('Non-root physical input changed at declared cargo boundary')
+
+
 def validate_geometry(run):
     snapshots = run.get('geometry', [])
     if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider'):
@@ -175,7 +263,7 @@ def validate_geometry(run):
     isolated = run['probe_kind'] == 'wheel_collider'
     if run.get('isolated_wheel_probe') is not isolated:
         raise ValueError('Declared physical source-body or isolated-probe path differs')
-    required = {'world.entry', 'source-physical-ready', 'prepared-held', 'backlog-drained-held',
+    required = {'world.entry', 'source-physical-ready', 'cargo-input-applied-held', 'prepared-held', 'backlog-drained-held',
                 'before-dynamic', 'switched-dynamic',
                 'canonical-transforms-synchronized', 'native-wheels-enabled', 'armed-after-canonical'}
     if not isolated:
@@ -229,6 +317,7 @@ def validate_geometry(run):
                not required_shapes[shape['type']] <= shape.keys() for shape in row['colliders']):
             raise ValueError('Incomplete native shape data')
     by_phase = {row['phase']: row for row in snapshots}
+    validate_cargo_input(run, by_phase)
     for phase in ('prepared-held', 'backlog-drained-held', 'native-wheels-enabled'):
         wheels = [shape for shape in by_phase[phase]['colliders'] if shape['type'] == 'WheelCollider']
         if len(wheels) != 5 or sorted(shape['road_slot'] for shape in wheels) != [-1, 0, 1, 2, 3]:

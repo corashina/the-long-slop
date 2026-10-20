@@ -14,10 +14,101 @@ from tools.reference.tests.test_driving_lifecycle import lifecycle_fixture
 from tools.reference.tests.test_driving_controls import scenario_fixture, add_control_fixture
 
 
+def cargo_input_fixture(run):
+    before = next(row for row in run['geometry'] if row['phase'] == 'source-physical-ready')
+    after = next(row for row in run['geometry'] if row['phase'] == 'cargo-input-applied-held')
+    identities = dict(key='key', pickup='pickup', save='save', parent='parent', mount='lock_owner',
+                      lock_parent='lock_parent', body='car_body', category='category', item='item', lock_id='lock_id')
+    targets = [{**{k: cargo[v] for k, v in identities.items()},
+                **{k: deepcopy(cargo[k]) for k in ('local_position', 'local_rotation', 'local_scale')}}
+               for cargo in sorted(before['cargo'], key=lambda row: row['key'])]
+    declared = dict(phase='source-physical-ready', frame=10, physics_step=4, input_revision=2, targets=targets)
+    def observe(snapshot):
+        return [dict(key=cargo['key'], body_id=cargo['car_body_id'],
+                     **{k: cargo[k] for k in ('root_id', 'pickup_id', 'save_id', 'mount_id', 'lock_parent_id')},
+                     **{k: deepcopy(cargo[k]) for k in ('local_position', 'local_rotation', 'local_scale')},
+                     owner_ids=[row['owner_instance_id'] for row in cargo['collider_owners'] if row['present']])
+                for cargo in sorted(snapshot['cargo'], key=lambda row: row['key'])]
+    run['cargo_input'] = dict(applications=1, phase='source-physical-ready', input=deepcopy(declared), arguments=deepcopy(targets),
+        **{k: before[k] for k in ('frame', 'physics_step', 'time', 'fixed_time')}, input_revision=2,
+        before=observe(before), after=observe(after), caches_before=['cache'], caches_after=['cache'])
+    for name in ('setup_state', 'initial'):
+        run[name]['cargo_input'] = deepcopy(declared)
+
+
 class DrivingProbeTests(unittest.TestCase):
+    def test_declared_cargo_input_requires_complete_exact_evidence(self):
+        cases = ('missing_report', 'missing_input', 'missing_setup', 'missing_initial', 'missing_arguments', 'changed_arguments',
+                 'applications', 'missing_before', 'missing_after', 'missing_caches', 'changed_caches', 'cohort', 'duplicate',
+                 'extra', 'parent', 'lock', 'unretired', 'nested', 'owner', 'native_id', 'output', 'non_root', 'not_held', 'order', 'stamp')
+        for corruption in cases:
+            with self.subTest(corruption=corruption):
+                run = self.retirement_run()
+                validate_geometry(run)
+                report = run['cargo_input']
+                ready = next(row for row in run['geometry'] if row['phase'] == 'source-physical-ready')
+                after = next(row for row in run['geometry'] if row['phase'] == 'cargo-input-applied-held')
+                if corruption == 'missing_report': del run['cargo_input']
+                if corruption == 'missing_input': del report['input']
+                if corruption == 'missing_setup': del run['setup_state']['cargo_input']
+                if corruption == 'missing_initial': del run['initial']['cargo_input']
+                if corruption == 'missing_arguments': del report['arguments']
+                if corruption == 'changed_arguments': report['arguments'][0]['local_rotation']['w'] = .99
+                if corruption == 'applications': report['applications'] = 2
+                if corruption == 'missing_before': del report['before']
+                if corruption == 'missing_after': del report['after']
+                if corruption == 'missing_caches': report['caches_before'] = report['caches_after'] = []
+                if corruption == 'changed_caches': report['caches_after'] = ['changed']
+                if corruption in ('cohort', 'duplicate', 'extra'):
+                    targets = report['input']['targets']
+                    if corruption == 'cohort': targets.clear()
+                    if corruption == 'duplicate': targets.append(deepcopy(targets[0]))
+                    if corruption == 'extra': targets.append(dict(targets[0], key='extra'))
+                    report['arguments'] = deepcopy(targets)
+                    for name in ('initial', 'setup_state'): run[name]['cargo_input'] = deepcopy(report['input'])
+                if corruption == 'parent': ready['cargo'][0]['parent'] = 'wrong'
+                if corruption == 'lock': ready['cargo'][0]['lock_parent_id'] = 8
+                if corruption == 'unretired': ready['cargo'][0]['original_body_present'] = True
+                if corruption == 'nested': ready['cargo'][0]['retained_nested_body'] = True
+                if corruption == 'owner': report['before'][0]['owner_ids'] = [42]
+                if corruption == 'native_id': report['before'][0]['root_id'] = 0
+                if corruption == 'output': report['after'][0]['local_rotation']['w'] = .999
+                if corruption == 'non_root': after['colliders'][0]['radius'] = 42.
+                if corruption == 'not_held': ready['body']['kinematic'] = False
+                if corruption == 'order': run['geometry'].remove(after); run['geometry'].append(after)
+                if corruption == 'stamp': report['physics_step'] += 1
+                with self.assertRaises(ValueError): validate_geometry(run)
+
+    def test_native_cargo_output_stays_separate_from_declared_arguments(self):
+        run = self.retirement_run()
+        after = next(row for row in run['geometry'] if row['phase'] == 'cargo-input-applied-held')
+        native = .9999999403953552
+        after['cargo'][0]['local_rotation']['w'] = native
+        next(row for row in after['transforms'] if row['key'] == 'source-cargo')['local_rotation']['w'] = native
+        run['cargo_input']['after'][0]['local_rotation']['w'] = native
+        original = deepcopy(run)
+        validate_geometry(run)
+        self.assertEqual(run, original)
+        self.assertEqual(run['cargo_input']['arguments'][0]['local_rotation']['w'], 1.)
+        self.assertEqual(after['cargo'][0]['local_rotation']['w'], native)
+
+    def test_observed_raw_cargo_quaternions_remain_exact_physical_inputs(self):
+        run = self.retirement_run()
+        before = next(row for row in run['geometry'] if row['phase'] == 'source-physical-ready')
+        observed = (("y", -0.009555235505104065, -0.009555244818329811),
+                    ("w", -0.005558406934142113, -0.00555840041488409),
+                    ("x", 0.012508993968367577, 0.0125089967623353),
+                    ("z", 0.026729393750429153, 0.026729390025138855))
+        for component, first, second in observed:
+            with self.subTest(component=component):
+                left, right = deepcopy(before), deepcopy(before)
+                for snapshot, value in ((left, first), (right, second)):
+                    next(row for row in snapshot['transforms'] if row['key'] == 'source-cargo')['local_rotation'][component] = value
+                self.assertNotEqual(physical_inputs(left), physical_inputs(right))
+
     def test_geometry_helper_provenance(self):
         revision = observer_revision()
-        for name in ('driving_body_trace.cs', 'driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_controls.cs', 'driving_controls.py'):
+        for name in ('driving_cargo.cs', 'driving_body_trace.cs', 'driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_controls.cs', 'driving_controls.py'):
             self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
 
     def test_native_helper_restoration_and_physical_readiness(self):
@@ -61,7 +152,15 @@ class DrivingProbeTests(unittest.TestCase):
                    retirement_audio=[deepcopy(audio)], removed=[deepcopy(audio['removed'])])
         for snapshot in run['geometry']:
             snapshot.update(frame=20, time=1., cargo=[dict(key='source-cargo', ownership_ready=True,
-                                                        collider_owners=[deepcopy(row)])])
+                pickup='source-cargo/pickup', save='source-cargo/save', parent='body-transform', lock_owner='mount',
+                lock_parent='save-owner', car_body='car-body', category=0, item=74, lock_id=1, locked=True,
+                body_present=False, original_body_present=False, deferred_destruction=False, retained_nested_body=False,
+                root_id=1, pickup_id=2, save_id=3, mount_id=4, car_body_id=5, lock_parent_id=7, expected_lock_parent_id=7,
+                local_position=dict.fromkeys('xyz', 0.), local_rotation=dict(x=0., y=0., z=0., w=1.),
+                local_scale=dict.fromkeys('xyz', 100.), collider_owners=[deepcopy(row)])])
+            snapshot['transforms'].append(dict(key='source-cargo', parent='body-transform', active_self=True, active_hierarchy=True,
+                **{k: deepcopy(snapshot['cargo'][0][k]) for k in ('local_position', 'local_rotation', 'local_scale')}))
+        cargo_input_fixture(run)
         return run
 
     def test_exact_retained_source_audio_retirement_preserves_geometry_inputs(self):
@@ -173,7 +272,7 @@ class DrivingProbeTests(unittest.TestCase):
                                       'center': {'x': 0., 'y': 0., 'z': 0.}, 'size': {'x': 1., 'y': 1., 'z': 1.},
                                       'transform': 'cargo-transform', 'owner': 'cargo-body', 'owner_is_null': False})
         run['geometry'].insert(1, snapshot)
-        self.assertEqual(validate_geometry(run)['checkpoints'], 12)
+        self.assertEqual(validate_geometry(run)['checkpoints'], 13)
 
     def test_preflight_rejects_changed_source(self):
         with tempfile.TemporaryDirectory() as name:
@@ -247,7 +346,7 @@ class DrivingProbeTests(unittest.TestCase):
                    'damper_n_s_per_m': 4500., 'spring_target': .5,
                    'forward': {'extremum_slip': .4, 'extremum_value': 1., 'asymptote_slip': .8, 'asymptote_value': .5, 'stiffness': 1.},
                    'sideways': {'extremum_slip': .2, 'extremum_value': 1., 'asymptote_slip': .5, 'asymptote_value': .75, 'stiffness': 1.}} for i in range(5)]
-        phases = ('world.entry', 'source-physical-ready', 'prepared-held', 'backlog-drained-held',
+        phases = ('world.entry', 'source-physical-ready', 'cargo-input-applied-held', 'prepared-held', 'backlog-drained-held',
                   'before-dynamic', 'switched-dynamic', 'before-inertia-reset', 'after-inertia-reset',
                   'canonical-transforms-synchronized', 'native-wheels-enabled', 'armed-after-canonical')
         if kind == 'wheel_collider':
@@ -261,13 +360,15 @@ class DrivingProbeTests(unittest.TestCase):
                                           *[(f'wheel-transform-{i}', 'body-transform') for i in range(5)]]]
         run['geometry'] = [{'phase': phase, 'complete': True, 'physical_ready': True, 'unavailable': [],
                             'colliders': deepcopy(wheels), 'transforms': deepcopy(transforms), 'cargo': [],
-                            'body': {'key': 'car-body', 'transform_key': 'body-transform', 'parent': 'scene-transform'}, 'nested_bodies': []}
+                            'body': {'key': 'car-body', 'transform_key': 'body-transform', 'parent': 'scene-transform', 'kinematic': True},
+                            'frame': 10, 'physics_step': 4, 'time': 1., 'fixed_time': 1., 'nested_bodies': []}
                            for phase in phases]
         for sample in run['samples']:
             sample['native_wheels'] = [{'sprung_mass_available': True} for _ in range(5)]
         driver = driver_fixture()
         run['initial'].update(driver.pop('initial'))
         run.update(driver)
+        cargo_input_fixture(run)
         return add_control_fixture(lifecycle_fixture(run), scenario_fixture(kind))
 
     @staticmethod

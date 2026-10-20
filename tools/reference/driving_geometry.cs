@@ -61,6 +61,8 @@ public static class G11Geometry
     [Serializable] public class Cargo
     {
         public string key,parent,lock_owner,original_identity; public int category,item,id_in_save,lock_parent_id,lock_id;
+        public string pickup,save,lock_parent,car_body;
+        public int root_id,pickup_id,save_id,mount_id,car_body_id,expected_lock_parent_id;
         public bool locked,body_present,original_body_present,deferred_destruction,ownership_ready,retained_nested_body;
         public float body_mass;
         public Vector3 world_position,local_position,local_scale;
@@ -367,12 +369,106 @@ public static class G11Geometry
         var cargo=item.cargo;var save=cargo.GetComponent<tosaveitemscript>();var rb=cargo.GetComponent<Rigidbody>();
         return new Cargo{key=Key(cargo.transform),original_identity=item.original,parent=Key(cargo.transform.parent),lock_owner=Key(item.mount),
             category=save==null?-1:save.category,item=save==null?-1:save.id,id_in_save=save==null?-1:save.idInSave,
+            pickup=Key(cargo),save=Key(save),lock_parent=Key(item.mount.parentTosave),car_body=Key(car.RB),
+            root_id=cargo.transform.GetInstanceID(),pickup_id=cargo.GetInstanceID(),save_id=save==null?0:save.GetInstanceID(),
+            mount_id=item.mount.GetInstanceID(),car_body_id=car.RB.GetInstanceID(),
+            expected_lock_parent_id=item.mount.parentTosave==null?0:item.mount.parentTosave.idInSave,
             locked=cargo.isPhyslocked,lock_parent_id=cargo.physLockParentID,lock_id=cargo.physLockID,body_present=rb!=null,
             original_body_present=item.original_body!=null,deferred_destruction=item.mount.stored.Contains(cargo) && item.original_body!=null,
             ownership_ready=Ready(item),retained_nested_body=cargo.ragdoll!=null,body_mass=rb==null?0:rb.mass,
             world_position=cargo.transform.position,world_rotation=cargo.transform.rotation,local_position=cargo.transform.localPosition,
             local_rotation=cargo.transform.localRotation,local_scale=cargo.transform.localScale,
             collider_owners=Enumerable.Range(0,item.colliders.Length).Select(index=>ReadCargoCollider(item,index)).ToArray()};
+    }
+    static string CacheValue(object value)
+    {
+        if(System.Object.ReferenceEquals(value,null)) return "managed-null";
+        var native=value as UnityEngine.Object;
+        if(!System.Object.ReferenceEquals(native,null)) return "native:"+native.GetInstanceID()+";live="+(native!=null);
+        var sequence=value as System.Collections.IEnumerable;
+        if(sequence!=null && !(value is string))
+        {
+            var values=new List<string>();foreach(var item in sequence) values.Add(CacheValue(item));
+            return "["+String.Join(",",values.ToArray())+"]";
+        }
+        if(value is float) return ((float)value).ToString("R",System.Globalization.CultureInfo.InvariantCulture);
+        if(value is double) return ((double)value).ToString("R",System.Globalization.CultureInfo.InvariantCulture);
+        if(value.GetType().IsPrimitive || value.GetType().IsEnum || value is string) return Convert.ToString(value,System.Globalization.CultureInfo.InvariantCulture);
+        return JsonUtility.ToJson(value);
+    }
+    static void CacheFields(List<string> rows,Component owner,string fields)
+    {
+        if(owner==null) return;
+        foreach(var name in fields.Split(','))
+        {
+            var field=owner.GetType().GetField(name,System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.Public|System.Reflection.BindingFlags.NonPublic);
+            if(field==null) throw new InvalidOperationException("Missing declared cargo cache field: "+owner.GetType().Name+"."+name);
+            rows.Add(owner.GetInstanceID()+"/"+owner.GetType().Name+"."+name+"="+CacheValue(field.GetValue(owner)));
+        }
+    }
+    static string[] CargoCaches(Locked[] cohort)
+    {
+        var rows=new List<string>();
+        foreach(var item in cohort)
+        {
+            var cargo=item.cargo;var save=cargo.GetComponent<tosaveitemscript>();
+            CacheFields(rows,item.mount,"parentTosave,id,stored,cols,lastcols,lastSensed,childCount,mass,started,colParentTransform,cstore,currentSetting");
+            CacheFields(rows,cargo,"parentBeforeMount,isPhyslocked,physLockParentID,physLockID,RB,started,DroppedTime,RBC,mass,cols,tosave");
+            CacheFields(rows,save,"category,id,idInSave,started,loaded,useThisForDistance,startPos,syncLastPos,syncLastRot,RB");
+            foreach(var mass in cargo.GetComponentsInChildren<massScript>(true)) CacheFields(rows,mass,"RB,mass,P,tanks");
+            foreach(var layer in cargo.GetComponentsInChildren<layerScript>(true)) CacheFields(rows,layer,"p,col,dpm,defLayer,started");
+            foreach(var shift in cargo.GetComponentsInChildren<visszarako>(true))
+            {
+                CacheFields(rows,shift,"RB,coord,dontlookUnderMap,importantUnderMapLook,importantRayPos,rb,onlyY,moveWhenParented,terrain,noWarp,world,dont");
+                rows.Add(shift.GetInstanceID()+"/world-registration="+mainscript.M.visszarakni.Contains(shift)+","+
+                    mainscript.M.lookUnderMap.Contains(shift)+","+mainscript.M.importantLookUnderMap.Contains(shift));
+            }
+            tosaveitemscript registered;
+            rows.Add(save.GetInstanceID()+"/save-registration="+(savedatascript.d.toSaveStuff.TryGetValue(save.idInSave,out registered) && registered==save));
+        }
+        return rows.ToArray();
+    }
+    public static G11Cargo.Input ApplyCargoInput(G11Cargo.Input declared,int step,int revision,HashSet<mountStuff> completed)
+    {
+        if(snapshots.Count==0 || snapshots[snapshots.Count-1].phase!="source-physical-ready" ||
+           !PhysicalReady() || !snapshots[snapshots.Count-1].complete)
+            throw new InvalidOperationException("Declared cargo input requires complete source-physical-ready geometry");
+        var cohort=new List<Locked>();var seen=new HashSet<pickupable>();
+        foreach(var mount in car.GetComponentsInChildren<mountStuff>(true))
+        {
+            if(mount.isActiveAndEnabled && !completed.Contains(mount)) throw new InvalidOperationException("Cargo source storage callback pending");
+            foreach(var cargo in mount.stored)
+            {
+                if(cargo==null || !seen.Add(cargo)) throw new InvalidOperationException("Missing or duplicate stored cargo");
+                var matches=locked.Where(value=>value.cargo==cargo && value.mount==mount).ToArray();
+                if(matches.Length!=1 || cargo.ragdoll!=null || cargo.GetComponent<tosaveitemscript>()==null || mount.parentTosave==null ||
+                   cargo.transform.parent!=mount.transform || cargo.physLockID!=mount.id ||
+                   cargo.GetComponentsInChildren<Rigidbody>(true).Length!=0)
+                    throw new InvalidOperationException("Unsupported retained cargo root, parent, body, or observed Lock owner");
+                cohort.Add(matches[0]);
+            }
+        }
+        var retained=cohort.OrderBy(value=>Key(value.cargo.transform),StringComparer.Ordinal).ToArray();
+        var bindings=retained.Select(value=>
+        {
+            var state=ReadCargo(value);var root=value.cargo.transform;
+            return new G11Cargo.Binding{root=root,state=new G11Cargo.Target{key=state.key,pickup=state.pickup,save=state.save,
+                parent=state.parent,mount=state.lock_owner,lock_parent=state.lock_parent,body=state.car_body,category=state.category,
+                item=state.item,lock_id=state.lock_id,local_position=root.localPosition,local_rotation=root.localRotation,local_scale=root.localScale},
+                root_id=state.root_id,pickup_id=state.pickup_id,save_id=state.save_id,mount_id=state.mount_id,body_id=state.car_body_id,
+                locked=state.locked,body_retired=!state.body_present && !state.original_body_present && value.cargo.RB==null,
+                ownership_ready=state.ownership_ready,unsupported=state.retained_nested_body,
+                lock_parent_id=state.lock_parent_id,expected_lock_parent_id=state.expected_lock_parent_id,
+                owner_ids=value.colliders.Where(shape=>shape!=null).Select(shape=>shape.attachedRigidbody==null?0:shape.attachedRigidbody.GetInstanceID()).ToArray()};
+        }).ToArray();
+        if(declared==null) declared=G11Cargo.Declare(bindings,step,revision);
+        G11Cargo.report.caches_before=CargoCaches(retained);
+        G11Cargo.Apply(declared,bindings,G11Cargo.report,step,revision,car.RB.isKinematic && !G11Capture.IsArmed);
+        G11Cargo.report.caches_after=CargoCaches(retained);
+        if(!G11Cargo.report.caches_before.SequenceEqual(G11Cargo.report.caches_after))
+            throw new InvalidOperationException("Declared cargo input changed source ownership or caches");
+        Capture("cargo-input-applied-held",step,"observer.declared-cargo-input",completed);
+        return declared;
     }
     public static string Inputs(Snapshot snapshot)
     {
