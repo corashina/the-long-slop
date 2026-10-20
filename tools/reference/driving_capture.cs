@@ -173,7 +173,7 @@ public sealed class G11Capture : MonoBehaviour
         public List<string> setup_changes=new List<string>();
         public G11Driver.Report driver=G11Driver.report;
         public G11Lifecycle.Report lifecycle=G11Lifecycle.report;
-        public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses"};
+        public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses", "Independent native engine, service, and parking brake torque decomposition"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
     static readonly HashSet<mountStuff> completedStorage=new HashSet<mountStuff>();

@@ -12,6 +12,17 @@ MODE_FIELDS = {'h_shifter': False, 'analog_gas': False, 'analog_brake': False,
                'mouse_drive': False, 'force_manual': False}
 
 
+EVIDENCE = {
+    'native_wheel_api': ['WheelCollider.motorTorque', 'WheelCollider.brakeTorque', 'WheelCollider.rpm'],
+    'managed_source_outputs': ['enginescript.actualOutput', 'enginescript.brakeOutput', 'carscript.brake', 'carscript.handbrake', 'carscript.clutch'],
+    'derived_terms': 'derived_* fields reconstruct original managed assignments from source roles and recorded outputs; they are not independent native API channels',
+    'source_anchors': {'build_id': 11140890, 'record': 'managed/Assembly-CSharp.cs',
+                       'engine_motor_and_brake': 'carscript.SetWheel lines 8063-8074',
+                       'service': 'carscript.SetWheel line 8101', 'parking': 'carscript.SetWheel line 8109',
+                       'engine_clutch': 'enginescript lines 12219-12224'},
+    'unavailable_native': ['Independent PhysX engine/service/parking brake torque decomposition']}
+
+
 def validate_schedule(scenario):
     controls = scenario.get('controls')
     duration = scenario.get('duration_frames')
@@ -66,7 +77,7 @@ def validate_schedule(scenario):
         channels = {'motor', 'engine', 'service', 'parking'}
         if isolated or not isinstance(phase, dict) or phase.keys() != {'start_frame','end_frame','required_contributors','excluded_contributors','observe_engine_interlock'}:
             raise ValueError('Invalid source brake phase declaration')
-        if type(phase['start_frame']) is not int or type(phase['end_frame']) is not int or not 0 <= phase['start_frame'] < phase['end_frame'] <= duration or type(phase['observe_engine_interlock']) is not bool:
+        if type(phase['start_frame']) is not int or type(phase['end_frame']) is not int or not 0 <= phase['start_frame'] < phase['end_frame'] <= duration or phase['start_frame'] not in frames or phase['end_frame'] not in frames+[duration] or type(phase['observe_engine_interlock']) is not bool:
             raise ValueError('Invalid source brake phase interval')
         for key in ('required_contributors','excluded_contributors'):
             if not isinstance(phase[key],list) or any(type(name) is not str for name in phase[key]) or len(set(phase[key])) != len(phase[key]) or not set(phase[key]) <= channels:
@@ -217,8 +228,8 @@ def validate_controls(run, scenario):
                 if f32(wheel['brake_torque']) != expected:
                     raise ValueError('Source wheel-role native brake torque differs')
                 motor = f32(f32(f32(f32(sample['engine_output_nm']) * f32(state['selected_ratio'])) * f32(state['differential_ratio'])) / sample['torque_divisor']) if role['driven'] and state['selected_ratio'] != 0 else 0.
-                contributions.append(dict(engine_brake_nm=engine, service_brake_nm=service, parking_brake_nm=parking,
-                                          engine_motor_nm=motor, native_motor_nm=wheel['motor_torque'], native_brake_nm=wheel['brake_torque']))
+                contributions.append(dict(derived_engine_brake_nm=engine, derived_service_brake_nm=service, derived_parking_brake_nm=parking,
+                                          derived_engine_motor_nm=motor, native_total_motor_nm=wheel['motor_torque'], native_total_brake_nm=wheel['brake_torque']))
             if event_input is not None:
                 phase_samples[row_at(scenario, event_input['frame'])['frame']].append((sample, contributions))
         elif phase in ('physics.entry', 'physics.exit') and sample['input_sequence']:
@@ -229,8 +240,8 @@ def validate_controls(run, scenario):
         raise ValueError('Declared handbrake event consumption is missing or duplicated')
     if [e['declared_frame'] for e in gear_events] != [c['frame'] for c in scenario['controls'] if 'gear_press' in c]:
         raise ValueError('Declared direct gear event consumption is missing or duplicated')
-    brake_phase = validate_brake_phase(scenario, phase_samples)
-    return {'protocol': 'keyboard-digital', 'handbrake_events': events, 'gear_events': gear_events, 'brake_phase': brake_phase,
+    brake_phase = validate_brake_phase(scenario, phase_samples, samples)
+    return {'protocol': 'keyboard-digital', 'evidence': EVIDENCE, 'handbrake_events': events, 'gear_events': gear_events, 'brake_phase': brake_phase,
             'requested_phases': phase_summary(scenario, wheels, phase_samples)}
 
 
@@ -248,24 +259,24 @@ def phase_summary(scenario, wheels, observed):
         rows = observed[row['frame']]
         phase = {'declared_frame': row['frame'], 'requests': row, 'torque_samples': len(rows)}
         for name in ('gear', 'clutch', 'brake', 'handbrake', 'engine_output_nm', 'engine_brake_nm'):
-            phase[name] = bounds([sample[name] for sample, _ in rows])
+            phase['managed_source_'+name] = bounds([sample[name] for sample, _ in rows])
         for name in ('car_throttle', 'car_brake', 'car_clutch'):
             phase[name] = bounds([sample['controls'][name] for sample, _ in rows])
         phase['wheel_contributors'] = [dict(source_path=role.get('path'), roles=role,
             **{name: bounds([terms[i][name] for _, terms in rows]) for name in (
-                'engine_brake_nm','service_brake_nm','parking_brake_nm','engine_motor_nm','native_motor_nm','native_brake_nm')}) for i, role in enumerate(wheels)]
+                'derived_engine_brake_nm','derived_service_brake_nm','derived_parking_brake_nm','derived_engine_motor_nm','native_total_motor_nm','native_total_brake_nm')}) for i, role in enumerate(wheels)]
         phases.append(phase)
     return phases
 
 
-def validate_brake_phase(scenario, observed):
+def validate_brake_phase(scenario, observed, samples):
     phase = scenario.get('brake_phase')
     if phase is None:
         return None
-    rows = [pair for frame, pairs in observed.items() if phase['start_frame'] <= frame < phase['end_frame'] for pair in pairs]
+    rows = [pair for pairs in observed.values() for pair in pairs if phase['start_frame'] <= samples[pair[0]['input_sequence']-1]['frame'] < phase['end_frame']]
     if not rows:
         raise ValueError('Declared source brake phase has no native torque observations')
-    channels = {'motor':'engine_motor_nm', 'engine':'engine_brake_nm', 'service':'service_brake_nm', 'parking':'parking_brake_nm'}
+    channels = {'motor':'derived_engine_motor_nm', 'engine':'derived_engine_brake_nm', 'service':'derived_service_brake_nm', 'parking':'derived_parking_brake_nm'}
     measured = []
     for sample, terms in rows:
         present = {name for name, key in channels.items() if any(term[key] != 0 for term in terms)}
@@ -316,11 +327,11 @@ def validate_isolated(run, scenario):
                                       'before_brake_nm':before['wheels'][index]['brake_torque'],'after_brake_nm':after['wheels'][index]['brake_torque']})
             wheels.append({'slot':index, 'rpm':bounds([s['wheels'][index]['rpm'] for s in observed]),
                            'derived_omega_rad_s':bounds([s['wheels'][index]['rpm'] * math.tau / 60 for s in observed]),
-                           'native_motor_nm':bounds([s['wheels'][index]['motor_torque'] for s in observed]),
-                           'native_brake_nm':bounds([s['wheels'][index]['brake_torque'] for s in observed]),
+                           'native_total_motor_nm':bounds([s['wheels'][index]['motor_torque'] for s in observed]),
+                           'native_total_brake_nm':bounds([s['wheels'][index]['brake_torque'] for s in observed]),
                            'zero_crossings':crossings, 'zero_crossing_observed':bool(crossings)})
         phases.append({'requests':row,'physics_samples':len(observed),'wheels':wheels})
-    return {'protocol':'isolated-native-actuators','native_actuator_phases':phases}
+    return {'protocol':'isolated-native-actuators','evidence':EVIDENCE,'native_actuator_phases':phases}
 
 
 def main():

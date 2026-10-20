@@ -204,10 +204,12 @@ class DrivingControlsTests(unittest.TestCase):
             for index in (2,3):sample['wheels'][index]['brake_torque'] = 850.
         result = validate_controls(run, scenario)
         phase = result['requested_phases'][0]
+        self.assertIn('Independent PhysX engine/service/parking brake torque decomposition',result['evidence']['unavailable_native'])
+        self.assertEqual(result['evidence']['source_anchors']['service'],'carscript.SetWheel line 8101')
         self.assertEqual(phase['requests']['brake'],0.)
-        self.assertEqual(phase['brake'],[.25,.25])
-        self.assertEqual(phase['wheel_contributors'][2]['service_brake_nm'],[250.,250.])
-        self.assertEqual(phase['wheel_contributors'][2]['parking_brake_nm'],[600.,600.])
+        self.assertEqual(phase['managed_source_brake'],[.25,.25])
+        self.assertEqual(phase['wheel_contributors'][2]['derived_service_brake_nm'],[250.,250.])
+        self.assertEqual(phase['wheel_contributors'][2]['derived_parking_brake_nm'],[600.,600.])
 
     def test_required_native_brake_matrix_and_actual_zero_crossings(self):
         from tools.reference.tests.test_driving_probe import DrivingProbeTests
