@@ -244,14 +244,84 @@ class DrivingControlsTests(unittest.TestCase):
         scenario = scenario_fixture()
         scenario['setup']['auto_shift'] = False
         scenario['controls'][0]['gear_press'] = 'gear1'
+        scenario['setup']['auto_clutch'] = False
         run, scenario = self.observed(scenario)
         # Selected gear stays neutral. The original clutch eligibility may reject a consumed request.
-        self.assertEqual(validate_controls(run,scenario)['gear_events'][0]['gear'],'gear1')
+        event=validate_controls(run,scenario)['gear_events'][0]
+        self.assertEqual(event['gear'],'gear1')
+        self.assertFalse(event['clutch_eligible'])
+        self.assertEqual((event['before_gear'],event['after_gear']),(0,0))
         bad = deepcopy(run)
         for sample in bad['samples']:
             if sample['phase'] == 'control.exit' and sample['frame']==0:
                 sample['controls']['car_gears'] = 0
         with self.assertRaises(ValueError):validate_controls(bad, scenario)
+
+    def required_gear_fixture(self):
+        scenario=scenario_fixture()
+        scenario['setup'].update(auto_clutch=False,auto_shift=False)
+        scenario['controls']=[control_row(frame) for frame in (0,1,2)]
+        changes=[dict(frame=0,before_gear=0,after_gear=1),dict(frame=1,before_gear=1,after_gear=0),dict(frame=2,before_gear=0,after_gear=-1)]
+        for row,name in zip(scenario['controls'],('gear1','neutral','reverse')):
+            row.update(clutch=1.,gear_press=name)
+        scenario['required_gear_changes']=changes
+        run,scenario=self.observed(scenario)
+        gear=0
+        for sample in run['samples']:
+            sample['clutch']=1.
+            if sample['phase']=='actuation.exit' and sample['frame']<3:
+                gear=changes[sample['frame']]['after_gear']
+            sample['gear']=gear
+        return run,scenario
+
+    def test_required_gear_changes_use_actual_actuation_outcomes(self):
+        from tools.reference.driving_probe import validate_run
+        run,scenario=self.required_gear_fixture()
+        declared=deepcopy(scenario)
+        raw=deepcopy(run)
+        result=validate_run(run,scenario)
+        events=result['controls']['gear_events']
+        self.assertEqual([(e['before_gear'],e['after_gear']) for e in events],[(0,1),(1,0),(0,-1)])
+        for event in events:
+            self.assertTrue(event['clutch_eligible'])
+            self.assertEqual(event['clutch'],1.)
+            self.assertLess(event['input_callback_sequence'],event['consumed_sequence'])
+            self.assertLess(event['consumed_sequence'],event['actuation_entry_sequence'])
+            self.assertLess(event['actuation_entry_sequence'],event['actuation_exit_sequence'])
+            self.assertEqual(event['input_revision'],event['actuation_input_revision'])
+        self.assertEqual(scenario,declared)
+        self.assertEqual(run,raw)
+
+    def test_required_gear_changes_reject_ineligible_wrong_and_missing_outcomes(self):
+        from tools.reference.driving_probe import validate_run
+        from tools.reference.tests.test_driving_probe import DrivingProbeTests
+        for frame in (0,1,2):
+            for corruption in ('clutch_boundary','clutch_below','before','unchanged','wrong_after','missing','entry_revision','exit_revision'):
+                run,scenario=self.required_gear_fixture()
+                entry=next(s for s in run['samples'] if s['phase']=='actuation.entry' and s['frame']==frame)
+                exit=next(s for s in run['samples'] if s['phase']=='actuation.exit' and s['frame']==frame)
+                if corruption=='clutch_boundary':exit['clutch']=.5
+                if corruption=='clutch_below':exit['clutch']=.083334505558
+                if corruption=='before':entry['gear']=2
+                if corruption=='unchanged':exit['gear']=scenario['required_gear_changes'][frame]['before_gear']
+                if corruption=='wrong_after':exit['gear']=2
+                if corruption=='missing':DrivingProbeTests.remove_sample(run,run['samples'].index(exit))
+                if corruption=='entry_revision':entry['controls']['input_revision']+=1
+                if corruption=='exit_revision':exit['controls']['input_revision']+=1
+                with self.subTest(frame=frame,corruption=corruption),self.assertRaises(ValueError):validate_run(run,scenario)
+
+    def test_required_gear_metadata_is_strict(self):
+        _,scenario=self.required_gear_fixture()
+        changes=(None,[],[{}],[dict(frame=True,before_gear=0,after_gear=1)],
+                 [dict(frame=0,before_gear=True,after_gear=1)],
+                 [dict(frame=0,before_gear=0,after_gear=True)],
+                 [dict(frame=0,before_gear=1,after_gear=1)],
+                 [dict(frame=0,before_gear=0,after_gear=2)],
+                 [dict(frame=3,before_gear=0,after_gear=1)],
+                 [scenario['required_gear_changes'][0],scenario['required_gear_changes'][0]])
+        for metadata in changes:
+            bad=deepcopy(scenario);bad['required_gear_changes']=metadata
+            with self.subTest(metadata=metadata),self.assertRaises(ValueError):validate_schedule(bad)
 
     def test_actual_brake_channels_do_not_assume_requested_service_output(self):
         run, scenario = self.observed()
@@ -334,6 +404,15 @@ class DrivingControlsTests(unittest.TestCase):
             if change in ('missing','shifted'):first['controls']['input_gears']=0
             if change in ('duplicate','shifted'):later['controls']['input_gears']=GEAR_MASKS['gear1']
             with self.subTest(change=change),self.assertRaises(ValueError):validate_run(bad,scenario)
+
+    def test_committed_manual_gear_case_requires_prepared_outcomes(self):
+        rows=json.loads((ROOT.parents[1]/'tests/fixtures/driving/scenarios.json').read_text())['scenarios']
+        case=next(row for row in rows if row['id']=='gear-forward-neutral-reverse')
+        self.assertEqual(case['required_gear_changes'],[dict(frame=90,before_gear=0,after_gear=1),dict(frame=180,before_gear=1,after_gear=0),dict(frame=240,before_gear=0,after_gear=-1)])
+        self.assertEqual([(row['frame'],row['gear_press']) for row in case['controls'] if row.get('gear_press')],[(90,'gear1'),(180,'neutral'),(240,'reverse')])
+        prep=next(row for row in case['controls'] if row['frame']==168)
+        self.assertEqual(prep['clutch'],1.)
+        self.assertEqual({k:v for k,v in prep.items() if k not in ('frame','clutch')},{k:v for k,v in next(row for row in case['controls'] if row['frame']==110).items() if k not in ('frame','clutch')})
 
     def test_actual_csharp_event_and_held_semantics(self):
         source = (ROOT/'driving_controls.cs').read_text()

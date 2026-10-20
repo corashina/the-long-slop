@@ -5,7 +5,8 @@ import math
 import struct
 from pathlib import Path
 
-GEAR_MASKS = {'': 0, 'reverse': 1, 'neutral': 2, 'gear1': 4, 'gear2': 8, 'gear3': 16, 'gear4': 32, 'gear5': 64, 'gear6': 128}
+GEAR_VALUES = {'reverse': -1, 'neutral': 0, 'gear1': 1, 'gear2': 2, 'gear3': 3, 'gear4': 4, 'gear5': 5, 'gear6': 6}
+GEAR_MASKS = {'': 0, **{name: 1 << (value+1) for name, value in GEAR_VALUES.items()}}
 SOURCE_FIELDS = {'frame', 'throttle', 'brake', 'clutch', 'steer', 'ignition_button_held', 'handbrake_press'}
 ISOLATED_FIELDS = {'frame', 'motor_scale', 'service_brake_fraction', 'handbrake_fraction', 'steer'}
 MODE_FIELDS = {'h_shifter': False, 'analog_gas': False, 'analog_brake': False,
@@ -73,6 +74,23 @@ def validate_schedule(scenario):
             releases = [c['frame'] for c in controls if c['handbrake_press'] and (first is None or c['frame'] < first)]
             if first is None or len(releases) != 1:
                 raise ValueError('Free launch requires one prior parking brake release event')
+    if 'required_gear_changes' in scenario:
+        changes = scenario['required_gear_changes']
+        if isolated or not isinstance(changes, list) or not changes:
+            raise ValueError('Required gear changes need explicit source event outcomes')
+        events = {c['frame']: c.get('gear_press', '') for c in controls}
+        previous = -1
+        for change in changes:
+            if not isinstance(change, dict) or change.keys() != {'frame', 'before_gear', 'after_gear'}:
+                raise ValueError('Invalid required gear change fields')
+            if any(type(change[key]) is not int for key in change) or not previous < change['frame'] < duration:
+                raise ValueError('Required gear change frames must increase inside the schedule')
+            if any(not -1 <= change[key] <= 6 for key in ('before_gear', 'after_gear')) or change['before_gear'] == change['after_gear']:
+                raise ValueError('Required gear change must declare distinct valid source gears')
+            name = events.get(change['frame'], '')
+            if not name or GEAR_VALUES[name] != change['after_gear']:
+                raise ValueError('Required gear change differs from its declared gear event')
+            previous = change['frame']
     phase = scenario.get('brake_phase')
     if phase is not None:
         channels = {'motor', 'engine', 'service', 'parking'}
@@ -150,6 +168,7 @@ def validate_controls(run, scenario):
     gear_events = []
     phase_samples = {c['frame']: [] for c in scenario['controls']}
     event_input = None
+    current_gear_event = gear_actuation_entry = None
     for sample in samples:
         phase, frame, state = sample['phase'], sample['frame'], sample['controls']
         row = row_at(scenario, frame)
@@ -170,6 +189,7 @@ def validate_controls(run, scenario):
                 raise ValueError('Ignition held-state edge differs from declaration')
             latest_input2 = sample
         elif phase == 'control.exit':
+            current_gear_event = None
             if latest_input is None or latest_input2 is None:
                 if sample['input_sequence'] or state['car_handbrake_press'] or state['car_gears']:
                     raise ValueError('Source car event has no observed source producer')
@@ -192,13 +212,18 @@ def validate_controls(run, scenario):
                 if revision in consumed_gears:
                     raise ValueError('Source direct gear event was consumed twice')
                 consumed_gears.add(revision)
-                gear_events.append({'declared_frame': latest_input['frame'], 'frame': frame, 'input_revision': revision,
-                                    'input_sequence': sample['input_sequence'], 'consumed_sequence': sample['sequence'],
-                                    'gear': row_at(scenario, latest_input['frame'])['gear_press']})
+                current_gear_event = {'declared_frame': latest_input['frame'], 'frame': frame, 'input_revision': revision,
+                                      'input_callback_sequence': latest_input['sequence'], 'input_sequence': sample['input_sequence'],
+                                      'car_sequence': sample['car_sequence'], 'consumed_sequence': sample['sequence'],
+                                      'gear': row_at(scenario, latest_input['frame'])['gear_press']}
+                gear_events.append(current_gear_event)
         elif phase == 'actuation.entry':
+            gear_actuation_entry = sample
             if latest_consumed is None or latest_consumed['frame'] != frame or state['stored_handbrake'] != latch:
                 raise ValueError('Source latch before control consumption differs')
         elif phase == 'actuation.exit':
+            if current_gear_event is not None:
+                record_gear_outcome(current_gear_event, gear_actuation_entry, sample)
             if state['car_handbrake_press']:
                 if event_input is None or event_input['controls']['input_revision'] in consumed_revisions:
                     raise ValueError('Source handbrake event was consumed twice or lacks a producer')
@@ -241,9 +266,46 @@ def validate_controls(run, scenario):
         raise ValueError('Declared handbrake event consumption is missing or duplicated')
     if [e['declared_frame'] for e in gear_events] != [c['frame'] for c in scenario['controls'] if c.get('gear_press')]:
         raise ValueError('Declared direct gear event consumption is missing or duplicated')
+    validate_required_gears(scenario, gear_events)
     brake_phase = validate_brake_phase(scenario, phase_samples, samples)
     return {'protocol': 'keyboard-digital', 'evidence': EVIDENCE, 'handbrake_events': events, 'gear_events': gear_events, 'brake_phase': brake_phase,
             'requested_phases': phase_summary(scenario, wheels, phase_samples)}
+
+
+def record_gear_outcome(event, before, after):
+    if before is None or not event['consumed_sequence'] < before['sequence'] < after['sequence']:
+        raise ValueError('Gear event lacks original actuation boundaries')
+    for boundary in (before, after):
+        if (boundary['frame'] != event['frame'] or boundary['car_sequence'] != event['car_sequence'] or
+            boundary['input_sequence'] != event['input_sequence'] or boundary['controls']['input_revision'] != event['input_revision']):
+            raise ValueError('Gear actuation differs from its consumed source event revision')
+        if type(boundary['gear']) is not int:
+            raise ValueError('Actual source gear must be an integer')
+    clutch = after['clutch']
+    if type(clutch) not in (int, float) or not math.isfinite(clutch):
+        raise ValueError('Actual source clutch gate value is missing')
+    mode = after['controls']['mode']
+    eligible = after['controls']['driving'] and (clutch > .5 or
+               (mode['auto_clutch'] or mode['force_automatic_transmission']) and not mode['force_manual'])
+    event.update(before_gear=before['gear'], after_gear=after['gear'], clutch=clutch, clutch_eligible=eligible,
+                 actuation_entry_sequence=before['sequence'], actuation_exit_sequence=after['sequence'],
+                 actuation_input_revision=after['controls']['input_revision'])
+
+
+def validate_required_gears(scenario, events):
+    observed = {event['declared_frame']: event for event in events}
+    for required in scenario.get('required_gear_changes', []):
+        event = observed.get(required['frame'])
+        if event is None or 'after_gear' not in event:
+            raise ValueError('Required gear change lacks an original actuation outcome')
+        if not event['clutch_eligible']:
+            raise ValueError('Required gear change failed original source clutch eligibility')
+        if event['before_gear'] != required['before_gear']:
+            raise ValueError('Required gear change has the wrong source before gear')
+        if event['after_gear'] == event['before_gear']:
+            raise ValueError('Required gear change left the source gear unchanged')
+        if event['after_gear'] != required['after_gear']:
+            raise ValueError('Required gear change has the wrong source after gear')
 
 
 def f32(value):

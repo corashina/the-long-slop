@@ -861,6 +861,15 @@
           "handbrake_press": false
         },
         {
+          "frame": 168,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
           "frame": 180,
           "throttle": 0.0,
           "brake": 1.0,
@@ -894,7 +903,24 @@
       "required_observations": [],
       "input_mode": "keyboard-digital",
       "parking_brake_intent": "release-before-acceleration",
-      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs.",
+      "required_gear_changes": [
+        {
+          "frame": 90,
+          "before_gear": 0,
+          "after_gear": 1
+        },
+        {
+          "frame": 180,
+          "before_gear": 1,
+          "after_gear": 0
+        },
+        {
+          "frame": 240,
+          "before_gear": 0,
+          "after_gear": -1
+        }
+      ]
     },
     {
       "id": "grip-full-tire-longitudinal",
