@@ -41,10 +41,10 @@ def gate_fixture(index=0):
 class AngularTests(unittest.TestCase):
     def test_declared_rows(self):
         rows=angular_rows()
-        self.assertEqual(len(rows),10)
+        self.assertEqual(len(rows),12)
         committed=json.loads((Path(__file__).parents[3]/'tests/fixtures/driving/angular-scenarios.json').read_text())
         self.assertEqual(committed['scenarios'],rows)
-        self.assertEqual(len({r['id'] for r in rows}),10)
+        self.assertEqual(len({r['id'] for r in rows}),12)
         for row in rows: validate_angular_schedule(row)
         self.assertEqual({r['angular']['support'] for r in rows}, {'full-tire','worn-tire','bare-rim','hub','auxiliary-helper'})
 

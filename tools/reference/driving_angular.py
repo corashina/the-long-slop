@@ -44,7 +44,25 @@ def angular_rows():
         row['required_observations']=['one enabled contact-free native wheel','exact consuming physics solves','active signed spin and coast' if purpose!='baseline' else 'free-body baseline']
         row['frame_schedule']['sampling']='fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged'
         rows.append(row)
-    return rows
+    zero=deepcopy(rows[0])
+    zero['id']='angular-full-tire-excitation-zero-body-speed'
+    zero['setup']['velocity_mps']=dict(x=0.,y=0.,z=0.)
+    zero['angular']['rig']['velocity_mps']=dict(x=0.,y=0.,z=0.)
+    brake=deepcopy(rows[0])
+    brake['id']='angular-full-tire-brake-excitation'
+    brake['angular']['purpose']='brake-excitation'
+    brake['angular']['events']=events([
+        ('positive-brake-start',600.,1.),('positive-unbraked-release',600.,0.),
+        ('brake-stop-after-positive-release',0.,1800.),('positive-brake-restart',600.,1.),
+        ('negative-brake-reversal',-600.,1.),('negative-unbraked-release',-600.,0.),
+        ('brake-stop-after-negative-release',0.,1800.),('negative-brake-restart',-600.,1.)])
+    brake['required_observations']=[
+        'one enabled active contact-free native wheel and awake dynamic body',
+        'exact consuming physics solves and actual motor and brake assignments',
+        'observed initial zero RPM and terminal strong-brake zero intervals',
+        'signed spin in both unbraked release phases',
+        'observed low-brake response from qualified zero boundaries']
+    return [*rows,zero,brake]
 
 
 def validate_angular_schedule(scenario):
@@ -52,8 +70,10 @@ def validate_angular_schedule(scenario):
     if scenario.get('probe_kind')!='wheel_angular' or spec.get('support') not in SUPPORTS+('auxiliary-helper',):
         raise ValueError('Angular support identity is missing')
     purpose=spec.get('purpose')
-    if purpose not in ('excitation','confirmation','baseline','motor-coast') or (spec['support']=='auxiliary-helper') != (purpose in ('baseline','motor-coast')):
+    if purpose not in ('excitation','confirmation','baseline','motor-coast','brake-excitation') or (spec['support']=='auxiliary-helper') != (purpose in ('baseline','motor-coast')):
         raise ValueError('Angular purpose differs from support')
+    if purpose=='brake-excitation' and spec['support']!='full-tire':
+        raise ValueError('Angular brake excitation requires full tire')
     if spec.get('source_wheel') != ('level1:58655' if spec['support']=='auxiliary-helper' else 'level1:58684') or spec.get('provenance')!=PROVENANCE:
         raise ValueError('Angular source identity or input provenance differs')
     expected=next((row for row in angular_rows() if row['id']==scenario['id']),None)
@@ -208,6 +228,16 @@ def validate_angular(run,scenario):
         initial_body.get('velocity')!=rig['velocity_mps'] or initial_body.get('angular_velocity')!=rig['angular_velocity_rad_s'] or
         initial_body.get('instance_id')!=report['copied_body_id'] or initial_body.get('kinematic') is not False):
         raise ValueError('Angular one-time initial body input is missing or differs')
+    new_row=scenario['id'] in ('angular-full-tire-excitation-zero-body-speed','angular-full-tire-brake-excitation')
+    if new_row and (initial_body['sleeping'] is not False or
+                    initial_state.get('active_self') is not True or initial_state.get('active_hierarchy') is not True):
+        raise ValueError('Angular initial boundary requires an awake dynamic body and active wheel')
+    if spec['purpose']=='brake-excitation':
+        initial_wheels=run.get('initial',{}).get('wheel_state',[])
+        if (len(initial_wheels)!=1 or initial_wheels[0].get('rpm')!=0 or
+            initial_wheels[0].get('motor_torque')!=0 or initial_wheels[0].get('brake_torque')!=0 or
+            initial_wheels[0].get('contact') is not False):
+            raise ValueError('Angular brake initial wheel requires observed zero RPM and zero inputs')
     pairs={}
     for sample in run.get('samples',[]):
         if sample['phase'] in ('physics.entry','physics.exit'):
@@ -241,6 +271,8 @@ def validate_angular(run,scenario):
             if any(body[k]!=v for k,v in [('constraints',rig['constraints']),('use_gravity',rig['use_gravity']),('drag',rig['drag']),('angular_drag',rig['angular_drag']),('sleep_threshold',rig['sleep_threshold'])]):
                 raise ValueError('Angular declared body input differs')
             if spec['purpose']!='baseline' and body['sleeping']:
+                if new_row:
+                    raise ValueError(f"Inactive sleeping getter at step {step} {sample['phase']} cannot establish angular response")
                 raise ValueError('Inactive sleeping getter cannot establish angular response')
             if sample.get('fixed_dt')!=run['initial']['fixed_dt'] or not {'frame','delta_time','time','input_sequence','phase'}<=sample.keys():
                 raise ValueError('Angular clock or input provenance is missing')
@@ -280,8 +312,40 @@ def validate_angular(run,scenario):
                 raise ValueError('Angular actual motor/brake overlap response is missing')
             if len(held_zero)<2 or not any(b==a+1 for a,b in zip(held_zero,held_zero[1:])) or not any(c['phase'] in ('motor-brake-overlap','brake-hold') for c in crossings):
                 raise ValueError('Angular observed crossing and held-zero interval are missing')
-    return dict(steps=len(pairs),events=len(actual),support=spec['support'],purpose=spec['purpose'],crossings=crossings,held_zero_steps=held_zero,
+    brake_response={}
+    if spec['purpose']=='brake-excitation':
+        brake_response=validate_brake_excitation(spec,by_event,pairs,crossings)
+        held_zero=[179,180,419,420]
+    return dict(**brake_response,steps=len(pairs),events=len(actual),support=spec['support'],purpose=spec['purpose'],crossings=crossings,held_zero_steps=held_zero,
                 native_internal_inertia='unavailable',native_solver_impulses='unavailable')
+
+
+def validate_brake_excitation(spec,by_event,pairs,crossings):
+    """Qualify observed zero boundaries without choosing the low-brake response."""
+    def rpm(step,phase):return pairs[step][phase]['wheels'][0]['rpm']
+    for step in (1,181,421):
+        if rpm(step,'physics.entry')!=0:
+            raise ValueError(f'Angular brake zero entry is missing at step {step}')
+    for step in (179,180,419,420):
+        for phase in ('physics.entry','physics.exit'):
+            if rpm(step,phase)!=0:
+                raise ValueError(f'Angular brake terminal zero is missing at step {step} {phase}')
+    low=[];strong=[]
+    for index,event in enumerate(spec['events']):
+        if event['brake_nm']==0:continue
+        solves=[dict(step=event['step']+offset,entry_rpm=left,exit_rpm=right)
+                for offset,(left,right,_) in enumerate(by_event[index])]
+        if event['motor_nm']!=0:
+            low.append(dict(phase=event['phase'],solves=solves,
+                            zero_to_zero_steps=[s['step'] for s in solves if s['entry_rpm']==s['exit_rpm']==0],
+                            zero_to_nonzero_steps=[s['step'] for s in solves if s['entry_rpm']==0 and s['exit_rpm']!=0]))
+        else:
+            zeros=[dict(step=s['step'],boundary=boundary) for s in solves
+                   for boundary,key in (('physics.entry','entry_rpm'),('physics.exit','exit_rpm')) if s[key]==0]
+            strong.append(dict(phase=event['phase'],solves=solves,first_observed_zero=zeros[0],
+                               crossings=[c for c in crossings if c['phase']==event['phase']],
+                               terminal_hold_steps=[s['step'] for s in solves[-2:]]))
+    return dict(low_brake_response=low,strong_brake_response=strong)
 
 if __name__=='__main__':
     print(json.dumps(dict(schema_version=1,scenarios=angular_rows()),indent=2))
