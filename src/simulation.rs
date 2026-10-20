@@ -7,6 +7,8 @@ pub mod instruments;
 pub mod radio;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = FIXED_DT as f64;
+/// Steps per frame at time scale 1. Slow frames drop extra time, so step cost cannot grow frame time.
+const STEP_BUDGET: usize = 2;
 
 pub mod keys {
     pub const FORWARD: u32 = 1;
@@ -94,6 +96,7 @@ pub struct DriveInput {
 }
 
 /// Stores accepted real time. Each step spends its sampled scale once.
+/// Below 25 FPS the simulation runs slower than real time.
 #[derive(Default)]
 pub struct StepClock {
     accumulator: f64,
@@ -116,7 +119,11 @@ impl StepClock {
         }
         self.touched_sleep |= time_scale > 1.;
         let cost = STEP_SECONDS / f64::from(time_scale);
-        let budget = if self.touched_sleep { 12 } else { 5 };
+        let budget = if self.touched_sleep {
+            STEP_BUDGET * 2
+        } else {
+            STEP_BUDGET
+        };
         if self.steps >= budget {
             self.accumulator %= cost;
             return false;
@@ -143,13 +150,15 @@ mod step_clock_tests {
     use super::{FIXED_DT, StepClock};
 
     #[test]
-    fn normal_clock_advances_five_steps_per_tenth_second() {
+    fn slow_frame_runs_two_steps_and_drops_extra_time() {
         let mut clock = StepClock::default();
         clock.accept_frame(0.1);
 
-        for _ in 0..5 {
+        for _ in 0..2 {
             assert!(clock.take_step(1.));
         }
+        assert!(!clock.take_step(1.));
+        clock.accept_frame(0.);
         assert!(!clock.take_step(1.));
     }
 
@@ -158,7 +167,7 @@ mod step_clock_tests {
         let mut clock = StepClock::default();
         clock.accept_frame(0.1);
 
-        for _ in 0..10 {
+        for _ in 0..4 {
             assert!(clock.take_step(2.));
         }
         assert!(!clock.take_step(2.));
