@@ -14,6 +14,7 @@ from tools.reference.driving import method
 from tools.reference import driving_probe as probe
 from tools.reference.driving_curve import (
     SCENARIO_ID, INPUT_FIELD, PROVENANCE_FIELD, INPUT_BITS, PROVENANCE,
+    COMPLETE_SCENARIO_ID, COMPLETE_INPUT_BITS, COMPLETE_PROVENANCE,
     bits, original_inputs, serialized_torque_curve, validate_curve_scenario, validate_curve_run)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,49 @@ FROZEN_INPUTS = [31.25, 656.25, 687.5, 1437.5, 1468.75, 1984.375, 2390.625,
                  2484.375, 2890.625, 2968.75, 3437.5, 4265.625, 4484.375, 4406.25,
                  4718.75, 4890.625, 4906.25, 5187.5, 5343.75, 5359.375, 5856.25,
                  5875., 5931.25, 6553.125, 6240.625]
+FROZEN_COMPLETE_BITS = (
+    '4104d000', '41a02800', '448b86c0', '44b61d18', '44b78c48', '448bcd10', '448d01a8', '44ad4378',
+    '448fc4b0', '44885a40', '447fbcc0', '448462a0', '44b1e6f8', '44b60d78', '44b4aa00', '44a37b90',
+    '44b31b90', '4487a690', '448a0fc0', '44ad0110', '448c9c18', '448b9660', '4496b608', '449e9990',
+    '44d11370', '44f79ab8', '44f58f48', '44d8ef28', '44ceb5f8', '44f6eed8', '44c87850', '44e32858',
+    '44ef1320', '44f6c7c8', '44ed1368', '44ccba28', '44d97010', '44d75cd0', '44dab060', '44d7ca30',
+    '44e80670', '44dad770', '44e7a0e0', '44f1a748', '44f0f780', '44df01d8', '44e64920', '44e85c60',
+    '44e9db30', '44f45ab0', '44cc7f90', '44d32a98', '44d5ca78', '44da52a0', '44ea8710', '44f5ae88',
+    '44f69118', '44cdf690', '44dfec38', '44e3d438', '44e69740', '44e69b28', '44e8be08', '44e8d578',
+    '4505d2db', '45061ea0', '451548cc', '450256b1', '4504f3a9', '4506a749', '45174e60', '4500d38e',
+    '4503d7f0', '45054148', '450673ff', '4506996d', '451189d0', '4518a814', '451be04c', '44fdd844',
+    '4501a0ac', '45031bfd', '450329a1', '450356a0', '4503ad45', '4503cd19', '4503f6db', '450442e1',
+    '4506a5cb', '4506a99d', '450b30d0', '450bf22c', '450ee414', '45109d7c', '451a80bc', '45009fbc',
+    '4500fe1d', '45013c7f', '4501e3d2', '4502ae3f', '4502c466', '45039780', '4503bce9', '45042237',
+    '45044735', '4504616f', '4504a225', '4504b363', '4504c060', '4504c33f', '45055474', '45055f83',
+    '45062a85', '4506b029', '45071bcb', '45075328', '4507d11f', '451289ac', '4512e384', '451402a0',
+    '45155c54', '451575b8', '4516eeac', '4518c754', '451a3490', '451a6758', '451a6d34', '452d4b48',
+    '453910f4', '4531e310', '4524f09c', '45274644', '4539f384', '45382c70', '45386708', '45275fa8',
+    '45352ed0', '453aef78', '4525d520', '452fbc48', '453d703b', '4550b5b0', '4551a3f8', '4543a6dc',
+    '4549d010', '454324eb', '4552f7d0', '455474ac', '455a681c', '45402b48', '4540dafc', '45427bec',
+    '45468a2c', '45485334', '454faff8', '453f55ff', '453f6f4b', '4541189a', '4548012c', '454e2188',
+    '454edb14', '454fb9bc', '455126f8', '45596458', '455a6df8', '45400e77', '45411dbf', '4541521d',
+    '454365e2', '45572df0', '45575ec4', '453e22c2', '453fa712', '453fc2d9', '453ff9a3', '45408956',
+    '454180ac', '454194a4', '45425fa9', '45426dda', '4542e06c', '45432508', '45438861', '45438a98',
+    '4543bfcb', '4544104d', '45446037', '454522cc', '45453c30', '454a3f64', '454f7f24', '45508ea0',
+    '455101dc', '4552c120', '45563db4', '4556d60c', '455706e0', '454161a3', '4541f1a6', '4542c595',
+    '45443c54', '454617fa', '4549511c', '45497e08', '4549dfb0', '454d391c', '455063a8', '45521d10',
+    '45525d84', '4552bf2c', '4552d0c0', '45530770', '45530d4c', '4553b544', '45543244', '4554ab5c',
+    '45557a64', '45562e14', '4556419c', '45564390', '45565cf4', '4557dbc4', '45588f74', '4558ba6c',
+    '4558dba0', '455a0e44', '455a587c', '455a6a10', '455aa0c0', '45764eb0', '4560d88c', '456b9880',
+    '45786bb4', '4577bde0', '455cd534', '45623434', '4568e130', '4571340c', '4574a6dc', '4576c7c8',
+    '457990ac', '45780818', '45622e58', '456f2c84', '456b774c', '4577a670', '4578cd5c', '4570e9d4',
+    '45776dcc', '457233e8', '45684108', '45662dc8', '4576d380', '456844f0', '456848d8', '456ff7a4',
+    '45652810', '456b2b20', '456acf54', '456c6f58', '456775e8', '4569df18', '456a13d4', '456cf234',
+    '456e72f8', '456eaf84', '456f9408', '4570b900', '45715f04', '457302f0', '4580cf96', '458c1f18',
+    '458a512e', '458b9d36', '4583205c', '458024b0', '458148ae', '458bb988', '457d3450', '458bf902',
+    '458bffd8', '458b5ace', '457f7670', '45931840', '459b1914', '459ab866', '45941df8', '458ed956',
+    '459a3490', '4599936e', '459288b2', '4593711e', '4599f322', '45998aa4', '459012d0', '45a7137c',
+    '45a1953c', '45a93562', '45a67642', '45a16850', '45a8cce4', '45a99516', '45a5c968', '45a1f108',
+    '45b56328', '45bddea4', '45b10c38', '45bd34b8', '45bd78b0', '45b0a068', '45b0e208', '45b7efe4',
+    '45b7c488', '45b1ee64',
+)
+COMPLETE_INPUTS = [struct.unpack('>f', bytes.fromhex(word))[0] for word in FROZEN_COMPLETE_BITS]
 PREFIX = [0., -6600., 0., 1000., 1500., 2000., 2500., 3000., 3500., 4000.,
           4500., 5000., 5500., 6100., 6600., 13200., 250., 500., 750.,
           1125., 1250., 1375., 1625., 1750., 1875., 2125., 2250., 2375.,
@@ -29,25 +73,53 @@ PREFIX = [0., -6600., 0., 1000., 1500., 2000., 2500., 3000., 3500., 4000.,
           5650., 5800., 5950., 6225., 6350., 6475.]
 
 
-def scenario():
+def scenario(complete=False):
     document = json.loads((ROOT.parents[1] / 'tests/fixtures/driving/scenarios.json').read_text())
     row = deepcopy(next(row for row in document['scenarios'] if row['id'] == 'curve-boundaries'))
-    return dict(row, id=SCENARIO_ID, **{INPUT_FIELD: FROZEN_INPUTS.copy(), PROVENANCE_FIELD: dict(PROVENANCE)})
+    return dict(row, id=COMPLETE_SCENARIO_ID if complete else SCENARIO_ID, **{
+        INPUT_FIELD: (COMPLETE_INPUTS if complete else FROZEN_INPUTS).copy(),
+        PROVENANCE_FIELD: dict(COMPLETE_PROVENANCE if complete else PROVENANCE)})
 
 
-def torque_row():
+def torque_row(complete=False):
+    suffix = COMPLETE_INPUTS if complete else FROZEN_INPUTS
     return dict(owner='enginescript', name='torqueCurve', keys=serialized_torque_curve()['keys'],
-                pre_wrap=8, post_wrap=8, inputs=PREFIX + FROZEN_INPUTS,
-                values=[float(i) + .25 for i in range(77)])
+                pre_wrap=8, post_wrap=8, inputs=PREFIX + suffix,
+                values=[float(i) + .25 for i in range(52 + len(suffix))])
 
 
-def raw_car_curve_run(token):
-    run = dict(scenario=SCENARIO_ID, probe_kind='curve', runtime='original-unity-player',
-               curves=[torque_row(), dict(owner='carscript', name='other', inputs=['CAR_INPUT_TOKEN'])])
+def raw_car_curve_run(token, complete=False):
+    run = dict(scenario=COMPLETE_SCENARIO_ID if complete else SCENARIO_ID, probe_kind='curve', runtime='original-unity-player',
+               curves=[torque_row(complete), dict(owner='carscript', name='other', inputs=['CAR_INPUT_TOKEN'])])
     return json.dumps(run).replace('"CAR_INPUT_TOKEN"', token)
 
 
 class DrivingCurveInputTests(unittest.TestCase):
+    def test_complete_inputs_match_independently_declared_words_and_provenance(self):
+        self.assertEqual(COMPLETE_SCENARIO_ID, 'curve-complete-identification')
+        self.assertEqual(COMPLETE_INPUT_BITS, FROZEN_COMPLETE_BITS)
+        self.assertEqual(len(COMPLETE_INPUT_BITS), 314)
+        packed = b''.join(bytes.fromhex(word)[::-1] for word in FROZEN_COMPLETE_BITS)
+        self.assertEqual(hashlib.sha256(packed).hexdigest(),
+                         'd07975062c25a031100585f2f308cc7c0fc5cfce328c8a788849c1ca171c5a8b')
+        self.assertEqual(COMPLETE_PROVENANCE, {
+            'owner': 'enginescript', 'name': 'torqueCurve',
+            'design_results_sha256': '4d75b86cbe88acd58f20dda76eeb2c4be809478b1aa29e1e210e8c2002c63e61',
+            'inputs_binary32_le_sha256': 'd07975062c25a031100585f2f308cc7c0fc5cfce328c8a788849c1ca171c5a8b'})
+        for complete in (False, True):
+            row = scenario(complete)
+            row[PROVENANCE_FIELD] = dict(PROVENANCE if complete else COMPLETE_PROVENANCE)
+            with self.subTest(complete=complete), self.assertRaisesRegex(ValueError, 'provenance differs'):
+                validate_curve_scenario(row)
+        for identifier in ('curve-boundaries', 'unrecognized-curve'):
+            for field in (INPUT_FIELD, PROVENANCE_FIELD):
+                for value in (None, [], {}):
+                    row = dict(scenario(), id=identifier)
+                    del row[INPUT_FIELD]; del row[PROVENANCE_FIELD]
+                    row[field] = value
+                    with self.subTest(identifier=identifier, field=field, value=value), self.assertRaises(ValueError):
+                        validate_curve_scenario(row)
+
     def test_actual_observer_methods_keep_prefix_and_dispatch_only_engine_suffix(self):
         capture = (ROOT / 'driving_capture.cs').read_text()
         methods = ''.join(method(capture, marker)[0] for marker in (
@@ -62,7 +134,9 @@ class DrivingCurveInputTests(unittest.TestCase):
         arrays = ('static Keyframe[] SourceKeys(){return new[]{' + keys + '};}' +
                   'static float[] Prefix(){return new float[]{' + ','.join(str(v) + 'f' for v in PREFIX) + '};}' +
                   'static float[] Holdouts(){return new float[]{' + ','.join(str(v) + 'f' for v in FROZEN_INPUTS) + '};}' +
-                  'static string[] SuffixBits(){return new[]{' + ','.join('"' + bit + '"' for bit in INPUT_BITS) + '};}')
+                  'static string[] SuffixBits(){return new[]{' + ','.join('"' + bit + '"' for bit in INPUT_BITS) + '};}' +
+                  'static float[] Complete(){return new float[]{' + ','.join(str(v) + 'f' for v in COMPLETE_INPUTS) + '};}' +
+                  'static string[] CompleteBits(){return new[]{' + ','.join('"' + bit + '"' for bit in FROZEN_COMPLETE_BITS) + '};}')
         code = STUBS + 'public static class Capture {' + CAPTURE + methods + arrays + CHECKS + '}'
         command = "Add-Type -TypeDefinition @'\n" + code + "\n'@\n[Capture]::Run()"
         result = subprocess.run(['pwsh', '-NoProfile', '-Command', command], capture_output=True,
@@ -71,241 +145,253 @@ class DrivingCurveInputTests(unittest.TestCase):
         self.assertIn('G11_CURVE_INPUTS_PASS', result.stdout)
 
     def test_exact_scenario_and_all_invalid_declarations(self):
-        validate_curve_scenario(scenario())
-        self.assertEqual(tuple(map(bits, FROZEN_INPUTS)), INPUT_BITS)
-        self.assertEqual(original_inputs(serialized_torque_curve()['keys']), PREFIX)
-        changes = {
-            'missing inputs': lambda r: r.pop(INPUT_FIELD),
-            'missing provenance': lambda r: r.pop(PROVENANCE_FIELD),
-            'null inputs': lambda r: r.update({INPUT_FIELD: None}),
-            'empty inputs': lambda r: r.update({INPUT_FIELD: []}),
-            'duplicate input': lambda r: r[INPUT_FIELD].__setitem__(1, r[INPUT_FIELD][0]),
-            'missing input': lambda r: r[INPUT_FIELD].pop(),
-            'extra input': lambda r: r[INPUT_FIELD].append(1.),
-            'reordered input': lambda r: r[INPUT_FIELD].reverse(),
-            'nan input': lambda r: r[INPUT_FIELD].__setitem__(0, float('nan')),
-            'infinite input': lambda r: r[INPUT_FIELD].__setitem__(0, float('inf')),
-            'boolean input': lambda r: r[INPUT_FIELD].__setitem__(0, True),
-            'string input': lambda r: r[INPUT_FIELD].__setitem__(0, '31.25'),
-            'one bit input': lambda r: r[INPUT_FIELD].__setitem__(0, struct.unpack('>f', bytes.fromhex('41fa0001'))[0]),
-            'rounded double input': lambda r: r[INPUT_FIELD].__setitem__(0, 31.25 + 1e-10),
-            'wrong kind': lambda r: r.update(probe_kind='assembled_lada'),
-            'base row control': lambda r: r['controls'][0].update(throttle=1.),
-            'extra row field': lambda r: r.update(extra=True),
-            'preset state': lambda r: r.update(setup_state={}),
-            'preset state flag': lambda r: r.update(has_setup_state=True),
-        }
-        for key in PROVENANCE:
-            changes['changed provenance ' + key] = lambda r, k=key: r[PROVENANCE_FIELD].update({k: 'changed'})
-            changes['missing provenance ' + key] = lambda r, k=key: r[PROVENANCE_FIELD].pop(k)
-        changes['extra provenance'] = lambda r: r[PROVENANCE_FIELD].update(extra='changed')
-        for name, change in changes.items():
-            row = scenario(); change(row)
-            with self.subTest(name=name), self.assertRaises(ValueError): validate_curve_scenario(row)
-        for field in (INPUT_FIELD, PROVENANCE_FIELD):
-            for value in (None, [], {}, FROZEN_INPUTS):
-                row = dict(scenario(), id='curve-boundaries'); row.pop(INPUT_FIELD); row.pop(PROVENANCE_FIELD)
-                row[field] = value
-                with self.subTest(field=field, value=value), self.assertRaises(ValueError): validate_curve_scenario(row)
-        old = scenario(); old['id'] = 'curve-boundaries'; old.pop(INPUT_FIELD); old.pop(PROVENANCE_FIELD)
-        validate_curve_scenario(old)
-        with self.assertRaisesRegex(ValueError, 'Native engine torque curve is missing'): validate_curve_run({}, old)
+        for complete in (False, True):
+            validate_curve_scenario(scenario(complete))
+            self.assertEqual(tuple(map(bits, (COMPLETE_INPUTS if complete else FROZEN_INPUTS))), (COMPLETE_INPUT_BITS if complete else INPUT_BITS))
+            self.assertEqual(original_inputs(serialized_torque_curve()['keys']), PREFIX)
+            changes = {
+                'missing inputs': lambda r: r.pop(INPUT_FIELD),
+                'missing provenance': lambda r: r.pop(PROVENANCE_FIELD),
+                'null inputs': lambda r: r.update({INPUT_FIELD: None}),
+                'empty inputs': lambda r: r.update({INPUT_FIELD: []}),
+                'duplicate input': lambda r: r[INPUT_FIELD].__setitem__(1, r[INPUT_FIELD][0]),
+                'missing input': lambda r: r[INPUT_FIELD].pop(),
+                'extra input': lambda r: r[INPUT_FIELD].append(1.),
+                'reordered input': lambda r: r[INPUT_FIELD].reverse(),
+                'nan input': lambda r: r[INPUT_FIELD].__setitem__(0, float('nan')),
+                'infinite input': lambda r: r[INPUT_FIELD].__setitem__(0, float('inf')),
+                'boolean input': lambda r: r[INPUT_FIELD].__setitem__(0, True),
+                'string input': lambda r: r[INPUT_FIELD].__setitem__(0, '31.25'),
+                'one bit input': lambda r: r[INPUT_FIELD].__setitem__(0, struct.unpack('>f', struct.pack('>I', int(
+                    (COMPLETE_INPUT_BITS if complete else INPUT_BITS)[0], 16) ^ 1))[0]),
+                'rounded double input': lambda r: r[INPUT_FIELD].__setitem__(0, (COMPLETE_INPUTS if complete else FROZEN_INPUTS)[0] + 1e-10),
+                'wrong kind': lambda r: r.update(probe_kind='assembled_lada'),
+                'base row control': lambda r: r['controls'][0].update(throttle=1.),
+                'extra row field': lambda r: r.update(extra=True),
+                'preset state': lambda r: r.update(setup_state={}),
+                'preset state flag': lambda r: r.update(has_setup_state=True),
+            }
+            for key in (COMPLETE_PROVENANCE if complete else PROVENANCE):
+                changes['changed provenance ' + key] = lambda r, k=key: r[PROVENANCE_FIELD].update({k: 'changed'})
+                changes['missing provenance ' + key] = lambda r, k=key: r[PROVENANCE_FIELD].pop(k)
+            changes['extra provenance'] = lambda r: r[PROVENANCE_FIELD].update(extra='changed')
+            for name, change in changes.items():
+                row = scenario(complete); change(row)
+                with self.subTest(name=name), self.assertRaises(ValueError): validate_curve_scenario(row)
+            for field in (INPUT_FIELD, PROVENANCE_FIELD):
+                for value in (None, [], {}, (COMPLETE_INPUTS if complete else FROZEN_INPUTS)):
+                    row = dict(scenario(complete), id='curve-boundaries'); row.pop(INPUT_FIELD); row.pop(PROVENANCE_FIELD)
+                    row[field] = value
+                    with self.subTest(field=field, value=value), self.assertRaises(ValueError): validate_curve_scenario(row)
+            old = scenario(complete); old['id'] = 'curve-boundaries'; old.pop(INPUT_FIELD); old.pop(PROVENANCE_FIELD)
+            validate_curve_scenario(old)
+            with self.assertRaisesRegex(ValueError, 'Native engine torque curve is missing'): validate_curve_run({}, old)
 
     def test_serialized_and_native_wrap_domains_are_distinct(self):
-        serialized = serialized_torque_curve()
-        self.assertEqual((serialized['pre_wrap_mode'], serialized['post_wrap_mode']), (2, 2))
-        semantic = json.dumps(serialized, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii')
-        self.assertEqual(hashlib.sha256(semantic).hexdigest(),
-                         '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89')
-        # Native modes are literal observations from qualified focused07, independent of authoring modes.
-        row = torque_row()
-        with self.subTest(native=(8, 8)):
-            self.assertEqual(len(validate_curve_run({'curves': [row]}, scenario())['value_bits']), 77)
-        for pre, post in ((2, 2), (2, 8), (8, 2), (0, 0), (1, 1), (4, 4), (16, 16),
-                          (8.0, 8), (8, 8.0), (True, 8), (8, False), ('8', 8), (8, None)):
-            wrong = dict(row, pre_wrap=pre, post_wrap=post)
-            with self.subTest(native=(pre, post)), self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'):
-                validate_curve_run({'curves': [wrong]}, scenario())
+        for complete in (False, True):
+            serialized = serialized_torque_curve()
+            self.assertEqual((serialized['pre_wrap_mode'], serialized['post_wrap_mode']), (2, 2))
+            semantic = json.dumps(serialized, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii')
+            self.assertEqual(hashlib.sha256(semantic).hexdigest(),
+                             '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89')
+            # Native modes are literal observations from qualified focused07, independent of authoring modes.
+            row = torque_row(complete)
+            with self.subTest(native=(8, 8)):
+                self.assertEqual(len(validate_curve_run({'curves': [row]}, scenario(complete))['value_bits']), (366 if complete else 77))
+            for pre, post in ((2, 2), (2, 8), (8, 2), (0, 0), (1, 1), (4, 4), (16, 16),
+                              (8.0, 8), (8, 8.0), (True, 8), (8, False), ('8', 8), (8, None)):
+                wrong = dict(row, pre_wrap=pre, post_wrap=post)
+                with self.subTest(native=(pre, post)), self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'):
+                    validate_curve_run({'curves': [wrong]}, scenario(complete))
 
     def test_result_requires_exact_identity_keys_wraps_prefix_suffix_and_lengths(self):
-        run = {'curves': [torque_row()]}
-        result = validate_curve_run(run, scenario())
-        self.assertEqual(result['value_bits'], [bits(float(i) + .25) for i in range(77)])
-        changes = {
-            'missing': lambda r: r.pop('curves'), 'null': lambda r: r.update(curves=None),
-            'empty': lambda r: r.update(curves=[]),
-            'null row': lambda r: r.update(curves=[None]),
-            'duplicate': lambda r: r['curves'].append(torque_row()),
-            'owner': lambda r: r['curves'][0].update(owner='carscript'),
-            'name': lambda r: r['curves'][0].update(name='changed'),
-            'missing key': lambda r: r['curves'][0]['keys'].pop(),
-            'extra key': lambda r: r['curves'][0]['keys'].append(deepcopy(r['curves'][0]['keys'][0])),
-            'null key': lambda r: r['curves'][0]['keys'].__setitem__(0, None),
-            'key value': lambda r: r['curves'][0]['keys'][1].update(value=25.1),
-            'key field': lambda r: r['curves'][0]['keys'][0].pop('in_weight'),
-            'key mode': lambda r: r['curves'][0]['keys'][0].update(weighted_mode=True),
-            'key order': lambda r: r['curves'][0]['keys'].reverse(),
-            'pre wrap': lambda r: r['curves'][0].update(pre_wrap=1),
-            'post wrap': lambda r: r['curves'][0].update(post_wrap=1),
-            'prefix': lambda r: r['curves'][0]['inputs'].__setitem__(2, -0.),
-            'suffix': lambda r: r['curves'][0]['inputs'].__setitem__(52, 31.251),
-            'input count': lambda r: r['curves'][0]['inputs'].pop(),
-            'value count': lambda r: r['curves'][0]['values'].pop(),
-            'extra value': lambda r: r['curves'][0]['values'].append(1.),
-            'nonfinite value': lambda r: r['curves'][0]['values'].__setitem__(0, Decimal('NaN')),
-            'boolean value': lambda r: r['curves'][0]['values'].__setitem__(0, True),
-        }
-        for name, change in changes.items():
-            bad = deepcopy(run); change(bad)
-            with self.subTest(name=name), self.assertRaises(ValueError): validate_curve_run(bad, scenario())
+        for complete in (False, True):
+            run = {'curves': [torque_row(complete)]}
+            result = validate_curve_run(run, scenario(complete))
+            self.assertEqual(result['value_bits'], [bits(float(i) + .25) for i in range((366 if complete else 77))])
+            changes = {
+                'missing': lambda r: r.pop('curves'), 'null': lambda r: r.update(curves=None),
+                'empty': lambda r: r.update(curves=[]),
+                'null row': lambda r: r.update(curves=[None]),
+                'duplicate': lambda r: r['curves'].append(torque_row(complete)),
+                'owner': lambda r: r['curves'][0].update(owner='carscript'),
+                'name': lambda r: r['curves'][0].update(name='changed'),
+                'missing key': lambda r: r['curves'][0]['keys'].pop(),
+                'extra key': lambda r: r['curves'][0]['keys'].append(deepcopy(r['curves'][0]['keys'][0])),
+                'null key': lambda r: r['curves'][0]['keys'].__setitem__(0, None),
+                'key value': lambda r: r['curves'][0]['keys'][1].update(value=25.1),
+                'key field': lambda r: r['curves'][0]['keys'][0].pop('in_weight'),
+                'key mode': lambda r: r['curves'][0]['keys'][0].update(weighted_mode=True),
+                'key order': lambda r: r['curves'][0]['keys'].reverse(),
+                'pre wrap': lambda r: r['curves'][0].update(pre_wrap=1),
+                'post wrap': lambda r: r['curves'][0].update(post_wrap=1),
+                'prefix': lambda r: r['curves'][0]['inputs'].__setitem__(2, -0.),
+                'suffix': lambda r: r['curves'][0]['inputs'].__setitem__(52, 31.251),
+                'input count': lambda r: r['curves'][0]['inputs'].pop(),
+                'value count': lambda r: r['curves'][0]['values'].pop(),
+                'extra value': lambda r: r['curves'][0]['values'].append(1.),
+                'nonfinite value': lambda r: r['curves'][0]['values'].__setitem__(0, Decimal('NaN')),
+                'boolean value': lambda r: r['curves'][0]['values'].__setitem__(0, True),
+            }
+            for name, change in changes.items():
+                bad = deepcopy(run); change(bad)
+                with self.subTest(name=name), self.assertRaises(ValueError): validate_curve_run(bad, scenario(complete))
 
     def test_capture_rejects_invalid_declarations_before_setup(self):
-        for change in ('missing', 'wrong order', 'wrong provenance'):
-            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
-                project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
-                row = scenario()
-                if change == 'missing': row.pop(INPUT_FIELD)
-                if change == 'wrong order': row[INPUT_FIELD].reverse()
-                if change == 'wrong provenance': row[PROVENANCE_FIELD]['owner'] = 'carscript'
-                definitions = project / 'scenarios.json'
-                definitions.write_text(json.dumps({'scenarios': [row]}))
-                with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value={}), \
-                     patch.object(probe.subprocess, 'run') as launch:
-                    with self.assertRaises(ValueError): probe.capture(project, project, output, definitions, 3)
-                    launch.assert_not_called()
-                self.assertFalse(output.exists())
+        for complete in (False, True):
+            for change in ('missing', 'wrong order', 'wrong provenance'):
+                with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
+                    project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
+                    row = scenario(complete)
+                    if change == 'missing': row.pop(INPUT_FIELD)
+                    if change == 'wrong order': row[INPUT_FIELD].reverse()
+                    if change == 'wrong provenance': row[PROVENANCE_FIELD]['owner'] = 'carscript'
+                    definitions = project / 'scenarios.json'
+                    definitions.write_text(json.dumps({'scenarios': [row]}))
+                    with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value={}), \
+                         patch.object(probe.subprocess, 'run') as launch:
+                        with self.assertRaises(ValueError): probe.capture(project, project, output, definitions, 3)
+                        launch.assert_not_called()
+                    self.assertFalse(output.exists())
 
     def test_validate_run_uses_strict_curve_gate(self):
-        from tools.reference.tests.test_driving_probe import DrivingProbeTests
-        run = DrivingProbeTests.sample_run('curve')
-        run.update(scenario=SCENARIO_ID, curves=[torque_row()])
-        # Other suites check the complete timing and control paths with source protocols.
-        with patch.object(probe, 'validate_timing', return_value={}), \
-             patch.object(probe, 'validate_controls', return_value={}):
-            result = probe.validate_run(run, scenario())
-            self.assertEqual(result['engine_curve']['input_state']['input_bits'], list(map(bits, PREFIX + FROZEN_INPUTS)))
-            run['curves'][0]['inputs'][52] = 0.
-            with self.assertRaisesRegex(ValueError, 'prefix or suffix bits differ'):
-                probe.validate_run(run, scenario())
+        for complete in (False, True):
+            from tools.reference.tests.test_driving_probe import DrivingProbeTests
+            run = DrivingProbeTests.sample_run('curve')
+            run.update(scenario=(COMPLETE_SCENARIO_ID if complete else SCENARIO_ID), curves=[torque_row(complete)])
+            # Other suites check the complete timing and control paths with source protocols.
+            with patch.object(probe, 'validate_timing', return_value={}), \
+                 patch.object(probe, 'validate_controls', return_value={}):
+                result = probe.validate_run(run, scenario(complete))
+                self.assertEqual(result['engine_curve']['input_state']['input_bits'], list(map(bits, PREFIX + (COMPLETE_INPUTS if complete else FROZEN_INPUTS))))
+                run['curves'][0]['inputs'][52] = 0.
+                with self.assertRaisesRegex(ValueError, 'prefix or suffix bits differ'):
+                    probe.validate_run(run, scenario(complete))
 
     def test_native_decimal_tokens_stay_local_and_receipts_serialize(self):
-        with tempfile.TemporaryDirectory() as name:
-            path = Path(name) / 'runtime.json'
-            data = dict(scenario=SCENARIO_ID, probe_kind='curve', curves=[torque_row()], initial={'rpm': .2})
-            text = json.dumps(data).replace('0.25', '0.2500000000000000000000000000000000001', 1)
-            path.write_text(text)
-            read = probe.read_json(path)
-            self.assertIs(type(read['initial']['rpm']), float)
-            self.assertIs(type(read['curves'][0]['values'][0]), Decimal)
-            result = validate_curve_run(read, scenario())
-            self.assertEqual(result['native_value_decimals'][0], '0.2500000000000000000000000000000000001')
-            self.assertEqual(result['value_bits'][0], bits(.25))
-            probe.write_json(path.with_name('receipt.json'), result)
-            self.assertEqual(probe.read_json(path.with_name('receipt.json')), result)
+        for complete in (False, True):
+            with tempfile.TemporaryDirectory() as name:
+                path = Path(name) / 'runtime.json'
+                data = dict(scenario=(COMPLETE_SCENARIO_ID if complete else SCENARIO_ID), probe_kind='curve', curves=[torque_row(complete)], initial={'rpm': .2})
+                data['curves'][0]['values'][0] = 'LOSSLESS_OUTPUT_TOKEN'
+                text = json.dumps(data).replace('"LOSSLESS_OUTPUT_TOKEN"',
+                                                '0.2500000000000000000000000000000000001')
+                path.write_text(text)
+                read = probe.read_json(path)
+                self.assertIs(type(read['initial']['rpm']), float)
+                self.assertIs(type(read['curves'][0]['values'][0]), Decimal)
+                result = validate_curve_run(read, scenario(complete))
+                self.assertEqual(result['native_value_decimals'][0], '0.2500000000000000000000000000000000001')
+                self.assertEqual(result['value_bits'][0], bits(.25))
+                probe.write_json(path.with_name('receipt.json'), result)
+                self.assertEqual(probe.read_json(path.with_name('receipt.json')), result)
 
     def test_raw_nonengine_decimal_overflow_fails_validate_run(self):
-        with tempfile.TemporaryDirectory() as name:
-            path = Path(name) / 'runtime.json'
-            path.write_text(raw_car_curve_run('1e1000'))
-            run = probe.read_json(path)
-            overflow = run['curves'][1]['inputs'][0]
-            self.assertIs(type(overflow), Decimal)
-            self.assertEqual(overflow, Decimal('1e1000'))
-            checked = validate_curve_run(run, scenario())
-            self.assertEqual(len(checked['value_bits']), 77)
-            self.assertEqual(checked['value_bits'], [bits(float(i) + .25) for i in range(77)])
-            with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
-                probe.validate_run(run, scenario())
-            # Match the old float gate's range. Finite binary64 car values remain valid.
-            path.write_text(raw_car_curve_run('1e100'))
-            probe.finite(probe.read_json(path))
+        for complete in (False, True):
+            with tempfile.TemporaryDirectory() as name:
+                path = Path(name) / 'runtime.json'
+                path.write_text(raw_car_curve_run('1e1000', complete))
+                run = probe.read_json(path)
+                overflow = run['curves'][1]['inputs'][0]
+                self.assertIs(type(overflow), Decimal)
+                self.assertEqual(overflow, Decimal('1e1000'))
+                checked = validate_curve_run(run, scenario(complete))
+                self.assertEqual(len(checked['value_bits']), (366 if complete else 77))
+                self.assertEqual(checked['value_bits'], [bits(float(i) + .25) for i in range((366 if complete else 77))])
+                with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
+                    probe.validate_run(run, scenario(complete))
+                # Match the old float gate's range. Finite binary64 car values remain valid.
+                path.write_text(raw_car_curve_run('1e100', complete))
+                probe.finite(probe.read_json(path))
 
     def test_capture_and_explicit_verify_reject_raw_nonengine_decimal_overflow(self):
-        raw = raw_car_curve_run('1e1000')
-        for operation in ('capture', 'verify'):
-            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as name:
-                project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
-                definitions = project / 'scenarios.json'
-                definitions.write_text(json.dumps({'scenarios': [scenario()]}))
-                launched = []
-                if operation == 'capture':
-                    def native(arguments, **kwargs):
-                        mode = arguments[arguments.index('-Mode') + 1]; launched.append(mode)
-                        if mode == 'Run':
-                            directory = Path(arguments[arguments.index('-RunRoot') + 1])
-                            (directory / 'runtime.json').write_text(raw)
-                        return type('Result', (), {'returncode': 0})()
-                    with patch.object(probe, 'PROJECT', project), \
-                         patch.object(probe, 'preflight', return_value={'powershell': 'pwsh', 'observer_revision': {}}), \
-                         patch.object(probe.subprocess, 'run', side_effect=native):
-                        # Real capture, validate_evidence, and validate_run must stop at finite.
+        for complete in (False, True):
+            raw = raw_car_curve_run('1e1000', complete)
+            for operation in ('capture', 'verify'):
+                with self.subTest(operation=operation), tempfile.TemporaryDirectory() as name:
+                    project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
+                    definitions = project / 'scenarios.json'
+                    definitions.write_text(json.dumps({'scenarios': [scenario(complete)]}))
+                    launched = []
+                    if operation == 'capture':
+                        def native(arguments, **kwargs):
+                            mode = arguments[arguments.index('-Mode') + 1]; launched.append(mode)
+                            if mode == 'Run':
+                                directory = Path(arguments[arguments.index('-RunRoot') + 1])
+                                (directory / 'runtime.json').write_text(raw)
+                            return type('Result', (), {'returncode': 0})()
+                        with patch.object(probe, 'PROJECT', project), \
+                             patch.object(probe, 'preflight', return_value={'powershell': 'pwsh', 'observer_revision': {}}), \
+                             patch.object(probe.subprocess, 'run', side_effect=native):
+                            # Real capture, validate_evidence, and validate_run must stop at finite.
+                            with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
+                                probe.capture(project, project, output, definitions, 3)
+                        self.assertEqual(launched, ['Setup', 'Run'])
+                    else:
+                        output.mkdir(parents=True)
+                        probe.write_json(output / 'request.json', {'repeats': 3, 'scenarios': [scenario(complete)]})
+                        directory = output / (COMPLETE_SCENARIO_ID if complete else SCENARIO_ID) / 'repeat-1'; directory.mkdir(parents=True)
+                        (directory / 'runtime.json').write_text(raw)
+                        # No validation function or evidence gate is mocked for explicit verify.
                         with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
-                            probe.capture(project, project, output, definitions, 3)
-                    self.assertEqual(launched, ['Setup', 'Run'])
-                else:
-                    output.mkdir(parents=True)
-                    probe.write_json(output / 'request.json', {'repeats': 3, 'scenarios': [scenario()]})
-                    directory = output / SCENARIO_ID / 'repeat-1'; directory.mkdir(parents=True)
-                    (directory / 'runtime.json').write_text(raw)
-                    # No validation function or evidence gate is mocked for explicit verify.
-                    with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
-                        probe.verify(output)
-                self.assertEqual((output / SCENARIO_ID / 'repeat-1/runtime.json').read_text(), raw)
-                self.assertFalse((output / 'receipt.json').exists())
-                self.assertFalse((output / SCENARIO_ID / 'repeat-2').exists())
+                            probe.verify(output)
+                    self.assertEqual((output / (COMPLETE_SCENARIO_ID if complete else SCENARIO_ID) / 'repeat-1/runtime.json').read_text(), raw)
+                    self.assertFalse((output / 'receipt.json').exists())
+                    self.assertFalse((output / (COMPLETE_SCENARIO_ID if complete else SCENARIO_ID) / 'repeat-2').exists())
 
     def test_capture_and_verify_preserve_declarations_serialize_and_stop_on_bit_changes(self):
-        # Run real orchestration and curve validation with synthetic unrelated telemetry.
-        for corrupt in ('none', 'value', 'serialized wraps'):
-            with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as name:
-                project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
-                definitions = project / 'scenarios.json'; definitions.write_text(json.dumps({'scenarios': [scenario()]}))
-                launched = []
-                pre = dict(powershell='pwsh', observer_revision=probe.observer_revision(), app_id=1017180,
-                           build_id=11140890, unity_version='2021.3.18f1', native_engine={'sha256': 'a'},
-                           dependencies={'TheLongDrive_Data/Managed/UnityEngine.PhysicsModule.dll': 'b'})
-                def native(arguments, **kwargs):
-                    if arguments[arguments.index('-Mode') + 1] == 'Setup':
-                        scratch = output / 'scratch'; scratch.mkdir()
-                        probe.write_json(scratch / 'patch-receipt.json', dict(changed_methods=['original'],
-                            observer_revision=pre['observer_revision'], native_engine_sha256='a', source_physics_module_sha256='b'))
-                    else:
-                        directory = Path(arguments[arguments.index('-RunRoot') + 1]); launched.append(directory)
-                        row = torque_row()
-                        if corrupt == 'value' and len(launched) == 2: row['values'][52] += .5
-                        if corrupt == 'serialized wraps': row.update(pre_wrap=2, post_wrap=2)
-                        probe.write_json(directory / 'runtime.json', dict(scenario=SCENARIO_ID, probe_kind='curve', curves=[row],
-                            initial={'rpm': .2}, setup_state={'held': True}, geometry=[dict(
-                                phase='armed-after-canonical', colliders=[], transforms=[])]))
-                    return type('Result', (), {'returncode': 0})()
-                def validate(output, directory, run, row):
-                    return {'engine_curve': validate_curve_run(run, row)}
-                with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value=pre), \
-                     patch.object(probe.subprocess, 'run', side_effect=native), patch.object(probe, 'validate_evidence', side_effect=validate):
-                    if corrupt != 'none':
-                        message, repeats = ('different engine torque curve bits', 2) if corrupt == 'value' else ('Native engine torque wraps differ', 1)
-                        with self.assertRaisesRegex(ValueError, message):
-                            probe.capture(project, project, output, definitions, 3)
-                        self.assertEqual(len(launched), repeats)
-                        self.assertFalse((output / 'receipt.json').exists())
-                        continue
-                    receipt = probe.capture(project, project, output, definitions, 3)
-                    self.assertEqual(probe.verify(output), receipt)
-                    self.assertEqual(probe.read_json(output / 'receipt.json'), receipt)
-                    request = probe.read_json(output / 'request.json')
-                    self.assertEqual(request['repeats'], 3)
-                    self.assertEqual(request['scenarios'], [scenario()])
-                    self.assertEqual(len(launched), 3)
-                    for directory in launched:
-                        declared = probe.read_json(directory / 'scenario.json')
-                        self.assertEqual(declared[INPUT_FIELD], FROZEN_INPUTS)
-                        self.assertEqual(declared[PROVENANCE_FIELD], PROVENANCE)
-                    changed = launched[-1] / 'runtime.json'; data = json.loads(changed.read_text())
-                    data['curves'][0]['values'][52] += .5; probe.write_json(changed, data)
-                    with self.assertRaisesRegex(ValueError, 'different engine torque curve bits'): probe.verify(output)
-                    data['curves'][0] = torque_row(); data['curves'][0].update(pre_wrap=2, post_wrap=2)
-                    probe.write_json(changed, data)
-                    with self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'): probe.verify(output)
+        for complete in (False, True):
+            # Run real orchestration and curve validation with synthetic unrelated telemetry.
+            for corrupt in ('none', 'value', 'serialized wraps'):
+                with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as name:
+                    project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
+                    definitions = project / 'scenarios.json'; definitions.write_text(json.dumps({'scenarios': [scenario(complete)]}))
+                    launched = []
+                    pre = dict(powershell='pwsh', observer_revision=probe.observer_revision(), app_id=1017180,
+                               build_id=11140890, unity_version='2021.3.18f1', native_engine={'sha256': 'a'},
+                               dependencies={'TheLongDrive_Data/Managed/UnityEngine.PhysicsModule.dll': 'b'})
+                    def native(arguments, **kwargs):
+                        if arguments[arguments.index('-Mode') + 1] == 'Setup':
+                            scratch = output / 'scratch'; scratch.mkdir()
+                            probe.write_json(scratch / 'patch-receipt.json', dict(changed_methods=['original'],
+                                observer_revision=pre['observer_revision'], native_engine_sha256='a', source_physics_module_sha256='b'))
+                        else:
+                            directory = Path(arguments[arguments.index('-RunRoot') + 1]); launched.append(directory)
+                            row = torque_row(complete)
+                            if corrupt == 'value' and len(launched) == 2: row['values'][52] += .5
+                            if corrupt == 'serialized wraps': row.update(pre_wrap=2, post_wrap=2)
+                            probe.write_json(directory / 'runtime.json', dict(scenario=(COMPLETE_SCENARIO_ID if complete else SCENARIO_ID), probe_kind='curve', curves=[row],
+                                initial={'rpm': .2}, setup_state={'held': True}, geometry=[dict(
+                                    phase='armed-after-canonical', colliders=[], transforms=[])]))
+                        return type('Result', (), {'returncode': 0})()
+                    def validate(output, directory, run, row):
+                        return {'engine_curve': validate_curve_run(run, row)}
+                    with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value=pre), \
+                         patch.object(probe.subprocess, 'run', side_effect=native), patch.object(probe, 'validate_evidence', side_effect=validate):
+                        if corrupt != 'none':
+                            message, repeats = ('different engine torque curve bits', 2) if corrupt == 'value' else ('Native engine torque wraps differ', 1)
+                            with self.assertRaisesRegex(ValueError, message):
+                                probe.capture(project, project, output, definitions, 3)
+                            self.assertEqual(len(launched), repeats)
+                            self.assertFalse((output / 'receipt.json').exists())
+                            continue
+                        receipt = probe.capture(project, project, output, definitions, 3)
+                        self.assertEqual(probe.verify(output), receipt)
+                        self.assertEqual(probe.read_json(output / 'receipt.json'), receipt)
+                        request = probe.read_json(output / 'request.json')
+                        self.assertEqual(request['repeats'], 3)
+                        self.assertEqual(request['scenarios'], [scenario(complete)])
+                        self.assertEqual(len(launched), 3)
+                        for directory in launched:
+                            declared = probe.read_json(directory / 'scenario.json')
+                            self.assertEqual(declared[INPUT_FIELD], (COMPLETE_INPUTS if complete else FROZEN_INPUTS))
+                            self.assertEqual(declared[PROVENANCE_FIELD], (COMPLETE_PROVENANCE if complete else PROVENANCE))
+                        changed = launched[-1] / 'runtime.json'; data = json.loads(changed.read_text())
+                        data['curves'][0]['values'][52] += .5; probe.write_json(changed, data)
+                        with self.assertRaisesRegex(ValueError, 'different engine torque curve bits'): probe.verify(output)
+                        data['curves'][0] = torque_row(complete); data['curves'][0].update(pre_wrap=2, post_wrap=2)
+                        probe.write_json(changed, data)
+                        with self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'): probe.verify(output)
 
 
 STUBS = r"""
@@ -331,8 +417,9 @@ CHECKS = r"""
     static void Need(bool value,string name){if(!value)throw new Exception(name);}
     static string Bits(float x){return BitConverter.SingleToInt32Bits(x).ToString("x8");}
     public static void Run(){
-        foreach(bool holdout in new[]{false,true}){
-            result=new Result();scenario=new Scenario{engine_torque_holdout_inputs=holdout?Holdouts():null};
+        foreach(int count in new[]{0,25,314}){
+            var suffix=count==314?Complete():count==25?Holdouts():null;
+            result=new Result();scenario=new Scenario{engine_torque_holdout_inputs=suffix};
             var first=new AnimationCurve{keys=SourceKeys()};var second=new AnimationCurve{keys=SourceKeys()};
             var engine=new AnimationCurve{keys=SourceKeys()};
             car=new carscript{first=first,second=second,Engine=new enginescript{torqueCurve=engine}};
@@ -341,7 +428,7 @@ CHECKS = r"""
             Need(result.curves.Select(x=>x.owner+":"+x.name).SequenceEqual(new[]{"carscript:first","carscript:second","enginescript:torqueCurve"}),"capture call order and identity");
             for(int index=0;index<3;index++){
                 var row=result.curves[index];var source=new[]{first,second,engine}[index];
-                var expected=holdout && index==2?Prefix().Concat(Holdouts()).ToArray():Prefix();
+                var expected=count>0 && index==2?Prefix().Concat(suffix).ToArray():Prefix();
                 Need(row.inputs.Select(Bits).SequenceEqual(expected.Select(Bits)),"ordered input bits");
                 Need(source.evaluated.Select(Bits).SequenceEqual(expected.Select(Bits)),"native Evaluate call order");
                 Need(row.values.SequenceEqual(Enumerable.Range(1,expected.Length).Select(x=>x+1234.25f)),"distinct native Evaluate return values");
@@ -352,9 +439,9 @@ CHECKS = r"""
                     Need(Bits(a.time)==Bits(b.time) && Bits(a.value)==Bits(b.value) && Bits(a.in_tangent)==Bits(b.inTangent) && Bits(a.out_tangent)==Bits(b.outTangent) && Bits(a.in_weight)==Bits(b.inWeight) && Bits(a.out_weight)==Bits(b.outWeight) && a.weighted_mode==b.weightedMode,"source key fields");
                 }
             }
-            Need(engine.evaluated.Count==(holdout?77:52),"engine query count");
+            Need(engine.evaluated.Count==52+count,"engine query count, including complete366");
             Need(engine.evaluated[0]==0 && engine.evaluated[2]==0,"duplicate zero retained");
-            if(holdout)Need(engine.evaluated.Skip(52).Select(Bits).SequenceEqual(SuffixBits()),"frozen suffix bits");
+            if(count>0)Need(engine.evaluated.Skip(52).Select(Bits).SequenceEqual(count==314?CompleteBits():SuffixBits()),"frozen suffix bits");
         }
         result=new Result();CaptureCurve("enginescript","torqueCurve",null,Holdouts());
         CaptureCurve("enginescript","torqueCurve",new AnimationCurve{keys=new Keyframe[0]},Holdouts());
