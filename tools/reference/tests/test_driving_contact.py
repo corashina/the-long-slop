@@ -236,13 +236,18 @@ class ContactTests(unittest.TestCase):
         canonical=capture.split('static void ApplyCanonical(Initial initial)',1)[1].split('car.Engine.rpm=',1)[0].strip()[1:]
         load=capture.split('if(scenario.has_setup_state) inputPose=scenario.setup_state.input_pose;',1)[1].split('if(scenario.setup.surface==',1)[0].split('{',1)[1]
         activation=capture.split('                ApplyCanonical(result.setup_state);',1)[1].split('                result.initial=InitialState();',1)[0]
-        source=(reference/'driving_angular.cs').read_text(encoding='utf-8-sig')+(reference/'driving_contact.cs').read_text(encoding='utf-8-sig').replace('using System;','').replace('using System.Linq;','').replace('using UnityEngine;','')+CONTACT_STUBS+CONTACT_CHECKS.replace('HELD_METHOD',held).replace('CANONICAL_METHOD',canonical).replace('LOAD_METHOD',load).replace('ACTIVATION_METHOD',activation)
+        parsed=capture.split('                scenario=JsonUtility.FromJson<Scenario>',1)[1].split('                result.scenario=',1)[0]
+        parsed='scenario=JsonUtility.FromJson<Scenario>'+parsed
+        create='static void CreateContactProbe'+capture.split('static void CreateContactProbe',1)[1].split('static void CreateAngularProbe',1)[0]
+        flush='static void Flush()'+capture.split('static void Flush()',1)[1].split('    void OnApplicationQuit()',1)[0]
+        readouts=READOUT_CHECKS.replace('PARSED_METHOD',parsed).replace('CONTACT_METHOD',create).replace('HELD_METHOD',held).replace('FLUSH_METHODS',flush)
+        source='using System.IO;\nusing System.Linq;\n'+(reference/'driving_angular.cs').read_text(encoding='utf-8-sig')+(reference/'driving_contact.cs').read_text(encoding='utf-8-sig').replace('using System;','').replace('using System.Linq;','').replace('using UnityEngine;','')+CONTACT_STUBS+CONTACT_CHECKS.replace('HELD_METHOD',held).replace('CANONICAL_METHOD',canonical).replace('LOAD_METHOD',load).replace('ACTIVATION_METHOD',activation)+readouts
         with tempfile.TemporaryDirectory() as name:
             source_path=Path(name)/'contact.cs';script_path=Path(name)/'check.ps1'
             source_path.write_text(source)
             script_path.write_text("param($SourcePath)\n$ErrorActionPreference='Stop'\nAdd-Type -Path $SourcePath\n[ContactChecks]::Run()\n")
             result=subprocess.run(['pwsh','-NoProfile','-File',str(script_path),str(source_path)],capture_output=True,text=True,timeout=60)
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('G11_CONTACT_METHODS_PASS',result.stdout)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('G11_CONTACT_METHODS_PASS',result.stdout);self.assertIn('G11_CONTACT_READOUT_TRANSPORT_PASS',result.stdout)
 
 CONTACT_STUBS=r'''
 namespace UnityEngine {
@@ -258,20 +263,20 @@ namespace UnityEngine {
  public Vector3 up {get{return Vector3.up;}}public Vector3 forward {get{return new Vector3(0,0,1);}}public bool IsChildOf(Transform t){return this==t || parent==t;}public Vector3 TransformPoint(Vector3 p){return position+p;}public Vector3 TransformVector(Vector3 p){return p;}}
  public class GameObject {public string name;public Transform transform=new Transform();public bool activeSelf=true,activeInHierarchy=true;public static int ordinaryColliders;public GameObject(string n){}public static GameObject CreatePrimitive(PrimitiveType p){ordinaryColliders++;return new GameObject("support");}
  public T AddComponent<T>() where T:new(){object v=new T();if(v is WheelCollider){var w=(WheelCollider)v;w.gameObject=this;w.attachedRigidbody=Rigidbody.latest;WheelCollider.created++;}if(v is Rigidbody){var b=(Rigidbody)v;b.transform=transform;Rigidbody.latest=b;}return (T)v;}public T GetComponent<T>() where T:new(){return new T();}}
- public class Rigidbody {public static Rigidbody latest;public Transform transform=new Transform();public int id=2,solverIterations=6,solverVelocityIterations=1,interpolation,collisionDetectionMode,writes,angularWrites,wakes,impulses,massWrites,comWrites,tensorWrites,rotationWrites;public bool sleeping,useGravity,isKinematic,detectCollisions=true;
+ public class Rigidbody {public static Rigidbody latest;public Transform transform=new Transform();public int id=2,solverIterations=6,solverVelocityIterations=1,interpolation,collisionDetectionMode,writes,angularWrites,wakes,impulses,massWrites,comWrites,tensorWrites,rotationWrites;public bool sleeping,useGravity,detectCollisions=true;public int kinematicReads,kinematicWrites;bool kinematic;public bool isKinematic {get{kinematicReads++;return kinematic;}set{kinematicWrites++;kinematic=value;}}
  float m=100;public float mass {get{return m;}set{massWrites++;m=value;}}public float drag,angularDrag,sleepThreshold=.005f,maxAngularVelocity=7;public RigidbodyConstraints constraints;
  Vector3 com,tensor;Quaternion it;public Vector3 centerOfMass {get{return com;}set{comWrites++;com=value;}}public Vector3 inertiaTensor {get{return tensor;}set{tensorWrites++;tensor=value;}}public Quaternion inertiaTensorRotation {get{return it;}set{rotationWrites++;it=value;it.w=1;}}
  public Vector3 position {get{return transform.position;}set{transform.position=value;}}public Quaternion rotation {get{return transform.rotation;}set{transform.rotation=value;}}public Vector3 worldCenterOfMass {get{return position+centerOfMass;}}
  Vector3 speed,spin;public Vector3 velocity {get{return speed;}set{writes++;speed=value;}}public Vector3 angularVelocity {get{return spin;}set{angularWrites++;spin=value;}}public bool IsSleeping(){return sleeping;}public int GetInstanceID(){return id;}public void WakeUp(){wakes++;sleeping=false;}public Vector3 GetPointVelocity(Vector3 p){return velocity;}public void AddForce(Vector3 j,ForceMode m){impulses++;sleeping=false;}}
  public class Collider {public Transform transform=new Transform();public bool isTrigger;public Rigidbody attachedRigidbody;public Material sharedMaterial;public int GetInstanceID(){return 99;}}
- public class WheelCollider {public static int created;public GameObject gameObject=new GameObject("wheel");public Transform transform {get{return gameObject.transform;}}public Rigidbody attachedRigidbody;public bool enabled=true;
+ public class WheelCollider {public string key="level1:58684";public static int created;public GameObject gameObject=new GameObject("wheel");public Transform transform {get{return gameObject.transform;}}public Rigidbody attachedRigidbody;public bool enabled=true;
  public Vector3 center=new Vector3(0,-.1f,0);public float radius=.5f,mass=20,wheelDampingRate=.25f,suspensionDistance=.3f,forceAppPointDistance,sprungMass=123,rpm=-7,steerAngle;public WheelFrictionCurve forwardFriction,sidewaysFriction;public JointSpring suspensionSpring;public float motorTorque,brakeTorque;public int GetInstanceID(){return 50;}public void GetWorldPose(out Vector3 p,out Quaternion q){p=transform.position;q=transform.rotation;}public bool GetGroundHit(out WheelHit h){h=new WheelHit();return false;}}
  public struct WheelHit {public Collider collider;public Vector3 point,normal,forwardDir,sidewaysDir;public float forwardSlip,sidewaysSlip,force;}
  public struct RaycastHit {public Collider collider;public Vector3 point,normal;public float distance;}
  public static class Object {public static T[] FindObjectsOfType<T>(){return new T[0];}}
  public static class Physics {public static int syncs;public static void SyncTransforms(){syncs++;}public static Vector3 gravity=new Vector3(0,-10,0);public static int DefaultRaycastLayers=-5;public static RaycastHit[] RaycastAll(Vector3 o,Vector3 d,float l,int m,QueryTriggerInteraction q){return new[]{new RaycastHit{collider=new Collider(),normal=Vector3.up,point=Vector3.zero,distance=1}};}}
 }
-public static class G11Geometry {public static UnityEngine.WheelCollider[] nativeWheels=new UnityEngine.WheelCollider[0];public struct NativeWheel {public int road_slot,read_revision;}static int reads;public static NativeWheel ReadWheel(UnityEngine.WheelCollider w){return new NativeWheel{read_revision=++reads};}public static void RestoreWheels(){throw new Exception("unexpected source wheel restore");}public static string Key(UnityEngine.WheelCollider w){return "level1:58684";}public static string Key(UnityEngine.Collider c){return "support";}}
+public static class G11Geometry {public static int isolates,activation_count;public struct Activation {}public static Activation[] activation_events=new Activation[0];public static void IsolateSourceCar(){isolates++;}public static UnityEngine.WheelCollider[] nativeWheels=new UnityEngine.WheelCollider[0];public struct NativeWheel {public int road_slot,read_revision;}static int reads;public static NativeWheel ReadWheel(UnityEngine.WheelCollider w){return new NativeWheel{read_revision=++reads};}public static void RestoreWheels(){throw new Exception("unexpected source wheel restore");}public static string Key(UnityEngine.WheelCollider w){return w.key;}public static string Key(UnityEngine.Collider c){return "support";}}
 public static class G11BodyTrace {public static int holds;public static void HoldCopy(UnityEngine.Rigidbody b){b.isKinematic=true;holds++;}}
 '''
 
@@ -289,7 +294,7 @@ public static class ContactChecks {
   var original=new UnityEngine.Rigidbody{id=1,isKinematic=true,mass=400,centerOfMass=new UnityEngine.Vector3(0,2,0),inertiaTensor=new UnityEngine.Vector3(1,2,3)};
   var input=new G11ContactProbe.Input{source_wheel="level1:58684",support="full-tire",mode="force",duration_steps=240,event_steps=new[]{1,121,145},wheel_enabled=true,side_speed_mps=.5f,torque_scale=.25f,offset_m=new UnityEngine.Vector3(10000,0,0)};
   var source=new UnityEngine.WheelCollider();G11Geometry.nativeWheels=new[]{source,source,source,source,source};var probe=new UnityEngine.GameObject("rig");body=CreateHeldProbeBody(probe);
-  Need(body.isKinematic && G11BodyTrace.holds==1,"reviewed constructor not held");var wheel=G11ContactProbe.Configure(input,source,original,probe,body,true,null);
+  Need(body.isKinematic && G11BodyTrace.holds==1,"reviewed constructor not held");var wheel=G11ContactProbe.Configure(input,source,original,probe,body,true,null,new G11ContactProbe.SetupMark());
   Need(UnityEngine.WheelCollider.created==1 && UnityEngine.GameObject.ordinaryColliders==1,"copied geometry count");Need(body.writes==0 && body.angularWrites==0,"setup velocity write");
   Need(body.mass==100 && body.centerOfMass.y==2.1f && body.inertiaTensor.x==1 && body.constraints==(UnityEngine.RigidbodyConstraints)112,"declared body inputs");
   Need(wheel.radius==source.radius && wheel.center.y==source.center.y && wheel.forceAppPointDistance==0,"source profile copy");Need(wheel.transform.position.y+wheel.center.y==.65f,"wheel center placement");
@@ -301,8 +306,79 @@ public static class ContactChecks {
   Need(entry.pre_input.step==1 && entry.pre_input.native_wheel0.read_revision==saved.native_wheel0.read_revision && entry.pre_input.native_wheel0.read_revision<G11Geometry.ReadWheel(source).read_revision && entry.pre_input.observed.body.velocity.z==saved.observed.body.velocity.z,"retained pre-input aliased later mutable snapshot");
   Need(body.writes==1 && body.angularWrites==1 && body.wakes==1 && body.impulses==1,"repeated input write");Need(G11ContactProbe.report.assignments[2].step==145,"third assignment missing");Reject(()=>G11ContactProbe.Assign(241,250,241,5,.02f));
   Reset();original.mass=999;original.centerOfMass=new UnityEngine.Vector3(0,9,0);original.inertiaTensor=new UnityEngine.Vector3(9,8,7);scenario.has_setup_state=true;body=CreateHeldProbeBody(new UnityEngine.GameObject("reused"));
-  input.wheel_enabled=false;wheel=G11ContactProbe.Configure(input,source,original,probe,body,false,canonical);ApplyLoad();ApplyCanonical(new Initial());Need(body.mass==100 && body.centerOfMass.y==2.1f && body.inertiaTensor.x==1 && G11ContactProbe.report.source_body.mass==999,"canonical reuse replaced by later source readback");Need(body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1,"reused property owner");body.isKinematic=false;G11ContactProbe.Arm();Need(!wheel.enabled && body.wakes==1,"disabled control arming");
-  Console.WriteLine("G11_CONTACT_METHODS_PASS");
+  input.wheel_enabled=false;wheel=G11ContactProbe.Configure(input,source,original,probe,body,false,canonical,new G11ContactProbe.SetupMark());ApplyLoad();ApplyCanonical(new Initial());Need(body.mass==100 && body.centerOfMass.y==2.1f && body.inertiaTensor.x==1 && G11ContactProbe.report.source_body.mass==999,"canonical reuse replaced by later source readback");Need(body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1,"reused property owner");body.isKinematic=false;G11ContactProbe.Arm();Need(!wheel.enabled && body.wakes==1,"disabled control arming");
+  ReadoutCaptureChecks.Run();Console.WriteLine("G11_CONTACT_METHODS_PASS");
+ }
+}
+'''
+
+
+READOUT_CHECKS=r'''
+namespace UnityEngine {
+ public static class Time {public static int frameCount;}
+ public static class Debug {public static void Log(object value){}public static void LogException(Exception error){}}
+ public static class Application {public static int exitCode;public static event Action<string,string,int> logMessageReceived;public static void Quit(int code){exitCode=code;}public static void Raise(){if(logMessageReceived!=null)logMessageReceived("","",0);}}
+ public static class JsonUtility {
+  public static object supplied,serialized;
+  public static T FromJson<T>(string json){if(json!="recording deserializer input")throw new Exception("scenario text changed");return (T)supplied;}
+  public static string ToJson(object value,bool pretty){serialized=value;return System.Text.Json.JsonSerializer.Serialize(value,new System.Text.Json.JsonSerializerOptions{IncludeFields=true});}
+ }
+}
+public static class ReadoutCaptureChecks {
+ class Scenario {public string id="contact-test",probe_kind="single_wheel_contact";public bool contact_body_input_from_source;public G11AngularProbe.BodyInput contact_body_input;public G11ContactProbe.Input contact;}
+ class Sample {}
+ class Result {public bool completed,isolated_wheel_probe;public string error;public int physics_steps=0;public G11ContactProbe.Report contact;public G11ContactProbe.Readout contact_configure_readout;public G11Geometry.Activation[] wheel_activation_events;public Sample[] samples;}
+ static Scenario scenario;static Result result;static UnityEngine.Rigidbody body;static UnityEngine.WheelCollider[] wheels;
+ static int observedPhysicsStep,controlRevision,used;static bool finished,active;static Sample[] buffer;static System.Threading.Timer timeoutTimer;
+ static readonly object bufferGate=new object();static string Output;static int ObservedPhysicsStep {get{return observedPhysicsStep;}}static int InputRevision {get{return controlRevision;}}
+ static void CaptureLog(string a,string b,int c){}
+ static void Parse(){PARSED_METHOD}
+ HELD_METHOD
+ CONTACT_METHOD
+ FLUSH_METHODS
+ static void Need(bool value,string message){if(!value)throw new Exception(message);}
+ static void Reset(){typeof(G11ContactProbe).GetField("input",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,null);G11ContactProbe.report=null;G11ContactProbe.readout.after_from_json=new G11ContactProbe.ParsedReadout();G11ContactProbe.readout.before_guard=new G11ContactProbe.ConfigureReadout();}
+ static G11ContactProbe.Input Input(){return new G11ContactProbe.Input{source_wheel="level1:58684",support="full-tire",mode="force",duration_steps=240,event_steps=new[]{1,121,145},offset_m=new UnityEngine.Vector3(10000,0,0)};}
+ public static void Run(){
+  Need(!new G11ContactProbe.Readout().after_from_json.observed && !new G11ContactProbe.Readout().before_guard.observed,"unavailable readout appears observed");
+  for(int mask=0;mask<32;mask++){
+   Reset();var declared=Input();var held=new UnityEngine.Rigidbody{id=202,isKinematic=(mask&2)==0};var sourceBody=new UnityEngine.Rigidbody{id=101,isKinematic=(mask&4)==0};
+   var source=new UnityEngine.WheelCollider{key=(mask&8)==0?declared.source_wheel:"level1:different-component"};var canonical=(mask&16)==0?null:new G11AngularProbe.BodyInput();
+   if((mask&1)!=0)typeof(G11ContactProbe).GetField("input",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,declared);
+   bool rejected=false;try{G11ContactProbe.Configure(declared,source,sourceBody,new UnityEngine.GameObject("guard"),held,true,canonical,new G11ContactProbe.SetupMark{frame=41,physics_step=15,input_revision=10});}catch(InvalidOperationException error){Need(error.Message=="Contact source, hold, or canonical origin differs","guard exception changed");rejected=true;}
+   var seen=G11ContactProbe.readout.before_guard;Need(rejected==(mask!=0),"guard truth differs from supplied fixture");
+   Need(seen.observed && seen.active==((mask&1)!=0) && seen.copied_kinematic==((mask&2)==0) && seen.source_kinematic==((mask&4)==0),"actual guard operands missing");
+   Need(seen.reject_active==((mask&1)!=0) && seen.reject_copied_dynamic==((mask&2)!=0) && seen.reject_source_dynamic==((mask&4)!=0) && seen.reject_source_key==((mask&8)!=0) && seen.reject_canonical_origin==((mask&16)!=0),"clause flags differ from fixture");
+   Need(seen.copied_body_id==202 && seen.source_body_id==101 && seen.source_wheel_id==50 && seen.source_component_key==source.key && seen.declared_source_key==declared.source_wheel,"component/body identity changed");
+   Need(seen.from_source && seen.canonical_is_null==((mask&16)==0) && seen.mark.frame==41 && seen.mark.physics_step==15 && seen.mark.input_revision==10,"origin or mark missing");
+   if(rejected)Need(held.massWrites==0 && held.comWrites==0 && held.tensorWrites==0 && held.rotationWrites==0 && held.kinematicReads==1 && sourceBody.kinematicReads==1 && held.kinematicWrites==1 && sourceBody.kinematicWrites==1,"rejected guard wrote body input or repeated native getter");
+  }
+  Reset();var absentHeld=new UnityEngine.Rigidbody{isKinematic=true};var absentSource=new UnityEngine.Rigidbody{isKinematic=true};bool absentRejected=false;
+  try{G11ContactProbe.Configure(Input(),new UnityEngine.WheelCollider(),absentSource,new UnityEngine.GameObject("absent canonical"),absentHeld,false,null,new G11ContactProbe.SetupMark());}catch(InvalidOperationException){absentRejected=true;}
+  Need(absentRejected && !G11ContactProbe.Active && G11ContactProbe.readout.before_guard.observed && !G11ContactProbe.readout.before_guard.from_source && G11ContactProbe.readout.before_guard.canonical_is_null && G11ContactProbe.readout.before_guard.reject_canonical_origin && absentHeld.massWrites==0,"missing canonical origin accepted or hidden");
+  Output=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"g11-contact-readout-"+Guid.NewGuid().ToString("N"));System.IO.Directory.CreateDirectory(Output);System.IO.File.WriteAllText(System.IO.Path.Combine(Output,"scenario.json"),"recording deserializer input");
+  try{
+   for(int state=0;state<4;state++){
+    Reset();result=new Result();var supplied=new Scenario{contact_body_input_from_source=(state&1)!=0,contact_body_input=(state&2)==0?null:new G11AngularProbe.BodyInput()};UnityEngine.JsonUtility.supplied=supplied;
+    UnityEngine.Time.frameCount=7;observedPhysicsStep=3;controlRevision=2;Parse();var parsed=result.contact_configure_readout.after_from_json;
+    Need(object.ReferenceEquals(scenario,supplied) && parsed.observed && parsed.from_source==supplied.contact_body_input_from_source && parsed.canonical_is_null==((state&2)==0),"actual parsed reference/bool changed");
+    Need(parsed.mark.frame==7 && parsed.mark.physics_step==3 && parsed.mark.input_revision==2 && !result.contact_configure_readout.before_guard.observed,"parsed mark or availability differs");
+   }
+   Reset();result=new Result();UnityEngine.JsonUtility.supplied=new Scenario{probe_kind="curve"};Parse();Need(result.contact_configure_readout==null && !G11ContactProbe.readout.after_from_json.observed,"non-contact parse observed contact");
+   Reset();result=new Result();UnityEngine.JsonUtility.supplied=new Scenario{contact=Input(),contact_body_input_from_source=true,contact_body_input=new G11AngularProbe.BodyInput()};UnityEngine.Time.frameCount=8;observedPhysicsStep=4;controlRevision=3;Parse();
+   var original=new UnityEngine.Rigidbody{id=101,isKinematic=true};body=original;var sourceWheel=new UnityEngine.WheelCollider();G11Geometry.nativeWheels=new[]{sourceWheel};int isolated=G11Geometry.isolates;bool failed=false;finished=false;used=0;active=false;buffer=null;timeoutTimer=null;
+   UnityEngine.Time.frameCount=10;observedPhysicsStep=15;controlRevision=10;
+   try{CreateContactProbe();}catch(InvalidOperationException error){failed=true;Fail(error);}
+   var output=UnityEngine.JsonUtility.serialized as Result;Need(failed && object.ReferenceEquals(output,result) && finished && !active && !G11ContactProbe.Active && result.contact==null && !result.isolated_wheel_probe && G11Geometry.isolates==isolated && object.ReferenceEquals(body,original),"failed configure activated contact or lost failure output");
+   Need(!output.completed && output.error.Contains("Contact source, hold, or canonical origin differs") && output.samples.Length==0 && UnityEngine.Application.exitCode==2,"original failure outcome changed");
+   var readout=output.contact_configure_readout;Need(readout.after_from_json.observed && readout.before_guard.observed && readout.after_from_json.from_source && !readout.after_from_json.canonical_is_null && readout.before_guard.from_source && !readout.before_guard.canonical_is_null && readout.before_guard.reject_canonical_origin,"failure serializer lacks actual readouts");
+   Need(readout.after_from_json.mark.frame==8 && readout.before_guard.mark.frame==10 && readout.before_guard.mark.physics_step==15 && readout.before_guard.mark.input_revision==10,"failure marks lost");
+   Need(UnityEngine.Rigidbody.latest.massWrites==0 && UnityEngine.Rigidbody.latest.comWrites==0 && UnityEngine.Rigidbody.latest.tensorWrites==0 && UnityEngine.Rigidbody.latest.rotationWrites==0 && original.massWrites==0 && original.kinematicWrites==1,"failure added body setter");
+   var saved=System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(Output,"runtime.json"))).RootElement;
+   var savedReadout=saved.GetProperty("contact_configure_readout");Need(!saved.GetProperty("completed").GetBoolean() && savedReadout.GetProperty("after_from_json").GetProperty("observed").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("observed").GetBoolean() && !savedReadout.GetProperty("after_from_json").GetProperty("canonical_is_null").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("reject_canonical_origin").GetBoolean(),"written failure output lacks actual readouts");
+   Need(System.IO.File.ReadAllText(System.IO.Path.Combine(Output,"completion.json")).Contains("\"completed\":false"),"failure completion not written");
+  }finally{System.IO.Directory.Delete(Output,true);}
+  Console.WriteLine("G11_CONTACT_READOUT_TRANSPORT_PASS 32 guard fixtures, 4 parsed fixtures, failed output");
  }
 }
 '''

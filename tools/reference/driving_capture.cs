@@ -174,6 +174,7 @@ public sealed class G11Capture : MonoBehaviour
         public string template_source="level1/64898.StartCar02 -> level1/206 -> level1/17687 carscript level1/77839";
         public Sample[] samples;
         public G11AngularProbe.Report angular;public G11ContactProbe.Report contact;
+        public G11ContactProbe.Readout contact_configure_readout;
         public G11Geometry.Activation[] wheel_activation_events;
         public List<G11Geometry.OwnershipCheckpoint> wheel_ownership=G11Geometry.ownershipCheckpoints;
         public List<SetupBoundary> setup_boundaries=new List<SetupBoundary>();
@@ -286,6 +287,12 @@ public sealed class G11Capture : MonoBehaviour
             {
                 if(instance!=null) throw new InvalidOperationException("Duplicate original menu initialization");
                 scenario=JsonUtility.FromJson<Scenario>(File.ReadAllText(Path.Combine(Output,"scenario.json")));
+                if(scenario.probe_kind=="single_wheel_contact")
+                {
+                    result.contact_configure_readout=G11ContactProbe.readout;
+                    G11ContactProbe.ObserveAfterFromJson(scenario.contact_body_input_from_source,scenario.contact_body_input,
+                        new G11ContactProbe.SetupMark{frame=Time.frameCount,physics_step=ObservedPhysicsStep,input_revision=InputRevision});
+                }
                 result.scenario=scenario.id; result.probe_kind=scenario.probe_kind;
                 new GameObject("G11NativeObserver").AddComponent<G11Capture>();
                 instance.StartCoroutine(instance.Load((mainmenuscript)owner));
@@ -714,7 +721,8 @@ public sealed class G11Capture : MonoBehaviour
         var source=G11Geometry.nativeWheels.Single(w=>G11Geometry.Key(w)==scenario.contact.source_wheel);
         var original=body;var probe=new GameObject("G11SingleWheelContactProbe");
         var copied=CreateHeldProbeBody(probe);
-        wheels=new[]{G11ContactProbe.Configure(scenario.contact,source,original,probe,copied,scenario.contact_body_input_from_source,scenario.contact_body_input)};
+        wheels=new[]{G11ContactProbe.Configure(scenario.contact,source,original,probe,copied,scenario.contact_body_input_from_source,scenario.contact_body_input,
+            new G11ContactProbe.SetupMark{frame=Time.frameCount,physics_step=ObservedPhysicsStep,input_revision=InputRevision})};
         G11Geometry.IsolateSourceCar();body=copied;result.isolated_wheel_probe=true;result.contact=G11ContactProbe.report;
     }
     static void CreateAngularProbe()

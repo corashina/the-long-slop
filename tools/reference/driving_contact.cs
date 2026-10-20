@@ -52,15 +52,42 @@ public static class G11ContactProbe
         public bool source_sprung_mass_available,copied_sprung_mass_available;public float source_sprung_mass,copied_sprung_mass;
         public float n0,q0,motor_argument;public Assignment[] assignments;public Impulse impulse;public State initial_state;
     }
+    [Serializable] public struct SetupMark {
+        public int frame,physics_step,input_revision;
+    }
+    [Serializable] public struct ParsedReadout {
+        public bool observed,from_source,canonical_is_null;public SetupMark mark;
+    }
+    [Serializable] public struct ConfigureReadout {
+        public bool observed,active,copied_kinematic,source_kinematic,from_source,canonical_is_null;
+        public int copied_body_id,source_body_id,source_wheel_id;public string source_component_key,declared_source_key;
+        public bool reject_active,reject_copied_dynamic,reject_source_dynamic,reject_source_key,reject_canonical_origin;
+        public SetupMark mark;
+    }
+    [Serializable] public class Readout {
+        public ParsedReadout after_from_json;public ConfigureReadout before_guard;
+    }
+    public static readonly Readout readout=new Readout();
+    public static void ObserveAfterFromJson(bool fromSource,G11AngularProbe.BodyInput canonical,SetupMark mark)
+    {
+        readout.after_from_json=new ParsedReadout{observed=true,from_source=fromSource,canonical_is_null=canonical==null,mark=mark};
+    }
     public static Report report;
     static Input input;static WheelCollider wheel;static Rigidbody body,original;static Collider support;
     static PreInput[] preInputs;static int assignedStep,revision;static bool armed;
     public static bool Active { get {return input!=null;} }
     public static bool WheelEnabled { get {return input.wheel_enabled;} }
     static float Spacing(float x) {if(x==0) return float.Epsilon;return (float)Math.Pow(2,Math.Floor(Math.Log(Math.Abs(x),2))-23);}
-    public static WheelCollider Configure(Input declared,WheelCollider source,Rigidbody sourceBody,GameObject probe,Rigidbody held,bool fromSource,G11AngularProbe.BodyInput canonical)
+    public static WheelCollider Configure(Input declared,WheelCollider source,Rigidbody sourceBody,GameObject probe,Rigidbody held,bool fromSource,G11AngularProbe.BodyInput canonical,SetupMark mark)
     {
-        if(Active || !held.isKinematic || !sourceBody.isKinematic || G11Geometry.Key(source)!=declared.source_wheel || fromSource!=(canonical==null))
+        var observed=new ConfigureReadout{observed=true,active=Active,copied_body_id=held.GetInstanceID(),copied_kinematic=held.isKinematic,
+            source_body_id=sourceBody.GetInstanceID(),source_kinematic=sourceBody.isKinematic,source_wheel_id=source.GetInstanceID(),
+            source_component_key=G11Geometry.Key(source),declared_source_key=declared.source_wheel,from_source=fromSource,canonical_is_null=canonical==null,mark=mark};
+        observed.reject_active=observed.active;observed.reject_copied_dynamic=!observed.copied_kinematic;
+        observed.reject_source_dynamic=!observed.source_kinematic;observed.reject_source_key=observed.source_component_key!=observed.declared_source_key;
+        observed.reject_canonical_origin=observed.from_source!=observed.canonical_is_null;
+        readout.before_guard=observed;
+        if(observed.reject_active || observed.reject_copied_dynamic || observed.reject_source_dynamic || observed.reject_source_key || observed.reject_canonical_origin)
             throw new InvalidOperationException("Contact source, hold, or canonical origin differs");
         if(declared.duration_steps!=240 || declared.mode!="force" || declared.support!="full-tire" || declared.event_steps==null || declared.event_steps.Length!=3 || declared.event_steps[0]!=1 || declared.event_steps[1]!=121 || declared.event_steps[2]!=145)
             throw new InvalidOperationException("Contact fixed schedule differs");
