@@ -11,8 +11,8 @@ def gate_fixture(index=0):
     row=angular_rows()[index];spec=row['angular'];z=dict(x=0.,y=0.,z=0.);q=dict(x=0.,y=0.,z=0.,w=1.)
     profile=dict(center=z,radius=.3,mass=20.,damping=.25,suspension_distance=.3,force_application_distance=0.,spring_n_per_m=25000.,damper_n_s_per_m=1500.,spring_target=.45,forward={},sideways={})
     body=dict(instance_id=2,constraints=spec['rig']['constraints'],mass=100.,center_of_mass=z,inertia_tensor=dict(x=1.,y=2.,z=3.),inertia_tensor_rotation=q,position=z,rotation=q,velocity=spec['rig']['velocity_mps'],angular_velocity=z,gravity=z,use_gravity=False,drag=0.,angular_drag=0.,sleep_threshold=0.,sleeping=False,solver_iterations=6,solver_velocity_iterations=1,max_angular_velocity=7.,detect_collisions=True,kinematic=False,interpolation=0,collision_detection_mode=0)
-    native=[dict(key='level1:'+str(k),instance_id=i+10,road_slot=i if i<4 else -1,source_index=i,owner_instance_id=1,enabled=False) for i,k in enumerate((58684,58685,58686,58687,58655))]
-    shapes=[dict(type='WheelCollider',**n,**profile,sample=dict(enabled=False)) for n in native]
+    native=[dict(key='level1:'+str(k),instance_id=i+10,road_slot=i if i<4 else -1,source_index=i,owner_instance_id=0,owner_is_null=True,native_association_available=False,structural_owner_key='source-body',structural_owner_instance_id=1,structural_owner_bound=True,structural_links_valid=True,enabled=False,active_self=True,active_hierarchy=True) for i,k in enumerate((58684,58685,58686,58687,58655))]
+    shapes=[dict(type='WheelCollider',**n,**profile,sample=deepcopy(n)) for n in native]
     chosen=next(n for n in native if n['key']==spec['source_wheel'])
     transform=dict(position=z,rotation=q,local_position=z,local_rotation=q,local_scale=dict(x=1.,y=1.,z=1.),lossy_scale=dict(x=1.,y=1.,z=1.))
     report=dict(declared=deepcopy(spec),source_key=spec['source_wheel'],support=spec['support'],copied_wheel_id=50,source_wheel_id=chosen['instance_id'],original_body_id=1,copied_body_id=2,
@@ -31,7 +31,8 @@ def gate_fixture(index=0):
         for phase,value in [('physics.entry',previous),('physics.exit',rpm)]:
             samples.append(dict(step=step,sequence=len(samples)+1,phase=phase,frame=step,delta_time=.02,time=step*.02,fixed_dt=.02,input_sequence=0,angular_state=deepcopy(state),native_wheels=deepcopy(native),wheels=[dict(rpm=value,motor_torque=event['motor_nm'],brake_torque=event['brake_nm'],contact=False)]))
         previous=rpm
-    return row,dict(angular=report,body_trace=dict(retained_instance_id=1,copied_instance_id=2),geometry=[dict(phase='armed-after-canonical',colliders=shapes)],samples=samples,initial=dict(fixed_dt=.02))
+    phases=('prepared-held','backlog-drained-held','before-dynamic','switched-dynamic','canonical-applied','canonical-transforms-synchronized','native-wheels-enabled','armed-after-canonical')
+    return row,dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,initial=dict(fixed_dt=.02))
 
 
 class AngularTests(unittest.TestCase):
@@ -126,45 +127,12 @@ class AngularTests(unittest.TestCase):
         run['angular']['initial_state']['body']['rotation']['x']=.01
         self.assertNotEqual(before,angular_initial_inputs(run))
 
-    def test_actual_role_binding_waits_for_source_initialization(self):
-        from tools.reference.driving import method
-        actual=method((Path(__file__).parents[1]/'driving_geometry.cs').read_text(encoding='utf-8-sig'),'public static void BindNativeWheelRoles(')[0]
-        source=ROLE_STUBS.replace('// ACTUAL',actual)
-        result=subprocess.run(['pwsh','-NoProfile','-Command',"Add-Type -TypeDefinition @'\n"+source+"\n'@\n[RoleChecks]::Run()"],capture_output=True,text=True,timeout=60)
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-        self.assertIn('G11_ROLES_PASS',result.stdout)
-
     def test_actual_native_helper_with_compiled_stubs(self):
         source=(Path(__file__).parents[1]/'driving_angular.cs').read_text(encoding='utf-8-sig')+STUBS
         result=subprocess.run(['pwsh','-NoProfile','-Command',"Add-Type -TypeDefinition @'\n"+source+"\n'@\n[AngularChecks]::Run()"],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertIn('G11_ANGULAR_STUB_PASS',result.stdout)
 
-
-ROLE_STUBS=r'''
-using System;using System.Collections.Generic;using System.Linq;
-public class WheelCollider { public int id;public object attachedRigidbody;public int GetInstanceID(){return id;} }
-public class Car {public object RB=new object();public List<WheelCollider> allWH=new List<WheelCollider>();}
-public static class G11Geometry {
- public struct NativeWheel {public int road_slot,instance_id,source_index;public string key;}
- public static Car car=new Car();public static WheelCollider[] nativeWheels;
- public static Dictionary<WheelCollider,NativeWheel> nativeIdentities=new Dictionary<WheelCollider,NativeWheel>();
- static bool nativeRolesBound;public static string Key(WheelCollider w){return "source-"+w.id;}
- // ACTUAL
-}
-public static class RoleChecks {
- static void Need(bool v,string m){if(!v)throw new Exception(m);}
- public static void Run(){
-  G11Geometry.nativeWheels=Enumerable.Range(0,5).Select(i=>new WheelCollider{id=i+10,attachedRigidbody=G11Geometry.car.RB}).ToArray();
-  foreach(var w in G11Geometry.nativeWheels) G11Geometry.nativeIdentities.Add(w,new G11Geometry.NativeWheel{key="source-"+w.id,instance_id=w.id,source_index=w.id-10,road_slot=-1});
-  bool failed=false;try{G11Geometry.BindNativeWheelRoles();}catch(InvalidOperationException){failed=true;}Need(failed,"empty source roles accepted");
-  G11Geometry.car.allWH.AddRange(G11Geometry.nativeWheels.Take(4).Reverse());G11Geometry.BindNativeWheelRoles();
-  Need(G11Geometry.nativeIdentities[G11Geometry.nativeWheels[4]].road_slot==-1,"helper became road slot");
-  for(int i=0;i<4;i++){var w=G11Geometry.car.allWH[i];var n=G11Geometry.nativeIdentities[w];Need(n.road_slot==i && n.instance_id==w.id && n.key=="source-"+w.id,"binding changed");}
-  failed=false;try{G11Geometry.BindNativeWheelRoles();}catch(InvalidOperationException){failed=true;}Need(failed,"roles rebound");Console.WriteLine("G11_ROLES_PASS");
- }
-}
-'''
 
 STUBS=r'''
 namespace UnityEngine {

@@ -55,6 +55,7 @@ public static class Debug { public static void Log(string text) {} public static
 public static class JsonUtility { public static string ToJson(object value,bool pretty) { return "{}"; } }
 '''
 GEOMETRY = r'''
+    public static void NativeOwnershipCheckpoint(string phase,int step) {}
     public class Activation { public string wheel,caller; public int frame; public bool previous,requested,observed; }
     public class Hold { public bool intended; }
     public static bool holding=true;
@@ -64,6 +65,7 @@ GEOMETRY = r'''
     static string Key(WheelCollider wheel) { return "tracked-wheel"; }
 '''
 CAPTURE = r'''
+    public static int ObservedPhysicsStep=1;
     public class Sample {}
     public class Result { public bool completed; public string error; public int physics_steps;
         public G11Geometry.Activation[] wheel_activation_events; public Sample[] samples; }

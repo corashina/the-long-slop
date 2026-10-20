@@ -172,6 +172,7 @@ public sealed class G11Capture : MonoBehaviour
         public Sample[] samples;
         public G11AngularProbe.Report angular;
         public G11Geometry.Activation[] wheel_activation_events;
+        public List<G11Geometry.OwnershipCheckpoint> wheel_ownership=G11Geometry.ownershipCheckpoints;
         public List<SetupBoundary> setup_boundaries=new List<SetupBoundary>();
         public List<G11Geometry.Snapshot> geometry=G11Geometry.snapshots;
         public List<Curve> curves=new List<Curve>();
@@ -912,7 +913,7 @@ public sealed class G11Capture : MonoBehaviour
         { Fail(new InvalidOperationException("Angular declared render bound exceeded before required solves"));return; }
         if(active && !finished && startFrame>=0 && (G11AngularProbe.Active?step>=scenario.angular.duration_steps:Time.frameCount-startFrame>=scenario.duration_frames))
         {
-            try { G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
+            try { G11Geometry.NativeOwnershipCheckpoint("measurement-complete",ObservedPhysicsStep);G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
             catch(Exception error) { Fail(error); }
         }
     }

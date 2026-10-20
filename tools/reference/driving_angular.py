@@ -76,6 +76,33 @@ def angular_initial_inputs(run):
                 body_input=report['body_input'],wheel_input=report['wheel_input'])
 
 
+def validate_source_ownership(native,expected,original_id,original_key):
+    fields={'key','instance_id','source_index','road_slot','owner_instance_id','owner_is_null','native_association_available',
+            'structural_owner_key','structural_owner_instance_id','structural_owner_bound','structural_links_valid',
+            'enabled','active_self','active_hierarchy'}
+    if len(native)!=5 or any(not fields<=wheel.keys() for wheel in native):
+        raise ValueError('Angular source ownership evidence is missing')
+    if ([w['source_index'] for w in native]!=list(range(5)) or len({w['key'] for w in native})!=5 or
+        {w['key']:(w['instance_id'],w['road_slot']) for w in native}!=expected):
+        raise ValueError('Angular source native wheel identity or cohort differs')
+    for wheel in native:
+        booleans=('owner_is_null','native_association_available','structural_owner_bound','structural_links_valid','enabled','active_self','active_hierarchy')
+        if any(type(wheel[k]) is not bool for k in booleans) or type(wheel['owner_instance_id']) is not int:
+            raise ValueError('Angular native association availability is missing or invalid')
+        if (wheel['structural_owner_bound'] is not True or wheel['structural_links_valid'] is not True or
+            wheel['structural_owner_key']!=original_key or wheel['structural_owner_instance_id']!=original_id):
+            raise ValueError('Angular bound structural owner or parent links changed')
+        available=wheel['native_association_available']
+        if available!= (wheel['owner_instance_id']!=0) or wheel['owner_is_null']==available:
+            raise ValueError('Angular raw native association and availability differ')
+        if available and wheel['owner_instance_id']!=original_id:
+            raise ValueError('Angular reported native owner differs')
+        if not available and wheel['enabled'] and wheel['active_hierarchy']:
+            raise ValueError('Angular enabled active native association is missing')
+        if wheel['enabled']:
+            raise ValueError('Angular original source wheel isolation changed')
+
+
 def validate_angular(run,scenario):
     spec=validate_angular_schedule(scenario)
     report=run.get('angular',{})
@@ -93,11 +120,25 @@ def validate_angular(run,scenario):
     if not isinstance(profile,dict) or any(profile.get(k)!=shapes[0].get(k) for k in fields) or report.get('copied_profile')!=profile:
         raise ValueError('Angular copied profile differs from live source')
     native_expected={shape['key']:(shape['instance_id'],shape['road_slot']) for shape in run['geometry'][-1]['colliders'] if shape['type']=='WheelCollider'}
+    original_key=trace.get('retained_body')
+    if not original_key: raise ValueError('Angular retained structural body key is missing')
     for sample in run.get('samples',[]):
-        native=sample.get('native_wheels',[])
-        if (len(native)!=5 or [w.get('source_index') for w in native]!=list(range(5)) or
-            any(w.get('owner_instance_id')!=report['original_body_id'] for w in native) or len({w.get('key') for w in native})!=5 or {w.get('key'):(w.get('instance_id'),w.get('road_slot')) for w in native}!=native_expected or any(w['enabled'] for w in native)):
-            raise ValueError('Angular source native wheel identity or isolation differs')
+        validate_source_ownership(sample.get('native_wheels',[]),native_expected,report['original_body_id'],original_key)
+    checkpoints=run.get('wheel_ownership',[])
+    geometry=run.get('geometry',[])
+    phases=[row['phase'] for row in geometry]
+    if 'prepared-held' not in phases: raise ValueError('Angular prepared structural checkpoint is missing')
+    checked_geometry=geometry[phases.index('prepared-held'):]
+    expected_phases=[row['phase'] for row in checked_geometry]
+    for snapshot in checked_geometry:
+        native=[shape.get('sample',{}) for shape in snapshot['colliders'] if shape['type']=='WheelCollider']
+        validate_source_ownership(sorted(native,key=lambda wheel:wheel.get('source_index',-1)),native_expected,report['original_body_id'],original_key)
+    if [row.get('phase') for row in checkpoints]!=['source-role-bound',*expected_phases,'measurement-complete']:
+        raise ValueError('Angular structural ownership checkpoints are missing or reordered')
+    for index,checkpoint in enumerate(checkpoints):
+        if checkpoint.get('order')!=index+1 or any(type(checkpoint.get(k)) is not int for k in ('frame','physics_step')) or type(checkpoint.get('time')) not in (int,float):
+            raise ValueError('Angular structural checkpoint order or clocks are missing')
+        validate_source_ownership(checkpoint.get('wheels',[]),native_expected,report['original_body_id'],original_key)
     for name in ('source_sprung_mass','copied_sprung_mass'):
         if type(report.get(name)) not in (int,float): raise ValueError('Separate source/copy sprung mass is missing')
     source_body=report.get('source_body',{})

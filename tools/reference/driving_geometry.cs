@@ -16,7 +16,8 @@ public static class G11Geometry
     [Serializable] public class SourceMap { public string root; public SourceTransform[] transforms; }
     [Serializable] public struct NativeWheel
     {
-        public string key; public int instance_id,road_slot,source_index,owner_instance_id;
+        public string key,structural_owner_key; public int instance_id,road_slot,source_index,owner_instance_id,structural_owner_instance_id;
+        public bool native_association_available,owner_is_null,structural_owner_bound,structural_links_valid;
         public bool enabled,active_self,active_hierarchy,contact,sprung_mass_available;
         public float motor_torque,brake_torque,rpm,sprung_mass,hit_force;
         public Vector3 hit_point,hit_normal;
@@ -119,7 +120,16 @@ public static class G11Geometry
     public static readonly List<Snapshot> snapshots=new List<Snapshot>();
     public static WheelCollider[] nativeWheels;
     static bool holding,nativeRolesBound;
-    static readonly Dictionary<WheelCollider,NativeWheel> nativeIdentities=new Dictionary<WheelCollider,NativeWheel>();
+    sealed class NativeBinding {
+        public NativeWheel identity;public Rigidbody structural_owner;
+        public Transform[] nodes,parents;
+    }
+    [Serializable] public class OwnershipCheckpoint {
+        public string phase;public int order,frame,physics_step;public float time;
+        public NativeWheel[] wheels;
+    }
+    public static readonly List<OwnershipCheckpoint> ownershipCheckpoints=new List<OwnershipCheckpoint>();
+    static readonly Dictionary<WheelCollider,NativeBinding> nativeIdentities=new Dictionary<WheelCollider,NativeBinding>();
     public static Activation[] activation_events=new Activation[4096];
     public static int activation_count;
     static string Segment(Transform value)
@@ -193,23 +203,70 @@ public static class G11Geometry
         for(int index=0;index<nativeWheels.Length;index++) {
             var wheel=nativeWheels[index];
             held.Add(wheel,new Hold{saved=wheel.enabled,intended=wheel.enabled});
-            nativeIdentities.Add(wheel,new NativeWheel{key=Key(wheel),instance_id=wheel.GetInstanceID(),source_index=index,road_slot=-1});
+            nativeIdentities.Add(wheel,new NativeBinding{identity=new NativeWheel{key=Key(wheel),instance_id=wheel.GetInstanceID(),source_index=index,road_slot=-1}});
         }
+    }
+    static Exception NativeOwnershipFailure(WheelCollider wheel,NativeWheel identity,string predicate,string actual)
+    {
+        var native=wheel==null?null:wheel.attachedRigidbody;
+        return new InvalidOperationException("Native wheel predicate="+predicate+" key="+identity.key+
+            " source_index="+identity.source_index+" cached_id="+identity.instance_id+
+            " actual_id="+(wheel==null?0:wheel.GetInstanceID())+" expected_body="+(identity.structural_owner_bound?identity.structural_owner_key:Key(car.RB))+
+            " expected_body_id="+(identity.structural_owner_bound?identity.structural_owner_instance_id:car.RB==null?0:car.RB.GetInstanceID())+
+            " current_car_body_id="+(car.RB==null?0:car.RB.GetInstanceID())+" native_owner_id="+(native==null?0:native.GetInstanceID())+
+            " enabled="+(wheel!=null && wheel.enabled)+" active_self="+(wheel!=null && wheel.gameObject.activeSelf)+
+            " active_hierarchy="+(wheel!=null && wheel.gameObject.activeInHierarchy)+" actual="+actual);
     }
     public static void BindNativeWheelRoles()
     {
         if(nativeRolesBound || car.allWH.Count!=4 || car.allWH.Distinct().Count()!=4 || nativeWheels.Length!=5 ||
             nativeWheels.Distinct().Count()!=5 || nativeIdentities.Count!=5)
-            throw new InvalidOperationException("Native road roles are missing or already bound");
+            throw new InvalidOperationException("Native ownership predicate=cohort-count expected_wheels=5 expected_roads=4 actual_wheels="+
+                nativeWheels.Length+" actual_roads="+car.allWH.Count+" already_bound="+nativeRolesBound);
         for(int index=0;index<nativeWheels.Length;index++) {
-            var wheel=nativeWheels[index];var identity=nativeIdentities[wheel];
-            if(identity.source_index!=index || identity.instance_id!=wheel.GetInstanceID() || identity.key!=Key(wheel) || wheel.attachedRigidbody!=car.RB)
-                throw new InvalidOperationException("Native wheel cohort or original body ownership changed");
-            identity.road_slot=car.allWH.IndexOf(wheel);nativeIdentities[wheel]=identity;
+            var wheel=nativeWheels[index];NativeBinding binding;
+            if(wheel==null || !nativeIdentities.TryGetValue(wheel,out binding))
+                throw new InvalidOperationException("Native ownership predicate=cohort-member source_index="+index);
+            var identity=binding.identity;
+            if(identity.source_index!=index) throw NativeOwnershipFailure(wheel,identity,"source-index",index.ToString());
+            if(identity.instance_id!=wheel.GetInstanceID()) throw NativeOwnershipFailure(wheel,identity,"native-id",wheel.GetInstanceID().ToString());
+            if(identity.key!=Key(wheel)) throw NativeOwnershipFailure(wheel,identity,"authored-key",Key(wheel));
+            var structural=wheel.GetComponentInParent<Rigidbody>(true);
+            if(structural==null || structural!=car.RB) throw NativeOwnershipFailure(wheel,identity,"structural-owner",structural==null?"null":Key(structural));
+            binding.structural_owner=structural;
+            var nodes=new List<Transform>();var parents=new List<Transform>();
+            for(var node=wheel.transform;node!=structural.transform;node=node.parent) {
+                if(node==null) throw NativeOwnershipFailure(wheel,identity,"structural-path","missing retained body");
+                nodes.Add(node);parents.Add(node.parent);
+            }
+            binding.nodes=nodes.ToArray();binding.parents=parents.ToArray();
+            identity.road_slot=car.allWH.IndexOf(wheel);identity.structural_owner_key=Key(structural);
+            identity.structural_owner_instance_id=structural.GetInstanceID();identity.structural_owner_bound=true;
+            binding.identity=identity;
+            ReadWheel(wheel);
         }
-        if(nativeWheels.Count(w=>nativeIdentities[w].road_slot<0)!=1)
-            throw new InvalidOperationException("Expected four road wheels and one separate native helper");
+        if(nativeWheels.Count(w=>nativeIdentities[w].identity.road_slot<0)!=1)
+            throw new InvalidOperationException("Native ownership predicate=road-roles expected_four_roads_and_one_helper");
         nativeRolesBound=true;
+        NativeOwnershipCheckpoint("source-role-bound",G11Capture.ObservedPhysicsStep);
+    }
+    public static void NativeOwnershipCheckpoint(string phase,int step)
+    {
+        if(!nativeRolesBound) return;
+        if(car.allWH.Count!=4 || car.allWH.Distinct().Count()!=4)
+            throw new InvalidOperationException("Native ownership predicate=checkpoint-road-cohort expected_roads=4 actual_roads="+car.allWH.Count);
+        var samples=new NativeWheel[nativeWheels.Length];
+        for(int index=0;index<nativeWheels.Length;index++) {
+            var wheel=nativeWheels[index];var binding=nativeIdentities[wheel];
+            if(binding.identity.road_slot!=car.allWH.IndexOf(wheel))
+                throw NativeOwnershipFailure(wheel,binding.identity,"checkpoint-road-role",car.allWH.IndexOf(wheel).ToString());
+            var actual=wheel.GetComponentInParent<Rigidbody>(true);
+            if(actual==null || binding.structural_owner==null || actual!=binding.structural_owner || actual!=car.RB)
+                throw NativeOwnershipFailure(wheel,binding.identity,"checkpoint-structural-owner",actual==null?"null":Key(actual));
+            samples[index]=ReadWheel(wheel);
+        }
+        ownershipCheckpoints.Add(new OwnershipCheckpoint{phase=phase,order=ownershipCheckpoints.Count+1,
+            frame=Time.frameCount,physics_step=step,time=Time.time,wheels=samples});
     }
     public static void HoldWheels()
     {
@@ -339,10 +396,28 @@ public static class G11Geometry
     }
     public static NativeWheel ReadWheel(WheelCollider wheel)
     {
+        NativeBinding binding;
+        if(wheel==null || !nativeIdentities.TryGetValue(wheel,out binding))
+            throw NativeOwnershipFailure(wheel,new NativeWheel{key=wheel==null?"null":Key(wheel),source_index=-1},"sample-cohort","unbound native wheel");
         WheelHit hit;bool contact=wheel.GetGroundHit(out hit);
-        var identity=nativeIdentities[wheel];
+        var identity=binding.identity;
+        if(identity.source_index<0 || identity.source_index>=nativeWheels.Length || nativeWheels[identity.source_index]!=wheel ||
+            identity.instance_id!=wheel.GetInstanceID() || identity.key!=Key(wheel))
+            throw NativeOwnershipFailure(wheel,identity,"sample-cohort","cached identity or index changed");
+        if(identity.structural_owner_bound) {
+            if(binding.structural_owner==null || binding.structural_owner!=car.RB) throw NativeOwnershipFailure(wheel,identity,"bound-structural-owner","retained body changed");
+            for(int index=0;index<binding.nodes.Length;index++)
+                if(binding.nodes[index]==null || binding.nodes[index].parent!=binding.parents[index])
+                    throw NativeOwnershipFailure(wheel,identity,"cached-parent-link",index.ToString());
+        }
+        var native=wheel.attachedRigidbody;
+        if(native!=null && native!=car.RB) throw NativeOwnershipFailure(wheel,identity,"reported-native-owner",Key(native));
+        if(native==null && wheel.enabled && wheel.gameObject.activeInHierarchy)
+            throw NativeOwnershipFailure(wheel,identity,"enabled-active-native-owner","null");
         return new NativeWheel{key=identity.key,instance_id=identity.instance_id,source_index=identity.source_index,road_slot=identity.road_slot,
-            owner_instance_id=wheel.attachedRigidbody==null?0:wheel.attachedRigidbody.GetInstanceID(),enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
+            owner_instance_id=native==null?0:native.GetInstanceID(),owner_is_null=native==null,native_association_available=native!=null,
+            structural_owner_key=identity.structural_owner_key,structural_owner_instance_id=identity.structural_owner_instance_id,
+            structural_owner_bound=identity.structural_owner_bound,structural_links_valid=identity.structural_owner_bound,enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
             motor_torque=wheel.motorTorque,brake_torque=wheel.brakeTorque,rpm=wheel.rpm,sprung_mass=wheel.sprungMass,sprung_mass_available=true,
             contact=contact,hit_point=contact?hit.point:Vector3.zero,hit_normal=contact?hit.normal:Vector3.zero,hit_force=contact?hit.force:0,
             contact_response=contact?"native WheelCollider.GetGroundHit response":"native GetGroundHit false; hit response unavailable"};
@@ -539,6 +614,7 @@ public static class G11Geometry
         (extra!=null && value.transform.IsChildOf(extra.transform))); }
     public static Snapshot Capture(string phase,int step,string callback,HashSet<mountStuff> completed,pickupable extra=null)
     {
+        NativeOwnershipCheckpoint(phase,step);
         // Source-generated wheel lock boxes have roles independent of their unnamed sibling paths.
         for(int index=0;index<car.whColliders.Count;index++)
         {
