@@ -1135,7 +1135,7 @@ impl GarageRuntime {
             },
             vehicle_input.held,
         );
-        if driving && input.pressed & keys::LIGHTS != 0 {
+        if (driving || self.area.player.driving2()) && input.pressed & keys::LIGHTS != 0 {
             if let Some(audio) = &mut self.audio
                 && audio.vehicle_index == self.vehicle
             {

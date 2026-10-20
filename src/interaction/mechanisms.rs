@@ -455,11 +455,12 @@ impl MechanismState {
         }
         self.items.get(&item).is_some_and(|i| {
             self.controls[*i].enabled
-                && self.controls[*i]
-                    .reference
-                    .turn
-                    .as_ref()
-                    .is_some_and(|t| matches!(t.action, TurnAction::ToggleHomeLight { .. }))
+                && self.controls[*i].reference.turn.as_ref().is_some_and(|t| {
+                    matches!(
+                        t.action,
+                        TurnAction::ToggleHomeLight { .. } | TurnAction::ToggleHandbrake
+                    )
+                })
         })
     }
     pub fn turn_state(&self, item: ItemId) -> Option<u8> {
