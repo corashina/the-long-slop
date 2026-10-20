@@ -3,7 +3,7 @@
 Date: 2026-10-20.
 Scope: roadmap G11 for the garage Lada and nearby terrain.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
-Status: design direction approved. Written specification awaits review.
+Status: written specification approved by the user on 2026-10-20.
 
 ## Intended result
 
@@ -261,9 +261,9 @@ This task excludes extra vehicles, long-distance world generation, cargo, towing
 It does not alter unrelated engine maintenance, inventory, or player controls.
 A required change outside these boundaries needs a design revision.
 
-This specification does not approve an implementation plan or implementation.
-The next approval covers this written specification.
-The next artifact is the implementation plan.
+The user approved this written specification on 2026-10-20.
+Implementation remains subject to implementation-plan review.
+The selected execution method uses subagents.
 
 ## Source and code pointers
 
