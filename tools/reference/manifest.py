@@ -168,14 +168,15 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 collider=candidates[0]
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
+    retained_colliders=detachable_colliders | getattr(source,'storage_collider_keys',set())
     for node,group in components.items():
         food_geometry=key(node_readers[node]) in source.food_geometry_nodes
-        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in retained_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
                 value=source.read(reader)
-                if not value['m_Enabled'] and key(reader) not in detachable_colliders and key(reader) not in getattr(source,'storage_collider_keys',set()):continue
+                if not value['m_Enabled'] and key(reader) not in retained_colliders:continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
