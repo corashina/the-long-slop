@@ -65,7 +65,7 @@ def validate_driver(run):
         raise ValueError('Original driver body missing before GetIn')
     for phase in STAMPS[2:]:
         stamp = by_phase[phase]
-        if stamp.get('original_body_present') or stamp.get('managed_body_present'):
+        if stamp.get('original_body_present') is not False or stamp.get('managed_body_present') is not False:
             raise ValueError('Native driver body removal is incomplete')
     for phase in STAMPS[3:]:
         stamp = by_phase[phase]

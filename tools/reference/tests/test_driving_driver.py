@@ -47,6 +47,22 @@ class DrivingDriverTests(unittest.TestCase):
                 if corrupt == 'inconsistent': run['driver']['stamps'][4]['consistent'] = False
                 with self.assertRaisesRegex(ValueError, message): validate_driver(run)
 
+    def test_native_removal_requires_explicit_false_body_flags(self):
+        valid = driver_fixture()
+        for stamp in valid['driver']['stamps'][2:]:
+            self.assertIs(stamp['original_body_present'], False)
+            self.assertIs(stamp['managed_body_present'], False)
+        self.assertEqual(validate_driver(valid)['expected_colliders'], 1)
+        for missing in (('original_body_present',), ('managed_body_present',),
+                        ('original_body_present', 'managed_body_present')):
+            for index in range(2, len(STAMPS)):
+                with self.subTest(missing=missing, phase=STAMPS[index]):
+                    run = driver_fixture()
+                    for field in missing:
+                        del run['driver']['stamps'][index][field]
+                    with self.assertRaisesRegex(ValueError, 'body removal'):
+                        validate_driver(run)
+
     def test_player_update_drive_flag_is_not_seat_ownership(self):
         run = driver_fixture()
         self.assertFalse(run['driver']['states'][0]['driver_update_flag'])
