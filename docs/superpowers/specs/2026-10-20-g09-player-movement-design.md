@@ -1,7 +1,7 @@
 # G09 player movement and inspection
 
 Date: 2026-10-20.
-Status: Design approved in chat. Written specification awaits review.
+Status: Written specification approved by the user on 2026-10-20. Implementation planning authorized.
 Branch: `codex/g09-player-movement`.
 Base commit: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 
