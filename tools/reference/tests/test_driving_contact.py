@@ -83,6 +83,31 @@ class ContactTests(unittest.TestCase):
         row,run=fixture();run['contact']['geometry']['source_signed_height']=3.
         with self.assertRaises(ValueError):validate_contact_body_input(run,None,True)
 
+    def test_non_axis_projections_and_speed_decode_single_operands(self):
+        import struct
+        row,run=fixture()
+        axes=('x','y','z')
+        def decode(value):return struct.unpack('<f',struct.pack('<f',value))[0]
+        run['contact']['geometry']['forward']=dict(x=.6,y=0.,z=.8)
+        run['contact']['geometry']['sideways']=dict(x=.8,y=0.,z=-.6)
+        for sample in run['samples']:sample['contact_state']['observed']['body']['velocity']=dict(x=.6,y=0.,z=.8)
+        run['samples'][1]['contact_state']['observed']['body']['velocity']=dict(x=.01,y=.02,z=.03)
+        original=deepcopy(run);rows=analyze_contact(run,row);first=rows[0]
+        pre=run['samples'][0]['contact_state']['pre_input'];before=pre['observed']['body'];after=run['samples'][1]['contact_state']['observed']['body']
+        mass=decode(before['mass']);dt=decode(pre['fixed_dt'])
+        expected_residual={axis:mass*(decode(after['velocity'][axis])-decode(before['velocity'][axis]))-mass*decode(before['gravity'][axis])*dt for axis in axes}
+        self.assertEqual(first['residual'],expected_residual)
+        self.assertTrue(any(value!=0 for value in expected_residual.values()))
+        expected={name:sum(expected_residual[axis]*decode(run['contact']['geometry'][name][axis]) for axis in axes) for name in ('normal','forward','sideways')}
+        raw_forward=sum(expected_residual[axis]*run['contact']['geometry']['forward'][axis] for axis in axes)
+        self.assertNotEqual(raw_forward,expected['forward'])
+        self.assertEqual(first['projections'],expected)
+        self.assertEqual(first['step_average'],{name:value/dt for name,value in expected.items()})
+        speeds=[math.sqrt(sum(decode(sample['contact_state']['observed']['body']['velocity'][axis])**2 for axis in axes)) for sample in run['samples']]
+        self.assertNotEqual(max(speeds),math.sqrt(.6**2+.8**2))
+        self.assertEqual(contact_summary(run,rows)['speed'],dict(min=min(speeds),max=max(speeds)))
+        self.assertEqual(run,original)
+
     def test_momentum_gravity_impulse_and_boundary_sleep(self):
         row,run=fixture(3);i=240
         run['initial']['fixed_dt']=.125

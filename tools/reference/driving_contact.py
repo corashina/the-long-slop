@@ -102,6 +102,7 @@ def analyze_contact(run,scenario):
         if sample['phase'] in ('physics.entry','physics.exit'):
             key=(sample['step'],sample['phase']);require(key not in pairs,'Contact duplicated solve boundary');pairs[key]=sample
     require(set(pairs)=={(s,p) for s in range(1,241) for p in ('physics.entry','physics.exit')},'Contact solve pairs missing')
+    basis={name:fv(report['geometry'][name]) for name in ('normal','forward','sideways')}
     output=[]
     for step in range(1,241):
         entry=pairs[step,'physics.entry'];exit=pairs[step,'physics.exit'];state=entry['contact_state'];pre=state['pre_input']
@@ -118,7 +119,7 @@ def analyze_contact(run,scenario):
         residual={k:mass*(f32(after['velocity'][k])-f32(before['velocity'][k]))-(mass*f32(before['gravity'][k])*dt if before['use_gravity'] else 0.)-f32(impulse[k]) for k in ZERO}
         awake=not any(b['sleeping'] or b['kinematic'] for b in (start,after))
         active=awake and spec['wheel_enabled'] and entry['contact_state']['observed']['contact'] and exit['contact_state']['observed']['contact']
-        output.append(dict(step=step,residual=residual,declared_impulse=impulse,pre_sleeping=before['sleeping'],entry_sleeping=start['sleeping'],exit_sleeping=after['sleeping'],entry_kinematic=start['kinematic'],exit_kinematic=after['kinematic'],awake_dynamic_boundaries=awake,active_response_available=active,projections={k:dot(residual,report['geometry'][k]) for k in ('normal','forward','sideways')},step_average={k:dot(residual,report['geometry'][k])/dt for k in ('normal','forward','sideways')}))
+        output.append(dict(step=step,residual=residual,declared_impulse=impulse,pre_sleeping=before['sleeping'],entry_sleeping=start['sleeping'],exit_sleeping=after['sleeping'],entry_kinematic=start['kinematic'],exit_kinematic=after['kinematic'],awake_dynamic_boundaries=awake,active_response_available=active,projections={k:dot(residual,basis[k]) for k in ('normal','forward','sideways')},step_average={k:dot(residual,basis[k])/dt for k in ('normal','forward','sideways')}))
     return output
 
 def validate_contact(run,scenario):
@@ -193,8 +194,9 @@ def validate_contact(run,scenario):
 
 def contact_summary(run,residuals):
     values=[s['contact_state']['observed'] for s in run['samples'] if s['phase'] in ('physics.entry','physics.exit')]
+    velocities=[fv(value['body']['velocity']) for value in values]
     def bounds(items):return dict(min=min(items),max=max(items)) if items else None
-    return dict(numeric_precision='raw Unity JSON remains retained; formula operands decode exactly to binary32, then offline momentum arithmetic uses binary64',contact_boundaries=sum(v['contact'] for v in values),nonzero_residual_intervals=sum(any(x!=0 for x in r['residual'].values()) for r in residuals),rpm=bounds([v['rpm'] for v in values]),projected_offset_q=bounds([v['q'] for v in values]),speed=bounds([math.sqrt(dot(v['body']['velocity'],v['body']['velocity'])) for v in values]),native_sprung_mass=bounds([v['sprung_mass'] for v in values if v['sprung_mass_available']]),hit_force_scalar=bounds([v['force_scalar'] for v in values if v['contact']]),forward_slip=bounds([v['forward_slip'] for v in values if v['contact']]),sideways_slip=bounds([v['sideways_slip'] for v in values if v['contact']]),overlap_limit='compare these observed ranges across independently qualified rows; absent overlap supplies no combined-slip identification')
+    return dict(numeric_precision='raw Unity JSON remains retained; formula operands decode exactly to binary32, then offline momentum arithmetic uses binary64',contact_boundaries=sum(v['contact'] for v in values),nonzero_residual_intervals=sum(any(x!=0 for x in r['residual'].values()) for r in residuals),rpm=bounds([v['rpm'] for v in values]),projected_offset_q=bounds([v['q'] for v in values]),speed=bounds([math.sqrt(dot(velocity,velocity)) for velocity in velocities]),native_sprung_mass=bounds([v['sprung_mass'] for v in values if v['sprung_mass_available']]),hit_force_scalar=bounds([v['force_scalar'] for v in values if v['contact']]),forward_slip=bounds([v['forward_slip'] for v in values if v['contact']]),sideways_slip=bounds([v['sideways_slip'] for v in values if v['contact']]),overlap_limit='compare these observed ranges across independently qualified rows; absent overlap supplies no combined-slip identification')
 
 def main():
     import argparse
