@@ -62,7 +62,25 @@ def angular_rows():
         'observed initial zero RPM and terminal strong-brake zero intervals',
         'signed spin in both unbraked release phases',
         'observed low-brake response from qualified zero boundaries']
-    return [*rows,zero,brake]
+    rows.extend((zero,brake))
+    # Frozen world inputs. Keep each parent's complete setup and observation contract.
+    for identity,parent,velocity in (
+        ('angular-full-tire-excitation-world-x-positive-below-five',0,(4.999000072479248,0.,0.)),
+        ('angular-full-tire-excitation-world-x-positive-above-five',0,(5.000999927520752,0.,0.)),
+        ('angular-full-tire-excitation-world-x-negative-below-five',0,(-4.999000072479248,0.,0.)),
+        ('angular-full-tire-excitation-world-x-negative-above-five',0,(-5.000999927520752,0.,0.)),
+        ('angular-full-tire-excitation-world-z-positive-ten',0,(0.,0.,10.)),
+        ('angular-bare-rim-excitation-zero-body-speed',4,(0.,0.,0.)),
+        ('angular-hub-excitation-zero-body-speed',6,(0.,0.,0.)),
+        ('angular-auxiliary-helper-motor-coast-zero-body-speed',9,(0.,0.,0.)),
+        ('angular-full-tire-brake-excitation-zero-body-speed',11,(0.,0.,0.)),
+    ):
+        clone=deepcopy(rows[parent])
+        clone['id']=identity
+        clone['setup']['velocity_mps']=dict(zip(('x','y','z'),velocity))
+        clone['angular']['rig']['velocity_mps']=dict(zip(('x','y','z'),velocity))
+        rows.append(clone)
+    return rows
 
 
 def validate_angular_schedule(scenario):
@@ -228,7 +246,7 @@ def validate_angular(run,scenario):
         initial_body.get('velocity')!=rig['velocity_mps'] or initial_body.get('angular_velocity')!=rig['angular_velocity_rad_s'] or
         initial_body.get('instance_id')!=report['copied_body_id'] or initial_body.get('kinematic') is not False):
         raise ValueError('Angular one-time initial body input is missing or differs')
-    new_row=scenario['id'] in ('angular-full-tire-excitation-zero-body-speed','angular-full-tire-brake-excitation')
+    new_row=any(row['id']==scenario['id'] for row in angular_rows()[10:])
     if new_row and (initial_body['sleeping'] is not False or
                     initial_state.get('active_self') is not True or initial_state.get('active_hierarchy') is not True):
         raise ValueError('Angular initial boundary requires an awake dynamic body and active wheel')

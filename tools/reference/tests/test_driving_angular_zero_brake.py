@@ -52,7 +52,7 @@ def new_fixture(index=10, spinning=False):
 class ZeroBrakeTests(unittest.TestCase):
     def test_exact_rows_and_unchanged_prefix(self):
         rows = angular_rows()
-        self.assertEqual(len(rows), 12)
+        self.assertEqual(len(rows), 21)
         self.assertEqual(hashlib.sha256(json.dumps(rows[:10],sort_keys=True,separators=(',',':')).encode()).hexdigest(), 'e6e7765656c9ca1b945ce7f61f859e1356db9c4e51f044f86fe93802c6cf19b5')
         stored = json.loads((Path(__file__).parents[3]/'tests/fixtures/driving/angular-scenarios.json').read_text())
         self.assertEqual({k:v for k,v in stored.items() if k!='scenarios'}, {'schema_version': 1})
@@ -81,7 +81,7 @@ class ZeroBrakeTests(unittest.TestCase):
                     if case == 'repeated': bad['angular']['events'].append(deepcopy(bad['angular']['events'][0]))
                     if case == 'frames': bad['duration_frames'] += 1
                     if case == 'steps': bad['angular']['duration_steps'] += 1
-                    if case == 'source': bad['angular']['source_wheel'] = 'level1:58655'
+                    if case == 'source': bad['angular']['source_wheel'] = 'wrong-source'
                     if case == 'rig': bad['angular']['rig']['velocity_mps']['x'] += 1
                     if case == 'setup': bad['setup']['velocity_mps']['x'] += 1
                     with self.assertRaises(ValueError): validate_angular_schedule(bad)
