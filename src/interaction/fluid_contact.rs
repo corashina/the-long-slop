@@ -321,6 +321,7 @@ mod tests {
     use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
     #[test]
+    #[ignore = "requires the installed single-Lada export"]
     fn g04_receipts_own_colliders_record_overlap_bounce_and_clear_outputs() {
         let mut r = ReferenceManifest::from_runtime_json(
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
