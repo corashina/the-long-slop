@@ -1224,7 +1224,11 @@ impl InteractionState {
         if self.active_mechanism_target(player, physics).is_none() {
             self.latched_mechanism = None;
         }
-        let availability = self.available_actions(&aim, player, items, physics, needs);
+        let mut availability = self.available_actions(&aim, player, items, physics, needs);
+        if availability.active_drag && !self.drag_input(input, &availability) {
+            self.latched_mechanism = None;
+            availability = self.available_actions(&aim, player, items, physics, needs);
+        }
         let resolved = self.resolve_input(input, &availability);
         self.carry.release_acquisition(input);
         let grab_input = resolved.grab_input;

@@ -55,6 +55,16 @@ impl InteractionState {
         }
         input
     }
+    pub(super) fn drag_input(&self, input: FrameInput, available: &ActionAvailability) -> bool {
+        available.use_item.is_some_and(|item| {
+            self.mechanisms.drag_eligible(item)
+                && (input.held & keys::USE != 0
+                    || (available.lmb_use
+                        && self.held_light_control().is_none()
+                        && input.held & keys::PRIMARY != 0)
+                    || (input.wheel != 0. && self.mechanisms.scroll_eligible(item)))
+        })
+    }
     pub(super) fn resolve_input(
         &self,
         input: FrameInput,
@@ -70,15 +80,8 @@ impl InteractionState {
         let primary_use = available.lmb_use && self.held_light_control().is_none();
         let use_held =
             input.held & keys::USE != 0 || (primary_use && input.held & keys::PRIMARY != 0);
-        let drag = available
-            .use_item
-            .is_some_and(|item| self.mechanisms.drag_eligible(item))
-            && (use_held
-                || (input.wheel != 0.
-                    && available
-                        .use_item
-                        .is_some_and(|item| self.mechanisms.scroll_eligible(item))));
-        let active_drag = self.latched_mechanism.is_some() && drag;
+        let drag = self.drag_input(input, available);
+        let active_drag = available.active_drag && drag;
         let mounting = !self.carry.acquisition_held()
             && ((available.actions.0 & ActionMask::MOUNT != 0
                 && input.released & keys::GRAB != 0

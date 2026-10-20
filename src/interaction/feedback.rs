@@ -58,6 +58,7 @@ pub struct ActionAvailability {
     pub opening: Option<OpeningId>,
     pub slot: Option<SlotTarget>,
     pub(super) use_item: Option<ItemId>,
+    pub(super) active_drag: bool,
     pub light_control: Option<LightControlId>,
     pub lmb_use: bool,
     pub fill_reservation: Option<OpeningId>,
@@ -126,15 +127,15 @@ impl InteractionState {
                     && target.distance <= self.reach
             })
         };
-        let use_target = self
-            .active_mechanism_target(player, physics)
-            .or_else(|| valid(aim.use_target));
+        let active_target = self.active_mechanism_target(player, physics);
+        let use_target = active_target.or_else(|| valid(aim.use_target));
         let grab_target = valid(aim.grab_target);
         let installation_target = valid(aim.installation_target);
         let filling_target = valid(aim.filling_target);
         let focus = valid(aim.focus_target);
         let mut a = ActionAvailability::default();
         a.use_item = use_target.map(|t| t.item);
+        a.active_drag = active_target.is_some_and(|t| self.mechanisms.drag_eligible(t.item));
         a.item = use_target
             .or(grab_target)
             .or(filling_target)
@@ -470,6 +471,16 @@ impl InteractionState {
                 Some(186) => a.actions.0 |= ActionMask::SCRUB,
                 _ => {}
             }
+        }
+        if a.active_drag {
+            a.actions.0 &= !(ActionMask::PICKUP
+                | ActionMask::DROP
+                | ActionMask::THROW
+                | ActionMask::MOUNT
+                | ActionMask::DISMOUNT
+                | ActionMask::PUSH
+                | ActionMask::GRIP
+                | ActionMask::RELEASE_GRIP);
         }
         a
     }

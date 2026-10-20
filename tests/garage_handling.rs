@@ -106,6 +106,18 @@ fn action_priority_and_input_ownership() {
         },
         aim,
     );
+    let available = run.area.interaction.available_actions(
+        &aim,
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+        run.survival.output(),
+    );
+    assert_eq!(
+        available.actions.0 & ActionMask::DISMOUNT,
+        0,
+        "active drag owns F in feedback"
+    );
     let outcome = step_input(
         &mut run,
         FrameInput {
@@ -122,6 +134,18 @@ fn action_priority_and_input_ownership() {
     assert!(run.area.interaction.parts.contains(part));
     // Without an active drag, the earlier part pass claims simultaneous F and LMB.
     step_input(&mut run, FrameInput::default(), aim);
+    let available = run.area.interaction.available_actions(
+        &aim,
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+        run.survival.output(),
+    );
+    assert_ne!(
+        available.actions.0 & ActionMask::DISMOUNT,
+        0,
+        "ending drag restores removal feedback"
+    );
     let outcome = step_input(
         &mut run,
         FrameInput {
