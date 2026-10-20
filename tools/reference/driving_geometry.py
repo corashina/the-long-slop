@@ -58,11 +58,80 @@ def first_difference(left, right, path=''):
     return None
 
 
+def scalar(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def coordinates(value, fields=('x', 'y', 'z')):
+    return isinstance(value, dict) and set(fields) <= value.keys() and all(scalar(value[k]) for k in fields)
+
+
+def validate_ownership(snapshot):
+    transforms = snapshot.get('transforms')
+    if not isinstance(transforms, list) or not transforms:
+        raise ValueError('Missing physical transform records')
+    poses = {}
+    for pose in transforms:
+        key = pose.get('key')
+        if not isinstance(key, str) or not key or key in poses:
+            raise ValueError('Missing or ambiguous physical transform identity')
+        if ('parent' not in pose or pose['parent'] is not None and not isinstance(pose['parent'], str) or
+                not coordinates(pose.get('local_position')) or
+                not coordinates(pose.get('local_rotation'), ('x', 'y', 'z', 'w')) or
+                not coordinates(pose.get('local_scale')) or
+                type(pose.get('active_self')) is not bool or type(pose.get('active_hierarchy')) is not bool):
+            raise ValueError('Incomplete physical local transform: ' + key)
+        poses[key] = pose
+    chains = {}
+    for key in poses:
+        chain = set()
+        current = key
+        while current:
+            if current in chain or current not in poses:
+                raise ValueError('Broken physical transform parent chain: ' + key)
+            chain.add(current)
+            current = poses[current]['parent']
+        chains[key] = chain
+    bodies = snapshot.get('nested_bodies')
+    if not isinstance(snapshot.get('body'), dict) or not isinstance(bodies, list):
+        raise ValueError('Missing physical body ownership records')
+    owners = {}
+    for body in [snapshot['body'], *bodies]:
+        key = body.get('key')
+        transform = body.get('transform_key')
+        if not isinstance(key, str) or not key or key in owners or not isinstance(transform, str) or transform not in poses:
+            raise ValueError('Missing physical body ownership transform')
+        if 'parent' not in body or body['parent'] != poses[transform]['parent']:
+            raise ValueError('Physical body parent context differs from its transform')
+        owners[key] = transform
+    for shape in snapshot['colliders']:
+        transform = shape.get('transform')
+        if not isinstance(transform, str) or transform not in poses:
+            raise ValueError('Missing physical collider transform reference')
+        if 'owner' not in shape or type(shape.get('owner_is_null')) is not bool:
+            raise ValueError('Missing explicit physical collider owner or null evidence')
+        owner = shape['owner']
+        if shape['owner_is_null']:
+            if owner not in (None, ''):
+                raise ValueError('Physical collider null ownership evidence conflicts')
+        elif not isinstance(owner, str) or owner not in owners:
+            raise ValueError('Missing physical collider owner body reference')
+        elif owners[owner] not in chains[transform]:
+            raise ValueError('Physical collider owner is outside its transform parent chain')
+
+
 def validate_geometry(run):
     snapshots = run.get('geometry', [])
+    if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider'):
+        raise ValueError('Unknown declared physical capture path')
+    isolated = run['probe_kind'] == 'wheel_collider'
+    if run.get('isolated_wheel_probe') is not isolated:
+        raise ValueError('Declared physical source-body or isolated-probe path differs')
     required = {'world.entry', 'source-physical-ready', 'prepared-held', 'backlog-drained-held',
-                'before-dynamic', 'switched-dynamic', 'before-inertia-reset', 'after-inertia-reset',
+                'before-dynamic', 'switched-dynamic',
                 'canonical-transforms-synchronized', 'native-wheels-enabled', 'armed-after-canonical'}
+    if not isolated:
+        required.update(('before-inertia-reset', 'after-inertia-reset'))
     if not required <= {row['phase'] for row in snapshots}:
         raise ValueError('Missing physical geometry checkpoints')
     if any(not row['complete'] or row['unavailable'] or not row['colliders'] for row in snapshots):
@@ -70,15 +139,12 @@ def validate_geometry(run):
     for row in snapshots:
         if row['phase'] in required - {'world.entry'} and not row['physical_ready']:
             raise ValueError('Incomplete deferred cargo body removal or collider ownership')
-        def scalar(value):
-            return type(value) in (int, float) and math.isfinite(value)
-        def vector(value):
-            return isinstance(value, dict) and {'x', 'y', 'z'} <= value.keys() and all(scalar(value[k]) for k in ('x', 'y', 'z'))
+        validate_ownership(row)
         friction_fields = {'extremum_slip', 'extremum_value', 'asymptote_slip', 'asymptote_value', 'stiffness'}
         for shape in row['colliders']:
-            if not vector(shape.get('center')):
+            if not coordinates(shape.get('center')):
                 raise ValueError('Incomplete native shape data: explicit center fields are required')
-            if shape['type'] == 'BoxCollider' and not vector(shape.get('size')):
+            if shape['type'] == 'BoxCollider' and not coordinates(shape.get('size')):
                 raise ValueError('Incomplete native shape data: explicit box size fields are required')
             if shape['type'] in ('SphereCollider', 'CapsuleCollider') and not scalar(shape.get('radius')):
                 raise ValueError('Incomplete native shape data: explicit radius is required')

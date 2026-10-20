@@ -42,14 +42,79 @@ class DrivingProbeTests(unittest.TestCase):
     def test_geometry_outputs_do_not_hide_local_shape_inputs(self):
         run = self.sample_run()
         left, right = run['geometry'][:2]
-        for row in (left, right):
-            row['transforms'] = [{'key': 'body-transform', 'local_position': 1., 'local_rotation': 2.,
-                                  'local_scale': 1., 'world_matrix': 3., 'body_matrix': 4., 'lossy_scale': 1.}]
-        right['transforms'][0]['local_rotation'] = 99.
-        right['transforms'][0]['world_matrix'] = 99.
+        body_transform = next(row for row in right['transforms'] if row['key'] == 'body-transform')
+        body_transform['local_rotation']['w'] = .99
+        body_transform['world_matrix'] = 99.
         self.assertEqual(physical_inputs(left), physical_inputs(right))
         right['colliders'][0]['radius'] = 99.
         self.assertNotEqual(physical_inputs(left), physical_inputs(right))
+
+    def test_geometry_checkpoints_follow_the_declared_physical_path(self):
+        isolated = self.sample_run('wheel_collider')
+        self.assertNotIn('before-inertia-reset', {row['phase'] for row in isolated['geometry']})
+        self.assertEqual(validate_geometry(isolated)['native_wheels'], 5)
+        validate_run(isolated, self.scenario('wheel_collider'))
+        assembled = self.sample_run()
+        assembled['geometry'] = [row for row in assembled['geometry'] if row['phase'] != 'before-inertia-reset']
+        with self.assertRaisesRegex(ValueError, 'Missing physical geometry checkpoints'):
+            validate_geometry(assembled)
+        isolated['isolated_wheel_probe'] = False
+        with self.assertRaisesRegex(ValueError, 'physical source-body or isolated-probe path differs'):
+            validate_geometry(isolated)
+
+    def test_geometry_requires_ownership_and_complete_transform_chains(self):
+        corruptions = (('missing_owner', 'explicit physical collider owner'),
+                       ('missing_null_flag', 'explicit physical collider owner'),
+                       ('conflicting_null', 'null ownership evidence conflicts'),
+                       ('unknown_owner', 'owner body reference'),
+                       ('missing_owner_transform', 'body ownership transform'),
+                       ('missing_shape_transform', 'collider transform reference'),
+                       ('empty_transforms', 'Missing physical transform records'),
+                       ('missing_transform_record', 'collider transform reference'),
+                       ('missing_parent', 'Incomplete physical local transform'),
+                       ('missing_position', 'Incomplete physical local transform'),
+                       ('incomplete_rotation', 'Incomplete physical local transform'),
+                       ('missing_scale', 'Incomplete physical local transform'),
+                       ('unknown_parent', 'Broken physical transform parent chain'),
+                       ('cycle', 'Broken physical transform parent chain'),
+                       ('owner_outside_chain', 'owner is outside its transform parent chain'))
+        for corruption, message in corruptions:
+            with self.subTest(corruption=corruption):
+                run = self.sample_run()
+                validate_geometry(run)
+                snapshot = run['geometry'][0]
+                shape = snapshot['colliders'][1]
+                pose = next(row for row in snapshot['transforms'] if row['key'] == shape['transform'])
+                if corruption == 'missing_owner': del shape['owner']
+                if corruption == 'missing_null_flag': del shape['owner_is_null']
+                if corruption == 'conflicting_null': shape['owner_is_null'] = True
+                if corruption == 'unknown_owner': shape['owner'] = 'missing-body'
+                if corruption == 'missing_owner_transform': snapshot['body']['transform_key'] = 'missing-transform'
+                if corruption == 'missing_shape_transform': del shape['transform']
+                if corruption == 'empty_transforms': snapshot['transforms'] = []
+                if corruption == 'missing_transform_record': snapshot['transforms'].remove(pose)
+                if corruption == 'missing_parent': del pose['parent']
+                if corruption == 'missing_position': del pose['local_position']
+                if corruption == 'incomplete_rotation': del pose['local_rotation']['w']
+                if corruption == 'missing_scale': del pose['local_scale']
+                if corruption == 'unknown_parent': pose['parent'] = 'missing-parent'
+                if corruption == 'cycle': pose['parent'] = pose['key']
+                if corruption == 'owner_outside_chain': pose['parent'] = 'scene-transform'
+                with self.assertRaisesRegex(ValueError, message): validate_geometry(run)
+
+    def test_transitional_native_owners_remain_valid_observations(self):
+        run = self.sample_run()
+        snapshot = deepcopy(run['geometry'][0])
+        snapshot.update(phase='storage.lock.exit', physical_ready=False)
+        cargo_pose = deepcopy(snapshot['transforms'][-1])
+        cargo_pose.update(key='cargo-transform', parent='body-transform')
+        snapshot['transforms'].append(cargo_pose)
+        snapshot['nested_bodies'].append({'key': 'cargo-body', 'transform_key': 'cargo-transform', 'parent': 'body-transform'})
+        snapshot['colliders'].append({'key': 'cargo-shape', 'type': 'BoxCollider', 'complete': True,
+                                      'center': {'x': 0., 'y': 0., 'z': 0.}, 'size': {'x': 1., 'y': 1., 'z': 1.},
+                                      'transform': 'cargo-transform', 'owner': 'cargo-body', 'owner_is_null': False})
+        run['geometry'].insert(1, snapshot)
+        self.assertEqual(validate_geometry(run)['checkpoints'], 12)
 
     def test_preflight_rejects_changed_source(self):
         with tempfile.TemporaryDirectory() as name:
@@ -82,6 +147,7 @@ class DrivingProbeTests(unittest.TestCase):
     def sample_run(kind='assembled_lada', initial_physics=False):
         run = {'schema_version': 1, 'scenario': 'launch-default', 'probe_kind': kind,
                'runtime': 'original-unity-player', 'completed': True,
+               'isolated_wheel_probe': kind == 'wheel_collider',
                'menu_ready': True, 'lada_ready': True, 'control_capture_active': True,
                'physics_steps': 4 if initial_physics else 3, 'error': '', 'initial': {'engine_rpm': 0.}, 'samples': []}
         links = dict(input_sequence=0, engine_sequence=0, car_sequence=0, rpm_sequence=0)
@@ -116,6 +182,7 @@ class DrivingProbeTests(unittest.TestCase):
                         'forward_slip': 0., 'sideways_slip': 0.} for _ in range(4)]})
         wheels = [{'key': f'wheel-{i}', 'type': 'WheelCollider', 'road_slot': i-1,
                    'complete': True, 'sprung_mass_available': True, 'enabled': i != 0,
+                   'transform': f'wheel-transform-{i}', 'owner': 'car-body' if i else None, 'owner_is_null': i == 0,
                    'intended_enabled': i != 0, 'restored_enabled': i != 0,
                    'restoration_applied': True, 'center': {'x': 0., 'y': 0., 'z': 0.}, 'radius': .3, 'mass': 1., 'damping': .25,
                    'suspension_distance': .3, 'force_application_distance': 0., 'spring_n_per_m': 35000.,
@@ -125,8 +192,18 @@ class DrivingProbeTests(unittest.TestCase):
         phases = ('world.entry', 'source-physical-ready', 'prepared-held', 'backlog-drained-held',
                   'before-dynamic', 'switched-dynamic', 'before-inertia-reset', 'after-inertia-reset',
                   'canonical-transforms-synchronized', 'native-wheels-enabled', 'armed-after-canonical')
+        if kind == 'wheel_collider':
+            phases = tuple(phase for phase in phases if phase not in ('before-inertia-reset', 'after-inertia-reset'))
+        transforms = [{'key': key, 'parent': parent,
+                       'local_position': {'x': 0., 'y': 0., 'z': 0.},
+                       'local_rotation': {'x': 0., 'y': 0., 'z': 0., 'w': 1.},
+                       'local_scale': {'x': 1., 'y': 1., 'z': 1.},
+                       'active_self': True, 'active_hierarchy': True}
+                      for key, parent in [('scene-transform', None), ('body-transform', 'scene-transform'),
+                                          *[(f'wheel-transform-{i}', 'body-transform') for i in range(5)]]]
         run['geometry'] = [{'phase': phase, 'complete': True, 'physical_ready': True, 'unavailable': [],
-                            'colliders': deepcopy(wheels), 'transforms': [], 'body': {'transform_key': 'body-transform'}}
+                            'colliders': deepcopy(wheels), 'transforms': deepcopy(transforms),
+                            'body': {'key': 'car-body', 'transform_key': 'body-transform', 'parent': 'scene-transform'}, 'nested_bodies': []}
                            for phase in phases]
         for sample in run['samples']:
             sample['native_wheels'] = [{'sprung_mass_available': True} for _ in range(5)]
