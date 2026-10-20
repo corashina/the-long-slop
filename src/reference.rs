@@ -6,6 +6,9 @@ pub mod package;
 pub mod prototype_plan;
 pub use package::{FileCatalog, FileReceipt, PlanReceipt};
 
+pub mod player;
+pub use player::*;
+
 pub mod driving;
 pub use driving::*;
 
@@ -610,6 +613,12 @@ pub struct PushReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerReference {
+    pub posture: PlayerPostureReference,
+    pub view: PlayerViewReference,
+    pub prone_multiplier: f32,
+    pub duck_jump_multiplier: f32,
+    pub inverse_duck_multiplier: f32,
+    pub max_fall_speed: f32,
     pub source: SourceId,
     pub capsule_source: SourceId,
     pub camera_source: SourceId,
@@ -667,6 +676,8 @@ pub struct PlayerReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeatReference {
+    pub default_yaw_degrees: f32,
+    pub pitch_limits_degrees: [f32; 2],
     pub id: SeatId,
     pub source: SourceId,
     pub item: ItemId,
@@ -1637,6 +1648,7 @@ impl ReferenceManifest {
             )?;
         }
         let p = &self.player;
+        p.validate_movement()?;
         require(p.camera_culling_mask != 0, "camera culling mask")?;
         require(
             p.scroll_sensitivity.is_finite() && p.scroll_sensitivity > 0.0,
@@ -1909,6 +1921,7 @@ impl ReferenceManifest {
         )?;
         let mut seat_hit_nodes = HashSet::new();
         for r in &self.seats {
+            r.validate_view()?;
             require(
                 item_ids.contains(&r.item)
                     && anchor_ids.contains(&r.anchor)

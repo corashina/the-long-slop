@@ -9,6 +9,7 @@ from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
 from .driving import recover_driving
+from .player_movement import recover_player_movement, recover_seat_view
 
 
 def build_manifest(source, roots, reports, hashes, library, cars, output):
@@ -229,7 +230,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight']})
+                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],**recover_seat_view(source,reader)})
     wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
     mount_links={}
     for group in components.values():
@@ -325,6 +326,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     stand=source.resolve(player_reader,player['TStandHeadPos']);prone=source.resolve(player_reader,player['TProneHeadPos']);capsule=source.get('level1',58456);camera=source.get('level1',40241)
     distance=math.dist(vector(source.read(stand)['m_LocalPosition']),vector(source.read(prone)['m_LocalPosition']))
     player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'ctrl_duck_value':player['ctrlDuckValue'],'duck_lerp':player['FduckLerp'],'head_lerp':player['FHeadLerp'],'crouch_height':distance*player['ctrlDuckValue'],'capsule_radius':source.read(capsule)['m_Radius'],'capsule_height':source.read(capsule)['m_Height'],'camera_height':source.read(stand)['m_LocalPosition']['y'],'field_of_view_degrees':source.read(camera)['field of view'],'aim_reach':player['FrayRange']}
+    player_record.update(recover_player_movement(source))
     player_record.update(standing_radius=player['maxBodyRadius'],standing_height=distance,
         crouch_radius=player['minBodyRadius']+(player['maxBodyRadius']-player['minBodyRadius'])*player['ctrlDuckValue'],
         exit_distance=player['CanGetOutDist'],exit_step_vertical=player['GetOutStepV'],exit_steps_vertical=player['GetOutStepTimesV'],

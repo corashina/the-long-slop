@@ -215,3 +215,55 @@ fn oversized_documents_stop_before_parsing() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn installed_player_movement_contract() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+    let player = &reference.player;
+    assert_eq!(player.source.path_id, 80125);
+    assert_eq!(player.posture.feet.source.path_id, 57258);
+    assert_eq!(player.posture.feet.source.file, "level1");
+    assert_eq!(player.posture.feet.filter, 4_172_190_207);
+    assert_eq!(player.posture.feet.membership, 1 << 12);
+    assert!((player.posture.feet.center[1] + 0.573).abs() < 0.00001);
+    assert_eq!(player.posture.sensor_hold_steps, 3);
+    assert_eq!(player.view.foot_fov_degrees, 65.0);
+    assert_eq!(player.view.car_fov_degrees, 65.0);
+    for (index, sensor) in player.posture.clearance.iter().enumerate() {
+        assert!((sensor.posture - (index + 1) as f32 / 10.0).abs() < 0.00001);
+        assert_eq!(sensor.sphere.source.file, "sharedassets1.assets");
+        assert_eq!(sensor.sphere.source.path_id, 124758);
+        assert_eq!(sensor.sphere.membership, 1 << 14);
+        assert_eq!(sensor.sphere.filter, 4_037_970_431);
+        assert!((sensor.sphere.radius - 0.15).abs() < 0.00001);
+        assert!((sensor.sphere.center[1] - (-0.685 + 1.335 * sensor.posture)).abs() < 0.00001);
+    }
+    let mut seat_sources: Vec<_> = reference.seats.iter().map(|s| s.source.path_id).collect();
+    seat_sources.sort_unstable();
+    assert_eq!(seat_sources, [65840, 66466, 69296, 76381, 77843]);
+    for seat in &reference.seats {
+        assert_eq!(seat.yaw_limits_degrees, [-179.0, 179.0]);
+        assert_eq!(seat.pitch_limits_degrees, [-89.0, 89.0]);
+        assert_eq!(seat.default_yaw_degrees, 0.0);
+        assert_eq!(seat.min_exit_angle_degrees, 65.0);
+    }
+    for mutate in [
+        |r: &mut ReferenceManifest| r.player.posture.clearance.reverse(),
+        |r: &mut ReferenceManifest| r.player.posture.clearance[0].sphere.radius = 0.2,
+        |r: &mut ReferenceManifest| r.player.posture.clearance[0].sphere.filter = 1,
+        |r: &mut ReferenceManifest| r.player.posture.feet.center[0] = f32::NAN,
+        |r: &mut ReferenceManifest| r.player.posture.standing_head.translation[1] = f32::INFINITY,
+        |r: &mut ReferenceManifest| r.player.view.tap_seconds = 0.3,
+        |r: &mut ReferenceManifest| r.seats[0].default_yaw_degrees = 1.0,
+        |r: &mut ReferenceManifest| r.seats[0].pitch_limits_degrees = [-90.0, 90.0],
+    ] {
+        let mut invalid = reference.clone();
+        mutate(&mut invalid);
+        assert!(invalid.validate().is_err());
+    }
+    let mut missing: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    missing["player"].as_object_mut().unwrap().remove("view");
+    assert!(ReferenceManifest::from_runtime_json(&serde_json::to_vec(&missing).unwrap()).is_err());
+}
