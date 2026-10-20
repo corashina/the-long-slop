@@ -1,12 +1,30 @@
 //! Engine save boundaries checked against the installed build 11140890 export.
 use my_summer_slop::{
-    fluids::{FluidContainer, FluidMixture, transfer},
+    fluids::{FluidContainer, FluidEntry, transfer},
     reference::ReferenceManifest,
-    save::{
-        CameraSave, FluidSnapshot, IdentityMap, SaveError, SaveSnapshot, SourceHash, SourceStamp,
-    },
+    save::{CameraSave, IdentityMap, SaveError, SaveSnapshot, SourceHash, SourceStamp},
     starting_area::GarageRuntime,
 };
+
+fn fluid(capacity: f32, quantities: [f32; 6], order: &[u8]) -> FluidContainer {
+    let entries: Vec<_> = order
+        .iter()
+        .map(|&fluid_type| FluidEntry {
+            fluid_type,
+            amount: quantities[fluid_type as usize],
+        })
+        .collect();
+    FluidContainer::new(capacity, &entries)
+}
+
+fn natural_fluid(capacity: f32, quantities: [f32; 6]) -> FluidContainer {
+    let order: Vec<_> = quantities
+        .iter()
+        .enumerate()
+        .filter_map(|(index, amount)| (*amount != 0.).then_some(index as u8))
+        .collect();
+    fluid(capacity, quantities, &order)
+}
 
 fn installed_source() -> (ReferenceManifest, SourceStamp) {
     let path = "web/assets/reference/manifest.json";
@@ -56,11 +74,13 @@ fn fluid_save_order_and_validation() {
         .fluid
         .as_mut()
         .unwrap();
-    *container = FluidContainer::new(container.capacity_liters, FluidMixture::default());
+    *container = FluidContainer::new(container.capacity_liters, &[]);
     for (index, liters) in [(3, 3.), (0, 2.)] {
-        let mut quantities_liters = [0.; 6];
-        quantities_liters[index] = liters;
-        let mut source = FluidContainer::new(liters, FluidMixture { quantities_liters });
+        let entry = FluidEntry {
+            fluid_type: index,
+            amount: liters,
+        };
+        let mut source = FluidContainer::new(liters, &[entry]);
         assert_eq!(transfer(&mut source, container, liters), liters);
     }
     let saved = game
@@ -78,8 +98,19 @@ fn fluid_save_order_and_validation() {
         .position(|item| ids.item(&item.instance).unwrap() == fuel_id)
         .unwrap();
     let fluids = saved.items[fuel].fluids.as_ref().unwrap();
-    assert_eq!(fluids.order, [3, 0]);
-    assert_eq!(fluids.quantities_liters, [2., 0., 0., 3., 0., 0.]);
+    assert_eq!(
+        fluids,
+        &[
+            FluidEntry {
+                fluid_type: 3,
+                amount: 3.
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 2.
+            },
+        ]
+    );
     let decoded = SaveSnapshot::from_json(&serde_json::to_vec(&saved).unwrap()).unwrap();
     let restored = GarageRuntime::from_save(&reference, &stamp, &decoded).unwrap();
     // Item contents restore before the world streaming gate opens.
@@ -95,44 +126,39 @@ fn fluid_save_order_and_validation() {
         )
         .unwrap();
     assert_eq!(recaptured[fuel].fluids, saved.items[fuel].fluids);
-    for order in [
-        vec![3, 0, 0],
-        vec![3, 0, 6],
-        vec![0, 1, 2, 3, 4, 5, 0],
-        vec![3],
+    for entries in [
+        vec![
+            FluidEntry {
+                fluid_type: 3,
+                amount: 1.,
+            },
+            FluidEntry {
+                fluid_type: 3,
+                amount: 0.,
+            },
+        ],
+        vec![FluidEntry {
+            fluid_type: 6,
+            amount: 0.,
+        }],
+        vec![
+            FluidEntry {
+                fluid_type: 0,
+                amount: 0.
+            };
+            7
+        ],
+        vec![FluidEntry {
+            fluid_type: 0,
+            amount: f32::NAN,
+        }],
     ] {
         let mut invalid = saved.clone();
-        invalid.items[fuel].fluids.as_mut().unwrap().order = order;
+        invalid.items[fuel].fluids = Some(entries);
         assert!(invalid.validate(&reference, &stamp).is_err());
     }
-    for amount in [
-        -1.,
-        f32::NAN,
-        reference
-            .tanks
-            .iter()
-            .find(|tank| tank.item == fuel_id)
-            .unwrap()
-            .capacity_liters
-            + 1.,
-    ] {
-        let mut invalid = saved.clone();
-        invalid.items[fuel]
-            .fluids
-            .as_mut()
-            .unwrap()
-            .quantities_liters[0] = amount;
-        assert!(invalid.validate(&reference, &stamp).is_err());
-    }
-    game.area
-        .items
-        .get_mut(fuel_id)
-        .unwrap()
-        .fluid
-        .as_mut()
-        .unwrap()
-        .mixture
-        .quantities_liters[1] = 1.;
+    game.area.items.get_mut(fuel_id).unwrap().fluid =
+        Some(fluid(39., [2., 1., 0., 3., 0., 0.], &[3, 0, 1]));
     let quantity_only = game
         .capture_save(
             &reference,
@@ -142,8 +168,21 @@ fn fluid_save_order_and_validation() {
         )
         .unwrap();
     assert_eq!(
-        quantity_only.items[fuel].fluids.as_ref().unwrap().order,
-        [3, 0, 1]
+        quantity_only.items[fuel].fluids.as_ref().unwrap(),
+        &[
+            FluidEntry {
+                fluid_type: 3,
+                amount: 3.
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 2.
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: 1.
+            },
+        ]
     );
     let restored = GarageRuntime::from_save(&reference, &stamp, &quantity_only).unwrap();
     // Item contents restore before the world streaming gate opens.
@@ -159,16 +198,33 @@ fn fluid_save_order_and_validation() {
         )
         .unwrap();
     assert_eq!(recaptured[fuel].fluids, quantity_only.items[fuel].fluids);
-    let mut retained_zero = saved.clone();
-    retained_zero.items[fuel]
-        .fluids
-        .as_mut()
-        .unwrap()
-        .order
-        .push(5);
-    retained_zero.validate(&reference, &stamp).unwrap();
+    let mut retained_entries = saved.items[fuel].fluids.clone().unwrap();
+    retained_entries.extend([
+        FluidEntry {
+            fluid_type: 5,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 2,
+            amount: -0.25,
+        },
+    ]);
+    game.area.items.get_mut(fuel_id).unwrap().fluid =
+        Some(FluidContainer::new(39., &retained_entries));
+    let retained_zero = game
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    assert_eq!(
+        retained_zero.items[fuel].fluids.as_ref().unwrap(),
+        &retained_entries
+    );
     let restored = GarageRuntime::from_save(&reference, &stamp, &retained_zero).unwrap();
-    // Item contents restore before the world streaming gate opens.
+    // Load removes one nonpositive entry before the world streaming gate opens.
     let recaptured = restored
         .area
         .items
@@ -180,29 +236,55 @@ fn fluid_save_order_and_validation() {
             &reference,
         )
         .unwrap();
-    assert_eq!(recaptured[fuel].fluids.as_ref().unwrap().order, [3, 0, 5]);
+    assert_eq!(
+        recaptured[fuel].fluids.as_ref().unwrap(),
+        &[
+            FluidEntry {
+                fluid_type: 3,
+                amount: 3.
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 2.
+            },
+            FluidEntry {
+                fluid_type: 2,
+                amount: -0.25
+            },
+        ]
+    );
     let mut invalid = saved.clone();
     invalid
         .items
         .iter_mut()
         .find(|item| item.fluids.is_none())
         .unwrap()
-        .fluids = Some(FluidSnapshot {
-        quantities_liters: [0.; 6],
-        order: vec![],
-    });
+        .fluids = Some(vec![
+        FluidEntry {
+            fluid_type: 3,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 3,
+            amount: 0.,
+        },
+    ]);
     assert!(invalid.validate(&reference, &stamp).is_err());
     let mut invalid = saved.clone();
-    invalid.schema_version = 6;
+    invalid.schema_version = 7;
     assert!(invalid.validate(&reference, &stamp).is_err());
     assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(matches!(
+        SaveSnapshot::from_json(br#"{"schema_version":7}"#),
+        Err(SaveError::IncompatibleSources(_))
+    ));
     assert!(matches!(
         SaveSnapshot::from_json(br#"{"schema_version":6}"#),
         Err(SaveError::IncompatibleSources(_))
     ));
     assert!(
-        serde_json::from_str::<FluidSnapshot>(
-            r#"{"quantities_liters":[0,0,0,0,0,0],"order":[],"extra":true}"#
+        serde_json::from_str::<my_summer_slop::fluids::FluidSnapshot>(
+            r#"[{"fluid_type":3,"amount":0,"extra":true}]"#
         )
         .is_err()
     );
@@ -543,9 +625,10 @@ fn engine_thresholds_and_grace() {
         let mut state = primed(&rig);
         state.last_run_time = -1.;
         rig.engine.restore_save(&state).unwrap();
-        rig.sump.mixture.quantities_liters = [0.; 6];
-        rig.sump.mixture.quantities_liters[source.oil_fluid as usize] =
-            rig.sump.capacity_liters * 0.3 * (1. - penalty.cbrt());
+        let oil = rig.sump.capacity_liters * 0.3 * (1. - penalty.cbrt());
+        let mut quantities = [0.; 6];
+        quantities[source.oil_fluid as usize] = oil;
+        rig.sump = natural_fluid(rig.sump.capacity_liters, quantities);
         let output = rig.step(source, installed(), |_| 0., 0.02);
         assert_eq!(
             output.running, expected,
@@ -560,11 +643,12 @@ fn engine_thresholds_and_grace() {
     assert!(normal.torque_nm > 0.);
     let mut low_oil = EngineRig::new(&reference);
     low_oil.engine.restore_save(&primed(&low_oil)).unwrap();
-    low_oil.sump.mixture.quantities_liters[source.oil_fluid as usize] =
-        low_oil.sump.capacity_liters * 0.03;
+    let mut oil = [0.; 6];
+    oil[source.oil_fluid as usize] = low_oil.sump.capacity_liters * 0.03;
+    low_oil.sump = natural_fluid(low_oil.sump.capacity_liters, oil);
     let weak = low_oil.step(source, installed(), |_| 0., 0.02);
     assert!(weak.torque_nm > 0. && weak.torque_nm < normal.torque_nm);
-    low_oil.sump.mixture.quantities_liters = [0.; 6];
+    low_oil.sump = FluidContainer::new(low_oil.sump.capacity_liters, &[]);
     assert!(!low_oil.step(source, installed(), |_| 0., 0.21).running);
 
     let mut hot = EngineRig::new(&reference);
@@ -585,13 +669,13 @@ fn engine_thresholds_and_grace() {
 
     let mut fuel = EngineRig::new(&reference);
     fuel.engine.restore_save(&primed(&fuel)).unwrap();
-    fuel.fuel.mixture.quantities_liters = [0.; 6];
+    fuel.fuel = FluidContainer::new(fuel.fuel.capacity_liters, &[]);
     let first = fuel.step(source, installed(), |_| 0., 0.02);
     assert!(first.running, "decision reads previous fuel suitability");
     assert_eq!(first.fuel_suitability, 0.);
     assert_eq!(first.target_rpm, 0.);
     assert!(!fuel.step(source, installed(), |_| 0., 0.21).running);
-    fuel.fuel.mixture.quantities_liters[0] = 1.;
+    fuel.fuel = natural_fluid(fuel.fuel.capacity_liters, [1., 0., 0., 0., 0., 0.]);
     assert!(!fuel.step(source, installed(), |_| 0., 0.02).running);
     assert!(fuel.step(source, installed(), |_| 0., 0.02).running);
 }
@@ -613,24 +697,9 @@ fn engine_fluids_and_cooling() {
     rule.heat_gain_min = 0.;
     rule.heat_gain_max = 0.;
     rule.rpm_change_modifier = 0.;
-    rig.fuel = FluidContainer::new(
-        39.,
-        FluidMixture {
-            quantities_liters: [2., 0., 0., 3., 0., 0.],
-        },
-    );
-    rig.sump = FluidContainer::new(
-        5.,
-        FluidMixture {
-            quantities_liters: [0., 2., 0., 3., 0., 0.],
-        },
-    );
-    rig.coolant = FluidContainer::new(
-        5.,
-        FluidMixture {
-            quantities_liters: [0., 0., 0., 2., 3., 0.],
-        },
-    );
+    rig.fuel = natural_fluid(39., [2., 0., 0., 3., 0., 0.]);
+    rig.sump = natural_fluid(5., [0., 2., 0., 3., 0., 0.]);
+    rig.coolant = natural_fluid(5., [0., 0., 0., 2., 3., 0.]);
     let mut saved = primed(&rig);
     saved.temperature = 120.;
     rig.engine.restore_save(&saved).unwrap();
@@ -647,8 +716,8 @@ fn engine_fluids_and_cooling() {
         * (rule.fuel_consumption.iter().sum::<f32>() * (0.2 + 0.8 * 2000. / rule.max_rpm));
     let fuel_first = 2. - fuel_amount * 2. / 5.;
     let fuel_second = 3. - fuel_amount * 3. / (fuel_first + 3.);
-    close(rig.fuel.mixture.amount(0), fuel_first);
-    close(rig.fuel.mixture.amount(3), fuel_second);
+    close(rig.fuel.mixture().amount(0), fuel_first);
+    close(rig.fuel.mixture().amount(3), fuel_second);
     close(output.consumed_fuel_liters, 5. - (fuel_first + fuel_second));
     let oil_amount = rule.globals.oil_consumption
         * rule.oil_consumption_modifier
@@ -657,8 +726,8 @@ fn engine_fluids_and_cooling() {
         * input.sleep_modifier;
     let oil_first = 2. - oil_amount * 2. / 5.;
     let oil_second = 3. - oil_amount * 3. / (oil_first + 3.);
-    close(rig.sump.mixture.amount(1), oil_first);
-    close(rig.sump.mixture.amount(3), oil_second);
+    close(rig.sump.mixture().amount(1), oil_first);
+    close(rig.sump.mixture().amount(3), oil_second);
     // Existing order: mechanical heat, sump drain, evaporation, radiator cooling/leak.
     let evaporation = rule.globals.coolant_evaporate_rate / 60.
         * dt
@@ -670,18 +739,13 @@ fn engine_fluids_and_cooling() {
     let leak = rule.radiator.max_fluid_loss / 60. * dt * input.sleep_modifier;
     let water_after_leak = water - leak * water / (water + blood);
     let blood_after_leak = blood - leak * blood / (water_after_leak + blood);
-    close(rig.coolant.mixture.amount(3), water_after_leak);
-    close(rig.coolant.mixture.amount(4), blood_after_leak);
+    close(rig.coolant.mixture().amount(3), water_after_leak);
+    close(rig.coolant.mixture().amount(4), blood_after_leak);
 
     // Source sequential overdraw can create fluid after a negative total.
     // The engine publication boundary bounds each amount by its previous amount.
     let mut overdraw = EngineRig::new(&reference);
-    overdraw.fuel = FluidContainer::new(
-        4.,
-        FluidMixture {
-            quantities_liters: [1., 1., 1., 1., 0., 0.],
-        },
-    );
+    overdraw.fuel = natural_fluid(4., [1., 1., 1., 1., 0., 0.]);
     overdraw.engine.restore_save(&primed(&overdraw)).unwrap();
     let mut drain_rule = source.clone();
     drain_rule.globals.fuel_consumption =
@@ -689,7 +753,7 @@ fn engine_fluids_and_cooling() {
     let output = overdraw.step(&drain_rule, EngineInput::default(), |_| 0., dt);
     for (actual, expected) in overdraw
         .fuel
-        .mixture
+        .mixture()
         .quantities_liters
         .into_iter()
         .zip([0., 0., 0., 1., 0., 0.])
@@ -700,24 +764,9 @@ fn engine_fluids_and_cooling() {
 
     // Installed rates and supported sleep scaling also deplete mixed containers.
     let mut near_empty = EngineRig::new(&reference);
-    near_empty.fuel = FluidContainer::new(
-        39.,
-        FluidMixture {
-            quantities_liters: [0.000001; 6],
-        },
-    );
-    near_empty.sump = FluidContainer::new(
-        5.,
-        FluidMixture {
-            quantities_liters: [0.0000001; 6],
-        },
-    );
-    near_empty.coolant = FluidContainer::new(
-        5.,
-        FluidMixture {
-            quantities_liters: [0.0000001; 6],
-        },
-    );
+    near_empty.fuel = natural_fluid(39., [0.000001; 6]);
+    near_empty.sump = natural_fluid(5., [0.0000001; 6]);
+    near_empty.coolant = natural_fluid(5., [0.0000001; 6]);
     let mut state = primed(&near_empty);
     state.temperature = 120.;
     near_empty.engine.restore_save(&state).unwrap();
@@ -731,25 +780,21 @@ fn engine_fluids_and_cooling() {
         for container in [&near_empty.fuel, &near_empty.sump, &near_empty.coolant] {
             assert!(
                 container
-                    .mixture
-                    .quantities_liters
-                    .iter()
-                    .all(|amount| amount.is_finite() && *amount >= 0.)
+                    .entries()
+                    .all(|entry| entry.amount.is_finite() && entry.amount >= 0.)
             );
-            assert!(container.mixture.total() <= container.capacity_liters);
+            assert!(container.total() <= container.capacity_liters);
         }
     }
     assert!(!near_empty.engine.running());
     for wrong in [false, true] {
         let mut rig = EngineRig::new(&reference);
-        rig.fuel = FluidContainer::new(
+        rig.fuel = natural_fluid(
             39.,
-            FluidMixture {
-                quantities_liters: if wrong {
-                    [0., 0., 5., 0., 0., 0.]
-                } else {
-                    [0.; 6]
-                },
+            if wrong {
+                [0., 0., 5., 0., 0., 0.]
+            } else {
+                [0.; 6]
             },
         );
         for _ in 0..20 {
@@ -774,7 +819,7 @@ fn engine_fluids_and_cooling() {
         state.fan_on = fan_on;
         rig.engine.restore_save(&state).unwrap();
         if empty {
-            rig.coolant.mixture.quantities_liters = [0.; 6];
+            rig.coolant = FluidContainer::new(rig.coolant.capacity_liters, &[]);
         }
         let mut input = installed();
         let installed = input.installed.as_mut().unwrap();
@@ -789,7 +834,7 @@ fn engine_fluids_and_cooling() {
     let good = cooled(100., Some(0), false, false, 0.);
     let worn = cooled(100., Some(4), false, false, 0.);
     assert!(good.0.temperature < worn.0.temperature && worn.0.temperature < 100.);
-    assert!(worn.2.mixture.total() < good.2.mixture.total());
+    assert!(worn.2.total() < good.2.total());
     let off = radiator.thermostat_range[0];
     assert_eq!(
         cooled(off.next_down(), Some(0), false, false, 0.)
@@ -869,16 +914,13 @@ fn engine_fluids_and_cooling() {
     let mut state = stopped.engine.capture_save();
     state.temperature = 120.;
     stopped.engine.restore_save(&state).unwrap();
-    let before = stopped.coolant.mixture.total();
+    let before = stopped.coolant.total();
     let mut stopped_input = installed();
     stopped_input.installed.as_mut().unwrap().ignition = false;
     stopped_input.installed.as_mut().unwrap().radiator_condition = Some(4);
     let out = stopped.step(source, stopped_input, |_| 0., dt);
     assert!(!out.running);
-    assert!(
-        stopped.coolant.mixture.total() < before,
-        "hot stopped evaporation"
-    );
+    assert!(stopped.coolant.total() < before, "hot stopped evaporation");
     let mut missing = stopped.clone();
     let before_missing = missing.coolant.clone();
     stopped_input.installed.as_mut().unwrap().radiator_condition = None;

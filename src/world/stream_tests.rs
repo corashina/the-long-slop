@@ -747,14 +747,11 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
         tank_pose: reference.world.generation_frame,
         cap_pose: reference.world.generation_frame,
         fluids: source_tank
-            .quantities_liters
-            .into_iter()
-            .enumerate()
-            .filter_map(|(fluid_type, amount)| {
-                (amount > 0.).then_some(super::super::placement::SupplyFluid {
-                    fluid_type: fluid_type as i32,
-                    amount,
-                })
+            .fluids
+            .iter()
+            .map(|entry| super::super::placement::SupplyFluid {
+                fluid_type: i32::from(entry.fluid_type),
+                amount: entry.amount,
             })
             .collect(),
         capacity: source_tank.capacity_liters,
@@ -785,7 +782,15 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
     let supply_key = run.area.items.object_key(tank);
     let supply_baseline = run.area.items.generated_snapshot(tank, None).unwrap();
     let mut supply_changed = supply_baseline.clone();
-    supply_changed.fluid_quantities.as_mut().unwrap()[3] -= 1.;
+    supply_changed
+        .fluids
+        .as_mut()
+        .unwrap()
+        .as_mut_slice()
+        .iter_mut()
+        .find(|entry| entry.fluid_type == 3)
+        .unwrap()
+        .amount -= 1.;
     run.stream
         .changes
         .record(supply_key.clone(), supply_changed, &supply_baseline);
@@ -1186,7 +1191,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         condition: 0.5,
         food: None,
         temperature: None,
-        fluid_quantities: None,
+        fluids: None,
         valve: None,
         lamp: None,
         linear_velocity: [0.; 3],
@@ -3109,6 +3114,28 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .find(|item| item.name == "OilCan")
         .unwrap()
         .id;
+    let oil_entries = [
+        crate::fluids::FluidEntry {
+            fluid_type: 0,
+            amount: -0.5,
+        },
+        crate::fluids::FluidEntry {
+            fluid_type: 3,
+            amount: 1.,
+        },
+        crate::fluids::FluidEntry {
+            fluid_type: 2,
+            amount: -0.25,
+        },
+    ];
+    run.area
+        .items
+        .get_mut(oil)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .restore_entries(&oil_entries);
     let owner_colliders = run.physics.rapier().bodies
         [run.area.items.get(held).unwrap().body.unwrap()]
     .colliders()
@@ -3168,6 +3195,19 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
     let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
     assert!(loaded.restore_pending());
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        oil_entries[1..]
+    );
     let mut claim = None;
     for _ in 0..1000 {
         let required = roadside_views(&loaded.stream);
@@ -3204,6 +3244,22 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         loaded.area.items.get(oil).unwrap().location,
         ItemLocation::Attached(restored_held)
     );
+    for _ in 0..2 {
+        assert!(loaded.advance_saved_restore(&reference).unwrap());
+        assert_eq!(
+            loaded
+                .area
+                .items
+                .get(oil)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .entries()
+                .collect::<Vec<_>>(),
+            oil_entries[1..]
+        );
+    }
     assert_eq!(
         loaded.area.items.get(oil).unwrap().body,
         loaded.area.items.get(restored_held).unwrap().body
@@ -3231,6 +3287,16 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             .find(|item| item.id == oil)
             .unwrap()
             .source,
+    );
+    assert_eq!(
+        recaptured
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(&oil_entries[1..])
     );
     assert_eq!(
         saved
@@ -3581,6 +3647,281 @@ fn roadside_views(stream: &WorldStream) -> [super::super::RequiredView; 1] {
         light_mask: u32::MAX,
         origin: stream.origin.offset,
     }]
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
+    use crate::fluids::{FluidContainer, FluidEntry};
+    use crate::save::{CameraSave, SourceHash, SourceStamp};
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: r.app_id,
+        build_id: r.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: r
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let mut run = GarageRuntime::new(&r).unwrap();
+    let oil = r.vehicles[0].engine.oil_tank;
+    let engine = r.vehicles[0].engine.item;
+    run.area
+        .interaction
+        .parts
+        .remove(engine, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    let capacity = run
+        .area
+        .items
+        .get(oil)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .capacity_liters;
+    let entries = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: -0.5,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 2,
+            amount: -0.25,
+        },
+        FluidEntry {
+            fluid_type: 1,
+            amount: capacity + 1.,
+        },
+    ];
+    run.area.items.get_mut(oil).unwrap().fluid = Some(FluidContainer::new(capacity, &entries));
+    let saved = run
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    let tank = restored
+        .area
+        .items
+        .get(oil)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap();
+    assert_eq!(tank.entries().collect::<Vec<_>>(), entries[1..]);
+    let body = restored.area.items.get(engine).unwrap().body.unwrap();
+    assert_ne!(body, restored.physics.chassis_handle(0));
+    // Complete deferred binding through the native renderer-receipt adapter before capture.
+    prepare_ready(&mut restored, &r);
+    assert!(restored.advance_saved_restore(&r).unwrap());
+    assert!(!restored.restore_pending());
+    let mass = restored.physics.rapier().bodies[body].mass();
+    assert_eq!(
+        restored
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[1..]
+    );
+    // A second source load removes the retained zero, without changing mass.
+    let recaptured = restored
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut second = GarageRuntime::from_save(&r, &stamp, &recaptured).unwrap();
+    let second_tank = second.area.items.get(oil).unwrap().fluid.as_ref().unwrap();
+    assert_eq!(second_tank.entries().collect::<Vec<_>>(), entries[2..]);
+    let second_body = second.area.items.get(engine).unwrap().body.unwrap();
+    prepare_ready(&mut second, &r);
+    assert!(second.advance_saved_restore(&r).unwrap());
+    assert!(!second.restore_pending());
+    assert!(
+        (second.physics.rapier().bodies[second_body].mass() - mass).abs() < 0.001,
+        "first completed mass {mass}, second completed mass {}",
+        second.physics.rapier().bodies[second_body].mass()
+    );
+    assert_eq!(
+        second
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[2..]
+    );
+    let third_save = second
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut third = GarageRuntime::from_save(&r, &stamp, &third_save).unwrap();
+    assert_eq!(
+        third
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[3..]
+    );
+    prepare_ready(&mut third, &r);
+    assert!(third.advance_saved_restore(&r).unwrap());
+    assert!(!third.restore_pending());
+    assert_eq!(
+        third
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[3..]
+    );
+    let third_body = third.area.items.get(engine).unwrap().body.unwrap();
+    assert!((third.physics.rapier().bodies[third_body].mass() - mass - 0.25).abs() < 0.001);
+    // World reactivation restores complete state without a logical source load.
+    let snapshot = second.area.items.generated_snapshot(oil, None).unwrap();
+    let mut reactivated = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    reactivated
+        .area
+        .items
+        .restore_generated(oil, &snapshot)
+        .unwrap();
+    assert_eq!(
+        reactivated
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[2..]
+    );
+
+    // Task 5's exact fixture uses the same real deferred-restore adapter.
+    let exact = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: 1.,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 1,
+            amount: -0.25,
+        },
+    ];
+    let oil_instance = crate::save::InstanceId::initial(
+        &r.items.iter().find(|item| item.id == oil).unwrap().source,
+    );
+    let dry_mass = third.physics.rapier().bodies[third_body].mass() - entries[3].amount;
+    third.area.items.get_mut(oil).unwrap().fluid = Some(FluidContainer::new(capacity, &exact));
+    let exact_save = third
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_save
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(exact.as_slice())
+    );
+    let expected = [exact[0], exact[2]];
+    let mut exact_load = GarageRuntime::from_save(&r, &stamp, &exact_save).unwrap();
+    assert_eq!(
+        exact_load
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        expected
+    );
+    prepare_ready(&mut exact_load, &r);
+    for _ in 0..3 {
+        assert!(exact_load.advance_saved_restore(&r).unwrap());
+        assert!(!exact_load.restore_pending());
+        assert_eq!(
+            exact_load
+                .area
+                .items
+                .get(oil)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .entries()
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let exact_body = exact_load.area.items.get(engine).unwrap().body.unwrap();
+    assert_ne!(exact_body, exact_load.physics.chassis_handle(0));
+    assert!(
+        (exact_load.physics.rapier().bodies[exact_body].mass() - dry_mass - 0.75).abs() < 0.001
+    );
+    let exact_recapture = exact_load
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_recapture
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(expected.as_slice())
+    );
 }
 
 fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
@@ -4348,7 +4689,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters,
         game.area
             .items
@@ -4357,7 +4698,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters
     );
     // Stored food retains its bite, and exhausted food does not return on load.
@@ -4605,7 +4946,7 @@ fn g08_save_independent_equipment_and_both_owners() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters,
         run.area
             .items
@@ -4614,7 +4955,7 @@ fn g08_save_independent_equipment_and_both_owners() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
+            .mixture()
             .quantities_liters
     );
     g08_assert_equipment_pose(&loaded, &reference, tool);

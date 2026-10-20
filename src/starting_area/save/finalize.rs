@@ -35,6 +35,12 @@ impl RestoreFinalizer<'_> {
         self.area.sync_portable_mass(self.physics);
         self.wheels.sync(&mut self.area.items, self.physics)?;
         self.area.items.restore_save(ids, &saved.items, reference)?;
+        self.area.items.cleanup_loaded_fluids();
+        self.area
+            .interaction
+            .sync_parts(&mut self.area.items, self.physics)?;
+        self.area.sync_portable_mass(self.physics);
+        self.wheels.sync(&mut self.area.items, self.physics)?;
         self.area.items.sync_poses(self.physics);
         recompute_dynamic_mass(self.physics);
         restore_body_records(

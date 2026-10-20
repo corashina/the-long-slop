@@ -39,6 +39,108 @@ fn step(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInpu
     run.step_vehicle(reference, 0, input, true, Default::default());
 }
 
+fn fluid_entries(quantities: [f32; 6], order: &[u8]) -> Vec<crate::fluids::FluidEntry> {
+    order
+        .iter()
+        .map(|&fluid_type| crate::fluids::FluidEntry {
+            fluid_type,
+            amount: quantities[fluid_type as usize],
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "requires the installed build 11140890 export"]
+fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
+    use crate::fluids::FluidEntry;
+    use crate::simulation::instruments::{InstrumentState, needle_angle};
+
+    let (reference, _) = installed_source();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    run.vehicles[0].ignition.ignition = true;
+    let vehicle = &reference.vehicles[0];
+    let instruments = &vehicle.instruments;
+    let mut state = InstrumentState::new(instruments);
+    let source_entries = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: -0.25,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: f32::from_bits(0x7fc1_2345),
+        },
+    ];
+    for id in [vehicle.engine.fuel_tank, vehicle.engine.oil_tank] {
+        run.area
+            .items
+            .get_mut(id)
+            .unwrap()
+            .fluid
+            .as_mut()
+            .unwrap()
+            .restore_entries(&source_entries);
+    }
+    let sample = run.instrument_sample(&reference, 0);
+    assert!(sample.local_ignition);
+    assert_eq!(sample.fuel_liters, 0.);
+    assert_eq!(sample.oil_liters, 0.);
+    state.initialize_from_sample(instruments, sample);
+    state.update(instruments, sample, FIXED_DT);
+    assert!(state.needle_angles.iter().all(|angle| angle.is_finite()));
+    for id in [vehicle.engine.fuel_tank, vehicle.engine.oil_tank] {
+        let entries: Vec<_> = run
+            .area
+            .items
+            .get(id)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+            .collect();
+        assert_eq!(
+            entries,
+            source_entries
+                .iter()
+                .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        run.area
+            .items
+            .get_mut(id)
+            .unwrap()
+            .fluid
+            .as_mut()
+            .unwrap()
+            .restore_entries(&[FluidEntry {
+                fluid_type: 0,
+                amount: 10.,
+            }]);
+    }
+    let sample = run.instrument_sample(&reference, 0);
+    assert_eq!(sample.fuel_liters, 10.);
+    assert_eq!(sample.oil_liters, 10.);
+    let fuel_needle = instruments
+        .needles
+        .iter()
+        .position(|needle| needle.signal == "fuel")
+        .unwrap();
+    let empty_angle = state.needle_angles[fuel_needle];
+    for _ in 0..600 {
+        state.update(instruments, sample, FIXED_DT);
+    }
+    assert!(state.needle_angles.iter().all(|angle| angle.is_finite()));
+    assert_ne!(state.needle_angles[fuel_needle], empty_angle);
+    assert!(
+        (state.needle_angles[fuel_needle]
+            - needle_angle(&instruments.needles[fuel_needle], sample.fuel_liters))
+        .abs()
+            < 0.01
+    );
+}
+
 #[test]
 #[ignore = "requires the installed build 11140890 export"]
 fn ignition_and_attachment() {
@@ -163,9 +265,8 @@ fn ignition_and_attachment() {
             .fluid
             .as_ref()
             .unwrap()
-            .mixture
             .total()
-            < fuel_before.as_ref().unwrap().mixture.total()
+            < fuel_before.as_ref().unwrap().total()
     );
     run.area
         .items
@@ -174,8 +275,7 @@ fn ignition_and_attachment() {
         .fluid
         .as_mut()
         .unwrap()
-        .mixture
-        .quantities_liters = [0.; 6];
+        .restore_entries(&[]);
     step(&mut run, &reference, tap);
     assert_eq!(
         run.vehicles[0].engine_output.oil_penalty,
@@ -560,7 +660,7 @@ fn garage_engine_remove_restore_continue() {
         .fluid
         .as_mut()
         .unwrap()
-        .restore_contents([0.; 6], &[]);
+        .restore_entries(&[]);
     for _ in 0..600 {
         step(&mut run, &reference, held);
         if run.vehicles[0]
@@ -597,7 +697,7 @@ fn garage_engine_remove_restore_continue() {
             .fluid
             .as_mut()
             .unwrap()
-            .restore_contents(quantities, &order);
+            .restore_entries(&fluid_entries(quantities, &order));
     }
     // Start through the production fixed vehicle step, with installed source rates.
     for _ in 0..600 {
@@ -693,7 +793,13 @@ fn garage_engine_remove_restore_continue() {
             .iter()
             .find(|original| original.instance == item.instance)
             .unwrap();
-        assert_eq!(item.fluids, original.fluids);
+        let mut expected_fluids = original.fluids.clone();
+        if let Some(entries) = &mut expected_fluids {
+            if let Some(index) = entries.iter().position(|entry| entry.amount <= 0.) {
+                entries.remove(index);
+            }
+        }
+        assert_eq!(item.fluids, expected_fluids);
         assert_eq!(item.temperature, original.temperature);
         assert_eq!(item.location, original.location);
     }
@@ -707,7 +813,16 @@ fn garage_engine_remove_restore_continue() {
         .find(|item| item.instance == saved_fuel.instance)
         .unwrap();
     assert_eq!(restored_fuel.fluids, saved_fuel.fluids);
-    assert_eq!(saved_fuel.fluids.as_ref().unwrap().order, [3, 0]);
+    assert_eq!(
+        saved_fuel
+            .fluids
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.fluid_type)
+            .collect::<Vec<_>>(),
+        [3, 0]
+    );
     let loaded_chassis = loaded.physics.chassis_handle(0);
     let loaded_engine = loaded.area.items.get(source.item).unwrap().body.unwrap();
     assert!(!loaded.physics.body_active(loaded_chassis));
@@ -736,6 +851,8 @@ fn garage_engine_remove_restore_continue() {
         .find(|item| item.instance == saved_fuel.instance)
         .unwrap();
     assert_eq!(restored_fuel.fluids, saved_fuel.fluids);
+    // Apply the same logical load cleanup once before comparing continued runs.
+    run.area.items.cleanup_loaded_fluids();
     run.clear_input();
     compare(&run, &loaded);
     for expected in [false, true] {
@@ -779,18 +896,17 @@ fn garage_engine_remove_restore_continue() {
         .as_ref()
         .unwrap();
     assert!(
-        fuel_after.mixture.total()
+        fuel_after.total()
             < saved_fuel
                 .fluids
                 .as_ref()
                 .unwrap()
-                .quantities_liters
                 .iter()
-                .sum()
+                .map(|entry| entry.amount)
+                .sum::<f32>()
     );
     for item in [source.oil_tank, source.coolant_tank] {
-        let original = saved
-            .items
+        let original = restored_items
             .iter()
             .find(|entry| ids.item(&entry.instance).unwrap() == item)
             .unwrap();

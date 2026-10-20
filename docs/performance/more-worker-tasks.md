@@ -6,7 +6,8 @@ The current source is in `C:/Users/Corashina/Documents/Projects/the-long-drive-w
 Merge commit: `50d51c6fb2e40614e5b63a06e11662ae2221ebdf`.
 The branch commit identities below record the historical implementation source.
 The latest user instruction is "Implement workers. Skip tests".
-The merge preserves the current master renderer path and G05 save schema 7.
+The merge preserves the current master renderer path and G05 save schema 7 at that time.
+The 2026-10-20 G04 integration advances the current save schema to 8.
 The worker implementation report's schema 6 describes its pre-merge tree only.
 It does not describe current master save behavior.
 The historical worker worktree path is no longer current. The source now lives in the primary checkout.
@@ -186,7 +187,8 @@ The 2 MiB linker settings have source and parse evidence only. No worker release
 ## Save/load source boundaries
 
 In the historical worker tree, save schema was version 6.
-Current master uses G05 schema 7. Worker transport data stays outside saved snapshots.
+At document time, master used G05 schema 7. G04 later advanced the current schema to 8.
+Worker transport data stays outside saved snapshots.
 Capture checks readiness and pause state, clears input, captures authoritative runtime fields, validates, serializes, and returns.
 It adds no wait for road or grass visual jobs.
 Existing restore-pending and snapshot validation checks remain.

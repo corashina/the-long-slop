@@ -1631,13 +1631,12 @@ fn drain_tank(run: &mut GarageRuntime, item: crate::reference::ItemId, amount: f
         .fluid
         .as_mut()
         .unwrap();
-    let quantity = fluid
-        .mixture
-        .quantities_liters
-        .iter_mut()
-        .find(|q| **q > amount)
-        .unwrap();
-    *quantity -= amount;
+    let index = fluid
+        .entries()
+        .find(|entry| entry.amount > amount)
+        .unwrap()
+        .fluid_type as usize;
+    fluid.change_one(-amount, index);
 }
 fn near_mass(actual: f32, expected: f32) {
     assert!(
