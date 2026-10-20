@@ -255,6 +255,7 @@ pub struct MechanismReference {
     pub disable_on_uncraft: bool,
     pub drag: MechanismDrag,
     pub rotation: Option<RotationReference>,
+    pub reaction: EndpointReactionReference,
     pub slide: Option<SlideReference>,
     pub turn: Option<TurnReference>,
 }
@@ -264,6 +265,20 @@ pub struct TurnReference {
     pub action: TurnAction,
     pub max_state: u8,
     pub initial_state: u8,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EndpointReactionReference {
+    None,
+    Rotation {
+        node: NodeId,
+        /// Unity right, up, and forward flags. Binding reflects forward Z once.
+        axes: [bool; 3],
+        inverted: bool,
+        force: f32,
+        /// Enter minimum, enter maximum, leave minimum, leave maximum.
+        events: [bool; 4],
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -1451,6 +1466,15 @@ impl ReferenceManifest {
         )?;
         let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
         for r in &self.mechanisms {
+            if let EndpointReactionReference::Rotation { node, force, .. } = &r.reaction {
+                require(
+                    r.rotation.is_some()
+                        && node_ids.contains(node)
+                        && force.is_finite()
+                        && *force >= 0.,
+                    "mechanism endpoint reaction",
+                )?;
+            }
             require(
                 item_ids.contains(&r.item)
                     && r.parent_item.is_none_or(|id| item_ids.contains(&id))

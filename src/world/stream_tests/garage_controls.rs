@@ -8,6 +8,9 @@ use crate::{
 };
 use rapier3d::math::{Rotation, Vector};
 
+#[path = "garage_controls/reactions.rs"]
+mod reactions;
+
 fn load_garage() -> (ReferenceManifest, GarageRuntime) {
     let reference = super::reference();
     assert_eq!(reference.build_id, 11140890);

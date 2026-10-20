@@ -532,7 +532,7 @@ impl WorldReference {
         )?;
         require(
             self.library.schema_version == 1
-                && self.library.manifest_sha256 == manifest.library.manifest_sha256
+                && hash(&self.library.manifest_sha256)
                 && self.library.catalog_sha256 == manifest.library.catalog_sha256
                 && self.library.source_manifest_sha256 == manifest.library.source_manifest_sha256,
             "world library receipt",
@@ -598,6 +598,20 @@ impl WorldReference {
                     rotation.targets.iter().all(|t| node(t.node))
                         && rotation.sensitivity.is_finite(),
                     "world rotation inputs",
+                )?;
+            }
+            if let super::EndpointReactionReference::Rotation {
+                node: control,
+                force,
+                ..
+            } = &row.recipe.reaction
+            {
+                require(
+                    row.recipe.rotation.is_some()
+                        && node(*control)
+                        && force.is_finite()
+                        && *force >= 0.,
+                    "world mechanism endpoint reaction",
                 )?;
             }
             if let Some(slide) = &row.recipe.slide {

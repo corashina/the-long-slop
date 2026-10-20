@@ -1159,6 +1159,10 @@ impl GarageRuntime {
         }
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
+        self.area
+            .interaction
+            .mechanisms
+            .apply_reactions(&mut self.physics);
         self.physics.step_physics();
         self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);

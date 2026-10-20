@@ -30,6 +30,9 @@ def recover_world_mechanisms(source, selected, world):
         recipes=[r for r in recipes if r['rotation'] or r['slide']]
         by_source={(r['source']['file'],r['source']['path_id']):r['use_node'] for r in recipes}
         for r in recipes:
+            reaction = r['reaction']
+            if reaction['kind'] == 'rotation' and not 1 <= reaction['node'] <= len(hierarchy):
+                raise ValueError('Generated endpoint control is outside its prototype')
             node=r.pop('use_node');child=r.pop('child_source')
             parent=node
             while parent and not components[parent].get('pickupable'):parent=nodes[parent-1]['parent']

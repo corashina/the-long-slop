@@ -36,6 +36,11 @@ pub(super) fn bind(
             0,
         )?;
     }
+    if let Some(index) = prototype.bodies.iter().position(|body| body.node == 0) {
+        interaction
+            .mechanisms
+            .set_part_root(content.nodes[0], Some(instance.bodies[index]));
+    }
     for row in reference
         .world
         .mechanisms
@@ -154,6 +159,9 @@ pub(super) fn bind(
         }
         recipe.drag.node = local(recipe.drag.node);
         recipe.drag.node2 = local(recipe.drag.node2);
+        if let EndpointReactionReference::Rotation { node, .. } = &mut recipe.reaction {
+            *node = local(*node);
+        }
         if let Some(r) = &mut recipe.rotation {
             for target in &mut r.targets {
                 target.node = local(target.node)

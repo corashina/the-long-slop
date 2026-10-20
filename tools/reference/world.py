@@ -32,6 +32,13 @@ def selected_actions(source, scripts, actions):
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
 
+def validate_sample_source(samples, receipt):
+    if (samples['payload_sha256'] != PAYLOAD_SHA256
+            or samples['library']['source_manifest_sha256'] != receipt.source_manifest_sha256
+            or samples['library']['catalog_sha256'] != receipt.catalog_sha256):
+        raise ValueError('World sample payload or source identity changed')
+
+
 def required_record(source, owner, fields):
     """Check required fields and all their links before opening a dependent record."""
     identity = f'{key(owner)[0]}:{key(owner)[1]}'
@@ -155,8 +162,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     print("Verifying retained world samples",flush=True)
     world_probe.verify(world_probe.PROBE_ROOT)
     samples=json.loads((world_probe.PROBE_ROOT/'samples.json').read_text())
-    if samples['payload_sha256']!=PAYLOAD_SHA256 or samples['library']['manifest_sha256']!=reader.receipt.manifest_sha256:
-        raise ValueError('World source sample/library receipt changed')
+    validate_sample_source(samples, reader.receipt)
     print('World samples verified; selecting source records',flush=True)
     selected=Selection(source,reader)
     settings_owner=source.get('level1',64898)
