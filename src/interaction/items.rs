@@ -100,8 +100,8 @@ impl ItemStore {
             });
             state.removed = record.removed;
             state.temperature = record.temperature;
-            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
-                fluid.mixture.quantities_liters = quantities;
+            if let (Some(fluid), Some(saved)) = (&mut state.fluid, &record.fluids) {
+                fluid.restore_contents(saved.quantities_liters, &saved.order);
             }
         }
         Ok(())
@@ -846,7 +846,9 @@ impl ItemStore {
 }
 
 /// Project source signed state into the nonnegative core save format without changing gameplay.
-fn capture_fluids(fluid: &FluidContainer) -> Result<[f32; 6], crate::save::SaveError> {
+fn capture_fluids(
+    fluid: &FluidContainer,
+) -> Result<crate::save::FluidSnapshot, crate::save::SaveError> {
     let mut quantities = fluid.mixture.quantities_liters;
     if !fluid.capacity_liters.is_finite()
         || fluid.capacity_liters < 0.
@@ -876,7 +878,10 @@ fn capture_fluids(fluid: &FluidContainer) -> Result<[f32; 6], crate::save::SaveE
             remaining = (remaining - f64::from(*amount)).max(0.);
         }
     }
-    Ok(quantities)
+    Ok(crate::save::FluidSnapshot {
+        quantities_liters: quantities,
+        order: fluid.snapshot_order(),
+    })
 }
 
 pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePose, ReferenceError> {

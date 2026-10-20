@@ -70,7 +70,7 @@ impl GarageRuntime {
                         bite: food.bite,
                     }),
                 temperature: item.temperature,
-                fluid_quantities: item.fluids,
+                fluid_quantities: item.fluids.as_ref().map(|fluid| fluid.quantities_liters),
                 valve: None,
                 lamp: None,
                 linear_velocity: [0.; 3],
@@ -89,6 +89,16 @@ impl GarageRuntime {
                 &mut self.physics,
                 &mut self.wheels,
             )? {
+                if let Some(saved) = &item.fluids {
+                    self.area
+                        .items
+                        .get_mut(ids.item(&item.instance)?)
+                        .unwrap()
+                        .fluid
+                        .as_mut()
+                        .unwrap()
+                        .restore_contents(saved.quantities_liters, &saved.order);
+                }
                 pending.items.swap_remove(index);
             } else {
                 index += 1;
@@ -368,7 +378,9 @@ impl GarageRuntime {
                 .iter()
                 .find(|v| v.instance == ids.vehicles[index])
                 .expect("validated vehicle");
-            vehicle.engine_output = vehicle.engine.restore_save(&record.engine);
+            vehicle.ignition.ignition = record.ignition;
+            vehicle.ignition.clear_input();
+            vehicle.engine_output = vehicle.engine.restore_save(&record.engine)?;
             vehicle.drivetrain.restore_gear(record.gear);
             vehicle.handbrake = record.handbrake;
             vehicle.trip_m = record.trip_m;
@@ -395,7 +407,7 @@ impl GarageRuntime {
                     SaveError::ReconstructionFailure("Missing vehicle electronics".into())
                 })?;
             signals.push(crate::lighting::VehicleLightSample {
-                local_ignition: vehicle.engine_output.ignition
+                local_ignition: vehicle.ignition.ignition
                     && (electronics.electronics_source.is_none()
                         || electronics.electronics_output > electronics.electronics_threshold),
                 brake: 0.,
@@ -422,6 +434,11 @@ impl GarageRuntime {
         candidate.area.commit_poses(&candidate.physics, true);
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
+            audio.restore_engine(
+                candidate.vehicles[audio.vehicle_index]
+                    .engine_output
+                    .running,
+            );
             audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
         candidate.startup_aligned = true;
@@ -536,6 +553,7 @@ impl GarageRuntime {
                             origin,
                         ),
                         engine: vehicle.engine.capture_save(),
+                        ignition: vehicle.ignition.ignition,
                         gear: vehicle.drivetrain.gear(),
                         handbrake: vehicle.handbrake,
                         trip_m: vehicle.trip_m,

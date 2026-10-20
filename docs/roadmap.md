@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-19. Approved scope: one complete garage repair and driving experience.
+Updated: 2026-10-20. Approved scope: one complete garage repair and driving experience.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
@@ -65,6 +65,38 @@ Three targeted native tests passed. They cover 20 general parts and both plates 
 Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicate attachment, and source-fixed seats.
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
+
+G05 implementation, 2026-10-20: chassis ignition persists after engine removal.
+The engine retains mechanics, temperature, fluid identities, and its fuel binding.
+Detached engines use the source 0.2-second run grace and produce zero wheel torque.
+Starter release retains the source one-update delay. Cancellation and load clear transient starter commands.
+Engine decisions read prior fuel suitability and heat penalties. Mounted oil service keeps the existing fixed-step order.
+Start checks consume interval draws. Schema 7 saves the next draw and ordered fluid contents. Schema 6 is rejected.
+Engine drains use source sequential changes. A zero-total guard and bounded engine publication prevent invalid depleted quantities.
+This deliberately differs from source NaN and negative-total overdraw. General fluid transfer remains outside G05.
+Engine audio follows engine state and position, including detached grace and the genuine stop transition.
+
+Final review found that an active chassis advanced an inactive detached engine.
+The engine activity gate now freezes mechanics, item temperature, and bound fluids.
+The installed-export regression first failed, then passed.
+Chassis ignition, brake lights, brake wake, starter latch, and zero detached torque also passed.
+
+The prior targeted engine suite passed five tests. The final runtime filter passed four tests, including the combined restore scenario.
+These commands used `scripts/check.ps1` with `-IncludeIgnored`. Formatting and both WASM backend checks passed.
+Prior targeted ignition, fluid, audio, and save-storage checks passed. Existing compiler warnings remain.
+Initial Task 5 failures corrected test timing assumptions and pending-world restoration setup. No production defect required a Task 5 fix.
+The combined test uses real part transactions and fixed vehicle steps before and after normal native restore completion.
+It compares identities, complete fluid snapshots, temperature, ignition, and nonzero draw continuation.
+Native renderer receipts permit restore completion. They do not verify browser asset uploads or rendering.
+Full checks, release builds, and browser acceptance were deferred. Input capture and visible dashboard behavior remain unverified.
+Audible playback, full driving, and normal garage gameplay remain unaccepted. G05 stays Verify.
+The [approved specification](superpowers/specs/2026-10-20-g05-engine-design.md) records the source rules and runtime limits.
+
+G05 integration, 2026-10-20: G05 is merged into master with the current renderer and save finalizer.
+Integration review found no blocking issue. Targeted engine, runtime, audio, and save-storage checks passed.
+The merged result passed five engine tests, four runtime tests, two audio tests, and six web tests.
+Formatting and both WASM backend checks passed. Existing compiler warnings remain.
+Full checks, release builds, and browser acceptance remain deferred. G05 stays Verify.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.

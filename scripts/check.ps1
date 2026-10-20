@@ -9,6 +9,10 @@ param(
     [ValidatePattern('^[a-zA-Z_][a-zA-Z0-9_:]*$')]
     [string]$Filter,
 
+    [Parameter(ParameterSetName = 'NativeTarget')]
+    [Parameter(ParameterSetName = 'NativeFilter')]
+    [switch]$IncludeIgnored,
+
     [Parameter(Mandatory, ParameterSetName = 'Web')]
     [ValidatePattern('^[a-z0-9]+(?:-[a-z0-9]+)*$')]
     [string[]]$WebTest,
@@ -45,6 +49,7 @@ try {
     } elseif ($Full) {
         $checks += ' && cargo test --locked --workspace'
     }
+    if ($IncludeIgnored) { $checks += ' -- --include-ignored' }
     $checks += ' && cargo check --locked --target wasm32-unknown-unknown --workspace --lib'
     $checks += ' && cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu'
 
