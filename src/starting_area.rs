@@ -1477,7 +1477,7 @@ impl GarageRuntime {
             },
             self.area.items.vehicle_fluids(index).expect("bound fluids"),
             engine_reference,
-            start_sample(DEFAULT_SEED, self.attempts),
+            |draw| start_sample(DEFAULT_SEED, draw),
             FIXED_DT,
         );
         let output = vehicle.engine_output;

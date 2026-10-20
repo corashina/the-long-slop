@@ -107,7 +107,12 @@ impl FluidContainer {
                 .iter()
                 .map(|&entry| self.mixture.quantities_liters[entry as usize])
                 .sum();
-            let fraction = self.mixture.quantities_liters[index] / total;
+            // Finite-state correction: retained entries can follow exact depletion.
+            let fraction = if total == 0. {
+                0.
+            } else {
+                self.mixture.quantities_liters[index] / total
+            };
             self.mixture.quantities_liters[index] += amount * fraction;
         }
     }
@@ -303,5 +308,15 @@ mod tests {
         restored.restore_contents([0.; 6], &[]);
         assert!(restored.retained_order().is_empty());
         assert_eq!(restored.mixture.total(), 0.);
+    }
+
+    #[test]
+    fn retained_zero_after_depletion_stays_finite() {
+        let mut container = FluidContainer::new(5., FluidMixture::default());
+        container.restore_contents([1., 0., 0., 0., 0., 0.], &[0, 3]);
+        container.change_without_mix(-1.);
+        assert_eq!(container.mixture.quantities_liters, [0.; 6]);
+        container.change_without_mix(-1.);
+        assert_eq!(container.mixture.quantities_liters, [0.; 6]);
     }
 }

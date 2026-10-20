@@ -1,7 +1,8 @@
 //! Installed Lada engine rules at the fixed gameplay step.
 
-use crate::fluids::{FluidMixture, VehicleFluids, spill, suitability};
+use crate::fluids::{FluidContainer, FluidMixture, VehicleFluids, suitability};
 use crate::reference::{EngineReference, TorqueCurve};
+use crate::save::{EngineSnapshot, SaveError, identity::unsigned};
 
 const RUN_GRACE_SECONDS: f32 = 0.2;
 
@@ -67,6 +68,26 @@ fn temperature_change(
         * input.sleep_modifier
 }
 
+// Source ChangeWithoutMix is sequential. Tank.Upd removes one depleted entry.
+// Coolant changes do not call Tank.Upd. Keep their retained zero entries.
+fn drain(container: &mut FluidContainer, liters: f32) -> f32 {
+    let quantities = container.mixture.quantities_liters;
+    let before = container.mixture.total();
+    if before > 0.0 && liters > 0.0 {
+        container.change_without_mix(-liters);
+        // Finite-state correction: overdraw must not publish fluid creation.
+        for (amount, prior) in container
+            .mixture
+            .quantities_liters
+            .iter_mut()
+            .zip(quantities)
+        {
+            *amount = amount.max(0.0).min(prior.max(0.0));
+        }
+    }
+    before - container.mixture.total()
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InstalledEngineInput {
     pub ignition: bool,
@@ -123,6 +144,9 @@ pub struct EngineState {
     last_start_chance_time: f32,
     random_start: f32,
     oil_penalty: f32,
+    fuel_suitability: f32,
+    heat_penalty: f32,
+    start_draw: u64,
     supplied_fuel: f32,
     fan_on: bool,
     last_output: EngineOutput,
@@ -146,9 +170,13 @@ impl EngineState {
             supplied_fuel: self.supplied_fuel,
             fan_on: self.fan_on,
             oil_penalty: self.oil_penalty,
+            fuel_suitability: self.fuel_suitability,
+            heat_penalty: self.heat_penalty,
+            start_draw: self.start_draw.to_string(),
         }
     }
-    pub fn restore_save(&mut self, saved: &crate::save::EngineSnapshot) -> EngineOutput {
+    pub fn restore_save(&mut self, saved: &EngineSnapshot) -> Result<EngineOutput, SaveError> {
+        let start_draw = unsigned(&saved.start_draw)?;
         self.rpm = saved.rpm;
         self.temperature = saved.temperature;
         self.elapsed = saved.elapsed;
@@ -158,15 +186,20 @@ impl EngineState {
         self.supplied_fuel = saved.supplied_fuel;
         self.fan_on = saved.fan_on;
         self.oil_penalty = saved.oil_penalty;
+        self.fuel_suitability = saved.fuel_suitability;
+        self.heat_penalty = saved.heat_penalty;
+        self.start_draw = start_draw;
         self.clear_input();
         self.last_output = EngineOutput {
             running: self.running(),
             rpm: self.rpm,
             temperature: self.temperature,
             oil_penalty: self.oil_penalty,
+            fuel_suitability: self.fuel_suitability,
+            heat_penalty: self.heat_penalty,
             ..Default::default()
         };
-        self.last_output
+        Ok(self.last_output)
     }
     pub fn new(reference: &EngineReference) -> Self {
         Self {
@@ -177,6 +210,9 @@ impl EngineState {
             last_start_chance_time: 0.0,
             random_start: 1.0,
             oil_penalty: 0.,
+            fuel_suitability: 0.,
+            heat_penalty: 0.,
+            start_draw: 0,
             supplied_fuel: 0.0,
             fan_on: false,
             last_output: EngineOutput::default(),
@@ -188,7 +224,7 @@ impl EngineState {
         input: EngineInput,
         fluids: VehicleFluids<'_>,
         reference: &EngineReference,
-        random_sample: f32,
+        mut start_sample: impl FnMut(u64) -> f32,
         dt: f32,
     ) -> EngineOutput {
         if !dt.is_finite() || dt <= 0.0 {
@@ -199,7 +235,6 @@ impl EngineState {
         let required = FluidMixture {
             quantities_liters: reference.fuel_consumption,
         };
-        let fuel_suitability = suitability(fluids.fuel, &required);
         if input.installed.is_some() {
             self.oil_penalty = inverse_lerp(
                 fluids.sump.capacity_liters * 0.3,
@@ -209,33 +244,28 @@ impl EngineState {
             .powi(3);
         }
         let oil_penalty = self.oil_penalty;
-        let bounds = reference.globals.car_temperature_bounds;
-        self.temperature = self.temperature.clamp(bounds[0], bounds[1]);
-        if reference.no_overheat {
-            self.temperature = self.temperature.min(reference.optimal_temperature[2]);
-        }
-        let heat_penalty = inverse_lerp(
-            reference.optimal_temperature[2],
-            reference.optimal_temperature[3],
-            self.temperature,
-        )
-        .powi(3);
         let can_run = self.rpm > reference.shutdown_rpm
             && oil_penalty < 0.99
-            && heat_penalty < 0.99
-            && fuel_suitability > 0.3
+            && self.heat_penalty < 0.99
+            && self.fuel_suitability > 0.3
             && self.random_start <= reference.start_chance;
         let ignition = installed.ignition && reference.electronics_enabled;
         let min_supplied = inverse_lerp(0.0, reference.max_rpm, reference.idle_rpm);
         if ignition && can_run {
-            self.supplied_fuel = lerp(min_supplied, 1.0, installed.throttle * fuel_suitability);
+            self.supplied_fuel = lerp(
+                min_supplied,
+                1.0,
+                installed.throttle * self.fuel_suitability,
+            );
             self.last_run_time = self.elapsed;
         } else if self.elapsed - self.last_run_time >= RUN_GRACE_SECONDS {
             self.supplied_fuel = 0.0;
         }
         let running = self.running();
+        self.fuel_suitability = suitability(fluids.fuel, &required);
+        let fuel_suitability = self.fuel_suitability;
         let consumed_fuel = if running {
-            spill(
+            let removed = drain(
                 fluids.fuel,
                 self.supplied_fuel
                     * dt
@@ -246,7 +276,10 @@ impl EngineState {
                         required.total(),
                         inverse_lerp(0.0, reference.max_rpm, self.rpm),
                     ),
-            )
+            );
+            // Source Fuel.Upd also runs when supplied fuel is zero.
+            fluids.fuel.cleanup_one();
+            removed
         } else {
             0.0
         };
@@ -272,7 +305,8 @@ impl EngineState {
                     > reference.start_chance_interval_seconds * reference.engine_start_time_modifier
             {
                 self.last_start_chance_time = self.elapsed;
-                self.random_start = random_sample.clamp(0.0, 1.0);
+                self.random_start = start_sample(self.start_draw).clamp(0.0, 1.0);
+                self.start_draw = self.start_draw.wrapping_add(1);
             }
         }
         let next_rpm = lerp(target_rpm, installed.wheel_rpm, clutch);
@@ -300,6 +334,18 @@ impl EngineState {
             } else {
                 inverse_lerp(0.0, reference.max_rpm_difference, rpm_difference)
             };
+        let bounds = reference.globals.car_temperature_bounds;
+        self.temperature = self.temperature.clamp(bounds[0], bounds[1]);
+        if reference.no_overheat {
+            self.temperature = self.temperature.min(reference.optimal_temperature[2]);
+        }
+        self.heat_penalty = inverse_lerp(
+            reference.optimal_temperature[2],
+            reference.optimal_temperature[3],
+            self.temperature,
+        )
+        .powi(3);
+        let heat_penalty = self.heat_penalty;
         actual_output *= (1.0 - heat_penalty) * (1.0 - oil_penalty);
         if running {
             self.temperature += dt
@@ -318,8 +364,8 @@ impl EngineState {
             reference,
             dt,
         );
-        if input.installed.is_some() && self.rpm > 10.0 {
-            spill(
+        if input.installed.is_some() && self.rpm > 10.0 && fluids.sump.mixture.total() > 0.0 {
+            drain(
                 fluids.sump,
                 reference.globals.oil_consumption
                     * reference.oil_consumption_modifier
@@ -327,11 +373,12 @@ impl EngineState {
                     * dt
                     * input.sleep_modifier,
             );
+            fluids.sump.cleanup_one();
         }
         if installed.radiator_condition.is_some()
             && self.temperature > reference.globals.min_steam_temperature
         {
-            spill(
+            drain(
                 fluids.coolant,
                 reference.globals.coolant_evaporate_rate / 60.0
                     * dt
@@ -379,7 +426,7 @@ impl EngineState {
                 * water_blood.clamp(0.5, 1.0);
             self.temperature +=
                 temperature_change(self.temperature, speed, cooling, input, reference, dt);
-            spill(
+            drain(
                 fluids.coolant,
                 leak / 60.0 * dt * thermostat * input.sleep_modifier,
             );
@@ -398,5 +445,71 @@ impl EngineState {
             temperature: self.temperature,
         };
         self.last_output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reference::ReferenceManifest;
+
+    #[test]
+    #[ignore = "requires the installed build 11140890 export"]
+    fn zero_fuel_drain_keeps_source_cleanup() {
+        let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        assert_eq!(reference.build_id, 11140890);
+        assert_eq!(reference.vehicles.len(), 1);
+        let source = &reference.vehicles[0].engine;
+        assert_eq!(source.source.file, "level1");
+        assert_eq!(source.source.path_id, 68282);
+        let mut engine = EngineState::new(source);
+        let mut state = engine.capture_save();
+        state.elapsed = 1.;
+        state.last_run_time = 1.;
+        engine.restore_save(&state).unwrap();
+        let container =
+            |id| FluidContainer::from(reference.tanks.iter().find(|tank| tank.item == id).unwrap());
+        let mut fuel = container(source.fuel_tank);
+        let mut sump = container(source.oil_tank);
+        let mut coolant = container(source.coolant_tank);
+        fuel.restore_contents([1., 0., 0., 0., 0., 0.], &[3, 0]);
+        let output = engine.step(
+            EngineInput::default(),
+            VehicleFluids {
+                fuel: &mut fuel,
+                sump: &mut sump,
+                coolant: &mut coolant,
+            },
+            source,
+            |_| panic!("no starter"),
+            0.02,
+        );
+        assert_eq!(output.consumed_fuel_liters, 0.);
+        assert_eq!(fuel.retained_order(), &[0]);
+        fuel.restore_contents([0.; 6], &[0, 3]);
+        sump.restore_contents([0.; 6], &[0, 1]);
+        coolant.restore_contents([0.; 6], &[3, 4]);
+        engine.rpm = 2000.;
+        engine.step(
+            EngineInput {
+                installed: Some(InstalledEngineInput {
+                    radiator_condition: Some(4),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            VehicleFluids {
+                fuel: &mut fuel,
+                sump: &mut sump,
+                coolant: &mut coolant,
+            },
+            source,
+            |_| panic!("no starter"),
+            0.02,
+        );
+        assert_eq!(fuel.retained_order(), &[3]);
+        assert_eq!(sump.retained_order(), &[0, 1]);
+        assert_eq!(coolant.retained_order(), &[3, 4]);
     }
 }

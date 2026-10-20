@@ -84,7 +84,7 @@ fn ignition_and_attachment() {
     mechanical.last_run_time = 1.;
     mechanical.supplied_fuel = 0.4;
     mechanical.random_start = 0.;
-    run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&mechanical);
+    run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&mechanical).unwrap();
     step(&mut run, &reference, FrameInput::default());
     assert!(run.vehicles[0].engine_output.running);
     let engine_slot = reference
@@ -298,4 +298,30 @@ fn ignition_and_attachment() {
     assert_eq!(item.temperature, item_before_install.temperature);
     assert_eq!(item.fluid, item_before_install.fluid);
     assert!(run.area.items.mounted(source.item));
+}
+
+#[test]
+#[ignore = "requires the installed build 11140890 export"]
+fn interval_draws_preserve_attempts_and_cancellation() {
+    let (mut reference, _) = installed_source();
+    // Rule test: keep combustion stopped so one held press consumes many draws.
+    reference.vehicles[0].engine.start_chance = 0.;
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let held = FrameInput {
+        held: keys::IGNITION,
+        ..Default::default()
+    };
+    step(&mut run, &reference, held);
+    let attempts = run.attempts;
+    for _ in 0..180 {
+        step(&mut run, &reference, held);
+    }
+    let state = run.vehicles[0].engine.capture_save();
+    assert!(state.start_draw.parse::<u64>().unwrap() >= 2);
+    assert_eq!(run.attempts, attempts);
+    assert!(run.vehicles[0].engine_output.starter);
+    run.clear_input();
+    assert!(!run.vehicles[0].engine_output.starter);
+    assert_eq!(run.vehicles[0].engine.capture_save(), state);
+    assert_eq!(run.attempts, attempts);
 }

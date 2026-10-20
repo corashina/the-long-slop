@@ -153,6 +153,9 @@ pub struct EngineSnapshot {
     pub supplied_fuel: f32,
     pub fan_on: bool,
     pub oil_penalty: f32,
+    pub fuel_suitability: f32,
+    pub heat_penalty: f32,
+    pub start_draw: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

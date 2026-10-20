@@ -501,7 +501,7 @@ impl GarageRuntime {
                 .expect("validated vehicle");
             vehicle.ignition.ignition = record.ignition;
             vehicle.ignition.clear_input();
-            vehicle.engine_output = vehicle.engine.restore_save(&record.engine);
+            vehicle.engine_output = vehicle.engine.restore_save(&record.engine)?;
             vehicle.drivetrain.restore_gear(record.gear);
             vehicle.handbrake = record.handbrake;
             vehicle.trip_m = record.trip_m;

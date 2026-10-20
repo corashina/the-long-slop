@@ -187,6 +187,7 @@ impl SaveSnapshot {
                 "Vehicle gear",
             )?;
             let e = &vehicle.engine;
+            super::identity::unsigned(&e.start_draw)?;
             data(
                 finite(&[
                     e.rpm,
@@ -203,6 +204,8 @@ impl SaveSnapshot {
                     && e.last_start_chance_time >= 0.
                     && e.last_start_chance_time <= e.elapsed
                     && unit(e.random_start)
+                    && unit(e.fuel_suitability)
+                    && unit(e.heat_penalty)
                     && unit(e.oil_penalty)
                     && e.supplied_fuel >= 0.,
                 "Engine state",
