@@ -52,7 +52,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Verify | Verify source pickup, drop, throw, rotation, distance, recenter, action ownership, push force, grip, and reset through normal input. |
 | G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Verify | Verify explicit equip and release, source Tab behavior, slot selection, swapping, tool roles, and saved ownership. Browser acceptance remains open. See [G08 verification](g08-inventory.md). |
 | G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, posture, lean, zoom, seats, recenter, and recovery through normal input. Verify schema 9 save/load. Resolve the far-coordinate slope-normal gap. |
-| G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs), [verification](g10-controls.md) | Hard | Verify | Source reactions, handbrake inputs, secondary-seat lights, dashboard lighting, and radio visuals implemented. Targeted checks pass. Computer Use URL policy stopped browser checks. All twelve normal-input scenarios remain open. Gauge readability and audible output remain unverified. G09 owns seat transitions. G13 owns missing radio persistence. |
+| G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs), [verification](g10-controls.md) | Hard | Verify | Source reactions, handbrake inputs, secondary-seat lights, dashboard lighting, and radio visuals are merged. All twelve normal-input scenarios remain open. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
 | G12 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | Hard | Verify | Drive out, turn, brake, park, and return. Verify nearby collision, ground seams, re-entry, and loose-object stability. |
 | G13 | Preserve garage progress. [Save](../src/save/schema.rs), [restore](../src/starting_area/save.rs) | Hard | Verify | Preserve parts, fluids, tools, conditions, mechanisms, inventory, and car state through save, browser reload, load, and continued driving. |
@@ -136,6 +136,17 @@ Web input, feedback, and save-storage checks passed 13 tests. Both WASM check ba
 The engine and garage-fluid suites compiled; each skipped five export-dependent tests. Full checks, release builds, and browser acceptance remain open.
 Private G09 assets predate integration and do not establish merged runtime parity. Browser behavior remains unverified.
 No runtime assets or G09 tests were added. G09 stays Partial.
+
+G10 integration, 2026-10-20: garage and car controls are merged with current master.
+Integration retains current renderer readiness, source capture validation, chassis ignition, inventory ownership, posture, and schema 9 saves.
+A matching source package passed normal export validation and promotion.
+Targeted Python checks passed 11 tests. Web checks passed 14 tests. Native G10 checks passed 14 tests.
+Formatting and both WASM backend checks passed. Existing compiler warnings remain.
+Initial fixture API and formatting failures were corrected. Scoped integration review found no issue.
+The original release build passed. Release builds, full checks, and browser acceptance were not repeated for integration.
+All twelve normal-input scenarios remain open after the prior Computer Use URL-policy stop.
+Gauge readability and audible output remain unverified. G13 owns missing persisted radio controls. G10 stays Verify.
+See [G10 verification](g10-controls.md) for package identities, commands, evidence, and limits.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.

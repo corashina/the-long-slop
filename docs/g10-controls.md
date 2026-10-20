@@ -2,10 +2,50 @@
 
 Date: 2026-10-20. Status: Verify.
 Source authority: Steam build `11140890`.
-Branch: `codex/g10-garage-controls`, unmerged and unpushed.
-Worktree: `C:/Users/Corashina/.codex/worktrees/g10-garage-controls/the-long-drive-wasm`.
-Production commit: `b23a4b580a67c3592061faac2e02d0793af02e10`.
+Integrated into `master`. Original branch: `codex/g10-garage-controls`.
+Original worktree: `C:/Users/Corashina/.codex/worktrees/g10-garage-controls/the-long-drive-wasm`.
+Implementation production commit: `b23a4b580a67c3592061faac2e02d0793af02e10`.
 The Task 5 commit adds tests and this record. It changes no product behavior.
+
+## Master integration
+
+G10 includes master `43f2eb5c9b76382e295ac6f452f26babf23cb44b` and its current renderer, inventory, ignition, posture, and save contracts.
+Integration retains the instrument preparation gate and separate current and capture library receipts.
+The superseded source-identity helper was removed.
+G10 fixtures now use current ignition, source posture, and the real equip path.
+Initial formatting and obsolete fixture API failures were corrected. No production compatibility path was added.
+
+The normal exporter derived, validated, and promoted this matching package:
+
+| Identity | Value |
+| --- | --- |
+| Package | `b05648ba0de407131d30c65320cb68be36eb025a46afa05eda18722d0faf812f` |
+| Runtime manifest SHA-256 | `e4000dde993f617e90898b03c8c087fc71678cd112a8963614860b4e46389dc3` |
+| Capture library SHA-256 | `92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99` |
+
+Library, source, and catalog identities remain the values recorded below.
+The current package has a separate capture receipt. No proof pin or source input changed.
+Python passed 11 tests. Web passed 14 tests. Native passed 14 G10 tests with none ignored.
+Formatting and both WASM backend checks passed. Existing compiler warnings remain.
+Scoped integration review found no issue.
+Evidence is retained in [`.cache/g10-integration/`](../.cache/g10-integration/).
+Original implementation evidence remains in [`.cache/g10-control-verification/`](../.cache/g10-control-verification/).
+
+Release builds, full checks, and browser acceptance were not repeated for integration.
+The release receipts below describe the original implementation build.
+All twelve normal-input scenarios remain open. Radio persistence remains a G13 dependency. G10 stays Verify.
+
+Build before serving the merged code:
+
+```powershell
+Set-Location 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm'
+./scripts/build.ps1
+$env:PORT = '43125'
+node scripts/serve.mjs
+```
+
+Retained source input for a later normal export is `.cache/g10-integration/source-input/library`.
+The prior installed reference export is retained in `.cache/g10-integration/reference-before`.
 
 ## Implemented controls
 
@@ -14,7 +54,7 @@ The existing modules own these changes.
 Tests cover endpoint direction, intensity, body ownership, transforms, material links, input priority, and control roles.
 These checks do not prove normal gameplay or audible output.
 
-## Matching package
+## Implementation package
 
 | Identity | Value |
 | --- | --- |
@@ -42,8 +82,8 @@ Task 5 did not derive or promote another source package.
 ## Targeted checks
 
 All commands ran from this worktree.
-Evidence will be archived under [`.cache/g10-control-verification/`](../.cache/g10-control-verification/).
-The controller retains the execution workspace until final review.
+Evidence is archived under [`.cache/g10-control-verification/`](../.cache/g10-control-verification/).
+The execution scratch was removed after final review.
 
 | Command | Exit | Result and evidence |
 | --- | --- | --- |
@@ -98,9 +138,9 @@ It passed the focused check. This corrects test setup, not product behavior.
 Native checks retain four existing dead-code warnings.
 Both WASM checks retain four existing material warnings.
 
-## Browser acceptance
+## Original browser acceptance
 
-The isolated server uses this command:
+The implementation test used this command:
 
 ```powershell
 Set-Location 'C:/Users/Corashina/.codex/worktrees/g10-garage-controls/the-long-drive-wasm'
