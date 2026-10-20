@@ -1,5 +1,6 @@
 """Checked source-only G11 driving captures. Raw runs stay in ignored storage."""
 import argparse
+from decimal import Decimal
 import json
 import math
 import os
@@ -9,6 +10,7 @@ from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
+from .driving_curve import SCENARIO_ID, validate_curve_scenario, validate_curve_run, require_same_curve
 from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
@@ -20,14 +22,18 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_angular.cs', 'driving_angular.py', 'driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+FILES = ('driving_curve.py', 'driving_angular.cs', 'driving_angular.py', 'driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input2.entry', 'input2.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
 
 def read_json(path):
     try:
-        return json.loads(path.read_text(encoding='utf-8-sig'))
+        text = path.read_text(encoding='utf-8-sig')
+        data = json.loads(text)
+        if isinstance(data, dict) and data.get('scenario') == SCENARIO_ID:
+            data['curves'] = json.loads(text, parse_float=Decimal).get('curves')
+        return data
     except (OSError, ValueError) as error:
         raise ValueError(f'Missing or invalid evidence: {path}') from error
 
@@ -172,6 +178,7 @@ def validate_timing(samples, scenario):
 
 
 def validate_run(run, scenario):
+    curve = validate_curve_run(run, scenario)
     finite(run)
     if run.get('runtime') != 'original-unity-player':
         raise ValueError('Original native Unity player evidence is required')
@@ -227,7 +234,8 @@ def validate_run(run, scenario):
     controls = validate_controls(run, checked_scenario)
     if scenario['probe_kind']=='wheel_angular':
         timing['angular'] = validate_angular(run, scenario)
-    return {'samples': len(samples), 'physics_steps': run['physics_steps'],
+    return {**({'curve_holdout': curve} if curve is not None else {}),
+            'samples': len(samples), 'physics_steps': run['physics_steps'],
             'phases': sorted(phases), 'controls': controls, **timing}
 
 
@@ -280,6 +288,8 @@ def verify(output_root: Path) -> dict:
         raise ValueError('Three fresh native repeats are required')
     results = []
     for scenario in request['scenarios']:
+        validate_curve_scenario(scenario)
+        first_curve = None
         initial = None
         canonical_body_input = None
         for repeat in range(1, 4):
@@ -290,6 +300,9 @@ def verify(output_root: Path) -> dict:
                 validate_angular_body_input(run, canonical_body_input, repeat==1)
                 if repeat==1: canonical_body_input = run['setup_state']['angular_body_input']
             result = validate_evidence(output, directory, run, scenario)
+            if scenario['id'] == SCENARIO_ID:
+                require_same_curve(first_curve, result['curve_holdout'])
+                first_curve = result['curve_holdout']
             state = {key: value for key, value in run['initial'].items()
                      if key != 'profile_path'}
             state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
@@ -336,6 +349,7 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError('Invalid native scenario')
         for key in ('source_objects', 'setup', 'frame_schedule', 'controls'):
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
+        validate_curve_scenario(row)
         validate_schedule(row)
         if row['probe_kind']=='wheel_angular': validate_angular_schedule(row)
     output.mkdir(parents=True)
@@ -355,6 +369,7 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError(f'Native capture failed; evidence retained: {log}')
     invoke(['-Mode', 'Setup', '-RequestPath', str(output / 'request.json')], output / 'setup.log', 120)
     for row in rows:
+        first_curve = None
         setup_state = None
         initial = None
         for repeat in range(1, 4):
@@ -370,7 +385,10 @@ def capture(source_root: Path, reference_root: Path,
             native_run = read_json(directory / 'runtime.json')
             if row['probe_kind']=='wheel_angular':
                 validate_angular_body_input(native_run, None if setup_state is None else setup_state.get('angular_body_input'), repeat==1)
-            validate_evidence(output, directory, native_run, row)
+            result = validate_evidence(output, directory, native_run, row)
+            if row['id'] == SCENARIO_ID:
+                require_same_curve(first_curve, result['curve_holdout'])
+                first_curve = result['curve_holdout']
             state = {key: value for key, value in native_run['initial'].items()
                      if key != 'profile_path'}
             state['physical_geometry'] = physical_inputs(next(row for row in native_run['geometry'] if row['phase'] == 'armed-after-canonical'))

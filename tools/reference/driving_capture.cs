@@ -52,6 +52,7 @@ public sealed class G11Capture : MonoBehaviour
         public bool has_setup_state;
         public Control[] controls;
         public G11AngularProbe.Input angular;
+        public float[] engine_torque_holdout_inputs;
     }
     [Serializable] public struct Wheel
     {
@@ -679,10 +680,10 @@ public sealed class G11Capture : MonoBehaviour
     static void CaptureCurves()
     {
         var fields=typeof(carscript).GetFields().Where(f=>f.FieldType==typeof(AnimationCurve));
-        foreach(var field in fields) CaptureCurve("carscript",field.Name,(AnimationCurve)field.GetValue(car));
-        CaptureCurve("enginescript","torqueCurve",car.Engine.torqueCurve);
+        foreach(var field in fields) CaptureCurve("carscript",field.Name,(AnimationCurve)field.GetValue(car),null);
+        CaptureCurve("enginescript","torqueCurve",car.Engine.torqueCurve,scenario.engine_torque_holdout_inputs);
     }
-    static void CaptureCurve(string owner,string name,AnimationCurve curve)
+    static void CaptureCurve(string owner,string name,AnimationCurve curve,float[] appendedInputs)
     {
         if(curve==null || curve.length==0) return;
         var keys=curve.keys;
@@ -696,6 +697,7 @@ public sealed class G11Capture : MonoBehaviour
             float span=keys[index].time-keys[index-1].time;
             for(int quarter=1;quarter<=3;quarter++) inputs.Add(keys[index-1].time+span*quarter*.25f);
         }
+        if(appendedInputs!=null) inputs.AddRange(appendedInputs);
         result.curves.Add(new Curve{owner=owner,name=name,keys=keys.Select(k=>new Key(k)).ToArray(),pre_wrap=(int)curve.preWrapMode,
             post_wrap=(int)curve.postWrapMode,inputs=inputs.ToArray(),values=inputs.Select(curve.Evaluate).ToArray()});
     }
