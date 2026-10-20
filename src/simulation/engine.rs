@@ -71,21 +71,14 @@ fn temperature_change(
 // Source ChangeWithoutMix is sequential. Tank.Upd removes one depleted entry.
 // Coolant changes do not call Tank.Upd. Keep their retained zero entries.
 fn drain(container: &mut FluidContainer, liters: f32) -> f32 {
-    let quantities = container.mixture.quantities_liters;
-    let before = container.mixture.total();
+    let quantities = container.mixture().quantities_liters;
+    let before = container.total();
     if before > 0.0 && liters > 0.0 {
         container.change_without_mix(-liters);
         // Finite-state correction: overdraw must not publish fluid creation.
-        for (amount, prior) in container
-            .mixture
-            .quantities_liters
-            .iter_mut()
-            .zip(quantities)
-        {
-            *amount = amount.max(0.0).min(prior.max(0.0));
-        }
+        container.bound_engine_drain(quantities);
     }
-    before - container.mixture.total()
+    before - container.total()
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -239,7 +232,7 @@ impl EngineState {
             self.oil_penalty = inverse_lerp(
                 fluids.sump.capacity_liters * 0.3,
                 0.0,
-                fluids.sump.mixture.amount(reference.oil_fluid as usize),
+                fluids.sump.mixture().amount(reference.oil_fluid as usize),
             )
             .powi(3);
         }
@@ -364,7 +357,7 @@ impl EngineState {
             reference,
             dt,
         );
-        if input.installed.is_some() && self.rpm > 10.0 && fluids.sump.mixture.total() > 0.0 {
+        if input.installed.is_some() && self.rpm > 10.0 && fluids.sump.total() > 0.0 {
             drain(
                 fluids.sump,
                 reference.globals.oil_consumption
@@ -408,13 +401,13 @@ impl EngineState {
                 radiator.thermostat_range[1],
                 self.temperature,
             );
-            let total = fluids.coolant.mixture.total();
+            let total = fluids.coolant.total();
             let water_blood = if total > 0.0 {
                 fluids
                     .coolant
-                    .mixture
+                    .mixture()
                     .amount(3)
-                    .max(fluids.coolant.mixture.amount(4))
+                    .max(fluids.coolant.mixture().amount(4))
                     / total
             } else {
                 0.0
@@ -473,7 +466,16 @@ mod tests {
         let mut fuel = container(source.fuel_tank);
         let mut sump = container(source.oil_tank);
         let mut coolant = container(source.coolant_tank);
-        fuel.restore_contents([1., 0., 0., 0., 0., 0.], &[3, 0]);
+        fuel.restore_entries(&[
+            crate::fluids::FluidEntry {
+                fluid_type: 3,
+                amount: 0.,
+            },
+            crate::fluids::FluidEntry {
+                fluid_type: 0,
+                amount: 1.,
+            },
+        ]);
         let output = engine.step(
             EngineInput::default(),
             VehicleFluids {
@@ -486,10 +488,42 @@ mod tests {
             0.02,
         );
         assert_eq!(output.consumed_fuel_liters, 0.);
-        assert_eq!(fuel.retained_order(), &[0]);
-        fuel.restore_contents([0.; 6], &[0, 3]);
-        sump.restore_contents([0.; 6], &[0, 1]);
-        coolant.restore_contents([0.; 6], &[3, 4]);
+        assert_eq!(
+            fuel.entries()
+                .map(|entry| entry.fluid_type)
+                .collect::<Vec<_>>(),
+            [0]
+        );
+        fuel.restore_entries(&[
+            crate::fluids::FluidEntry {
+                fluid_type: 0,
+                amount: 0.,
+            },
+            crate::fluids::FluidEntry {
+                fluid_type: 3,
+                amount: 0.,
+            },
+        ]);
+        sump.restore_entries(&[
+            crate::fluids::FluidEntry {
+                fluid_type: 0,
+                amount: 0.,
+            },
+            crate::fluids::FluidEntry {
+                fluid_type: 1,
+                amount: 0.,
+            },
+        ]);
+        coolant.restore_entries(&[
+            crate::fluids::FluidEntry {
+                fluid_type: 3,
+                amount: 0.,
+            },
+            crate::fluids::FluidEntry {
+                fluid_type: 4,
+                amount: 0.,
+            },
+        ]);
         engine.rpm = 2000.;
         engine.step(
             EngineInput {
@@ -508,8 +542,24 @@ mod tests {
             |_| panic!("no starter"),
             0.02,
         );
-        assert_eq!(fuel.retained_order(), &[3]);
-        assert_eq!(sump.retained_order(), &[0, 1]);
-        assert_eq!(coolant.retained_order(), &[3, 4]);
+        assert_eq!(
+            fuel.entries()
+                .map(|entry| entry.fluid_type)
+                .collect::<Vec<_>>(),
+            [3]
+        );
+        assert_eq!(
+            sump.entries()
+                .map(|entry| entry.fluid_type)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+        assert_eq!(
+            coolant
+                .entries()
+                .map(|entry| entry.fluid_type)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
     }
 }

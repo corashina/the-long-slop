@@ -68,30 +68,12 @@ impl SaveSnapshot {
             )?;
             let tank = reference.tanks.iter().find(|tank| tank.item == id);
             match (&item.fluids, tank) {
-                (Some(fluid), Some(tank)) => {
-                    let quantities = &fluid.quantities_liters;
-                    data(
-                        quantities.iter().all(|v| v.is_finite() && *v >= 0.)
-                            && quantities.iter().map(|v| f64::from(*v)).sum::<f64>()
-                                <= f64::from(tank.capacity_liters) + 0.001,
-                        "Fluid capacity",
-                    )?;
-                    data(fluid.order.len() <= 6, "Fluid order length")?;
-                    let mut seen = [false; 6];
-                    for &index in &fluid.order {
-                        data(index < 6, "Fluid order index")?;
-                        let entry = &mut seen[index as usize];
-                        data(!*entry, "Duplicate fluid order entry")?;
-                        *entry = true;
-                    }
-                    data(
-                        quantities
-                            .iter()
-                            .zip(seen)
-                            .all(|(&amount, retained)| amount <= 0. || retained),
-                        "Missing positive fluid order entry",
-                    )?;
-                }
+                (Some(entries), Some(tank)) => data(
+                    crate::fluids::validate_fluid_entries(entries)
+                        && tank.capacity_liters.is_finite()
+                        && tank.capacity_liters > 0.,
+                    "Fluid entries",
+                )?,
                 (None, None) => (),
                 _ => {
                     return Err(SaveError::InvalidLinks(

@@ -172,9 +172,8 @@ impl SaveSnapshot {
                 "Generated velocity",
             )?;
             data(
-                s.fluid_quantities.is_none_or(|q| {
-                    q.iter().all(|v| v.is_finite() && *v >= 0.)
-                        && q.iter().map(|v| f64::from(*v)).sum::<f64>() <= f64::from(f32::MAX)
+                s.fluids.as_ref().is_none_or(|entries| {
+                    crate::fluids::validate_fluid_entries(entries.as_slice())
                 }),
                 "Generated fluids",
             )?;

@@ -6,6 +6,7 @@ pub mod equipment;
 pub(crate) mod equipment_input;
 pub mod feedback;
 pub mod fluid_contact;
+mod fluid_receipts;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -114,6 +115,7 @@ struct OpeningRules {
     tank: ItemId,
     cap: ItemId,
     flow_liters_per_second: f32,
+    flow_radius: f32,
     tilt_degrees: f32,
     angle_disabled: bool,
     spill_disabled: bool,
@@ -129,6 +131,7 @@ impl From<&OpeningRecord> for OpeningRules {
             tank: opening.tank,
             cap: opening.cap,
             flow_liters_per_second: opening.flow_liters_per_second,
+            flow_radius: opening.flow_radius,
             tilt_degrees: opening.tilt_degrees,
             angle_disabled: opening.angle_disabled,
             spill_disabled: opening.spill_disabled,
@@ -177,6 +180,8 @@ pub struct InteractionState {
     pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
+    receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
+    callback_nodes: Vec<NodeId>,
     seats: Vec<SeatState>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
@@ -283,6 +288,13 @@ impl InteractionState {
             + map(&self.collider_bindings)
             + map(&self.mechanism_bodies)
             + vector(&self.openings)
+            + vector(&self.receipt_tanks)
+            + self
+                .receipt_tanks
+                .iter()
+                .map(|tank| tank.retained_cap_bytes())
+                .sum::<usize>()
+            + vector(&self.callback_nodes)
             + set(&self.supplies)
             + map(&self.source_supply_emission)
             + map(&self.tank_rules)
@@ -546,6 +558,15 @@ impl InteractionState {
             parts: parts::PartAttachments::new(reference)?,
             attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
+            receipt_tanks: fluid_receipts::tank_nodes(reference),
+            callback_nodes: Vec::with_capacity(
+                reference
+                    .openings
+                    .iter()
+                    .map(|o| o.particles.capacity as usize)
+                    .max()
+                    .unwrap_or(0),
+            ),
             openings,
             sounds: [None; 64],
             sound_count: 0,
@@ -1009,6 +1030,7 @@ impl InteractionState {
             tank,
             cap,
             flow_liters_per_second: flow,
+            flow_radius: radius,
             tilt_degrees: number(cap_record, "defPourAngle")?,
             angle_disabled: number(cap_record, "noAngle")? != 0.0,
             spill_disabled: definition.no_pour,
@@ -1106,6 +1128,22 @@ impl InteractionState {
         self.sounds.copy_within(1..=self.sound_count, 0);
         self.sounds[self.sound_count] = None;
         sound
+    }
+
+    fn fill_pair(&self, opening: &OpeningState, items: &ItemStore) -> Option<(ItemId, ItemId)> {
+        let source = self.held()?;
+        let destination = opening.reference.tank;
+        if source == destination
+            || opening.valve <= 0.
+            || self.tank_rules.get(&source)?.no_fill_from
+            || self.tank_rules.get(&destination)?.no_fill_this
+        {
+            return None;
+        }
+        let source_fluid = items.get(source)?.fluid.as_ref()?;
+        let destination_fluid = items.get(destination)?.fluid.as_ref()?;
+        (source_fluid.total() > 0. && destination_fluid.total() < destination_fluid.capacity_liters)
+            .then_some((source, destination))
     }
 
     pub fn opening_flow(&self, id: OpeningId) -> Option<(bool, f32)> {
@@ -1244,6 +1282,9 @@ impl InteractionState {
             opening.flow = None;
             opening.fill_called = false;
             opening.empty_pour = false;
+            if let Some(contact) = opening.contact.as_mut() {
+                contact.clear_outputs();
+            }
         }
         self.mechanisms.begin_audio_step();
         let mut cap_sounds = [None; 2];
@@ -1594,61 +1635,33 @@ impl InteractionState {
         }
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
-        let mut filling = None;
         let mut filled_destination = None;
         if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
-            && let Some(held) = self.held()
             && let Some(target) = filling_target
         {
             if let Some(opening) = self
                 .openings
                 .iter()
-                .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
+                .find(|opening| opening.reference.cap == target.item)
+                && let Some((source_id, destination)) = self.fill_pair(opening, items)
             {
-                let (source_id, destination, flow, destination_opening) =
-                    if self.supplies.contains(&opening.reference.tank) {
-                        if let Some(destination) = self.openings.iter().find(|destination| {
-                            destination.reference.tank == held && destination.valve > 0.0
-                        }) {
-                            (
-                                opening.reference.tank,
-                                held,
-                                opening.reference.flow_liters_per_second * opening.valve,
-                                destination.reference.id,
-                            )
-                        } else {
-                            (held, held, 0.0, opening.reference.id)
-                        }
-                    } else {
-                        (
-                            held,
-                            opening.reference.tank,
-                            opening.reference.flow_liters_per_second * opening.valve,
-                            opening.reference.id,
-                        )
-                    };
-                let source_allowed = self
-                    .tank_rules
-                    .get(&source_id)
-                    .is_some_and(|rules| !rules.no_fill_from);
+                let flow = opening.reference.flow_liters_per_second * opening.valve;
+                let destination_opening = opening.reference.id;
                 let destination_rules = self.tank_rules.get(&destination);
-                if source_id != destination
-                    && source_allowed
-                    && destination_rules.is_some_and(|rules| !rules.no_fill_this)
-                    && let Some((source, destination_state)) =
-                        items.get_pair_mut(source_id, destination)
+                if let Some((source, destination_state)) =
+                    items.get_pair_mut(source_id, destination)
                     && let (Some(source), Some(destination_state)) =
                         (source.fluid.as_mut(), destination_state.fluid.as_mut())
                 {
                     let mut amount = flow * dt;
-                    let source_total = source.mixture.total();
-                    let destination_total = destination_state.mixture.total();
+                    let source_total = source.total();
+                    let destination_total = destination_state.total();
                     if destination_rules.is_some_and(|rules| rules.slow_oil)
                         && source_total > 0.0
-                        && source.mixture.amount(1) / source_total > 0.25
+                        && source.mixture().amount(1) / source_total > 0.25
                         && destination_total > 0.05
-                        && destination_state.mixture.amount(1) / destination_total < 1.0
+                        && destination_state.mixture().amount(1) / destination_total < 1.0
                     {
                         amount = (amount * destination_total * self.slow_oil_modifier)
                             .max(0.0001)
@@ -1656,7 +1669,6 @@ impl InteractionState {
                     }
                     let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
-                        filling = Some(source_id);
                         filled_destination = Some(destination_opening);
                         action = Some(InteractionAction::Fill {
                             source: source_id,
@@ -1682,6 +1694,7 @@ impl InteractionState {
             if item.inactive_pose.is_some() {
                 continue;
             }
+            contact.update_response(particles);
             let cap_pose = to_rapier(item.pose) * opening.local_pose;
             let forward = cap_pose.rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
@@ -1690,7 +1703,7 @@ impl InteractionState {
             let mut poured = None;
             let mut fractions = [0.; 6];
             if let Some(fluid) = item.fluid.as_mut() {
-                let fill = (fluid.mixture.total() / fluid.capacity_liters).clamp(0.0, 1.0);
+                let fill = (fluid.total() / fluid.capacity_liters).clamp(0.0, 1.0);
                 let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
                 let factor = if opening.reference.angle_disabled {
                     1.0
@@ -1698,23 +1711,25 @@ impl InteractionState {
                     inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
                         .max(inverse_lerp(90.0, 180.0, angle))
                 };
-                opening.empty_pour = fluid.mixture.total() <= 0.;
+                opening.empty_pour = fluid.total() <= 0.;
                 let emitting = opening.valve > 0.
                     && !opening.reference.spill_disabled
                     && !opening.reference.tube_connected
-                    && filling != Some(opening.reference.tank)
                     && (opening.reference.angle_disabled || angle > threshold)
-                    && fluid.mixture.total() > 0.;
+                    && fluid.total() > 0.;
                 if emitting {
                     let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
                     let requested_liters = speed * dt * fluid_scale;
-                    let total = fluid.mixture.total();
-                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                    let total = fluid.total();
+                    fractions = fluid
+                        .mixture()
+                        .quantities_liters
+                        .map(|amount| amount / total);
                     let debited = spill(fluid, requested_liters);
                     if debited > 0. {
                         opening.flow = Some((false, speed));
                     }
-                    poured = Some(requested_liters);
+                    poured = Some(speed * dt);
                     emission_rate = particles.min_rate
                         + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
                     emission_speed = particles.max_speed * fill * factor;
@@ -1725,11 +1740,10 @@ impl InteractionState {
             if poured.is_some() {
                 contact.set_color(fractions);
             }
-            let hit = contact.advance(
+            contact.advance(
                 particles,
                 cap_pose,
                 opening.tilt_axis,
-                item.body,
                 self.player_body,
                 cap_center,
                 self.drink_collider_radius,
@@ -1740,32 +1754,36 @@ impl InteractionState {
                 emission_speed,
                 poured,
             );
-            if hit && contact.last_poured > 0. {
+            if contact.player_hit() && contact.last_poured > 0. {
                 if poured.is_none() {
                     let Some(fluid) = item.fluid.as_ref() else {
                         continue;
                     };
-                    let total = fluid.mixture.total();
+                    let total = fluid.total();
                     if total <= 0. {
                         continue;
                     }
-                    fractions = fluid.mixture.quantities_liters.map(|amount| amount / total);
+                    fractions = fluid
+                        .mixture()
+                        .quantities_liters
+                        .map(|amount| amount / total);
                 }
                 if action.is_none() {
                     action = Some(InteractionAction::DrinkContact {
                         source: opening.reference.tank,
-                        poured_liters: contact.last_poured,
+                        poured_liters: contact.last_poured * fluid_scale,
                         fractions,
                     });
                 } else {
                     self.pending_drink_contacts.push((
                         opening.reference.tank,
-                        contact.last_poured,
+                        contact.last_poured * fluid_scale,
                         fractions,
                     ));
                 }
             }
         }
+        self.apply_fluid_receipts(items, physics, fluid_scale);
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }

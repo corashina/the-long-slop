@@ -71,7 +71,8 @@ The engine retains mechanics, temperature, fluid identities, and its fuel bindin
 Detached engines use the source 0.2-second run grace and produce zero wheel torque.
 Starter release retains the source one-update delay. Cancellation and load clear transient starter commands.
 Engine decisions read prior fuel suitability and heat penalties. Mounted oil service keeps the existing fixed-step order.
-Start checks consume interval draws. Schema 7 saves the next draw and ordered fluid contents. Schema 6 is rejected.
+Start checks consume interval draws. At implementation time, schema 7 saved the next draw and ordered fluid contents.
+The G04 integration below advances the current format to schema 8 and rejects schemas 6 and 7.
 Engine drains use source sequential changes. A zero-total guard and bounded engine publication prevent invalid depleted quantities.
 This deliberately differs from source NaN and negative-total overdraw. General fluid transfer remains outside G05.
 Engine audio follows engine state and position, including detached grace and the genuine stop transition.
@@ -102,6 +103,24 @@ The merged result passed 22 targeted native tests and seven web tests. Formattin
 Existing compiler warnings remain. The G08 worktree and merged branch were removed after verification.
 Browser acceptance, full checks, and product release builds remain open. G08 stays Verify.
 See [G08 verification](g08-inventory.md) for commands and limits.
+G04 update, 2026-10-20: ordered fluid state, direct fill, particle receipts, and detached tank checks are implemented.
+Task 5 baseline checks passed 30 native tests and five Python tests. Both WASM targets passed.
+The installed checks include three engine and radiator cycles each, signed save reconstruction, cap ownership, collision ownership, and mass.
+Final review found two P2 defects. Portable mass and receiver particle response are fixed.
+The fix wave passed 12 affected native tests and both WASM checks.
+Scoped re-review approved both fixes with no new actionable issue.
+Two reference-loading runtime cases remain ignored. Normal-input aiming, visible flow, audio, browser reload, and Unity callback timing remain unverified.
+Full-library checks previously failed because `records/managed/coverage.json` is missing. Selected runtime and package checks passed.
+See [G04 evidence](superpowers/reports/2026-10-20-g04-fluids.md) for commands, counts, rulings, and limits. G04 stays Verify.
+G04 integration, 2026-10-20: G04 is merged into master with G05 engine persistence and G08 inventory.
+The merged save format uses schema 8 for ordered fluid entries. Schemas 6 and 7 are rejected.
+Integration review corrected deferred fluid cleanup and finite instrument sampling.
+Targeted fluid, engine, inventory, generated-owner restore, and instrument checks passed.
+The accepted native runs include 63 executions, with repeated filter cases counted.
+Five Python tests, six save-storage web tests, formatting, and both WASM backend checks passed.
+Matching selected assets passed native contract, reference, and immutable package validation.
+Full-library coverage remains incomplete. Full checks, release builds, and browser acceptance remain deferred.
+See [G04 verification](superpowers/reports/2026-10-20-g04-fluids.md) for commands and limits. G04 stays Verify.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
