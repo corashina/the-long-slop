@@ -9,6 +9,8 @@ The Task 5 commit adds tests and this record. It changes no product behavior.
 
 ## Master integration
 
+Local merge commit: `685d040e9ac1a3686ca9ee092b2348908d474289`.
+
 G10 includes master `43f2eb5c9b76382e295ac6f452f26babf23cb44b` and its current renderer, inventory, ignition, posture, and save contracts.
 Integration retains the instrument preparation gate and separate current and capture library receipts.
 The superseded source-identity helper was removed.
@@ -28,6 +30,9 @@ The current package has a separate capture receipt. No proof pin or source input
 Python passed 11 tests. Web passed 14 tests. Native passed 14 G10 tests with none ignored.
 Formatting and both WASM backend checks passed. Existing compiler warnings remain.
 Scoped integration review found no issue.
+The same targeted checks also passed on merged master.
+The first master Python run failed during sandbox temp cleanup. A workspace temp directory resolved that environment error.
+The G10 worktree was removed after verification. Evidence, source inputs, and prior immutable packages were retained.
 Evidence is retained in [`.cache/g10-integration/`](../.cache/g10-integration/).
 Original implementation evidence remains in [`.cache/g10-control-verification/`](../.cache/g10-control-verification/).
 
@@ -79,7 +84,7 @@ That command exited 0. `task-4-local-verify.log` holds the original result.
 `task-5-confirm-identities.py` and `task-5-identity.log` record the fresh identity check.
 Task 5 did not derive or promote another source package.
 
-## Targeted checks
+## Implementation targeted checks
 
 All commands ran from this worktree.
 Evidence is archived under [`.cache/g10-control-verification/`](../.cache/g10-control-verification/).

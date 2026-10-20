@@ -146,6 +146,8 @@ Initial fixture API and formatting failures were corrected. Scoped integration r
 The original release build passed. Release builds, full checks, and browser acceptance were not repeated for integration.
 All twelve normal-input scenarios remain open after the prior Computer Use URL-policy stop.
 Gauge readability and audible output remain unverified. G13 owns missing persisted radio controls. G10 stays Verify.
+The same targeted checks passed on merged master. The G10 worktree was then removed.
+Evidence and source inputs remain in the local cache.
 See [G10 verification](g10-controls.md) for package identities, commands, evidence, and limits.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
