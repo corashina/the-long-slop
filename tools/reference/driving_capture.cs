@@ -183,6 +183,7 @@ public sealed class G11Capture : MonoBehaviour
     static WheelCollider[] wheels, sourceWheels;
     static PoseInput inputPose, spawnPose;
     static Sample[] buffer;
+    static int observedPhysicsStep;
     static int used, sequence, step, startFrame, lastInput, lastEngine, lastCar, lastRpm;
     static bool active, finished, sourceContactAvailable;
     static WheelHit sourceContact;
@@ -266,7 +267,7 @@ public sealed class G11Capture : MonoBehaviour
                 result.authored_template=DescribeAssembly(authored);
                 car=authored; body=car.RB;
                 G11Geometry.Initialize(car);
-                G11Geometry.Capture("world.entry",step,"world.entry",completedStorage);
+                G11Geometry.Capture("world.entry",observedPhysicsStep,"world.entry",completedStorage);
                 body.isKinematic=true;
                 G11Geometry.HoldWheels();
                 result.target_held_before_activation=true;
@@ -322,10 +323,10 @@ public sealed class G11Capture : MonoBehaviour
         {
             if(!result.target_held_before_activation || !SourceAssemblyReady(car) || !main.player.mind)
             {
-                G11Geometry.Capture("readiness-timeout",step,"Initialize bounded timeout",completedStorage);
+                G11Geometry.Capture("readiness-timeout",observedPhysicsStep,"Initialize bounded timeout",completedStorage);
                 throw new InvalidOperationException("Original selected Lada, source storage, and player did not initialize; physical readiness: "+G11Geometry.ReadinessFailure()+"; source readiness: "+SourceReadinessFailure(car));
             }
-            G11Geometry.Capture("source-physical-ready",step,"Initialize source readiness",completedStorage);
+            G11Geometry.Capture("source-physical-ready",observedPhysicsStep,"Initialize source readiness",completedStorage);
             main.PressedContinue();
             body=car.RB;
             body.isKinematic=true;
@@ -751,7 +752,9 @@ public sealed class G11Capture : MonoBehaviour
     public static float AnalogAxis(string name) { return 0f; }
     void FixedUpdate()
     {
-        if(!active || finished) return;
+        if(finished) return;
+        observedPhysicsStep++;
+        if(!active) return;
         try
         {
             if(startFrame<0) startFrame=Time.frameCount;
@@ -785,12 +788,12 @@ public sealed class G11Capture : MonoBehaviour
     public static void SetColliderEnabled(Collider collider,bool value) { G11Geometry.SetEnabled(collider,value); }
     public static void ObserveLock(object owner,object cargo,string phase)
     {
-        try { if(!finished) G11Geometry.LockBoundary((mountStuff)owner,(pickupable)cargo,phase,step,completedStorage); }
+        try { if(!finished) G11Geometry.LockBoundary((mountStuff)owner,(pickupable)cargo,phase,observedPhysicsStep,completedStorage); }
         catch(Exception error) { Fail(error); }
     }
     static void RecordSetupBoundary(string phase)
     {
-        var geometry=G11Geometry.Capture(phase,step,phase=="prepared-held"?"observer.Initialize":"observer.LateUpdate",completedStorage);
+        var geometry=G11Geometry.Capture(phase,observedPhysicsStep,phase=="prepared-held"?"observer.Initialize":"observer.LateUpdate",completedStorage);
         if(!geometry.complete) throw new InvalidOperationException("Incomplete discovered physical geometry: "+String.Join("; ",geometry.unavailable));
         result.setup_boundaries.Add(new SetupBoundary{phase=phase,frame=Time.frameCount,time=Time.time,
             fixed_time=Time.fixedTime,delta_time=Time.deltaTime,kinematic=body.isKinematic,
