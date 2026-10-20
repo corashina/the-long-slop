@@ -484,3 +484,150 @@ fn g04_caps_and_direct_fill() {
         assert_eq!(blocked.area.items.get(source).unwrap().fluid, before);
     }
 }
+
+#[test]
+#[ignore = "requires the installed single-Lada export"]
+fn g04_particle_receipt() {
+    use my_summer_slop::{
+        fluids::{FluidContainer, FluidEntry, spill},
+        interaction::ResolvedAim,
+        reference::ItemId,
+        simulation::{FIXED_DT, FrameInput},
+        vehicle::to_rapier,
+    };
+    use rapier3d::math::{Pose, Vector};
+    let mut r = ReferenceManifest::from_runtime_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let source = ItemId(116);
+    let receiver = r.vehicles[0].engine.fuel_tank;
+    let probe = GarageRuntime::new(&r).unwrap();
+    let chassis = probe.physics.chassis_handle(0);
+    let collider = probe
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| c.parent() == Some(chassis) && c.is_enabled() && !c.is_sensor())
+        .unwrap()
+        .1;
+    let bounds = collider.compute_aabb();
+    let emitter = Pose::from_translation(Vector::new(
+        (bounds.mins.x + bounds.maxs.x) * 0.5,
+        bounds.maxs.y + 0.05,
+        (bounds.mins.z + bounds.maxs.z) * 0.5,
+    ));
+    let source_cap = r
+        .openings
+        .iter()
+        .find(|o| o.tank == source)
+        .unwrap()
+        .clone();
+    let source_item = r.items.iter().find(|i| i.id == source).unwrap();
+    let body = r.bodies.iter().find(|b| b.id == source_item.body).unwrap();
+    let anchor = r
+        .anchors
+        .iter()
+        .find(|a| a.id == source_cap.anchor)
+        .unwrap();
+    let pose = |t: &my_summer_slop::reference::Transform| {
+        to_rapier(my_summer_slop::vehicle::VehiclePose {
+            position: t.translation,
+            rotation: t.rotation,
+        })
+    };
+    let local = (pose(&body.pose) * pose(&anchor.transform)).inverse() * emitter;
+    for opening in &mut r.openings {
+        opening.valve = 0.;
+        if opening.tank == source {
+            opening.angle_disabled = true;
+            opening.spill_disabled = false;
+            opening.tube_connected = false;
+            opening.tilt_axis = [0., -1., 0.];
+            opening.flow_liters_per_second = 1.;
+            opening.particles.local_pose.translation = local.translation.to_array();
+            opening.particles.local_pose.rotation = local.rotation.to_array();
+            opening.particles.cone_degrees = 0.;
+            opening.particles.cone_radius = 0.;
+            opening.particles.gravity_multiplier = 0.;
+            opening.particles.max_speed = 20.;
+            opening.particles.min_rate = 600.;
+            opening.particles.max_rate = 600.;
+        }
+        if opening.tank == receiver {
+            opening.flow_radius = 100.;
+            opening.spill_disabled = true;
+        }
+    }
+    let receiver_cap = r
+        .openings
+        .iter()
+        .find(|o| o.tank == receiver)
+        .unwrap()
+        .clone();
+    let mut run = GarageRuntime::new(&r).unwrap();
+    set_cap(&mut run, &r, receiver_cap.id, true);
+    set_cap(&mut run, &r, source_cap.id, true);
+    run.area.items.get_mut(source).unwrap().fluid = Some(FluidContainer::new(
+        4.,
+        &[
+            FluidEntry {
+                fluid_type: 0,
+                amount: 2.,
+            },
+            FluidEntry {
+                fluid_type: 3,
+                amount: 2.,
+            },
+        ],
+    ));
+    run.area.items.get_mut(receiver).unwrap().fluid = Some(FluidContainer::new(40., &[]));
+    let mut expected = run.area.items.get(source).unwrap().fluid.clone().unwrap();
+    let mut received = false;
+    for _ in 0..20 {
+        spill(&mut expected, FIXED_DT * 2.);
+        run.area.interaction.step(
+            FrameInput::default(),
+            ResolvedAim::default(),
+            &mut run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+            FIXED_DT,
+            run.survival.output(),
+            2.,
+        );
+        assert_eq!(
+            run.area.items.get(source).unwrap().fluid.as_ref().unwrap(),
+            &expected,
+            "receipt must not debit its source"
+        );
+        let fluid = run
+            .area
+            .items
+            .get(receiver)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap();
+        if fluid.total() > 0. {
+            let total = expected.total();
+            assert!(
+                (fluid.mixture().amount(0) - FIXED_DT * 2. * expected.mixture().amount(0) / total)
+                    .abs()
+                    < 1e-5
+            );
+            assert!(
+                (fluid.mixture().amount(3) - FIXED_DT * 2. * expected.mixture().amount(3) / total)
+                    .abs()
+                    < 1e-5
+            );
+            received = true;
+            break;
+        }
+    }
+    assert!(
+        received,
+        "actual source particles must fill installed receiver geometry"
+    );
+}

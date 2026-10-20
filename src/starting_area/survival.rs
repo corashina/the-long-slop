@@ -767,7 +767,6 @@ impl GarageRuntime {
             &self.urine_reference,
             cap,
             -Vector::Z,
-            None,
             Some(body),
             Vector::ZERO,
             0.,

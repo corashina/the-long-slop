@@ -17,7 +17,15 @@ pub struct FluidParticle {
     remaining: f32,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct FluidCollision {
+    pub collider: ColliderHandle,
+    pub position: Vector,
+}
+
 pub struct FluidContact {
+    collisions: Vec<FluidCollision>,
+    player_hit: bool,
     particles: Vec<FluidParticle>,
     emission_remainder: f32,
     last_emitter: Option<Vector>,
@@ -39,6 +47,8 @@ impl FluidContact {
     ) -> Self {
         Self {
             particles: Vec::with_capacity(reference.capacity as usize),
+            collisions: Vec::with_capacity(reference.capacity as usize),
+            player_hit: false,
             emission_remainder: 0.,
             last_emitter: None,
             random: seed.max(1),
@@ -59,6 +69,17 @@ impl FluidContact {
         }
     }
 
+    pub(crate) fn clear_outputs(&mut self) {
+        self.collisions.clear();
+        self.player_hit = false;
+        self.last_poured = 0.;
+    }
+    pub(crate) fn collisions(&self) -> &[FluidCollision] {
+        &self.collisions
+    }
+    pub(crate) fn player_hit(&self) -> bool {
+        self.player_hit
+    }
     pub fn particles(&self) -> &[FluidParticle] {
         &self.particles
     }
@@ -110,7 +131,6 @@ impl FluidContact {
         reference: &FluidParticleReference,
         cap_pose: Pose,
         local_axis: Vector,
-        source_body: Option<RigidBodyHandle>,
         player_body: Option<RigidBodyHandle>,
         cap_center: Vector,
         cap_radius: f32,
@@ -120,9 +140,10 @@ impl FluidContact {
         rate: f32,
         speed: f32,
         poured: Option<f32>,
-    ) -> bool {
+    ) {
+        self.clear_outputs();
         if !dt.is_finite() || dt <= 0. {
-            return false;
+            return;
         }
         let rate = if rate.is_finite() { rate } else { 0. };
         let speed = if speed.is_finite() { speed } else { 0. };
@@ -189,7 +210,6 @@ impl FluidContact {
                 });
             }
         }
-        let mut contact = false;
         let mut index = 0;
         while index < self.particles.len() {
             let particle = &mut self.particles[index];
@@ -223,7 +243,6 @@ impl FluidContact {
                     && !collider.is_sensor()
                     && collider.collision_groups().memberships.bits() & reference.collision_mask
                         != 0
-                    && source_body.is_none_or(|body| collider.parent() != Some(body))
                     && player_body.is_none_or(|body| collider.parent() != Some(body))
             };
             let world_hit = physics
@@ -237,17 +256,20 @@ impl FluidContact {
                         stop_at_penetration: true,
                         ..Default::default()
                     },
-                )
-                .map(|(_, hit)| hit);
+                );
             if let Some(time) = cap_hit
                 && (particle.position + travel * time - cap_center).length() < contact_radius
                 && world_hit
                     .as_ref()
-                    .is_none_or(|obstruction| time < obstruction.time_of_impact)
+                    .is_none_or(|(_, obstruction)| time < obstruction.time_of_impact)
             {
-                contact = true;
+                self.player_hit = true;
                 self.particles.swap_remove(index);
-            } else if let Some(hit) = world_hit {
+            } else if let Some((collider, hit)) = world_hit {
+                self.collisions.push(FluidCollision {
+                    collider,
+                    position: hit.witness1,
+                });
                 if hit.time_of_impact <= 0. {
                     self.particles.swap_remove(index);
                     continue;
@@ -270,7 +292,6 @@ impl FluidContact {
                 index += 1;
             }
         }
-        contact
     }
 }
 
@@ -291,4 +312,148 @@ fn sphere_hit(start: Vector, travel: Vector, center: Vector, radius: f32) -> Opt
     }
     let time = (-b - discriminant.sqrt()) / (2. * a);
     (0. ..=1.).contains(&time).then_some(time)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reference::ReferenceManifest;
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+
+    #[test]
+    fn g04_receipts_own_colliders_record_overlap_bounce_and_clear_outputs() {
+        let mut r = ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        let opening = r
+            .openings
+            .iter()
+            .find(|o| o.tank == crate::reference::ItemId(116))
+            .unwrap();
+        let mut reference = opening.particles.clone();
+        let visual = r
+            .particles
+            .iter()
+            .find(|p| p.role == format!("outlet_{}", opening.id.0))
+            .unwrap();
+        let splash = r
+            .particles
+            .iter()
+            .find(|p| p.role == format!("splash_{}", opening.id.0))
+            .unwrap();
+        let mut contact = FluidContact::new(&reference, visual, splash, 1);
+        reference.gravity_multiplier = 0.;
+        reference.bounce = 1.;
+        reference.dampen = 0.;
+        reference.collision_mask = u32::MAX;
+        contact
+            .visual
+            .curves
+            .get_mut("CollisionModule.m_EnergyLossOnCollision")
+            .unwrap()
+            .scalar = 0.;
+        r.vehicles.clear();
+        let mut physics = PhysicsWorld::new(&r, &[]).unwrap();
+        let source = physics.insert_body(RigidBodyBuilder::fixed());
+        let collider =
+            physics.insert_collider_with_parent(ColliderBuilder::cuboid(2., 0.1, 2.), source);
+        physics.refresh_queries();
+        let add = |contact: &mut FluidContact, position: Vector| {
+            contact.particles.push(FluidParticle {
+                position,
+                size: 0.01,
+                color: [1.; 4],
+                start_color: [1.; 4],
+                rotation: 0.,
+                age: 0.,
+                velocity: Vector::new(0., -10., 0.),
+                remaining: reference.lifetime_seconds,
+            })
+        };
+        let advance = |contact: &mut FluidContact, dt, player| {
+            contact.advance(
+                &reference,
+                Pose::IDENTITY,
+                Vector::Y,
+                player,
+                Vector::ZERO,
+                0.,
+                0.,
+                &physics,
+                dt,
+                0.,
+                0.,
+                Some(1.),
+            )
+        };
+        let particle_capacity = contact.particles.capacity();
+        let collision_capacity = contact.collisions.capacity();
+        add(&mut contact, Vector::new(0., 0.5, 0.));
+        advance(&mut contact, 0.1, None);
+        assert_eq!(contact.collisions().len(), 1);
+        assert_eq!(contact.collisions()[0].collider, collider);
+        assert!(
+            (contact.collisions()[0].position.y - 0.1).abs() < 1e-5,
+            "receipt stores the world witness, not the particle center"
+        );
+        assert!(contact.particles()[0].velocity.y > 0.);
+        advance(&mut contact, 0., None);
+        assert!(contact.collisions().is_empty());
+        assert!(!contact.player_hit());
+        assert_eq!(contact.last_poured, 0.);
+        for _ in 0..256 {
+            contact.particles.clear();
+            add(&mut contact, Vector::ZERO);
+            advance(&mut contact, 0.1, None);
+            assert_eq!(
+                contact.collisions().len(),
+                1,
+                "initial overlap with the emitter body must record a hit"
+            );
+            assert!(contact.particles().is_empty());
+        }
+        contact
+            .visual
+            .curves
+            .get_mut("CollisionModule.m_EnergyLossOnCollision")
+            .unwrap()
+            .scalar = 1.;
+        add(&mut contact, Vector::new(0., 0.5, 0.));
+        advance(&mut contact, 0.1, None);
+        assert_eq!(
+            contact.collisions().len(),
+            1,
+            "record the hit before collision lifetime loss removes the particle"
+        );
+        assert!(contact.particles().is_empty());
+        assert_eq!(contact.particles.capacity(), particle_capacity);
+        assert_eq!(contact.collisions.capacity(), collision_capacity);
+        add(&mut contact, Vector::ZERO);
+        advance(&mut contact, 0.1, Some(source));
+        assert!(
+            contact.collisions().is_empty(),
+            "the synthetic drink collider still excludes its player body"
+        );
+        contact.particles.clear();
+        add(&mut contact, Vector::new(10., 0., 0.));
+        contact.advance(
+            &reference,
+            Pose::IDENTITY,
+            Vector::Y,
+            None,
+            Vector::new(10., 0., 0.),
+            1.,
+            1.,
+            &physics,
+            0.1,
+            0.,
+            0.,
+            Some(1.),
+        );
+        assert!(contact.player_hit());
+        advance(&mut contact, 0., None);
+        assert!(!contact.player_hit());
+        assert!(contact.collisions().is_empty());
+    }
 }

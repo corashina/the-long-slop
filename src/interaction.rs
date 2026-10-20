@@ -5,6 +5,7 @@ pub mod consumption;
 pub mod equipment;
 pub mod feedback;
 pub mod fluid_contact;
+mod fluid_receipts;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -113,6 +114,7 @@ struct OpeningRules {
     tank: ItemId,
     cap: ItemId,
     flow_liters_per_second: f32,
+    flow_radius: f32,
     tilt_degrees: f32,
     angle_disabled: bool,
     spill_disabled: bool,
@@ -128,6 +130,7 @@ impl From<&OpeningRecord> for OpeningRules {
             tank: opening.tank,
             cap: opening.cap,
             flow_liters_per_second: opening.flow_liters_per_second,
+            flow_radius: opening.flow_radius,
             tilt_degrees: opening.tilt_degrees,
             angle_disabled: opening.angle_disabled,
             spill_disabled: opening.spill_disabled,
@@ -176,6 +179,8 @@ pub struct InteractionState {
     pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
+    receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
+    callback_nodes: Vec<NodeId>,
     seats: Vec<SeatState>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
@@ -281,6 +286,13 @@ impl InteractionState {
             + map(&self.collider_bindings)
             + map(&self.mechanism_bodies)
             + vector(&self.openings)
+            + vector(&self.receipt_tanks)
+            + self
+                .receipt_tanks
+                .iter()
+                .map(|tank| tank.retained_cap_bytes())
+                .sum::<usize>()
+            + vector(&self.callback_nodes)
             + set(&self.supplies)
             + map(&self.source_supply_emission)
             + map(&self.tank_rules)
@@ -544,6 +556,15 @@ impl InteractionState {
             parts: parts::PartAttachments::new(reference)?,
             attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
+            receipt_tanks: fluid_receipts::tank_nodes(reference),
+            callback_nodes: Vec::with_capacity(
+                reference
+                    .openings
+                    .iter()
+                    .map(|o| o.particles.capacity as usize)
+                    .max()
+                    .unwrap_or(0),
+            ),
             openings,
             sounds: [None; 64],
             sound_count: 0,
@@ -964,6 +985,7 @@ impl InteractionState {
             tank,
             cap,
             flow_liters_per_second: flow,
+            flow_radius: radius,
             tilt_degrees: number(cap_record, "defPourAngle")?,
             angle_disabled: number(cap_record, "noAngle")? != 0.0,
             spill_disabled: definition.no_pour,
@@ -1211,6 +1233,9 @@ impl InteractionState {
             opening.flow = None;
             opening.fill_called = false;
             opening.empty_pour = false;
+            if let Some(contact) = opening.contact.as_mut() {
+                contact.clear_outputs();
+            }
         }
         self.mechanisms.begin_audio_step();
         let mut cap_sounds = [None; 2];
@@ -1573,7 +1598,6 @@ impl InteractionState {
         }
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
-        let mut filling = None;
         let mut filled_destination = None;
         if !held_switch_pressed
             && input.held & keys::PRIMARY != 0
@@ -1609,7 +1633,6 @@ impl InteractionState {
                     }
                     let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
-                        filling = Some(source_id);
                         filled_destination = Some(destination_opening);
                         action = Some(InteractionAction::Fill {
                             source: source_id,
@@ -1655,7 +1678,6 @@ impl InteractionState {
                 let emitting = opening.valve > 0.
                     && !opening.reference.spill_disabled
                     && !opening.reference.tube_connected
-                    && filling != Some(opening.reference.tank)
                     && (opening.reference.angle_disabled || angle > threshold)
                     && fluid.total() > 0.;
                 if emitting {
@@ -1670,7 +1692,7 @@ impl InteractionState {
                     if debited > 0. {
                         opening.flow = Some((false, speed));
                     }
-                    poured = Some(requested_liters);
+                    poured = Some(speed * dt);
                     emission_rate = particles.min_rate
                         + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
                     emission_speed = particles.max_speed * fill * factor;
@@ -1681,11 +1703,10 @@ impl InteractionState {
             if poured.is_some() {
                 contact.set_color(fractions);
             }
-            let hit = contact.advance(
+            contact.advance(
                 particles,
                 cap_pose,
                 opening.tilt_axis,
-                item.body,
                 self.player_body,
                 cap_center,
                 self.drink_collider_radius,
@@ -1696,7 +1717,7 @@ impl InteractionState {
                 emission_speed,
                 poured,
             );
-            if hit && contact.last_poured > 0. {
+            if contact.player_hit() && contact.last_poured > 0. {
                 if poured.is_none() {
                     let Some(fluid) = item.fluid.as_ref() else {
                         continue;
@@ -1713,18 +1734,19 @@ impl InteractionState {
                 if action.is_none() {
                     action = Some(InteractionAction::DrinkContact {
                         source: opening.reference.tank,
-                        poured_liters: contact.last_poured,
+                        poured_liters: contact.last_poured * fluid_scale,
                         fractions,
                     });
                 } else {
                     self.pending_drink_contacts.push((
                         opening.reference.tank,
-                        contact.last_poured,
+                        contact.last_poured * fluid_scale,
                         fractions,
                     ));
                 }
             }
         }
+        self.apply_fluid_receipts(items, physics, fluid_scale);
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }
