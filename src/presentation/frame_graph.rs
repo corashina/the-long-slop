@@ -341,6 +341,7 @@ pub fn spawn_cameras(
     images: &mut Assets<Image>,
     reference: &crate::reference::ReferenceManifest,
     pose: Transform,
+    fov_degrees: f32,
 ) {
     let record = &reference.render_lighting;
     let sky = &record.cameras[0];
@@ -356,7 +357,7 @@ pub fn spawn_cameras(
         CameraRenderGraph::new(SourceSkySurface),
         RenderLayers::layer(16),
         Projection::Perspective(PerspectiveProjection {
-            fov: sky.field_of_view.to_radians(),
+            fov: fov_degrees.to_radians(),
             near: sky.near,
             far: sky.far,
             ..default()
@@ -380,7 +381,7 @@ pub fn spawn_cameras(
     let capture = images.add(image);
     for index in 0..VIEW_COUNT {
         let (near, far, fov, mask, order, samples) = if index < WORLD_VIEWS {
-            let world = super::camera::world_camera_settings(reference);
+            let world = super::camera::world_camera_settings(fov_degrees);
             (
                 world.near,
                 world.far,
@@ -402,11 +403,15 @@ pub fn spawn_cameras(
             (0..32)
                 .filter(|layer| mask & (1u32 << layer) != 0)
                 .collect::<RenderLayers>(),
-            Projection::Perspective(PerspectiveProjection {
-                fov: fov.to_radians(),
-                near,
-                far,
-                ..default()
+            Projection::Perspective(if index < WORLD_VIEWS {
+                super::camera_projection::player_perspective(fov, 1.)
+            } else {
+                PerspectiveProjection {
+                    fov: fov.to_radians(),
+                    near,
+                    far,
+                    ..default()
+                }
             }),
             pose,
             samples,
@@ -429,13 +434,24 @@ pub fn spawn_cameras(
     }
 }
 
-pub fn sync_sky_camera(
+pub(crate) fn sync_sky_camera(
+    drive: Res<crate::app::Drive>,
     main: Query<&Transform, (With<super::camera::DriveCamera>, Without<SourceSkyCamera>)>,
-    mut sky: Query<&mut Transform, (With<SourceSkyCamera>, Without<super::camera::DriveCamera>)>,
+    mut sky: Query<
+        (&mut Transform, &mut Projection),
+        (With<SourceSkyCamera>, Without<super::camera::DriveCamera>),
+    >,
 ) {
     let Ok(main) = main.single() else { return };
-    for mut transform in &mut sky {
+    let fov = drive
+        .runtime
+        .area
+        .player
+        .view(&drive.runtime.physics)
+        .fov_degrees;
+    for (mut transform, mut projection) in &mut sky {
         *transform = Transform::from_rotation(main.rotation);
+        super::camera_projection::sync_player_projection(&mut projection, true, fov);
     }
 }
 fn bind_sky_extras(

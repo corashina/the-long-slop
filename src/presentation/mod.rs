@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod camera_projection;
 mod candidate_upload;
 pub mod conditions;
 pub mod consumables;

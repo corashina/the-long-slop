@@ -330,12 +330,12 @@ impl PlayerState {
             head_rotation,
             dt,
         );
-        if ordinary_look {
+        if let Some(multiplier) = ordinary_look {
             if input.mouse[0].is_finite() {
-                self.yaw += input.mouse[0];
+                self.yaw += input.mouse[0] * multiplier;
             }
             if input.mouse[1].is_finite() {
-                self.pitch += input.mouse[1];
+                self.pitch += input.mouse[1] * multiplier;
             }
         }
         self.pitch = self.pitch.clamp(-89.0, 89.0);

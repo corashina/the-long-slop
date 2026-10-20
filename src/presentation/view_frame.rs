@@ -236,7 +236,6 @@ pub(crate) fn snapshot(
     drive: Res<crate::app::Drive>,
     requests: Res<crate::app::save::SaveRequests>,
     graph: Res<super::frame_graph::SourceGraphProgress>,
-    reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
     epoch: Res<SourceSceneEpoch>,
@@ -315,13 +314,19 @@ pub(crate) fn snapshot(
     let job = (clock.probe_wanted(clock.probe_index, activation.enabled)
         || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
     .then(|| clock.probe[clock.probe_index].job());
+    let fov_degrees = drive
+        .runtime
+        .area
+        .player
+        .view(&drive.runtime.physics)
+        .fov_degrees;
     let snapshots = std::array::from_fn(|index| {
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
         let (extent, world_from_view) = input[index]?;
         let (near, far, fov, mask, distance) = if index < WORLD_VIEWS {
-            let world = super::camera::world_camera_settings(&reference.0);
+            let world = super::camera::world_camera_settings(fov_degrees);
             (
                 world.near,
                 world.far,
@@ -350,7 +355,7 @@ pub(crate) fn snapshot(
     let sky_clips = Some(sky_pose).map(|pose| {
         let sky = &assets.record.cameras[0];
         let projection = Mat4::perspective_rh_gl(
-            sky.field_of_view.to_radians(),
+            fov_degrees.to_radians(),
             main.x as f32 / main.y as f32,
             sky.near,
             sky.far,

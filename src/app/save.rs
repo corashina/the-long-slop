@@ -223,7 +223,32 @@ fn process_request(
                 let sample = super::instrument_sample(&reference, &drive.runtime, index);
                 drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
             }
+            let camera = super::active_camera(&drive);
+            let fov = drive
+                .runtime
+                .area
+                .player
+                .view(&drive.runtime.physics)
+                .fov_degrees;
             drop(drive);
+            let mut cameras = world.query::<(
+                &mut Transform,
+                &mut Projection,
+                Option<&DriveCamera>,
+                Option<&crate::presentation::frame_graph::SourceSkyCamera>,
+            )>();
+            for (mut transform, mut projection, main, sky) in cameras.iter_mut(world) {
+                if main.is_some() {
+                    *transform = camera;
+                } else if sky.is_some() {
+                    *transform = Transform::from_rotation(camera.rotation);
+                }
+                crate::presentation::camera_projection::sync_player_projection(
+                    &mut projection,
+                    main.is_some() || sky.is_some(),
+                    fov,
+                );
+            }
             crate::browser::game_loading();
             crate::presentation::view_frame::restart_scene(world);
             crate::presentation::plates::reset_plate_text(world);

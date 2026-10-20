@@ -297,6 +297,12 @@ fn setup(
         &mut images,
         &reference.0,
         presentation::transform(drive.current),
+        drive
+            .runtime
+            .area
+            .player
+            .view(&drive.runtime.physics)
+            .fov_degrees,
     );
 }
 
@@ -760,7 +766,7 @@ fn sync_world(
     mut drive: ResMut<Drive>,
     mut presentation: presentation::world::runtime::WorldPresentation,
     requests: Res<save::SaveRequests>,
-    camera: Query<(&Projection, &GlobalTransform), With<DriveCamera>>,
+    camera: Query<(&Projection, &Transform), With<DriveCamera>>,
     views: Res<presentation::view_frame::SourceViewFrame>,
     mut required_views: Local<Option<crate::world::RequiredViews>>,
     epoch: Res<presentation::view_frame::SourceSceneEpoch>,
@@ -773,17 +779,43 @@ fn sync_world(
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
+    // Preparation consumes one completed pose/FOV pair. Startup and load use the root camera.
+    let coherent = views.session == drive.runtime.stream.frame().request.session
+        && views.scene == epoch.0
+        && views.views[..presentation::surface_views::WORLD_VIEWS]
+            .iter()
+            .all(Option::is_some);
+    let snapshot = coherent.then(|| {
+        views.views[0]
+            .as_ref()
+            .expect("complete world camera snapshot")
+    });
+    let camera_world = snapshot.map_or_else(
+        || camera_transform.to_matrix(),
+        |view| view.view_from_world.inverse(),
+    );
+    let clip_from_view = snapshot.map_or_else(
+        || projection.get_clip_from_view(),
+        |view| view.raster_projection,
+    );
+    let fov_degrees = snapshot.map_or_else(
+        || match projection {
+            Projection::Perspective(p) => p.fov.to_degrees(),
+            _ => 0.,
+        },
+        |view| view.fov_degrees,
+    );
     let started = game_now();
     let origin = drive.runtime.stream.origin;
     let position = Vec3::from_array(
         origin
-            .absolute(camera_transform.translation().to_array())
+            .absolute(camera_world.w_axis.truncate().to_array())
             .map(|v| v as f32),
     );
     let source_from_runtime = Mat4::from_scale(Vec3::new(1., 1., -1.));
-    let mut camera_world = camera_transform.to_matrix();
+    let mut camera_world = camera_world;
     camera_world.w_axis = position.extend(1.);
-    let clip = projection.get_clip_from_view() * camera_world.inverse() * source_from_runtime;
+    let clip = clip_from_view * camera_world.inverse() * source_from_runtime;
     let rows = clip.transpose();
     let planes = [
         rows.w_axis + rows.x_axis,
@@ -798,8 +830,11 @@ fn sync_world(
         clip_planes: planes,
     };
     let lod_view = presentation::world::lod::LodView {
-        position: camera_transform.translation(),
-        fov_degrees: reference.0.player.field_of_view_degrees,
+        position: snapshot.map_or_else(
+            || camera_transform.translation,
+            |view| view.view_from_world.inverse().w_axis.truncate(),
+        ),
+        fov_degrees,
         ortho_size: match projection {
             Projection::Orthographic(p) => Some(p.area.height() * 0.5),
             _ => None,
@@ -822,11 +857,6 @@ fn sync_world(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    let coherent = views.session == runtime.stream.frame().request.session
-        && views.scene == epoch.0
-        && views.views[..presentation::surface_views::WORLD_VIEWS]
-            .iter()
-            .all(Option::is_some);
     if coherent {
         let first = views.views[0]
             .as_ref()
@@ -1036,9 +1066,19 @@ fn active_camera(drive: &Drive) -> Transform {
         presentation::transform(drive.rendered)
     }
 }
-fn update_camera(drive: Res<Drive>, mut query: Query<&mut Transform, With<DriveCamera>>) {
-    for mut transform in &mut query {
+fn update_camera(
+    drive: Res<Drive>,
+    mut query: Query<(&mut Transform, &mut Projection), With<DriveCamera>>,
+) {
+    let fov = drive
+        .runtime
+        .area
+        .player
+        .view(&drive.runtime.physics)
+        .fov_degrees;
+    for (mut transform, mut projection) in &mut query {
         *transform = active_camera(&drive);
+        presentation::camera_projection::sync_player_projection(&mut projection, true, fov);
     }
 }
 fn publish_loading(

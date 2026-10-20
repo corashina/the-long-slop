@@ -895,3 +895,35 @@ fn carried_q_wheel_routes_to_posture_without_distance_change() {
     assert_eq!(before, after);
     assert!((run.area.player.posture() - 0.95).abs() < 1e-6);
 }
+
+#[test]
+fn installed_zoom_uses_candidate_base_and_neutral_load() {
+    use my_summer_slop::simulation::player_keys;
+    let (reference, mut live, stamp) = garage();
+    let saved = live
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T10:00:00Z",
+        )
+        .unwrap();
+    live.area.player.step_view(
+        FrameInput {
+            player_held: player_keys::ZOOM,
+            mouse: [10., 20.],
+            ..Default::default()
+        },
+        Default::default(),
+        1.,
+    );
+    let view = live.area.player.view(&live.physics);
+    assert!((view.fov_degrees - 26.).abs() < 1e-5);
+    let yaw_delta =
+        (live.area.player.yaw_degrees() - saved.player.yaw + 180.).rem_euclid(360.) - 180.;
+    assert!((yaw_delta - 4.).abs() < 1e-5);
+    let candidate = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let restored = candidate.area.player.view(&candidate.physics);
+    assert_eq!(restored.fov_degrees, reference.player.view.foot_fov_degrees);
+    assert_eq!(candidate.area.player.posture(), live.area.player.posture());
+}

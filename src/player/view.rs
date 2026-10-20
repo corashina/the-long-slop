@@ -1,4 +1,4 @@
-//! Source lean, independent look, and head tracking.
+//! Source lean, independent look, zoom, and head tracking.
 use crate::{
     player::PlayerStepContext,
     reference::{PlayerPostureReference, PlayerViewReference},
@@ -31,6 +31,7 @@ pub(super) struct ViewState {
     lean: Vector,
     head: Vector,
     height: f32,
+    zoom: f32,
 }
 impl ViewState {
     pub(super) fn new(
@@ -55,6 +56,7 @@ impl ViewState {
             lean: standing,
             head: standing,
             height: 0.,
+            zoom: 1.,
         }
     }
     fn neutral_head(&self, posture: f32) -> Vector {
@@ -70,10 +72,11 @@ impl ViewState {
         self.seated_lean = false;
         self.looking = false;
         self.height = 0.;
+        self.zoom = 1.;
         self.lean = self.neutral_head(posture);
         self.head = self.lean;
     }
-    /// Returns whether ordinary body look can consume this mouse sample.
+    /// Returns the ordinary look multiplier when this mouse sample is available.
     pub(super) fn step(
         &mut self,
         input: FrameInput,
@@ -82,7 +85,15 @@ impl ViewState {
         seated: bool,
         head_rotation: Rotation,
         dt: f32,
-    ) -> bool {
+    ) -> Option<f32> {
+        let zooming = input.player_held & player_keys::ZOOM != 0
+            || (input.held & keys::TRANSLATE != 0 && !context.picked_up);
+        let (target, rate) = if zooming {
+            (self.reference.zoom_multiplier, self.reference.zoom_in_rate)
+        } else {
+            (1., self.reference.zoom_out_rate)
+        };
+        self.zoom += (target - self.zoom) * (dt * rate).clamp(0., 1.);
         let head_rotation = self.seat_entry_rotation.take().unwrap_or(head_rotation);
         let held = input.player_held & player_keys::LEAN != 0;
         if input.player_pressed & player_keys::LEAN != 0 {
@@ -184,7 +195,13 @@ impl ViewState {
         self.head = self
             .head
             .lerp(self.lean, (dt * self.reference.head_lerp).min(1.));
-        !held && !(self.standing_lean && !seated) && !context.mouse_consumed
+        (!held && !(self.standing_lean && !seated) && !context.mouse_consumed).then_some(
+            if zooming {
+                self.reference.zoom_multiplier
+            } else {
+                1.
+            },
+        )
     }
     pub(super) fn enter(&mut self, head_in_seat: Pose) {
         self.cancel(1.);
@@ -226,10 +243,14 @@ impl ViewState {
         PlayerView {
             head_pose: super::from_rapier(head),
             camera_pose: super::from_rapier(camera),
-            fov_degrees: if seated {
+            fov_degrees: (if seated {
                 self.reference.car_fov_degrees
             } else {
                 self.reference.foot_fov_degrees
+            }) * if neutral_posture.is_some() {
+                1.
+            } else {
+                self.zoom
             },
             ray_actions_blocked: neutral_posture.is_none() && self.seated_lean,
         }
@@ -320,18 +341,147 @@ mod tests {
         ViewState::new(&crate::player::posture::test_reference(), &reference(), 1.)
     }
     fn step(state: &mut ViewState, input: FrameInput, seated: bool, dt: f32) -> bool {
+        state
+            .step(
+                input,
+                PlayerStepContext {
+                    duck_allowed: true,
+                    wheel_posture_allowed: true,
+                    ..Default::default()
+                },
+                1.,
+                seated,
+                Rotation::IDENTITY,
+                dt,
+            )
+            .is_some()
+    }
+    #[test]
+    fn zoom_reduces_normal_look_but_keeps_q_source_sensitivity() {
+        let mut state = state();
+        let input = FrameInput {
+            player_held: player_keys::ZOOM,
+            mouse: [10., 20.],
+            ..Default::default()
+        };
+        assert_eq!(
+            state.step(
+                input,
+                Default::default(),
+                1.,
+                false,
+                Rotation::IDENTITY,
+                0.02
+            ),
+            Some(0.4)
+        );
+        assert_eq!(
+            state.step(
+                FrameInput {
+                    player_held: player_keys::ZOOM | player_keys::LEAN,
+                    ..input
+                },
+                Default::default(),
+                1.,
+                false,
+                Rotation::IDENTITY,
+                0.02
+            ),
+            None
+        );
+        assert_eq!(state.independent, [10., 20.]);
+    }
+    #[test]
+    fn dedicated_zoom_while_carrying_and_release_use_source_rates() {
+        let mut state = state();
         state.step(
-            input,
+            FrameInput {
+                player_held: player_keys::ZOOM,
+                ..Default::default()
+            },
             PlayerStepContext {
-                duck_allowed: true,
-                wheel_posture_allowed: true,
+                picked_up: true,
                 ..Default::default()
             },
             1.,
-            seated,
+            false,
             Rotation::IDENTITY,
-            dt,
-        )
+            0.02,
+        );
+        let view = state.resolve(Pose::IDENTITY, Rotation::IDENTITY, false, None);
+        assert!((view.fov_degrees - 65. * 0.88).abs() < 1e-5);
+        step(&mut state, FrameInput::default(), false, 0.02);
+        let view = state.resolve(Pose::IDENTITY, Rotation::IDENTITY, false, None);
+        assert!((view.fov_degrees - 65. * 0.928).abs() < 1e-5);
+    }
+    #[test]
+    fn rmb_zoom_requires_empty_picked_up_slot() {
+        for (picked_up, multiplier) in [(false, 0.88), (true, 1.)] {
+            let mut state = state();
+            state.step(
+                FrameInput {
+                    held: keys::TRANSLATE,
+                    ..Default::default()
+                },
+                PlayerStepContext {
+                    picked_up,
+                    ..Default::default()
+                },
+                1.,
+                false,
+                Rotation::IDENTITY,
+                0.02,
+            );
+            assert!(
+                (state
+                    .resolve(Pose::IDENTITY, Rotation::IDENTITY, false, None)
+                    .fov_degrees
+                    - 65. * multiplier)
+                    .abs()
+                    < 1e-5
+            );
+        }
+    }
+    #[test]
+    fn neutral_candidate_and_cancel_reset_zoom_but_keep_base_selection() {
+        let mut state = state();
+        state.reference.car_fov_degrees = 70.;
+        step(
+            &mut state,
+            FrameInput {
+                player_held: player_keys::ZOOM,
+                ..Default::default()
+            },
+            true,
+            1.,
+        );
+        assert!(
+            (state
+                .resolve(Pose::IDENTITY, Rotation::IDENTITY, true, None)
+                .fov_degrees
+                - 28.)
+                .abs()
+                < 1e-5
+        );
+        assert_eq!(
+            state
+                .resolve(Pose::IDENTITY, Rotation::IDENTITY, true, Some(1.))
+                .fov_degrees,
+            70.
+        );
+        assert_eq!(
+            state
+                .resolve(Pose::IDENTITY, Rotation::IDENTITY, false, Some(0.17))
+                .fov_degrees,
+            65.
+        );
+        state.cancel(0.17);
+        assert_eq!(
+            state
+                .resolve(Pose::IDENTITY, Rotation::IDENTITY, false, None)
+                .fov_degrees,
+            65.
+        );
     }
     #[test]
     fn q_tap_boundary_and_cancel() {

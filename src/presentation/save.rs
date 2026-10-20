@@ -216,7 +216,8 @@ impl PreparedPresentation {
         candidate.stream.advance_generation();
         candidate.stream.set_overlap(self.overlap(world))?;
         candidate.initialize_storage_frame(FIXED_DT)?;
-        let pose = candidate.area.player.view(&candidate.physics).camera_pose;
+        let player_view = candidate.area.player.view(&candidate.physics);
+        let pose = player_view.camera_pose;
         let camera = if let Some(sleep) = candidate.sleep_camera() {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
         } else if mode == super::camera::CameraMode::Chase && candidate.area.player.seat().is_some()
@@ -233,11 +234,10 @@ impl PreparedPresentation {
                 .absolute(local.to_array())
                 .map(|v| v as f32),
         );
-        let projection = PerspectiveProjection {
-            fov: reference.player.field_of_view_degrees.to_radians(),
-            aspect_ratio: self.aspect_ratio,
-            ..default()
-        };
+        let projection = super::camera_projection::player_perspective(
+            player_view.fov_degrees,
+            self.aspect_ratio,
+        );
         let clip = projection.get_clip_from_view()
             * Mat4::from_rotation_translation(camera.rotation, position).inverse();
         let rows = (clip * Mat4::from_scale(Vec3::new(1., 1., -1.))).transpose();
@@ -254,7 +254,7 @@ impl PreparedPresentation {
         };
         let lod = super::world::lod::LodView {
             position: local,
-            fov_degrees: reference.player.field_of_view_degrees,
+            fov_degrees: player_view.fov_degrees,
             ortho_size: None,
         };
         imported_updates(candidate, world, &mut self.updates)?;
@@ -790,7 +790,9 @@ fn candidate_required_views(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    let first = super::camera::world_camera_settings(reference);
+    let first = super::camera::world_camera_settings(
+        candidate.area.player.view(&candidate.physics).fov_degrees,
+    );
     let first = required_view(
         &camera_snapshot(
             extent,
