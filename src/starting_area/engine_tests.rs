@@ -302,6 +302,124 @@ fn ignition_and_attachment() {
 
 #[test]
 #[ignore = "requires the installed build 11140890 export"]
+fn active_chassis_preserves_inactive_detached_engine() {
+    let (reference, _) = installed_source();
+    let source = &reference.vehicles[0].engine;
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut mechanical = run.vehicles[0].engine.capture_save();
+    mechanical.rpm = 2000.;
+    mechanical.temperature = 80.;
+    mechanical.elapsed = 1.;
+    mechanical.last_run_time = 1.;
+    mechanical.supplied_fuel = 0.4;
+    mechanical.random_start = 0.;
+    run.vehicles[0].ignition.ignition = true;
+    run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&mechanical).unwrap();
+    step(&mut run, &reference, FrameInput::default());
+    run.area
+        .interaction
+        .parts
+        .remove(source.item, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area.interaction.parts.detach_mechanism(
+        source.item,
+        &mut run.area.interaction.mechanisms,
+        &mut run.physics,
+    );
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    step(&mut run, &reference, FrameInput::default());
+    assert!(run.vehicles[0].engine_output.running);
+    let loose = run.area.items.get(source.item).unwrap().body.unwrap();
+    let chassis = run.physics.chassis_handle(0);
+    assert_ne!(loose, chassis);
+    run.physics.edit_body(loose, |body| body.set_enabled(false));
+    run.physics.inactive_bodies.insert(loose);
+    assert!(run.physics.body_active(chassis));
+    assert!(!run.physics.body_active(loose));
+    let before = run.vehicles[0].engine.capture_save();
+    let contents = [
+        source.item,
+        source.fuel_tank,
+        source.oil_tank,
+        source.coolant_tank,
+    ]
+    .map(|id| {
+        let item = run.area.items.get(id).unwrap();
+        (id, item.temperature, item.fluid.clone())
+    });
+    let tap = FrameInput {
+        pressed: keys::IGNITION,
+        released: keys::IGNITION,
+        ..Default::default()
+    };
+    step(&mut run, &reference, tap);
+    assert!(!run.vehicles[0].ignition.ignition);
+    assert!(!run.instrument_sample(&reference, 0).local_ignition);
+    run.physics.edit_body(chassis, |body| body.sleep());
+    run.step_vehicle(
+        &reference,
+        0,
+        tap,
+        true,
+        crate::simulation::input::DrivingControls {
+            brake: 1.,
+            ..Default::default()
+        },
+    );
+    assert!(run.vehicles[0].ignition.ignition);
+    assert!(run.instrument_sample(&reference, 0).local_ignition);
+    assert!(!run.physics.rapier().bodies[chassis].is_sleeping());
+    let brake = reference
+        .lighting
+        .controllers
+        .iter()
+        .find(|control| {
+            control.kind == crate::reference::LightControllerKind::Rear
+                && control.vehicle == Some(0)
+        })
+        .unwrap()
+        .states
+        .iter()
+        .find(|lamp| lamp.signal == crate::reference::LampSignal::Brake)
+        .unwrap();
+    assert!(!brake.lights.is_empty());
+    for id in &brake.lights {
+        assert!(
+            run.lighting
+                .light_outputs()
+                .iter()
+                .find(|light| light.id == *id)
+                .unwrap()
+                .enabled
+        );
+    }
+    for _ in 0..(source.starter_delay_seconds / FIXED_DT).ceil() as usize + 2 {
+        step(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::IGNITION,
+                ..Default::default()
+            },
+        );
+    }
+    assert!(run.vehicles[0].ignition.starter);
+    assert!(!run.vehicles[0].engine_output.starter);
+    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
+    assert_eq!(run.vehicles[0].engine_output.brake_torque_nm, 0.);
+    assert_eq!(run.vehicles[0].engine.capture_save(), before);
+    for (id, temperature, fluid) in contents {
+        let item = run.area.items.get(id).unwrap();
+        assert_eq!(item.temperature, temperature);
+        assert_eq!(item.fluid, fluid);
+    }
+}
+
+#[test]
+#[ignore = "requires the installed build 11140890 export"]
 fn interval_draws_preserve_attempts_and_cancellation() {
     let (mut reference, _) = installed_source();
     // Rule test: keep combustion stopped so one held press consumes many draws.

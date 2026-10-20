@@ -76,8 +76,13 @@ Engine drains use source sequential changes. A zero-total guard and bounded engi
 This deliberately differs from source NaN and negative-total overdraw. General fluid transfer remains outside G05.
 Engine audio follows engine state and position, including detached grace and the genuine stop transition.
 
-The final targeted engine suite passed five tests. The final runtime filter passed three tests, including the combined restore scenario.
-Both commands used `scripts/check.ps1` with `-IncludeIgnored`. Formatting and both WASM backend checks passed.
+Final review found that an active chassis advanced an inactive detached engine.
+The engine activity gate now freezes mechanics, item temperature, and bound fluids.
+The installed-export regression first failed, then passed.
+Chassis ignition, brake lights, brake wake, starter latch, and zero detached torque also passed.
+
+The prior targeted engine suite passed five tests. The final runtime filter passed four tests, including the combined restore scenario.
+These commands used `scripts/check.ps1` with `-IncludeIgnored`. Formatting and both WASM backend checks passed.
 Prior targeted ignition, fluid, audio, and save-storage checks passed. Existing compiler warnings remain.
 Initial Task 5 failures corrected test timing assumptions and pending-world restoration setup. No production defect required a Task 5 fix.
 The combined test uses real part transactions and fixed vehicle steps before and after normal native restore completion.

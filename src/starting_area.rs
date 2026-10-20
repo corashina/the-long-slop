@@ -1450,37 +1450,44 @@ impl GarageRuntime {
             FIXED_DT,
         );
         let was_running = vehicle.engine_output.running;
-        vehicle.engine_output = vehicle.engine.step(
-            EngineInput {
-                installed: engine_present.then_some(InstalledEngineInput {
-                    ignition: vehicle.ignition.ignition,
-                    starter: vehicle.ignition.starter,
-                    throttle,
-                    clutch: drivetrain.engagement,
-                    wheel_rpm: drivetrain.wheel_rpm,
-                    free_run: drivetrain.free_run,
-                    speed_kmh: speed * 3.6,
-                    radiator_condition: self
-                        .area
-                        .items
-                        .mounted(engine_reference.coolant_tank)
-                        .then_some(radiator_condition),
-                }),
-                ambient_temperature: self.lighting.cycle.output().ambient_temperature,
-                ambient_heat_modifier: engine_reference.globals.outside_temperature_modifier
-                    * ((self.lighting.cycle.output().ambient_temperature
-                        - reference.lighting.cycle.temp_nights[0])
-                        / (reference.lighting.cycle.temp_days[0]
-                            + reference.lighting.cycle.temp_add_noons[0]
-                            - reference.lighting.cycle.temp_nights[0]))
-                        .clamp(0., 1.),
-                sleep_modifier,
-            },
-            self.area.items.vehicle_fluids(index).expect("bound fluids"),
-            engine_reference,
-            |draw| start_sample(DEFAULT_SEED, draw),
-            FIXED_DT,
-        );
+        if engine_active {
+            vehicle.engine_output = vehicle.engine.step(
+                EngineInput {
+                    installed: engine_present.then_some(InstalledEngineInput {
+                        ignition: vehicle.ignition.ignition,
+                        starter: vehicle.ignition.starter,
+                        throttle,
+                        clutch: drivetrain.engagement,
+                        wheel_rpm: drivetrain.wheel_rpm,
+                        free_run: drivetrain.free_run,
+                        speed_kmh: speed * 3.6,
+                        radiator_condition: self
+                            .area
+                            .items
+                            .mounted(engine_reference.coolant_tank)
+                            .then_some(radiator_condition),
+                    }),
+                    ambient_temperature: self.lighting.cycle.output().ambient_temperature,
+                    ambient_heat_modifier: engine_reference.globals.outside_temperature_modifier
+                        * ((self.lighting.cycle.output().ambient_temperature
+                            - reference.lighting.cycle.temp_nights[0])
+                            / (reference.lighting.cycle.temp_days[0]
+                                + reference.lighting.cycle.temp_add_noons[0]
+                                - reference.lighting.cycle.temp_nights[0]))
+                            .clamp(0., 1.),
+                    sleep_modifier,
+                },
+                self.area.items.vehicle_fluids(index).expect("bound fluids"),
+                engine_reference,
+                |draw| start_sample(DEFAULT_SEED, draw),
+                FIXED_DT,
+            );
+            self.area
+                .items
+                .get_mut(engine_reference.item)
+                .expect("engine item")
+                .temperature = Some(vehicle.engine.temperature);
+        }
         let output = vehicle.engine_output;
         if vehicle.ignition.ignition != was_ignition
             && let Some(audio) = &mut self.audio
@@ -1488,11 +1495,6 @@ impl GarageRuntime {
         {
             audio.ignition_changed(&self.area);
         }
-        self.area
-            .items
-            .get_mut(engine_reference.item)
-            .expect("engine item")
-            .temperature = Some(vehicle.engine.temperature);
         if chassis_active && engine_present && output.running && !was_running {
             let engine = to_rapier(
                 self.area
