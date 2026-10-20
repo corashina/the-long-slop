@@ -1,7 +1,7 @@
 # G07 object handling design
 
 Date: 2026-10-20.
-Status: Written specification awaiting user review.
+Status: Approved by the user on 2026-10-20.
 Branch: `codex/g07-object-handling`.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 
