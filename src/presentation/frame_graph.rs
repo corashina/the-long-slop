@@ -180,6 +180,7 @@ impl Plugin for SourceFramePlugin {
                 cpu_batching.after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
             )
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
+            .add_systems(Render, release_canvas_texture.after(RenderSystems::Render))
             .add_systems(
                 Render,
                 (update_sky_extras, prepare_frame, prepare_probe)
@@ -230,6 +231,17 @@ impl Plugin for SourceFramePlugin {
     }
 }
 
+/// A WebGPU canvas texture expires when the browser task ends.
+/// Bevy keeps a texture that no view presented, so release it before the next frame.
+fn release_canvas_texture(mut windows: ResMut<bevy::render::view::ExtractedWindows>) {
+    if !cfg!(feature = "webgpu") {
+        return;
+    }
+    for window in windows.values_mut() {
+        window.swap_chain_texture_view = None;
+        window.swap_chain_texture = None;
+    }
+}
 pub fn spawn_cameras(
     commands: &mut Commands,
     images: &mut Assets<Image>,
