@@ -561,17 +561,6 @@
           "handbrake": 0.0,
           "motor_scale": 0.0,
           "ignition": true
-        },
-        {
-          "frame": 90,
-          "gear": -99,
-          "throttle": 1.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
         }
       ],
       "duration_frames": 60,

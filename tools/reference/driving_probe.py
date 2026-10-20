@@ -94,6 +94,77 @@ def finite(value):
         for item in value: finite(item)
 
 
+def control_frames(scenario):
+    duration = scenario.get('duration_frames')
+    controls = scenario.get('controls')
+    if type(duration) is not int or duration < 2 or not isinstance(controls, list) or not controls:
+        raise ValueError('Declared finite duration and control schedule are required')
+    frames = [control.get('frame') for control in controls]
+    if (any(type(frame) is not int or not 0 <= frame < duration for frame in frames) or
+        frames[0] != 0 or frames != sorted(set(frames))):
+        raise ValueError('Declared control schedule must increase from zero inside the finite interval')
+    return duration, frames
+
+
+def validate_timing(samples, scenario):
+    duration, controls = control_frames(scenario)
+    frames = [sample['frame'] for sample in samples]
+    if (any(type(frame) is not int or not 0 <= frame <= duration for frame in frames) or
+        frames[0] != 0 or frames[-1] != duration):
+        raise ValueError('Native samples do not cover the declared observation interval')
+    if frames != sorted(frames) or set(frames) != set(range(duration + 1)):
+        raise ValueError('Native render frame coverage is incomplete or out of order')
+    links = {'input_sequence': 'input.entry', 'car_sequence': 'car.entry',
+             'engine_sequence': 'engine.entry', 'rpm_sequence': 'rpm.exit'}
+    latest = dict.fromkeys(links, 0)
+    opened, completed = {}, set()
+    step = 0
+    for sample in samples:
+        phase = sample['phase']
+        if phase not in PHASES | {'autoshift.entry', 'autoshift.exit'}:
+            raise ValueError(f'Unknown native callback phase: {phase}')
+        callback, boundary = phase.split('.')
+        if phase == 'physics.entry': step += 1
+        if type(sample['step']) is not int or sample['step'] != step:
+            raise ValueError('Native physics step order is invalid')
+        if boundary == 'entry':
+            if callback in opened:
+                raise ValueError(f'Native callback pair has a missing exit: {callback}')
+            opened[callback] = sample
+        else:
+            entry = opened.pop(callback, None)
+            if entry is None or (entry['frame'], entry['step']) != (sample['frame'], sample['step']):
+                raise ValueError(f'Native callback pair is missing or crosses a frame/step: {callback}')
+            completed.update((entry['sequence'], sample['sequence']))
+        # The observer sets entry revisions before their sample, but RPM at its exit.
+        # Validate the observed order, without imposing a car/engine render order.
+        for link, target in links.items():
+            if phase == target: latest[link] = sample['sequence']
+            revision = sample[link]
+            if (type(revision) is not int or not 0 <= revision <= sample['sequence'] or
+                (revision and samples[revision - 1]['phase'] != target) or revision != latest[link]):
+                raise ValueError(f'Invalid native callback link: {link} at sample {sample["sequence"]}')
+            if callback == 'physics':
+                # Zero is only available before every producer's first observed callback.
+                # Retain that native startup prefix; it cannot prove control consumption.
+                if not revision and any(latest.values()):
+                    raise ValueError(f'Missing native consuming callback link: {link}')
+                if revision and revision not in completed:
+                    raise ValueError(f'Native callback pair is incomplete before physics: {target}')
+    if opened:
+        raise ValueError(f'Native callback pair has no exit: {sorted(opened)}')
+    callbacks = {s['phase'].split('.')[0] for s in samples} - {'physics'}
+    for callback in callbacks:
+        if [s['frame'] for s in samples if s['phase'] == callback + '.exit'] != list(range(duration + 1)):
+            raise ValueError(f'Native callback pair frame coverage is incomplete: {callback}')
+    physics = [s for s in samples if s['phase'] == 'physics.entry']
+    for start, end in zip(controls, controls[1:] + [duration]):
+        if not any(s['input_sequence'] and
+                   start <= samples[s['input_sequence'] - 1]['frame'] < end for s in physics):
+            raise ValueError(f'No native physics step consumed declared control interval [{start}, {end})')
+    return {'initial_unlinked_physics_steps': [s['step'] for s in physics if not s['input_sequence']]}
+
+
 def validate_run(run, scenario):
     finite(run)
     if run.get('runtime') != 'original-unity-player':
@@ -143,7 +214,9 @@ def validate_run(run, scenario):
             raise ValueError('Native fixed timestep is missing')
         if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != 4:
             raise ValueError('Four native wheel samples are required')
-    return {'samples': len(samples), 'physics_steps': run['physics_steps'], 'phases': sorted(phases)}
+    timing = validate_timing(samples, scenario)
+    return {'samples': len(samples), 'physics_steps': run['physics_steps'],
+            'phases': sorted(phases), **timing}
 
 
 def verify(output_root: Path) -> dict:
@@ -236,6 +309,7 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError('Invalid native scenario')
         for key in ('source_objects', 'setup', 'frame_schedule', 'controls'):
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
+        control_frames(row)
     output.mkdir(parents=True)
     write_json(output / 'preflight.json', pre)
     write_json(output / 'request.json', {'repeats': repeats, 'scenarios': rows,
