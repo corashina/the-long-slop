@@ -7,10 +7,7 @@ use super::{
 use crate::{
     presentation::{
         lighting::SourceLighting,
-        materials::{
-            grass::{GrassView, writers::GrassWriters},
-            terrain::TerrainMaterial,
-        },
+        materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
     starting_area::StartingArea,
@@ -21,6 +18,7 @@ use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
     prelude::*,
 };
+use grass_mesh::GrassView;
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,

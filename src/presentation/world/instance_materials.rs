@@ -6,15 +6,14 @@ use super::{
 use crate::reference::prototype_plan::PlanPrimitive;
 use crate::{
     presentation::materials::{
-        self, RenderingState, SourceMaterial, SourceMaterials,
-        grass::{GrassView, material::GrassMaterial},
-        impostor::ImpostorMaterial,
-        specular::SpecularMaterial,
+        self, RenderingState, SourceMaterial, SourceMaterials, grass::material::GrassMaterial,
+        impostor::ImpostorMaterial, specular::SpecularMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::WorldStream,
 };
 use bevy::{ecs as bevy_ecs, ecs::system::SystemParam, prelude::*};
+use grass_mesh::GrassView;
 #[derive(Clone)]
 pub enum InstanceMaterial {
     Primary(Handle<SourceMaterial>),

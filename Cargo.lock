@@ -2526,6 +2526,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "grass-mesh"
+version = "0.1.0"
+dependencies = [
+ "glam 0.32.1",
+]
+
+[[package]]
+name = "grass-worker"
+version = "0.1.0"
+dependencies = [
+ "grass-mesh",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "grid"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3087,6 +3102,7 @@ dependencies = [
  "bevy",
  "console_error_panic_hook",
  "gltf",
+ "grass-mesh",
  "js-sys",
  "naga",
  "rapier3d",

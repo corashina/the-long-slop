@@ -3,12 +3,7 @@ use super::pipelines::{PipelineTicket, WorldPipelines};
 use crate::{
     presentation::materials::{
         RenderingState,
-        grass::{
-            GrassPatch, GrassSettings, GrassView,
-            domain::GrassDomain,
-            expansion::GrassExpansion,
-            material::{BLADE_ATTRIBUTE, GrassMaterial},
-        },
+        grass::material::{BLADE_ATTRIBUTE, GrassMaterial},
     },
     reference::ReferenceError,
     world::WorldStream,
@@ -19,6 +14,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
+use grass_mesh::{GrassDomain, GrassExpansion, GrassPatch, GrassSettings, GrassView};
 use std::sync::Arc;
 struct Geometry {
     mesh: Handle<Mesh>,
@@ -236,10 +232,10 @@ impl GrassJobs {
             next.prototype_cpu += bytes;
             stream.set_presentation_allocation(next)?;
             self.domains = Some(Arc::new([
-                GrassDomain::new(2)?,
-                GrassDomain::new(4)?,
-                GrassDomain::new(8)?,
-                GrassDomain::new(16)?,
+                GrassDomain::new(2).map_err(ReferenceError)?,
+                GrassDomain::new(4).map_err(ReferenceError)?,
+                GrassDomain::new(8).map_err(ReferenceError)?,
+                GrassDomain::new(16).map_err(ReferenceError)?,
             ]));
         }
         let metadata = std::mem::size_of::<Instance>();
@@ -317,30 +313,35 @@ impl GrassJobs {
                 instance.last_started = self.revision;
                 let mut cpu = 0;
                 let job = GrassExpansion::new(
-                    instance.session,
-                    self.revision,
                     instance.latest,
                     instance.settings,
                     Arc::clone(&instance.patches),
                     Arc::clone(self.domains.as_ref().unwrap()),
-                    |bytes, _| {
-                        pending_allocation(stream, bytes, 0, 1)?;
+                    |bytes| {
+                        pending_allocation(stream, bytes, 0, 1).map_err(|error| error.0)?;
                         cpu = bytes;
                         Ok(())
                     },
-                )?;
+                )
+                .map_err(ReferenceError)?;
                 instance.pending_cpu = cpu;
                 instance.pending = Some(Pending::Expand(job));
             }
             if let Some(Pending::Expand(job)) = &mut instance.pending {
-                let mut added = (0, 0);
-                let complete = job.prepare(|cpu, gpu| {
-                    pending_allocation(stream, cpu * 2, gpu, 0)?;
-                    added = (cpu * 2, gpu);
-                    Ok(())
-                })?;
-                instance.pending_cpu += added.0;
-                instance.pending_gpu += added.1;
+                let complete = if job.approved() {
+                    job.prepare().map_err(ReferenceError)?
+                } else {
+                    if let Some(plan) = job.plan().map_err(ReferenceError)? {
+                        let cpu = plan.output_bytes.checked_mul(2).ok_or_else(|| {
+                            ReferenceError("Grass copy allocation overflow".into())
+                        })?;
+                        pending_allocation(stream, cpu, plan.gpu_bytes, 0)?;
+                        instance.pending_cpu += cpu;
+                        instance.pending_gpu += plan.gpu_bytes;
+                        job.approve().map_err(ReferenceError)?;
+                    }
+                    false
+                };
                 if complete {
                     pending_allocation(stream, 4096, 8, 0)?;
                     instance.pending_cpu += 4096;

@@ -241,7 +241,7 @@ impl PreparedPresentation {
         let clip = projection.get_clip_from_view()
             * Mat4::from_rotation_translation(camera.rotation, position).inverse();
         let rows = (clip * Mat4::from_scale(Vec3::new(1., 1., -1.))).transpose();
-        let view = materials::grass::GrassView {
+        let view = grass_mesh::GrassView {
             position: position * Vec3::new(1., 1., -1.),
             screen_height: self.screen_height,
             clip_planes: [

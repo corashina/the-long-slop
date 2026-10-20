@@ -779,7 +779,7 @@ fn sync_world(
         rows.w_axis - rows.y_axis,
     ]
     .map(|p| p / p.truncate().length());
-    let view = presentation::materials::grass::GrassView {
+    let view = grass_mesh::GrassView {
         position: position * Vec3::new(1., 1., -1.),
         screen_height: windows.single().map_or(1., |w| w.physical_height() as f32),
         clip_planes: planes,
