@@ -191,7 +191,7 @@ impl SourceFixedAssets {
                         .ok_or_else(|| ReferenceError("Fixed control strings overflow".into()))
                 })?;
         let control = [
-            super::frame_graph::control_bytes(),
+            super::readiness::control_bytes(),
             std::mem::size_of::<Self>(),
             std::mem::size_of::<AdmittedShaders>(),
             product(roots.capacity(), std::mem::size_of::<Root>())?,

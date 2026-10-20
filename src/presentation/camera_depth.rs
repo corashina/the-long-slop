@@ -1,8 +1,9 @@
 //! Source camera-depth dispatch reuses prepared opaque batches, never camera-visible shadow candidates.
 use super::{
     caster::{CasterPasses, CasterViews},
-    materials::{MaterialLoading, RenderingState},
-    source_lighting::{DrawSourceMaterial, SetSourceViewCamera, SourceLightingStatus},
+    materials::MaterialLoading,
+    readiness::RendererStateHandle,
+    source_lighting::{DrawSourceMaterial, SetSourceViewCamera},
     surface_graph::SurfaceViewTargets,
 };
 use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d};
@@ -200,12 +201,12 @@ where
 /// Run once after the source draw registration. Each table keeps its original draw ID.
 pub fn install(world: &mut World) {
     if let Err(error) = wrap::<Opaque3d>(world).and_then(|_| wrap::<AlphaMask3d>(world)) {
-        *world.resource::<SourceLightingStatus>().0.lock().unwrap() = RenderingState::Failed(error);
+        world.resource::<RendererStateHandle>().fail(error);
     }
 }
 /// The single-sample camera depth exists independently of the source8x scene attachment.
 /// Renderer cast-Off is deliberately irrelevant here. The installed camera-depth queue/pass rule owns eligibility.
-pub fn camera_depth(
+pub(crate) fn camera_depth(
     world: &World,
     view: ViewQuery<(&ExtractedView, &SurfaceViewTargets, &CameraDepthState)>,
     opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
@@ -213,14 +214,11 @@ pub fn camera_depth(
     pipelines: Res<CasterPasses>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
-    if !loading.is_ready()
-        || !pipelines.ready(&cache, &owners)
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-    {
+    if !loading.is_ready() || !pipelines.ready(&cache, &owners) || status.failure().is_some() {
         return;
     }
     let entity = view.entity();
@@ -249,13 +247,12 @@ pub fn camera_depth(
         .render(&mut pass, world, entity)
         .and_then(|_| masked.render(&mut pass, world, entity))
     {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed(format!("Source camera-depth draw: {error:?}"));
+        status.fail(format!("Source camera-depth draw: {error:?}"));
         return;
     }
     let [epoch, attempts, successes] = state.counts();
     if attempts != successes {
-        *status.0.lock().unwrap() = RenderingState::Failed(format!(
+        status.fail(format!(
             "Source camera-depth skipped draw at epoch{epoch}: {successes}/{attempts}"
         ));
     }

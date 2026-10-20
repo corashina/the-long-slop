@@ -4,10 +4,9 @@ use super::surface_views::{PROBE_START, VIEW_COUNT};
 use super::{
     caster::{CasterPasses, CasterUniform, CasterViews},
     lighting_scene::SourceSceneLighting,
-    materials::RenderingState,
+    readiness::RendererStateHandle,
     shadow_phase::{self, ShadowBatchKey, ShadowDrawState, SourceShadow},
     shadow_scene::ShadowScene,
-    source_lighting::SourceLightingStatus,
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
 };
@@ -181,10 +180,7 @@ pub fn queue(world: &mut World) {
         state.revision += 1;
         let revision = state.revision;
         state.frame = 0;
-        if matches!(
-            *world.resource::<SourceLightingStatus>().0.lock().unwrap(),
-            RenderingState::Failed(_)
-        ) {
+        if world.resource::<RendererStateHandle>().failure().is_some() {
             return;
         }
         world.resource_scope(|world, scene: Mut<ShadowScene>| {
@@ -294,8 +290,7 @@ pub fn queue(world: &mut World) {
                                     continue;
                                 }
                                 Err(e) => {
-                                    *world.resource::<SourceLightingStatus>().0.lock().unwrap() =
-                                        RenderingState::Failed(e);
+                                    world.resource::<RendererStateHandle>().fail(e);
                                     return;
                                 }
                             };
@@ -542,7 +537,7 @@ pub fn install(app: &mut App) {
 }
 
 /// Gates source dispatch before any pass consumes a stale view or partial pipeline set.
-pub fn graph_ready(
+pub(crate) fn graph_ready(
     view: bevy::render::renderer::ViewQuery<(
         &SourceSurfaceView,
         Option<&super::shadow_collector::CollectorView>,
@@ -554,7 +549,7 @@ pub fn graph_ready(
     caster: Res<CasterPasses>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
     loading: Res<super::materials::MaterialLoading>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) -> bool {
     let (view, collector) = view.into_inner();
     frame.frame != 0
@@ -565,7 +560,7 @@ pub fn graph_ready(
         && surface.ready(&cache, &owners)
         && caster.ready(&cache, &owners)
         && collector.is_some_and(|c| c.prepared_frame == frame.frame && c.ready(&cache))
-        && !matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        && !status.failure().is_some()
 }
 pub fn collector_encoded(
     view: bevy::render::renderer::ViewQuery<&super::shadow_collector::CollectorView>,

@@ -1,6 +1,5 @@
 //! Cached source ForwardBase and ForwardAdd pipelines. Transparent dispatch uses source pass order.
-use super::materials::RenderingState;
-use super::source_lighting::SourceLightingStatus;
+use super::readiness::RendererStateHandle;
 use bevy::ecs::{
     query::ROQueryItem,
     system::{SystemParamItem, lifetimeless::SRes},
@@ -77,16 +76,13 @@ fn flag(definitions: &[ShaderDefVal], name: &str) -> bool {
         .any(|value| matches!(value,ShaderDefVal::Bool(key,true) if key==name))
 }
 /// Inspect only newly prepared descriptors. Pipeline clones occur once per new source variant.
-pub fn prepare_surface_passes(
+pub(crate) fn prepare_surface_passes(
     mut passes: ResMut<SurfacePasses>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
-    if matches!(
-        *status.0.lock().expect("source lighting status lock"),
-        RenderingState::Failed(_)
-    ) {
+    if status.failure().is_some() {
         return;
     }
     let first = passes.inspected;
@@ -151,8 +147,7 @@ pub fn prepare_surface_passes(
                 Ok(id) => id,
                 Err(error) => {
                     if !owners.fail(base, error.0.clone()) {
-                        *status.0.lock().expect("source lighting status lock") =
-                            RenderingState::Failed(error.0);
+                        status.fail(error.0);
                     }
                     continue;
                 }
@@ -174,11 +169,10 @@ pub fn prepare_surface_passes(
                     | ShaderCacheError::ShaderImportNotYetAvailable,
                 ) => {}
                 CachedPipelineState::Err(error) => {
-                    *status.0.lock().expect("source lighting status lock") =
-                        RenderingState::Failed(format!(
-                            "Source surface {} pipeline: {error}",
-                            if id == *base { "base" } else { "additive" }
-                        ));
+                    status.fail(format!(
+                        "Source surface {} pipeline: {error}",
+                        if id == *base { "base" } else { "additive" }
+                    ));
                     return;
                 }
                 _ => {}

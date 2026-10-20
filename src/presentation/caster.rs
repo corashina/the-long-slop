@@ -1,8 +1,7 @@
 //! Persistent source camera-depth and directional-shadow caster state.
 use super::{
-    materials::RenderingState,
+    readiness::RendererStateHandle,
     render_targets::{DEPTH_FORMAT, SHADOW_FORMAT},
-    source_lighting::SourceLightingStatus,
 };
 use crate::reference::shadow_profile;
 use bevy::ecs as bevy_ecs;
@@ -211,14 +210,14 @@ impl CasterPasses {
                 .all(|id| cache.get_render_pipeline(*id).is_some())
     }
     /// Called during preparation. Descriptors are cloned only once per new source surface variant.
-    pub fn prepare(
+    pub(crate) fn prepare(
         &mut self,
         cache: &PipelineCache,
         shader: &Handle<Shader>,
-        status: &SourceLightingStatus,
+        status: &RendererStateHandle,
         owners: &super::pipeline_ownership::PipelineOwners,
     ) {
-        if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        if status.failure().is_some() {
             return;
         }
         let first = self.inspected;
@@ -247,7 +246,7 @@ impl CasterPasses {
             let Some(reflected) = flag(&fragment.shader_defs, "SOURCE_OBJECT_REFLECTED") else {
                 let error = "Source caster requires object transform parity metadata".to_string();
                 if !owners.fail(base_id, error.clone()) {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                    status.fail(error);
                 }
                 return;
             };
@@ -318,7 +317,7 @@ impl CasterPasses {
                     Ok(id) => id,
                     Err(error) => {
                         if !owners.fail(base_id, error.0.clone()) {
-                            *status.0.lock().unwrap() = RenderingState::Failed(error.0);
+                            status.fail(error.0);
                         }
                         None
                     }
@@ -339,8 +338,7 @@ impl CasterPasses {
                     | ShaderCacheError::ShaderImportNotYetAvailable,
                 ) => {}
                 CachedPipelineState::Err(error) => {
-                    *status.0.lock().unwrap() =
-                        RenderingState::Failed(format!("Source caster pipeline: {error}"));
+                    status.fail(format!("Source caster pipeline: {error}"));
                     return;
                 }
                 _ => {}
@@ -351,7 +349,7 @@ impl CasterPasses {
 
 /// Prepare once per view, then update only its existing camera-depth uniform buffer.
 /// Shadow slots remain untouched until the source candidate set and cascade fit are ready.
-pub fn prepare_views(
+pub(crate) fn prepare_views(
     mut commands: Commands,
     frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
@@ -369,13 +367,13 @@ pub fn prepare_views(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Caster,
         &frame,
     );
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     let (Some(assets), Some(scene)) = (assets, scene.0) else {
@@ -421,11 +419,11 @@ pub fn prepare_views(
     }
 }
 
-pub fn prepare_passes(
+pub(crate) fn prepare_passes(
     mut passes: ResMut<CasterPasses>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
     let Some(assets) = assets else {

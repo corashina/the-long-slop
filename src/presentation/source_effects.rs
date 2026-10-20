@@ -1,12 +1,10 @@
 //! The world camera effect chain commits history after frame submission.
 use super::{
-    frame_graph::SourceGraphProgress,
     lighting_assets::{LightingAssets, LightingRenderAssets},
     lighting_scene::SourceSceneLighting,
-    materials::RenderingState,
     postprocessing::chain::{PostFrame, PostShaders, PostTextures, SourceAoChain, SourcePostChain},
+    readiness::{RendererStateHandle, SourceExecutionGate},
     render_targets::SourceColorTargets,
-    source_lighting::{SourceExecutionGate, SourceLightingStatus},
     surface_graph::{SourceSurface, SourceSurfaceStage, SurfaceViewTargets},
     surface_views::{SourceSurfaceView, SurfaceResources},
     view_frame::SourceViewFrame,
@@ -79,18 +77,6 @@ pub(crate) struct EffectsAudit {
     validation: u32,
     validated: bool,
     delta_seconds: f32,
-}
-impl EffectsAudit {
-    pub(crate) fn pipelines_ready(&self) -> bool {
-        self.pipelines_ready && self.inputs_ready
-    }
-    pub(crate) fn complete(&self, frame: u32, token: u32) -> bool {
-        self.frame == frame
-            && self.token == token
-            && self.submitted_token == token
-            && self.completed_token == token
-            && self.validated
-    }
 }
 struct EffectTargets {
     colors: Arc<SourceColorTargets>,
@@ -178,9 +164,9 @@ fn prepare(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     if effects.motion_revision != frame.motion_revision {
@@ -204,7 +190,7 @@ fn prepare(
         a.validated = false;
     }
     if let Some(error) = effects.failure(&cache) {
-        *status.0.lock().unwrap() = RenderingState::Failed(error);
+        status.fail(error);
         return;
     }
     let (Some(surfaces), Some(assets)) = (surfaces, assets) else {
@@ -290,7 +276,7 @@ fn prepare(
             effects.audit.validated = false;
             effects.targets = Some(targets);
         }
-        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
+        Err(error) => status.fail(error),
     }
 }
 fn begin_frame(
@@ -316,11 +302,11 @@ fn encode_ao(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let (view, targets) = view.into_inner();
-    if view.index != 0 || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if view.index != 0 || status.failure().is_some() {
         return;
     }
     let (Some(snapshot), Some(scene), Some(storage)) =
@@ -345,7 +331,7 @@ fn encode_ao(
             effects.audit.ao_token = frame.main_token;
         }
         Ok(false) => {}
-        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
+        Err(error) => status.fail(error),
     }
 }
 fn encode_post(
@@ -356,14 +342,11 @@ fn encode_post(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let index = view.into_inner().index;
-    if index != 0
-        || input.frame != frame.frame
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-    {
+    if index != 0 || input.frame != frame.frame || status.failure().is_some() {
         return;
     }
     if effects.audit.ao_frame != frame.frame || frame.views[index].is_none() {
@@ -389,21 +372,26 @@ fn encode_post(
             effects.audit.encoded_token = frame.main_token;
         }
         Ok(false) => {}
-        Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error),
+        Err(error) => status.fail(error),
     }
 }
 pub(crate) fn submitted(
     mut effects: ResMut<SourceEffects>,
     frame: Res<SourceViewFrame>,
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     gate: Res<SourceExecutionGate>,
     queue: Res<RenderQueue>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
-    let (stamp, token, presented) = progress.frame_submission();
+    let mut shared = progress.lock();
+    let (stamp, token, presented) = (
+        shared.audit.frame,
+        shared.audit.token,
+        shared.audit.presented,
+    );
     if presented
         && stamp == frame.frame
         && token == frame.main_token
@@ -412,14 +400,16 @@ pub(crate) fn submitted(
     {
         let targets = effects.targets.as_mut().unwrap();
         if targets.chain.as_ref().unwrap().pending_token() != Some(token) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source effect submission token mismatch".into());
+            shared
+                .proof
+                .fail("Source effect submission token mismatch".into());
             return;
         }
         let before = targets.chain.as_ref().unwrap().history();
         if !targets.chain.as_mut().unwrap().completed(token) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source effect history did not commit".into());
+            shared
+                .proof
+                .fail("Source effect history did not commit".into());
             return;
         }
         let chain = targets.chain.as_ref().unwrap();
@@ -436,6 +426,26 @@ pub(crate) fn submitted(
             effects.audit.validation = gate.watch_submission(&queue);
         }
     }
-    effects.audit.validated = gate.submission_validated(effects.audit.validation);
-    progress.publish_effects(effects.audit);
+    let validation = gate.snapshot(effects.audit.validation);
+    effects.audit.validated =
+        validation.requested != 0 && validation.validated >= validation.requested;
+    if let Some(identity) = frame.render_identity() {
+        shared
+            .proof
+            .observe_effects(crate::render_readiness::EffectsObservation {
+                identity,
+                history_revision: frame.motion_revision,
+                frame: effects.audit.frame,
+                token: effects.audit.token,
+                pipelines_ready: effects.audit.pipelines_ready,
+                inputs_ready: effects.audit.inputs_ready,
+                encoded_token: effects.audit.encoded_token,
+                submitted_token: effects.audit.submitted_token,
+                committed_token: effects.audit.completed_token,
+                validation,
+            });
+    } else {
+        shared.proof.invalidate_frame();
+    }
+    shared.audit.effects = effects.audit;
 }

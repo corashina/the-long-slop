@@ -1,8 +1,9 @@
 //! Reused source pass order over Bevy's prepared transparent mesh items.
 use super::{
-    materials::{MaterialLoading, RenderingState},
+    materials::MaterialLoading,
+    readiness::RendererStateHandle,
     renderer_visibility::{CameraVisibility, SourceSortData},
-    source_lighting::{DrawSourceAdd, DrawSourceBase, DrawSourceGlass, SourceLightingStatus},
+    source_lighting::{DrawSourceAdd, DrawSourceBase, DrawSourceGlass},
 };
 use crate::reference::sorting::{PassSortKey, perspective_distance};
 use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
@@ -127,7 +128,7 @@ pub(crate) fn prepare_pass_order(
     materials: Res<bevy::pbr::RenderMaterialInstances>,
     loading: Res<MaterialLoading>,
     functions: Res<DrawFunctions<Transparent3d>>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     particles: Res<super::particles::ExtractedParticles>,
     lighting: Res<super::lighting::ExtractedLighting>,
 ) {
@@ -135,7 +136,7 @@ pub(crate) fn prepare_pass_order(
         super::reflection_preparation::Stage::Transparent,
         &frame,
     );
-    if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if !loading.is_ready() || status.failure().is_some() {
         for (_, mut order, _) in &mut views {
             order.entries.clear();
         }
@@ -177,7 +178,7 @@ pub(crate) fn prepare_pass_order(
                 continue;
             }
             let Some(data) = metadata.0.get(&item.main_entity().id()) else {
-                *status.0.lock().unwrap() = RenderingState::Failed(format!(
+                status.fail(format!(
                     "Source transparent sort metadata is missing: entity {:?}, material {:?}",
                     item.main_entity(),
                     materials
@@ -192,8 +193,7 @@ pub(crate) fn prepare_pass_order(
                 depth_bias,
             } = item.sorting_info
             else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source transparent distance mode is invalid".into());
+                status.fail("Source transparent distance mode is invalid".into());
                 return;
             };
             let particle = materials
@@ -207,15 +207,12 @@ pub(crate) fn prepare_pass_order(
             let distance = perspective_distance(mesh_center.to_array(), camera)
                 - if particle { depth_bias } else { 0. };
             if !distance.is_finite() || index > i32::MAX as usize {
-                *status.0.lock().unwrap() = RenderingState::Failed(
-                    "Source transparent distance or gather index is invalid".into(),
-                );
+                status.fail("Source transparent distance or gather index is invalid".into());
                 return;
             }
             let count = 1 + usize::from(data.additive || data.glass);
             if order.entries.len() + count > order.entries.capacity() {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source transparent pass capacity was exceeded".into());
+                status.fail("Source transparent pass capacity was exceeded".into());
                 return;
             }
             let key = PassSortKey {

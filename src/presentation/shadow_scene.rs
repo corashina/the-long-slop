@@ -4,9 +4,9 @@ use super::{
     lighting_assets::LightingAssets,
     lighting_scene::{SourceSceneLighting, SourceWorldOrigin},
     materials::{RenderingState, SourceMaterials},
+    readiness::RendererStateHandle,
     renderer_visibility::SourceMaterialWarmup,
     shadow_changes::{ShadowChanges, ShadowMaterials, ShadowMesh, ShadowMeshItem},
-    source_lighting::SourceLightingStatus,
     view_frame::SourceViewFrame,
 };
 use crate::reference::shadow_profile;
@@ -75,7 +75,7 @@ pub(super) fn prepare_scene(
     materials: ShadowMaterials,
     mut updates: ParamSet<(ShadowChanges, Query<&mut ViewVisibility>)>,
     mut scene: ResMut<ShadowScene>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     master: Res<super::lighting::SourceLighting>,
     camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
@@ -94,7 +94,7 @@ pub(super) fn prepare_scene(
     if !frame.required_views_ready()
         || source.state != RenderingState::Ready
         || master.road_lamps.recipe.is_none()
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || status.failure().is_some()
     {
         return;
     }
@@ -105,7 +105,7 @@ pub(super) fn prepare_scene(
     let mut rebuild = changes.removed() || !changes.warmup.is_empty();
     rebuild |= scene.bounds.begin(frame.session, frame.scene, origin.0) || !was_ready;
     let fail = |message: &str| {
-        *status.0.lock().unwrap() = RenderingState::Failed(message.into());
+        status.fail(message.into());
     };
     // Asset resources include same-frame edits, before AssetEvent delivery in Last.
     // A material edit refreshes eligibility without rebuilding unchanged membership.

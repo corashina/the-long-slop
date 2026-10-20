@@ -6,7 +6,8 @@ use super::{
     lighting_assets::LightingRenderAssets,
     materials::RenderingState,
     probes::{ProbeFilter, ProbePublication},
-    source_lighting::{SourceExecutionGate, SourceLightingStatus, SourceViewCamera},
+    readiness::{RendererStateHandle, SourceExecutionGate},
+    source_lighting::SourceViewCamera,
     source_sky::SkyPass,
     surface_graph::{SourceSurface, SourceSurfaceStage},
     surface_views::{SourceSurfaceView, SurfaceResources},
@@ -31,7 +32,7 @@ use bevy::render::{
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc, OnceLock,
     atomic::{AtomicU32, Ordering},
 };
 
@@ -68,130 +69,24 @@ impl ExtractComponent for SourceSkyExtra {
 #[derive(Resource, Default)]
 struct SkyExtras(bevy::ecs::entity::EntityHashMap<(Entity, u32)>);
 #[derive(Default, serde::Serialize)]
-struct FrameProgress {
-    loading: crate::reference::loading_dispatch::LoadingDispatch<PROBE_COUNT>,
+pub(crate) struct FrameAudit {
     #[serde(skip)]
-    prepared_content: Option<(u64, u64)>,
+    identity: Option<crate::render_readiness::RenderIdentity>,
     scene: u32,
     extent: [u32; 2],
     first_token: u32,
-    frame: u32,
+    pub(crate) frame: u32,
     mask: u16,
     sky: bool,
-    presented: bool,
-    token: u32,
+    pub(crate) presented: bool,
+    pub(crate) token: u32,
     validation: u32,
     validated: bool,
     views: [ViewAudit; VIEW_COUNT],
     cpu_boundary: CpuBoundary,
     gpu_boundary: GpuBoundary,
     probes: [ProbeAudit; PROBE_COUNT],
-    effects: super::source_effects::EffectsAudit,
-}
-#[derive(Resource, Clone, Default)]
-pub struct SourceGraphProgress(Arc<Mutex<FrameProgress>>);
-// Shared graph handles, main/render snapshots, and the retained main-world required-view buffer.
-pub(crate) fn control_bytes() -> usize {
-    std::alloc::Layout::new::<[usize; 2]>()
-        .extend(std::alloc::Layout::new::<Mutex<FrameProgress>>())
-        .unwrap()
-        .0
-        .pad_to_align()
-        .size()
-        + 3 * std::mem::size_of::<SourceGraphProgress>()
-        + 2 * std::mem::size_of::<SourceViewFrame>()
-        + std::mem::size_of::<Option<crate::world::RequiredViews>>()
-}
-impl SourceGraphProgress {
-    pub(crate) fn content_checked(&self, content: Option<(u64, u64)>) {
-        self.0.lock().unwrap().prepared_content = content;
-    }
-    pub(crate) fn invalidate_loading(&self) {
-        let mut state = self.0.lock().unwrap();
-        state.prepared_content = None;
-        state.loading.invalidate();
-    }
-    pub(crate) fn loading_snapshot(
-        &self,
-        frame: &SourceViewFrame,
-        bypass: bool,
-        revision: u64,
-    ) -> (bool, bool) {
-        let Some(key) = frame.loading_key() else {
-            return (false, false);
-        };
-        let mut state = self.0.lock().unwrap();
-        // Preparation can change the required selection after check_ready.
-        let complete = state.prepared_content == Some((key.session, revision));
-        let restart = state.loading.snapshot(
-            key,
-            frame.frame,
-            bypass,
-            complete,
-            revision,
-            frame.probe_mask(),
-        );
-        (state.loading.captures_allowed(), restart)
-    }
-    pub(crate) fn complete_scene(
-        &self,
-        key: crate::reference::loading_dispatch::LoadingKey,
-        revision: u64,
-        enabled: u32,
-    ) -> bool {
-        let state = self.0.lock().unwrap();
-        state.scene == key.scene
-            && state.extent == key.extent
-            && state.prepared_content == Some((key.session, revision))
-            && state.loading.fresh(key, revision, enabled)
-    }
-
-    pub(crate) fn frame_submission(&self) -> (u32, u32, bool) {
-        let state = self.0.lock().unwrap();
-        (state.frame, state.token, state.presented)
-    }
-    pub(crate) fn publish_effects(&self, audit: super::source_effects::EffectsAudit) {
-        self.0.lock().unwrap().effects = audit;
-    }
-    pub(crate) fn readiness(&self, scene: u32) -> [bool; 5] {
-        let s = self.0.lock().unwrap();
-        if s.scene != scene {
-            return [false; 5];
-        }
-        let gpu = &s.gpu_boundary;
-        let complete = s.presented
-            && s.sky
-            && s.mask == 1
-            && s.token != 0
-            && s.effects.complete(s.frame, s.token)
-            && s.validated;
-        [
-            gpu.source_targets
-                && gpu.lighting_textures != 0
-                && gpu.lighting_gpu_textures == gpu.lighting_textures,
-            gpu.source_surface_ready
-                && gpu.source_camera_ready
-                && gpu.source_sky_ready
-                && gpu.source_cloud_ready,
-            gpu.source_caster_ready,
-            s.effects.pipelines_ready(),
-            complete,
-        ]
-    }
-    pub fn probe_readiness(&self) -> (bool, bool) {
-        let state = self.0.lock().unwrap();
-        (
-            state.probes.iter().all(|probe| probe.pipelines_ready),
-            state
-                .probes
-                .iter()
-                .all(|probe| !probe.enabled || probe.published)
-                && state.loading.current_fresh(),
-        )
-    }
-    pub fn validated(&self) -> bool {
-        self.0.lock().unwrap().validated
-    }
+    pub(crate) effects: super::source_effects::EffectsAudit,
 }
 #[derive(Resource)]
 pub(crate) struct FrameResources {
@@ -231,6 +126,7 @@ struct ProbeState {
     publication_encoded: Option<u32>,
     filter_validation: u32,
     publication_validation: u32,
+    published_validation: u32,
     publication_token: u32,
     submitted_token: u32,
     published_token: u32,
@@ -248,12 +144,10 @@ impl ProbeState {
 pub struct SourceFramePlugin;
 impl Plugin for SourceFramePlugin {
     fn build(&self, app: &mut App) {
-        let progress = app.world().resource::<SourceGraphProgress>().clone();
-        let status = app.world().resource::<SourceLightingStatus>().0.clone();
+        let progress = app.world().resource::<RendererStateHandle>().clone();
         let gate = app.world().resource::<SourceExecutionGate>().clone();
         let _ = SOURCE_DIAGNOSTICS.set(SourceDiagnostics {
-            progress: progress.0.clone(),
-            status,
+            state: progress.clone(),
             gate,
         });
         app.insert_resource(progress.clone())
@@ -499,7 +393,7 @@ fn prepare_frame(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let (Some(resources), Some(assets), Some(scene)) = (resources, assets, scene.0) else {
         return;
@@ -552,8 +446,7 @@ fn prepare_frame(
         return;
     };
     if !format.is_srgb() {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source final display requires an sRGB view".into());
+        status.fail("Source final display requires an sRGB view".into());
         return;
     }
     let colors = resources.targets.world.clone();
@@ -568,11 +461,10 @@ fn prepare_frame(
             existing.colors = colors;
         }
         if existing.display_format != format {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source display format changed".into());
+            status.fail("Source display format changed".into());
         }
         if let Some(error) = existing.display.failure(&cache) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error);
+            status.fail(error);
         }
         return;
     }
@@ -612,7 +504,7 @@ fn sky_depth(device: &RenderDevice, width: u32, height: u32) -> Texture {
 pub(crate) fn surface_ready(
     view: ViewQuery<&SourceSurfaceView>,
     frame: Res<SourceViewFrame>,
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     camera: Res<SourceViewCamera>,
     resources: Option<Res<FrameResources>>,
     probe: Option<Res<ProbeFrame>>,
@@ -620,35 +512,31 @@ pub(crate) fn surface_ready(
     effects: Option<Res<super::source_effects::SourceEffects>>,
 ) -> bool {
     let index = view.into_inner().index;
-    let state = progress.0.lock().unwrap();
+    let state = progress.lock();
     index < VIEW_COUNT
         && frame.views[index].is_some()
         && frame
-            .loading_key()
-            .is_none_or(|key| state.loading.allows(key, frame.frame))
+            .render_identity()
+            .is_none_or(|key| state.proof.allows_frame(key, frame.frame))
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
         && effects.is_some_and(|effects| effects.ready(&cache))
-        && state.sky
+        && state.audit.sky
         && (index < WORLD_VIEWS
-            || (state.presented
+            || (state.audit.presented
                 && frame.probe_job == Some(ProbeJob::Face((index - PROBE_START) as u8))
                 && probe.is_some_and(|p| {
                     p.probes[frame.probe_index].accepts(frame.probe_token)
                         && p.probes[frame.probe_index].filter.ready(&cache)
                 })))
 }
-fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) {
-    let mut state = progress.0.lock().unwrap();
-    if state.scene != frame.scene {
-        let cpu = state.cpu_boundary;
-        let gpu = state.gpu_boundary;
-        let loading = state.loading;
-        let prepared_content = state.prepared_content;
-        *state = FrameProgress {
+fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<RendererStateHandle>) {
+    let mut state = progress.lock();
+    if state.audit.scene != frame.scene {
+        let cpu = state.audit.cpu_boundary;
+        let gpu = state.audit.gpu_boundary;
+        state.audit = FrameAudit {
             scene: frame.scene,
-            loading,
-            prepared_content,
             cpu_boundary: cpu,
             gpu_boundary: gpu,
             ..default()
@@ -656,16 +544,22 @@ fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<SourceGraphProgress>) 
     }
     if let Some(view) = frame.views[0] {
         let extent = view.extent.to_array();
-        if state.extent != extent {
-            state.extent = extent;
-            state.validation = 0;
-            state.validated = false;
+        if state.audit.extent != extent {
+            state.audit.extent = extent;
+            state.audit.validation = 0;
+            state.audit.validated = false;
         }
     }
-    state.frame = frame.frame;
-    state.mask = 0;
-    state.sky = false;
-    state.presented = false;
+    let identity = frame.render_identity();
+    if state.audit.identity != identity {
+        state.audit.identity = identity;
+        state.audit.validation = 0;
+        state.audit.validated = false;
+    }
+    state.audit.frame = frame.frame;
+    state.audit.mask = 0;
+    state.audit.sky = false;
+    state.audit.presented = false;
 }
 fn draw_extras(
     kind: u32,
@@ -728,8 +622,8 @@ fn render_sky(
     cache: Res<PipelineCache>,
     frame: Res<SourceViewFrame>,
     loading: Res<super::materials::MaterialLoading>,
-    status: Res<SourceLightingStatus>,
-    progress: Res<SourceGraphProgress>,
+    status: Res<RendererStateHandle>,
+    progress: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let entity = view.entity();
@@ -799,7 +693,7 @@ fn render_sky(
         &resources.sky_depth,
         &extras,
     ) {
-        *status.0.lock().unwrap() = RenderingState::Failed(error);
+        status.fail(error);
         return;
     }
     if !clouds.encode(
@@ -822,10 +716,10 @@ fn render_sky(
         &resources.sky_depth,
         &extras,
     ) {
-        *status.0.lock().unwrap() = RenderingState::Failed(error);
+        status.fail(error);
         return;
     }
-    progress.0.lock().unwrap().sky = true;
+    progress.lock().audit.sky = true;
 }
 fn finish_surface(
     view: ViewQuery<(
@@ -839,25 +733,25 @@ fn finish_surface(
         &super::stained_glass::SourceGlassView,
     )>,
     frame: Res<SourceViewFrame>,
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     resources: Res<FrameResources>,
     surfaces: Res<SurfaceResources>,
     mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
     effects: Res<super::source_effects::SourceEffects>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
     if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
-    let mut state = progress.0.lock().unwrap();
+    let mut state = progress.lock();
     let (shadow_epoch, shadow_attempts, shadow_issued) = shadow.counts();
-    state.views[source.index] = ViewAudit {
+    state.audit.views[source.index] = ViewAudit {
         frame: frame.frame,
         glass: glass.audit(),
         camera_depth: depth.counts(),
@@ -893,14 +787,14 @@ fn finish_surface(
         }
         let job = ProbeJob::Face(face);
         if let Err(error) = probe.publication.encoded(frame.probe_token, job) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+            state.proof.fail(error.into());
             return;
         }
         if face == 0 {
-            if let Some(key) = frame.loading_key() {
+            if let Some(request) = frame.readiness_request() {
                 state
-                    .loading
-                    .capture_started(key, frame.frame, frame.probe_index);
+                    .proof
+                    .capture_started(request, frame.frame, frame.probe_index);
             }
         }
         probe.encoded_token = Some(frame.probe_token);
@@ -909,8 +803,8 @@ fn finish_surface(
     if !effects.encoded(frame.frame, frame.main_token) {
         return;
     }
-    state.mask |= 1 << source.index;
-    if source.index == 0 && state.mask == 1 && state.sky {
+    state.audit.mask |= 1 << source.index;
+    if source.index == 0 && state.audit.mask == 1 && state.audit.sky {
         let Some(output) = target.out_texture_color_attachment(None) else {
             return;
         };
@@ -918,96 +812,138 @@ fn finish_surface(
             .display
             .encode(context.command_encoder(), &cache, output.view)
         {
-            state.presented = true;
-            state.token = frame.main_token;
+            state.audit.presented = true;
+            state.audit.token = frame.main_token;
         }
     }
 }
 fn submitted(
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     frame: Res<SourceViewFrame>,
     mut probe: Option<ResMut<ProbeFrame>>,
     cache: Res<PipelineCache>,
     acks: Res<SourceSubmissionAcks>,
     gate: Res<SourceExecutionGate>,
     queue: Res<RenderQueue>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
-    let mut state = progress.0.lock().unwrap();
-    if state.presented {
-        if state.first_token == 0 {
-            state.first_token = state.token;
+    let mut state = progress.lock();
+    if state.audit.presented {
+        if state.audit.first_token == 0 {
+            state.audit.first_token = state.audit.token;
         }
-        acks.main_submitted(state.token);
-        if state.validation == 0 {
-            state.validation = gate.watch_submission(&queue);
+        acks.main_submitted(state.audit.token);
+        if state.audit.validation == 0 {
+            state.audit.validation = gate.watch_submission(&queue);
         }
-        state.validated = gate.submission_validated(state.validation);
     }
-    let Some(probes) = probe.as_mut() else { return };
-    if probes.scene != frame.scene {
-        return;
-    }
-    for (index, probe) in probes.probes.iter_mut().enumerate() {
-        let result = (|| -> Result<(), &'static str> {
-            if let Some(token) = probe.encoded_token.take() {
-                let advance = probe.publication.submitted(token)?;
-                probe.submitted_token = token;
-                if advance {
-                    acks.probe_submitted(token);
+    let validation = gate.snapshot(state.audit.validation);
+    state.audit.validated =
+        validation.requested != 0 && validation.validated >= validation.requested;
+    let mut observations = [crate::render_readiness::ProbeObservation {
+        pipelines_ready: false,
+        published: false,
+        validation: crate::render_readiness::Validation::default(),
+    }; PROBE_COUNT];
+    if let Some(probes) = probe.as_mut().filter(|probes| probes.scene == frame.scene) {
+        for (index, probe) in probes.probes.iter_mut().enumerate() {
+            let result = (|| -> Result<(), &'static str> {
+                if let Some(token) = probe.encoded_token.take() {
+                    let advance = probe.publication.submitted(token)?;
+                    probe.submitted_token = token;
+                    if advance {
+                        acks.probe_submitted(token);
+                    } else {
+                        probe.filter_validation = gate.watch_submission(&queue);
+                    }
+                }
+                if let Some(token) = probe.publication_encoded.take() {
+                    probe.publication_token = token;
+                    probe.publication_validation = gate.watch_submission(&queue);
+                }
+                if probe.publication_validation != 0
+                    && validation.validated >= probe.publication_validation
+                {
+                    let token = probe.publication_token;
+                    probe.publication.publication_submitted(token)?;
+                    if let Some(request) = frame.readiness_request() {
+                        state.proof.publication_validated(request, index);
+                    }
+                    acks.probe_publication_submitted(token);
+                    probe.published_token = token;
+                    probe.published_validation = probe.publication_validation;
+                    probe.publication_validation = 0;
+                    probe.publication_token = 0;
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                state.proof.fail(error.into());
+                return;
+            }
+            observations[index] = crate::render_readiness::ProbeObservation {
+                pipelines_ready: probe.filter.ready(&cache),
+                published: probe.publication.published(),
+                validation: crate::render_readiness::Validation {
+                    requested: probe.published_validation,
+                    ..validation
+                },
+            };
+            state.audit.probes[index] = ProbeAudit {
+                enabled: frame.probe_enabled[index],
+                checks: frame.probe_checks,
+                distance_squared: frame.probe_distance_squared[index],
+                token: frame.probe_token,
+                job: match if index == frame.probe_index {
+                    frame.probe_job
                 } else {
-                    probe.filter_validation = gate.watch_submission(&queue);
-                }
-            }
-            if let Some(token) = probe.publication_encoded.take() {
-                probe.publication_token = token;
-                probe.publication_validation = gate.watch_submission(&queue);
-            }
-            if gate.submission_validated(probe.publication_validation) {
-                let token = probe.publication_token;
-                probe.publication.publication_submitted(token)?;
-                if let Some(key) = frame.loading_key() {
-                    state.loading.publication_validated(key, index);
-                }
-                acks.probe_publication_submitted(token);
-                probe.published_token = token;
-                probe.publication_validation = 0;
-                probe.publication_token = 0;
-            }
-            Ok(())
-        })();
-        if let Err(error) = result {
-            *status.0.lock().unwrap() = RenderingState::Failed(error.into());
-            return;
+                    None
+                } {
+                    Some(ProbeJob::Face(face)) => face + 1,
+                    Some(ProbeJob::FirstMip) => 7,
+                    Some(ProbeJob::RemainingMipsAndPublish) => 8,
+                    None => 0,
+                },
+                face_mask: probe.publication.face_mask(),
+                mip_mask: probe.publication.mip_mask(),
+                pipelines_ready: probe.filter.ready(&cache),
+                filter_validation: probe.filter_validation,
+                publication_validation: probe.publication_validation,
+                published: probe.publication.published(),
+                generation: probe.publication.generation(),
+                submitted_token: probe.submitted_token,
+                published_token: probe.published_token,
+            };
         }
-        state.probes[index] = ProbeAudit {
-            enabled: frame.probe_enabled[index],
-            checks: frame.probe_checks,
-            distance_squared: frame.probe_distance_squared[index],
-            token: frame.probe_token,
-            job: match if index == frame.probe_index {
-                frame.probe_job
-            } else {
-                None
-            } {
-                Some(ProbeJob::Face(face)) => face + 1,
-                Some(ProbeJob::FirstMip) => 7,
-                Some(ProbeJob::RemainingMipsAndPublish) => 8,
-                None => 0,
-            },
-            face_mask: probe.publication.face_mask(),
-            mip_mask: probe.publication.mip_mask(),
-            pipelines_ready: probe.filter.ready(&cache),
-            filter_validation: probe.filter_validation,
-            publication_validation: probe.publication_validation,
-            published: probe.publication.published(),
-            generation: probe.publication.generation(),
-            submitted_token: probe.submitted_token,
-            published_token: probe.published_token,
+    }
+    if let Some(identity) = frame.render_identity() {
+        let audit = &state.audit;
+        let gpu = &audit.gpu_boundary;
+        let observation = crate::render_readiness::GraphObservation {
+            identity,
+            frame: audit.frame,
+            token: audit.token,
+            sky: audit.sky,
+            world_mask: audit.mask,
+            display_encoded: audit.presented,
+            submitted_token: if audit.presented { audit.token } else { 0 },
+            targets_ready: gpu.source_targets,
+            lighting_textures: gpu.lighting_textures,
+            lighting_gpu_textures: gpu.lighting_gpu_textures,
+            surface_ready: gpu.source_surface_ready,
+            camera_ready: gpu.source_camera_ready,
+            sky_ready: gpu.source_sky_ready,
+            cloud_ready: gpu.source_cloud_ready,
+            caster_ready: gpu.source_caster_ready,
+            probes: observations,
+            validation,
         };
+        state.proof.observe_graph(observation);
+    } else {
+        state.proof.invalidate_frame();
     }
 }
 
@@ -1029,8 +965,7 @@ struct ViewAudit {
     projection: [f32; 16],
 }
 struct SourceDiagnostics {
-    progress: Arc<Mutex<FrameProgress>>,
-    status: Arc<Mutex<RenderingState>>,
+    state: RendererStateHandle,
     gate: SourceExecutionGate,
 }
 static SOURCE_DIAGNOSTICS: OnceLock<SourceDiagnostics> = OnceLock::new();
@@ -1041,14 +976,7 @@ pub fn source_render_failure(message: &str) {
     let Some(renderer) = SOURCE_DIAGNOSTICS.get() else {
         return;
     };
-    let mut state = renderer.status.lock().unwrap();
-    if !matches!(*state, RenderingState::Failed(_)) {
-        *state = RenderingState::Failed(message.to_owned());
-    }
-    drop(state);
-    let mut progress = renderer.progress.lock().unwrap();
-    progress.loading.invalidate();
-    progress.prepared_content = None;
+    renderer.state.fail(message.to_owned());
 }
 
 /// Serialize only on explicit diagnostic calls. Render frames copy fixed-size counters.
@@ -1057,16 +985,21 @@ pub fn source_render_audit() -> String {
     let Some(audit) = SOURCE_DIAGNOSTICS.get() else {
         return "null".into();
     };
-    let progress = audit.progress.lock().unwrap();
-    let state = audit.status.lock().unwrap();
-    let state = match &*state {
-        RenderingState::Loading => "Loading".to_owned(),
-        RenderingState::Ready => "Ready".to_owned(),
-        RenderingState::Failed(error) => format!("Failed: {error}"),
+    let state = audit.state.lock();
+    let status = match state.proof.status() {
+        crate::render_readiness::RendererStatus::Loading => "Loading".to_owned(),
+        crate::render_readiness::RendererStatus::Ready => "Ready".to_owned(),
+        crate::render_readiness::RendererStatus::Failed(error) => format!("Failed: {error}"),
     };
+    #[derive(serde::Serialize)]
+    struct GraphDiagnostic<'a> {
+        loading: &'a crate::render_readiness::RendererReadiness,
+        #[serde(flatten)]
+        audit: &'a FrameAudit,
+    }
     serde_json::to_string(&serde_json::json!({
-        "state": state, "graph": &*progress,
-        "graph_control_bytes": control_bytes(),
+        "state": status, "graph": GraphDiagnostic { loading: &state.proof, audit: &state.audit },
+        "graph_control_bytes": super::readiness::control_bytes(),
         "gpu_validated_generation": audit.gate.validated_generation(),
     }))
     .expect("source diagnostic values serialize")
@@ -1145,7 +1078,7 @@ fn state_code(state: &RenderingState) -> u8 {
     }
 }
 fn cpu_boundaries(
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     assets: Option<Res<super::lighting_assets::LightingAssets>>,
     materials: Option<Res<super::materials::SourceMaterials>>,
     loading: Option<Res<super::materials::MaterialLoading>>,
@@ -1183,7 +1116,7 @@ fn cpu_boundaries(
         boundary.master_cookie_handles = master.cookie_handles.is_some();
     }
     boundary.visuals_bound = visuals.is_some_and(|v| v.bound);
-    progress.0.lock().unwrap().cpu_boundary = boundary;
+    progress.lock().audit.cpu_boundary = boundary;
 }
 #[derive(Default)]
 struct AssetAuditCache {
@@ -1353,10 +1286,9 @@ fn gpu_boundaries(
         boundary.prewarm = loading.prewarm_audit(world);
     }
     world
-        .resource::<SourceGraphProgress>()
-        .0
+        .resource::<RendererStateHandle>()
         .lock()
-        .unwrap()
+        .audit
         .gpu_boundary = boundary;
 }
 
@@ -1369,9 +1301,9 @@ fn prepare_probe(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     if let Some(mut existing) = existing {
@@ -1387,6 +1319,7 @@ fn prepare_probe(
                 probe.publication_encoded = None;
                 probe.filter_validation = 0;
                 probe.publication_validation = 0;
+                probe.published_validation = 0;
                 probe.publication_token = 0;
                 probe.submitted_token = 0;
                 probe.published_token = 0;
@@ -1397,7 +1330,7 @@ fn prepare_probe(
         }
         for probe in &existing.probes {
             if let Some(error) = probe.filter.failure(&cache) {
-                *status.0.lock().unwrap() = RenderingState::Failed(error);
+                status.fail(error);
             }
         }
         return;
@@ -1424,6 +1357,7 @@ fn prepare_probe(
             publication_encoded: None,
             filter_validation: 0,
             publication_validation: 0,
+            published_validation: 0,
             publication_token: 0,
             submitted_token: 0,
             published_token: 0,
@@ -1475,12 +1409,11 @@ fn render_capture_sky(
     probe: Option<Res<ProbeFrame>>,
     frame: Res<SourceViewFrame>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let (source, targets) = view.into_inner();
-    if source.index < WORLD_VIEWS || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-    {
+    if source.index < WORLD_VIEWS || status.failure().is_some() {
         return;
     }
     if sky.encode(
@@ -1500,15 +1433,13 @@ fn filter_probe(
     mut probe: Option<ResMut<ProbeFrame>>,
     surfaces: Option<Res<SurfaceResources>>,
     frame: Res<SourceViewFrame>,
-    progress: Res<SourceGraphProgress>,
+    progress: Res<RendererStateHandle>,
     gate: Res<SourceExecutionGate>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
-        || !progress.0.lock().unwrap().presented
-    {
+    if status.failure().is_some() || !progress.lock().audit.presented {
         return;
     }
     let (Some(probe), Some(surfaces)) = (probe.as_mut(), surfaces) else {
@@ -1523,8 +1454,7 @@ fn filter_probe(
             return;
         }
         let Some(token) = probe.publication.validation_token() else {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source probe validation lacks its token".into());
+            status.fail("Source probe validation lacks its token".into());
             return;
         };
         let result = probe.publication.validated(token, true).and_then(|()| {
@@ -1540,7 +1470,7 @@ fn filter_probe(
                 probe.filter_validation = 0;
                 probe.publication_encoded = Some(token);
             }
-            Err(error) => *status.0.lock().unwrap() = RenderingState::Failed(error.into()),
+            Err(error) => status.fail(error.into()),
         }
         return;
     }
@@ -1563,7 +1493,7 @@ fn filter_probe(
     };
     if encoded {
         if let Err(error) = probe.publication.encoded(frame.probe_token, job) {
-            *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+            status.fail(error.into());
             return;
         }
         probe.encoded_token = Some(frame.probe_token);
