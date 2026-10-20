@@ -79,6 +79,7 @@ public static class G11Driver
     static int ownershipUpdate,appliedUpdate,preparedUpdate,startedFrame;
     static Stamp readyStamp;static State readyState;
     public static int UpdateSequence { get; private set; }
+    public static int InputApplications { get { return report.input_applications; } }
     public static float ConsumedDt { get; private set; }
     public static float StoredDt { get { return player==null?0f:player.dt; } }
     static string References()
@@ -167,6 +168,7 @@ public static class G11Driver
     public static void Observe(object owner,string phase,int step)
     {
         if(player==null || !ReferenceEquals(owner,player)) return;
+        G11BodyTrace.Boundary(phase);
         if(phase=="driver.get-in.exit")
         {
             getInExited=true;StampAt("get-in-exit",phase,step);return;
@@ -226,6 +228,12 @@ public static class G11Driver
         StampAt("stationary-input-applied","observer.LateUpdate",G11Capture.ObservedPhysicsStep);
     }
     public static bool Tick(Input canonical,int step)
+    {
+        G11BodyTrace.Boundary("driver.Tick.entry");
+        try { return TickCore(canonical,step); }
+        finally { G11BodyTrace.Boundary("driver.Tick.exit"); }
+    }
+    static bool TickCore(Input canonical,int step)
     {
         if(Time.frameCount-startedFrame>600) throw new InvalidOperationException("Driver callback or native ownership readiness timeout: "+G11Lifecycle.Pending());
         if(!getInExited) return false;

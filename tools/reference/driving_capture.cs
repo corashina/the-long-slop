@@ -173,6 +173,7 @@ public sealed class G11Capture : MonoBehaviour
         public List<string> setup_changes=new List<string>();
         public G11Driver.Report driver=G11Driver.report;
         public G11Lifecycle.Report lifecycle=G11Lifecycle.report;
+        public G11BodyTrace.Report body_trace=G11BodyTrace.report;
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses", "Independent native engine, service, and parking brake torque decomposition"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
@@ -258,7 +259,7 @@ public sealed class G11Capture : MonoBehaviour
                 var ready=(carscript)owner;
                 if(ready.carType==itemdatabase.CarType.car02 && ready.RB!=null)
                 {
-                    ready.RB.isKinematic=true;
+                    G11BodyTrace.Set(ready.RB,true,"System.Void G11Capture::Observe(System.Object,System.String)",-1,"observer.car.ready");
                     if(ready==car) G11Geometry.HoldWheels();
                     else foreach(var wheel in ready.allWH) wheel.enabled=false;
                     result.setup_changes.Add("Hold source Lada body and disable native wheels after original car Start");
@@ -288,9 +289,9 @@ public sealed class G11Capture : MonoBehaviour
                 var authored=start.GetComponentsInChildren<carscript>(true).Single(c=>c.carType==itemdatabase.CarType.car02);
                 result.authored_template=DescribeAssembly(authored);
                 car=authored; body=car.RB;
-                G11Geometry.Initialize(car);G11Lifecycle.Begin();
+                G11Geometry.Initialize(car);G11BodyTrace.Bind(car);G11Lifecycle.Begin();
                 G11Geometry.Capture("world.entry",observedPhysicsStep,"world.entry",completedStorage);
-                body.isKinematic=true;
+                G11BodyTrace.Set(body,true,"System.Void G11Capture::Observe(System.Object,System.String)",-1,"observer.world.entry");
                 G11Geometry.HoldWheels();
                 result.target_held_before_activation=true;
                 result.setup_changes.Add("Use the actual authored StartCar02 car in each fresh source process; hold body and disable every native wheel before original activation");
@@ -355,7 +356,7 @@ public sealed class G11Capture : MonoBehaviour
             G11Geometry.Capture("source-physical-ready",observedPhysicsStep,"Initialize source readiness",completedStorage);
             main.PressedContinue();
             body=car.RB;
-            body.isKinematic=true;
+            G11BodyTrace.Set(body,true,"System.Collections.IEnumerator G11Capture::Initialize(mainscript)",-1,"observer.Initialize");
             sourceWheels=car.allWH.ToArray(); wheels=sourceWheels;
             if(wheels.Any(w=>w.enabled)) throw new InvalidOperationException("Original native wheels enabled before setup completion");
             spawnPose=scenario.has_setup_state?scenario.setup_state.spawn_pose:
@@ -792,6 +793,9 @@ public sealed class G11Capture : MonoBehaviour
     public static int InputRevision { get { return controlRevision; } }
     public static int ObservedPhysicsStep { get { return observedPhysicsStep; } }
     public static Rigidbody ObservedBody { get { return body; } }
+    public static bool TraceOpen { get { return !finished; } }
+    public static bool IsArmed { get { return active; } }
+    public static void TraceFailure(Exception error) { Fail(error); }
     public static void SetSourceActive(GameObject target,bool value,string caller)
     {
         if(finished) target.SetActive(value);
@@ -847,7 +851,7 @@ public sealed class G11Capture : MonoBehaviour
                 if(!SourceAssemblyReady(car)) throw new InvalidOperationException("Source mounted assembly changed readiness during held boundary");
                 RequireAssembly(result.prepared_assembly,result.held_assembly,"stable authored membership through held boundary");
                 RecordSetupBoundary("before-dynamic");
-                body.isKinematic=false;
+                G11BodyTrace.Set(body,false,"System.Void G11Capture::LateUpdate()",-1,"observer.before-dynamic");
                 RecordSetupBoundary("switched-dynamic");
                 if(scenario.setup.height=="wheels-clear") body.constraints=RigidbodyConstraints.FreezeAll;
                 ApplyCanonical(result.setup_state);

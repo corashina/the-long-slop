@@ -57,6 +57,7 @@ Add-Type -Path "$PSHOME/Microsoft.CodeAnalysis.CSharp.dll"
 $references=[Collections.Generic.List[Microsoft.CodeAnalysis.MetadataReference]]::new()
 Get-ChildItem -LiteralPath $sourceManaged -Filter '*.dll' | ForEach-Object {$references.Add([Microsoft.CodeAnalysis.MetadataReference]::CreateFromFile($_.FullName))}
 $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_body_trace.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_driver.cs'))))
@@ -121,6 +122,20 @@ function Observe($type,$name,$phase,$entry,$signature=''){
     $changes.Add("Observe $type.$name $phase; original instructions and branch targets retained")
 }
 function AllMethods($type){$type.Methods;foreach($nested in $type.NestedTypes){AllMethods $nested}}
+# Record all original setter locations before any instruction changes.
+$bodySetter='System.Void UnityEngine.Rigidbody::set_isKinematic(System.Boolean)'
+$bodySites=[Collections.Generic.List[object]]::new()
+foreach($type in $main.MainModule.Types){foreach($method in (AllMethods $type)){
+    if(-not $method.HasBody){continue}
+    foreach($instruction in $method.Body.Instructions){
+        if($instruction.Operand -is [Mono.Cecil.MethodReference] -and $instruction.Operand.FullName -ceq $bodySetter){
+            if($instruction.OpCode.Code -notin @('Call','Callvirt')){throw 'Unsupported original kinematic setter opcode'}
+            $bodySites.Add(@{method=$method;instruction=$instruction;caller=$method.FullName;identity=(Identity $method);
+                il_offset=$instruction.Offset;opcode=$instruction.OpCode.Name;target=$bodySetter})
+        }
+    }
+}}
+if($bodySites.Count -ne 20){throw "Checked original kinematic setter count differs: $($bodySites.Count)"}
 # Retain source component intent while the observer holds every native source wheel.
 # GameObject.SetActive calls remain original, including carscript.Lock and enableObjs.
 foreach($type in $main.MainModule.Types){foreach($method in (AllMethods $type)){
@@ -273,6 +288,18 @@ foreach($method in $core.MainModule.GetType('UnityEngine.PlayerPrefs').Methods){
     $il.Append($il.Create([Mono.Cecil.Cil.OpCodes]::Ret))
     $changes.Add("PlayerPrefs.$($method.Name)($signature) -> isolated in-memory profile")
 }
+$bodyHook=@($hook.MainModule.GetType('G11BodyTrace').Methods | Where-Object Name -ceq 'Set')
+if($bodyHook.Count -ne 1){throw 'Expected one selected body setter adapter'}
+$bodyCall=$main.MainModule.ImportReference($bodyHook[0])
+foreach($site in $bodySites){
+    $method=$site.method;Mark $method;Expand $method;$il=$method.Body.GetILProcessor();$point=$site.instruction
+    $point.OpCode=[Mono.Cecil.Cil.OpCodes]::Ldstr;$point.Operand=$site.caller
+    $offset=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldc_I4,[int]$site.il_offset)
+    $opcode=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldstr,[string]$site.opcode)
+    $invoke=$il.Create([Mono.Cecil.Cil.OpCodes]::Call,$bodyCall)
+    $il.InsertAfter($point,$offset);$il.InsertAfter($offset,$opcode);$il.InsertAfter($opcode,$invoke)
+    $changes.Add("Forward original $($site.target) once in $($site.caller) at original IL $($site.il_offset), opcode $($site.opcode); selected-body evidence only")
+}
 $main.Write((Join-Path $managed 'Assembly-CSharp.dll'))
 $core.Write((Join-Path $managed 'UnityEngine.CoreModule.dll'))
 function Fingerprint($method){
@@ -289,6 +316,24 @@ foreach($name in @('Assembly-CSharp.dll','UnityEngine.CoreModule.dll')){
         $audited++
     }}
 }
+# Read back each exact call replacement, including caller and original offset loads.
+$readback=[Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $managed 'Assembly-CSharp.dll'))
+$bodyAudit=[Collections.Generic.List[object]]::new()
+foreach($type in $readback.MainModule.Types){foreach($method in (AllMethods $type)){
+    if(-not $method.HasBody){continue}
+    foreach($point in $method.Body.Instructions){
+        if($point.Operand -isnot [Mono.Cecil.MethodReference]){continue}
+        if($point.Operand.FullName -ceq $bodySetter){throw 'Unobserved original kinematic setter remains'}
+        if($point.Operand.FullName -cne $bodyCall.FullName){continue}
+        $opcode=$point.Previous;$offset=$opcode.Previous;$caller=$offset.Previous
+        $matches=@($bodySites | Where-Object {$_.identity -ceq (Identity $method) -and $_.il_offset -eq $offset.Operand -and $_.caller -ceq $caller.Operand -and $_.opcode -ceq $opcode.Operand})
+        if($matches.Count -ne 1 -or $point.OpCode.Code -ne 'Call' -or $caller.OpCode.Code -ne 'Ldstr' -or $offset.OpCode.Code -ne 'Ldc_I4' -or $opcode.OpCode.Code -ne 'Ldstr'){
+            throw "Original kinematic setter adapter audit differs: $($method.FullName)"
+        }
+        $site=$matches[0];$bodyAudit.Add(@{caller=$site.caller;identity=$site.identity;il_offset=$site.il_offset;opcode=$site.opcode;target=$site.target})
+    }
+}}
+if($bodyAudit.Count -ne $bodySites.Count){throw 'Original kinematic setter adapter audit count differs'}
 $scripting=Join-Path $game 'TheLongDrive_Data/ScriptingAssemblies.json'
 $assemblies=Get-Content -LiteralPath $scripting -Raw | ConvertFrom-Json
 $assemblies.names+='G11Capture.dll';$assemblies.types+=16
@@ -298,6 +343,7 @@ $patches=@($files | ForEach-Object {@{file=$_;original_sha256=(Hash (Join-Path $
 $request=Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
 @{schema_version=1;observer_revision=$request.observer_revision;observer_assembly_sha256=(Hash $observerPath);
     changed_methods=@($allowed);changes=@($changes);patched_files=$patches;audited_methods=$audited;
+    body_setter_sites=@($bodyAudit);body_setter_adapter=$bodyCall.FullName;
     archive_file_count=$archive.files.Count;source_physics_module_sha256=(Hash (Join-Path $managed 'UnityEngine.PhysicsModule.dll'));
     native_engine_sha256=(Hash (Join-Path $game 'UnityPlayer.dll'))} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $scratch 'patch-receipt.json') -Encoding utf8
 Write-Output "SCRATCH_VERIFIED source_files=$($archive.files.Count) audited_methods=$audited"

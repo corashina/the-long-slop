@@ -17,7 +17,7 @@ from tools.reference.tests.test_driving_controls import scenario_fixture, add_co
 class DrivingProbeTests(unittest.TestCase):
     def test_geometry_helper_provenance(self):
         revision = observer_revision()
-        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_controls.cs', 'driving_controls.py'):
+        for name in ('driving_body_trace.cs', 'driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_controls.cs', 'driving_controls.py'):
             self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
 
     def test_native_helper_restoration_and_physical_readiness(self):
