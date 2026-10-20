@@ -26,7 +26,8 @@ def validate_audio(value, opened, closed):
     created = _mark(value.get('created'))
     requested = _mark(value.get('destruction_requested'), 'mainscript.PlayClipAtPoint.Destroy(Object,clip.length)')
     parent_observed = _mark(value.get('parent_observed'))
-    if (value['parent_observed']['callback'] not in ('driver.update.exit.parent', 'observer.LateUpdate.parent') or
+    creation_parent = value['parent_observed']['callback'] == 'mainscript.PlayClipAtPoint.Instantiate.parent'
+    if (value['parent_observed']['callback'] not in ('mainscript.PlayClipAtPoint.Instantiate.parent', 'driver.update.exit.parent', 'observer.LateUpdate.parent') or
             not created < requested or not created < parent_observed or any(type(value.get(k)) is not bool for k in
             ('required', 'scope_member', 'created_after_close', 'object_null', 'component_null', 'collider_null')) or
             value['created_after_close'] != (created > closed)):
@@ -34,6 +35,17 @@ def validate_audio(value, opened, closed):
     membership = value.get('membership')
     if not isinstance(membership, list) or not membership:
         raise ValueError('Missing exact captured-geometry audio membership observations')
+    if creation_parent:
+        first_scope = membership[0].get('observed')
+        scope_order = _mark(first_scope, 'mainscript.PlayClipAtPoint.Instantiate.scope')
+        clocks = ('frame', 'time', 'update_sequence', 'input_revision')
+        if (value['created']['callback'] not in ('mainscript.PlayClipAtPoint.Instantiate', 'setup.crafted.entry', 'setup.slot.entry') or
+                not 0 < created or value['created']['update_sequence'] != 0 or
+                parent_observed != created + 1 or scope_order != parent_observed + 1 or
+                not scope_order < requested or not isinstance(value['creation_parent'], str) or
+                value['parent'] != value['creation_parent'] or membership[0].get('parent') != value['creation_parent'] or
+                any(stamp[k] != value['created'][k] for stamp in (value['parent_observed'], first_scope, value['destruction_requested']) for k in clocks)):
+            raise ValueError('Invalid actual creation-hook audio parent observation')
     previous_scope = created
     required = False
     for scope in membership:

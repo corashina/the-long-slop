@@ -92,9 +92,12 @@ public static class G11Lifecycle
         var owner=owners.Count==0?null:owners[owners.Count-1];
         var audio=new Audio{prefab="sharedassets1.assets:21250",prefab_id=mainscript.M.Audio.GetInstanceID(),clip=clip.name,clip_id=clip.GetInstanceID(),
             clip_length=clip.length,object_id=obj.GetInstanceID(),component_id=source.GetInstanceID(),collider_id=collider.GetInstanceID(),
-            component="native-instance:"+source.GetInstanceID(),collider="native-instance:"+collider.GetInstanceID(),creation_parent=G11Geometry.Key(obj.transform.parent),
-            parent=G11Geometry.Key(obj.transform.parent),source_owner=owner==null?"original source stack":G11Geometry.Key((Component)owner.value),
+            component="native-instance:"+source.GetInstanceID(),collider="native-instance:"+collider.GetInstanceID(),
+            source_owner=owner==null?"original source stack":G11Geometry.Key((Component)owner.value),
             source_stack=stack,created=At(owner==null?"mainscript.PlayClipAtPoint.Instantiate":owner.callback)};
+        string parent=G11Geometry.Key(obj.transform.parent);
+        audio.creation_parent=parent;audio.parent=parent;
+        audio.parent_observed=At("mainscript.PlayClipAtPoint.Instantiate.parent");
         audio.created_after_close=report.cohort_closed;
         report.audio.Add(audio);var value=new Retained{obj=obj,source=source,collider=collider,record=audio};retained.Add(value);
         ObserveScope(value,G11Geometry.InCaptureScope(collider),"mainscript.PlayClipAtPoint.Instantiate",true);
