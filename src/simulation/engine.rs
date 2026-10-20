@@ -67,49 +67,40 @@ fn temperature_change(
         * input.sleep_modifier
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct EngineInput {
-    pub engine_present: bool,
-    pub radiator_present: bool,
-    pub ignition_held: bool,
-    pub ignition_pressed: bool,
-    pub ignition_released: bool,
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InstalledEngineInput {
+    pub ignition: bool,
+    pub starter: bool,
     pub throttle: f32,
     /// Clutch engagement. Zero disconnects the wheels.
     pub clutch: f32,
     pub wheel_rpm: f32,
     pub free_run: bool,
     pub speed_kmh: f32,
+    pub radiator_condition: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EngineInput {
+    pub installed: Option<InstalledEngineInput>,
     pub ambient_temperature: f32,
     pub ambient_heat_modifier: f32,
     pub sleep_modifier: f32,
-    pub radiator_condition: u8,
 }
 
 impl Default for EngineInput {
     fn default() -> Self {
         Self {
-            engine_present: true,
-            radiator_present: true,
-            ignition_held: false,
-            ignition_pressed: false,
-            ignition_released: false,
-            throttle: 0.,
-            clutch: 0.,
-            wheel_rpm: 0.,
-            free_run: false,
-            speed_kmh: 0.,
+            installed: None,
             ambient_temperature: 0.,
             ambient_heat_modifier: 0.,
             sleep_modifier: 1.,
-            radiator_condition: 0,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineOutput {
-    pub ignition: bool,
     pub starter: bool,
     pub running: bool,
     pub rpm: f32,
@@ -125,16 +116,13 @@ pub struct EngineOutput {
 
 #[derive(Clone, Debug)]
 pub struct EngineState {
-    pub ignition: bool,
     pub rpm: f32,
     pub temperature: f32,
     elapsed: f32,
     last_run_time: f32,
     last_start_chance_time: f32,
     random_start: f32,
-    ignition_hold_seconds: f32,
-    last_ignition_held: bool,
-    starter: bool,
+    oil_penalty: f32,
     supplied_fuel: f32,
     fan_on: bool,
     last_output: EngineOutput,
@@ -142,9 +130,6 @@ pub struct EngineState {
 
 impl EngineState {
     pub fn clear_input(&mut self) {
-        self.ignition_hold_seconds = 0.;
-        self.last_ignition_held = false;
-        self.starter = false;
         self.last_output.starter = false;
     }
     pub fn running(&self) -> bool {
@@ -152,7 +137,6 @@ impl EngineState {
     }
     pub fn capture_save(&self) -> crate::save::EngineSnapshot {
         crate::save::EngineSnapshot {
-            ignition: self.ignition,
             rpm: self.rpm,
             temperature: self.temperature,
             elapsed: self.elapsed,
@@ -161,10 +145,10 @@ impl EngineState {
             random_start: self.random_start,
             supplied_fuel: self.supplied_fuel,
             fan_on: self.fan_on,
+            oil_penalty: self.oil_penalty,
         }
     }
     pub fn restore_save(&mut self, saved: &crate::save::EngineSnapshot) -> EngineOutput {
-        self.ignition = saved.ignition;
         self.rpm = saved.rpm;
         self.temperature = saved.temperature;
         self.elapsed = saved.elapsed;
@@ -173,28 +157,26 @@ impl EngineState {
         self.random_start = saved.random_start;
         self.supplied_fuel = saved.supplied_fuel;
         self.fan_on = saved.fan_on;
+        self.oil_penalty = saved.oil_penalty;
         self.clear_input();
         self.last_output = EngineOutput {
-            ignition: self.ignition,
             running: self.running(),
             rpm: self.rpm,
             temperature: self.temperature,
+            oil_penalty: self.oil_penalty,
             ..Default::default()
         };
         self.last_output
     }
     pub fn new(reference: &EngineReference) -> Self {
         Self {
-            ignition: false,
             rpm: 0.0,
             temperature: reference.initial_temperature,
             elapsed: 0.0,
             last_run_time: -1.0,
             last_start_chance_time: 0.0,
             random_start: 1.0,
-            ignition_hold_seconds: 0.0,
-            last_ignition_held: false,
-            starter: false,
+            oil_penalty: 0.,
             supplied_fuel: 0.0,
             fan_on: false,
             last_output: EngineOutput::default(),
@@ -213,60 +195,20 @@ impl EngineState {
             return self.last_output;
         }
         self.elapsed += dt;
-        if !input.engine_present {
-            self.ignition = false;
-            self.starter = false;
-            self.rpm = 0.;
-            self.supplied_fuel = 0.;
-            self.last_run_time = -1.;
-            self.last_ignition_held = false;
-            self.ignition_hold_seconds = 0.;
-            self.temperature += temperature_change(
-                self.temperature,
-                0.,
-                reference.heat_loss,
-                input,
-                reference,
-                dt,
-            );
-            self.last_output = EngineOutput {
-                temperature: self.temperature,
-                ..EngineOutput::default()
-            };
-            return self.last_output;
-        }
-        if input.ignition_pressed {
-            self.ignition_hold_seconds = 0.0;
-        }
-        if input.ignition_held {
-            if self.ignition_hold_seconds < reference.starter_delay_seconds {
-                self.ignition_hold_seconds += dt;
-            } else {
-                self.ignition = true;
-                self.starter = reference.electronics_enabled;
-            }
-        } else if input.ignition_released || self.last_ignition_held {
-            if self.ignition_hold_seconds < reference.starter_delay_seconds {
-                self.ignition = !self.ignition;
-                self.ignition_hold_seconds = 0.0;
-                self.starter = false;
-            }
-        } else {
-            self.starter = false;
-            self.ignition_hold_seconds = 0.0;
-        }
-        self.last_ignition_held = input.ignition_held;
-
+        let installed = input.installed.unwrap_or_default();
         let required = FluidMixture {
             quantities_liters: reference.fuel_consumption,
         };
         let fuel_suitability = suitability(fluids.fuel, &required);
-        let oil_penalty = inverse_lerp(
-            fluids.sump.capacity_liters * 0.3,
-            0.0,
-            fluids.sump.mixture.amount(reference.oil_fluid as usize),
-        )
-        .powi(3);
+        if input.installed.is_some() {
+            self.oil_penalty = inverse_lerp(
+                fluids.sump.capacity_liters * 0.3,
+                0.0,
+                fluids.sump.mixture.amount(reference.oil_fluid as usize),
+            )
+            .powi(3);
+        }
+        let oil_penalty = self.oil_penalty;
         let bounds = reference.globals.car_temperature_bounds;
         self.temperature = self.temperature.clamp(bounds[0], bounds[1]);
         if reference.no_overheat {
@@ -283,10 +225,10 @@ impl EngineState {
             && heat_penalty < 0.99
             && fuel_suitability > 0.3
             && self.random_start <= reference.start_chance;
-        let ignition = self.ignition && reference.electronics_enabled;
+        let ignition = installed.ignition && reference.electronics_enabled;
         let min_supplied = inverse_lerp(0.0, reference.max_rpm, reference.idle_rpm);
         if ignition && can_run {
-            self.supplied_fuel = lerp(min_supplied, 1.0, input.throttle * fuel_suitability);
+            self.supplied_fuel = lerp(min_supplied, 1.0, installed.throttle * fuel_suitability);
             self.last_run_time = self.elapsed;
         } else if self.elapsed - self.last_run_time >= RUN_GRACE_SECONDS {
             self.supplied_fuel = 0.0;
@@ -310,14 +252,14 @@ impl EngineState {
         };
         self.supplied_fuel *= fuel_suitability;
         let target_rpm = reference.max_rpm * self.supplied_fuel;
-        let mut clutch = input.clutch.clamp(0.0, 1.0);
-        if input.free_run
+        let mut clutch = installed.clutch.clamp(0.0, 1.0);
+        if installed.free_run
             && (!reference.kickstart || running || !ignition)
-            && target_rpm < input.wheel_rpm
+            && target_rpm < installed.wheel_rpm
         {
             clutch = 0.0;
         }
-        if self.starter {
+        if installed.starter {
             if self.rpm < reference.starter_rpm {
                 self.rpm = lerp(
                     self.rpm,
@@ -333,7 +275,7 @@ impl EngineState {
                 self.random_start = random_sample.clamp(0.0, 1.0);
             }
         }
-        let next_rpm = lerp(target_rpm, input.wheel_rpm, clutch);
+        let next_rpm = lerp(target_rpm, installed.wheel_rpm, clutch);
         self.rpm += (next_rpm - self.rpm)
             .clamp(-reference.globals.rpm_change, reference.globals.rpm_change)
             * reference.rpm_change_modifier
@@ -345,7 +287,7 @@ impl EngineState {
         } else {
             0.0
         };
-        if self.starter && target_rpm <= reference.starter_rpm {
+        if installed.starter && target_rpm <= reference.starter_rpm {
             rpm_difference =
                 (self.rpm - reference.starter_rpm) * reference.starter_rpm_lerp * 100.0;
             actual_output =
@@ -370,13 +312,13 @@ impl EngineState {
         }
         self.temperature += temperature_change(
             self.temperature,
-            input.speed_kmh * reference.heat_loss_speed_modifier,
+            installed.speed_kmh * reference.heat_loss_speed_modifier,
             reference.heat_loss,
             input,
             reference,
             dt,
         );
-        if self.rpm > 10.0 {
+        if input.installed.is_some() && self.rpm > 10.0 {
             spill(
                 fluids.sump,
                 reference.globals.oil_consumption
@@ -386,7 +328,9 @@ impl EngineState {
                     * input.sleep_modifier,
             );
         }
-        if input.radiator_present && self.temperature > reference.globals.min_steam_temperature {
+        if installed.radiator_condition.is_some()
+            && self.temperature > reference.globals.min_steam_temperature
+        {
             spill(
                 fluids.coolant,
                 reference.globals.coolant_evaporate_rate / 60.0
@@ -399,13 +343,13 @@ impl EngineState {
                     ),
             );
         }
-        if running && input.radiator_present {
+        if running && let Some(condition) = installed.radiator_condition {
             let radiator = &reference.radiator;
-            let condition = usize::from(input.radiator_condition.min(4));
+            let condition = usize::from(condition.min(4));
             let value_factor = [1.0, 0.75, 0.5, 0.25, 0.125][condition];
             let fan_value = radiator.max_fan_value * [1.0, 0.9, 0.8, 0.7, 0.6][condition];
             let leak = radiator.max_fluid_loss * [0.0, 0.125, 0.25, 0.5, 1.0][condition];
-            let mut speed = input.speed_kmh;
+            let mut speed = installed.speed_kmh;
             if self.temperature > radiator.fan_temperature_on || radiator.fan_on_when_engine_runs {
                 self.fan_on = true;
                 speed = (speed + fan_value).clamp(fan_value, reference.globals.max_car_velocity);
@@ -441,8 +385,7 @@ impl EngineState {
             );
         }
         self.last_output = EngineOutput {
-            ignition: self.ignition,
-            starter: self.starter,
+            starter: installed.starter,
             running,
             rpm: self.rpm,
             target_rpm,

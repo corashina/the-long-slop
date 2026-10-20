@@ -196,12 +196,14 @@ impl SaveSnapshot {
                     e.last_start_chance_time,
                     e.random_start,
                     e.supplied_fuel,
+                    e.oil_penalty,
                 ]) && e.elapsed >= 0.
                     && e.last_run_time >= -1.
                     && e.last_run_time <= e.elapsed
                     && e.last_start_chance_time >= 0.
                     && e.last_start_chance_time <= e.elapsed
                     && unit(e.random_start)
+                    && unit(e.oil_penalty)
                     && e.supplied_fuel >= 0.,
                 "Engine state",
             )?;

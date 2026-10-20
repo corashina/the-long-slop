@@ -215,7 +215,7 @@ fn process_request(
             drive.skip_elapsed = true;
             drive.last_feedback = None;
             for (index, vehicle) in reference.vehicles.iter().enumerate() {
-                let sample = super::instrument_sample(&reference, &drive.runtime, index);
+                let sample = drive.runtime.instrument_sample(&reference, index);
                 drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
             }
             drop(drive);

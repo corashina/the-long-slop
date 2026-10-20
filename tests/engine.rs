@@ -207,3 +207,58 @@ fn fluid_save_order_and_validation() {
         .is_err()
     );
 }
+
+#[test]
+#[ignore = "requires the installed build 11140890 export"]
+fn ignition_save_ownership_and_cancellation() {
+    use my_summer_slop::simulation::ignition::IgnitionInput;
+    let (reference, stamp) = installed_source();
+    let mut game = GarageRuntime::new(&reference).unwrap();
+    let delay = reference.vehicles[0].engine.starter_delay_seconds;
+    let held = IgnitionInput {
+        held: true,
+        ..Default::default()
+    };
+    game.vehicles[0].ignition.step(held, delay, true, delay);
+    game.vehicles[0].ignition.step(held, delay, true, 0.02);
+    game.vehicles[0].engine_output.starter = true;
+    assert!(game.vehicles[0].ignition.starter);
+    let mechanics = game.vehicles[0].engine.capture_save();
+    let saved = game
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    assert!(saved.vehicles[0].ignition);
+    let json = serde_json::to_value(&saved).unwrap();
+    assert!(json["vehicles"][0]["engine"].get("ignition").is_none());
+    assert!(json["vehicles"][0].get("starter").is_none());
+    let loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(loaded.paused);
+    assert!(loaded.vehicles[0].ignition.ignition);
+    assert!(!loaded.vehicles[0].ignition.starter);
+    assert!(!loaded.vehicles[0].engine_output.starter);
+    assert_eq!(loaded.vehicles[0].engine.capture_save(), mechanics);
+    game.clear_input();
+    assert!(game.vehicles[0].ignition.ignition);
+    assert!(!game.vehicles[0].ignition.starter);
+    assert!(!game.vehicles[0].engine_output.starter);
+    assert_eq!(game.vehicles[0].engine.capture_save(), mechanics);
+    let mut obsolete = json.clone();
+    obsolete["vehicles"][0]["engine"]["ignition"] = true.into();
+    assert!(SaveSnapshot::from_json(&serde_json::to_vec(&obsolete).unwrap()).is_err());
+    let mut missing = json;
+    missing["vehicles"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("ignition");
+    assert!(SaveSnapshot::from_json(&serde_json::to_vec(&missing).unwrap()).is_err());
+    for penalty in [-0.01, 1.01, f32::NAN] {
+        let mut invalid = saved.clone();
+        invalid.vehicles[0].engine.oil_penalty = penalty;
+        assert!(invalid.validate(&reference, &stamp).is_err());
+    }
+}

@@ -9,7 +9,7 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
-use crate::simulation::instruments::{InstrumentSample, InstrumentState};
+use crate::simulation::instruments::InstrumentState;
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -948,33 +948,6 @@ pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<
     };
     drive.runtime.advance_tools(&reference.0, frame);
 }
-fn instrument_sample(
-    reference: &ReferenceManifest,
-    run: &GarageRuntime,
-    index: usize,
-) -> InstrumentSample {
-    let amount = |id: ItemId| {
-        run.area
-            .items
-            .get(id)
-            .and_then(|i| i.fluid.as_ref())
-            .map_or(0., |f| f.mixture.total())
-    };
-    let vehicle = &reference.vehicles[index];
-    let state = &run.vehicles[index];
-    let r = &vehicle.instruments;
-    InstrumentSample {
-        speed_kmh: run.physics.snapshot(index).speed_mps * 3.6,
-        fuel_liters: amount(vehicle.engine.fuel_tank),
-        oil_liters: amount(vehicle.engine.oil_tank),
-        temperature: state.engine_output.temperature,
-        rpm: state.engine_output.rpm,
-        headlights: run.lighting.headlights(index),
-        local_ignition: state.engine_output.ignition
-            && r.electronics_output > r.electronics_off_threshold,
-        distance_m: state.trip_m,
-    }
-}
 fn sync_instruments(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
@@ -986,7 +959,7 @@ fn sync_instruments(
     let run = &drive.runtime;
     for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
         let r = &vehicle.instruments;
-        let sample = instrument_sample(&reference.0, run, index);
+        let sample = run.instrument_sample(&reference.0, index);
         if run.started && !run.paused {
             drive.instruments[index].update(r, sample, drive.render_delta_seconds);
         }
@@ -1197,14 +1170,23 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     } else {
         ""
     };
+    let rpm = if runtime
+        .area
+        .items
+        .mounted(reference.0.vehicles[runtime.vehicle].engine.item)
+    {
+        current.engine_output.rpm
+    } else {
+        0.
+    };
     let stamp = FeedbackStamp {
         condition: condition.to_bits(),
         held,
         throw_charge: runtime.area.interaction.throw_charge().to_bits(),
         throw_active: runtime.area.interaction.throw_active(),
-        rpm: current.engine_output.rpm.to_bits(),
+        rpm: rpm.to_bits(),
         engine_flags: [
-            current.engine_output.ignition,
+            current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
             runtime.area.player.seat().is_some(),
@@ -1255,8 +1237,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
                 .unwrap_or(""),
             runtime.area.interaction.throw_charge(),
             runtime.area.interaction.throw_active(),
-            current.engine_output.rpm,
-            current.engine_output.ignition,
+            rpm,
+            current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
             runtime.area.player.seat().is_some(),

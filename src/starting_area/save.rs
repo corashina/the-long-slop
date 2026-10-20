@@ -499,6 +499,8 @@ impl GarageRuntime {
                 .iter()
                 .find(|v| v.instance == ids.vehicles[index])
                 .expect("validated vehicle");
+            vehicle.ignition.ignition = record.ignition;
+            vehicle.ignition.clear_input();
             vehicle.engine_output = vehicle.engine.restore_save(&record.engine);
             vehicle.drivetrain.restore_gear(record.gear);
             vehicle.handbrake = record.handbrake;
@@ -526,7 +528,7 @@ impl GarageRuntime {
                     SaveError::ReconstructionFailure("Missing vehicle electronics".into())
                 })?;
             signals.push(crate::lighting::VehicleLightSample {
-                local_ignition: vehicle.engine_output.ignition
+                local_ignition: vehicle.ignition.ignition
                     && (electronics.electronics_source.is_none()
                         || electronics.electronics_output > electronics.electronics_threshold),
                 brake: 0.,
@@ -667,6 +669,7 @@ impl GarageRuntime {
                             origin,
                         ),
                         engine: vehicle.engine.capture_save(),
+                        ignition: vehicle.ignition.ignition,
                         gear: vehicle.drivetrain.gear(),
                         handbrake: vehicle.handbrake,
                         trip_m: vehicle.trip_m,

@@ -135,6 +135,7 @@ pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
     pub engine: EngineSnapshot,
+    pub ignition: bool,
     pub gear: usize,
     pub handbrake: bool,
     pub trip_m: f64,
@@ -143,7 +144,6 @@ pub struct VehicleSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineSnapshot {
-    pub ignition: bool,
     pub rpm: f32,
     pub temperature: f32,
     pub elapsed: f32,
@@ -152,6 +152,7 @@ pub struct EngineSnapshot {
     pub random_start: f32,
     pub supplied_fuel: f32,
     pub fan_on: bool,
+    pub oil_penalty: f32,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
