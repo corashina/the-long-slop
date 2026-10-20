@@ -19,6 +19,7 @@ def gate_fixture(index=0):
                 source_profile=deepcopy(profile),copied_profile=deepcopy(profile),source_body=dict(body,instance_id=1),copied_constructor_body=body,copied_held_body=body,
                 source_transform=deepcopy(transform),copied_transform=dict(deepcopy(transform),position=deepcopy(spec['rig']['offset_m'])),source_sprung_mass=200.,copied_sprung_mass=100.,assignments=[dict(event_revision=i+1,**e) for i,e in enumerate(spec['events'])])
     report['body_input']={k:deepcopy(body[k]) for k in ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')}
+    report['body_input_from_source']=True
     report['wheel_input']=dict(position=deepcopy(spec['rig']['offset_m']),rotation=deepcopy(q),local_scale=dict(x=1.,y=1.,z=1.))
     report['initial_state']=dict(profile,body=deepcopy(body),wheel_id=50,enabled=True,event_revision=0,assignment_step=0,phase='before-first-assignment')
     samples=[];previous=0.
@@ -34,7 +35,7 @@ def gate_fixture(index=0):
                 samples[-1]['angular_state']['body']['inertia_tensor']=deepcopy(z)
         previous=rpm
     phases=('prepared-held','backlog-drained-held','before-dynamic','switched-dynamic','canonical-applied','canonical-transforms-synchronized','native-wheels-enabled','armed-after-canonical')
-    return row,dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,initial=dict(fixed_dt=.02))
+    return row,dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,setup_state=dict(angular_body_input=deepcopy(report['body_input'])),initial=dict(fixed_dt=.02,angular_body_input=deepcopy(report['body_input'])))
 
 
 class AngularTests(unittest.TestCase):
@@ -234,7 +235,7 @@ public static class AngularChecks {
   var input=new G11AngularProbe.Input{source_wheel="level1:58684",support="full-tire",duration_steps=5,
    rig=new G11AngularProbe.Rig{constraints=116,velocity_mps=new UnityEngine.Vector3{x=10}},
    events=new[]{new G11AngularProbe.Event{step=1,phase="positive",motor_nm=60},new G11AngularProbe.Event{step=3,phase="coast",motor_nm=0,brake_nm=0}}};
-  var wheel=G11AngularProbe.Configure(input,source,original,new UnityEngine.GameObject("rig"),held);
+  var wheel=G11AngularProbe.Configure(input,source,original,new UnityEngine.GameObject("rig"),held,false,null);
   Need(held.isKinematic && held.writes==0,"hold changed or setup velocity correction");
   Need(wheel.radius==source.radius && wheel.mass==source.mass && wheel.wheelDampingRate==source.wheelDampingRate,"profile copy");
   Need(G11AngularProbe.report.source_sprung_mass==123 && G11AngularProbe.report.copied_sprung_mass==123,"separate sprung mass");
@@ -291,7 +292,7 @@ public static class CaptureArmingChecks {
  public static void Run(){
   var original=new UnityEngine.Rigidbody{id=1};var source=new UnityEngine.WheelCollider();source.enabled=false;
   var input=new G11AngularProbe.Input{source_wheel="level1:58684",rig=new G11AngularProbe.Rig{velocity_mps=new UnityEngine.Vector3{x=10},angular_velocity_rad_s=new UnityEngine.Vector3{z=2}},events=new G11AngularProbe.Event[0]};
-  var copied=G11AngularProbe.Configure(input,source,original,new UnityEngine.GameObject("rig"),body);
+  var copied=G11AngularProbe.Configure(input,source,original,new UnityEngine.GameObject("rig"),body,false,null);
   wheels=new[]{copied};UnityEngine.WheelCollider.activationBody=body;body.isKinematic=false;
   ApplyCanonical();ACTIVATION_STATEMENTS
   Need(G11AngularProbe.report.initial_state.body.velocity.x==10,"declared velocity lost across observed activation boundary");

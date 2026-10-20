@@ -155,7 +155,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -312,7 +312,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -469,7 +469,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -626,7 +626,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -783,7 +783,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -940,7 +940,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -1097,7 +1097,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -1254,7 +1254,7 @@
           "constraints": 116
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -1369,7 +1369,7 @@
           "constraints": 0
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     },
     {
@@ -1526,7 +1526,7 @@
           "constraints": 0
         },
         "provenance": "declared copied-rig input; native source profile copied without a response equation",
-        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+        "body_properties": "first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults"
       }
     }
   ]

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
-from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs
+from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
@@ -281,10 +281,14 @@ def verify(output_root: Path) -> dict:
     results = []
     for scenario in request['scenarios']:
         initial = None
+        canonical_body_input = None
         for repeat in range(1, 4):
             directory = output / scenario['id'] / f'repeat-{repeat}'
             path = directory / 'runtime.json'
             run = read_json(path)
+            if scenario['probe_kind']=='wheel_angular':
+                validate_angular_body_input(run, canonical_body_input, repeat==1)
+                if repeat==1: canonical_body_input = run['setup_state']['angular_body_input']
             result = validate_evidence(output, directory, run, scenario)
             state = {key: value for key, value in run['initial'].items()
                      if key != 'profile_path'}
@@ -364,6 +368,8 @@ def capture(source_root: Path, reference_root: Path,
             invoke(['-Mode', 'Run', '-RunRoot', str(directory), '-ProfileRoot', str(directory / 'profile')],
                    directory / 'launcher.log', 200)
             native_run = read_json(directory / 'runtime.json')
+            if row['probe_kind']=='wheel_angular':
+                validate_angular_body_input(native_run, None if setup_state is None else setup_state.get('angular_body_input'), repeat==1)
             validate_evidence(output, directory, native_run, row)
             state = {key: value for key, value in native_run['initial'].items()
                      if key != 'profile_path'}

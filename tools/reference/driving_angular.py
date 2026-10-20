@@ -40,7 +40,7 @@ def angular_rows():
         if purpose=='baseline': schedule=[dict(step=1,phase='baseline',motor_nm=0.,brake_nm=0.)]
         row['angular']=dict(support=support,purpose=purpose,source_wheel='level1:58655' if support=='auxiliary-helper' else 'level1:58684',
                             duration_steps=480,schedule_unit='native physics step from 1; assign before consuming solve',events=deepcopy(schedule),rig=dict(deepcopy(RIG),constraints=0 if support=='auxiliary-helper' else 116),
-                            provenance=PROVENANCE,body_properties='copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults')
+                            provenance=PROVENANCE,body_properties='first source records mass, centerOfMass, inertiaTensor, inertiaTensorRotation setter inputs in canonical Initial; later repeats reuse those exact inputs; live source and copied readbacks stay separate; Configure alone assigns copied properties; rig overrides explicit; remaining body settings retain measured constructor defaults')
         row['required_observations']=['one enabled contact-free native wheel','exact consuming physics solves','active signed spin and coast' if purpose!='baseline' else 'free-body baseline']
         row['frame_schedule']['sampling']='fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged'
         rows.append(row)
@@ -74,6 +74,30 @@ def angular_initial_inputs(run):
     return dict(initial_state=initial,source_profile=report['source_profile'],copied_profile=report['copied_profile'],
                 source_transform=report['source_transform'],copied_transform=report['copied_transform'],
                 body_input=report['body_input'],wheel_input=report['wheel_input'])
+
+
+BODY_INPUT_FIELDS = ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')
+
+
+def validate_angular_body_input(run,canonical,from_source):
+    """Bind exact setter arguments to first-source input or supplied canonical input."""
+    report=run.get('angular',{})
+    body_input=report.get('body_input')
+    if (type(report.get('body_input_from_source')) is not bool or
+        report['body_input_from_source'] is not from_source or
+        not isinstance(body_input,dict) or set(body_input)!=set(BODY_INPUT_FIELDS)):
+        raise ValueError('Angular body input or origin is missing or differs')
+    source=report.get('source_body',{})
+    if from_source:
+        if canonical is not None or not set(BODY_INPUT_FIELDS)<=source.keys():
+            raise ValueError('Angular first-source body input provenance differs')
+        expected={key:source[key] for key in BODY_INPUT_FIELDS}
+    else:
+        if canonical is None:
+            raise ValueError('Angular reused canonical body input is missing')
+        expected=canonical
+    if body_input!=expected or any(run.get(name,{}).get('angular_body_input')!=expected for name in ('setup_state','initial')):
+        raise ValueError('Angular canonical body input differs from exact setter arguments')
 
 
 def validate_source_ownership(native,expected,original_id,original_key):
@@ -157,7 +181,9 @@ def validate_angular(run,scenario):
     constructor=report.get('copied_constructor_body',{})
     held=report.get('copied_held_body',{})
     body_input=report.get('body_input',{})
-    if not constructor or not held or body_input!={k:source_body[k] for k in ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')} or any(held.get(k)!=body_input[k] for k in ('mass','center_of_mass','inertia_tensor')):
+    from_source=report.get('body_input_from_source')
+    validate_angular_body_input(run,None if from_source else run.get('setup_state',{}).get('angular_body_input'),from_source)
+    if not constructor or not held or any(held.get(k)!=body_input[k] for k in ('mass','center_of_mass','inertia_tensor')):
         raise ValueError('Copied body source-property provenance differs')
     for name in ('source_transform','copied_transform'):
         if not {'position','rotation','local_position','local_rotation','local_scale','lossy_scale'}<=report.get(name,{}).keys():
@@ -171,6 +197,9 @@ def validate_angular(run,scenario):
     initial_state=report.get('initial_state',{})
     initial_body=initial_state.get('body',{})
     rig=spec['rig']
+    setup_fields=('mass','center_of_mass','inertia_tensor_rotation','solver_iterations','solver_velocity_iterations','max_angular_velocity','detect_collisions','interpolation','collision_detection_mode')
+    if any(initial_body.get(k)!=held.get(k) for k in setup_fields):
+        raise ValueError('Angular copied body setup changed')
     validate_angular_inertia(held,body_input['inertia_tensor'],rig['constraints'])
     validate_angular_inertia(initial_body,body_input['inertia_tensor'],rig['constraints'])
     if (not body_fields<=initial_body.keys() or initial_state.get('wheel_id')!=report['copied_wheel_id'] or not initial_state.get('enabled') or
@@ -206,7 +235,7 @@ def validate_angular(run,scenario):
             if observation.get('sprung_mass_available') is not True or type(observation.get('sprung_mass')) not in (float,int):
                 raise ValueError('Angular native sprung mass is missing')
             validate_angular_inertia(body,body_input['inertia_tensor'],rig['constraints'],step,sample['phase'])
-            if any(body[k]!=held[k] for k in ('mass','center_of_mass','inertia_tensor_rotation','solver_iterations','solver_velocity_iterations','max_angular_velocity','detect_collisions','interpolation','collision_detection_mode')):
+            if any(body[k]!=held[k] for k in setup_fields):
                 raise ValueError('Angular copied body setup changed')
             rig=spec['rig']
             if any(body[k]!=v for k,v in [('constraints',rig['constraints']),('use_gravity',rig['use_gravity']),('drag',rig['drag']),('angular_drag',rig['angular_drag']),('sleep_threshold',rig['sleep_threshold'])]):

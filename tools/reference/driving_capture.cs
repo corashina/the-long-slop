@@ -148,6 +148,7 @@ public sealed class G11Capture : MonoBehaviour
         public PoseInput input_pose, spawn_pose;
         public G11Driver.Input driver_input;
         public G11Cargo.Input cargo_input;
+        public G11AngularProbe.BodyInput angular_body_input;
         public WheelParameters[] wheels;
         public WheelParameters[] source_control_wheels;
     }
@@ -396,7 +397,7 @@ public sealed class G11Capture : MonoBehaviour
             if(scenario.has_setup_state) inputPose=scenario.setup_state.input_pose;
             else
             {
-                body.mass*=scenario.setup.load_multiplier;
+                if(!G11AngularProbe.Active) body.mass*=scenario.setup.load_multiplier;
                 if(scenario.setup.surface=="nearby-source-slope") PlaceOnSourceSlope();
                 if(scenario.setup.height=="one-source-suspension-drop") body.position+=Vector3.up*wheels[0].suspensionDistance;
                 if(scenario.setup.height=="wheels-clear") body.position+=Vector3.up*(wheels[0].radius*4+wheels[0].suspensionDistance);
@@ -603,8 +604,10 @@ public sealed class G11Capture : MonoBehaviour
     }
     static void ApplyCanonical(Initial initial)
     {
-        body.mass=initial.mass;
-        body.centerOfMass=initial.center_of_mass;
+        if(!G11AngularProbe.Active) {
+            body.mass=initial.mass;
+            body.centerOfMass=initial.center_of_mass;
+        }
         car.Engine.rpm=initial.engine_rpm; car.Engine.temp=initial.engine_temperature;
         car.ignition=initial.ignition; car.Engine.running=initial.running; car.BhandBrake=initial.stored_handbrake;
         car.ShiftTo(initial.selected_gear,true);
@@ -653,7 +656,7 @@ public sealed class G11Capture : MonoBehaviour
         return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
-            setup_json=JsonUtility.ToJson(scenario.setup), cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            setup_json=JsonUtility.ToJson(scenario.setup), angular_body_input=G11AngularProbe.Active?G11AngularProbe.report.body_input:null, cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
             inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,
@@ -709,7 +712,7 @@ public sealed class G11Capture : MonoBehaviour
         var probe=new GameObject("G11AirborneAngularProbe");
         probe.transform.position=original.position+scenario.angular.rig.offset_m;probe.transform.rotation=original.rotation;
         var copied=CreateHeldProbeBody(probe);
-        wheels=new[]{G11AngularProbe.Configure(scenario.angular,source,original,probe,copied)};
+        wheels=new[]{G11AngularProbe.Configure(scenario.angular,source,original,probe,copied,scenario.has_setup_state,scenario.has_setup_state?scenario.setup_state.angular_body_input:null)};
         G11Geometry.IsolateSourceCar();body=copied;result.isolated_wheel_probe=true;result.angular=G11AngularProbe.report;
         result.setup_changes.Add("One copied native wheel; no copied ground or body collider; fixed-step torque inputs; original held by reviewed owner");
     }

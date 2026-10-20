@@ -51,7 +51,7 @@ public static class G11AngularProbe
         public Profile source_profile,copied_profile;public Body source_body,copied_constructor_body,copied_held_body;
         public float source_sprung_mass,copied_sprung_mass;
         public TransformState source_transform,copied_transform;
-        public BodyInput body_input;public TransformInput wheel_input;
+        public BodyInput body_input;public bool body_input_from_source;public TransformInput wheel_input;
         public Assignment[] assignments;
         public State initial_state;
     }
@@ -82,12 +82,14 @@ public static class G11AngularProbe
             max_angular_velocity=value.maxAngularVelocity,detect_collisions=value.detectCollisions,kinematic=value.isKinematic,
             interpolation=(int)value.interpolation,collision_detection_mode=(int)value.collisionDetectionMode};
     }
-    public static WheelCollider Configure(Input declared,WheelCollider source,Rigidbody original,GameObject probe,Rigidbody held) {
+    public static WheelCollider Configure(Input declared,WheelCollider source,Rigidbody original,GameObject probe,Rigidbody held,bool hasCanonical,BodyInput canonical) {
         if(input!=null || !held.isKinematic || !original.isKinematic || G11Geometry.Key(source)!=declared.source_wheel)
             throw new InvalidOperationException("Angular source/copy hold or identity differs");
-        input=declared;body=held;var constructorBody=ReadBody(body);
-        var bodyInput=new BodyInput{mass=original.mass,center_of_mass=original.centerOfMass,
-            inertia_tensor=original.inertiaTensor,inertia_tensor_rotation=original.inertiaTensorRotation};
+        if(hasCanonical != (canonical!=null))
+            throw new InvalidOperationException("Angular canonical body input is missing or unexpected");
+        input=declared;body=held;var constructorBody=ReadBody(body);var sourceBody=ReadBody(original);
+        var bodyInput=hasCanonical?canonical:new BodyInput{mass=sourceBody.mass,center_of_mass=sourceBody.center_of_mass,
+            inertia_tensor=sourceBody.inertia_tensor,inertia_tensor_rotation=sourceBody.inertia_tensor_rotation};
         body.mass=bodyInput.mass;body.centerOfMass=bodyInput.center_of_mass;
         body.inertiaTensor=bodyInput.inertia_tensor;body.inertiaTensorRotation=bodyInput.inertia_tensor_rotation;
         body.constraints=(RigidbodyConstraints)input.rig.constraints;body.useGravity=input.rig.use_gravity;
@@ -104,9 +106,9 @@ public static class G11AngularProbe
         wheel.motorTorque=0;wheel.brakeTorque=0;wheel.steerAngle=0;
         report=new Report{declared=input,source_key=G11Geometry.Key(source),support=input.support,
             source_wheel_id=source.GetInstanceID(),copied_wheel_id=wheel.GetInstanceID(),original_body_id=original.GetInstanceID(),copied_body_id=body.GetInstanceID(),
-            source_profile=new Profile(),copied_profile=new Profile(),source_body=ReadBody(original),copied_constructor_body=constructorBody,copied_held_body=ReadBody(body),
+            source_profile=new Profile(),copied_profile=new Profile(),source_body=sourceBody,copied_constructor_body=constructorBody,copied_held_body=ReadBody(body),
             source_sprung_mass=source.sprungMass,copied_sprung_mass=wheel.sprungMass,
-            source_transform=new TransformState(source.transform),copied_transform=new TransformState(wheel.transform),body_input=bodyInput,wheel_input=wheelInput,assignments=new Assignment[input.events.Length]};
+            source_transform=new TransformState(source.transform),copied_transform=new TransformState(wheel.transform),body_input=bodyInput,body_input_from_source=!hasCanonical,wheel_input=wheelInput,assignments=new Assignment[input.events.Length]};
         ReadProfile(source,report.source_profile);ReadProfile(wheel,report.copied_profile);
         for(int i=0;i<report.assignments.Length;i++) report.assignments[i]=new Assignment();
         return wheel;
