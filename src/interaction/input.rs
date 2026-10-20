@@ -77,6 +77,7 @@ impl InteractionState {
             push_input: input,
             look_mouse: input.mouse,
         };
+        remove(&mut resolved.carry_input, keys::RECENTER);
         let primary_use = available.lmb_use && self.held_light_control().is_none();
         let use_held =
             input.held & keys::USE != 0 || (primary_use && input.held & keys::PRIMARY != 0);

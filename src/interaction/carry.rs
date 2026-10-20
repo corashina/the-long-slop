@@ -342,6 +342,7 @@ impl CarryState {
     pub fn step(
         &mut self,
         input: FrameInput,
+        recenter: bool,
         player: &PlayerState,
         physics: &mut PhysicsWorld,
         dt: f32,
@@ -371,7 +372,7 @@ impl CarryState {
         let rotation_gain = ((mass - self.reference.carry_max_weight * 2.0)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight * 2.0))
             .clamp(0.0, 1.0);
-        if (input.held | input.pressed) & keys::RECENTER != 0 {
+        if recenter {
             held.offset = if rule.use_recenter_position {
                 Vector::from_array(rule.recenter_position)
             } else {
@@ -688,6 +689,7 @@ mod tests {
                 mouse: [1., 1.],
                 ..Default::default()
             },
+            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,
@@ -707,6 +709,7 @@ mod tests {
         assert_eq!(restored.capture_save(&ids).unwrap(), Some(saved));
         restored.step(
             FrameInput::default(),
+            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,
@@ -730,6 +733,7 @@ mod tests {
         );
         restored.step(
             FrameInput::default(),
+            false,
             &run.area.player,
             &mut run.physics,
             FIXED_DT,

@@ -1718,3 +1718,296 @@ fn carry_body_follows_solver_pose_and_collision() {
     }
     assert!(run.physics.rapier().bodies[body].is_ccd_enabled());
 }
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn tab_recenter_has_one_owner() {
+    use my_summer_slop::{interaction::items::ItemLocation, reference::ItemId, save::IdentityMap};
+
+    fn frame(
+        run: &mut GarageRuntime,
+        held: u32,
+        pressed: u32,
+        released: u32,
+        dt: f32,
+    ) -> InteractionOutcome {
+        let out = run.area.interaction.step(
+            FrameInput {
+                held,
+                pressed,
+                released,
+                mouse: [0.2, 0.1],
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+            &mut run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+            dt,
+            run.survival.output(),
+            1.,
+        );
+        run.area.sync_inventory();
+        out
+    }
+    fn offset(run: &GarageRuntime, ids: &IdentityMap) -> [f32; 3] {
+        run.area
+            .interaction
+            .capture_carry_save(ids)
+            .unwrap()
+            .unwrap()
+            .offset
+    }
+    fn light(run: &mut GarageRuntime, id: ItemId) {
+        if run.area.interaction.storage.stored(id) {
+            let point = run.area.items.get(id).unwrap().pose.position;
+            run.area
+                .interaction
+                .pickup_stored_item(
+                    id,
+                    point,
+                    &run.area.player,
+                    &mut run.area.items,
+                    &mut run.physics,
+                )
+                .unwrap();
+            step_input(run, FrameInput::default(), ResolvedAim::default());
+        } else {
+            place_for_carry(run, id);
+            let point = run.area.items.get(id).unwrap().pose.position;
+            run.area
+                .interaction
+                .pickup_item(
+                    id,
+                    point,
+                    &run.area.player,
+                    &mut run.area.items,
+                    &mut run.physics,
+                )
+                .unwrap();
+        }
+        run.area.sync_inventory();
+    }
+    fn equip(run: &mut GarageRuntime, id: ItemId) {
+        light(run, id);
+        frame(run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+        frame(run, 0, 0, keys::RECENTER, 0.125);
+        assert_eq!(run.area.interaction.equipment.item(), Some(id));
+        assert_eq!(run.area.interaction.held(), None);
+    }
+
+    let (reference, mut run) = source_scene();
+    assert_eq!(reference.inventory.equip_hold_seconds, 0.25);
+    let ids = IdentityMap::new(&reference).unwrap();
+    let lamp = ItemId(127);
+    let oil = ItemId(120);
+    assert_eq!(
+        run.area
+            .interaction
+            .pickup_rule(lamp)
+            .unwrap()
+            .recenter_distance,
+        -0.5
+    );
+    assert_eq!(
+        run.area
+            .interaction
+            .pickup_rule(oil)
+            .unwrap()
+            .recenter_distance,
+        0.
+    );
+    light(&mut run, lamp);
+    let body = run.area.items.get(lamp).unwrap().body.unwrap();
+    let authored = run.physics.authored_body_mass(body);
+    let slots_before = run.area.inventory.slots;
+    let before = offset(&run, &ids);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    assert_eq!(
+        offset(&run, &ids),
+        before,
+        "short Tab must not recenter on press"
+    );
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(run.area.interaction.equipment.item(), Some(lamp));
+    assert_eq!(run.area.interaction.held(), None);
+    assert_eq!(
+        run.area.items.get(lamp).unwrap().location,
+        ItemLocation::Equipped
+    );
+    assert_eq!(run.area.inventory.slots, slots_before);
+    near_mass(run.physics.rapier().bodies[body].mass(), authored);
+    assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 1.);
+    assert!(run.physics.rapier().bodies[body].is_kinematic());
+    assert!(
+        run.physics
+            .rapier()
+            .impulse_joints
+            .iter()
+            .all(|(_, j)| j.body2() != body)
+    );
+    // Tab-down releases equipment, but its release cannot equip it again.
+    let outcome = frame(
+        &mut run,
+        keys::RECENTER | keys::ROTATE,
+        keys::RECENTER,
+        0,
+        0.125,
+    );
+    assert_eq!(
+        outcome.look_mouse, [0.; 2],
+        "resolve input after hand transfer"
+    );
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    near_mass(run.physics.rapier().bodies[body].mass(), 1.);
+    assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 0.);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    assert_eq!(run.area.inventory.slots, slots_before);
+
+    // Both comparisons are strict at the source threshold.
+    let before = offset(&run, &ids);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(&mut run, keys::RECENTER, 0, 0, 0.25);
+    assert_eq!(offset(&run, &ids), before);
+    frame(&mut run, keys::RECENTER, 0, 0, 0.001);
+    let centered = (Vector::from_array(reference.player.carry_anchor_offset) * -0.5).to_array();
+    assert_eq!(offset(&run, &ids), centered);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.25);
+    assert_eq!(run.area.interaction.equipment.item(), None);
+
+    // Reset discards the timer and blocks held input until release.
+    step_input(
+        &mut run,
+        FrameInput {
+            wheel: 1.,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let cancelled_offset = offset(&run, &ids);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    run.area.interaction.cancel_input();
+    frame(&mut run, keys::RECENTER, 0, 0, 0.5);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    assert_eq!(offset(&run, &ids), cancelled_offset);
+    // A new carried identity cannot finish the previous gesture.
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    run.area
+        .interaction
+        .drop_held(&mut run.area.items, &mut run.physics);
+    run.area.player.rebase([0., -50., 0.]);
+    place_for_carry(&mut run, oil);
+    let point = run.area.items.get(oil).unwrap().pose.position;
+    run.area
+        .interaction
+        .pickup_item(
+            oil,
+            point,
+            &run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+        )
+        .unwrap();
+    let before = offset(&run, &ids);
+    frame(&mut run, keys::RECENTER, 0, 0, 0.5);
+    assert_eq!(
+        offset(&run, &ids),
+        before,
+        "item change suppresses stale recenter"
+    );
+    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    assert_eq!(offset(&run, &ids), [0.; 3], "OilCan recenters immediately");
+    let anchor = anchor_handle(&run, oil);
+    let saved = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    near_rotation(
+        run.physics.rapier().bodies[anchor].next_position().rotation,
+        Rotation::from_array(run.area.player.view_pose(&run.physics).rotation)
+            * Rotation::from_array(saved.local_grip.rotation).inverse(),
+    );
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(run.area.interaction.held(), Some(oil));
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    run.area
+        .interaction
+        .drop_held(&mut run.area.items, &mut run.physics);
+    light(&mut run, lamp);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(
+        run.area.interaction.equipment.item(),
+        None,
+        "item change suppresses delayed equip"
+    );
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    run.area
+        .interaction
+        .drop_held(&mut run.area.items, &mut run.physics);
+    near_mass(run.physics.rapier().bodies[body].mass(), authored);
+    assert_eq!(run.physics.rapier().bodies[body].gravity_scale(), 1.);
+
+    let (_, mut run) = source_scene();
+    equip(&mut run, ItemId(126));
+    light(&mut run, lamp);
+    let slots_before = run.area.inventory.slots;
+    let before = offset(&run, &ids);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(offset(&run, &ids), before);
+    assert_eq!(run.area.interaction.equipment.item(), Some(ItemId(126)));
+    assert_eq!(run.area.interaction.held(), Some(ItemId(127)));
+    assert_eq!(run.area.inventory.slots, slots_before);
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(&mut run, keys::RECENTER, 0, 0, 0.251);
+    assert_eq!(offset(&run, &ids), centered);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.01);
+    assert_eq!(run.area.interaction.equipment.item(), Some(ItemId(126)));
+    assert_eq!(run.area.interaction.held(), Some(ItemId(127)));
+    assert_eq!(run.area.inventory.slots, slots_before);
+
+    let (_, mut run) = source_scene();
+    equip(&mut run, lamp);
+    let slots_before = run.area.inventory.slots;
+    let seat = &reference.seats[0];
+    assert!(run.area.player.enter(
+        seat.id,
+        VehiclePose {
+            position: [0., 10., 0.],
+            rotation: [0., 0., 0., 1.],
+        },
+        &mut run.physics
+    ));
+    frame(&mut run, keys::RECENTER, keys::RECENTER, 0, 0.125);
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(run.area.interaction.equipment.item(), Some(lamp));
+    assert_eq!(run.area.interaction.held(), None);
+    run.area.sync_equipment(&reference, &mut run.physics);
+    // Held MMB transfers equipment even while seated and claims look input.
+    let out = frame(&mut run, keys::ROTATE, 0, 0, 0.125);
+    assert_eq!(out.look_mouse, [0.; 2]);
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    assert_eq!(run.area.interaction.held(), Some(lamp));
+    assert_eq!(run.area.inventory.slots, slots_before);
+    assert_eq!(
+        run.physics
+            .rapier()
+            .impulse_joints
+            .iter()
+            .filter(|(_, j)| j.body2() == run.area.items.get(lamp).unwrap().body.unwrap())
+            .count(),
+        1
+    );
+    frame(&mut run, 0, 0, keys::RECENTER, 0.125);
+    assert_eq!(run.area.interaction.equipment.item(), None);
+}

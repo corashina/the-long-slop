@@ -5,6 +5,7 @@ pub mod consumption;
 pub mod equipment;
 pub mod feedback;
 pub mod fluid_contact;
+mod hand_controls;
 mod input;
 pub use input::InteractionOutcome;
 pub mod items;
@@ -161,6 +162,7 @@ pub struct InteractionState {
     cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
     seat_action_latched: bool,
     cancelled_input: u32,
+    hand_controls: hand_controls::HandControls,
     usable_light_controls: HashSet<LightControlId>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
@@ -497,6 +499,7 @@ impl InteractionState {
             cabin_doors,
             seat_action_latched: false,
             cancelled_input: 0,
+            hand_controls: hand_controls::HandControls::new(reference.inventory.equip_hold_seconds),
             next_generated_light: reference
                 .lighting
                 .controllers
@@ -652,6 +655,7 @@ impl InteractionState {
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.storage.unlock(item, items, physics)?;
         self.carry.pickup(item, point, player, items, physics)?;
+        self.hand_controls.owner_changed();
         Ok(item)
     }
     pub fn allocate_generated_light(&mut self) -> Result<LightControlId, ReferenceError> {
@@ -1139,6 +1143,7 @@ impl InteractionState {
         self.fill_opening = None;
         self.f_gesture_consumed = false;
         self.carry.cancel_input();
+        self.hand_controls.cancel();
         self.push.cancel_input();
         self.latched_mechanism = None;
         self.use_consumed = false;
@@ -1154,6 +1159,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Option<ItemId> {
         let item = self.carry.drop(items, physics)?;
+        self.hand_controls.owner_changed();
         self.cleaning.reset_contact();
         self.storage.mark_dropped(item);
         Some(item)
@@ -1166,7 +1172,9 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        self.carry.pickup(item, point, player, items, physics)
+        self.carry.pickup(item, point, player, items, physics)?;
+        self.hand_controls.owner_changed();
+        Ok(())
     }
 
     pub fn fluid_particles(
@@ -1225,6 +1233,7 @@ impl InteractionState {
         self.mechanisms.begin_audio_step();
         let mut cap_sounds = [None; 2];
         self.pending_drink_contacts.clear();
+        let recenter = self.step_hand_controls(input, player, items, physics, dt);
         let acquisition_release = self.carry.acquisition_held();
         let reach = self.reach;
         let valid = |target: AimTarget| {
@@ -1312,6 +1321,7 @@ impl InteractionState {
                 match slot {
                     SlotTarget::Wheel(slot) => {
                         self.carry.cancel_input();
+                        self.hand_controls.cancel();
                         action = Some(InteractionAction::Wheel(WheelAction::Install {
                             item: held,
                             target: slot,
@@ -1319,6 +1329,7 @@ impl InteractionState {
                     }
                     SlotTarget::Tire(rim) => {
                         self.carry.cancel_input();
+                        self.hand_controls.cancel();
                         action = Some(InteractionAction::Wheel(WheelAction::Join {
                             rim,
                             tire: held,
@@ -1568,7 +1579,7 @@ impl InteractionState {
                 }
             }
         }
-        if self.carry.step(carry_input, player, physics, dt)
+        if self.carry.step(carry_input, recenter, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
         {
             self.complete_carry_release(&mut action, InteractionAction::Drop(item));
@@ -1796,6 +1807,7 @@ impl InteractionState {
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.attachments.remove(item, items, physics)?;
         self.carry.pickup(item, point, player, items, physics)?;
+        self.hand_controls.owner_changed();
         self.parts.sync(items, physics)?;
         Ok(())
     }
