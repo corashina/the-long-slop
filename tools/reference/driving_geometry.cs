@@ -253,6 +253,18 @@ public static class G11Geometry
     public static void NativeOwnershipCheckpoint(string phase,int step)
     {
         if(!nativeRolesBound) return;
+        var live=car.GetComponentsInChildren<WheelCollider>(true);
+        if(live.Length!=nativeIdentities.Count || live.Distinct().Count()!=nativeIdentities.Count)
+            throw new InvalidOperationException("Native ownership predicate=checkpoint-live-cohort-count expected="+
+                nativeIdentities.Count+" actual="+live.Length+" unique="+live.Distinct().Count());
+        foreach(var wheel in live) {
+            NativeBinding binding;
+            if(wheel==null || !nativeIdentities.TryGetValue(wheel,out binding))
+                throw NativeOwnershipFailure(wheel,new NativeWheel{key=wheel==null?"null":Key(wheel),source_index=-1},"checkpoint-live-cohort-member","unbound live wheel");
+            var identity=binding.identity;
+            if(identity.instance_id!=wheel.GetInstanceID() || identity.key!=Key(wheel))
+                throw NativeOwnershipFailure(wheel,identity,"checkpoint-live-cohort-identity",Key(wheel));
+        }
         if(car.allWH.Count!=4 || car.allWH.Distinct().Count()!=4)
             throw new InvalidOperationException("Native ownership predicate=checkpoint-road-cohort expected_roads=4 actual_roads="+car.allWH.Count);
         var samples=new NativeWheel[nativeWheels.Length];

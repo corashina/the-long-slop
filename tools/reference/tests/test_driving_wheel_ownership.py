@@ -67,7 +67,13 @@ public class WheelCollider {
   return null;
  }
 }
-public class Car {public Rigidbody RB;public List<WheelCollider> allWH=new List<WheelCollider>();}
+public class Car {
+ public Rigidbody RB;public List<WheelCollider> allWH=new List<WheelCollider>();
+ public List<WheelCollider> liveWheels=new List<WheelCollider>();public static int enumerationQueries;
+ public T[] GetComponentsInChildren<T>(bool includeInactive) where T:class {
+  enumerationQueries++;if(!includeInactive)throw new Exception("inactive source components excluded");return liveWheels.Cast<T>().ToArray();
+ }
+}
 public static class Time {public static int frameCount=1;public static float time=1;}
 public static class G11Capture {public static int ObservedPhysicsStep=5;}
 public static class G11Geometry {
@@ -79,9 +85,10 @@ public static class G11Geometry {
  static string Key(Rigidbody b){return b==null?null:"source-body-"+b.id;}
  // ACTUAL
  public static void Seed(){
-  nativeRolesBound=false;nativeIdentities.Clear();ownershipCheckpoints.Clear();WheelCollider.hierarchyQueries=0;
+  nativeRolesBound=false;nativeIdentities.Clear();ownershipCheckpoints.Clear();WheelCollider.hierarchyQueries=0;Car.enumerationQueries=0;
   var rb=new Rigidbody{id=1};rb.transform.body=rb;car=new Car{RB=rb};group=new Transform{parent=rb.transform};
   nativeWheels=Enumerable.Range(0,5).Select(i=>new WheelCollider{id=i+10,transform=new Transform{parent=i==4?rb.transform:group}}).ToArray();
+  car.liveWheels.AddRange(nativeWheels);
   nativeWheels[4].gameObject.activeSelf=false;nativeWheels[4].gameObject.activeInHierarchy=false;
   foreach(var w in nativeWheels)nativeIdentities.Add(w,new NativeBinding{identity=new NativeWheel{key=Key(w),instance_id=w.id,source_index=w.id-10,road_slot=-1}});
   car.allWH.AddRange(nativeWheels.Take(4).Reverse());
@@ -89,15 +96,24 @@ public static class G11Geometry {
  static void Need(bool v,string m){if(!v)throw new Exception(m);}
  static void Reject(Action action,string predicate){try{action();}catch(InvalidOperationException e){Need(e.Message.Contains(predicate),"wrong failure: "+e.Message);return;}throw new Exception("accepted "+predicate);}
  public static void Check(){
-  Seed();BindNativeWheelRoles();int queries=WheelCollider.hierarchyQueries;
+  Seed();BindNativeWheelRoles();int queries=WheelCollider.hierarchyQueries;int enumerations=Car.enumerationQueries;
   for(int i=0;i<5;i++){var w=nativeWheels[i];var state=ReadWheel(w);
    Need(state.instance_id==w.id && state.key==Key(w) && state.source_index==i,"identity changed");
    Need(state.owner_is_null && !state.native_association_available && state.owner_instance_id==0,"raw null replaced");
    Need(state.structural_owner_bound && state.structural_links_valid && state.structural_owner_instance_id==1 && state.structural_owner_key=="source-body-1","structural binding");
    Need(state.road_slot==(i==4?-1:3-i),"helper or road role changed");}
-  Need(WheelCollider.hierarchyQueries==queries,"per-step hierarchy query");
+  Need(WheelCollider.hierarchyQueries==queries && Car.enumerationQueries==enumerations,"per-step hierarchy query");
   Need(ownershipCheckpoints.Count==1,"setup checkpoint missing");NativeOwnershipCheckpoint("held",6);
   Need(ownershipCheckpoints.Count==2,"held checkpoint missing");
+  Seed();BindNativeWheelRoles();var cached=nativeWheels.ToArray();var roads=car.allWH.ToArray();
+  var added=new WheelCollider{id=99,transform=new Transform{parent=car.RB.transform}};
+  added.gameObject.activeSelf=false;added.gameObject.activeInHierarchy=false;car.liveWheels.Add(added);
+  foreach(var wheel in nativeWheels)ReadWheel(wheel);
+  Need(nativeWheels.SequenceEqual(cached) && car.allWH.SequenceEqual(roads),"added helper changed cached cohort or roads");
+  Reject(()=>NativeOwnershipCheckpoint("measurement-complete",8),"checkpoint-live-cohort");
+  Seed();BindNativeWheelRoles();car.liveWheels[4]=new WheelCollider{id=99};Reject(()=>NativeOwnershipCheckpoint("replaced",8),"checkpoint-live-cohort-member");
+  Seed();BindNativeWheelRoles();car.liveWheels.RemoveAt(4);Reject(()=>NativeOwnershipCheckpoint("removed",8),"checkpoint-live-cohort-count");
+  Seed();BindNativeWheelRoles();car.liveWheels.Reverse();NativeOwnershipCheckpoint("same-cohort",8);
   Seed();group.body=new Rigidbody{id=2};Reject(BindNativeWheelRoles,"structural-owner");
   Seed();nativeWheels[0].attachedRigidbody=new Rigidbody{id=2};Reject(BindNativeWheelRoles,"reported-native-owner");
   Seed();nativeWheels[0].enabled=true;Reject(BindNativeWheelRoles,"enabled-active-native-owner");
