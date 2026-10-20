@@ -160,6 +160,63 @@ class DrivingControlsTests(unittest.TestCase):
             if change=='edge':next(s for s in bad['samples'] if s['phase']=='input2.exit' and s['frame']==1)['controls']['input_ignition_down']=True
             with self.subTest(change=change), self.assertRaises(ValueError):validate_controls(bad, scenario)
 
+    def event_interval_fixture(self):
+        scenario = scenario_fixture()
+        scenario['parking_brake_intent'] = 'release-before-acceleration'
+        scenario['setup']['auto_shift'] = False
+        scenario['controls'] = [control_row(0), control_row(1), control_row(2)]
+        scenario['controls'][0]['ignition_button_held'] = True
+        scenario['controls'][1].update(ignition_button_held=True, handbrake_press=True, gear_press={'value':1})
+        scenario['controls'][2]['throttle'] = 1.
+        return self.observed(scenario)
+
+    def test_validate_run_accepts_events_between_physics_consumers(self):
+        from tools.reference.driving_probe import validate_run
+        run, scenario = self.event_interval_fixture()
+        frames = [run['samples'][s['input_sequence']-1]['frame'] for s in run['samples'] if s['phase']=='physics.entry']
+        self.assertEqual(frames,[0,0,2])
+        result = validate_run(run, scenario)
+        event = result['controls']['handbrake_events'][0]
+        self.assertEqual((event['declared_frame'],event['frame'],event['input_revision']),(1,1,2))
+        self.assertTrue(event['stored_handbrake_before'])
+        self.assertFalse(event['stored_handbrake'])
+        self.assertEqual(result['controls']['gear_events'][0]['declared_frame'],1)
+        self.assertEqual([c['frame'] for c in scenario['controls']],[0,1,2])
+        # Event validation still sees every original row after sustained intervals merge.
+        for change in ('missing','duplicate','shifted'):
+            bad = deepcopy(run)
+            first = next(s for s in bad['samples'] if s['phase']=='input.exit' and s['frame']==1)
+            later = next(s for s in bad['samples'] if s['phase']=='input.exit' and s['frame']==2)
+            if change in ('missing','shifted'):first['controls']['input_handbrake_press'] = False
+            if change in ('duplicate','shifted'):later['controls']['input_handbrake_press'] = True
+            with self.subTest(change=change), self.assertRaises(ValueError):validate_run(bad,scenario)
+
+    def test_validate_run_requires_each_real_sustained_transition(self):
+        from tools.reference.driving_probe import validate_run
+        for name in ('throttle','brake','clutch','steer','ignition_button_held'):
+            run, scenario = self.event_interval_fixture()
+            if name == 'throttle':
+                # Keep the release before the newly earlier acceleration.
+                scenario['controls'][0]['handbrake_press'] = True
+                scenario['controls'][1]['handbrake_press'] = False
+            scenario['controls'][1][name] = False if name=='ignition_button_held' else .25
+            add_control_fixture(run,scenario)
+            validate_controls(run,scenario)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, r'control interval \[1, 2\)'):
+                validate_run(run,scenario)
+
+    def test_validate_run_requires_isolated_actuator_transitions(self):
+        from tools.reference.driving_probe import validate_run
+        from tools.reference.tests.test_driving_probe import DrivingProbeTests
+        for name in ('motor_scale','service_brake_fraction','handbrake_fraction','steer'):
+            scenario = scenario_fixture('wheel_collider')
+            scenario['controls'].insert(1,dict(scenario['controls'][0],frame=1))
+            scenario['controls'][1][name] = .25
+            run = add_control_fixture(DrivingProbeTests.sample_run('wheel_collider'),scenario)
+            validate_controls(run,scenario)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, r'control interval \[1, 2\)'):
+                validate_run(run,scenario)
+
     def test_prior_frame_source_consumption_remains_valid(self):
         from tools.reference.tests.test_driving_probe import DrivingProbeTests
         scenario = self.release_scenario()

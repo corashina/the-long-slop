@@ -440,7 +440,7 @@ class DrivingProbeTests(unittest.TestCase):
                 if change == 'missing_frame':
                     for sample in run['samples']:
                         if sample['frame'] == 2: sample['frame'] = 1
-                if change == 'final_control_not_consumed': row['controls'][-1]['frame'] = 3
+                if change == 'final_control_not_consumed': row['controls'][-1].update(frame=3, steer=.25)
                 if change == 'event_after_end': row['controls'][-1]['frame'] = 5
                 if change == 'event_at_end': row['controls'][-1]['frame'] = 4
                 request_path.write_text(json.dumps(request))

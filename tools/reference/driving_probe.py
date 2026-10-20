@@ -98,12 +98,20 @@ def finite(value):
         for item in value: finite(item)
 
 
-def control_frames(scenario):
-    return validate_schedule(scenario)
+def sustained_control_frames(scenario):
+    duration, _ = validate_schedule(scenario)
+    frames, previous = [], None
+    for control in scenario['controls']:
+        state = {key: value for key, value in control.items()
+                 if key not in ('frame', 'handbrake_press', 'gear_press')}
+        if state != previous:
+            frames.append(control['frame'])
+        previous = state
+    return duration, frames
 
 
 def validate_timing(samples, scenario):
-    duration, controls = control_frames(scenario)
+    duration, controls = sustained_control_frames(scenario)
     frames = [sample['frame'] for sample in samples]
     if (any(type(frame) is not int or not 0 <= frame <= duration for frame in frames) or
         frames[0] != 0 or frames[-1] != duration):
@@ -315,7 +323,7 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError('Invalid native scenario')
         for key in ('source_objects', 'setup', 'frame_schedule', 'controls'):
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
-        control_frames(row)
+        validate_schedule(row)
     output.mkdir(parents=True)
     write_json(output / 'preflight.json', {k: v for k, v in pre.items() if k != 'source_geometry_map'})
     write_json(output / 'source-geometry-map.json', pre.get('source_geometry_map', {}))
