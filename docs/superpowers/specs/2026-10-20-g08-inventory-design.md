@@ -1,7 +1,7 @@
 # G08 inventory and equipment design
 
 Date: 2026-10-20.
-Status: Proposed written specification. The user approved the design in chat.
+Status: Approved by the user on 2026-10-20. Implementation plan review remains pending.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g08-inventory`.
 
@@ -232,7 +232,7 @@ G08 can become `Verify` only when code coverage is complete, with browser accept
 
 ## Review and execution boundary
 
-This specification records the approved design for review.
+This specification records the user-approved design.
 Product code remains unchanged at this stage.
 Written-spec approval permits the implementation plan.
 The user reviews that plan before implementation starts.
