@@ -27,6 +27,10 @@ impl ActionMask {
     pub const HELD_SWITCH: u32 = 2097152;
     pub const WASH: u32 = 4194304;
     pub const SCRUB: u32 = 8388608;
+    pub const EQUIP: u32 = 1 << 24;
+    pub const RECENTER: u32 = 1 << 25;
+    pub const RELEASE_EQUIPMENT: u32 = 1 << 26;
+    pub const RELEASE_EQUIPMENT_SEATED: u32 = 1 << 27;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -57,7 +61,8 @@ pub struct ActionAvailability {
     pub rim: Option<ItemId>,
     pub opening: Option<OpeningId>,
     pub slot: Option<SlotTarget>,
-    pub consumes_mouse: bool,
+    pub(super) use_item: Option<ItemId>,
+    pub(super) active_drag: bool,
     pub light_control: Option<LightControlId>,
     pub lmb_use: bool,
     pub fill_reservation: Option<OpeningId>,
@@ -76,38 +81,6 @@ pub struct InteractionFeedback<'a> {
     pub fluid: Option<FluidFeedback<'a>>,
 }
 impl InteractionState {
-    fn can_reserve_fill(&self, opening: &OpeningState, items: &ItemStore) -> bool {
-        let Some(held) = self.held() else {
-            return false;
-        };
-        if opening.valve <= 0. {
-            return false;
-        }
-        let (source, destination) = if self.supplies.contains(&opening.reference.tank) {
-            (opening.reference.tank, held)
-        } else {
-            (held, opening.reference.tank)
-        };
-        let destination_open = !self.supplies.contains(&opening.reference.tank)
-            || self
-                .openings
-                .iter()
-                .any(|o| o.reference.tank == destination && o.valve > 0.);
-        source != destination
-            && destination_open
-            && self
-                .tank_rules
-                .get(&source)
-                .is_some_and(|r| !r.no_fill_from)
-            && self
-                .tank_rules
-                .get(&destination)
-                .is_some_and(|r| !r.no_fill_this)
-            && items
-                .get(source)
-                .and_then(|i| i.fluid.as_ref())
-                .is_some_and(|f| f.mixture.total() > 0.)
-    }
     pub fn available_actions(
         &self,
         aim: &ResolvedAim,
@@ -116,7 +89,7 @@ impl InteractionState {
         physics: &PhysicsWorld,
         needs: crate::survival::NeedsOutput,
     ) -> ActionAvailability {
-        if needs.dead {
+        if needs.dead || player.view(physics).ray_actions_blocked {
             return ActionAvailability::default();
         }
         let valid = |target: Option<AimTarget>| {
@@ -126,12 +99,15 @@ impl InteractionState {
                     && target.distance <= self.reach
             })
         };
-        let use_target = valid(aim.use_target);
+        let active_target = self.active_mechanism_target(player, physics);
+        let use_target = active_target.or_else(|| valid(aim.use_target));
         let grab_target = valid(aim.grab_target);
         let installation_target = valid(aim.installation_target);
         let filling_target = valid(aim.filling_target);
         let focus = valid(aim.focus_target);
         let mut a = ActionAvailability::default();
+        a.use_item = use_target.map(|t| t.item);
+        a.active_drag = active_target.is_some_and(|t| self.mechanisms.drag_eligible(t.item));
         a.item = use_target
             .or(grab_target)
             .or(filling_target)
@@ -148,7 +124,11 @@ impl InteractionState {
             a.item = Some(id);
         }
         if let Some(held) = self.held() {
-            a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
+            a.actions.0 |=
+                ActionMask::DROP | ActionMask::THROW | ActionMask::ROTATE | ActionMask::RECENTER;
+            if self.can_equip_carried(player, items, physics) {
+                a.actions.0 |= ActionMask::EQUIP;
+            }
             if items
                 .get(held)
                 .is_some_and(|item| item.food.is_some() && !item.removed)
@@ -164,7 +144,7 @@ impl InteractionState {
                 && items
                     .get(held)
                     .and_then(|item| item.fluid.as_ref())
-                    .is_some_and(|fluid| fluid.mixture.total() > 0.)
+                    .is_some_and(|fluid| fluid.total() > 0.)
                 && a.fill_reservation.is_none()
             {
                 a.actions.0 |= ActionMask::DRINK;
@@ -174,9 +154,17 @@ impl InteractionState {
                 a.actions.0 |= ActionMask::HELD_SWITCH;
                 a.context = FeedbackContext::LightSwitch;
             }
-            if self.carry.allows_held_rotation() {
-                a.actions.0 |= ActionMask::ROTATE;
-            }
+        }
+        if self
+            .equipment
+            .item()
+            .is_some_and(|id| self.carry.can_receive_equipment(id, player, items, physics))
+        {
+            a.actions.0 |= if player.seat().is_some() {
+                ActionMask::RELEASE_EQUIPMENT_SEATED
+            } else {
+                ActionMask::RELEASE_EQUIPMENT
+            };
         }
         if let Some(t) = use_target {
             if self.mechanisms.contains(t.item) {
@@ -214,51 +202,17 @@ impl InteractionState {
                     a.actions.0 |= ActionMask::TUNE;
                 }
             }
-            if self.seats.iter().any(|s| s.item == t.item)
-                && self.held().is_none()
-                && player.seat().is_none()
-            {
+            if self.seats.iter().any(|s| s.item == t.item) && player.seat().is_none() {
                 a.actions.0 |= ActionMask::ENTER;
                 a.context = FeedbackContext::Seat;
             }
         }
         if let Some(t) = filling_target
-            && let Some(o) = self
-                .openings
-                .iter()
-                .find(|o| o.reference.cap == t.item && o.valve > 0.)
-            && let Some(held) = self.held()
+            && let Some(o) = self.openings.iter().find(|o| o.reference.cap == t.item)
         {
             a.opening = Some(o.reference.id);
-            if self.can_reserve_fill(o, items) {
+            if self.fill_pair(o, items).is_some() {
                 a.fill_reservation = Some(o.reference.id);
-            }
-            let (source, dest) = if self.supplies.contains(&o.reference.tank) {
-                (o.reference.tank, held)
-            } else {
-                (held, o.reference.tank)
-            };
-            let dest_open = !self.supplies.contains(&o.reference.tank)
-                || self
-                    .openings
-                    .iter()
-                    .any(|v| v.reference.tank == dest && v.valve > 0.);
-            if source != dest
-                && dest_open
-                && self
-                    .tank_rules
-                    .get(&source)
-                    .is_some_and(|r| !r.no_fill_from)
-                && self.tank_rules.get(&dest).is_some_and(|r| !r.no_fill_this)
-                && items
-                    .get(source)
-                    .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.mixture.total() > 0.)
-                && items
-                    .get(dest)
-                    .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.mixture.total() < f.capacity_liters)
-            {
                 a.actions.0 |= ActionMask::FILL;
             }
         }
@@ -388,7 +342,7 @@ impl InteractionState {
             a.context = FeedbackContext::Push;
         } else if self.held().is_none()
             && let Some(t) = valid(aim.push_target)
-            && self.push.supports(t.item)
+            && self.push.can_start(t, &self.bodies, player, physics)
         {
             a.actions.0 |= if self
                 .collider_bindings
@@ -409,7 +363,7 @@ impl InteractionState {
         let latched_fill = self
             .fill_opening
             .and_then(|id| self.openings.iter().find(|o| o.reference.id == id))
-            .is_some_and(|opening| self.can_reserve_fill(opening, items));
+            .is_some_and(|opening| self.fill_pair(opening, items).is_some());
         let food_guard = self.held().is_some_and(|held| {
             items
                 .get(held)
@@ -419,7 +373,9 @@ impl InteractionState {
             && !latched_fill
             && !drink_guard
             && !food_guard
-            && !self.cleaning.reserves_lmb(self.held());
+            && !self
+                .cleaning
+                .reserves_lmb(self.equipment.item(), self.held());
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()
@@ -430,6 +386,7 @@ impl InteractionState {
             && !(self.seat_action_latched && self.usable_light_controls.contains(&t.control))
         {
             a.light_control = Some(t.control);
+            a.use_item = None;
             a.actions.0 |= ActionMask::USE;
             a.actions.0 &= !(ActionMask::DOOR
                 | ActionMask::SWITCH
@@ -449,16 +406,13 @@ impl InteractionState {
         if self.carry.throw_charge() >= self.carry.reference_throw_minimum() {
             a.actions.0 &= !ActionMask::MOUNT;
         }
-        let blocked_install = aim.installation_block.is_some()
-            || (self.held().is_some() && installation_target.is_some() && a.slot.is_none());
-        if a.actions.0 & ActionMask::MOUNT != 0 || blocked_install {
+        if !a.active_drag && a.actions.0 & ActionMask::MOUNT != 0 {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
-        a.consumes_mouse = a.actions.0 & (ActionMask::DOOR | ActionMask::TUNE) != 0;
-        if let Some(held) = self
-            .held()
-            .filter(|_| self.cleaning.reserves_lmb(self.held()))
-        {
+        if let Some(held) = self.equipment.item().filter(|_| {
+            self.cleaning
+                .reserves_lmb(self.equipment.item(), self.held())
+        }) {
             a.item = Some(held);
             a.actions.0 &= !(ActionMask::DOOR
                 | ActionMask::FILL
@@ -469,6 +423,13 @@ impl InteractionState {
                 Some(186) => a.actions.0 |= ActionMask::SCRUB,
                 _ => {}
             }
+        }
+        if a.active_drag {
+            a.actions.0 &= !(ActionMask::PICKUP
+                | ActionMask::MOUNT
+                | ActionMask::DISMOUNT
+                | ActionMask::PUSH
+                | ActionMask::GRIP);
         }
         a
     }
@@ -505,9 +466,9 @@ impl InteractionState {
                     .get(o.tank)
                     .and_then(|i| i.fluid.as_ref())
                     .map(|f| FluidFeedback {
-                        amount: f.mixture.total(),
+                        amount: f.total(),
                         capacity: f.capacity_liters,
-                        quantities: f.mixture.quantities_liters,
+                        quantities: f.mixture().quantities_liters,
                         presentation: &o.presentation,
                     })
             });

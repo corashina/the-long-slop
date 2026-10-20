@@ -36,11 +36,11 @@ fn g10_control_restore_has_no_side_effects() {
     run.lighting.cycle_headlights(&reference.lighting, 0);
     run.vehicles[0].handbrake = !run.vehicles[0].handbrake;
     let vehicle = &mut run.vehicles[0];
+    vehicle.ignition.ignition = true;
     let mut engine = vehicle.engine.capture_save();
-    engine.ignition = true;
     engine.rpm = 725.;
     engine.temperature = 65.;
-    vehicle.engine_output = vehicle.engine.restore_save(&engine);
+    vehicle.engine_output = vehicle.engine.restore_save(&engine).unwrap();
     vehicle.trip_m = 321.;
     let radio = &mut run.audio.as_mut().unwrap().radio;
     radio.on = true;
@@ -145,15 +145,7 @@ fn g10_control_restore_has_no_side_effects() {
         audio.radio.on && initial.electronics_output > initial.electronics_cutoff
     );
     let r = &reference.vehicles[0].instruments;
-    let engine = restored.vehicles[0].engine_output;
-    let sample = InstrumentSample {
-        local_ignition: engine.ignition && r.electronics_output > r.electronics_off_threshold,
-        headlights: restored.lighting.headlights(0),
-        rpm: engine.rpm,
-        temperature: engine.temperature,
-        distance_m: restored.vehicles[0].trip_m,
-        ..InstrumentSample::default()
-    };
+    let sample = restored.instrument_sample(&reference, 0);
     let mut visual = InstrumentState::new(r);
     visual.initialize_from_sample(r, sample);
     assert!(

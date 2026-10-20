@@ -166,6 +166,7 @@ impl MechanismState {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));
+        needed.extend(reference.colliders.iter().map(|c| c.node));
         needed.extend(reference.anchors.iter().map(|a| a.node));
         let driven: HashSet<_> = reference
             .mechanisms
@@ -541,6 +542,11 @@ impl MechanismState {
         let c = &self.controls[*self.items.get(&item)?];
         c.reference.rotation.as_ref().map(|_| c.degrees)
     }
+    pub(crate) fn slideable(&self, item: ItemId) -> bool {
+        self.items
+            .get(&item)
+            .is_some_and(|i| self.controls[*i].reference.slide.is_some())
+    }
     pub fn scroll_eligible(&self, item: ItemId) -> bool {
         if self.radio_tunable(item) {
             return true;
@@ -592,6 +598,16 @@ impl MechanismState {
                     child
                 },
         )
+    }
+    pub(crate) fn root_node(&self, node: NodeId) -> Option<NodeId> {
+        let mut index = *self.nodes.get(&node)?;
+        loop {
+            let frame = &self.frames[index];
+            if frame.external.is_some() || frame.parent.is_none() {
+                return Some(frame.node);
+            }
+            index = frame.parent.unwrap();
+        }
     }
     /// Current world pose, in rebased runtime coordinates.
     pub fn node_pose(&self, node: NodeId) -> Option<VehiclePose> {

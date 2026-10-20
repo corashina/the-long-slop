@@ -1,7 +1,8 @@
-export function createStartupTrace(now){
+export function createStartupTrace(now,{hidden=false,focused=true,profileCpu=false}={}){
  const startedAt=now(),phases={},fetches=[];
  let failure=null,completed=false,inputReady=false,frozen=null;
  let buildIdentity=null;
+ let hiddenDuringStartup=hidden,unfocusedDuringStartup=!focused;
  const open=new Map();
  const closeOpen=()=>{const end=now();for(const [stage,start] of open)phases[stage]={startMs:start-startedAt,endMs:end-startedAt,durationMs:end-start,incomplete:true};open.clear();};
  const copy=()=>structuredClone({startedAt,phases,fetches,
@@ -9,8 +10,9 @@ export function createStartupTrace(now){
   receivedBytes:fetches.reduce((sum,item)=>sum+(item.receivedBytes??0),0),
   downloadMs:fetches.reduce((sum,item)=>sum+(item.downloadMs??0),0),
   cache:{hit:fetches.filter(item=>item.cache==='hit').length,miss:fetches.filter(item=>item.cache==='miss').length,unknown:fetches.filter(item=>item.cache!=='hit'&&item.cache!=='miss').length},
-  buildIdentity,failure,completed,inputReady});
+  buildIdentity,failure,completed,inputReady,hiddenDuringStartup,unfocusedDuringStartup,profileCpu});
  return {
+  environment(hidden,focused){if(frozen)return;hiddenDuringStartup||=hidden;unfocusedDuringStartup||=!focused;},
   begin(stage){if(!frozen&&!open.has(stage))open.set(stage,now());},
   end(stage){if(frozen)return;const start=open.get(stage);if(start===undefined)return;const end=now();phases[stage]={startMs:start-startedAt,endMs:end-startedAt,durationMs:end-start};open.delete(stage);},
   fetched(record){if(!frozen)fetches.push({...record});},

@@ -1,6 +1,7 @@
 pub const FIXED_DT: f32 = 0.01999999955;
 pub mod drivetrain;
 pub mod engine;
+pub mod ignition;
 pub mod input;
 pub mod instruments;
 pub mod radio;
@@ -41,15 +42,31 @@ pub mod keys {
     pub const GEAR_6: u32 = 1 << 31;
 }
 
+pub mod player_keys {
+    pub const LEAN: u8 = 1;
+    pub const ZOOM: u8 = 2;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CarryDeltas {
+    pub owner: Option<crate::reference::ItemId>,
+    pub mouse: [f32; 2],
+    pub wheel: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
     pub released: u32,
+    pub player_held: u8,
+    pub player_pressed: u8,
+    pub player_released: u8,
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
     pub wheel: f32,
+    pub carry: CarryDeltas,
 }
 
 impl FrameInput {
@@ -57,6 +74,9 @@ impl FrameInput {
         self.held = frame.held;
         self.pressed |= frame.pressed;
         self.released |= frame.released;
+        self.player_held = frame.player_held;
+        self.player_pressed |= frame.player_pressed;
+        self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
         for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
@@ -67,12 +87,39 @@ impl FrameInput {
         if frame.wheel.is_finite() {
             self.wheel += frame.wheel;
         }
+        if self.carry.owner != frame.carry.owner {
+            self.carry = CarryDeltas {
+                owner: frame.carry.owner,
+                ..CarryDeltas::default()
+            };
+        }
+        for (pending, delta) in self.carry.mouse.iter_mut().zip(frame.carry.mouse) {
+            if delta.is_finite() {
+                *pending += delta;
+            }
+        }
+        if frame.carry.wheel.is_finite() {
+            self.carry.wheel += frame.carry.wheel;
+        }
+    }
+
+    /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn take_frame(&mut self, skip_elapsed: &mut bool, blocked: bool) -> Option<Self> {
+        if std::mem::take(skip_elapsed) {
+            if blocked {
+                self.clear();
+            }
+            return None;
+        }
+        Some(std::mem::take(self))
     }
 
     pub fn take_step(&mut self) -> Self {
         let step = *self;
         *self = Self {
             held: step.held,
+            player_held: step.player_held,
             inventory_held: step.inventory_held,
             ..Self::default()
         };

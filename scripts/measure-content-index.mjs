@@ -1,12 +1,21 @@
 /** Run in DevTools after starting and focusing the game. Hooks restore after each sample. */
 export function contentIndexSampleFailures(sample) {
  const failures=[];
- if(sample.auditBefore.state!=='Ready'||sample.auditAfter.state!=='Ready')failures.push('renderer-not-ready');
- if(sample.frames<2||sample.submissionDelta!==sample.frames)failures.push('submitted-frame-mismatch');
+ if(sample.scenario.startsWith('startup-')){
+  if(typeof sample.startupTrace?.hiddenDuringStartup!=='boolean'||typeof sample.startupTrace?.unfocusedDuringStartup!=='boolean')failures.push('startup-environment-missing');
+  if(sample.startupTrace?.hiddenDuringStartup)failures.push('startup-hidden-tab');
+  if(sample.startupTrace?.unfocusedDuringStartup)failures.push('startup-unfocused-tab');
+  if(sample.startupTrace?.profileCpu!==sample.profileCpu)failures.push('startup-instrumentation-mismatch');
+  if(!sample.startupTrace?.completed||!sample.startupTrace?.inputReady||sample.startupTrace?.failure)failures.push('startup-not-complete');
+  if(sample.cacheState!==(sample.scenario==='startup-cold'?'cold':'warm'))failures.push('startup-cache-state-mismatch');
+  return failures;
+ }
  if(sample.hiddenDuringSample)failures.push('hidden-tab');
  if(sample.unfocusedDuringSample)failures.push('unfocused-tab');
+ if(sample.auditBefore.state!=='Ready'||sample.auditAfter.state!=='Ready')failures.push('renderer-not-ready');
+ if(sample.frames<2||sample.submissionDelta!==sample.frames)failures.push('submitted-frame-mismatch');
  if(!sample.stateBefore.started||!sample.stateAfter.started||sample.notStartedFrames)failures.push('game-not-started');
- if(sample.stateBefore.paused||sample.stateAfter.paused||sample.pausedFrames)failures.push('game-paused');
+ if(sample.scenario!=='save-load'&&(sample.stateBefore.paused||sample.stateAfter.paused||sample.pausedFrames))failures.push('game-paused');
  if(!(sample.stateAfter.totalSteps>sample.stateBefore.totalSteps))failures.push('physics-did-not-step');
  if(sample.scenario==='garage'&&!sample.settled)failures.push('garage-work-not-settled');
  if(sample.scenario==='driving'&&(!sample.stateBefore.seated||!sample.stateAfter.seated||sample.unseatedFrames||!(sample.travelDeltaM>0)))failures.push('driving-not-observed');
@@ -15,15 +24,26 @@ export function contentIndexSampleFailures(sample) {
   const expected=native.map(side=>Math.max(1,Math.floor(side*scale)));
   if(changedDuringSample||[sample.auditBefore,sample.auditAfter].some(audit=>!audit.graph.presented||audit.graph.extent.some((side,i)=>side!==expected[i])))failures.push('scene-resolution-mismatch');
  }
+ if(sample.scenario==='save-load'&&(!sample.saveOperations?.some(row=>row.kind==='Capture'&&!row.error)||!sample.saveOperations?.some(row=>row.kind==='Prepare'&&!row.error)||!sample.saveOperations?.some(row=>row.kind==='Commit'&&!row.error)))failures.push('save-load-not-observed');
  return failures;
 }
 
-export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,label='sample',scenario='garage',sceneScale=null}={}) {
+export function assertCpuProfileMode(profileCpu,profileStreaming,state){
+ if(profileCpu)return;
+ if(state.browserEnabled||state.rustEnabled||state.startupRenderTraceActive||state.terrain.jobActive||state.terrain.handshakeActive||state.road.jobActive||state.road.handshakeActive||state.road.publicationActive||state.grass.jobActive||state.grass.handshakeActive||state.grass.publicationActive||state.streamingEnabled&&!profileStreaming)throw Error('CPU or streaming profiling is active; stop it before this sample');
+}
+
+export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,profileCpu=false,label='sample',scenario='garage',sceneScale=null,cacheState='unknown',route='unspecified',seed=null,browserTrace=null,traceRecording=false}={}) {
  if(!Number.isFinite(durationMs)||durationMs<1000)throw Error('durationMs must be at least 1000');
  if(typeof instrument!=='boolean')throw Error('instrument must be a boolean');
  if(typeof profileStreaming!=='boolean')throw Error('profileStreaming must be a boolean');
- if(instrument&&profileStreaming)throw Error('Collect streaming stages and WebGL calls separately');
- if(!['garage','driving'].includes(scenario))throw Error('scenario must be garage or driving');
+ if(typeof traceRecording!=='boolean')throw Error('traceRecording must be a boolean');
+ if(![instrument,profileStreaming,profileCpu].every(value=>typeof value==='boolean'))throw Error('Profiling flags must be boolean');
+ if(Number(instrument)+Number(profileStreaming)+Number(profileCpu)>1)throw Error('Collect CPU stages, streaming stages, and WebGL calls separately');
+ if(!['garage','driving','startup-cold','startup-warm','interaction','save-load'].includes(scenario))throw Error('Invalid scenario');
+ if(!['cold','warm','unknown'].includes(cacheState))throw Error('Invalid cache state');
+ if(seed!==null&&!Number.isInteger(seed))throw Error('Invalid benchmark seed');
+ if(browserTrace!==null&&(!browserTrace.path||!/^[a-f0-9]{64}$/.test(browserTrace.sha256??'')))throw Error('A browser trace needs its saved path and SHA-256');
  if(sceneScale!==null&&![1,.75].includes(sceneScale))throw Error('Use scene scale 1 or 0.75');
  if(!/^[a-z0-9][a-z0-9-]{0,95}$/.test(label))throw Error('Invalid receipt label');
  const configResponse=await fetch('/__benchmark-config');
@@ -31,7 +51,13 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  const configuration=await configResponse.json();
  const canvas=document.querySelector('#game'),gl=canvas?.getContext('webgl2');
  if(!gl||typeof window.gamePerformanceFrame!=='function'||typeof window.measureWorld!=='function')throw Error('The game is unavailable');
- const {source_render_audit,streaming_profile,streaming_profile_audit}=await import('/pkg/my_summer_slop.js');
+ const {source_render_audit,streaming_profile,streaming_profile_audit,cpu_profile_audit}=await import('/pkg/my_summer_slop.js');
+ const startupScenario=scenario.startsWith('startup-');
+ if(!window.gameCpuInstrumentationState||!cpu_profile_audit||!streaming_profile_audit)throw Error('Instrumentation state is unavailable');
+ const assertActiveMode=()=>assertCpuProfileMode(profileCpu,profileStreaming,{...window.gameCpuInstrumentationState(),rustEnabled:JSON.parse(cpu_profile_audit()).enabled,streamingEnabled:JSON.parse(streaming_profile_audit()).enabled});
+ assertActiveMode();
+ if(profileCpu&&(!window.gameCpuProfile||!cpu_profile_audit))throw Error('CPU profiler is unavailable');
+ if(startupScenario&&profileCpu&&!window.gameCpuProfileSnapshot?.().enabled)throw Error('Reload with ?profileCpu=1 before startup profiling');
  if(profileStreaming&&(!streaming_profile||!streaming_profile_audit))throw Error('Streaming profiler is unavailable');
  const snapshot=()=>({...window.gameState,fluidVolumes:undefined,inventory:undefined});
  const before=await window.measureWorld();
@@ -54,9 +80,12 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  };
  const eventTypes=['keydown','keyup','mousedown','mouseup','mousemove'];
  const started=performance.now();
- let elapsed,streamingProfile=null;
+ const saveOperations=[],originalSaveResult=window.gameSaveResult;
+ let elapsed,streamingProfile=null,cpuProfile=null,renderMainThreadTrace=null,renderTrace=null;
  try {
+  if(profileCpu){if(!startupScenario)window.gameCpuProfile(true);const {observeRenderMainThread}=await import('/cpu-profile.js');renderTrace=observeRenderMainThread();}
   if(profileStreaming)streaming_profile(true);
+  if(scenario==='save-load')window.gameSaveResult=function(id,kind,payload,error){saveOperations.push({id,kind,error:error||null,at:performance.now()});return originalSaveResult.call(this,id,kind,payload,error);};
   document.addEventListener('visibilitychange',visibilityChanged);
   document.addEventListener('pointerlockchange',pointerLockChanged);
   window.addEventListener('blur',blurred);
@@ -77,6 +106,8 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   await new Promise(resolve=>setTimeout(resolve,durationMs));
   elapsed=performance.now()-started;
  } finally {
+  if(profileCpu){cpuProfile={browser:window.gameCpuProfileSnapshot(),rust:JSON.parse(cpu_profile_audit())};renderMainThreadTrace={sample:renderTrace?.stop()??null,startup:startupScenario?window.gameCpuStartupRenderTrace():null};window.gameCpuProfile(false);}
+  if(scenario==='save-load')window.gameSaveResult=originalSaveResult;
   if(profileStreaming){streamingProfile=JSON.parse(streaming_profile_audit());streaming_profile(false);}
   window.gamePerformanceFrame=originalFrame;
   for(const [name,original] of originals)gl[name]=original;
@@ -87,12 +118,16 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   window.removeEventListener('resize',resized);
  }
  const auditAfter=JSON.parse(source_render_audit()),stateAfter=snapshot();
+ assertActiveMode();
  const after=await window.measureWorld();
  intervals.sort((a,b)=>a-b);
  const percentile=p=>intervals.length?intervals[Math.ceil(intervals.length*p)-1]:null;
  const info=gl.getExtension('WEBGL_debug_renderer_info');
  input.codes=[...codes].sort();
- const result={label,scenario,instrument,profileStreaming,streamingProfile,sceneResolution,configuration,recordedAt:new Date().toISOString(),
+ const result={schemaVersion:2,label,scenario,cacheState,route,seed,instrument,profileStreaming,profileCpu,cpuProfile,renderMainThreadTrace,streamingProfile,configuration,recordedAt:new Date().toISOString(),
+  sceneResolution,
+  instrumentationMode:profileCpu?'cpu':profileStreaming?'streaming':instrument?'webgl':traceRecording||browserTrace?'browser-trace':'none',browser:navigator.userAgent,browserTrace,traceRecording,
+  startupTrace:startupScenario?window.gameStartupTrace():null,saveOperations,
   elapsedMs:elapsed,requestedDurationMs:durationMs,frames,fps:frames*1000/elapsed,
   intervals:{count:intervals.length,meanMs:intervals.length?intervals.reduce((sum,value)=>sum+value,0)/intervals.length:null,p50Ms:percentile(.5),p95Ms:percentile(.95),p99Ms:percentile(.99),maxMs:intervals.at(-1)??null},
   submissionDelta:auditAfter.graph.effects.submitted_token-auditBefore.graph.effects.submitted_token,
@@ -107,10 +142,10 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
   stateBefore,stateAfter,auditBefore,auditAfter,before,after};
  result.failures=contentIndexSampleFailures(result);
  result.valid=result.failures.length===0;
- result.performanceSample=result.valid&&!instrument&&!profileStreaming;
+ result.performanceSample=result.valid&&!instrument&&!profileStreaming&&!profileCpu&&!traceRecording&&!browserTrace;
  const saved=await fetch(`/__benchmark-result/${label}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});
  if(!saved.ok)throw Error(`Benchmark receipt could not be saved: HTTP ${saved.status}`);
- return {label,scenario,valid:result.valid,failures:result.failures,instrument,profileStreaming,streamingProfile,performanceSample:result.performanceSample,
+ return {label,scenario,valid:result.valid,failures:result.failures,instrument,profileStreaming,profileCpu,cpuProfile,streamingProfile,performanceSample:result.performanceSample,
   realInputObserved:result.realInputObserved,elapsedMs:elapsed,frames,submissionDelta:result.submissionDelta,
   fps:result.fps,intervals:result.intervals,steps:[stateBefore.totalSteps,stateAfter.totalSteps],travelDeltaM:result.travelDeltaM,
   settled:result.settled,counts,receipt:await saved.json()};

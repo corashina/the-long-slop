@@ -32,7 +32,7 @@ pub struct ObjectSnapshot {
     pub condition: f32,
     pub food: Option<FoodSnapshot>,
     pub temperature: Option<f32>,
-    pub fluid_quantities: Option<[f32; 6]>,
+    pub fluids: Option<crate::fluids::FluidSnapshot>,
     pub valve: Option<f32>,
     pub lamp: Option<bool>,
     pub linear_velocity: [f32; 3],

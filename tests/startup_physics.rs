@@ -114,7 +114,13 @@ fn installed_spawn_alignment_and_settling() {
     for _ in 0..settle_steps {
         run.area
             .player
-            .step(FrameInput::default(), &mut run.physics, FIXED_DT);
+            .step_view(FrameInput::default(), Default::default(), FIXED_DT);
+        run.area.player.step_movement(
+            FrameInput::default(),
+            Default::default(),
+            &mut run.physics,
+            FIXED_DT,
+        );
         run.area.sync_attachments(&mut run.physics, true);
         run.area.sync_compound(&mut run.physics);
         run.physics.apply_vehicle_forces(

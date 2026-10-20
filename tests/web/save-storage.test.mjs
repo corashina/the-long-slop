@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {webcrypto as crypto} from 'node:crypto';
 import {createSaveStorage, manifestStamp, verifyRecord} from '../../web/save-storage.js';
 
-const payload={schema_version:6,saved_at:'2026-10-12',world:{seed:42},source:{build_id:11140890}};
+const payload={schema_version:9,saved_at:'2026-10-12',world:{seed:42},source:{build_id:11140890}};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 // Inject request events only. Real database behavior belongs to the browser fixture.
 function boundary(){

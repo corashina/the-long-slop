@@ -1,4 +1,4 @@
-use super::{GrassSettings, GrassView};
+use super::settings::settings_from_source;
 use crate::{
     presentation::materials::SourceReceiver,
     reference::{ReferenceError, SourceId, WorldSourceMaterial},
@@ -13,6 +13,7 @@ use bevy::{
     render::{render_resource::*, renderer::RenderDevice},
     shader::ShaderRef,
 };
+use grass_mesh::GrassView;
 pub const BLADE_ATTRIBUTE: MeshVertexAttribute =
     MeshVertexAttribute::new("SourceGrassBlade", 984632517, VertexFormat::Float32x4);
 #[derive(Clone, Copy, Debug, ShaderType)]
@@ -54,7 +55,7 @@ impl GrassMaterial {
         if record.shader.name != "Stix Games/Grass" {
             return Err(ReferenceError("Expected checked Grass material".into()));
         }
-        let settings = GrassSettings::from_source(record)?;
+        let settings = settings_from_source(record)?;
         for required in [
             "SIMPLE_GRASS",
             "UNIFORM_DENSITY",

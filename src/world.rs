@@ -26,14 +26,18 @@ pub use placement::{
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;
+pub mod road_worker;
 pub use road::{
     ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadBlock, RoadCheckpoint, RoadCurve,
-    RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState, deform_road,
+    RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState,
 };
+pub use road_worker::{RoadJobId, RoadPoll, RoadWorker};
 mod instances;
 pub use instances::{StructureInstance, StructureRecipe};
 pub(crate) mod metrics;
 pub use metrics::WorldMetrics;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod pipeline_ownership;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod renderer_pending;
 pub(crate) mod stream;
@@ -51,10 +55,7 @@ pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,
     TerrainRoadPoint, TerrainTile, biome, source_perlin,
 };
-pub use terrain::{
-    TerrainPoll, TerrainWorker, terrain_evaluator, terrain_output_bound, terrain_settings,
-    terrain_tile,
-};
+pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;

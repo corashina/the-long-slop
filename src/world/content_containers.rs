@@ -93,16 +93,22 @@ pub(super) fn bind(
                 fluid.clone()
             } else {
                 let f = fields(value(tank.fields, "F")?)?;
-                let mut mixture = crate::fluids::FluidMixture::default();
+                let mut entries = Vec::new();
                 for v in array(f, "fluids")? {
                     let v = fields(v)?;
                     let kind = integer(v, "type")?;
                     if !(0..6).contains(&kind) {
                         return Err(ReferenceError("Unsupported source fluid identity".into()));
                     }
-                    mixture.quantities_liters[kind as usize] += number(v, "amount")?;
+                    entries.push(crate::fluids::FluidEntry {
+                        fluid_type: kind as u8,
+                        amount: number(v, "amount")?,
+                    });
                 }
-                crate::fluids::FluidContainer::new(definition.capacity, mixture)
+                if !crate::fluids::validate_fluid_entries(&entries) {
+                    return Err(ReferenceError("Invalid source fluid entries".into()));
+                }
+                crate::fluids::FluidContainer::new(definition.capacity, &entries)
             };
             items.get_mut(tank_item).unwrap().fluid = Some(fluid);
         }

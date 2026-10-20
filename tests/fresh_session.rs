@@ -1,4 +1,4 @@
-use my_summer_slop::save::fresh_permit::{FreshSessionPermit, PresentedFrames};
+use my_summer_slop::save::fresh_permit::FreshSessionPermit;
 
 #[test]
 fn fresh_permit_is_bound_to_request_session_and_generation() {
@@ -11,22 +11,6 @@ fn fresh_permit_is_bound_to_request_session_and_generation() {
     assert!(!permit.matches(8, 11, 3));
     assert!(!permit.matches(7, 12, 3));
     assert!(!permit.matches(7, 11, 4));
-}
-
-#[test]
-fn readiness_requires_two_distinct_new_submissions() {
-    let mut frames = PresentedFrames::default();
-    assert!(!frames.observe(11, 3, 9, 8));
-    assert!(!frames.observe(11, 3, 9, 8));
-    assert!(!frames.observe(11, 3, 10, 10));
-    assert!(!frames.observe(11, 3, 10, 10));
-    assert!(frames.observe(11, 3, 11, 11));
-    frames.reset();
-    assert!(!frames.observe(11, 3, 11, 11));
-    assert!(!frames.observe(12, 4, 14, 12));
-    assert!(!frames.observe(12, 4, 14, 13));
-    assert!(!frames.observe(12, 4, 15, 15));
-    assert!(frames.observe(12, 4, 16, 16));
 }
 
 #[test]

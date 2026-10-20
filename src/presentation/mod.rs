@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod camera_projection;
 mod candidate_upload;
 pub mod conditions;
 pub mod consumables;
@@ -76,3 +77,5 @@ pub mod view_frame;
 mod pipeline_ownership;
 
 pub mod primary_image;
+
+pub(crate) mod readiness;

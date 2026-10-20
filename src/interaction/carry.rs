@@ -18,15 +18,16 @@ struct HeldState {
     item: ItemId,
     body: RigidBodyHandle,
     offset: Vector,
+    // Relative to the Player root for noRot, otherwise relative to the view.
     rotation: Rotation,
     joint: ImpulseJointHandle,
     local_pose: Pose,
+    gravity_scale: f32,
 }
 
 pub struct CarryState {
     reference: PlayerReference,
     rules: HashMap<ItemId, PickupReference>,
-    plates: std::collections::HashSet<ItemId>,
     held: Option<HeldState>,
     anchor: Option<RigidBodyHandle>,
     acquisition_held: bool,
@@ -34,6 +35,12 @@ pub struct CarryState {
     throwing: bool,
     charge_falling: bool,
     charge_stopped: bool,
+}
+
+// Source 17488 keeps RMB as an override and always excludes MMB rotation.
+pub(super) fn wheel_allowed(input: FrameInput, tuning_available: bool, looking: bool) -> bool {
+    ((!tuning_available && !looking) || input.held & keys::TRANSLATE != 0)
+        && input.held & keys::ROTATE == 0
 }
 
 impl CarryState {
@@ -58,6 +65,8 @@ impl CarryState {
                 "Held body is inactive or fixed".into(),
             ));
         }
+        let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
         let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), false);
@@ -66,11 +75,16 @@ impl CarryState {
             item,
             body,
             offset: Vector::from_array(saved.offset),
+            // Save rotation uses the same authored frame as acquisition and step.
             rotation: Rotation::from_array(saved.rotation),
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
+            gravity_scale,
         });
-        physics.edit_body(body, |body| body.enable_ccd(true));
+        physics.edit_body(body, |body| {
+            body.enable_ccd(true);
+            body.set_gravity_scale(0.0, true);
+        });
         self.cancel_input();
         Ok(())
     }
@@ -109,7 +123,6 @@ impl CarryState {
                 .iter()
                 .filter_map(|item| item.pickup.clone().map(|rule| (item.id, rule)))
                 .collect(),
-            plates: reference.plates.plates.iter().map(|p| p.item).collect(),
             held: None,
             anchor: None,
             acquisition_held: false,
@@ -175,9 +188,13 @@ impl CarryState {
         if !self.throwing {
             return None;
         }
+        self.throwing = false;
+        if self.charge_stopped {
+            return None;
+        }
         let charge = self.throw_charge;
         let body = self.body()?;
-        let direction = to_rapier(player.view_pose(physics)).rotation * -Vector::Z;
+        let direction = to_rapier(player.view(physics).head_pose).rotation * -Vector::Z;
         let item = self.drop(items, physics)?;
         if charge > self.reference.throw_minimum {
             physics.edit_body(body, |body| {
@@ -211,15 +228,11 @@ impl CarryState {
             })
             .transpose()
     }
-    pub(super) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
+    pub(crate) fn rule(&self, id: ItemId) -> Option<&PickupReference> {
         self.rules.get(&id)
     }
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
-    }
-    pub(super) fn allows_held_rotation(&self) -> bool {
-        self.held()
-            .is_some_and(|item| !self.rules[&item].no_rotation)
     }
     pub fn body(&self) -> Option<RigidBodyHandle> {
         self.held.as_ref().map(|held| held.body)
@@ -242,9 +255,10 @@ impl CarryState {
     pub fn drop(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Option<ItemId> {
         let held = self.held.take()?;
         physics.remove_impulse_joint(held.joint, true);
-        if self.plates.contains(&held.item) {
-            physics.edit_body(held.body, |body| body.set_gravity_scale(1., true));
-        }
+        physics.set_body_mass_override(held.body, None);
+        physics.edit_body(held.body, |body| {
+            body.set_gravity_scale(held.gravity_scale, true)
+        });
         if let Some(item) = items.get_mut(held.item) {
             item.location = ItemLocation::World;
         }
@@ -252,6 +266,43 @@ impl CarryState {
         self.throwing = false;
         self.throw_charge = 0.0;
         Some(held.item)
+    }
+    pub fn can_receive_equipment(
+        &self,
+        id: ItemId,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.held.is_none()
+            && item.location == ItemLocation::Equipped
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && self.allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && self
+                .rules
+                .get(&id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && body.body_type() == rapier3d::prelude::RigidBodyType::KinematicPositionBased
+            && body.is_enabled()
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+            && player
+                .view(physics)
+                .head_pose
+                .position
+                .iter()
+                .all(|value| value.is_finite())
     }
     pub fn can_acquire(
         &self,
@@ -295,38 +346,71 @@ impl CarryState {
             .ok_or_else(|| ReferenceError("Cannot carry this item".into()))?;
         self.can_acquire(id, point, player, body, physics)?;
         let item = items.get_mut(id).unwrap();
+        let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = *self.anchor.get_or_insert_with(|| {
             physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
         });
         physics.edit_body(anchor, |body| body.set_position(pose, false));
         let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), true);
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).head_pose);
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
-        physics.edit_body(body, |body| body.enable_ccd(true));
-        if self.plates.contains(&id) {
-            physics.edit_body(body, |body| body.set_gravity_scale(0., true));
-        }
+        let rotation_frame = if self.rules[&id].no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        physics.edit_body(body, |body| {
+            body.enable_ccd(true);
+            body.set_gravity_scale(0.0, true);
+        });
         self.held = Some(HeldState {
             item: id,
             body,
             offset: (view.rotation.inverse() * (item_pose.translation - view.translation)
                 - Vector::from_array(self.reference.carry_anchor_offset))
             .clamp_length_max(self.reference.carry_offset_radius),
-            rotation: view.rotation.inverse() * item_pose.rotation,
+            rotation: rotation_frame.inverse() * item_pose.rotation,
             joint,
             local_pose,
+            gravity_scale,
         });
         item.location = ItemLocation::Held;
         self.cancel_input();
         Ok(())
     }
 
+    pub fn recenter(&mut self, player: &PlayerState, physics: &PhysicsWorld) {
+        let Some(held) = self.held.as_mut() else {
+            return;
+        };
+        let rule = &self.rules[&held.item];
+        let view = to_rapier(player.view(physics).head_pose);
+        let rotation_frame = if rule.no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        held.offset = if rule.use_recenter_position {
+            Vector::from_array(rule.recenter_position)
+        } else {
+            Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
+        };
+        held.rotation = rotation_frame.inverse()
+            * view.rotation
+            * if rule.use_recenter_rotation {
+                Rotation::from_array(rule.recenter_rotation)
+            } else {
+                Rotation::IDENTITY
+            };
+    }
     pub fn step(
         &mut self,
         input: FrameInput,
         player: &PlayerState,
+        tuning_available: bool,
         physics: &mut PhysicsWorld,
         dt: f32,
     ) -> bool {
@@ -340,30 +424,40 @@ impl CarryState {
         let Some(anchor) = self.anchor else {
             return false;
         };
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).head_pose);
         let rule = &self.rules[&held.item];
-        let mass = physics.rapier().bodies[held.body].mass();
+        let rotation_frame = if rule.no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        let view_in_frame = rotation_frame.inverse() * view.rotation;
+        let mass = physics.authored_body_mass(held.body);
         let movement_gain = ((mass - self.reference.carry_max_weight)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight))
             .clamp(0.0, 1.0);
         let rotation_gain = ((mass - self.reference.carry_max_weight * 2.0)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight * 2.0))
             .clamp(0.0, 1.0);
+        let rotating = input.held & keys::ROTATE != 0;
+        let moving = input.held & keys::TRANSLATE != 0;
         if (input.held | input.pressed) & keys::RECENTER != 0 {
             held.offset = if rule.use_recenter_position {
                 Vector::from_array(rule.recenter_position)
             } else {
                 Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
             };
-            held.rotation = if rule.use_recenter_rotation {
-                Rotation::from_array(rule.recenter_rotation)
-            } else {
-                Rotation::IDENTITY
-            };
+            held.rotation = rotation_frame.inverse()
+                * view.rotation
+                * if rule.use_recenter_rotation {
+                    Rotation::from_array(rule.recenter_rotation)
+                } else {
+                    Rotation::IDENTITY
+                };
         } else {
-            let rotating = input.held & keys::ROTATE != 0;
-            let moving = input.held & keys::TRANSLATE != 0;
-            if input.wheel.is_finite() && !rotating {
+            if input.wheel.is_finite()
+                && wheel_allowed(input, tuning_available, player.view_owns_look_input())
+            {
                 let direction = if rule.move_with_rotation {
                     (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
                         .normalize_or_zero()
@@ -377,7 +471,7 @@ impl CarryState {
                     * self.reference.obj_move_sensitivity;
             }
             if input.mouse.iter().all(|delta| delta.is_finite()) {
-                if rotating && !rule.no_rotation {
+                if rotating {
                     let sensitivity =
                         dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
                     let x = input.mouse[0] * sensitivity;
@@ -386,13 +480,16 @@ impl CarryState {
                         if rule.move_with_rotation {
                             held.rotation * Rotation::from_rotation_z(-x.to_radians())
                         } else {
-                            Rotation::from_rotation_z(-x.to_radians()) * held.rotation
+                            Rotation::from_axis_angle(view_in_frame * Vector::Z, -x.to_radians())
+                                * held.rotation
                         }
                     } else {
-                        Rotation::from_rotation_y(x.to_radians()) * held.rotation
+                        Rotation::from_axis_angle(view_in_frame * Vector::Y, x.to_radians())
+                            * held.rotation
                     };
                     held.rotation = if !rule.move_with_rotation || !moving {
-                        Rotation::from_rotation_x(y.to_radians()) * rotation
+                        Rotation::from_axis_angle(view_in_frame * Vector::X, y.to_radians())
+                            * rotation
                     } else {
                         rotation
                     };
@@ -429,7 +526,7 @@ impl CarryState {
                             self.reference.carry_min_distance,
                             self.reference.carry_max_distance,
                         ),
-            view.rotation * held.rotation,
+            rotation_frame * held.rotation,
         );
         desired *= held.local_pose.inverse();
         if (desired.translation - current.translation).length()

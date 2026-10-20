@@ -262,7 +262,7 @@ impl GarageRuntime {
         {
             return Err(ReferenceError("Missing particle source".into()));
         }
-        if self.survival.bladder.mixture.total() >= self.survival.bladder.capacity_liters {
+        if self.survival.bladder.total() >= self.survival.bladder.capacity_liters {
             return Ok(DrinkResult {
                 requested_liters: poured_liters,
                 debited_liters: 0.,
@@ -315,8 +315,8 @@ impl GarageRuntime {
             return Err(ReferenceError("Drink source has no fluid".into()));
         };
         if state.removed
-            || container.mixture.total() <= 0.
-            || self.survival.bladder.mixture.total() >= self.survival.bladder.capacity_liters
+            || container.total() <= 0.
+            || self.survival.bladder.total() >= self.survival.bladder.capacity_liters
         {
             return Ok(DrinkResult {
                 requested_liters,
@@ -324,9 +324,9 @@ impl GarageRuntime {
                 effect: ConsumptionEffect::default(),
             });
         }
-        let total = container.mixture.total();
+        let total = container.total();
         let fractions = container
-            .mixture
+            .mixture()
             .quantities_liters
             .map(|amount| amount / total);
         let needs = self.survival.output().needs;
@@ -484,7 +484,7 @@ impl GarageRuntime {
             .find(|b| b.kind == kind as u32)
             .unwrap();
         let pose = if kind == crate::audio::AudioKind::Eat {
-            self.area.player.view_pose(&self.physics)
+            self.area.player.view(&self.physics).head_pose
         } else {
             self.area.player.body_pose(&self.physics)
         };
@@ -575,13 +575,13 @@ impl GarageRuntime {
         } else {
             (0, 0., 1., 0.)
         };
-        let total = self.survival.bladder.mixture.total();
+        let total = self.survival.bladder.total();
         let fill = (total / self.survival.bladder.capacity_liters).clamp(0., 1.);
         if total > 0. {
             self.urine.set_color(
                 self.survival
                     .bladder
-                    .mixture
+                    .mixture()
                     .quantities_liters
                     .map(|v| v / total),
             );
@@ -722,7 +722,7 @@ impl GarageRuntime {
             || {
                 self.stream
                     .origin
-                    .absolute(self.area.player.view_pose(&self.physics).position)
+                    .absolute(self.area.player.view(&self.physics).head_pose.position)
             },
             |camera| camera.absolute_position,
         );
@@ -739,14 +739,31 @@ impl GarageRuntime {
     }
 }
 
+fn urine_outlet_pose(
+    view: crate::player::PlayerView,
+    anchor_midpoint: rapier3d::math::Vector,
+    reach: f32,
+    queries: &rapier3d::prelude::QueryPipeline<'_>,
+) -> rapier3d::math::Pose {
+    use rapier3d::math::{Rotation, Vector};
+    use rapier3d::prelude::Ray;
+    let view = to_rapier(view.head_pose);
+    let mut outlet = rapier3d::math::Pose::from_translation(anchor_midpoint);
+    let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+    let distance = queries
+        .cast_ray(&ray, reach, true)
+        .map_or(reach, |(_, t)| t);
+    let direction =
+        (ray.point_at(distance) - outlet.translation + Vector::Y * 0.25).normalize_or_zero();
+    outlet.rotation = Rotation::from_rotation_arc(-Vector::Z, direction);
+    outlet
+}
+
 impl GarageRuntime {
     pub(super) fn advance_urine(&mut self, reference: &ReferenceManifest, dt: f32) {
-        use rapier3d::math::{Rotation, Vector};
-        use rapier3d::prelude::{QueryFilter, Ray};
+        use rapier3d::math::Vector;
+        use rapier3d::prelude::QueryFilter;
         let body = self.area.player.body_handle();
-        let view = to_rapier(self.area.player.view_pose(&self.physics));
-        let mut cap = to_rapier(self.area.player.body_pose(&self.physics));
-        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
         let surfaces = |_: rapier3d::prelude::ColliderHandle, c: &rapier3d::prelude::Collider| {
             c.is_enabled()
                 && !c.is_sensor()
@@ -754,20 +771,19 @@ impl GarageRuntime {
                 && c.collision_groups().memberships.bits() & reference.player.action_masks.use_mask
                     != 0
         };
-        let distance = self
-            .physics
-            .queries(QueryFilter::default().predicate(&surfaces))
-            .cast_ray(&ray, reference.player.aim_reach, true)
-            .map_or(reference.player.aim_reach, |(_, t)| t);
-        let direction =
-            (ray.point_at(distance) - cap.translation + Vector::Y * 0.25).normalize_or_zero();
-        cap.rotation = Rotation::from_rotation_arc(-Vector::Z, direction);
+        let cap = urine_outlet_pose(
+            self.area.player.view(&self.physics),
+            self.area.player.source_anchor_midpoint(&self.physics),
+            reference.player.aim_reach,
+            &self
+                .physics
+                .queries(QueryFilter::default().predicate(&surfaces)),
+        );
         // The mouth and urine outlet own tank 73403. Source Tankolas excludes self-drinking.
         self.urine.advance(
             &self.urine_reference,
             cap,
             -Vector::Z,
-            None,
             Some(body),
             Vector::ZERO,
             0.,

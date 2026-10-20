@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-19. Approved scope: one complete garage repair and driving experience.
+Updated: 2026-10-20. Approved scope: one complete garage repair and driving experience.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
@@ -49,9 +49,9 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G04 | Fill and drain fluids. [Fluids](../src/fluids.rs), [interaction](../src/interaction.rs) | Hard | Verify | Operate caps and containers. Verify pouring, spilling, mixtures, empty supplies, and fluid retention after part removal. |
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
-| G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Partial | Verify pickup, drop, throw, rotation, distance, recenter, and pushing. Complete source action priority and resolve control conflicts. |
-| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Partial | Complete explicit equip and release, source Tab behavior, slot selection, swapping, and ownership rules. |
-| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, crouching, and seat transitions. Add source lean, zoom, and full low-posture behavior. |
+| G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Verify | Verify source pickup, drop, throw, rotation, distance, recenter, action ownership, push force, grip, and reset through normal input. |
+| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Verify | Verify explicit equip and release, source Tab behavior, slot selection, swapping, tool roles, and saved ownership. Browser acceptance remains open. See [G08 verification](g08-inventory.md). |
+| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, posture, lean, zoom, seats, recenter, and recovery through normal input. Verify schema 9 save/load. Resolve the far-coordinate slope-normal gap. |
 | G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs), [verification](g10-controls.md) | Hard | Verify | Source reactions, handbrake inputs, secondary-seat lights, dashboard lighting, and radio visuals implemented. Targeted checks pass. Computer Use URL policy stopped browser checks. All twelve normal-input scenarios remain open. Gauge readability and audible output remain unverified. G09 owns seat transitions. G13 owns missing radio persistence. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
 | G12 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | Hard | Verify | Drive out, turn, brake, park, and return. Verify nearby collision, ground seams, re-entry, and loose-object stability. |
@@ -66,10 +66,84 @@ Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicat
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
 
+G05 implementation, 2026-10-20: chassis ignition persists after engine removal.
+The engine retains mechanics, temperature, fluid identities, and its fuel binding.
+Detached engines use the source 0.2-second run grace and produce zero wheel torque.
+Starter release retains the source one-update delay. Cancellation and load clear transient starter commands.
+Engine decisions read prior fuel suitability and heat penalties. Mounted oil service keeps the existing fixed-step order.
+Start checks consume interval draws. At implementation time, schema 7 saved the next draw and ordered fluid contents.
+G04 later advanced the format to schema 8 and rejected schemas 6 and 7. G09 advances it to schema 9 and rejects earlier schemas.
+Engine drains use source sequential changes. A zero-total guard and bounded engine publication prevent invalid depleted quantities.
+This deliberately differs from source NaN and negative-total overdraw. General fluid transfer remains outside G05.
+Engine audio follows engine state and position, including detached grace and the genuine stop transition.
+
+Final review found that an active chassis advanced an inactive detached engine.
+The engine activity gate now freezes mechanics, item temperature, and bound fluids.
+The installed-export regression first failed, then passed.
+Chassis ignition, brake lights, brake wake, starter latch, and zero detached torque also passed.
+
+The prior targeted engine suite passed five tests. The final runtime filter passed four tests, including the combined restore scenario.
+These commands used `scripts/check.ps1` with `-IncludeIgnored`. Formatting and both WASM backend checks passed.
+Prior targeted ignition, fluid, audio, and save-storage checks passed. Existing compiler warnings remain.
+Initial Task 5 failures corrected test timing assumptions and pending-world restoration setup. No production defect required a Task 5 fix.
+The combined test uses real part transactions and fixed vehicle steps before and after normal native restore completion.
+It compares identities, complete fluid snapshots, temperature, ignition, and nonzero draw continuation.
+Native renderer receipts permit restore completion. They do not verify browser asset uploads or rendering.
+Full checks, release builds, and browser acceptance were deferred. Input capture and visible dashboard behavior remain unverified.
+Audible playback, full driving, and normal garage gameplay remain unaccepted. G05 stays Verify.
+The [approved specification](superpowers/specs/2026-10-20-g05-engine-design.md) records the source rules and runtime limits.
+
+G05 integration, 2026-10-20: G05 is merged into master with the current renderer and save finalizer.
+Integration review found no blocking issue. Targeted engine, runtime, audio, and save-storage checks passed.
+The merged result passed five engine tests, four runtime tests, two audio tests, and six web tests.
+Formatting and both WASM backend checks passed. Existing compiler warnings remain.
+Full checks, release builds, and browser acceptance remain deferred. G05 stays Verify.
+G08 integration, 2026-10-20: G08 is merged into master with the current road and grass worker tasks.
+The merged result passed 22 targeted native tests and seven web tests. Formatting and both WASM checks passed.
+Existing compiler warnings remain. The G08 worktree and merged branch were removed after verification.
+Browser acceptance, full checks, and product release builds remain open. G08 stays Verify.
+See [G08 verification](g08-inventory.md) for commands and limits.
+G04 update, 2026-10-20: ordered fluid state, direct fill, particle receipts, and detached tank checks are implemented.
+Task 5 baseline checks passed 30 native tests and five Python tests. Both WASM targets passed.
+The installed checks include three engine and radiator cycles each, signed save reconstruction, cap ownership, collision ownership, and mass.
+Final review found two P2 defects. Portable mass and receiver particle response are fixed.
+The fix wave passed 12 affected native tests and both WASM checks.
+Scoped re-review approved both fixes with no new actionable issue.
+Two reference-loading runtime cases remain ignored. Normal-input aiming, visible flow, audio, browser reload, and Unity callback timing remain unverified.
+Full-library checks previously failed because `records/managed/coverage.json` is missing. Selected runtime and package checks passed.
+See [G04 evidence](superpowers/reports/2026-10-20-g04-fluids.md) for commands, counts, rulings, and limits. G04 stays Verify.
+G04 integration, 2026-10-20: G04 is merged into master with G05 engine persistence and G08 inventory.
+At G04 integration, schema 8 stored ordered fluid entries and rejected schemas 6 and 7. G09 advances the combined format to schema 9.
+Integration review corrected deferred fluid cleanup and finite instrument sampling.
+Targeted fluid, engine, inventory, generated-owner restore, and instrument checks passed.
+The accepted native runs include 63 executions, with repeated filter cases counted.
+Five Python tests, six save-storage web tests, formatting, and both WASM backend checks passed.
+Matching selected assets passed native contract, reference, and immutable package validation.
+Merge commit: 777cedd. The G04 worktree and merged branch were removed after verification.
+Full-library coverage remains incomplete. Full checks, release builds, and browser acceptance remain deferred.
+See [G04 verification](superpowers/reports/2026-10-20-g04-fluids.md) for commands and limits. G04 stays Verify.
+
+G07 source handling is merged, including carry input ownership, mass publication, and push controls.
+Browser acceptance remains open. G07 stays Verify.
+
+G09 adds source posture, lean, look, zoom, seat views, recenter, and recovery.
+It integrates with G04 fluids, G05 engine, G07 carry, and G08 inventory.
+Save schema 9 stores persistent posture with combined garage state. It does not store temporary lean or zoom.
+Older schemas are rejected without migration. Registry Rapier 0.36 remains unchanged; no Rapier copy was added.
+Rapier normals fail over flat floors near 2000. This known gap keeps G09 Partial.
+The targeted interaction filter passed eight tests. Five reference-export tests remain ignored. The existing schema filter passed one test.
+Web input, feedback, and save-storage checks passed 13 tests. Both WASM check backends passed.
+The engine and garage-fluid suites compiled; each skipped five export-dependent tests. Full checks, release builds, and browser acceptance remain open.
+Private G09 assets predate integration and do not establish merged runtime parity. Browser behavior remains unverified.
+No runtime assets or G09 tests were added. G09 stays Partial.
+
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
 G13 follows the approved garage state. Saved survival needs remain deferred.
 G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
+Road and grass mesh jobs now run in workers. Active and prepared worlds own separate actors, results, and reservations.
+Main copies input into transfer buffers. WASM still copies input and output. Source review does not prove worker timing or memory release.
+Native and both WASM feature checks pass. No runtime, parity, driving, save/load, or performance acceptance is recorded. G15 stays Partial.
 G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
 It also requires the seven deferred G03 wheel checks in the [wheel audit](g03-wheel-audit.md).
 Verify hubcaps, complete wheels, tire separation, compatible assembly, fit rejection, step requirements, and repeated cycles.

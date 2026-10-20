@@ -103,3 +103,19 @@ pub fn capture_view_from_world(face: usize, target_position: [f32; 3]) -> [[f32;
     matrix[3][3] = 1.;
     matrix
 }
+
+/// Retain a valid source slot when no other capture is pending.
+pub fn pending_probe_index<const N: usize>(
+    current: usize,
+    probes: &[ProbeSchedule; N],
+    enabled: [bool; N],
+) -> usize {
+    let wanted = |index: usize| enabled[index] && !probes[index].published();
+    if !wanted(current) && probes[current].job() == ProbeJob::Face(0) {
+        return (1..N)
+            .map(|offset| (current + offset) % N)
+            .find(|&index| wanted(index))
+            .unwrap_or(current);
+    }
+    current
+}

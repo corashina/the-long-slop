@@ -28,6 +28,7 @@ pub struct WorldReference {
     pub sample_payload_sha256: String,
     pub managed_sha256: String,
     pub library: LibraryProvenance,
+    pub capture_library: LibraryProvenance,
     pub settings_context: String,
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
@@ -530,13 +531,7 @@ impl WorldReference {
                 && transform(&self.generation_frame),
             "world source context/frame",
         )?;
-        require(
-            self.library.schema_version == 1
-                && hash(&self.library.manifest_sha256)
-                && self.library.catalog_sha256 == manifest.library.catalog_sha256
-                && self.library.source_manifest_sha256 == manifest.library.source_manifest_sha256,
-            "world library receipt",
-        )?;
+        validate_world_libraries(&self.library, &self.capture_library, &manifest.library)?;
         require(
             self.spawn_context.classification == "controlled_startup_before_garage"
                 && self.spawn_context.engine_sha256
@@ -1668,4 +1663,26 @@ where
         ));
     }
     Ok(values.into_boxed_slice().into_vec())
+}
+
+fn validate_world_libraries(
+    current: &LibraryProvenance,
+    capture: &LibraryProvenance,
+    accepted: &LibraryProvenance,
+) -> Result<(), ReferenceError> {
+    require(
+        current.schema_version == 1
+            && current.manifest_sha256 == accepted.manifest_sha256
+            && current.catalog_sha256 == accepted.catalog_sha256
+            && current.source_manifest_sha256 == accepted.source_manifest_sha256,
+        "world library receipt",
+    )?;
+    require(
+        capture.schema_version == 1
+            && capture.manifest_sha256
+                == "92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99"
+            && capture.catalog_sha256 == current.catalog_sha256
+            && capture.source_manifest_sha256 == current.source_manifest_sha256,
+        "world capture library receipt",
+    )
 }

@@ -89,8 +89,6 @@ pub struct CandidatePipelines(
     pub Option<WorldPipelines>,
     pub Option<crate::presentation::gpu_prepare::GpuPreparation>,
 );
-#[derive(Resource, Default)]
-pub struct PipelineIsolation(pub std::collections::HashSet<CachedRenderPipelineId>);
 pub struct WorldPipelinePlugin;
 impl Plugin for WorldPipelinePlugin {
     fn build(&self, app: &mut App) {
@@ -99,7 +97,6 @@ impl Plugin for WorldPipelinePlugin {
             .init_resource::<WorldPipelines>()
             .add_plugins(ExtractResourcePlugin::<WorldPipelines>::default());
         app.sub_app_mut(RenderApp)
-            .init_resource::<PipelineIsolation>()
             .init_resource::<super::super::pipeline_ownership::PipelineOwners>()
             .add_systems(
                 Render,
@@ -459,10 +456,7 @@ fn compile(world: &mut World) {
         return;
     };
     let candidate = world.resource::<CandidatePipelines>().0.clone();
-    world
-        .resource_mut::<PipelineIsolation>()
-        .0
-        .retain(|id| !active.owns(*id));
+    super::super::pipeline_ownership::refresh_isolation(world);
     for (bank, input) in std::iter::once(active).chain(candidate).enumerate() {
         let Some(shared) = &input.jobs else {
             continue;
@@ -607,92 +601,44 @@ fn compile_pair(
                     .unwrap()
                     .clone()
             });
-            if owner.as_ref().is_some_and(|o| o.cancelled()) {
-                job.physical.stop();
-                job.waiting = "cancelled";
-                return dispatched;
-            }
-            let _queue = if owner.is_some() {
-                match super::super::pipeline_ownership::queue_scope(
-                    world.resource::<PipelineCache>(),
-                ) {
-                    Ok(scope) => Some(scope),
-                    Err(error) => {
-                        job.state =
-                            RenderingState::Failed(pipeline_diagnostic(format_args!("{error}")));
-                        break;
-                    }
-                }
-            } else {
-                None
+            let usage = match &owner {
+                Some(owner) => super::super::pipeline_ownership::PipelineUse::Candidate(owner),
+                None => super::super::pipeline_ownership::PipelineUse::Active,
             };
-            let key = ErasedMaterialPipelineKey {
-                type_id: job.material.type_id(),
-                mesh_key: ErasedMeshPipelineKey::new(mesh_key),
-                material_key: properties.material_key.clone(),
-            };
-            let result = if shadow {
-                let Some(specialize) = properties.prepass_specialize else {
-                    job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
-                        "Source shadow material has no shader pass"
-                    )));
-                    break;
+            let result = super::super::pipeline_ownership::specialize_base(world, usage, |world| {
+                let key = ErasedMaterialPipelineKey {
+                    type_id: job.material.type_id(),
+                    mesh_key: ErasedMeshPipelineKey::new(mesh_key),
+                    material_key: properties.material_key.clone(),
                 };
-                dispatched += 1;
-                specialize(world, key, &layout, &properties)
-            } else {
-                dispatched += 1;
-                base_specialize(world, key, &layout, &properties)
-            };
+                let result = if shadow {
+                    let Some(specialize) = properties.prepass_specialize else {
+                        return Err(ReferenceError(
+                            "Source shadow material has no shader pass".into(),
+                        ));
+                    };
+                    dispatched += 1;
+                    specialize(world, key, &layout, &properties)
+                } else {
+                    dispatched += 1;
+                    base_specialize(world, key, &layout, &properties)
+                };
+                result.map_err(|error| ReferenceError(format!("Source material pipeline: {error}")))
+            });
             match result {
-                Ok(id) => {
-                    if let Some(owner) = &owner {
-                        let claimed = world
-                            .resource::<super::super::pipeline_ownership::PipelineOwners>()
-                            .claim(world.resource::<PipelineCache>(), id, owner);
-                        if claimed {
-                            world
-                                .resource_mut::<crate::presentation::caster::CasterPasses>()
-                                .revisit(id);
-                            world
-                                .resource_mut::<crate::presentation::surface_pass::SurfacePasses>()
-                                .revisit(id);
-                        }
-                        if world
-                            .resource::<super::super::pipeline_ownership::PipelineOwners>()
-                            .isolated(id)
-                        {
-                            world.resource_mut::<PipelineIsolation>().0.insert(id);
-                        }
-                    } else {
-                        let reclaimed = world.resource_scope(
-                                    |world,
-                                     owners: Mut<
-                                        super::super::pipeline_ownership::PipelineOwners,
-                                    >| {
-                                        owners.reclaim_active(
-                                            &mut world.resource_mut::<PipelineCache>(),
-                                            id,
-                                        )
-                                    },
-                                );
-                        if reclaimed {
-                            world
-                                .resource_mut::<crate::presentation::caster::CasterPasses>()
-                                .revisit(id);
-                            world
-                                .resource_mut::<crate::presentation::surface_pass::SurfacePasses>()
-                                .revisit(id);
-                        }
-                    }
+                Ok(Some(id)) => {
                     if !job.ids.contains(&id) {
                         job.ids.push(id);
                     }
                 }
+                Ok(None) => {
+                    job.physical.stop();
+                    job.waiting = "cancelled";
+                    return dispatched;
+                }
                 Err(error) => {
-                    job.state = RenderingState::Failed(pipeline_diagnostic(format_args!(
-                        "Source material pipeline: {error}"
-                    )));
+                    job.state =
+                        RenderingState::Failed(pipeline_diagnostic(format_args!("{}", error.0)));
                     break;
                 }
             }

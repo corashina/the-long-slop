@@ -23,7 +23,6 @@ pub struct PushState {
     grip: Option<Grip>,
     cancelled: bool,
     steer: Option<f32>,
-    target: Option<(ItemId, rapier3d::prelude::ColliderHandle)>,
 }
 impl PushState {
     pub fn new(reference: &ReferenceManifest) -> Self {
@@ -42,7 +41,6 @@ impl PushState {
             grip: None,
             cancelled: false,
             steer: None,
-            target: None,
         }
     }
     pub fn is_grip(&self, item: ItemId, collider: crate::reference::ColliderId) -> bool {
@@ -54,8 +52,60 @@ impl PushState {
     pub fn supports(&self, item: ItemId) -> bool {
         self.rules.contains_key(&item)
     }
+    pub(super) fn can_start(
+        &self,
+        target: AimTarget,
+        bodies: &HashMap<BodyId, RigidBodyHandle>,
+        player: &PlayerState,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(rule) = self.rules.get(&target.item) else {
+            return false;
+        };
+        let Some(&body) = bodies.get(&rule.body) else {
+            return false;
+        };
+        let Some(collider) = physics.rapier().colliders.get(target.collider) else {
+            return false;
+        };
+        if target.slot.is_some()
+            || player.seat().is_some()
+            || !target.point.iter().all(|v| v.is_finite())
+            || physics
+                .rapier()
+                .bodies
+                .get(body)
+                .is_none_or(|b| !b.is_dynamic() || !b.is_enabled())
+            || !collider.is_enabled()
+        {
+            return false;
+        }
+        let id = crate::reference::ColliderId((collider.user_data >> 64) as u32);
+        if self.is_grip(target.item, id) {
+            let grip = rule.grip.as_ref().unwrap();
+            player.grounded()
+                && !grip.in_use
+                && player.support_body() != Some(body)
+                && self.grip_in_range(grip, body, player, physics)
+        } else {
+            rule.push_even_if_same_parent
+                || !player.grounded()
+                || player.support_body() != Some(body)
+        }
+    }
+    fn grip_in_range(
+        &self,
+        rule: &crate::reference::PushGripReference,
+        body: RigidBodyHandle,
+        player: &PlayerState,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let point = *physics.rapier().bodies[body].position()
+            * Vector::from_array(rule.local_pose.translation);
+        Vector::from_array(player.body_pose(physics).position).distance_squared(point)
+            <= self.player.grip_distance.powi(2)
+    }
     pub fn cancel_input(&mut self) {
-        self.target = None;
         self.cancelled = true;
         self.steer = None;
     }
@@ -71,7 +121,6 @@ impl PushState {
         }
         player.set_push_gripping(false, physics);
         self.steer = None;
-        self.target = None;
         self.cancelled = false;
     }
     pub(super) fn finish_cancelled_input(
@@ -131,14 +180,11 @@ impl PushState {
             self.stop(player, physics);
             return None;
         };
-        if input.pressed & keys::GRAB != 0 {
-            if self.grip.is_some() {
-                self.stop(player, physics);
-                return None;
-            }
-            self.target = Some((target.item, target.collider));
+        if input.pressed & keys::GRAB != 0 && self.grip.is_some() {
+            self.stop(player, physics);
+            return None;
         }
-        if self.target != Some((target.item, target.collider)) {
+        if self.grip.is_none() && !self.can_start(target, bodies, player, physics) {
             self.stop(player, physics);
             return None;
         }
@@ -152,10 +198,6 @@ impl PushState {
         };
         if target.slot.is_some()
             || player.seat().is_some()
-            || (self.grip.is_none()
-                && player.grounded()
-                && player.support_body() == Some(body_handle)
-                && !rule.push_even_if_same_parent)
             || !target.point.iter().all(|v| v.is_finite())
         {
             self.stop(player, physics);
@@ -176,17 +218,7 @@ impl PushState {
             let grip_rule = rule.grip.as_ref().unwrap();
             let car_pose = *physics.rapier().bodies[body_handle].position();
             let position = Vector::from_array(player.body_pose(physics).position);
-            let grip_pose = car_pose
-                * to_rapier(crate::vehicle::VehiclePose {
-                    position: grip_rule.local_pose.translation,
-                    rotation: grip_rule.local_pose.rotation,
-                });
-            if (self.grip.is_none()
-                && (!player.grounded()
-                    || grip_rule.in_use
-                    || player.support_body() == Some(body_handle)))
-                || position.distance_squared(grip_pose.translation)
-                    > self.player.grip_distance.powi(2)
+            if !self.grip_in_range(grip_rule, body_handle, player, physics)
                 || self
                     .grip
                     .as_ref()
@@ -251,7 +283,7 @@ impl PushState {
             self.stop(player, physics);
             return None;
         }
-        let view = to_rapier(player.view_pose(physics));
+        let view = to_rapier(player.view(physics).camera_pose);
         let forward = view.rotation * -Vector::Z;
         let mut direction = forward;
         let projected = Vector::new(direction.x, 0.0, direction.z);

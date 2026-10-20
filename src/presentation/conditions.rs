@@ -63,7 +63,7 @@ impl Plugin for ConditionPlugin {
             (prepare_conditions, sync_conditions)
                 .chain()
                 .after(materials::bind_authored_materials)
-                .after(crate::app::advance_tools)
+                .after(crate::app::sync_imported)
                 .before(super::plates::bind_plate_text),
         );
     }

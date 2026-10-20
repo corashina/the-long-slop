@@ -2,9 +2,10 @@
 use super::{
     lighting_assets::LightingRenderAssets,
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
-    materials::{MaterialLoading, RenderingState},
+    materials::MaterialLoading,
+    readiness::RendererStateHandle,
     render_targets::{HDR_FORMAT, MSAA_SAMPLES, ProbeTargets, SurfaceTargets},
-    source_lighting::{SourceLightingStatus, SourceViewLighting},
+    source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
     transparent::SourceTransparentPasses,
@@ -82,7 +83,7 @@ impl SurfaceResources {
     }
 }
 
-pub fn prepare_views(
+pub(crate) fn prepare_views(
     mut commands: Commands,
     frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<LightingRenderAssets>>,
@@ -102,13 +103,13 @@ pub fn prepare_views(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Surface,
         &frame,
     );
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     let (Some(assets), Some(scene), Some(capacity)) = (
@@ -132,9 +133,7 @@ pub fn prepare_views(
                     1
                 }
         {
-            *status.0.lock().unwrap() = RenderingState::Failed(
-                "Source surface view identity, format, or sample count is invalid".into(),
-            );
+            status.fail("Source surface view identity, format, or sample count is invalid".into());
             return;
         }
         if view.viewport.z == 0 || view.viewport.w == 0 {
@@ -148,8 +147,7 @@ pub fn prepare_views(
         .flatten()
         .any(|size| *size != UVec2::splat(64))
     {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source surface view extents disagree".into());
+        status.fail("Source surface view extents disagree".into());
         return;
     }
     if extents[PROBE_START..].iter().any(Option::is_none) {
@@ -160,8 +158,7 @@ pub fn prepare_views(
     };
     let native = snapshot.native_extent;
     let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source world atlas extent is invalid".into());
+        status.fail("Source world atlas extent is invalid".into());
         return;
     };
     let needs_targets = existing.as_ref().is_none_or(|value| {
@@ -178,7 +175,7 @@ pub fn prepare_views(
             {
                 Ok(()) => {}
                 Err(error) => {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                    status.fail(error);
                     return;
                 }
             }
@@ -188,7 +185,7 @@ pub fn prepare_views(
                     commands.insert_resource(value);
                 }
                 Err(error) => {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                    status.fail(error);
                 }
             }
             return;
@@ -227,19 +224,17 @@ pub fn prepare_views(
         ) {
             Ok(value) => value,
             Err(error) => {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
         };
         if bound.is_some_and(|bound| std::sync::Arc::ptr_eq(&bound.0, target)) {
             let Some(mut binding) = binding else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source view lighting binding is missing".into());
+                status.fail("Source view lighting binding is missing".into());
                 return;
             };
             let Some(mut glass) = glass else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source glass view binding is missing".into());
+                status.fail("Source glass view binding is missing".into());
                 return;
             };
             if timing.enabled() {
@@ -255,7 +250,7 @@ pub fn prepare_views(
                 }
             }
             if let Err(error) = glass.write(glass_value, &device, &queue) {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
             binding.write(uniform, &device, &queue);
@@ -271,7 +266,7 @@ pub fn prepare_views(
         let glass = match SourceGlassView::new(&device, &queue, &cache, glass_value) {
             Ok(value) => value,
             Err(error) => {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
         };

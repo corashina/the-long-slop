@@ -1,14 +1,10 @@
 //! Camera-dependent Grass work uses the world publication and allocation gates.
+use super::grass_worker::{DOMAIN_BYTES, GrassJobId, GrassPoll, GrassWorker, INITIAL_WASM_BYTES};
 use super::pipelines::{PipelineTicket, WorldPipelines};
 use crate::{
     presentation::materials::{
         RenderingState,
-        grass::{
-            GrassPatch, GrassSettings, GrassView,
-            domain::GrassDomain,
-            expansion::GrassExpansion,
-            material::{BLADE_ATTRIBUTE, GrassMaterial},
-        },
+        grass::material::{BLADE_ATTRIBUTE, GrassMaterial},
     },
     reference::ReferenceError,
     world::WorldStream,
@@ -19,6 +15,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
+use grass_mesh::{GrassExpansion, GrassPatch, GrassSettings, GrassView};
 use std::sync::Arc;
 struct Geometry {
     mesh: Handle<Mesh>,
@@ -30,7 +27,13 @@ struct Geometry {
 }
 enum Pending {
     Queued,
-    Expand(GrassExpansion),
+    Worker {
+        id: GrassJobId,
+        view: GrassView,
+        approved: bool,
+        canceled: bool,
+        scratch: usize,
+    },
     Upload {
         mesh: Handle<Mesh>,
         material: Handle<GrassMaterial>,
@@ -59,12 +62,15 @@ struct Instance {
     pending_cpu: usize,
     pending_gpu: usize,
     metadata: usize,
+    cache_cpu: usize,
+    install_cpu: usize,
     ready: bool,
 }
 #[derive(Resource, Default)]
 pub struct GrassJobs {
     instances: Vec<Instance>,
-    domains: Option<Arc<[GrassDomain; 4]>>,
+    worker: GrassWorker,
+    actor_cpu: usize,
     revision: u64,
 }
 fn allocation(
@@ -105,7 +111,7 @@ impl GrassJobs {
         serde_json::json!({
             "idle": self.instances.iter().filter(|i| !i.ready && i.pending.is_none()).count(),
             "queued": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Queued))).count(),
-            "expanding": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Expand(_)))).count(),
+            "expanding": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Worker { .. }))).count(),
             "uploading": self.instances.iter().filter(|i| matches!(i.pending, Some(Pending::Upload { .. }))).count(),
         })
     }
@@ -114,6 +120,8 @@ impl GrassJobs {
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<GrassMaterial>,
     ) {
+        self.worker.dispose();
+        self.actor_cpu = 0;
         for instance in self.instances.drain(..) {
             if let Some(accepted) = instance.accepted {
                 meshes.remove(accepted.mesh.id());
@@ -124,7 +132,15 @@ impl GrassJobs {
                 materials.remove(material.id());
             }
         }
-        self.domains = None;
+    }
+    pub(crate) fn cancel(&mut self) {
+        // Keep every charge until release_all drops this canceled presentation.
+        self.worker.dispose();
+        for instance in &self.instances {
+            if let Some(continuation) = &instance.continuation {
+                continuation.stop_flight();
+            }
+        }
     }
     pub(crate) fn drained(&self) -> bool {
         self.instances
@@ -151,10 +167,11 @@ impl GrassJobs {
         })
     }
 
-    pub fn release_domains(&mut self) {
-        if self.instances.is_empty() {
-            self.domains = None;
+    pub fn release_domains(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+        if self.instances.is_empty() && self.actor_cpu > 0 {
+            self.release_worker(stream)?;
         }
+        Ok(())
     }
 
     /// Source patch identities for the admitted canonical triangle expansion.
@@ -215,6 +232,11 @@ impl GrassJobs {
             .iter()
             .any(|i| i.parent == parent && i.pending.is_some());
         if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
+            if !Arc::ptr_eq(&instance.patches, &patches) || instance.settings != settings {
+                return Err(ReferenceError(
+                    "Grass entity source changed before retirement".into(),
+                ));
+            }
             instance.latest = view;
             if group_idle
                 && instance.pending.is_none()
@@ -228,19 +250,6 @@ impl GrassJobs {
         }
         if self.instances.len() >= 8192 {
             return Err(ReferenceError("Grass instance count cap".into()));
-        }
-        if self.domains.is_none() {
-            // Fixed selected domains have 304 points and 510 triangles in total.
-            let bytes = std::mem::size_of::<[GrassDomain; 4]>() + 304 * 12 + 510 * 6;
-            let mut next = stream.presentation_allocation();
-            next.prototype_cpu += bytes;
-            stream.set_presentation_allocation(next)?;
-            self.domains = Some(Arc::new([
-                GrassDomain::new(2)?,
-                GrassDomain::new(4)?,
-                GrassDomain::new(8)?,
-                GrassDomain::new(16)?,
-            ]));
         }
         let metadata = std::mem::size_of::<Instance>();
         let continuation = if group_idle && stream.can_request_independent(1) {
@@ -270,9 +279,64 @@ impl GrassJobs {
             pending_cpu: 0,
             pending_gpu: 0,
             metadata,
+            cache_cpu: 0,
+            install_cpu: 0,
             ready: false,
         });
         Ok(())
+    }
+    fn reserve_capacity(
+        worker: &GrassWorker,
+        actor: &mut usize,
+        stream: &mut WorldStream,
+        staging: usize,
+        extra: usize,
+    ) -> Result<(), ReferenceError> {
+        let mut next = stream.presentation_allocation();
+        let logical = next
+            .grass_worker_cache_bytes
+            .checked_add(staging)
+            .and_then(|v| v.checked_add(extra))
+            .ok_or_else(|| ReferenceError("Grass capacity overflow".into()))?;
+        // Estimate allocator growth separately from logical buffers. Retain the admitted high-water charge.
+        let capacity = logical
+            .checked_mul(2)
+            .and_then(|v| v.checked_add(INITIAL_WASM_BYTES))
+            .and_then(usize::checked_next_power_of_two)
+            .ok_or_else(|| ReferenceError("Grass capacity overflow".into()))?
+            .max(next.grass_worker_reserved_bytes);
+        let delta = capacity - next.grass_worker_reserved_bytes;
+        next.active_cpu += delta;
+        next.grass_worker_reserved_bytes = capacity;
+        stream.set_presentation_allocation(next)?;
+        *actor += delta;
+        worker.capacity_limit(capacity)
+    }
+    fn release_worker(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+        self.worker.dispose();
+        let mut next = stream.presentation_allocation();
+        next.active_cpu -= self.actor_cpu;
+        self.actor_cpu = 0;
+        for i in &mut self.instances {
+            next.active_cpu -= i.cache_cpu + i.install_cpu;
+            next.staging_bytes -= i.install_cpu;
+            next.jobs -= usize::from(i.install_cpu > 0);
+            i.cache_cpu = 0;
+            i.install_cpu = 0;
+            if matches!(i.pending, Some(Pending::Worker { .. })) {
+                next.active_cpu -= i.pending_cpu;
+                next.staging_bytes -= i.pending_cpu;
+                next.active_gpu -= i.pending_gpu;
+                next.jobs -= 1;
+                i.pending_cpu = 0;
+                i.pending_gpu = 0;
+                i.pending = Some(Pending::Queued);
+            }
+        }
+        next.grass_worker_reserved_bytes = 0;
+        next.grass_worker_wasm_bytes = 0;
+        next.grass_worker_cache_bytes = 0;
+        stream.set_presentation_allocation(next)
     }
     pub fn prepare(
         &mut self,
@@ -284,6 +348,75 @@ impl GrassJobs {
         pipelines: &mut WorldPipelines,
         fixed: &crate::presentation::fixed_assets::SourceFixedAssets,
     ) -> Result<(), ReferenceError> {
+        let result = self.prepare_inner(
+            stream,
+            writers_ready,
+            commands,
+            meshes,
+            materials,
+            pipelines,
+            fixed,
+        );
+        if result.is_err() {
+            self.release_worker(stream)?;
+        }
+        result
+    }
+    fn prepare_inner(
+        &mut self,
+        stream: &mut WorldStream,
+        writers_ready: bool,
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<GrassMaterial>,
+        pipelines: &mut WorldPipelines,
+        fixed: &crate::presentation::fixed_assets::SourceFixedAssets,
+    ) -> Result<(), ReferenceError> {
+        if !self.instances.is_empty() {
+            if self.actor_cpu == 0 {
+                let mut next = stream.presentation_allocation();
+                next.active_cpu += INITIAL_WASM_BYTES + DOMAIN_BYTES;
+                next.grass_worker_reserved_bytes = INITIAL_WASM_BYTES;
+                next.grass_worker_cache_bytes = DOMAIN_BYTES;
+                stream.set_presentation_allocation(next)?;
+                self.actor_cpu = INITIAL_WASM_BYTES + DOMAIN_BYTES;
+            }
+            if !self.worker.initialize()? {
+                return Ok(());
+            }
+        }
+        let poll = self.worker.poll()?;
+        let mut next = stream.presentation_allocation();
+        if next.grass_worker_wasm_bytes != self.worker.wasm_bytes() {
+            next.grass_worker_wasm_bytes = self.worker.wasm_bytes();
+            stream.set_presentation_allocation(next)?;
+        }
+        let candidate = if self.worker.busy() {
+            None
+        } else {
+            self.instances
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| {
+                    !i.retirement.started()
+                        && i.session == stream.frame().request.session
+                        && matches!(i.pending, Some(Pending::Queued))
+                })
+                .min_by_key(|(index, i)| (i.last_started, *index))
+                .map(|(index, _)| index)
+        };
+        let worker_staging: usize = self
+            .instances
+            .iter()
+            .map(|i| {
+                i.install_cpu
+                    + if matches!(i.pending, Some(Pending::Worker { .. })) {
+                        i.pending_cpu
+                    } else {
+                        0
+                    }
+            })
+            .sum();
         for index in 0..self.instances.len() {
             let needs_child = self.instances[index].pending.is_none()
                 && self.instances[index].accepted_view != Some(self.instances[index].latest);
@@ -309,82 +442,204 @@ impl GrassJobs {
                     Some(stream.reserve_grass_renderer(instance.entity.to_bits(), 0)?);
                 instance.pending = Some(Pending::Queued);
             }
+            if instance.install_cpu > 0 && self.worker.installed(instance.entity.to_bits())? {
+                let bytes = instance.install_cpu;
+                let mut next = stream.presentation_allocation();
+                next.active_cpu -= bytes;
+                next.staging_bytes -= bytes;
+                next.jobs -= 1;
+                stream.set_presentation_allocation(next)?;
+                instance.install_cpu = 0;
+            }
             if writers_ready
+                && candidate == Some(index)
                 && matches!(instance.pending, Some(Pending::Queued))
                 && stream.available_external_jobs() > 0
             {
-                self.revision = self.revision.wrapping_add(1);
-                instance.last_started = self.revision;
-                let mut cpu = 0;
-                let job = GrassExpansion::new(
-                    instance.session,
-                    self.revision,
-                    instance.latest,
-                    instance.settings,
-                    Arc::clone(&instance.patches),
-                    Arc::clone(self.domains.as_ref().unwrap()),
-                    |bytes, _| {
-                        pending_allocation(stream, bytes, 0, 1)?;
-                        cpu = bytes;
-                        Ok(())
-                    },
-                )?;
-                instance.pending_cpu = cpu;
-                instance.pending = Some(Pending::Expand(job));
-            }
-            if let Some(Pending::Expand(job)) = &mut instance.pending {
-                let mut added = (0, 0);
-                let complete = job.prepare(|cpu, gpu| {
-                    pending_allocation(stream, cpu * 2, gpu, 0)?;
-                    added = (cpu * 2, gpu);
-                    Ok(())
-                })?;
-                instance.pending_cpu += added.0;
-                instance.pending_gpu += added.1;
-                if complete {
-                    pending_allocation(stream, 4096, 8, 0)?;
-                    instance.pending_cpu += 4096;
-                    instance.pending_gpu += 8;
-                    allocation(stream, 0, 0, -1, 0)?;
-                    let Some(Pending::Expand(job)) = instance.pending.take() else {
-                        unreachable!()
-                    };
-
-                    let (view, output, scratch) = job.finish();
+                if instance.cache_cpu == 0 {
+                    let encoded = grass_mesh::dataset_encoded_len(&instance.patches)
+                        .map_err(ReferenceError)?;
+                    // Decoded Vec, Arc conversion overlap, encoded main/JS/WASM copies, and metadata.
+                    let cache = instance
+                        .patches
+                        .len()
+                        .checked_mul(std::mem::size_of::<GrassPatch>())
+                        .and_then(|v| v.checked_add(256))
+                        .ok_or_else(|| ReferenceError("Grass cache overflow".into()))?;
+                    let copies = encoded
+                        .checked_mul(3)
+                        .and_then(|v| v.checked_add(cache))
+                        .ok_or_else(|| ReferenceError("Grass install overflow".into()))?;
+                    Self::reserve_capacity(
+                        &self.worker,
+                        &mut self.actor_cpu,
+                        stream,
+                        worker_staging,
+                        cache + copies,
+                    )?;
                     let mut next = stream.presentation_allocation();
-                    next.active_cpu = next.active_cpu.checked_sub(scratch).unwrap();
-                    next.staging_bytes = next.staging_bytes.checked_sub(scratch).unwrap();
+                    next.active_cpu += cache + copies;
+                    next.staging_bytes += copies;
+                    next.jobs += 1;
+                    next.grass_worker_cache_bytes += cache;
                     stream.set_presentation_allocation(next)?;
-                    instance.pending_cpu = instance.pending_cpu.checked_sub(scratch).unwrap();
-                    let mut mesh = Mesh::new(
-                        PrimitiveTopology::TriangleList,
-                        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-                    );
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, output.anchors);
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, output.uvs);
-                    mesh.insert_attribute(BLADE_ATTRIBUTE, output.blades);
-                    mesh.insert_indices(Indices::U32(output.indices));
-                    let mut material = materials
-                        .get(&instance.material)
-                        .ok_or_else(|| ReferenceError("Missing Grass material owner".into()))?
-                        .clone();
-                    material.uniform.camera = view.position.extend(view.screen_height);
-                    let mesh = meshes.add(mesh);
-                    let upload = fixed.watch_meshes(std::iter::once(mesh.clone()));
-                    instance
-                        .continuation
-                        .as_mut()
-                        .unwrap()
-                        .watch_upload(upload.receipt.clone());
-                    instance.upload = Some(upload);
-                    instance.pending = Some(Pending::Upload {
-                        mesh,
-                        material: materials.add(material),
-                        view,
-                        patches: output.patches,
-                        ticket: None,
-                    });
+                    instance.cache_cpu = cache;
+                    instance.install_cpu = copies;
+                    self.revision = self
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| ReferenceError("Grass dataset revision exhausted".into()))?;
+                    self.worker.packing_started()?;
+                    let mut input = Vec::with_capacity(encoded);
+                    grass_mesh::encode_dataset(&instance.patches, instance.settings, &mut input);
+                    self.worker.packing_ended();
+                    self.worker.install(
+                        GrassJobId {
+                            session: instance.session,
+                            revision: self.revision,
+                            entity: instance.entity.to_bits(),
+                        },
+                        &input,
+                        GrassExpansion::planning_bytes(instance.patches.len())
+                            .map_err(ReferenceError)?,
+                    )?;
                 }
+                if self.worker.installed(instance.entity.to_bits())? {
+                    self.revision = self
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| ReferenceError("Grass view revision exhausted".into()))?;
+                    instance.last_started = self.revision;
+                    let scratch = GrassExpansion::planning_bytes(instance.patches.len())
+                        .map_err(ReferenceError)?;
+                    // Include captured view copies and transport control storage through physical release.
+                    let cpu = scratch
+                        .checked_add(1024)
+                        .ok_or_else(|| ReferenceError("Grass plan overflow".into()))?;
+                    Self::reserve_capacity(
+                        &self.worker,
+                        &mut self.actor_cpu,
+                        stream,
+                        worker_staging,
+                        cpu,
+                    )?;
+                    pending_allocation(stream, cpu, 0, 1)?;
+                    instance.pending_cpu = cpu;
+                    let id = GrassJobId {
+                        session: instance.session,
+                        revision: self.revision,
+                        entity: instance.entity.to_bits(),
+                    };
+                    instance.pending = Some(Pending::Worker {
+                        id,
+                        view: instance.latest,
+                        approved: false,
+                        canceled: false,
+                        scratch,
+                    });
+                    self.worker.submit(id, instance.latest)?;
+                }
+            }
+            if let Some(Pending::Worker {
+                id,
+                approved,
+                canceled,
+                scratch,
+                ..
+            }) = &mut instance.pending
+            {
+                if *canceled {
+                    if !self.worker.owns(*id) {
+                        let mut next = stream.presentation_allocation();
+                        next.active_cpu -= instance.pending_cpu;
+                        next.staging_bytes -= instance.pending_cpu;
+                        next.jobs -= 1;
+                        stream.set_presentation_allocation(next)?;
+                        instance.pending_cpu = 0;
+                        instance.pending_gpu = 0;
+                        instance.pending = Some(Pending::Queued);
+                    }
+                } else if let GrassPoll::Planned(owner, plan) = poll {
+                    if owner == *id && !*approved {
+                        if plan.scratch_bytes != *scratch {
+                            return Err(ReferenceError("Grass scratch plan mismatch".into()));
+                        }
+                        let cpu = plan
+                            .output_bytes
+                            .checked_mul(2)
+                            .ok_or_else(|| ReferenceError("Grass output overflow".into()))?;
+                        if Self::reserve_capacity(
+                            &self.worker,
+                            &mut self.actor_cpu,
+                            stream,
+                            worker_staging,
+                            cpu,
+                        )
+                        .is_err()
+                            || pending_allocation(stream, cpu, plan.gpu_bytes, 0).is_err()
+                        {
+                            self.worker.discard();
+                            *canceled = true;
+                        } else {
+                            instance.pending_cpu += cpu;
+                            instance.pending_gpu += plan.gpu_bytes;
+                            self.worker.approve(*id, plan.output_bytes)?;
+                            *approved = true;
+                        }
+                    }
+                }
+            }
+            let completed = matches!((&instance.pending,poll),(Some(Pending::Worker{id,canceled:false,..}),GrassPoll::Ready(owner)) if *id==owner);
+            if completed {
+                pending_allocation(stream, 4096, 8, 0)?;
+                instance.pending_cpu += 4096;
+                instance.pending_gpu += 8;
+                let Some(Pending::Worker { id, view, .. }) = instance.pending.as_ref() else {
+                    unreachable!()
+                };
+                let (id, view) = (*id, *view);
+                let mut material = materials
+                    .get(&instance.material)
+                    .ok_or_else(|| ReferenceError("Missing Grass material owner".into()))?
+                    .clone();
+                let output = self.worker.consume(id)?;
+                // consume physically releases the worker plan, worker output and transferred arrays.
+                let retained = output.retained_bytes();
+                let released = instance
+                    .pending_cpu
+                    .checked_sub(retained + 4096)
+                    .ok_or_else(|| ReferenceError("Grass result reservation mismatch".into()))?;
+                let mut next = stream.presentation_allocation();
+                next.active_cpu -= released;
+                next.staging_bytes -= released;
+                next.jobs -= 1;
+                stream.set_presentation_allocation(next)?;
+                instance.pending_cpu -= released;
+                let mut mesh = Mesh::new(
+                    PrimitiveTopology::TriangleList,
+                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+                );
+                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, output.anchors);
+                mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, output.uvs);
+                mesh.insert_attribute(BLADE_ATTRIBUTE, output.blades);
+                mesh.insert_indices(Indices::U32(output.indices));
+
+                material.uniform.camera = view.position.extend(view.screen_height);
+                let mesh = meshes.add(mesh);
+                let upload = fixed.watch_meshes(std::iter::once(mesh.clone()));
+                instance
+                    .continuation
+                    .as_mut()
+                    .unwrap()
+                    .watch_upload(upload.receipt.clone());
+                instance.upload = Some(upload);
+                instance.pending = Some(Pending::Upload {
+                    mesh,
+                    material: materials.add(material),
+                    view,
+                    patches: output.patches,
+                    ticket: None,
+                });
             }
             if let Some(Pending::Upload {
                 mesh,
@@ -433,6 +688,7 @@ impl GrassJobs {
                         next.active_gpu = next.active_gpu.saturating_sub(old.gpu);
                         stream.set_presentation_allocation(next)?;
                     }
+                    self.worker.publication_started(instance.entity.to_bits());
                     commands.entity(instance.entity).insert((
                         Mesh3d(mesh.clone()),
                         MeshMaterial3d(material.clone()),
@@ -459,12 +715,27 @@ impl GrassJobs {
                     )?;
                     instance.continuation = None;
                     instance.upload = None;
+                    self.worker
+                        .publication_ended(instance.entity.to_bits(), true);
                 }
             }
         }
         Ok(())
     }
     pub fn retire(
+        &mut self,
+        stream: &mut WorldStream,
+        entity: Entity,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<GrassMaterial>,
+    ) -> Result<bool, ReferenceError> {
+        let result = self.retire_inner(stream, entity, meshes, materials);
+        if result.is_err() {
+            self.release_worker(stream)?;
+        }
+        result
+    }
+    fn retire_inner(
         &mut self,
         stream: &mut WorldStream,
         entity: Entity,
@@ -478,6 +749,23 @@ impl GrassJobs {
         if let Some(parent) = &self.instances[index].continuation {
             parent.stop_flight();
         }
+        if let Some(Pending::Worker { id, canceled, .. }) = &mut self.instances[index].pending {
+            if !*canceled {
+                self.worker.discard();
+                *canceled = true;
+            }
+            self.worker.poll()?;
+            if self.worker.owns(*id) {
+                return Ok(false);
+            }
+        }
+        let entity_bits = self.instances[index].entity.to_bits();
+        if self.instances[index].cache_cpu > 0 {
+            if !self.worker.retiring(entity_bits)? {
+                return Ok(false);
+            }
+            self.worker.remove(entity_bits);
+        }
         let physical = self.instances[index]
             .continuation
             .as_ref()
@@ -486,7 +774,10 @@ impl GrassJobs {
             return Ok(false);
         }
         let mut instance = self.instances.swap_remove(index);
-        let mut cpu = instance.metadata + instance.pending_cpu;
+        self.worker
+            .publication_ended(instance.entity.to_bits(), false);
+        let mut cpu =
+            instance.metadata + instance.pending_cpu + instance.cache_cpu + instance.install_cpu;
         let mut gpu = instance.pending_gpu;
         if let Some(old) = instance.accepted {
             cpu += old.cpu;
@@ -500,16 +791,29 @@ impl GrassJobs {
         }
         let mut next = stream.presentation_allocation();
         next.active_cpu = next.active_cpu.saturating_sub(cpu);
-        next.staging_bytes = next.staging_bytes.saturating_sub(instance.pending_cpu);
+        next.staging_bytes = next
+            .staging_bytes
+            .saturating_sub(instance.pending_cpu + instance.install_cpu);
+        next.grass_worker_cache_bytes -= instance.cache_cpu;
+        next.jobs -= usize::from(instance.install_cpu > 0);
         next.active_gpu = next.active_gpu.saturating_sub(gpu);
         next.jobs = next.jobs.saturating_sub(usize::from(matches!(
             instance.pending,
-            Some(Pending::Expand(_))
+            Some(Pending::Worker { .. })
         )));
         stream.set_presentation_allocation(next)?;
         if let Some(claim) = instance.continuation.as_mut() {
             stream.release_grass_renderer(instance.entity.to_bits(), claim)?;
         }
+        if self.instances.is_empty() {
+            self.release_worker(stream)?;
+        }
         Ok(true)
+    }
+}
+
+impl Drop for GrassJobs {
+    fn drop(&mut self) {
+        self.worker.dispose();
     }
 }

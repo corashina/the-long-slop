@@ -112,6 +112,13 @@ impl PhysicsWorld {
             self.query_bounds.retire_collider(collider);
         }
         self.query_bounds.mark_body(body);
+        if self
+            .body_mass_override
+            .as_ref()
+            .is_some_and(|state| state.body == body)
+        {
+            self.body_mass_override = None;
+        }
         self.physics.remove_body(body)
     }
     pub fn recompute_body_mass(&mut self, body: RigidBodyHandle) {

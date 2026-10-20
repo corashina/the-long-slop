@@ -2526,6 +2526,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "grass-mesh"
+version = "0.1.0"
+dependencies = [
+ "glam 0.32.1",
+]
+
+[[package]]
+name = "grass-worker"
+version = "0.1.0"
+dependencies = [
+ "grass-mesh",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "grid"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3087,9 +3102,11 @@ dependencies = [
  "bevy",
  "console_error_panic_hook",
  "gltf",
+ "grass-mesh",
  "js-sys",
  "naga",
  "rapier3d",
+ "road-mesh",
  "serde",
  "serde_json",
  "terrain",
@@ -4049,6 +4066,21 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "road-mesh"
+version = "0.1.0"
+dependencies = [
+ "rapier3d",
+]
+
+[[package]]
+name = "road-worker"
+version = "0.1.0"
+dependencies = [
+ "road-mesh",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "robust"

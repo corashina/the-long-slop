@@ -1,4 +1,8 @@
 //! Source terrain inputs from the reference, and the tile worker client.
+mod jobs;
+
+pub(in crate::world) use jobs::{CompletedTerrain, TerrainExecution, TerrainMetadata};
+
 use super::WorldSurface;
 use crate::reference::{ReferenceError, WorldReference, WorldValue};
 use terrain::{TerrainEvaluator, TerrainSettings, TerrainTile, surface_origin};
@@ -83,7 +87,7 @@ pub fn terrain_output_bound(tile: TerrainTile) -> usize {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TerrainPoll {
+enum TerrainPoll {
     Idle,
     Busy,
     Ready(u32),
@@ -92,7 +96,7 @@ pub enum TerrainPoll {
 /// One tile job at a time. The browser runs it in a Web Worker with its own WASM.
 /// Native resumes it during polling, through the same byte boundary.
 #[derive(Default)]
-pub struct TerrainWorker {
+struct TerrainWorker {
     #[cfg(not(target_arch = "wasm32"))]
     next: u32,
     #[cfg(not(target_arch = "wasm32"))]
@@ -102,15 +106,12 @@ pub struct TerrainWorker {
 #[cfg(not(target_arch = "wasm32"))]
 impl TerrainWorker {
     /// Call only when `poll` returns `Idle`.
-    pub fn submit(&mut self, input: &[u8]) -> u32 {
+    fn submit(&mut self, input: &[u8]) -> u32 {
         self.next = self.next.wrapping_add(1);
         self.result = Some((self.next, terrain::TerrainTask::new(input)));
         self.next
     }
-    pub fn poll(
-        &mut self,
-        should_yield: impl FnMut() -> bool,
-    ) -> Result<TerrainPoll, ReferenceError> {
+    fn poll(&mut self, should_yield: impl FnMut() -> bool) -> Result<TerrainPoll, ReferenceError> {
         match &mut self.result {
             None => Ok(TerrainPoll::Idle),
             Some((_, Err(error))) => Err(ReferenceError(format!("Terrain worker: {error}"))),
@@ -122,7 +123,7 @@ impl TerrainWorker {
         }
     }
     /// Move the ready result into an empty `surface`.
-    pub fn read(&mut self, unit: [i64; 2], tile: TerrainTile, surface: &mut WorldSurface) {
+    fn read(&mut self, unit: [i64; 2], tile: TerrainTile, surface: &mut WorldSurface) {
         let Some((_, Ok(mesh))) = self.result.take() else {
             unreachable!("Terrain worker has no result");
         };
@@ -136,7 +137,7 @@ impl TerrainWorker {
         surface.triangles = mesh.triangles;
         surface.submeshes.push(0..surface.triangles.len());
     }
-    pub fn discard(&mut self) {
+    fn discard(&mut self) {
         self.result = None;
     }
 }
@@ -144,13 +145,10 @@ impl TerrainWorker {
 #[cfg(target_arch = "wasm32")]
 impl TerrainWorker {
     /// Call only when `poll` returns `Idle`.
-    pub fn submit(&mut self, input: &[u8]) -> u32 {
+    fn submit(&mut self, input: &[u8]) -> u32 {
         crate::browser::game_terrain_submit(input)
     }
-    pub fn poll(
-        &mut self,
-        _should_yield: impl FnMut() -> bool,
-    ) -> Result<TerrainPoll, ReferenceError> {
+    fn poll(&mut self, _should_yield: impl FnMut() -> bool) -> Result<TerrainPoll, ReferenceError> {
         match crate::browser::game_terrain_poll() {
             Ok(-1) => Ok(TerrainPoll::Idle),
             Ok(-2) => Ok(TerrainPoll::Busy),
@@ -165,9 +163,12 @@ impl TerrainWorker {
         }
     }
     /// Copy the ready result once, from the worker buffers into an empty `surface`.
-    pub fn read(&mut self, unit: [i64; 2], tile: TerrainTile, surface: &mut WorldSurface) {
+    fn read(&mut self, unit: [i64; 2], tile: TerrainTile, surface: &mut WorldSurface) {
         let vertices = crate::browser::game_terrain_vertex_count() as usize;
         let triangles = crate::browser::game_terrain_triangle_count() as usize;
+        let profile = crate::app::cpu_profile::Timer::new(
+            crate::app::cpu_profile::Stage::TerrainResultAllocation,
+        );
         surface.origin = surface_origin(unit, tile);
         surface.vertices = vec![[0.0; 3]; vertices];
         surface.normals = vec![[0.0; 3]; vertices];
@@ -175,6 +176,7 @@ impl TerrainWorker {
         surface.uv = vec![[0.0; 2]; vertices];
         surface.colors = vec![[0.0; 4]; vertices];
         surface.triangles = vec![[0; 3]; triangles];
+        drop(profile);
         crate::browser::game_terrain_read(
             surface.vertices.as_flattened_mut(),
             surface.normals.as_flattened_mut(),
@@ -185,7 +187,7 @@ impl TerrainWorker {
         );
         surface.submeshes.push(0..triangles);
     }
-    pub fn discard(&mut self) {
+    fn discard(&mut self) {
         crate::browser::game_terrain_discard();
     }
 }

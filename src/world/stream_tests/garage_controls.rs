@@ -88,13 +88,14 @@ fn aim_handbrake(reference: &ReferenceManifest, run: &mut GarageRuntime) -> Item
     let previous = run.area.player.body_handle();
     run.physics
         .edit_body(previous, |body| body.set_enabled(false));
+    let view_rotation = Rotation::from_array(view.rotation);
+    let head_offset =
+        view_rotation * Vector::from_array(reference.player.posture.standing_head.translation);
     run.area.player = PlayerState::new(
         &reference.player,
         VehiclePose {
-            position: (Vector::from_array(view.position)
-                - Vector::Y * reference.player.standing_height * 0.5)
-                .to_array(),
-            rotation: view.rotation,
+            position: (Vector::from_array(view.position) - head_offset).to_array(),
+            rotation: view_rotation.to_array(),
         },
         &mut run.physics,
     );
@@ -103,7 +104,7 @@ fn aim_handbrake(reference: &ReferenceManifest, run: &mut GarageRuntime) -> Item
         .bind_player_body(run.area.player.body_handle());
     let aim = run.area.interaction.resolve(
         &run.physics,
-        run.area.player.view_pose(&run.physics),
+        run.area.player.view(&run.physics).camera_pose,
         &run.area.items,
     );
     assert_eq!(aim.use_target.unwrap().item, item);
@@ -189,7 +190,13 @@ fn g10_handbrake_press_priority() {
         )
         .unwrap();
     assert_eq!(run.area.interaction.held(), Some(tool));
-    assert!(run.area.interaction.cleaning.reserves_lmb(Some(tool)));
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    assert_eq!(run.area.interaction.held(), None);
+    assert!(run.area.interaction.cleaning.reserves_lmb(
+        run.area.interaction.equipment.item(),
+        run.area.interaction.held(),
+    ));
     press(&mut run, &reference, keys::PRIMARY);
     let after_reserved_lmb = run.vehicles[0].handbrake;
     assert_eq!(after_reserved_lmb, initial_handbrake);

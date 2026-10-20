@@ -8,10 +8,7 @@ use super::{
     prototypes::SourcePrototypes,
 };
 use crate::{
-    presentation::materials::{
-        SourceShadowMode,
-        grass::{GrassPatch, GrassSettings, GrassView},
-    },
+    presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::{Placement, WorldStream},
 };
@@ -22,6 +19,7 @@ use bevy::{
     mesh::{VertexAttributeValues, skinning::SkinnedMesh},
     prelude::*,
 };
+use grass_mesh::{GrassPatch, GrassSettings, GrassView};
 use std::sync::Arc;
 struct MaterialVariant {
     source: Option<crate::reference::SourceId>,
@@ -673,7 +671,7 @@ impl SourceInstances {
                                         cpu += patch_bytes;
                                         let source_world = source_worlds[node.index as usize];
                                         let patches = grass_patches(mesh_data, source_world)?;
-                                        let settings = GrassSettings::from_source(record)?;
+                                        let settings = settings_from_source(record)?;
                                         if let InstanceMaterial::Grass(handle) = &binding.visible {
                                             let bounds = grass_bounds(
                                                 &patches,
