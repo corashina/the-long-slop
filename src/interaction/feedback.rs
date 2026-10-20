@@ -451,7 +451,7 @@ impl InteractionState {
         if self.carry.throw_charge() >= self.carry.reference_throw_minimum() {
             a.actions.0 &= !ActionMask::MOUNT;
         }
-        if a.actions.0 & ActionMask::MOUNT != 0 {
+        if !a.active_drag && a.actions.0 & ActionMask::MOUNT != 0 {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
         if let Some(held) = self
@@ -471,13 +471,10 @@ impl InteractionState {
         }
         if a.active_drag {
             a.actions.0 &= !(ActionMask::PICKUP
-                | ActionMask::DROP
-                | ActionMask::THROW
                 | ActionMask::MOUNT
                 | ActionMask::DISMOUNT
                 | ActionMask::PUSH
-                | ActionMask::GRIP
-                | ActionMask::RELEASE_GRIP);
+                | ActionMask::GRIP);
         }
         a
     }

@@ -92,7 +92,10 @@ impl InteractionState {
                     && input.pressed & keys::GRAB != 0
                     && !self.push.gripping()));
         if active_drag {
-            remove(&mut resolved.grab_input, keys::GRAB);
+            // RayStuff skips new F targets. Existing carry and grip release run separately.
+            if self.held().is_none() && !self.push.gripping() {
+                remove(&mut resolved.grab_input, keys::GRAB);
+            }
             remove(&mut resolved.push_input, keys::GRAB);
         } else if mounting {
             remove(&mut resolved.use_input, keys::USE | keys::PRIMARY);

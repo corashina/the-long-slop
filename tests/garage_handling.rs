@@ -2434,6 +2434,7 @@ fn push_force_grip_and_cancellation() {
             );
         }
         let grip_aim = source_push_aim(&authored, &run, true);
+        let baseline_joints = run.physics.rapier().impulse_joints.len();
         step_input(
             &mut run,
             FrameInput {
@@ -2443,7 +2444,7 @@ fn push_force_grip_and_cancellation() {
             },
             grip_aim,
         );
-        assert_push_released(&run, run.physics.rapier().impulse_joints.len());
+        assert_push_released(&run, baseline_joints);
     }
 }
 
@@ -2904,4 +2905,258 @@ fn push_feedback_matches_source_support() {
         (0, 0, 0),
         "feedback must share source push and grip eligibility"
     );
+}
+
+fn source_door_aim(reference: &ReferenceManifest, run: &GarageRuntime) -> ResolvedAim {
+    let part = reference
+        .items
+        .iter()
+        .find(|i| i.name == "FRDoor")
+        .unwrap()
+        .id;
+    let door = reference
+        .items
+        .iter()
+        .find(|i| i.name == "Collider" && i.attached_to == Some(part))
+        .unwrap()
+        .id;
+    let binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| b.use_owner == Some(door) && b.pickup_owner == Some(part))
+        .unwrap();
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == binding.collider.0)
+        .unwrap()
+        .0;
+    ray_aim(run, collider, |a| {
+        a.use_target.is_some_and(|t| t.item == door)
+    })
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn active_drag_independent_carry_release() {
+    use my_summer_slop::interaction::items::ItemLocation;
+    let (reference, mut run) = source_scene();
+    let item = reference
+        .items
+        .iter()
+        .find(|i| i.name == "Kolbasz")
+        .unwrap()
+        .id;
+    // Build 11140890: RayStuff returns for drag. Update charges and releases carry separately.
+    for frames in [1, 12] {
+        acquire(&mut run, item);
+        let aim = source_door_aim(&reference, &run);
+        let door = aim.use_target.unwrap().item;
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::USE,
+                ..Default::default()
+            },
+            aim,
+        );
+        assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+        let mask = run
+            .area
+            .interaction
+            .available_actions(
+                &aim,
+                &run.area.player,
+                &run.area.items,
+                &run.physics,
+                run.survival.output(),
+            )
+            .actions
+            .0;
+        let before = run
+            .area
+            .interaction
+            .mechanisms
+            .rotation_degrees(door)
+            .unwrap();
+        for frame in 0..frames {
+            let out = step_input(
+                &mut run,
+                FrameInput {
+                    held: keys::USE | keys::GRAB,
+                    pressed: if frame == 0 { keys::GRAB } else { 0 },
+                    mouse: [0.3, 0.2],
+                    ..Default::default()
+                },
+                aim,
+            );
+            assert_eq!(out.action, Some(InteractionAction::Mechanism(door)));
+            assert_eq!(out.look_mouse, [0.; 2]);
+            assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+        }
+        let charge = run.area.interaction.throw_charge();
+        assert!(
+            charge > 0.,
+            "active drag must allow independent carried F charge"
+        );
+        assert_eq!(
+            mask & (ActionMask::DROP | ActionMask::THROW),
+            ActionMask::DROP | ActionMask::THROW
+        );
+        assert_eq!(
+            mask & (ActionMask::MOUNT
+                | ActionMask::DISMOUNT
+                | ActionMask::PICKUP
+                | ActionMask::PUSH
+                | ActionMask::GRIP),
+            0
+        );
+        let during = run
+            .area
+            .interaction
+            .mechanisms
+            .rotation_degrees(door)
+            .unwrap();
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: keys::USE,
+                released: keys::GRAB,
+                mouse: [-0.3, -0.2],
+                ..Default::default()
+            },
+            aim,
+        );
+        assert_eq!(
+            out.action,
+            Some(if frames == 1 {
+                InteractionAction::Drop(item)
+            } else {
+                InteractionAction::Throw(item)
+            })
+        );
+        assert_eq!(out.look_mouse, [0.; 2]);
+        assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+        let after = run
+            .area
+            .interaction
+            .mechanisms
+            .rotation_degrees(door)
+            .unwrap();
+        assert!(
+            before != during || during != after,
+            "drag must still change the source door"
+        );
+        assert!(run.area.interaction.held().is_none());
+        assert_eq!(
+            run.area.items.get(item).unwrap().location,
+            ItemLocation::World
+        );
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    }
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn active_drag_independent_grip_release() {
+    let (reference, mut run) = source_scene();
+    push_support(&reference, &mut run, false);
+    let baseline_joints = run.physics.rapier().impulse_joints.len();
+    let aim = source_push_aim(&reference, &run, true);
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert!(run.area.interaction.push_gripping());
+    // Existing grip release follows RayStuff in source Update and remains independent.
+    let aim = source_door_aim(&reference, &run);
+    let door = aim.use_target.unwrap().item;
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::USE,
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert!(run.area.interaction.push_gripping());
+    assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+    let mask = run
+        .area
+        .interaction
+        .available_actions(
+            &aim,
+            &run.area.player,
+            &run.area.items,
+            &run.physics,
+            run.survival.output(),
+        )
+        .actions
+        .0;
+    let before = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::USE | keys::GRAB,
+            pressed: keys::GRAB,
+            mouse: [0.3, 0.2],
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_push_released(&run, baseline_joints);
+    assert_ne!(mask & ActionMask::RELEASE_GRIP, 0);
+    assert_eq!(
+        mask & (ActionMask::MOUNT
+            | ActionMask::DISMOUNT
+            | ActionMask::PICKUP
+            | ActionMask::PUSH
+            | ActionMask::GRIP),
+        0
+    );
+    assert_eq!(out.action, Some(InteractionAction::Mechanism(door)));
+    assert_eq!(out.look_mouse, [0.; 2]);
+    assert_eq!(run.area.interaction.dragging_mechanism(), Some(door));
+    let during = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::USE,
+            released: keys::GRAB,
+            mouse: [-0.3, -0.2],
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Mechanism(door)));
+    assert_eq!(out.look_mouse, [0.; 2]);
+    let after = run
+        .area
+        .interaction
+        .mechanisms
+        .rotation_degrees(door)
+        .unwrap();
+    assert!(
+        before != during || during != after,
+        "drag must still change the source door"
+    );
+    assert_push_released(&run, baseline_joints);
 }

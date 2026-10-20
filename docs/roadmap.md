@@ -67,7 +67,8 @@ The WASM compile check passed. G01 session input and G02 browser acceptance rema
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
 
 G07 update, 2026-10-20: held F can change push targets. Feedback and dispatch share source eligibility.
-Web `input` and `menu` passed. Native `garage_handling` passed 11 tests with `RUST_TEST_THREADS=1`.
+Active drag permits carried F charge, drop, throw, and existing grip release. Drag retains mouse ownership.
+Web `input` and `menu` passed. Native `garage_handling` passed 13 tests with `RUST_TEST_THREADS=1`.
 The default parallel handling check hit `ENOMEM` while reading the manifest.
 Native `interaction::carry::tests`, `garage_parts`, `wheel_input`, and `startup_physics` passed.
 Format and both WebGL2 and WebGPU WASM checks passed. Native tests call interaction, physics, and carry restoration owners directly.
