@@ -3935,3 +3935,42 @@ fn g08_frame_clutch_binding_collision() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_fresh_gesture_after_cancellation() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    };
+    for pause in [true, false] {
+        g08_frame(&mut run, &reference, down, 0.02);
+        if pause {
+            run.paused = true;
+            assert!(g08_frame(&mut run, &reference, FrameInput::default(), 0.02).actions_blocked);
+            run.paused = false;
+        } else {
+            run.clear_input();
+        }
+        // No stale release or idle frame rearms this fresh gesture.
+        g08_frame(&mut run, &reference, down, 0.02);
+        g08_frame(&mut run, &reference, up, 0.1);
+        assert_eq!(
+            run.area.interaction.equipment.item(),
+            Some(tool),
+            "fresh gesture after pause={pause}"
+        );
+        assert_eq!(run.area.interaction.held(), None);
+        assert!(run.area.release_equipped(&mut run.physics).unwrap());
+    }
+}

@@ -95,7 +95,7 @@ impl EquipmentInput {
     pub fn cancel_input(&mut self) {
         self.elapsed = 0.;
         self.pressed = false;
-        self.can_equip = false;
+        self.can_equip = true;
         self.can_recenter = false;
         self.equipped_now = false;
     }
@@ -233,10 +233,23 @@ mod tests {
         g.finish_frame(up());
         g.begin_frame(down(), 0.02, ELIGIBLE);
         assert_eq!(g.begin_frame(up(), 0.1, ELIGIBLE), Some(EquipAction::Equip));
-        g.cancel_input();
-        assert_eq!(g.begin_frame(up(), 0.1, ELIGIBLE), None);
-        g.finish_frame(up());
-        g.begin_frame(down(), 0.02, ELIGIBLE);
-        assert_eq!(g.begin_frame(up(), 0.1, ELIGIBLE), Some(EquipAction::Equip));
+    }
+    #[test]
+    fn cancellation_rejects_stale_release() {
+        let mut gesture = EquipmentInput::new(0.25);
+        gesture.begin_frame(down(), 0.02, ELIGIBLE);
+        gesture.cancel_input();
+        assert_eq!(gesture.begin_frame(up(), 0.1, ELIGIBLE), None);
+    }
+    #[test]
+    fn cancellation_accepts_immediate_fresh_gesture() {
+        let mut gesture = EquipmentInput::new(0.25);
+        gesture.begin_frame(down(), 0.02, ELIGIBLE);
+        gesture.cancel_input();
+        assert_eq!(gesture.begin_frame(down(), 0.02, ELIGIBLE), None);
+        assert_eq!(
+            gesture.begin_frame(up(), 0.1, ELIGIBLE),
+            Some(EquipAction::Equip)
+        );
     }
 }
