@@ -822,7 +822,30 @@ impl GarageRuntime {
             .interaction
             .cleaning
             .sync_wash_colliders(&self.area.conditions, &mut self.physics);
-        self.area.interaction.cleaning.advance(
+        use crate::interaction::cleaning::ToolOwner;
+        self.area.interaction.cleaning.begin_frame(frame);
+        for owner in [
+            self.area
+                .interaction
+                .equipment
+                .item()
+                .map(ToolOwner::Equipped),
+            self.area.interaction.held().map(ToolOwner::Carried),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.area.interaction.cleaning.advance_owner(
+                owner,
+                frame,
+                reference,
+                &mut self.area.conditions,
+                &self.area.items,
+                &self.physics,
+                &self.area.interaction.parts,
+            );
+        }
+        self.area.interaction.cleaning.finish_frame(
             frame,
             reference,
             &mut self.area.conditions,

@@ -419,7 +419,9 @@ impl InteractionState {
             && !latched_fill
             && !drink_guard
             && !food_guard
-            && !self.cleaning.reserves_lmb(self.held());
+            && !self
+                .cleaning
+                .reserves_lmb(self.equipment.item(), self.held());
         if self.latched_mechanism.is_none()
             && let Some(t) = aim.light_target
             && t.distance.is_finite()
@@ -455,10 +457,10 @@ impl InteractionState {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
         a.consumes_mouse = a.actions.0 & (ActionMask::DOOR | ActionMask::TUNE) != 0;
-        if let Some(held) = self
-            .held()
-            .filter(|_| self.cleaning.reserves_lmb(self.held()))
-        {
+        if let Some(held) = self.equipment.item().filter(|_| {
+            self.cleaning
+                .reserves_lmb(self.equipment.item(), self.held())
+        }) {
             a.item = Some(held);
             a.actions.0 &= !(ActionMask::DOOR
                 | ActionMask::FILL

@@ -936,7 +936,6 @@ fn sync_imported(
 }
 pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let frame = crate::interaction::cleaning::ToolFrame {
-        held: drive.runtime.area.interaction.held(),
         lmb: drive.tool_lmb,
         active: drive.ready
             && !drive.runtime.recovering

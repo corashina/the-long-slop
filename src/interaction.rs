@@ -620,11 +620,16 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    pub fn owned_light_control(&self, item: ItemId) -> Option<LightControlId> {
+        (self.equipment.item() == Some(item) || self.held() == Some(item))
+            .then(|| self.held_controls.get(&item).copied())
+            .flatten()
+    }
     pub fn held_light_control(&self) -> Option<LightControlId> {
         self.equipment
             .item()
-            .or(self.held())
-            .and_then(|item| self.held_controls.get(&item).copied())
+            .and_then(|item| self.owned_light_control(item))
+            .or_else(|| self.held().and_then(|item| self.owned_light_control(item)))
     }
     pub fn pickup_stored_item(
         &mut self,
@@ -1183,7 +1188,10 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
-        if self.cleaning.reserves_lmb(self.held()) {
+        if self
+            .cleaning
+            .reserves_lmb(self.equipment.item(), self.held())
+        {
             input.held &= !keys::PRIMARY;
             input.pressed &= !keys::PRIMARY;
             input.released &= !keys::PRIMARY;

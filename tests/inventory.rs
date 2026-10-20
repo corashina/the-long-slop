@@ -695,3 +695,532 @@ fn g08_transfer_hand_pose_is_frame_timed() {
     );
     assert_eq!(*game.physics.rapier().bodies[body].position(), immediate);
 }
+
+fn tool_frame(
+    _game: &GarageRuntime,
+    view: my_summer_slop::vehicle::VehiclePose,
+) -> my_summer_slop::interaction::cleaning::ToolFrame {
+    my_summer_slop::interaction::cleaning::ToolFrame {
+        lmb: true,
+        active: true,
+        dt: 0.04,
+        view,
+        origin: [0.; 3],
+    }
+}
+
+fn tool_surface(
+    game: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    exclude: Option<my_summer_slop::reference::ConditionId>,
+    tool: u8,
+) -> (
+    my_summer_slop::reference::ConditionId,
+    my_summer_slop::vehicle::VehiclePose,
+    rapier3d::prelude::ColliderHandle,
+) {
+    use rapier3d::math::{Rotation, Vector};
+    let (target, handle, bounds) = game
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .filter_map(|(handle, collider)| {
+            let id = my_summer_slop::reference::ColliderId((collider.user_data >> 64) as u32);
+            let binding = reference
+                .conditions
+                .collider_bindings
+                .iter()
+                .find(|b| b.collider == id)?;
+            let target = binding.ancestor_condition?;
+            let bounds = collider.compute_aabb();
+            let size = bounds.maxs - bounds.mins;
+            (Some(target) != exclude
+                && collider.is_enabled()
+                && !collider.is_sensor()
+                && collider.collision_groups().memberships.bits()
+                    & reference.conditions.brushes[0].mask
+                    != 0
+                && game.area.conditions.can_repair(target, tool)
+                && size.x > if tool == 0 { 0.1 } else { 0.6 }
+                && size.z > if tool == 0 { 0.1 } else { 0.6 })
+            .then_some((target, handle, bounds))
+        })
+        .max_by(|a, b| {
+            let area = |v: &(_, _, rapier3d::parry::bounding_volume::Aabb)| {
+                (v.2.maxs.x - v.2.mins.x) * (v.2.maxs.z - v.2.mins.z)
+            };
+            area(a).total_cmp(&area(b))
+        })
+        .expect("exported repairable contact surface");
+    let center = (bounds.mins + bounds.maxs) * 0.5;
+    let handles: Vec<_> = game
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .map(|(h, _)| h)
+        .collect();
+    // Keep the real exported contact geometry. Exclude unrelated occluders.
+    for other in handles {
+        game.physics
+            .edit_collider(other, |c| c.set_enabled(other == handle));
+    }
+    game.physics.refresh_queries();
+    (
+        target,
+        my_summer_slop::vehicle::VehiclePose {
+            position: [center.x, bounds.maxs.y + 0.5, center.z],
+            rotation: Rotation::from_rotation_arc(-Vector::Z, -Vector::Y).to_array(),
+        },
+        handle,
+    )
+}
+
+#[test]
+#[ignore = "Requires the installed runtime export"]
+fn g08_tools_require_the_correct_owner() {
+    use my_summer_slop::{
+        reference::ItemId,
+        vehicle::{from_rapier, to_rapier},
+    };
+    let (reference, _, mut game) = fixture();
+    game.started = true;
+    game.paused = false;
+    let brush = ItemId(128);
+    pickup(&mut game, brush);
+    let (target, view, _) = tool_surface(&mut game, &reference, None, 1);
+    let before = game.area.conditions.get(target).repair_progress;
+    let quantity = game.area.interaction.cleaning.get(brush).unwrap().quantity;
+    for i in 0..8 {
+        let mut v = view;
+        v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
+        let f = tool_frame(&game, v);
+        game.advance_tools(&reference, f);
+    }
+    assert_eq!(
+        game.area.conditions.get(target).repair_progress,
+        before,
+        "carried brush cannot repair"
+    );
+    assert_eq!(
+        game.area.interaction.cleaning.get(brush).unwrap().quantity,
+        quantity
+    );
+    // Restore the brush body, disabled only by this test's occluder isolation.
+    let body = game.area.items.get(brush).unwrap().body.unwrap();
+    game.physics.edit_body(body, |b| b.set_enabled(true));
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    for i in 0..8 {
+        let mut v = view;
+        v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
+        let f = tool_frame(&game, v);
+        game.advance_tools(&reference, f);
+    }
+    assert_ne!(
+        game.area.conditions.get(target).repair_progress,
+        before,
+        "equipped brush repairs after rubbing"
+    );
+    // Owner phases consume retained contact force. The model and audio update only in the tail.
+    use my_summer_slop::interaction::cleaning::ToolOwner;
+    let frame = tool_frame(&game, view);
+    let model_before = to_rapier(
+        game.area
+            .interaction
+            .cleaning
+            .model_pose(0, &game.area.items),
+    );
+    let gain_before = game.area.interaction.cleaning.signals()[0].voice_gain;
+    assert!(gain_before > 0.);
+    game.area.interaction.cleaning.begin_frame(frame);
+    assert!(game.area.interaction.cleaning.advance_owner(
+        ToolOwner::Equipped(brush),
+        frame,
+        &reference,
+        &mut game.area.conditions,
+        &game.area.items,
+        &game.physics,
+        &game.area.interaction.parts
+    ));
+    assert_eq!(
+        to_rapier(
+            game.area
+                .interaction
+                .cleaning
+                .model_pose(0, &game.area.items)
+        ),
+        model_before
+    );
+    assert_eq!(
+        game.area.interaction.cleaning.signals()[0].voice_gain,
+        gain_before
+    );
+    assert!(game.area.release_equipped(&mut game.physics).unwrap());
+    assert!(!game.area.interaction.cleaning.advance_owner(
+        ToolOwner::Carried(brush),
+        frame,
+        &reference,
+        &mut game.area.conditions,
+        &game.area.items,
+        &game.physics,
+        &game.area.interaction.parts
+    ));
+    assert_eq!(
+        to_rapier(
+            game.area
+                .interaction
+                .cleaning
+                .model_pose(0, &game.area.items)
+        ),
+        model_before
+    );
+    assert_eq!(
+        game.area.interaction.cleaning.signals()[0].voice_gain,
+        gain_before
+    );
+    let rule = &reference.conditions.brushes[0];
+    let original_root = to_rapier(
+        my_summer_slop::interaction::items::node_pose(
+            &reference,
+            reference.items.iter().find(|i| i.id == brush).unwrap().node,
+        )
+        .unwrap(),
+    );
+    let equip = original_root.inverse()
+        * to_rapier(
+            my_summer_slop::interaction::items::node_pose(&reference, rule.model_equip).unwrap(),
+        );
+    let default = original_root.inverse()
+        * to_rapier(
+            my_summer_slop::interaction::items::node_pose(&reference, rule.model_default).unwrap(),
+        );
+    let root = to_rapier(game.area.items.get(brush).unwrap().pose);
+    let expected_position = model_before.translation.lerp(
+        (root * equip).translation,
+        (rule.position_lerp * frame.dt).clamp(0., 1.),
+    );
+    let expected_rotation = model_before.rotation.slerp(
+        (root * default).rotation,
+        (rule.rotation_lerp * frame.dt).clamp(0., 1.),
+    );
+    game.area.interaction.cleaning.finish_frame(
+        frame,
+        &reference,
+        &mut game.area.conditions,
+        &game.area.items,
+        &game.physics,
+        &game.area.interaction.parts,
+    );
+    let model_after = to_rapier(
+        game.area
+            .interaction
+            .cleaning
+            .model_pose(0, &game.area.items),
+    );
+    assert!((model_after.translation - expected_position).length() < 0.00001);
+    assert!(model_after.rotation.dot(expected_rotation).abs() > 0.99999);
+    assert_eq!(game.area.interaction.cleaning.signals()[0].voice_gain, 0.);
+    assert!(!game.area.interaction.cleaning.signals()[0].playing);
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    for i in 0..4 {
+        let mut v = view;
+        v.position[0] += if i % 2 == 0 { -0.2 } else { 0.2 };
+        let f = tool_frame(&game, v);
+        game.advance_tools(&reference, f);
+    }
+    let progress = game.area.conditions.get(target).repair_progress;
+    game.paused = true;
+    let f = tool_frame(&game, view);
+    game.advance_tools(&reference, f);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && s.force == 0.)
+    );
+    game.paused = false;
+    game.advance_tools(&reference, f);
+    assert_eq!(game.area.conditions.get(target).repair_progress, progress);
+    let selected = game.area.inventory.selected;
+    assert!(
+        game.area
+            .apply_inventory_command(
+                InventoryCommand::Select((selected + 1) % 4),
+                &reference,
+                &mut game.physics
+            )
+            .unwrap()
+    );
+    let f = tool_frame(&game, view);
+    game.advance_tools(&reference, f);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && s.force == 0. && !s.doing_work)
+    );
+    assert!(
+        game.area
+            .apply_inventory_command(
+                InventoryCommand::Select(selected),
+                &reference,
+                &mut game.physics
+            )
+            .unwrap()
+    );
+    assert!(game.area.release_equipped(&mut game.physics).unwrap());
+    let f = tool_frame(&game, view);
+    game.advance_tools(&reference, f);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && s.force == 0.)
+    );
+    game.area
+        .interaction
+        .drop_held(&mut game.area.items, &mut game.physics);
+    let spray = reference.conditions.sprays[0].item;
+    let body = game.area.items.get(spray).unwrap().body.unwrap();
+    game.physics.edit_body(body, |b| b.set_enabled(true));
+    pickup(&mut game, spray);
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    // Each owner aims at a different existing surface. Re-enable geometry to choose the second surface.
+    let handles: Vec<_> = game
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .map(|(h, _)| h)
+        .collect();
+    for h in handles {
+        game.physics.edit_collider(h, |c| c.set_enabled(true));
+    }
+    let (target, view, head_handle) = tool_surface(&mut game, &reference, None, 0);
+    let handles: Vec<_> = game
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .map(|(h, _)| h)
+        .collect();
+    for h in handles {
+        game.physics.edit_collider(h, |c| c.set_enabled(true));
+    }
+    let (nozzle_target, mut nozzle_view, nozzle_handle) =
+        tool_surface(&mut game, &reference, Some(target), 0);
+    let collider = &game.physics.rapier().colliders[nozzle_handle];
+    let mut relocated = *collider.position();
+    relocated.translation.x += 10.;
+    let parent = *game.physics.rapier().bodies[collider.parent().unwrap()].position();
+    game.physics.edit_collider(nozzle_handle, |collider| {
+        collider.set_position_wrt_parent(parent.inverse() * relocated)
+    });
+    nozzle_view.position[0] += 10.;
+    game.physics
+        .edit_collider(head_handle, |collider| collider.set_enabled(true));
+    game.physics.refresh_queries();
+    // The nozzle transform is relative to the exported item root.
+    let root = to_rapier(
+        my_summer_slop::interaction::items::node_pose(
+            &reference,
+            reference.items.iter().find(|i| i.id == spray).unwrap().node,
+        )
+        .unwrap(),
+    );
+    let nozzle = root.inverse()
+        * to_rapier(
+            my_summer_slop::interaction::items::node_pose(
+                &reference,
+                reference.conditions.sprays[0].nozzle,
+            )
+            .unwrap(),
+        );
+    let spray_pose = to_rapier(nozzle_view) * nozzle.inverse();
+    game.area.items.get_mut(spray).unwrap().pose = from_rapier(&spray_pose);
+    game.physics
+        .edit_body(body, |body| body.set_position(spray_pose, true));
+    let head_before = game.area.conditions.get(target).color;
+    let nozzle_before = game.area.conditions.get(nozzle_target).color;
+    let f = tool_frame(&game, view);
+    game.advance_tools(&reference, f);
+    assert_ne!(
+        game.area.conditions.get(target).color,
+        head_before,
+        "equipped spray uses head ray"
+    );
+    assert_eq!(game.area.conditions.get(nozzle_target).color, nozzle_before);
+    assert!(game.area.release_equipped(&mut game.physics).unwrap());
+    let head_before = game.area.conditions.get(target).color;
+    let f = tool_frame(&game, view);
+    game.advance_tools(&reference, f);
+    assert_eq!(game.area.conditions.get(target).color, head_before);
+    assert_ne!(
+        game.area.conditions.get(nozzle_target).color,
+        nozzle_before,
+        "carried spray uses nozzle ray"
+    );
+}
+
+#[test]
+#[ignore = "Requires the installed runtime export"]
+fn g08_tools_two_sprays_and_one_shared_tail() {
+    let (reference, _, mut game) = fixture();
+    game.started = true;
+    game.paused = false;
+    let equipped = reference.conditions.sprays[0].item;
+    let carried = reference.conditions.sprays[1].item;
+    pickup(&mut game, equipped);
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    pickup(&mut game, carried);
+    let view = game.area.items.get(equipped).unwrap().pose;
+    let quantities = [equipped, carried].map(|id| {
+        game.area
+            .interaction
+            .cleaning
+            .get(id)
+            .unwrap()
+            .quantity
+            .unwrap()
+    });
+    let frame = tool_frame(&game, view);
+    game.advance_tools(&reference, frame);
+    for (i, id) in [equipped, carried].into_iter().enumerate() {
+        let tool = game.area.interaction.cleaning.get(id).unwrap();
+        let rule = &reference.conditions.sprays[i];
+        let valve = (rule.valve_speed * frame.dt).clamp(0., 1.);
+        assert!((tool.valve - valve).abs() < 0.00001);
+        assert!(
+            (quantities[i] - tool.quantity.unwrap() - rule.paint_loss * valve * frame.dt).abs()
+                < 0.00001
+        );
+        let signal = game
+            .area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .find(|s| s.item == id)
+            .unwrap();
+        assert!((signal.emission[0] - valve).abs() < 0.00001);
+    }
+    let previous = game
+        .area
+        .interaction
+        .cleaning
+        .spray_particles(0, 0)
+        .first()
+        .expect("spray emitted particles")
+        .age;
+    game.advance_tools(&reference, frame);
+    let particle = &game.area.interaction.cleaning.spray_particles(0, 0)[0];
+    assert!((particle.age - previous - 0.04).abs() < 0.00001);
+    let open_valve = game.area.interaction.cleaning.get(equipped).unwrap().valve;
+    let mut released_frame = frame;
+    released_frame.lmb = false;
+    game.advance_tools(&reference, released_frame);
+    let tool = game.area.interaction.cleaning.get(equipped).unwrap();
+    assert!((tool.valve - open_valve * 0.6).abs() < 0.00001);
+    let signal = game
+        .area
+        .interaction
+        .cleaning
+        .signals()
+        .iter()
+        .find(|s| s.item == equipped)
+        .unwrap();
+    assert!((signal.emission[0] - open_valve).abs() < 0.00001);
+    // A release can expose one spray to both use phases. Each Fire call consumes paint.
+    use my_summer_slop::interaction::cleaning::ToolOwner;
+    let before_quantity = tool.quantity.unwrap();
+    let mut expected_valve = tool.valve;
+    let previous_age = game.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+    let mut expected_loss = 0.;
+    game.area.interaction.cleaning.begin_frame(frame);
+    for owner in [ToolOwner::Equipped(equipped), ToolOwner::Carried(equipped)] {
+        expected_valve += (1. - expected_valve) * 0.4;
+        expected_loss += reference.conditions.sprays[0].paint_loss * expected_valve * frame.dt;
+        assert!(!game.area.interaction.cleaning.advance_owner(
+            owner,
+            frame,
+            &reference,
+            &mut game.area.conditions,
+            &game.area.items,
+            &game.physics,
+            &game.area.interaction.parts
+        ));
+    }
+    game.area.interaction.cleaning.finish_frame(
+        frame,
+        &reference,
+        &mut game.area.conditions,
+        &game.area.items,
+        &game.physics,
+        &game.area.interaction.parts,
+    );
+    let tool = game.area.interaction.cleaning.get(equipped).unwrap();
+    assert!((before_quantity - tool.quantity.unwrap() - expected_loss).abs() < 0.00001);
+    assert!((tool.valve - expected_valve).abs() < 0.00001);
+    assert!(
+        (game.area.interaction.cleaning.spray_particles(0, 0)[0].age - previous_age - frame.dt)
+            .abs()
+            < 0.00001
+    );
+    game.paused = true;
+    game.advance_tools(&reference, frame);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && s.emission == [0.; 2] && !s.doing_work)
+    );
+    game.paused = false;
+    game.area
+        .interaction
+        .drop_held(&mut game.area.items, &mut game.physics);
+    assert!(game.area.release_equipped(&mut game.physics).unwrap());
+    game.area
+        .interaction
+        .drop_held(&mut game.area.items, &mut game.physics);
+    let frame = tool_frame(&game, view);
+    game.advance_tools(&reference, frame);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && !s.doing_work && s.force == 0.)
+    );
+    pickup(&mut game, equipped);
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    let frame = tool_frame(&game, view);
+    game.advance_tools(&reference, frame);
+    let other = (game.area.inventory.selected + 1) % 4;
+    game.area
+        .apply_inventory_command(
+            InventoryCommand::Select(other),
+            &reference,
+            &mut game.physics,
+        )
+        .unwrap();
+    let frame = tool_frame(&game, view);
+    game.advance_tools(&reference, frame);
+    assert!(
+        game.area
+            .interaction
+            .cleaning
+            .signals()
+            .iter()
+            .all(|s| !s.playing && !s.doing_work && s.force == 0.)
+    );
+}
