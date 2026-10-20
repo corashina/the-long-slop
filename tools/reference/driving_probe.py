@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
+from .driving_body_hold import validate_body_hold
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
@@ -18,7 +19,7 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+FILES = ('driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input2.entry', 'input2.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
@@ -226,6 +227,7 @@ def validate_run(run, scenario):
 
 def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) -> dict:
     result = validate_run(run, scenario)
+    result['body_hold'] = validate_body_hold(run)
     result['geometry'] = validate_geometry(run)
     result['driver'] = validate_driver(run)
     result['lifecycle'] = validate_lifecycle(run)

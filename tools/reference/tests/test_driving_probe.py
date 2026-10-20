@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tools.reference.tests.test_driving_body_hold import add_hold_fixture
 from tools.reference.driving_probe import preflight, capture, verify, validate_run, observer_revision
 from tools.reference.library.archive import sha256
 from tools.reference.driving_geometry import validate_geometry, physical_inputs
@@ -369,7 +370,7 @@ class DrivingProbeTests(unittest.TestCase):
         run['initial'].update(driver.pop('initial'))
         run.update(driver)
         cargo_input_fixture(run)
-        return add_control_fixture(lifecycle_fixture(run), scenario_fixture(kind))
+        return add_hold_fixture(add_control_fixture(lifecycle_fixture(run), scenario_fixture(kind)))
 
     @staticmethod
     def remove_sample(run, index):

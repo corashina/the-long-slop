@@ -293,7 +293,7 @@ public sealed class G11Capture : MonoBehaviour
                 car=authored; body=car.RB;
                 G11Geometry.Initialize(car);G11BodyTrace.Bind(car);G11Lifecycle.Begin();
                 G11Geometry.Capture("world.entry",observedPhysicsStep,"world.entry",completedStorage);
-                G11BodyTrace.Set(body,true,"System.Void G11Capture::Observe(System.Object,System.String)",-1,"observer.world.entry");
+                G11BodyTrace.HoldOriginal();
                 G11Geometry.HoldWheels();
                 result.target_held_before_activation=true;
                 result.setup_changes.Add("Use the actual authored StartCar02 car in each fresh source process; hold body and disable every native wheel before original activation");
@@ -688,6 +688,12 @@ public sealed class G11Capture : MonoBehaviour
         result.curves.Add(new Curve{owner=owner,name=name,keys=keys.Select(k=>new Key(k)).ToArray(),pre_wrap=(int)curve.preWrapMode,
             post_wrap=(int)curve.postWrapMode,inputs=inputs.ToArray(),values=inputs.Select(curve.Evaluate).ToArray()});
     }
+    static Rigidbody CreateHeldProbeBody(GameObject probe)
+    {
+        var copied=probe.AddComponent<Rigidbody>();
+        G11BodyTrace.HoldCopy(copied);
+        return copied;
+    }
     static void CreateIsolatedProbe()
     {
         // Copy live source WheelCollider properties. No tire or engine formula runs in this probe.
@@ -695,7 +701,7 @@ public sealed class G11Capture : MonoBehaviour
         var offset=Vector3.right*10000f;
         var probe=new GameObject("G11IsolatedNativeWheelProbe");
         probe.transform.position=body.position+offset; probe.transform.rotation=body.rotation;
-        var rb=probe.AddComponent<Rigidbody>(); rb.mass=body.mass; rb.centerOfMass=body.centerOfMass;
+        var rb=CreateHeldProbeBody(probe); rb.mass=body.mass; rb.centerOfMass=body.centerOfMass;
         rb.drag=body.drag; rb.angularDrag=body.angularDrag; rb.inertiaTensor=body.inertiaTensor;
         rb.inertiaTensorRotation=body.inertiaTensorRotation; rb.useGravity=body.useGravity;
         wheels=new WheelCollider[4];
@@ -766,9 +772,10 @@ public sealed class G11Capture : MonoBehaviour
     {
         if(finished) return;
         observedPhysicsStep++;
-        if(!active) return;
         try
         {
+            G11BodyTrace.BeforeSolve();
+            if(!active) return;
             if(startFrame<0) startFrame=Time.frameCount;
             step++;
             if(result.isolated_wheel_probe)
@@ -822,6 +829,7 @@ public sealed class G11Capture : MonoBehaviour
     }
     static void RecordSetupBoundary(string phase)
     {
+        G11BodyTrace.SetupBoundary(phase);
         var geometry=G11Geometry.Capture(phase,observedPhysicsStep,"observer.LateUpdate",completedStorage);
         if(!geometry.complete) throw new InvalidOperationException("Incomplete discovered physical geometry: "+String.Join("; ",geometry.unavailable));
         result.setup_boundaries.Add(new SetupBoundary{phase=phase,frame=Time.frameCount,time=Time.time,
@@ -856,7 +864,7 @@ public sealed class G11Capture : MonoBehaviour
                 if(!SourceAssemblyReady(car)) throw new InvalidOperationException("Source mounted assembly changed readiness during held boundary");
                 RequireAssembly(result.prepared_assembly,result.held_assembly,"stable authored membership through held boundary");
                 RecordSetupBoundary("before-dynamic");
-                G11BodyTrace.Set(body,false,"System.Void G11Capture::LateUpdate()",-1,"observer.before-dynamic");
+                G11BodyTrace.ReleaseMeasurement(body);
                 RecordSetupBoundary("switched-dynamic");
                 if(scenario.setup.height=="wheels-clear") body.constraints=RigidbodyConstraints.FreezeAll;
                 ApplyCanonical(result.setup_state);
@@ -880,7 +888,7 @@ public sealed class G11Capture : MonoBehaviour
         }
         if(active && !finished && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames)
         {
-            try { result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
+            try { G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
             catch(Exception error) { Fail(error); }
         }
     }

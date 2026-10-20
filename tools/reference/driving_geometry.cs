@@ -96,7 +96,7 @@ public static class G11Geometry
         public string phase,source_callback,random_state;
         public int frame,physics_step; public float time,fixed_time,delta_time;
         public bool complete,physical_ready;
-        public Body body; public Body[] nested_bodies; public Shape[] colliders; public Pose[] transforms;
+        public Body body,observer_body; public Body[] nested_bodies; public Shape[] colliders; public Pose[] transforms;
         public Mount[] mounts; public Cargo[] cargo; public Slot[] slots; public Engine engine;
         public string[] unavailable;
         public int observer_body_instance_id; public bool observer_body_present,observer_body_is_current;
@@ -549,6 +549,7 @@ public static class G11Geometry
             engine=new Engine{tmove=ReadPose(engine.TMove),trot=engine.TRot.Select(ReadPose).ToArray(),engine_move=ReadPose(car.EngineMove),rpm=engine.rpm,
                 ignition=car.ignition,max_vibrate=engine.maxEngineVibrate,max_rotate=engine.maxEngineRotate,max_vibrate_speed=engine.maxEngineVibrateSpeed},
             physical_ready=PhysicalReady(),readiness_failure=ReadinessFailure(),unavailable=new string[0],
+            observer_body=G11Capture.ObservedBody==null?null:ReadBody(G11Capture.ObservedBody),
             observer_body_present=G11Capture.ObservedBody!=null,observer_body_is_current=G11Capture.ObservedBody==car.RB,
             observer_body_instance_id=G11Capture.ObservedBody==null?0:G11Capture.ObservedBody.GetInstanceID()};
         snapshot.complete=snapshot.colliders.All(shape=>shape.complete);

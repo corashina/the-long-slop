@@ -42,6 +42,7 @@ public class WheelCollider : Collider {
     public GameObject target=new GameObject(); public bool destroyed;
     public GameObject gameObject { get { if(destroyed) throw new InvalidOperationException("destroyed tracked wheel"); return target; } }
 }
+public static class G11BodyTrace { public static void End() {} }
 public static class Time { public static int frameCount=1; }
 public static class Application {
     public static event Action<string,string,int> logMessageReceived;
