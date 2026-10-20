@@ -510,6 +510,11 @@ impl MechanismState {
         let c = &self.controls[*self.items.get(&item)?];
         c.reference.rotation.as_ref().map(|_| c.degrees)
     }
+    pub(crate) fn slideable(&self, item: ItemId) -> bool {
+        self.items
+            .get(&item)
+            .is_some_and(|i| self.controls[*i].reference.slide.is_some())
+    }
     pub fn scroll_eligible(&self, item: ItemId) -> bool {
         if self.radio_tunable(item) {
             return true;

@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,7 +95,7 @@ pub struct PlayerSnapshot {
     pub yaw: f32,
     pub pitch: f32,
     pub seat: Option<SeatSnapshot>,
-    pub crouched: bool,
+    pub posture: f32,
     pub vertical_velocity: f32,
     pub recoil_velocity: [f32; 3],
     pub running: bool,

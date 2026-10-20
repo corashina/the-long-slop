@@ -323,13 +323,10 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss']}
         return engine_record
     engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]
-    stand=source.resolve(player_reader,player['TStandHeadPos']);prone=source.resolve(player_reader,player['TProneHeadPos']);capsule=source.get('level1',58456);camera=source.get('level1',40241)
-    distance=math.dist(vector(source.read(stand)['m_LocalPosition']),vector(source.read(prone)['m_LocalPosition']))
-    player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'ctrl_duck_value':player['ctrlDuckValue'],'duck_lerp':player['FduckLerp'],'head_lerp':player['FHeadLerp'],'crouch_height':distance*player['ctrlDuckValue'],'capsule_radius':source.read(capsule)['m_Radius'],'capsule_height':source.read(capsule)['m_Height'],'camera_height':source.read(stand)['m_LocalPosition']['y'],'field_of_view_degrees':source.read(camera)['field of view'],'aim_reach':player['FrayRange']}
+    capsule=source.get('level1',58456);camera=source.get('level1',40241)
+    player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'field_of_view_degrees':source.read(camera)['field of view'],'aim_reach':player['FrayRange']}
     player_record.update(recover_player_movement(source))
-    player_record.update(standing_radius=player['maxBodyRadius'],standing_height=distance,
-        crouch_radius=player['minBodyRadius']+(player['maxBodyRadius']-player['minBodyRadius'])*player['ctrlDuckValue'],
-        exit_distance=player['CanGetOutDist'],exit_step_vertical=player['GetOutStepV'],exit_steps_vertical=player['GetOutStepTimesV'],
+    player_record.update(exit_distance=player['CanGetOutDist'],exit_step_vertical=player['GetOutStepV'],exit_steps_vertical=player['GetOutStepTimesV'],
         exit_step_horizontal=player['GetOutStepH'],exit_steps_horizontal=player['GetOutStepTimesH'])
     head=source.resolve(player_reader,player['Th']);held=source.resolve(player_reader,player['TpickedUpPos'])
     held_offset=bake_points([(0.,0.,0.)],source.chain(held),world_pose(source,head))[0]
@@ -398,7 +395,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         return max(hits,key=lambda hit:hit[0])
     position=list(transform_point((-1.5,0.,0.),car_pose['translation'],car_pose['rotation'],[1.,1.,1.]))
     floor,_=floor_at(position[0],position[2],car_pose['translation'][1])
-    position[1]=floor+distance*0.5+source.read(physics)['m_DefaultContactOffset']
+    posture=player_record['posture']
+    lower=min(posture['prone_head']['translation'][1], posture['feet']['center'][1]-posture['maximum_radius'])
+    position[1]=floor-lower+source.read(physics)['m_DefaultContactOffset']
     spawn={'translation':position,'rotation':list(quaternion_product(car_pose['rotation'],[0.,-math.sqrt(.5),0.,math.sqrt(.5)])),'scale':[1.,1.,1.]}
     wheel_floors=[]
     for slot in wheel_slots[:4]:

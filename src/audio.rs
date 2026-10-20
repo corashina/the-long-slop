@@ -122,7 +122,6 @@ pub struct AudioState {
     origin_shift: [f32; 3],
     engine_formula: [f32; 11],
     voice_indices: HashMap<u32, usize>,
-    head_offset: f32,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
     pub reference: AudioReference,
     pub session: u32,
@@ -211,7 +210,6 @@ impl AudioState {
                 .enumerate()
                 .map(|(i, v)| (v.id, i))
                 .collect(),
-            head_offset: 0.,
             emitter_anchors: HashMap::new(),
             session,
             game_seconds: 0.,
@@ -284,7 +282,6 @@ impl AudioState {
             .iter()
             .position(|v| v.engine.source == self.reference.engine.source)
             .expect("validated audio vehicle");
-        self.head_offset = game.player.camera_height - game.player.standing_height * 0.5;
         for emitter in &self.reference.emitters {
             let world = to_rapier(
                 crate::interaction::items::node_pose(game, emitter.node)
@@ -1054,9 +1051,6 @@ impl AudioState {
         };
         let settings = &self.reference.mixer_controls.outside.sensor;
         let mut pose = to_rapier(area.player.view_pose(physics));
-        pose.translation += to_rapier(area.player.body_pose(physics)).rotation
-            * rapier3d::math::Vector::Y
-            * self.head_offset;
         pose.translation += pose.rotation
             * rapier3d::math::Vector::from_array(settings.local_position.unwrap_or([0.; 3]));
         let Some(mask) = settings.mask else {

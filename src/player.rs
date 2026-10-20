@@ -1,15 +1,40 @@
+pub mod collision;
 pub mod pose;
+mod posture;
+use collision::PlayerSweepShape;
+use posture::{MovementSpeed, PostureState};
+use rapier3d::parry::shape::Shape;
 
 use rapier3d::control::{CharacterCollision, KinematicCharacterController};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{
-    ColliderBuilder, ColliderHandle, QueryFilter, Ray, RigidBodyBuilder, RigidBodyHandle,
-    SharedShape,
+    ColliderBuilder, ColliderHandle, Group, InteractionGroups, InteractionTestMode, QueryFilter,
+    Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
 use crate::reference::{PlayerReference, SeatId, SeatReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
+
+#[derive(Clone, Copy, Debug)]
+pub struct PlayerStepContext {
+    pub wheel_posture_allowed: bool,
+    pub mouse_consumed: bool,
+    pub picked_up: bool,
+    pub recenter_consumed: bool,
+    pub movement_multiplier: f32,
+}
+impl Default for PlayerStepContext {
+    fn default() -> Self {
+        Self {
+            wheel_posture_allowed: false,
+            mouse_consumed: false,
+            picked_up: false,
+            recenter_consumed: false,
+            movement_multiplier: 1.0,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlayerMode {
@@ -53,11 +78,14 @@ struct Occupancy {
 pub struct PlayerState {
     reference: PlayerReference,
     controller: KinematicCharacterController,
-    standing: SharedShape,
-    crouching: SharedShape,
+    sweep: PlayerSweepShape,
+    posture: PostureState,
+    movement_speed: MovementSpeed,
     exit_capsule: SharedShape,
     body: RigidBodyHandle,
     collider: ColliderHandle,
+    feet: ColliderHandle,
+    clearance_shapes: [rapier3d::parry::shape::Ball; 10],
     pose: Pose,
     seats: Vec<SeatReference>,
     occupancy: Option<Occupancy>,
@@ -69,7 +97,6 @@ pub struct PlayerState {
     support_body: Option<RigidBodyHandle>,
     recoil_velocity: Vector,
     push_gripping: bool,
-    crouched: bool,
     running: bool,
 }
 
@@ -89,7 +116,8 @@ impl PlayerState {
         self.pitch = saved.pitch;
         self.vertical_velocity = saved.vertical_velocity;
         self.recoil_velocity = Vector::from_array(saved.recoil_velocity);
-        self.crouched = saved.crouched;
+        self.posture.restore(saved.posture);
+        self.movement_speed = MovementSpeed::default();
         self.running = saved.running;
         self.occupancy = if let Some(record) = &saved.seat {
             let id = ids.seats[&record.source];
@@ -121,32 +149,13 @@ impl PlayerState {
             body.set_position(self.pose, false);
             body.set_next_kinematic_position(self.pose);
         });
-        physics.edit_collider(self.collider, |collider| {
-            collider.set_enabled(self.occupancy.is_none());
-            collider.set_shape(if self.crouched {
-                self.crouching.clone()
-            } else {
-                self.standing.clone()
-            });
-        });
-        physics.refresh_queries();
+        self.update_geometry(physics);
         if self.occupancy.is_none() {
-            let height = if self.crouched {
-                self.reference.crouch_height
-            } else {
-                self.reference.standing_height
-            };
-            let hit = physics
-                .queries(
-                    QueryFilter::default()
-                        .exclude_sensors()
-                        .exclude_rigid_body(self.body),
-                )
-                .cast_ray(
-                    &Ray::new(self.pose.translation, -Vector::Y),
-                    height * 0.5 + 0.1,
-                    true,
-                );
+            let hit = physics.queries(self.movement_filter()).cast_ray(
+                &Ray::new(self.pose.translation, -Vector::Y),
+                -self.sweep.compute_local_aabb().mins.y + 0.1,
+                true,
+            );
             self.grounded = hit.is_some() && self.vertical_velocity <= 0.0;
             if self.grounded {
                 self.support_body = hit.and_then(|(h, _)| physics.rapier().colliders[h].parent());
@@ -154,16 +163,9 @@ impl PlayerState {
         }
         Ok(())
     }
-    /// The pose places the capsule center. World up is +Y. View forward is -Z.
+    /// Poses place the source body root. World up is +Y. View forward is -Z.
     pub fn new(reference: &PlayerReference, pose: VehiclePose, physics: &mut PhysicsWorld) -> Self {
-        let standing = SharedShape::capsule_y(
-            reference.standing_height * 0.5 - reference.standing_radius,
-            reference.standing_radius,
-        );
-        let crouching = SharedShape::capsule_y(
-            reference.crouch_height * 0.5 - reference.crouch_radius,
-            reference.crouch_radius,
-        );
+        let sweep = PlayerSweepShape::new(reference);
         let exit_capsule = SharedShape::capsule_y(
             reference.exit_capsule_half_height,
             reference.exit_capsule_radius,
@@ -171,17 +173,42 @@ impl PlayerState {
         let pose = to_rapier(pose);
         let (body, collider) = physics.insert(
             RigidBodyBuilder::kinematic_position_based().pose(pose),
-            ColliderBuilder::new(standing.clone()).mass(reference.mass_kg),
+            ColliderBuilder::new(SharedShape::new(*sweep.capsule()))
+                .position(sweep.capsule_pose())
+                .density(0.0)
+                .collision_groups(groups(
+                    reference.posture.capsule_membership,
+                    reference.posture.capsule_filter,
+                )),
         );
+        physics.edit_body(body, |body| {
+            body.set_additional_mass(reference.mass_kg, false)
+        });
+        let feet = physics.insert_collider_with_parent(
+            ColliderBuilder::new(SharedShape::new(sweep.feet()))
+                .position(sweep.feet_pose())
+                .density(0.0)
+                .collision_groups(groups(
+                    reference.posture.feet.membership,
+                    reference.posture.feet.filter,
+                )),
+            body,
+        );
+        physics.recompute_body_mass(body);
         physics.refresh_queries();
         Self {
             reference: reference.clone(),
             controller: KinematicCharacterController::default(),
-            standing,
-            crouching,
+            sweep,
+            posture: PostureState::new(1.0),
+            movement_speed: MovementSpeed::default(),
             exit_capsule,
             body,
             collider,
+            feet,
+            clearance_shapes: std::array::from_fn(|i| {
+                rapier3d::parry::shape::Ball::new(reference.posture.clearance[i].sphere.radius)
+            }),
             pose,
             seats: Vec::new(),
             occupancy: None,
@@ -193,7 +220,6 @@ impl PlayerState {
             support_body: None,
             recoil_velocity: Vector::ZERO,
             push_gripping: false,
-            crouched: false,
             running: false,
         }
     }
@@ -234,7 +260,7 @@ impl PlayerState {
                     })
                 })
                 .transpose()?,
-            crouched: self.crouched,
+            posture: self.posture.value(),
             vertical_velocity: self.vertical_velocity,
             recoil_velocity: self.recoil_velocity.to_array(),
             running: self.running,
@@ -252,14 +278,20 @@ impl PlayerState {
     }
 
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
-    pub fn step(&mut self, input: FrameInput, physics: &mut PhysicsWorld, dt: f32) {
+    pub fn step(
+        &mut self,
+        input: FrameInput,
+        context: PlayerStepContext,
+        physics: &mut PhysicsWorld,
+        dt: f32,
+    ) {
         if !dt.is_finite() || dt <= 0.0 {
             return;
         }
-        if input.mouse[0].is_finite() {
+        if !context.mouse_consumed && input.mouse[0].is_finite() {
             self.yaw += input.mouse[0];
         }
-        if input.mouse[1].is_finite() {
+        if !context.mouse_consumed && input.mouse[1].is_finite() {
             self.pitch += input.mouse[1];
         }
         self.pitch = self.pitch.clamp(-89.0, 89.0);
@@ -272,27 +304,32 @@ impl PlayerState {
             });
             return;
         }
+        self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
+        self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
         if self.push_gripping {
             self.pose.translation = physics.rapier().bodies[self.body].position().translation;
-            self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
-            let filter = QueryFilter::default()
-                .exclude_sensors()
-                .exclude_rigid_body(self.body);
+        }
+        let was_grounded = self.grounded;
+        let vertical_before_jump = self.vertical_velocity;
+        let jump_force = self.update_posture(input, context, physics, dt);
+        if self.push_gripping {
+            let filter = self.movement_filter();
             let ground = physics.queries(filter).cast_ray(
                 &Ray::new(self.pose.translation, -Vector::Y),
-                self.reference.standing_height * 0.5 + 0.1,
+                -self.sweep.compute_local_aabb().mins.y + 0.1,
                 true,
             );
             self.grounded =
                 ground.is_some() && physics.rapier().bodies[self.body].linvel().y <= 0.1;
             self.support_body =
                 ground.and_then(|(collider, _)| physics.rapier().colliders[collider].parent());
-            if self.grounded && input.pressed & keys::SPACE != 0 {
+            if jump_force != 0.0 {
                 physics.edit_body(self.body, |body| {
                     body.apply_impulse(
                         Vector::Y
                             * self.reference.jump_force
-                            * self.reference.source_force_interval,
+                            * self.reference.source_force_interval
+                            * jump_force,
                         true,
                     )
                 });
@@ -300,52 +337,50 @@ impl PlayerState {
             }
             return;
         }
-        self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
-        self.pose.rotation = Rotation::from_rotation_y(-self.yaw.to_radians());
-        self.update_crouch(input.held & keys::CROUCH != 0, physics);
         if self.grounded {
             self.running = input.held & keys::RUN != 0;
         }
-        if self.grounded && input.pressed & keys::SPACE != 0 {
-            // Unity Force mode changes velocity by force / mass * fixed delta.
-            self.vertical_velocity = self.reference.jump_force / self.reference.mass_kg * dt;
-            self.grounded = false;
+        if jump_force != 0.0 {
+            self.vertical_velocity += jump_force * self.reference.jump_force
+                / self.reference.mass_kg
+                * self.reference.source_force_interval;
+            if jump_force > 0.0 {
+                self.grounded = false;
+            }
         }
-        self.vertical_velocity += physics.rapier().gravity.y * dt;
+        self.vertical_velocity = (self.vertical_velocity + physics.rapier().gravity.y * dt)
+            .max(-self.reference.max_fall_speed);
         let x = ((input.held & keys::RIGHT != 0) as u8 as f32)
             - ((input.held & keys::LEFT != 0) as u8 as f32);
         let z = ((input.held & keys::BACK != 0) as u8 as f32)
             - ((input.held & keys::FORWARD != 0) as u8 as f32);
         let direction = Vector::new(x, 0.0, z).normalize_or_zero();
-        let speed = self.reference.walk_speed
+        let requested_speed = self.reference.walk_speed
             * if self.running {
                 self.reference.run_multiplier
             } else {
                 1.0
             }
-            * if self.crouched {
-                self.reference.duck_multiplier
-            } else {
-                1.0
-            };
+            * posture::speed_multiplier(
+                self.posture.value(),
+                self.reference.posture.ctrl_value,
+                self.reference.prone_multiplier,
+                self.reference.duck_multiplier,
+            )
+            * context.movement_multiplier;
+        let speed = self.movement_speed.limit(was_grounded, requested_speed);
         let desired = self.pose.rotation * direction * speed * dt
             + self.recoil_velocity * dt
             + Vector::Y * self.vertical_velocity * dt;
         let mut support_body = None;
         self.collisions.clear();
-        let shape = if self.crouched {
-            &self.crouching
-        } else {
-            &self.standing
-        };
-        let filter = QueryFilter::default()
-            .exclude_sensors()
-            .exclude_rigid_body(self.body);
+        let shape = &self.sweep;
+        let filter = self.movement_filter();
         let rapier = physics.rapier();
         let movement = self.controller.move_shape(
             dt,
             &physics.queries(filter),
-            shape.as_ref(),
+            shape,
             &self.pose,
             desired,
             |collision| {
@@ -366,9 +401,19 @@ impl PlayerState {
                 &self.controller,
                 dt,
                 filter,
-                shape.as_ref(),
+                shape,
                 self.reference.mass_kg,
                 &self.collisions,
+            );
+        }
+        if was_grounded {
+            self.movement_speed.grounded_velocity(
+                Vector::new(
+                    movement.translation.x / dt,
+                    vertical_before_jump,
+                    movement.translation.z / dt,
+                )
+                .length(),
             );
         }
         self.pose.translation += movement.translation;
@@ -387,47 +432,80 @@ impl PlayerState {
         });
     }
 
-    fn update_crouch(&mut self, want_crouch: bool, physics: &mut PhysicsWorld) {
-        if want_crouch == self.crouched {
-            return;
-        }
-        let center_delta = (self.reference.standing_height - self.reference.crouch_height) * 0.5;
-        let mut candidate = self.pose;
-        candidate.translation.y += if want_crouch {
-            -center_delta
-        } else {
-            center_delta
-        };
-        if !want_crouch && !self.clearance(candidate, self.standing.as_ref(), physics) {
-            return;
-        }
-        self.crouched = want_crouch;
-        self.pose = candidate;
-        let shape = if want_crouch {
-            self.crouching.clone()
-        } else {
-            self.standing.clone()
-        };
-        physics.edit_collider(self.collider, |collider| collider.set_shape(shape));
+    pub(crate) fn collision_groups(&self) -> InteractionGroups {
+        groups(
+            self.reference.posture.capsule_membership,
+            self.reference.posture.capsule_filter,
+        )
     }
-
-    fn clearance(
-        &self,
-        pose: Pose,
-        shape: &dyn rapier3d::prelude::Shape,
-        physics: &PhysicsWorld,
-    ) -> bool {
-        physics
-            .queries(
-                QueryFilter::default()
-                    .exclude_sensors()
-                    .exclude_rigid_body(self.body),
-            )
-            .intersect_shape(pose, shape)
-            .next()
-            .is_none()
+    fn movement_filter(&self) -> QueryFilter<'static> {
+        QueryFilter::default()
+            .exclude_sensors()
+            .exclude_rigid_body(self.body)
+            .groups(self.collision_groups())
     }
-
+    fn update_posture(
+        &mut self,
+        input: FrameInput,
+        context: PlayerStepContext,
+        physics: &mut PhysicsWorld,
+        dt: f32,
+    ) -> f32 {
+        let hits = std::array::from_fn(|index| {
+            let sensor = &self.reference.posture.clearance[index].sphere;
+            let pose = self.pose * Pose::from_translation(Vector::from_array(sensor.center));
+            physics
+                .queries(
+                    QueryFilter::default()
+                        .exclude_rigid_body(self.body)
+                        .groups(groups(sensor.membership, sensor.filter)),
+                )
+                .intersect_shape(pose, &self.clearance_shapes[index])
+                .next()
+                .is_some()
+        });
+        self.posture
+            .contacts(hits, self.reference.posture.sensor_hold_steps);
+        let before = self.posture.value();
+        let mut posture_input = input;
+        posture_input.wheel *= self.reference.scroll_sensitivity;
+        let force = self.posture.step(
+            posture_input,
+            context.wheel_posture_allowed,
+            self.grounded,
+            &self.reference.posture,
+            dt,
+            self.reference.duck_jump_multiplier,
+            self.reference.inverse_duck_multiplier,
+        );
+        if self.posture.value() != before {
+            self.update_geometry(physics);
+        }
+        force
+    }
+    fn update_geometry(&mut self, physics: &mut PhysicsWorld) {
+        self.sweep
+            .set_posture(&self.reference, self.posture.value());
+        physics.edit_collider(self.collider, |collider| {
+            *collider
+                .shape_mut()
+                .as_capsule_mut()
+                .expect("Owned player capsule") = *self.sweep.capsule();
+            collider.set_position_wrt_parent(self.sweep.capsule_pose());
+            crate::vehicle::set_collider_enabled(collider, self.occupancy.is_none());
+        });
+        physics.edit_collider(self.feet, |collider| {
+            *collider
+                .shape_mut()
+                .as_ball_mut()
+                .expect("Owned player foot sphere") = self.sweep.feet();
+            crate::vehicle::set_collider_enabled(
+                collider,
+                self.occupancy.is_none() && self.sweep.feet_enabled(),
+            );
+        });
+        physics.refresh_queries();
+    }
     /// The seat pose places the source sitPos root relative to the chassis.
     pub fn enter(&mut self, id: SeatId, pose: VehiclePose, physics: &mut PhysicsWorld) -> bool {
         if self.occupancy.is_some() {
@@ -436,27 +514,9 @@ impl PlayerState {
         let Some(seat) = self.seats.iter().find(|seat| seat.id == id) else {
             return false;
         };
-        let mut local_pose = to_rapier(pose);
-        let center_offset = self.reference.camera_height - self.reference.standing_height * 0.5;
-        local_pose.translation += local_pose.rotation * (Vector::Y * center_offset);
+        let local_pose = to_rapier(pose);
         let chassis = physics.chassis_handle(seat.vehicle);
         let seated_pose = *physics.rapier().bodies[chassis].position() * local_pose;
-        let outside_vehicle = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-            collider.parent() != Some(chassis)
-        };
-        let queries = physics.queries(
-            QueryFilter::default()
-                .exclude_sensors()
-                .exclude_rigid_body(self.body)
-                .predicate(&outside_vehicle),
-        );
-        if queries
-            .intersect_shape(seated_pose, self.crouching.as_ref())
-            .next()
-            .is_some()
-        {
-            return false;
-        }
         self.yaw =
             (self.yaw - yaw_from_rotation(seated_pose.rotation) + 180.0).rem_euclid(360.0) - 180.0;
         self.yaw = self
@@ -471,11 +531,11 @@ impl PlayerState {
             driving2: seat.driving2,
         });
         self.pose = seated_pose;
-        self.crouched = false;
+        self.posture.restore(1.0);
         self.grounded = false;
         self.running = false;
         self.vertical_velocity = 0.0;
-        physics.edit_collider(self.collider, |collider| collider.set_enabled(false));
+        self.update_geometry(physics);
         physics.edit_body(self.body, |body| body.set_position(seated_pose, false));
         physics.refresh_queries();
         true
@@ -516,7 +576,7 @@ impl PlayerState {
             .cast_ray_and_get_normal(&Ray::new(view.translation, forward), limits.distance, true)
             .map_or(limits.distance, |(_, hit)| {
                 let displacement = forward * hit.time_of_impact
-                    + hit.normal * (self.reference.standing_radius + 0.05);
+                    + hit.normal * (self.reference.posture.maximum_radius + 0.05);
                 Vector::new(displacement.x, 0.0, displacement.z)
                     .length()
                     .min(limits.distance)
@@ -545,10 +605,7 @@ impl PlayerState {
                     .is_none()
                 {
                     // Source GetOut places the body origin at the checked head point.
-                    let mut candidate = Pose::from_translation(
-                        head + Vector::Y
-                            * (self.reference.camera_height - self.reference.standing_height * 0.5),
-                    );
+                    let mut candidate = Pose::from_translation(head);
                     candidate.rotation =
                         Rotation::from_rotation_y(-yaw_from_rotation(view.rotation).to_radians());
                     return Some(candidate);
@@ -568,16 +625,15 @@ impl PlayerState {
         let chassis = physics.chassis_handle(self.occupancy.unwrap().vehicle);
         self.pose = candidate;
         self.yaw = yaw_from_rotation(candidate.rotation);
-        self.vertical_velocity = physics.rapier().bodies[chassis].linvel().y * 0.3;
+        let inherited = physics.rapier().bodies[chassis].linvel() * 0.3;
+        self.vertical_velocity = inherited.y;
+        self.recoil_velocity = Vector::new(inherited.x, 0.0, inherited.z);
         self.occupancy = None;
-        self.crouched = false;
+        self.posture.restore(1.0);
         self.grounded = false;
         self.running = false;
 
-        physics.edit_collider(self.collider, |collider| {
-            collider.set_shape(self.standing.clone())
-        });
-        physics.edit_collider(self.collider, |collider| collider.set_enabled(true));
+        self.update_geometry(physics);
         physics.edit_body(self.body, |body| body.set_position(candidate, false));
         physics.refresh_queries();
         true
@@ -602,8 +658,8 @@ impl PlayerState {
     pub fn driving2(&self) -> bool {
         self.occupancy.is_some_and(|seat| seat.driving2)
     }
-    pub fn crouched(&self) -> bool {
-        self.crouched
+    pub fn posture(&self) -> f32 {
+        self.posture.value()
     }
     pub fn support_body(&self) -> Option<RigidBodyHandle> {
         self.support_body
@@ -650,8 +706,8 @@ impl PlayerState {
     pub fn pitch_degrees(&self) -> f32 {
         self.pitch
     }
-    pub fn standing_shape(&self) -> &dyn rapier3d::parry::shape::Shape {
-        self.standing.as_ref()
+    pub fn sweep_shape(&self) -> &PlayerSweepShape {
+        &self.sweep
     }
     pub fn body_handle(&self) -> RigidBodyHandle {
         self.body
@@ -667,19 +723,38 @@ impl PlayerState {
         });
         from_rapier(pose)
     }
-    pub fn view_pose(&self, physics: &PhysicsWorld) -> VehiclePose {
-        let mut pose = to_rapier(self.body_pose(physics));
-        let head_offset = if self.crouched {
-            self.reference.crouch_height * 0.5
-        } else {
-            self.reference.standing_height * 0.5
-        };
-        pose.translation += pose.rotation * (Vector::Y * head_offset);
+    pub fn head_pose_at(&self, body_pose: VehiclePose) -> VehiclePose {
+        let mut pose = to_rapier(body_pose);
+        let lower = Vector::from_array(self.reference.posture.prone_head.translation);
+        let head = lower.lerp(
+            Vector::from_array(self.reference.posture.standing_head.translation),
+            self.posture.value(),
+        );
+        pose.translation += pose.rotation * head;
         if self.occupancy.is_some() {
             pose.rotation *= Rotation::from_rotation_y(-self.yaw.to_radians());
         }
         pose.rotation *= Rotation::from_rotation_x(-self.pitch.to_radians());
         from_rapier(pose)
+    }
+    pub fn view_pose(&self, physics: &PhysicsWorld) -> VehiclePose {
+        self.head_pose_at(self.body_pose(physics))
+    }
+    pub(crate) fn recover(&mut self, pose: VehiclePose, physics: &mut PhysicsWorld) {
+        self.pose = to_rapier(pose);
+        self.yaw = yaw_from_rotation(self.pose.rotation);
+        self.posture.restore(self.posture.value());
+        self.movement_speed = MovementSpeed::default();
+        self.vertical_velocity = 0.0;
+        self.recoil_velocity = Vector::ZERO;
+        self.grounded = false;
+        self.support_body = None;
+        self.running = false;
+        physics.edit_body(self.body, |body| {
+            body.set_position(self.pose, false);
+            body.set_next_kinematic_position(self.pose);
+        });
+        self.update_geometry(physics);
     }
     pub fn focus_position(&self, physics: &PhysicsWorld) -> [f32; 3] {
         self.view_pose(physics).position
@@ -708,4 +783,12 @@ fn from_rapier(pose: Pose) -> VehiclePose {
         position: pose.translation.to_array(),
         rotation: pose.rotation.to_array(),
     }
+}
+
+fn groups(membership: u32, filter: u32) -> InteractionGroups {
+    InteractionGroups::new(
+        Group::from_bits_retain(membership),
+        Group::from_bits_retain(filter),
+        InteractionTestMode::And,
+    )
 }

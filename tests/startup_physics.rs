@@ -112,9 +112,12 @@ fn installed_spawn_alignment_and_settling() {
     let settle_seconds = 2.0_f32;
     let settle_steps = (settle_seconds / FIXED_DT).round() as usize;
     for _ in 0..settle_steps {
-        run.area
-            .player
-            .step(FrameInput::default(), &mut run.physics, FIXED_DT);
+        run.area.player.step(
+            FrameInput::default(),
+            Default::default(),
+            &mut run.physics,
+            FIXED_DT,
+        );
         run.area.sync_attachments(&mut run.physics, true);
         run.area.sync_compound(&mut run.physics);
         run.physics.apply_vehicle_forces(

@@ -56,13 +56,8 @@ impl GarageRuntime {
             }
         }
     }
-    pub fn recovery_clearance(
-        &self,
-        reference: &ReferenceManifest,
-        pose: VehiclePose,
-    ) -> Option<RecoveryTransport> {
+    pub fn recovery_clearance(&self, pose: VehiclePose) -> Option<RecoveryTransport> {
         recovery_clearance(
-            reference,
             &self.area,
             &self.physics,
             &self.persistent_world,
@@ -90,7 +85,6 @@ impl GarageRuntime {
             self.stream
                 .prepare_recovery_pose(&self.physics, |physics, absolute| {
                     recovery_clearance(
-                        reference,
                         area,
                         physics,
                         persistent,
@@ -108,13 +102,10 @@ impl GarageRuntime {
             return Ok(false);
         };
         let plan = self
-            .recovery_clearance(
-                reference,
-                VehiclePose {
-                    position: origin.local(target.position),
-                    rotation: target.rotation,
-                },
-            )
+            .recovery_clearance(VehiclePose {
+                position: origin.local(target.position),
+                rotation: target.rotation,
+            })
             .ok_or_else(|| ReferenceError("Source recovery clearance changed".into()))?;
         let player = plan
             .player
@@ -141,7 +132,6 @@ impl GarageRuntime {
         } = self;
         stream.finish_recovery(permit, || {
             transport_prepared(
-                reference,
                 area,
                 physics,
                 wheels,
@@ -156,7 +146,6 @@ impl GarageRuntime {
     }
 }
 fn transport_prepared(
-    reference: &ReferenceManifest,
     area: &mut StartingArea,
     physics: &mut PhysicsWorld,
     wheels: &mut crate::interaction::wheels::WheelAssemblies,
@@ -186,10 +175,7 @@ fn transport_prepared(
         .sync(&mut area.items, physics)
         .expect("validated wheel bindings");
     if let Some(pose) = plan.player {
-        physics.remove_body(area.player.body_handle());
-        area.player = PlayerState::new(&reference.player, pose, physics);
-        area.player.configure_seats(&reference.seats);
-        area.interaction.bind_player_body(area.player.body_handle());
+        area.player.recover(pose, physics);
     } else {
         transport_body(physics, area.player.body_handle(), delta);
     }
@@ -205,7 +191,6 @@ fn transport_prepared(
 }
 
 pub fn recovery_clearance(
-    reference: &ReferenceManifest,
     area: &StartingArea,
     physics: &PhysicsWorld,
     persistent: &crate::save::PersistentWorld,
@@ -261,22 +246,24 @@ pub fn recovery_clearance(
     if !bodies.iter().all(|body| clear_body(*body, delta)) {
         return None;
     }
-    let clear_transported = |target: Pose, shape: &dyn Shape| {
-        bodies.iter().all(|body| {
-            physics.rapier().bodies[*body]
-                .colliders()
-                .iter()
-                .all(|handle| {
-                    let collider = &physics.rapier().colliders[*handle];
-                    collider.is_sensor()
-                        || (!dormant && !collider.is_enabled())
-                        || collider_pose(*body, collider).is_some_and(|pose| {
-                            intersection_test(&target, shape, &(delta * pose), collider.shape())
-                                .is_ok_and(|hit| !hit.intersecting)
-                        })
-                })
-        })
-    };
+    let clear_transported =
+        |target: Pose, shape: &dyn Shape, groups: rapier3d::prelude::InteractionGroups| {
+            bodies.iter().all(|body| {
+                physics.rapier().bodies[*body]
+                    .colliders()
+                    .iter()
+                    .all(|handle| {
+                        let collider = &physics.rapier().colliders[*handle];
+                        collider.is_sensor()
+                            || !collider.collision_groups().test(groups)
+                            || (!dormant && !collider.is_enabled())
+                            || collider_pose(*body, collider).is_some_and(|pose| {
+                                intersection_test(&target, shape, &(delta * pose), collider.shape())
+                                    .is_ok_and(|hit| !hit.intersecting)
+                            })
+                    })
+            })
+        };
     let old_view = to_rapier(area.player.view_pose(physics));
     if area.player.seat().is_some() {
         if !held.iter().all(|body| clear_body(*body, delta)) {
@@ -288,32 +275,34 @@ pub fn recovery_clearance(
             held_delta: delta,
         });
     }
-    let standing = area.player.standing_shape();
+    let shape = area.player.sweep_shape();
     for distance in [3.0, 4.0, 5.0, 6.0] {
         for side in [-1.0, 1.0] {
             let mut candidate = to_rapier(pose);
             candidate.translation += candidate.rotation
                 * Vector::new(
                     distance * side,
-                    reference.player.standing_height * 0.5 - 1.1 + 0.05,
+                    -shape.compute_local_aabb().mins.y - 1.1 + 0.05,
                     0.0,
                 );
             if physics
                 .queries(
                     QueryFilter::default()
                         .exclude_sensors()
+                        .groups(area.player.collision_groups())
                         .predicate(&obstacle),
                 )
-                .intersect_shape(candidate, standing)
+                .intersect_shape(candidate, shape)
                 .next()
                 .is_some()
-                || !clear_transported(candidate, standing)
+                || !clear_transported(candidate, shape, area.player.collision_groups())
             {
                 continue;
             }
-            let mut view = candidate;
-            view.translation +=
-                view.rotation * (Vector::Y * reference.player.standing_height * 0.5);
+            let view = to_rapier(
+                area.player
+                    .head_pose_at(crate::vehicle::from_rapier(&candidate)),
+            );
             let held_delta = view * old_view.inverse();
             if !held.iter().all(|body| clear_body(*body, held_delta)) {
                 continue;
@@ -329,6 +318,7 @@ pub fn recovery_clearance(
                             || clear_transported(
                                 held_delta * *collider.position(),
                                 collider.shape(),
+                                collider.collision_groups(),
                             )
                     })
             }) {

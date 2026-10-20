@@ -457,6 +457,14 @@ impl SaveSnapshot {
         let p = &self.player;
         absolute(&p.pose)?;
         data(
+            p.posture.is_finite() && (0.0..=1.0).contains(&p.posture),
+            "Player posture",
+        )?;
+        data(
+            p.seat.is_none() || p.posture == 1.0,
+            "Seated player posture",
+        )?;
+        data(
             finite(&[p.yaw, p.pitch, p.vertical_velocity])
                 && (-89.0..=89.0).contains(&p.pitch)
                 && bounded_local(&p.recoil_velocity)

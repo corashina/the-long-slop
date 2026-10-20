@@ -38,6 +38,8 @@ class PlayerMovementTests(unittest.TestCase):
 
     def test_ordered_clearance_spheres(self):
         value = self.recover()
+        self.assertEqual(value['posture']['capsule_membership'], 1 << 12)
+        self.assertEqual(value['posture']['capsule_filter'], 4172190207)
         self.assertEqual(len(value['posture']['clearance']), 10)
         self.assertEqual(value['posture']['sensor_hold_steps'], 3)
         self.assertEqual(value['posture']['clearance'][0]['sphere']['filter'], 4037970431)
@@ -92,6 +94,8 @@ class PlayerMovementTests(unittest.TestCase):
         value = self.recover()
         mutations = [
             lambda v: v['posture']['clearance'].reverse(),
+            lambda v: v['posture'].update(capsule_membership=1),
+            lambda v: v['posture'].update(capsule_filter=1),
             lambda v: v['posture']['clearance'][0]['sphere'].update(radius=0.2),
             lambda v: v['posture']['clearance'][0]['sphere'].update(filter=1),
             lambda v: v.pop('view'),

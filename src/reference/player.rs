@@ -21,6 +21,8 @@ pub struct PlayerClearanceReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerPostureReference {
+    pub capsule_membership: u32,
+    pub capsule_filter: u32,
     pub standing_head: Transform,
     pub prone_head: Transform,
     pub minimum_radius: f32,
@@ -84,7 +86,9 @@ impl PlayerReference {
             "player posture movement",
         )?;
         require(
-            transform(&p.standing_head)
+            p.capsule_membership == 1 << 12
+                && p.capsule_filter == 4_172_190_207
+                && transform(&p.standing_head)
                 && transform(&p.prone_head)
                 && same(p.minimum_radius, 0.1)
                 && same(p.maximum_radius, 0.3)

@@ -53,6 +53,11 @@ def recover_player_movement(source):
         return dict(source=source_id(collider), center=shape['center'], radius=shape['radius'],
                     membership=1 << layer, filter=matrix[layer])
 
+    capsule = source.resolve(reader, data['CBody'])
+    capsule_game_object = source.resolve(capsule, source.read(capsule)['m_GameObject'])
+    capsule_layer = source.read(capsule_game_object)['m_Layer']
+    if key(capsule) != ('level1', 58456) or capsule.type.name != 'CapsuleCollider' or capsule_layer != 12:
+        raise ValueError('Player capsule layer differs')
     feet_reader = source.resolve(reader, data['Feet2'])
     feet = sphere(feet_reader, body_pose)
     prefab = source.resolve(reader, data['sensPrefab'])
@@ -75,7 +80,7 @@ def recover_player_movement(source):
         value = source.read(source.resolve(settings, sliders[index]))
         return value['defValue'] * (value['valueMultipler'] if value['valueMultipler'] else 1.0)
     result = dict(
-        posture=dict(standing_head=stand_pose, prone_head=prone_pose,
+        posture=dict(capsule_membership=1 << capsule_layer, capsule_filter=matrix[capsule_layer], standing_head=stand_pose, prone_head=prone_pose,
             minimum_radius=data['minBodyRadius'], maximum_radius=data['maxBodyRadius'],
             ctrl_value=data['ctrlDuckValue'], scroll_step=data['duckSens'], rise_rate=data['FduckLerp'],
             feet=feet, clearance=clearance, sensor_hold_steps=3),
@@ -132,6 +137,8 @@ def validate_player_movement(value):
     sphere(posture['feet'], 'level1', 57258, 12, 4172190207, 0.3)
     if len(posture['clearance']) != 10:
         raise ValueError('Player clearance count differs')
+    if posture['capsule_membership'] != 1 << 12 or posture['capsule_filter'] != 4172190207:
+        raise ValueError('Player capsule collision groups differ')
     low = posture['prone_head']['translation']
     distance = math.dist(low, posture['standing_head']['translation'])
     if distance <= 0.0:

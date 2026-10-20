@@ -627,22 +627,12 @@ pub struct PlayerReference {
     pub jump_force: f32,
     pub mass_kg: f32,
     pub duck_multiplier: f32,
-    pub ctrl_duck_value: f32,
-    pub duck_lerp: f32,
-    pub head_lerp: f32,
-    pub crouch_height: f32,
-    pub capsule_radius: f32,
-    pub capsule_height: f32,
-    pub camera_height: f32,
     pub field_of_view_degrees: f32,
     pub aim_reach: f32,
     pub action_masks: ActionMasks,
     pub get_out_layer_mask: u32,
     pub exit_capsule_half_height: f32,
     pub exit_capsule_radius: f32,
-    pub standing_radius: f32,
-    pub standing_height: f32,
-    pub crouch_radius: f32,
     pub exit_distance: f32,
     pub exit_step_vertical: f32,
     pub exit_steps_vertical: u32,
@@ -1679,17 +1669,10 @@ impl ReferenceManifest {
         )?;
         require(
             finite(&[
-                p.standing_radius,
-                p.standing_height,
-                p.crouch_radius,
                 p.exit_distance,
                 p.exit_step_vertical,
                 p.exit_step_horizontal,
-            ]) && p.standing_radius > 0.0
-                && p.standing_height >= p.standing_radius * 2.0
-                && p.crouch_radius > 0.0
-                && p.crouch_height >= p.crouch_radius * 2.0
-                && p.exit_distance > 0.0
+            ]) && p.exit_distance > 0.0
                 && p.exit_steps_vertical <= 100
                 && p.exit_steps_horizontal <= 100,
             "effective player geometry/exit scan",
@@ -1818,14 +1801,7 @@ impl ReferenceManifest {
             "fluid rules",
         )?;
         require(
-            finite(&[
-                p.mass_kg,
-                p.duck_multiplier,
-                p.ctrl_duck_value,
-                p.duck_lerp,
-                p.head_lerp,
-            ]) && p.mass_kg > 0.0
-                && (0.0..=1.0).contains(&p.ctrl_duck_value),
+            finite(&[p.mass_kg, p.duck_multiplier]) && p.mass_kg == 72.0,
             "player movement",
         )?;
         require(
@@ -1833,19 +1809,11 @@ impl ReferenceManifest {
                 p.walk_speed,
                 p.run_multiplier,
                 p.jump_force,
-                p.crouch_height,
-                p.capsule_radius,
-                p.capsule_height,
-                p.camera_height,
                 p.field_of_view_degrees,
                 p.aim_reach,
                 p.exit_capsule_half_height,
                 p.exit_capsule_radius,
             ]) && p.walk_speed > 0.0
-                && p.capsule_radius > 0.0
-                && p.capsule_height >= p.capsule_radius * 2.0
-                && p.crouch_height >= p.capsule_radius * 2.0
-                && p.crouch_height < p.capsule_height
                 && p.aim_reach > 0.0
                 && p.action_masks.use_mask != 0
                 && p.action_masks.pickup_mask != 0

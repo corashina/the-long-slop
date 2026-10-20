@@ -4,7 +4,7 @@ use crate::interaction::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
 };
-use crate::player::PlayerState;
+use crate::player::{PlayerState, PlayerStepContext};
 use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::{
     DriveInput, FIXED_DT, FrameInput,
@@ -1106,9 +1106,34 @@ impl GarageRuntime {
         {
             walking_input.mouse = [0.0; 2];
         }
+        let picked_up = self.area.interaction.held().is_some();
+        let movement_multiplier = self.area.interaction.carry.body().map_or(1.0, |body| {
+            let mass = self.physics.rapier().bodies[body].mass();
+            ((mass - reference.player.carry_max_weight)
+                / (reference.player.carry_min_weight - reference.player.carry_max_weight))
+                .clamp(0.0, 1.0)
+        });
+        let slideable = self
+            .area
+            .interaction
+            .dragging_mechanism()
+            .is_some_and(|id| self.area.interaction.mechanisms.slideable(id));
+        let context = PlayerStepContext {
+            wheel_posture_allowed: availability.actions.0
+                & crate::interaction::feedback::ActionMask::TUNE
+                == 0
+                && !slideable
+                && (!picked_up
+                    || (input.player_held & crate::simulation::player_keys::LEAN != 0
+                        && input.held & keys::TRANSLATE == 0)),
+            mouse_consumed: walking_input.mouse != input.mouse,
+            picked_up,
+            recenter_consumed: picked_up && (input.held | input.pressed) & keys::RECENTER != 0,
+            movement_multiplier,
+        };
         self.area
             .player
-            .step(walking_input, &mut self.physics, FIXED_DT);
+            .step(walking_input, context, &mut self.physics, FIXED_DT);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
         self.area
