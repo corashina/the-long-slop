@@ -468,9 +468,9 @@ pub fn fixed_room(
 
 macro_rules! fixed_shaders {
     ($($name:literal),* $(,)?) => {
-        pub const FIXED_SHADER_PATHS: [&str; 31] = [$(concat!("shaders/", $name)),*];
+        pub const FIXED_SHADER_PATHS: [&str; 30] = [$(concat!("shaders/", $name)),*];
         /// Shaders are compiled into the build, so they always match its pipeline layouts.
-        const FIXED_SHADER_SOURCES: [&str; 31] =
+        const FIXED_SHADER_SOURCES: [&str; 30] =
             [$(include_str!(concat!("../../web/assets/shaders/", $name))),*];
     };
 }
@@ -505,7 +505,6 @@ fixed_shaders!(
     "source_terrain.wgsl",
     "source_impostor.wgsl",
     "source_particles.wgsl",
-    "source_shadow_collector.wgsl",
 );
 
 pub fn shader_source(path: &str) -> Option<&'static str> {

@@ -46,7 +46,7 @@ struct Output {{
         .find(|(_, value)| value.name.as_deref() == Some("lighting"))
         .unwrap()
         .1;
-    assert_eq!(layout[uniform.ty].size, 384);
+    assert_eq!(layout[uniform.ty].size, 736);
     let mut bindings: Vec<_> = module
         .global_variables
         .iter()

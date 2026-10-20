@@ -25,7 +25,7 @@ pub const PROBE_START: usize = WORLD_VIEWS;
 pub const VIEW_COUNT: usize = PROBE_START + 6;
 
 /// The world view precedes six probe faces.
-/// Shadow values come from each view's source fit and collector preparation.
+/// Shadow values come from each view's source fit and sun shadow preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
     pub index: usize,
@@ -53,7 +53,7 @@ pub struct SurfaceResources {
     pub targets: SurfaceTargets,
     pub probes: [ProbeTargets; PROBE_COUNT],
     probe_sampler: Sampler,
-    attenuation_sampler: Sampler,
+    shadow_compare: Sampler,
 }
 impl SurfaceResources {
     pub fn new(
@@ -73,8 +73,9 @@ impl SurfaceResources {
                 mipmap_filter: MipmapFilterMode::Linear,
                 ..default()
             }),
-            attenuation_sampler: device.create_sampler(&SamplerDescriptor {
-                label: Some("source_collector_sampler"),
+            shadow_compare: device.create_sampler(&SamplerDescriptor {
+                label: Some("source_shadow_linear_compare"),
+                compare: Some(CompareFunction::GreaterEqual),
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 ..default()
@@ -99,6 +100,7 @@ pub(crate) fn prepare_views(
         Option<&SurfaceViewTargets>,
         Option<&mut SourceViewLighting>,
         Option<&mut SourceGlassView>,
+        Option<&super::shadow_collector::CollectorView>,
     )>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -122,7 +124,7 @@ pub(crate) fn prepare_views(
         return;
     };
     let mut extents = [None; VIEW_COUNT];
-    for (_, source, view, msaa, _, _, _) in &mut views {
+    for (_, source, view, msaa, _, _, _, _) in &mut views {
         if source.index >= VIEW_COUNT
             || extents[source.index].is_some()
             || view.target_format != HDR_FORMAT
@@ -203,7 +205,7 @@ pub(crate) fn prepare_views(
     else {
         return;
     };
-    for (entity, source, _, _, bound, binding, glass) in &mut views {
+    for (entity, source, _, _, bound, binding, glass, sun_shadow) in &mut views {
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
@@ -215,6 +217,7 @@ pub(crate) fn prepare_views(
             source.clip_from_world,
             source.near,
             source.far,
+            sun_shadow.map_or_else(Default::default, |collector| collector.value),
         );
         let glass_value = match GlassViewUniform::new(
             source.clip_from_world,
@@ -281,8 +284,8 @@ pub(crate) fn prepare_views(
                 (&cookie.texture_view, &cookie.sampler),
                 (cubes, &resources.probe_sampler),
                 (
-                    target.collector.sampled.as_ref().unwrap(),
-                    &resources.attenuation_sampler,
+                    target.atlas.sampled.as_ref().unwrap(),
+                    &resources.shadow_compare,
                 ),
             ),
             SourceTransparentPasses::new(capacity),
