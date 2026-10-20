@@ -1040,3 +1040,83 @@ fn advance_tool_owners(
         .cleaning
         .sync_wash_colliders(&game.area.conditions, &mut game.physics);
 }
+
+#[test]
+#[ignore = "Requires the installed runtime export"]
+fn g08_frame_context_hints_match_available_actions() {
+    use my_summer_slop::{interaction::targets::ResolvedAim, reference::ItemId};
+    const EQUIP: u32 = 1 << 24;
+    const RECENTER: u32 = 1 << 25;
+    const RELEASE: u32 = 1 << 26;
+    const SEATED_RELEASE: u32 = 1 << 27;
+    fn actions(game: &GarageRuntime) -> u32 {
+        game.area
+            .interaction
+            .available_actions(
+                &ResolvedAim::default(),
+                &game.area.player,
+                &game.area.items,
+                &game.physics,
+                game.needs_output(),
+            )
+            .actions
+            .0
+    }
+    let (reference, _, mut game) = fixture();
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
+        0
+    );
+    pickup(&mut game, ItemId(128));
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER),
+        EQUIP | RECENTER,
+        "eligible carry advertises equip and recenter"
+    );
+    assert_eq!(actions(&game) & (RELEASE | SEATED_RELEASE), 0);
+    assert!(game.area.equip_carried(&mut game.physics).unwrap());
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
+        RELEASE
+    );
+    pickup(&mut game, ItemId(130));
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
+        RECENTER
+    );
+    game.area
+        .interaction
+        .drop_held(&mut game.area.items, &mut game.physics);
+    let seat = &reference.seats[0];
+    let anchor = reference
+        .anchors
+        .iter()
+        .find(|a| a.id == seat.anchor)
+        .unwrap();
+    assert!(game.area.player.enter(
+        seat.id,
+        my_summer_slop::vehicle::VehiclePose {
+            position: anchor.transform.translation,
+            rotation: anchor.transform.rotation,
+        },
+        &mut game.physics
+    ));
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
+        SEATED_RELEASE
+    );
+    let body = game.area.items.get(ItemId(128)).unwrap().body.unwrap();
+    game.physics.edit_body(body, |body| body.set_enabled(false));
+    assert_eq!(
+        actions(&game) & (RELEASE | SEATED_RELEASE),
+        0,
+        "invalid equipment cannot release"
+    );
+    let (_, _, mut game) = fixture();
+    pickup(&mut game, ItemId(120));
+    assert_eq!(
+        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
+        RECENTER,
+        "ineligible carry cannot equip"
+    );
+}

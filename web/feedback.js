@@ -1,6 +1,6 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
@@ -74,13 +74,17 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.SCROLL,'scroll','[Scroll]: Open/Close'],
   [ACTION.HELD_SWITCH,'heldSwitch','[LMB]: Switch flashlight'],
   [ACTION.WASH,'wash','[LMB]: Wash'],
-  [ACTION.SCRUB,'scrub','[LMB]: Scrub']
+  [ACTION.SCRUB,'scrub','[LMB]: Scrub'],
+  [ACTION.EQUIP,'equip','Tap Tab: equip'],
+  [ACTION.RECENTER,'recenter','Hold Tab: recenter'],
+  [ACTION.RELEASE_EQUIPMENT,'releaseEquipment','Tab or MMB: release'],
+  [ACTION.RELEASE_EQUIPMENT_SEATED,'releaseEquipmentSeated','MMB: release']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
  let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='';
- const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance / [Tab]: Center';
- const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance / [Tab]: Center';
+ const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance';
+ const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
@@ -110,7 +114,7 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   const tuneText=radio?(state.lmbUse?'[E] / [LMB]+[Mouse]: Tune':'[E]+[Mouse]: Tune'):'[E]+[Mouse] / [Scroll]: Open/Close';
   if(tuneText!==lastTune){rows[9].n.textContent=tuneText;lastTune=tuneText;}
   const scrollText=radio?'[Scroll]: Tune':'[Scroll]: Open/Close';
-  if(scrollText!==lastScroll){rows[19].n.textContent=scrollText;lastScroll=scrollText;}
+  if(scrollText!==lastScroll){rows[18].n.textContent=scrollText;lastScroll=scrollText;}
   const primaryText=state.actions&ACTION.HELD_SWITCH?'[E]: Switch':'[E] / [LMB]: Switch';
   if(primaryText!==lastPrimary){rows[13].n.textContent=primaryText;lastPrimary=primaryText;}
   placeRows();

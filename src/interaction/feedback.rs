@@ -27,6 +27,10 @@ impl ActionMask {
     pub const HELD_SWITCH: u32 = 2097152;
     pub const WASH: u32 = 4194304;
     pub const SCRUB: u32 = 8388608;
+    pub const EQUIP: u32 = 1 << 24;
+    pub const RECENTER: u32 = 1 << 25;
+    pub const RELEASE_EQUIPMENT: u32 = 1 << 26;
+    pub const RELEASE_EQUIPMENT_SEATED: u32 = 1 << 27;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -148,7 +152,17 @@ impl InteractionState {
             a.item = Some(id);
         }
         if let Some(held) = self.held() {
-            a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
+            a.actions.0 |= ActionMask::DROP | ActionMask::THROW | ActionMask::RECENTER;
+            if self.equipment.item().is_none()
+                && self
+                    .pickup_rule(held)
+                    .is_some_and(|rule| rule.can_hold_right_hand)
+                && self
+                    .carry
+                    .allows_pickup(held, player.seat().is_some(), items.mounted(held))
+            {
+                a.actions.0 |= ActionMask::EQUIP;
+            }
             if items
                 .get(held)
                 .is_some_and(|item| item.food.is_some() && !item.removed)
@@ -177,6 +191,17 @@ impl InteractionState {
             if self.carry.allows_held_rotation() {
                 a.actions.0 |= ActionMask::ROTATE;
             }
+        }
+        if self
+            .equipment
+            .item()
+            .is_some_and(|id| self.carry.can_receive_equipment(id, player, items, physics))
+        {
+            a.actions.0 |= if player.seat().is_some() {
+                ActionMask::RELEASE_EQUIPMENT_SEATED
+            } else {
+                ActionMask::RELEASE_EQUIPMENT
+            };
         }
         if let Some(t) = use_target {
             if self.mechanisms.contains(t.item) {

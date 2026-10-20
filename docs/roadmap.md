@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-19. Approved scope: one complete garage repair and driving experience.
+Updated: 2026-10-20. Approved scope: one complete garage repair and driving experience.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
@@ -50,7 +50,7 @@ Verify = code exists. Partial = known behavior gaps. Missing = no complete gamep
 | G05 | Start and maintain the engine. [Engine](../src/simulation/engine.rs) | Hard | Verify | Verify ignition, starter, fuel use, cooling, oil effects, stalling, and missing-part behavior. |
 | G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Verify rubbing, repair stages, paint, tool depletion, and visible changes. Complete spray refraction and soft-particle depth fading. |
 | G07 | Carry, handle, and push objects. [Interaction](../src/interaction.rs), [carry](../src/interaction/carry.rs) | Hard | Partial | Verify pickup, drop, throw, rotation, distance, recenter, and pushing. Complete source action priority and resolve control conflicts. |
-| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Partial | Complete explicit equip and release, source Tab behavior, slot selection, swapping, and ownership rules. |
+| G08 | Equip and use inventory. [Inventory](../src/inventory.rs), [equipment](../src/interaction/equipment.rs) | Hard | Verify | Verify explicit equip and release, source Tab behavior, slot selection, swapping, tool roles, and saved ownership. Browser acceptance remains open. See [G08 verification](g08-inventory.md). |
 | G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Verify walking, running, jumping, crouching, and seat transitions. Add source lean, zoom, and full low-posture behavior. |
 | G10 | Operate garage and car controls. [Mechanisms](../src/interaction/mechanisms.rs), [instruments](../src/simulation/instruments.rs) | Hard | Verify | Verify doors, hood, trunk, switches, seats, lights, horn, built-in radio, and gauges through normal input. |
 | G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
@@ -65,6 +65,10 @@ Three targeted native tests passed. They cover 20 general parts and both plates 
 Checks cover identity, fluids, mass, collision ownership, invalid fits, duplicate attachment, and source-fixed seats.
 The WASM compile check passed. G01 session input and G02 browser acceptance remain open.
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
+
+G08 update, 2026-10-20: 19 targeted native tests and two HUD web tests passed. Formatting and both WASM checks passed.
+Coverage includes transfer rejection, gestures, frame order, tool roles, saved ownership, real restore readiness, and live hint availability.
+Browser acceptance, full checks, and product release builds remain open. See [G08 verification](g08-inventory.md) for commands and limits.
 
 G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
