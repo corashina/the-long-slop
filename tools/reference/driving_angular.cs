@@ -1,0 +1,142 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+// Native measurements only. Rig inputs do not define source physics or wheel inertia.
+public static class G11AngularProbe
+{
+    [Serializable] public class Event { public int step; public string phase; public float motor_nm,brake_nm; }
+    [Serializable] public class Rig {
+        public bool use_gravity; public float drag,angular_drag,sleep_threshold; public int constraints;
+        public Vector3 velocity_mps,angular_velocity_rad_s,offset_m;
+    }
+    [Serializable] public class Input {
+        public string support,purpose,source_wheel,provenance,body_properties,schedule_unit;
+        public int duration_steps; public Event[] events; public Rig rig;
+    }
+    [Serializable] public struct Friction {
+        public float extremum_slip,extremum_value,asymptote_slip,asymptote_value,stiffness;
+        public Friction(WheelFrictionCurve curve) { extremum_slip=curve.extremumSlip;extremum_value=curve.extremumValue;
+            asymptote_slip=curve.asymptoteSlip;asymptote_value=curve.asymptoteValue;stiffness=curve.stiffness; }
+    }
+    [Serializable] public class Profile {
+        public Vector3 center;
+        public float radius,mass,damping,suspension_distance,force_application_distance,spring_n_per_m,damper_n_s_per_m,spring_target;
+        public Friction forward,sideways;
+    }
+    [Serializable] public struct Body {
+        public int instance_id,constraints,solver_iterations,solver_velocity_iterations;
+        public float mass,drag,angular_drag,sleep_threshold,max_angular_velocity;
+        public bool sleeping,use_gravity,detect_collisions,kinematic;
+        public int interpolation,collision_detection_mode;
+        public Vector3 center_of_mass,inertia_tensor,position,velocity,angular_velocity,gravity;
+        public Quaternion rotation,inertia_tensor_rotation;
+    }
+    [Serializable] public class State : Profile {
+        public int event_revision,assignment_step,wheel_id;
+        public string phase;
+        public bool enabled,active_self,active_hierarchy,sprung_mass_available;
+        public float sprung_mass; public Body body;
+    }
+    [Serializable] public class Assignment { public int event_revision,step; public string phase;public float motor_nm,brake_nm; }
+    [Serializable] public class BodyInput {
+        public float mass;public Vector3 center_of_mass,inertia_tensor;public Quaternion inertia_tensor_rotation;
+    }
+    [Serializable] public class TransformInput {
+        public Vector3 position,local_scale;public Quaternion rotation;
+    }
+    [Serializable] public class Report {
+        public Input declared;public string source_key,support;
+        public int source_wheel_id,copied_wheel_id,original_body_id,copied_body_id;
+        public Profile source_profile,copied_profile;public Body source_body,copied_constructor_body,copied_held_body;
+        public float source_sprung_mass,copied_sprung_mass;
+        public TransformState source_transform,copied_transform;
+        public BodyInput body_input;public TransformInput wheel_input;
+        public Assignment[] assignments;
+        public State initial_state;
+    }
+    [Serializable] public struct TransformState {
+        public Vector3 position,local_position,local_scale,lossy_scale;public Quaternion rotation,local_rotation;
+        public TransformState(Transform value) { position=value.position;rotation=value.rotation;local_position=value.localPosition;
+            local_rotation=value.localRotation;local_scale=value.localScale;lossy_scale=value.lossyScale; }
+    }
+    public static Report report;
+    static Input input;
+    static WheelCollider wheel;
+    static Rigidbody body;
+    static int revision,assignedStep;
+    public static bool Active { get { return input!=null; } }
+    public static void ReadProfile(WheelCollider value,Profile target) {
+        target.center=value.center;target.radius=value.radius;target.mass=value.mass;target.damping=value.wheelDampingRate;
+        target.suspension_distance=value.suspensionDistance;target.force_application_distance=value.forceAppPointDistance;
+        target.spring_n_per_m=value.suspensionSpring.spring;target.damper_n_s_per_m=value.suspensionSpring.damper;
+        target.spring_target=value.suspensionSpring.targetPosition;target.forward=new Friction(value.forwardFriction);target.sideways=new Friction(value.sidewaysFriction);
+    }
+    public static Body ReadBody(Rigidbody value) {
+        return new Body{instance_id=value.GetInstanceID(),constraints=(int)value.constraints,mass=value.mass,center_of_mass=value.centerOfMass,
+            inertia_tensor=value.inertiaTensor,inertia_tensor_rotation=value.inertiaTensorRotation,position=value.position,rotation=value.rotation,
+            velocity=value.velocity,angular_velocity=value.angularVelocity,gravity=Physics.gravity,use_gravity=value.useGravity,
+            drag=value.drag,angular_drag=value.angularDrag,sleeping=value.IsSleeping(),sleep_threshold=value.sleepThreshold,
+            solver_iterations=value.solverIterations,solver_velocity_iterations=value.solverVelocityIterations,
+            max_angular_velocity=value.maxAngularVelocity,detect_collisions=value.detectCollisions,kinematic=value.isKinematic,
+            interpolation=(int)value.interpolation,collision_detection_mode=(int)value.collisionDetectionMode};
+    }
+    public static WheelCollider Configure(Input declared,WheelCollider source,Rigidbody original,GameObject probe,Rigidbody held) {
+        if(input!=null || !held.isKinematic || !original.isKinematic || G11Geometry.Key(source)!=declared.source_wheel)
+            throw new InvalidOperationException("Angular source/copy hold or identity differs");
+        input=declared;body=held;var constructorBody=ReadBody(body);
+        var bodyInput=new BodyInput{mass=original.mass,center_of_mass=original.centerOfMass,
+            inertia_tensor=original.inertiaTensor,inertia_tensor_rotation=original.inertiaTensorRotation};
+        body.mass=bodyInput.mass;body.centerOfMass=bodyInput.center_of_mass;
+        body.inertiaTensor=bodyInput.inertia_tensor;body.inertiaTensorRotation=bodyInput.inertia_tensor_rotation;
+        body.constraints=(RigidbodyConstraints)input.rig.constraints;body.useGravity=input.rig.use_gravity;
+        body.drag=input.rig.drag;body.angularDrag=input.rig.angular_drag;body.sleepThreshold=input.rig.sleep_threshold;
+        var child=new GameObject("one-native-wheel");child.transform.parent=probe.transform;
+        var wheelInput=new TransformInput{position=source.transform.position+input.rig.offset_m,
+            rotation=source.transform.rotation,local_scale=source.transform.lossyScale};
+        child.transform.position=wheelInput.position;child.transform.rotation=wheelInput.rotation;
+        child.transform.localScale=wheelInput.local_scale;
+        wheel=child.AddComponent<WheelCollider>();wheel.enabled=false;
+        wheel.center=source.center;wheel.radius=source.radius;wheel.mass=source.mass;wheel.wheelDampingRate=source.wheelDampingRate;
+        wheel.suspensionDistance=source.suspensionDistance;wheel.suspensionSpring=source.suspensionSpring;
+        wheel.forceAppPointDistance=source.forceAppPointDistance;wheel.forwardFriction=source.forwardFriction;wheel.sidewaysFriction=source.sidewaysFriction;
+        wheel.motorTorque=0;wheel.brakeTorque=0;wheel.steerAngle=0;
+        report=new Report{declared=input,source_key=G11Geometry.Key(source),support=input.support,
+            source_wheel_id=source.GetInstanceID(),copied_wheel_id=wheel.GetInstanceID(),original_body_id=original.GetInstanceID(),copied_body_id=body.GetInstanceID(),
+            source_profile=new Profile(),copied_profile=new Profile(),source_body=ReadBody(original),copied_constructor_body=constructorBody,copied_held_body=ReadBody(body),
+            source_sprung_mass=source.sprungMass,copied_sprung_mass=wheel.sprungMass,
+            source_transform=new TransformState(source.transform),copied_transform=new TransformState(wheel.transform),body_input=bodyInput,wheel_input=wheelInput,assignments=new Assignment[input.events.Length]};
+        ReadProfile(source,report.source_profile);ReadProfile(wheel,report.copied_profile);
+        for(int i=0;i<report.assignments.Length;i++) report.assignments[i]=new Assignment();
+        return wheel;
+    }
+    public static void Arm() {
+        if(!Active) return;
+        // One declared input, after the reviewed copy release. Never restore state during measurement.
+        body.velocity=input.rig.velocity_mps;body.angularVelocity=input.rig.angular_velocity_rad_s;
+    }
+    public static void RetainInitial() { report.initial_state=new State();Read(report.initial_state); }
+    public static void Assign(int step) {
+        if(!Active || step!=assignedStep+1 || step>input.duration_steps)
+            throw new InvalidOperationException("Angular consuming solve repeated or missing");
+        if(revision<input.events.Length && input.events[revision].step==step) {
+            var next=input.events[revision];
+            if(next.phase.StartsWith("coast",StringComparison.Ordinal) && (next.motor_nm!=0 || next.brake_nm!=0))
+                throw new InvalidOperationException("Angular coast input is not zero");
+            wheel.motorTorque=next.motor_nm;wheel.brakeTorque=next.brake_nm;wheel.steerAngle=0;
+            var assignment=report.assignments[revision];assignment.event_revision=revision+1;assignment.step=step;assignment.phase=next.phase;
+            assignment.motor_nm=wheel.motorTorque;assignment.brake_nm=wheel.brakeTorque;
+            revision++;
+        }
+        if(revision==0) throw new InvalidOperationException("Angular initial assignment missing");
+        assignedStep=step;
+    }
+    public static void Read(State target) {
+        if(!Active) return;
+        ReadProfile(wheel,target);target.body=ReadBody(body);target.wheel_id=wheel.GetInstanceID();
+        target.enabled=wheel.enabled;target.active_self=wheel.gameObject.activeSelf;target.active_hierarchy=wheel.gameObject.activeInHierarchy;
+        target.event_revision=revision;target.assignment_step=assignedStep;target.phase=revision==0?"before-first-assignment":input.events[revision-1].phase;
+        try { target.sprung_mass=wheel.sprungMass;target.sprung_mass_available=true; }
+        catch { target.sprung_mass_available=false; }
+    }
+}

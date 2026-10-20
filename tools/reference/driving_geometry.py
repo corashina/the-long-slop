@@ -258,9 +258,9 @@ def validate_cargo_input(run, by_phase):
 
 def validate_geometry(run):
     snapshots = run.get('geometry', [])
-    if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider'):
+    if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider','wheel_angular'):
         raise ValueError('Unknown declared physical capture path')
-    isolated = run['probe_kind'] == 'wheel_collider'
+    isolated = run['probe_kind'] in ('wheel_collider','wheel_angular')
     if run.get('isolated_wheel_probe') is not isolated:
         raise ValueError('Declared physical source-body or isolated-probe path differs')
     required = {'world.entry', 'source-physical-ready', 'cargo-input-applied-held', 'prepared-held', 'backlog-drained-held',
@@ -324,7 +324,7 @@ def validate_geometry(run):
             raise ValueError('Five source native wheels and four separate road roles are required')
         if any(not shape['sprung_mass_available'] for shape in wheels):
             raise ValueError('Native wheel sprungMass evidence is missing')
-        if phase == 'native-wheels-enabled' and run['probe_kind'] != 'wheel_collider':
+        if phase == 'native-wheels-enabled' and not isolated:
             if any(not shape['restoration_applied'] or shape['enabled'] != shape['intended_enabled'] or
                    shape['restored_enabled'] != shape['intended_enabled'] for shape in wheels):
                 raise ValueError('Source native WheelCollider intended state was not restored')

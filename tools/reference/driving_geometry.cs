@@ -16,6 +16,7 @@ public static class G11Geometry
     [Serializable] public class SourceMap { public string root; public SourceTransform[] transforms; }
     [Serializable] public struct NativeWheel
     {
+        public string key; public int instance_id,road_slot,source_index,owner_instance_id;
         public bool enabled,active_self,active_hierarchy,contact,sprung_mass_available;
         public float motor_torque,brake_torque,rpm,sprung_mass,hit_force;
         public Vector3 hit_point,hit_normal;
@@ -117,7 +118,8 @@ public static class G11Geometry
     static readonly List<Locked> locked=new List<Locked>();
     public static readonly List<Snapshot> snapshots=new List<Snapshot>();
     public static WheelCollider[] nativeWheels;
-    static bool holding;
+    static bool holding,nativeRolesBound;
+    static readonly Dictionary<WheelCollider,NativeWheel> nativeIdentities=new Dictionary<WheelCollider,NativeWheel>();
     public static Activation[] activation_events=new Activation[4096];
     public static int activation_count;
     static string Segment(Transform value)
@@ -188,7 +190,26 @@ public static class G11Geometry
         foreach(var item in Resources.FindObjectsOfTypeAll<tosaveitemscript>())
             if(item.gameObject.scene.IsValid()) Key(item.transform);
         nativeWheels=car.GetComponentsInChildren<WheelCollider>(true);
-        foreach(var wheel in nativeWheels) held.Add(wheel,new Hold{saved=wheel.enabled,intended=wheel.enabled});
+        for(int index=0;index<nativeWheels.Length;index++) {
+            var wheel=nativeWheels[index];
+            held.Add(wheel,new Hold{saved=wheel.enabled,intended=wheel.enabled});
+            nativeIdentities.Add(wheel,new NativeWheel{key=Key(wheel),instance_id=wheel.GetInstanceID(),source_index=index,road_slot=-1});
+        }
+    }
+    public static void BindNativeWheelRoles()
+    {
+        if(nativeRolesBound || car.allWH.Count!=4 || car.allWH.Distinct().Count()!=4 || nativeWheels.Length!=5 ||
+            nativeWheels.Distinct().Count()!=5 || nativeIdentities.Count!=5)
+            throw new InvalidOperationException("Native road roles are missing or already bound");
+        for(int index=0;index<nativeWheels.Length;index++) {
+            var wheel=nativeWheels[index];var identity=nativeIdentities[wheel];
+            if(identity.source_index!=index || identity.instance_id!=wheel.GetInstanceID() || identity.key!=Key(wheel) || wheel.attachedRigidbody!=car.RB)
+                throw new InvalidOperationException("Native wheel cohort or original body ownership changed");
+            identity.road_slot=car.allWH.IndexOf(wheel);nativeIdentities[wheel]=identity;
+        }
+        if(nativeWheels.Count(w=>nativeIdentities[w].road_slot<0)!=1)
+            throw new InvalidOperationException("Expected four road wheels and one separate native helper");
+        nativeRolesBound=true;
     }
     public static void HoldWheels()
     {
@@ -319,7 +340,9 @@ public static class G11Geometry
     public static NativeWheel ReadWheel(WheelCollider wheel)
     {
         WheelHit hit;bool contact=wheel.GetGroundHit(out hit);
-        return new NativeWheel{enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
+        var identity=nativeIdentities[wheel];
+        return new NativeWheel{key=identity.key,instance_id=identity.instance_id,source_index=identity.source_index,road_slot=identity.road_slot,
+            owner_instance_id=wheel.attachedRigidbody==null?0:wheel.attachedRigidbody.GetInstanceID(),enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
             motor_torque=wheel.motorTorque,brake_torque=wheel.brakeTorque,rpm=wheel.rpm,sprung_mass=wheel.sprungMass,sprung_mass_available=true,
             contact=contact,hit_point=contact?hit.point:Vector3.zero,hit_normal=contact?hit.normal:Vector3.zero,hit_force=contact?hit.force:0,
             contact_response=contact?"native WheelCollider.GetGroundHit response":"native GetGroundHit false; hit response unavailable"};

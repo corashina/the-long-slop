@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
+from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
@@ -19,7 +20,7 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+FILES = ('driving_angular.cs', 'driving_angular.py', 'driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input2.entry', 'input2.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
@@ -186,12 +187,12 @@ def validate_run(run, scenario):
     if len(samples) < 2 or run.get('physics_steps', 0) < 2:
         raise ValueError('Native physics samples are missing')
     phases = {s['phase'] for s in samples}
-    required = PHASES if scenario['probe_kind'] == 'assembled_lada' else {'physics.entry', 'physics.exit'}
+    required = PHASES if scenario['probe_kind'] in ('assembled_lada','wheel_angular') else {'physics.entry', 'physics.exit'}
     if not required <= phases:
         raise ValueError(f'Missing native callback phases: {sorted(required - phases)}')
     if scenario['probe_kind'] == 'curve' and not run.get('curves'):
         raise ValueError('Native Unity curve observations are missing')
-    if scenario['probe_kind'] == 'wheel_collider' and not run.get('isolated_wheel_probe'):
+    if scenario['probe_kind'] in ('wheel_collider','wheel_angular') and not run.get('isolated_wheel_probe'):
         raise ValueError('Isolated native WheelCollider observations are missing')
     sequence = [s['sequence'] for s in samples]
     if sequence != list(range(1, len(samples) + 1)):
@@ -217,10 +218,15 @@ def validate_run(run, scenario):
                 raise ValueError('Missing native wheel metrics')
         if sample.get('fixed_dt', 0) <= 0:
             raise ValueError('Native fixed timestep is missing')
-        if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != 4:
-            raise ValueError('Four native wheel samples are required')
-    timing = validate_timing(samples, scenario)
-    controls = validate_controls(run, scenario)
+        if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != (1 if scenario['probe_kind']=='wheel_angular' else 4):
+            raise ValueError('Declared native measurement wheel count differs')
+    if scenario['probe_kind']=='wheel_angular' and samples[-1]['frame']>scenario['duration_frames']:
+        raise ValueError('Angular render observation bound was exceeded')
+    checked_scenario = dict(scenario, duration_frames=samples[-1]['frame']) if scenario['probe_kind']=='wheel_angular' else scenario
+    timing = validate_timing(samples, checked_scenario)
+    controls = validate_controls(run, checked_scenario)
+    if scenario['probe_kind']=='wheel_angular':
+        timing['angular'] = validate_angular(run, scenario)
     return {'samples': len(samples), 'physics_steps': run['physics_steps'],
             'phases': sorted(phases), 'controls': controls, **timing}
 
@@ -283,6 +289,7 @@ def verify(output_root: Path) -> dict:
             state = {key: value for key, value in run['initial'].items()
                      if key != 'profile_path'}
             state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
+            if scenario['probe_kind']=='wheel_angular': state['angular_initial'] = angular_initial_inputs(run)
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
@@ -321,11 +328,12 @@ def capture(source_root: Path, reference_root: Path,
         raise ValueError('Scenario identities must be unique')
     for row in rows:
         if (not row['id'].replace('-', '').isalnum() or row['probe_kind'] not in
-            ('assembled_lada', 'wheel_collider', 'curve') or row['duration_frames'] < 2):
+            ('assembled_lada', 'wheel_collider', 'curve', 'wheel_angular') or row['duration_frames'] < 2):
             raise ValueError('Invalid native scenario')
         for key in ('source_objects', 'setup', 'frame_schedule', 'controls'):
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
         validate_schedule(row)
+        if row['probe_kind']=='wheel_angular': validate_angular_schedule(row)
     output.mkdir(parents=True)
     write_json(output / 'preflight.json', {k: v for k, v in pre.items() if k != 'source_geometry_map'})
     write_json(output / 'source-geometry-map.json', pre.get('source_geometry_map', {}))
@@ -360,6 +368,7 @@ def capture(source_root: Path, reference_root: Path,
             state = {key: value for key, value in native_run['initial'].items()
                      if key != 'profile_path'}
             state['physical_geometry'] = physical_inputs(next(row for row in native_run['geometry'] if row['phase'] == 'armed-after-canonical'))
+            if row['probe_kind']=='wheel_angular': state['angular_initial'] = angular_initial_inputs(native_run)
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state

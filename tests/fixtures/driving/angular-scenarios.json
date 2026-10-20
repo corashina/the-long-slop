@@ -1,0 +1,1533 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "angular-full-tire-excitation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "full-tire",
+        "purpose": "excitation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-high",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "positive-low",
+            "motor_nm": 20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "coast-positive",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "negative-high",
+            "motor_nm": -600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 241,
+            "phase": "negative-low",
+            "motor_nm": -20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "positive-revisit",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-revisit",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-full-tire-confirmation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "full-tire",
+        "purpose": "confirmation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-independent",
+            "motor_nm": 35.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "coast-independent",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "negative-independent",
+            "motor_nm": -45.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "motor-brake-overlap",
+            "motor_nm": 25.0,
+            "brake_nm": 40.0
+          },
+          {
+            "step": 241,
+            "phase": "brake-hold",
+            "motor_nm": 0.0,
+            "brake_nm": 120.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-held",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "negative-restart",
+            "motor_nm": -15.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-worn-tire-excitation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "worn-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "worn-tire",
+        "purpose": "excitation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-high",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "positive-low",
+            "motor_nm": 20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "coast-positive",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "negative-high",
+            "motor_nm": -600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 241,
+            "phase": "negative-low",
+            "motor_nm": -20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "positive-revisit",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-revisit",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-worn-tire-confirmation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "worn-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "worn-tire",
+        "purpose": "confirmation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-independent",
+            "motor_nm": 35.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "coast-independent",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "negative-independent",
+            "motor_nm": -45.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "motor-brake-overlap",
+            "motor_nm": 25.0,
+            "brake_nm": 40.0
+          },
+          {
+            "step": 241,
+            "phase": "brake-hold",
+            "motor_nm": 0.0,
+            "brake_nm": 120.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-held",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "negative-restart",
+            "motor_nm": -15.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-bare-rim-excitation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "bare-rim",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "bare-rim",
+        "purpose": "excitation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-high",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "positive-low",
+            "motor_nm": 20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "coast-positive",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "negative-high",
+            "motor_nm": -600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 241,
+            "phase": "negative-low",
+            "motor_nm": -20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "positive-revisit",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-revisit",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-bare-rim-confirmation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "bare-rim",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "bare-rim",
+        "purpose": "confirmation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-independent",
+            "motor_nm": 35.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "coast-independent",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "negative-independent",
+            "motor_nm": -45.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "motor-brake-overlap",
+            "motor_nm": 25.0,
+            "brake_nm": 40.0
+          },
+          {
+            "step": 241,
+            "phase": "brake-hold",
+            "motor_nm": 0.0,
+            "brake_nm": 120.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-held",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "negative-restart",
+            "motor_nm": -15.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-hub-excitation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "hub",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "hub",
+        "purpose": "excitation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-high",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "positive-low",
+            "motor_nm": 20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "coast-positive",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "negative-high",
+            "motor_nm": -600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 241,
+            "phase": "negative-low",
+            "motor_nm": -20.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "positive-revisit",
+            "motor_nm": 600.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-revisit",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-hub-confirmation",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "hub",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "hub",
+        "purpose": "confirmation",
+        "source_wheel": "level1:58684",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-independent",
+            "motor_nm": 35.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "coast-independent",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "negative-independent",
+            "motor_nm": -45.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "motor-brake-overlap",
+            "motor_nm": 25.0,
+            "brake_nm": 40.0
+          },
+          {
+            "step": 241,
+            "phase": "brake-hold",
+            "motor_nm": 0.0,
+            "brake_nm": 120.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-held",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "negative-restart",
+            "motor_nm": -15.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 116
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-auxiliary-helper-baseline",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "free-body baseline"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "auxiliary-helper",
+        "purpose": "baseline",
+        "source_wheel": "level1:58655",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "baseline",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 0
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    },
+    {
+      "id": "angular-auxiliary-helper-motor-coast",
+      "probe_kind": "wheel_angular",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "no copied contact geometry",
+        "velocity_mps": {
+          "x": 10.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step angular assignment before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one enabled contact-free native wheel",
+        "exact consuming physics solves",
+        "active signed spin and coast"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "angular": {
+        "support": "auxiliary-helper",
+        "purpose": "motor-coast",
+        "source_wheel": "level1:58655",
+        "duration_steps": 480,
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "events": [
+          {
+            "step": 1,
+            "phase": "positive-high",
+            "motor_nm": 3.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 61,
+            "phase": "positive-low",
+            "motor_nm": 1.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 121,
+            "phase": "coast-positive",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 181,
+            "phase": "negative-high",
+            "motor_nm": -3.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 241,
+            "phase": "negative-low",
+            "motor_nm": -1.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 301,
+            "phase": "coast-negative",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 361,
+            "phase": "positive-revisit",
+            "motor_nm": 1.0,
+            "brake_nm": 0.0
+          },
+          {
+            "step": 421,
+            "phase": "coast-revisit",
+            "motor_nm": 0.0,
+            "brake_nm": 0.0
+          }
+        ],
+        "rig": {
+          "use_gravity": false,
+          "drag": 0.0,
+          "angular_drag": 0.0,
+          "sleep_threshold": 0.0,
+          "velocity_mps": {
+            "x": 10.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "angular_velocity_rad_s": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "offset_m": {
+            "x": 10000.0,
+            "y": 10000.0,
+            "z": 0.0
+          },
+          "constraints": 0
+        },
+        "provenance": "declared copied-rig input; native source profile copied without a response equation",
+        "body_properties": "copy live source mass, centerOfMass, inertiaTensor, inertiaTensorRotation; rig overrides explicit; remaining body settings retain measured constructor defaults"
+      }
+    }
+  ]
+}

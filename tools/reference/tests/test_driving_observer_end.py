@@ -43,6 +43,7 @@ public class WheelCollider : Collider {
     public GameObject gameObject { get { if(destroyed) throw new InvalidOperationException("destroyed tracked wheel"); return target; } }
 }
 public static class G11BodyTrace { public static void End() {} }
+public static class G11AngularProbe { public static bool Active; public class Input { public int duration_steps=1; } }
 public static class Time { public static int frameCount=1; }
 public static class Application {
     public static event Action<string,string,int> logMessageReceived;
@@ -66,9 +67,9 @@ CAPTURE = r'''
     public class Sample {}
     public class Result { public bool completed; public string error; public int physics_steps;
         public G11Geometry.Activation[] wheel_activation_events; public Sample[] samples; }
-    public class Scenario { public int duration_frames=1; }
+    public class Scenario { public int duration_frames=1; public G11AngularProbe.Input angular=new G11AngularProbe.Input(); }
     static Scenario scenario=new Scenario(); public static Result result;
-    static bool active,finished; static int startFrame,used; static Sample[] buffer;
+    static bool active,finished; static int startFrame,used,step=1; static Sample[] buffer;
     static readonly object bufferGate=new object(); static Timer timeoutTimer=null;
     static string Output { get { return Environment.GetEnvironmentVariable("G11_OBSERVER_TEST_ROOT"); } }
     static void CaptureLog(string message,string stack,int type) {}
@@ -98,7 +99,8 @@ public static class G11ObserverEndTests {
         var unrelated=new GameObject();
         Throws(()=>G11Capture.SetSourceActive(unrelated,false,"active"),"destroyed tracked wheel");
         Require(unrelated.calls==1,"active original call missing");
-        foreach(bool failed in new[]{false,true}) {
+        foreach(bool angular in new[]{false,true}) foreach(bool failed in new[]{false,true}) {
+            G11AngularProbe.Active=angular;
             G11Capture.Reset();
             int count=G11Geometry.activation_count;
             Application.shutdown=delegate {
