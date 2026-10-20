@@ -660,9 +660,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         return Err(fail("Material assets are not ready".into()));
     }
     let instruments = world.resource::<super::instruments::InstrumentVisuals>();
-    if !instruments.bound || !instruments.prepared {
-        return Err(fail("Instrument bindings are not ready".into()));
-    }
+    instruments.validate_assets(world.resource::<Assets<materials::SourceMaterial>>())?;
     for light in &source.lights {
         if world.get::<lighting::SourceLight>(light.entity).is_none()
             || light
@@ -693,7 +691,6 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             choice.validate_assets(authored)?;
         }
     }
-    instruments.validate_assets(authored)?;
     for entity in world.iter_entities() {
         // Generated GPU-only surfaces are validated by their pipeline tickets.
         if entity

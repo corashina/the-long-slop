@@ -532,7 +532,7 @@ fn check_ready(
                 readiness.reset();
                 return;
             }
-            if !plates.ready() || !particles.prepared() {
+            if !instruments.prepared || !plates.ready() || !particles.prepared() {
                 readiness.reset();
                 return;
             }
