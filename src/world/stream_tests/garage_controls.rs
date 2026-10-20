@@ -14,6 +14,9 @@ mod reactions;
 #[path = "garage_controls/instruments.rs"]
 mod instruments;
 
+#[path = "garage_controls/radio.rs"]
+mod radio;
+
 fn load_garage() -> (ReferenceManifest, GarageRuntime) {
     let reference = super::reference();
     assert_eq!(reference.build_id, 11140890);

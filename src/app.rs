@@ -997,6 +997,14 @@ fn sync_instruments(
         &mut transforms,
         &mut materials,
     );
+    if let Some(audio) = &drive.runtime.audio {
+        visuals.update_radio(
+            audio.radio_frame.power,
+            audio.radio.tuning,
+            &mut transforms,
+            &mut materials,
+        );
+    }
 }
 fn active_camera(drive: &Drive) -> Transform {
     if let Some(camera) = drive.runtime.sleep_camera() {

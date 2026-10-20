@@ -64,8 +64,23 @@ pub struct InstrumentVisuals {
     pub bound: bool,
     pub prepared: bool,
     dashboards: Vec<Dashboard>,
+    radio: Option<super::radio::RadioVisuals>,
 }
 impl InstrumentVisuals {
+    fn materials(&self) -> impl Iterator<Item = &MaterialVisual> {
+        self.dashboards
+            .iter()
+            .flat_map(|d| d.lamps.iter().chain(&d.backlights))
+            .chain(self.radio.iter().flat_map(|r| r.materials.iter()))
+    }
+
+    fn materials_mut(&mut self) -> impl Iterator<Item = &mut MaterialVisual> {
+        self.dashboards
+            .iter_mut()
+            .flat_map(|d| d.lamps.iter_mut().chain(&mut d.backlights))
+            .chain(self.radio.iter_mut().flat_map(|r| r.materials.iter_mut()))
+    }
+
     pub(crate) fn validate_assets(
         &self,
         materials: &Assets<SourceMaterial>,
@@ -75,11 +90,7 @@ impl InstrumentVisuals {
                 "instrument preparation".into(),
             ));
         }
-        for visual in self
-            .dashboards
-            .iter()
-            .flat_map(|dashboard| dashboard.lamps.iter().chain(&dashboard.backlights))
-        {
+        for visual in self.materials() {
             if visual.entities.is_empty() || visual.choices.len() != visual.entities.len() {
                 return Err(crate::save::SaveError::MissingAssets(
                     "instrument renderer choices".into(),
@@ -113,28 +124,46 @@ impl InstrumentVisuals {
         if gltfs.iter().any(|(_, h)| gltf_assets.get(h).is_none()) {
             return Ok(false);
         }
-        for link in reference.vehicles.iter().flat_map(|v| {
-            v.instruments
-                .lamps
-                .iter()
-                .flat_map(|l| [&l.on, &l.off])
-                .chain(
-                    v.instruments
-                        .odometer
-                        .digits
-                        .iter()
-                        .flat_map(|d| [&d.on, &d.off]),
-                )
-                .chain(
-                    std::iter::once(&v.instruments.backlight)
-                        .chain(v.instruments.needles.iter().map(|n| &n.backlight))
-                        .filter_map(|backlight| match backlight {
-                            MaterialSwitchReference::Absent => None,
-                            MaterialSwitchReference::Renderer { on, off, .. } => Some([on, off]),
-                        })
-                        .flatten(),
-                )
-        }) {
+        let radio: crate::reference::RadioVisualReference =
+            serde_json::from_value(reference.audio["radio"]["visuals"].clone())
+                .map_err(|e| ReferenceError(format!("Radio visuals: {e}")))?;
+        for link in reference
+            .vehicles
+            .iter()
+            .flat_map(|v| {
+                v.instruments
+                    .lamps
+                    .iter()
+                    .flat_map(|l| [&l.on, &l.off])
+                    .chain(
+                        v.instruments
+                            .odometer
+                            .digits
+                            .iter()
+                            .flat_map(|d| [&d.on, &d.off]),
+                    )
+                    .chain(
+                        std::iter::once(&v.instruments.backlight)
+                            .chain(v.instruments.needles.iter().map(|n| &n.backlight))
+                            .filter_map(|backlight| match backlight {
+                                MaterialSwitchReference::Absent => None,
+                                MaterialSwitchReference::Renderer { on, off, .. } => {
+                                    Some([on, off])
+                                }
+                            })
+                            .flatten(),
+                    )
+            })
+            .chain(
+                [&radio.screen, &radio.indicator]
+                    .into_iter()
+                    .filter_map(|switch| match switch {
+                        MaterialSwitchReference::Renderer { on, off, .. } => Some([on, off]),
+                        MaterialSwitchReference::Absent => None,
+                    })
+                    .flatten(),
+            )
+        {
             let (_, handle) = gltfs
                 .iter()
                 .find(|(id, _)| *id == link.asset)
@@ -242,6 +271,21 @@ impl InstrumentVisuals {
             }
             dashboards.push(dashboard);
         }
+        let mut radio_material = |switch: &MaterialSwitchReference| match switch {
+            MaterialSwitchReference::Renderer { node, on, off } => bind_material(0, *node, on, off),
+            MaterialSwitchReference::Absent => {
+                Err(ReferenceError("Required radio renderer".into()))
+            }
+        };
+        self.radio = Some(super::radio::RadioVisuals::bind(
+            reference,
+            &radio,
+            nodes,
+            [
+                radio_material(&radio.screen)?,
+                radio_material(&radio.indicator)?,
+            ],
+        )?);
         self.dashboards = dashboards;
         self.bound = true;
         Ok(true)
@@ -264,6 +308,20 @@ impl InstrumentVisuals {
             .zip(states)
         {
             dashboard.update(&vehicle.instruments, state, transforms, materials);
+        }
+    }
+
+    pub fn update_radio(
+        &mut self,
+        power: bool,
+        tuning: f32,
+        transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
+        materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+    ) {
+        if self.prepared {
+            if let Some(radio) = &mut self.radio {
+                radio.update(power, tuning, transforms, materials);
+            }
         }
     }
 }
@@ -353,27 +411,18 @@ pub(crate) fn prepare_instruments(
     {
         return;
     }
-    if visuals
-        .dashboards
-        .iter()
-        .flat_map(|d| d.lamps.iter().chain(&d.backlights))
-        .any(|visual| {
-            visual.entities.iter().any(|entity| {
-                receivers.get(*entity).map_or(true, |(_, receiver, ..)| {
-                    !materials.contains(receiver.0.id())
-                })
+    if visuals.materials().any(|visual| {
+        visual.entities.iter().any(|entity| {
+            receivers.get(*entity).map_or(true, |(_, receiver, ..)| {
+                !materials.contains(receiver.0.id())
             })
         })
-    {
+    }) {
         return;
     }
     let far = Transform::from_translation(Vec3::splat(1_000_000.));
     let visuals = &mut *visuals;
-    for visual in visuals
-        .dashboards
-        .iter_mut()
-        .flat_map(|d| d.lamps.iter_mut().chain(&mut d.backlights))
-    {
+    for visual in visuals.materials_mut() {
         for &entity in &visual.entities {
             let (mesh, receiver, global, renderer, primitive) = receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;

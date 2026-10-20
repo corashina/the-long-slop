@@ -8,6 +8,7 @@ pub mod instruments;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+mod radio;
 pub mod reference;
 pub mod save;
 mod shadow_batch;

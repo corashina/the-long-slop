@@ -8,6 +8,7 @@ from pathlib import Path
 from .library.reader import checked
 from .library.types import ObjectId
 from .source import key, source_id
+from .radio import recover_radio_visuals
 
 ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
@@ -82,7 +83,7 @@ def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: s
         'path': 'reference/' + name, 'usages':[usage], **metadata}
 
 
-def recover_audio(source, roots: dict, manifest: dict, library, output: Path) -> dict:
+def recover_audio(source, roots: dict, manifest: dict, library, output: Path, reports: dict) -> dict:
     receipt, method = managed_evidence(library)
     audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'mixers': [],
         'bindings': [], 'mechanisms': [], 'fluids': [], 'interiors': [], 'routes': [], 'lamps': [], 'silent_actions': ['pickup', 'detach', 'handbrake'],
@@ -263,6 +264,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             if electronics['jamValue'] != 0:
                 raise ValueError('Radio nonzero startup jam requires source rule')
             audio['radio'] = {'source':source_id(c),'emitter':emitter(c),'voices':rvoices,'controls':controls,
+                'visuals':recover_radio_visuals(source,c,manifest,reports),
                 'electronics_source':source_id(electronics_reader),'electronics_output':electronics['maxOutput'],
                 'tuning_repeat_seconds':0.2,'holiday_ranges':[[10,15,11,15],[12,15,1,15]],
                 'constants':{k:d[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']},
