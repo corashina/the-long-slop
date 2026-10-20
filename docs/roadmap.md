@@ -102,6 +102,9 @@ G11 includes service braking, engine braking, and the handbrake under simultaneo
 G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
 G13 follows the approved garage state. Saved survival needs remain deferred.
 G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
+Road and grass mesh jobs now run in workers. Active and prepared worlds own separate actors, results, and reservations.
+Main copies input into transfer buffers. WASM still copies input and output. Source review does not prove worker timing or memory release.
+Native and both WASM feature checks pass. No runtime, parity, driving, save/load, or performance acceptance is recorded. G15 stays Partial.
 G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
 It also requires the seven deferred G03 wheel checks in the [wheel audit](g03-wheel-audit.md).
 Verify hubcaps, complete wheels, tire separation, compatible assembly, fit rejection, step requirements, and repeated cycles.

@@ -1,15 +1,38 @@
 # Additional worker tasks
 
 Date: 2026-10-20.
-Road and grass workers are implemented in source on `codex/more-worker-tasks`.
-The branch remains unmerged. The primary checkout is untouched.
+Road and grass workers are merged into `master` from `codex/more-worker-tasks`.
+The current source is in `C:/Users/Corashina/Documents/Projects/the-long-drive-wasm`.
+Merge commit: `50d51c6fb2e40614e5b63a06e11662ae2221ebdf`.
+The branch commit identities below record the historical implementation source.
 The latest user instruction is "Implement workers. Skip tests".
-Task 8 documents implementation and limits. It adds no comparison tool, test, or acceptance gate.
+The merge preserves the current master renderer path and G05 save schema 7.
+The worker implementation report's schema 6 describes its pre-merge tree only.
+It does not describe current master save behavior.
+The historical worker worktree path is no longer current. The source now lives in the primary checkout.
+The historical replay asset tree lives at `.cache/benchmark/more-worker-tasks/assets`.
 
 Source review and compile checks do not prove runtime behavior.
 No worker performance gain, memory gain, bitwise equality, input latency, or save/load acceptance is established.
 No new release worker package or frozen candidate has been produced.
 The startup receipts below describe an older package with no road or grass worker.
+
+## Current integration checks
+
+These checks ran on the merged working tree. It included the pre-existing local MSAA change in `src/presentation/render_targets.rs`.
+The committed merge tree retains the prior four-sample value there, so these checks do not prove that exact committed file state.
+
+`cargo fmt --all -- --check` passed.
+`cargo check --locked --workspace --lib` passed for the native target.
+`cargo check --locked --target wasm32-unknown-unknown --workspace --lib` passed for the WebGL target.
+`cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu` passed.
+The Rust checks used the existing `my-summer-slop-toolchain` Docker image and Cargo volumes.
+Node syntax checks passed for the changed `.mjs` and worker bridge files.
+PowerShell parsed `scripts/build.ps1` without errors.
+`git diff --check` and `git diff --cached --check` passed.
+
+No tests ran, as requested. No release build, full check script, or browser run ran.
+Compilation and syntax checks do not establish runtime behavior, worker parity, or performance.
 
 ## Implementation identities
 
@@ -162,7 +185,8 @@ The 2 MiB linker settings have source and parse evidence only. No worker release
 
 ## Save/load source boundaries
 
-Save schema remains version 6.
+In the historical worker tree, save schema was version 6.
+Current master uses G05 schema 7. Worker transport data stays outside saved snapshots.
 Capture checks readiness and pause state, clears input, captures authoritative runtime fields, validates, serializes, and returns.
 It adds no wait for road or grass visual jobs.
 Existing restore-pending and snapshot validation checks remain.
@@ -220,7 +244,7 @@ These commands are documented only. Task 8 did not execute them.
 For a later user-authorized release and browser session, use the current build script without extra switches:
 
 ```powershell
-Set-Location -LiteralPath 'C:/Users/Corashina/.codex/worktrees/more-worker-tasks/the-long-drive-wasm'
+Set-Location -LiteralPath 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm'
 ./scripts/build.ps1
 ```
 
@@ -237,7 +261,7 @@ node ./scripts/serve.mjs
 ```
 
 Open `http://127.0.0.1:4173/` in a visible, focused browser.
-The server uses this worktree's `web/`, `web/assets/`, `web/pkg/`, and `.cache/http-compression/`.
+The server uses the primary checkout's `web/`, `web/assets/`, `web/pkg/`, and `.cache/http-compression/`.
 It supports the `PORT` environment variable. It has no package-root or asset-root CLI option.
 Use `http://127.0.0.1:4173/?profileCpu=1` only for instrumented CPU collection.
 These commands do not establish runtime acceptance.
@@ -282,7 +306,8 @@ All 39 served script and package hashes matched the saved server configuration.
 
 Artifact paths below use `.cache/benchmark/more-worker-tasks/` as their prefix.
 The saved pre-worker freeze is `baseline-timing-repair/`, with separate `web/`, `scripts/`, and `pkg/` roots.
-The asset root remains this isolated worktree's `web/assets/` directory.
+The original asset root was the worker worktree's `web/assets/` directory.
+That historical asset tree now lives at `.cache/benchmark/more-worker-tasks/assets` in the primary checkout.
 The full asset library was not copied.
 The old `baseline/` and `baseline-startup-repair/` freezes remain intact.
 All three freezes are historical evidence. None contains the new road or grass worker package.
@@ -451,20 +476,21 @@ The complete report is `.superpowers/sdd/2026-10-19-more-worker-tasks/task-2-rep
 The release log is `.superpowers/sdd/2026-10-19-more-worker-tasks/task-2-timing-repair-build.log`.
 Earlier startup failures remain documented there and in their separate frozen workflow directories.
 
-For a later user-authorized historical replay, start the pre-worker package with:
+For a later user-authorized replay of the historical pre-worker package, run:
 
 ```powershell
-Set-Location 'C:/Users/Corashina/.codex/worktrees/more-worker-tasks/the-long-drive-wasm'
+Set-Location 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm'
 ./.cache/benchmark/more-worker-tasks/workflow-timing-repair/run-server.ps1
 ```
 
-The wrapper sets these exact roots under this worktree:
+The old worktree path is historical. The wrapper and frozen package now live in the primary checkout.
+The wrapper sets these exact roots:
 
 | Server variable | Root or identity |
 | --- | --- |
 | `BENCH_WEB_ROOT` | `.cache/benchmark/more-worker-tasks/baseline-timing-repair/web` |
 | `BENCH_SCRIPTS_ROOT` | `.cache/benchmark/more-worker-tasks/baseline-timing-repair/scripts` |
-| `BENCH_ASSET_ROOT` | `web/assets` |
+| `BENCH_ASSET_ROOT` | `.cache/benchmark/more-worker-tasks/assets` |
 | `BENCH_PACKAGE_ROOT` | `.cache/benchmark/more-worker-tasks/baseline-timing-repair/pkg` |
 | `BENCH_RESULTS_ROOT` | `.cache/benchmark/more-worker-tasks/results-timing-repair` |
 | `BENCH_COMMIT` | `f6d5ded77ca38de139e920e2c5d12a3cde19d806` |
