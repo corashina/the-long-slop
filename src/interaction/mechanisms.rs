@@ -6,6 +6,7 @@ use rapier3d::glamx::EulerRot;
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
 use std::collections::{HashMap, HashSet};
+mod reactions;
 
 struct Frame {
     node: NodeId,
@@ -22,6 +23,7 @@ struct Frame {
     relative: Pose,
     external: Option<RigidBodyHandle>,
     external_pose: Option<Pose>,
+    reaction_root: Option<RigidBodyHandle>,
 }
 struct Control {
     reference: MechanismReference,
@@ -31,6 +33,9 @@ struct Control {
     audio_delta: [f32; 2],
     enabled: bool,
     turn_state: u8,
+    reaction_frame: Option<usize>,
+    reaction_force: Vector,
+    pending_reactions: [Option<reactions::EndpointEvent>; 4],
 }
 pub struct MechanismState {
     radio_controls: HashMap<ItemId, (RadioControlReference, u8)>,
@@ -53,6 +58,7 @@ impl MechanismState {
         ids: &crate::save::IdentityMap,
         saved: &[crate::save::MechanismSnapshot],
     ) {
+        self.clear_reactions();
         for record in saved {
             let control = self
                 .controls
@@ -104,6 +110,7 @@ impl MechanismState {
         item: ItemId,
         state: crate::world::MechanismSnapshot,
     ) -> Result<(), ReferenceError> {
+        self.clear_reactions();
         if !state.degrees.iter().all(|v| v.is_finite()) || !state.slide.is_finite() {
             return Err(ReferenceError("Invalid mechanism snapshot".into()));
         }
@@ -167,6 +174,9 @@ impl MechanismState {
             .flat_map(|m| m.driven_nodes.iter().copied())
             .collect();
         for m in &reference.mechanisms {
+            if let EndpointReactionReference::Rotation { node, .. } = &m.reaction {
+                needed.insert(*node);
+            }
             needed.extend(m.driven_nodes.iter().copied());
             needed.extend([m.drag.node, m.drag.node2]);
             if let Some(slide) = &m.slide {
@@ -237,6 +247,7 @@ impl MechanismState {
                     relative: Pose::IDENTITY,
                     external: None,
                     external_pose: None,
+                    reaction_root: None,
                 });
             }
             if frames.len() == before {
@@ -253,6 +264,12 @@ impl MechanismState {
             .mechanisms
             .iter()
             .map(|m| Control {
+                reaction_frame: match &m.reaction {
+                    EndpointReactionReference::None => None,
+                    EndpointReactionReference::Rotation { node, .. } => Some(nodes[node]),
+                },
+                pending_reactions: [None; 4],
+                reaction_force: reactions::local_force(&m.reaction),
                 reference: m.clone(),
                 audio_active: false,
                 audio_delta: [0.; 2],
@@ -355,6 +372,7 @@ impl MechanismState {
                 relative: local,
                 external: None,
                 external_pose: None,
+                reaction_root: None,
             });
         }
         while self.order.len() < self.frames.len() {
@@ -383,6 +401,12 @@ impl MechanismState {
         let index = self.controls.len();
         self.items.insert(reference.item, index);
         self.controls.push(Control {
+            reaction_frame: match &reference.reaction {
+                EndpointReactionReference::None => None,
+                EndpointReactionReference::Rotation { node, .. } => Some(self.nodes[node]),
+            },
+            pending_reactions: [None; 4],
+            reaction_force: reactions::local_force(&reference.reaction),
             audio_active: false,
             audio_delta: [0.; 2],
             degrees: reference
@@ -408,6 +432,7 @@ impl MechanismState {
         self.item_nodes.insert(item, node);
     }
     pub fn remove_generated(&mut self, item: ItemId, ids: &[NodeId]) {
+        self.clear_reactions();
         self.item_nodes.retain(|_, node| !ids.contains(node));
         self.item_nodes.remove(&item);
         self.controls.retain(|c| {
@@ -446,6 +471,11 @@ impl MechanismState {
                 self.bodies.insert(body, i);
             }
         }
+        for control in &mut self.controls {
+            if let EndpointReactionReference::Rotation { node, .. } = &control.reference.reaction {
+                control.reaction_frame = Some(self.nodes[node]);
+            }
+        }
     }
     pub fn take_control_action(&mut self) -> Option<ControlAction> {
         self.control_action.take()
@@ -456,11 +486,12 @@ impl MechanismState {
         }
         self.items.get(&item).is_some_and(|i| {
             self.controls[*i].enabled
-                && self.controls[*i]
-                    .reference
-                    .turn
-                    .as_ref()
-                    .is_some_and(|t| matches!(t.action, TurnAction::ToggleHomeLight { .. }))
+                && self.controls[*i].reference.turn.as_ref().is_some_and(|t| {
+                    matches!(
+                        t.action,
+                        TurnAction::ToggleHomeLight { .. } | TurnAction::ToggleHandbrake
+                    )
+                })
         })
     }
     pub fn turn_state(&self, item: ItemId) -> Option<u8> {
@@ -600,6 +631,7 @@ impl MechanismState {
         self.bodies.get(&body).map(|i| self.frames[*i].node)
     }
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
+        self.clear_reactions();
         if let Some(i) = self.bodies.get(&id) {
             self.frames[*i].handle = Some(handle);
         }
@@ -620,9 +652,13 @@ impl MechanismState {
         }
     }
     pub fn cancel_input(&mut self) {
+        self.clear_reactions();
         self.control_action = None;
     }
     pub fn set_part_root(&mut self, node: NodeId, body: Option<RigidBodyHandle>) {
+        if self.frames[self.nodes[&node]].external != body {
+            self.clear_reactions();
+        }
         let f = &mut self.frames[self.nodes[&node]];
         f.external = body;
         if body.is_none() {
@@ -634,6 +670,7 @@ impl MechanismState {
         f.external_pose = Some(to_rapier(pose));
     }
     pub fn mount_part(&mut self, node: NodeId, mount: NodeId, rotation: [f32; 4]) {
+        self.clear_reactions();
         let parent = self.nodes[&mount];
         let f = &mut self.frames[self.nodes[&node]];
         f.external = None;
@@ -663,6 +700,7 @@ impl MechanismState {
         (f.root_body == Some(root)).then_some(f.relative)
     }
     pub fn uncraft(&mut self, usable: ItemId, node: NodeId) -> Option<Rotation> {
+        self.clear_reactions();
         let index = *self.items.get(&usable)?;
         let control_node = self.nodes[&self.item_nodes[&self.controls[index].reference.item]];
         let rotation = self.frames[control_node].world.rotation;
@@ -674,6 +712,7 @@ impl MechanismState {
         Some(rotation * self.frames[control_node].world.rotation.inverse() * root)
     }
     pub fn set_mounted(&mut self, parent: ItemId, mounted: bool) {
+        self.clear_reactions();
         for c in &mut self.controls {
             if c.reference.parent_item != Some(parent) {
                 continue;
@@ -796,10 +835,21 @@ impl MechanismState {
         c.audio_active = true;
         c.audio_delta = [x, y];
         if held && let Some(r) = &c.reference.rotation {
+            let previous = c.degrees;
             for (i, delta) in [x, y].into_iter().enumerate() {
                 let sign = if r.inverted[i] == (i == 0) { 1.0 } else { -1.0 };
                 c.degrees[i] = (c.degrees[i] + delta * r.sensitivity * sign)
                     .clamp(r.limits_degrees[i][0], r.limits_degrees[i][1]);
+            }
+            if let EndpointReactionReference::Rotation { events, .. } = &c.reference.reaction {
+                c.pending_reactions = reactions::transitions(
+                    previous,
+                    c.degrees,
+                    r.limits_degrees,
+                    [x, y],
+                    dt,
+                    *events,
+                );
             }
         }
         if let Some(s) = &c.reference.slide {
@@ -870,6 +920,13 @@ impl MechanismState {
             self.frames[i].relative = relative;
             self.frames[i].world = world;
             self.frames[i].world_scale = scale;
+            self.frames[i].reaction_root = self.frames[i].external.or_else(|| {
+                self.frames[i]
+                    .parent
+                    .map_or(self.frames[i].handle, |parent| {
+                        self.frames[parent].reaction_root
+                    })
+            });
         }
     }
     fn apply(&mut self, index: usize) {

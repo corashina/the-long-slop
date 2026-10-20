@@ -1,4 +1,7 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
+#[path = "stream_tests/garage_controls.rs"]
+mod garage_controls;
+
 use super::*;
 use crate::starting_area::GarageRuntime;
 

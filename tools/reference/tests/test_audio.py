@@ -1,6 +1,8 @@
 """Critical selected-audio contract checks."""
 import copy
+import ast
 import hashlib
+import inspect
 import json
 import tempfile
 import unittest
@@ -13,6 +15,27 @@ from tools.reference.library.types import ObjectId
 from tools.reference.source import key, source_id
 
 class SelectedAudio(unittest.TestCase):
+    def test_audio_requires_gltf_reports(self):
+        from tools.reference.audio import recover_audio
+        signature = inspect.signature(recover_audio)
+        self.assertEqual(list(signature.parameters), ['source', 'roots', 'manifest', 'library', 'output', 'reports'])
+        self.assertIs(signature.parameters['reports'].default, inspect.Parameter.empty)
+
+    def test_audio_exporter_passes_gltf_reports(self):
+        from tools.reference.audio import recover_audio
+        from tools.reference.export import _export_selected
+        tree = ast.parse(inspect.getsource(_export_selected))
+        call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == 'recover_audio')
+        reports = {'lada': {'material_indices': {'level1:21': 3}}}
+        def bind(*args, **kwargs):
+            arguments = inspect.signature(recover_audio).bind(*args, **kwargs).arguments
+            self.assertIs(arguments['reports'], reports)
+            return arguments
+        scope = dict(source=object(), roots={}, CARS={}, manifest={}, library=object(),
+                     output=Path('.'), report=reports, recover_audio=bind)
+        eval(compile(ast.Expression(call), '<audio export caller>', 'eval'), scope)
+
     def accepted_source_fixture(self, directory):
         root=Path(directory)
         library,identity,_=self.fixture(directory)

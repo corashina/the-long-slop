@@ -362,7 +362,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['ui']=export_ui(source,output,library)
     for index,name in enumerate(CARS):
         manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and not name.startswith('item_') and name!='player'},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and not name.startswith('item_') and name!='player'},manifest,library,output,report)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
     from .acquisition import recover_acquisition, validate_acquisition
     manifest['acquisition'] = recover_acquisition(source, manifest)

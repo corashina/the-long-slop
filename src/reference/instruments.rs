@@ -7,10 +7,21 @@ pub struct MaterialLink {
     pub gltf_material: u32,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MaterialSwitchReference {
+    Absent,
+    Renderer {
+        node: NodeId,
+        on: MaterialLink,
+        off: MaterialLink,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NeedleReference {
     pub source: SourceId,
     pub node: NodeId,
+    pub backlight: MaterialSwitchReference,
     pub signal: String,
     pub min_value: f32,
     pub max_value: f32,
@@ -65,6 +76,7 @@ pub struct OdometerReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstrumentReference {
+    pub backlight: MaterialSwitchReference,
     pub electronics_output: f32,
     pub electronics_off_threshold: f32,
     pub needles: Vec<NeedleReference>,
@@ -118,6 +130,15 @@ impl InstrumentReference {
                 "instrument material",
             )
         };
+        for backlight in std::iter::once(&self.backlight)
+            .chain(self.needles.iter().map(|needle| &needle.backlight))
+        {
+            if let MaterialSwitchReference::Renderer { node, on, off } = backlight {
+                require(nodes.contains(node), "instrument backlight node")?;
+                material(on)?;
+                material(off)?;
+            }
+        }
         for l in &self.lamps {
             require(
                 nodes.contains(&l.node)

@@ -481,7 +481,7 @@ fn check_ready(
                 {
                     return false;
                 }
-                if !plates.ready() || !particles.prepared() {
+                if !instruments.prepared || !plates.ready() || !particles.prepared() {
                     return false;
                 }
                 true
@@ -960,6 +960,14 @@ fn sync_instruments(
         &mut transforms,
         &mut materials,
     );
+    if let Some(audio) = &drive.runtime.audio {
+        visuals.update_radio(
+            audio.radio_frame.power,
+            audio.radio.tuning,
+            &mut transforms,
+            &mut materials,
+        );
+    }
 }
 fn active_camera(drive: &Drive) -> Transform {
     if let Some(camera) = drive.runtime.sleep_camera() {

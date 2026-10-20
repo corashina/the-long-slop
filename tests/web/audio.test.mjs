@@ -53,6 +53,19 @@ function radioSetup(Context=Fake){const a=setup(Context);globalThis.fetch=async 
 const recording=raw.radio.stations[0].music[0];
 function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],true);for(const id of raw.radio.voices)a.emitter(raw.voices.find(v=>v.id===id).emitter,[0,0,0],[0,0,0,1],true);a.radio({power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
 async function radioLoaded(a){await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));await loaded(a);}
+test('radio_resume_reuses_playback',async()=>{
+ class Wav extends Fake {decodeAudioData(bytes){const v=new DataView(bytes),channels=v.getUint16(22,true),rate=v.getUint32(24,true),bits=v.getUint16(34,true);let data=0;for(let i=12;i+8<=bytes.byteLength;){const n=v.getUint32(i+4,true);if(v.getUint32(i,true)===0x61746164)data=n;i+=8+n+(n&1);}return Promise.resolve({duration:data/(rate*channels*bits/8),numberOfChannels:channels});}}
+ const a=radioSetup(Wav);a.unlock();await settle();radioFrame(a,2);await radioLoaded(a);radioFrame(a,2);
+ const voice=a.bank.voices.get(raw.radio.voices[1]),source=voice.source;
+ assert.ok(source);assert.equal(voice.offset,2);
+ a.pause();assert.equal(voice.source,null);assert.ok(source.stopped);
+ a.unlock();await settle();radioFrame(a,2);await radioLoaded(a);
+ const resumed=voice.source;assert.ok(resumed);assert.notEqual(resumed,source);assert.equal(voice.offset,2);
+ radioFrame(a,2);a.unlock();await settle();radioFrame(a,2);
+ assert.equal(voice.source,resumed);
+ assert.equal(Fake.starts.filter(s=>!s.stopped&&s.buffer===resumed.buffer).length,1);
+ a.dispose();
+});
 test('radio_cache_is_bounded',async()=>{
  const waiting=[],ids=raw.radio.stations.flatMap(s=>s.music).filter((id,i,a)=>a.indexOf(id)===i);
  class Slow extends Fake{decodeAudioData(bytes){return new Promise(resolve=>waiting.push({resolve,bytes}));}}

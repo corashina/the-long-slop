@@ -595,6 +595,20 @@ impl WorldReference {
                     "world rotation inputs",
                 )?;
             }
+            if let super::EndpointReactionReference::Rotation {
+                node: control,
+                force,
+                ..
+            } = &row.recipe.reaction
+            {
+                require(
+                    row.recipe.rotation.is_some()
+                        && node(*control)
+                        && force.is_finite()
+                        && *force >= 0.,
+                    "world mechanism endpoint reaction",
+                )?;
+            }
             if let Some(slide) = &row.recipe.slide {
                 require(
                     slide.paths.iter().all(|p| {
