@@ -1658,6 +1658,7 @@ impl InteractionState {
             if item.inactive_pose.is_some() {
                 continue;
             }
+            contact.update_response(particles);
             let cap_pose = to_rapier(item.pose) * opening.local_pose;
             let forward = cap_pose.rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();

@@ -2,7 +2,7 @@
 
 Date: 2026-10-20.
 Status: Approved and implemented on 2026-10-20. G04 remains `Verify`.
-Normal-input browser acceptance and final branch review remain pending.
+Normal-input browser acceptance and scoped final-fix review remain pending.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g04-fluids`.
 
@@ -35,8 +35,8 @@ The implementation must use the matching installed garage export for integration
 | `fluidcontainer.ChangeOne` | 28346-28365 | Limit additions by remaining capacity and retain source subtraction behavior. |
 | `fluidcontainer.ChangeWithoutMix` | 28368-28386 | Recalculate each fraction after previous mutations. |
 | Player fill selection and `DrinkFill` | 17068-17085, 18878-18918 | Fill the selected receiver from the held tank. |
-| `tankcapparticledetectionscript` | 62975-63036 | Receive emitted fluid through nearby caps without another source debit. |
-| `tankcapscript.Update` | 63416-63475 | Apply tilt, valve, fill fraction, emission, and depletion rules. |
+| `tankcapparticledetectionscript` | 62975-63041 | Receive emitted fluid through nearby caps without another source debit. |
+| `tankcapscript.Update` | 63407-63475 | Apply tilt, valve, fill fraction, emission, and depletion rules. |
 | `tankscript.Upd` | 63615-63624 | Remove the first nonpositive entry on each update call. |
 | Source tank save and restore | 39861-39874, 40241-40251 | Preserve ordered quantities and run source load cleanup. |
 
@@ -134,6 +134,16 @@ Separate struck GameObjects can each receive a callback from one emitter step.
 Receipts read live source fractions after spill debit and source cleanup.
 A receipt adds fluid without another source debit.
 
+A receiver with space and an open valve changes the emitter collision response.
+Bounce and dampening interpolate from the receiver defaults to zero through its valve value.
+The emitter retains two response values and a fixed five-update countdown.
+Five cap updates decrement the countdown. The sixth update restores the emitter defaults.
+A closed or full receiver restores the emitter defaults immediately without clearing the countdown.
+Old particles can change this response when the current raw poured amount is zero.
+Fluid additions and fill flags still require a positive raw request.
+Particle motion uses the current emitter response.
+These checks establish the local update sequence, not Unity callback timing.
+
 The implementation uses a stable local callback order based on existing source identities.
 The decompiled methods do not establish Unity callback timing or ordering.
 That ordering remains an explicit runtime acceptance limit.
@@ -181,6 +191,8 @@ Removal and installation do not initialize fluid contents.
 
 After transfer or spill, existing dirty-state and mass updates use the changed item contents.
 Tests check both detached and installed states.
+Portable mass bounds the combined dry mass and derived fluid total to 0.001 kg.
+This uses the existing detached-part boundary. It preserves authoritative entries and saved quantity bits.
 Part identities, collider ownership, and cap ownership remain stable through repeated cycles.
 
 ## File boundaries

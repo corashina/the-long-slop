@@ -417,7 +417,7 @@ impl StartingArea {
             if !physics.body_active(*handle) {
                 continue;
             }
-            let mass = *dry
+            let mass = (*dry
                 + tanks
                     .iter()
                     .map(|id| {
@@ -429,7 +429,8 @@ impl StartingArea {
                             .expect("portable fluid")
                             .finite_total()
                     })
-                    .sum::<f32>();
+                    .sum::<f32>())
+            .max(0.001);
             if (mass - *current).abs() > 0.0001 {
                 physics.edit_body(*handle, |body| body.set_additional_mass(mass, true));
                 *current = mass;

@@ -57,6 +57,81 @@ fn g04_ordered_snapshot_capture_and_copy_do_not_allocate() {
     );
 }
 
+#[test]
+#[ignore = "requires the installed single-Lada export"]
+fn g04_portable_mass_bounds_signed_depletion() {
+    use my_summer_slop::{
+        fluids::{FluidContainer, FluidEntry, FluidSnapshot, spill},
+        reference::ItemId,
+        simulation::FIXED_DT,
+    };
+    let r = ReferenceManifest::from_runtime_json(
+        &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+    )
+    .unwrap();
+    let mut run = GarageRuntime::new(&r).unwrap();
+    let id = ItemId(116);
+    let body = run.area.items.get(id).unwrap().body.unwrap();
+    let opening = r.openings.iter().find(|o| o.tank == id).unwrap();
+    let requested = opening.flow_liters_per_second * FIXED_DT;
+    let amount = requested / 4. + 1e-9;
+    let mut tank = FluidContainer::new(
+        20.,
+        &[
+            FluidEntry {
+                fluid_type: 0,
+                amount,
+            },
+            FluidEntry {
+                fluid_type: 3,
+                amount,
+            },
+        ],
+    );
+    spill(&mut tank, requested);
+    let expected = FluidSnapshot::from(&tank);
+    assert_eq!(expected.as_slice().len(), 1);
+    assert_eq!(expected.as_slice()[0].fluid_type, 3);
+    assert!(tank.total() < -21_000.);
+    let saved_bits = serde_json::to_vec(&expected).unwrap();
+    run.area.items.get_mut(id).unwrap().fluid = Some(tank);
+    for _ in 0..2 {
+        run.area.sync_portable_mass(&mut run.physics);
+        run.physics.recompute_body_mass(body);
+        let mass = run.physics.rapier().bodies[body].mass();
+        assert!(mass.is_finite() && mass > 0., "portable mass {mass}");
+        assert!((mass - 0.001).abs() < 1e-6);
+        let actual = FluidSnapshot::from(run.area.items.get(id).unwrap().fluid.as_ref().unwrap());
+        assert_eq!(
+            actual.as_slice()[0].amount.to_bits(),
+            expected.as_slice()[0].amount.to_bits()
+        );
+        assert_eq!(actual, expected);
+        assert_eq!(serde_json::to_vec(&actual).unwrap(), saved_bits);
+    }
+    // The other changed live-fluid mass caller reaches the vehicle setter.
+    let receiver = r.vehicles[0].engine.fuel_tank;
+    run.area.items.get_mut(receiver).unwrap().fluid = run.area.items.get(id).unwrap().fluid.clone();
+    run.wheels
+        .sync(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    let chassis = run.physics.chassis_handle(0);
+    let mass = run.physics.rapier().bodies[chassis].mass();
+    assert!(mass.is_finite() && mass > 0., "vehicle mass {mass}");
+    assert_eq!(
+        FluidSnapshot::from(
+            run.area
+                .items
+                .get(receiver)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+        ),
+        expected,
+    );
+}
+
 fn cap_aim(
     run: &GarageRuntime,
     r: &ReferenceManifest,

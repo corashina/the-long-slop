@@ -165,9 +165,22 @@ impl InteractionState {
         else {
             return false;
         };
-        if !(destination_fluid.total() < destination_fluid.capacity_liters
-            && self.openings[destination_index].valve > 0.)
-        {
+        let receiver = &self.openings[destination_index];
+        let valve = receiver.valve;
+        let accepts = destination_fluid.total() < destination_fluid.capacity_liters && valve > 0.;
+        let response = receiver.particles.as_ref().map(|p| (p.bounce, p.dampen));
+        let emitter = &mut self.openings[source_index];
+        if let Some(contact) = emitter.contact.as_mut() {
+            if accepts {
+                if let Some((bounce, dampen)) = response {
+                    contact.receive_response(bounce, dampen, valve);
+                }
+            } else if let Some(particles) = emitter.particles.as_ref() {
+                contact.restore_response(particles);
+            }
+        }
+        // Old particles still change the response after the current spill stops.
+        if !accepts || !(raw_poured > 0.) {
             return false;
         }
         let Some(_) = items.get(source_tank).and_then(|i| i.fluid.as_ref()) else {
@@ -205,36 +218,29 @@ impl InteractionState {
         fluid_scale: f32,
     ) {
         for index in 0..self.openings.len() {
-            let Some(contact) = self.openings[index].contact.take() else {
+            let Some(contact) = self.openings[index].contact.as_ref() else {
                 continue;
             };
-            if contact.last_poured > 0. {
-                group_callbacks(
-                    &mut self.callback_nodes,
+            let raw_poured = contact.last_poured;
+            group_callbacks(
+                &mut self.callback_nodes,
+                contact.collisions(),
+                &self.light_nodes,
+                physics,
+            );
+            let source = self.openings[index].reference.id;
+            for callback in 0..self.callback_nodes.len() {
+                let contact = self.openings[index].contact.as_ref().unwrap();
+                if let Some(destination) = self.receipt_target(
+                    source,
+                    self.callback_nodes[callback],
                     contact.collisions(),
-                    &self.light_nodes,
+                    items,
                     physics,
-                );
-                let source = self.openings[index].reference.id;
-                for callback in 0..self.callback_nodes.len() {
-                    if let Some(destination) = self.receipt_target(
-                        source,
-                        self.callback_nodes[callback],
-                        contact.collisions(),
-                        items,
-                        physics,
-                    ) {
-                        self.receive_fluid(
-                            source,
-                            destination,
-                            contact.last_poured,
-                            fluid_scale,
-                            items,
-                        );
-                    }
+                ) {
+                    self.receive_fluid(source, destination, raw_poured, fluid_scale, items);
                 }
             }
-            self.openings[index].contact = Some(contact);
         }
     }
 }

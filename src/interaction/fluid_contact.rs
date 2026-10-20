@@ -31,6 +31,9 @@ pub struct FluidContact {
     last_emitter: Option<Vector>,
     random: u32,
     pub(crate) last_poured: f32,
+    bounce: f32,
+    dampen: f32,
+    response_updates_remaining: u8,
     visual: crate::reference::ParticleReference,
     pub(crate) splash: crate::particles::ParticleState,
     colors: [[f32; 4]; 6],
@@ -53,6 +56,9 @@ impl FluidContact {
             last_emitter: None,
             random: seed.max(1),
             last_poured: 0.,
+            bounce: reference.bounce,
+            dampen: reference.dampen,
+            response_updates_remaining: 0,
             visual: visual.clone(),
             splash: crate::particles::ParticleState::new(splash, seed as u64),
             colors: std::array::from_fn(|i| {
@@ -66,6 +72,25 @@ impl FluidContact {
             }),
             start_color: [1.; 4],
             origin: [0.; 3],
+        }
+    }
+
+    pub(super) fn receive_response(&mut self, bounce: f32, dampen: f32, valve: f32) {
+        self.bounce = bounce + (0. - bounce) * valve;
+        self.dampen = dampen + (0. - dampen) * valve;
+        self.response_updates_remaining = 5;
+    }
+
+    pub(super) fn restore_response(&mut self, reference: &FluidParticleReference) {
+        self.bounce = reference.bounce;
+        self.dampen = reference.dampen;
+    }
+
+    pub(super) fn update_response(&mut self, reference: &FluidParticleReference) {
+        if self.response_updates_remaining > 0 {
+            self.response_updates_remaining -= 1;
+        } else {
+            self.restore_response(reference);
         }
     }
 
@@ -284,8 +309,8 @@ impl FluidContact {
                 let normal = hit.normal1.normalize_or_zero();
                 let inward = particle.velocity.dot(normal).min(0.);
                 particle.position += travel * hit.time_of_impact + normal * 0.0001;
-                particle.velocity = (particle.velocity - normal * inward) * (1. - reference.dampen)
-                    - normal * inward * reference.bounce;
+                particle.velocity = (particle.velocity - normal * inward) * (1. - self.dampen)
+                    - normal * inward * self.bounce;
                 index += 1;
             } else {
                 particle.position += travel;
@@ -322,6 +347,210 @@ mod tests {
 
     #[test]
     #[ignore = "requires the installed single-Lada export"]
+    fn g04_receipts_receiver_response_and_reset() {
+        use crate::fluids::{FluidContainer, FluidEntry};
+        use crate::interaction::{ResolvedAim, items::ItemStore};
+        use crate::reference::{ColliderId, ItemId};
+        use crate::simulation::{FIXED_DT, FrameInput};
+        use crate::starting_area::GarageRuntime;
+        let mut r = ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        let source_id = ItemId(116);
+        let receiver_id = r.vehicles[0].engine.fuel_tank;
+        let source = r.openings.iter().position(|o| o.tank == source_id).unwrap();
+        let receiver = r
+            .openings
+            .iter()
+            .position(|o| o.tank == receiver_id)
+            .unwrap();
+        r.openings[source].particles.gravity_multiplier = 0.;
+        r.openings[source].particles.collision_mask = u32::MAX;
+        r.openings[source].spill_disabled = true;
+        r.openings[receiver].particles.bounce = 0.8;
+        r.openings[receiver].particles.dampen = 0.6;
+        let mut run = GarageRuntime::new(&r).unwrap();
+        run.area.items.get_mut(source_id).unwrap().fluid = Some(FluidContainer::new(
+            20.,
+            &[FluidEntry {
+                fluid_type: 0,
+                amount: 2.,
+            }],
+        ));
+        run.area.items.get_mut(receiver_id).unwrap().fluid = Some(FluidContainer::new(10., &[]));
+        let source_before = run.area.items.get(source_id).unwrap().fluid.clone();
+        let pose = crate::vehicle::to_rapier(run.area.items.get(receiver_id).unwrap().pose)
+            * run.area.interaction.openings[receiver].local_pose;
+        let collider_id = ColliderId(90001);
+        let body = run
+            .physics
+            .insert_body(RigidBodyBuilder::fixed().translation(Vector::X * 1000.));
+        let collider = run.physics.insert_collider_with_parent(
+            ColliderBuilder::cuboid(2., 0.1, 2.).user_data((collider_id.0 as u128) << 64),
+            body,
+        );
+        let node = r.items.iter().find(|i| i.id == receiver_id).unwrap().node;
+        run.area.interaction.light_nodes.insert(collider_id, node);
+        run.physics.refresh_queries();
+        let contact = run.area.interaction.openings[source]
+            .contact
+            .as_mut()
+            .unwrap();
+        contact
+            .visual
+            .curves
+            .get_mut("CollisionModule.m_EnergyLossOnCollision")
+            .unwrap()
+            .scalar = 0.;
+        let capacities = (
+            contact.particles.capacity(),
+            contact.collisions.capacity(),
+            run.area.interaction.callback_nodes.capacity(),
+        );
+        let receipt = |run: &mut GarageRuntime, raw_poured| {
+            let contact = run.area.interaction.openings[source]
+                .contact
+                .as_mut()
+                .unwrap();
+            contact.clear_outputs();
+            contact.last_poured = raw_poured;
+            contact.collisions.push(FluidCollision {
+                collider,
+                position: pose.translation,
+            });
+            run.area
+                .interaction
+                .apply_fluid_receipts(&mut run.area.items, &run.physics, 1.);
+        };
+        let collide = |run: &mut GarageRuntime, bounce: f32, dampen: f32| {
+            let contact = run.area.interaction.openings[source]
+                .contact
+                .as_mut()
+                .unwrap();
+            contact.particles.clear();
+            contact.particles.push(FluidParticle {
+                position: Vector::new(1000., 0.5, 0.),
+                size: 0.01,
+                color: [1.; 4],
+                start_color: [1.; 4],
+                rotation: 0.,
+                age: 0.,
+                velocity: Vector::new(2., -10., 0.),
+                remaining: r.openings[source].particles.lifetime_seconds,
+            });
+            contact.advance(
+                &r.openings[source].particles,
+                Pose::IDENTITY,
+                Vector::Y,
+                None,
+                Vector::ZERO,
+                0.,
+                0.,
+                &run.physics,
+                0.1,
+                0.,
+                0.,
+                None,
+            );
+            assert_eq!(contact.collisions().len(), 1);
+            let velocity = contact.particles[0].velocity;
+            assert!(
+                (velocity.x - 2. * (1. - dampen)).abs() < 0.002,
+                "collision tangent velocity {velocity:?}, dampen {dampen}"
+            );
+            assert!(
+                (velocity.y - 10. * bounce).abs() < 0.002,
+                "collision normal velocity {velocity:?}, bounce {bounce}"
+            );
+            contact.particles.clear();
+            contact.clear_outputs();
+        };
+        let total = |items: &ItemStore| {
+            items
+                .get(receiver_id)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .total()
+        };
+        run.area.interaction.openings[receiver].valve = 1.;
+        receipt(&mut run, 0.01);
+        collide(&mut run, 0., 0.);
+        assert!((total(&run.area.items) - 0.01).abs() < 1e-6);
+        run.area.interaction.openings[receiver].valve = 0.25;
+        receipt(&mut run, 0.01);
+        collide(&mut run, 0.6, 0.45);
+        for _ in 0..5 {
+            run.area.interaction.step(
+                FrameInput::default(),
+                ResolvedAim::default(),
+                &mut run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+                FIXED_DT,
+                run.survival.output(),
+                1.,
+            );
+            collide(&mut run, 0.6, 0.45);
+        }
+        run.area.interaction.step(
+            FrameInput::default(),
+            ResolvedAim::default(),
+            &mut run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+            FIXED_DT,
+            run.survival.output(),
+            1.,
+        );
+        collide(&mut run, 0.4, 0.3);
+        let receiver_before = run.area.items.get(receiver_id).unwrap().fluid.clone();
+        run.area.interaction.openings[receiver].valve = 1.;
+        receipt(&mut run, 0.);
+        collide(&mut run, 0., 0.);
+        assert_eq!(
+            run.area.items.get(receiver_id).unwrap().fluid,
+            receiver_before
+        );
+        run.area.interaction.openings[receiver].valve = 0.;
+        receipt(&mut run, 0.);
+        collide(&mut run, 0.4, 0.3);
+        assert_eq!(
+            run.area.items.get(receiver_id).unwrap().fluid,
+            receiver_before
+        );
+        run.area.interaction.openings[receiver].valve = 1.;
+        receipt(&mut run, 0.);
+        collide(&mut run, 0., 0.);
+        run.area.items.get_mut(receiver_id).unwrap().fluid = Some(FluidContainer::new(
+            10.,
+            &[FluidEntry {
+                fluid_type: 0,
+                amount: 10.,
+            }],
+        ));
+        receipt(&mut run, 0.);
+        collide(&mut run, 0.4, 0.3);
+        assert_eq!(total(&run.area.items), 10.);
+        assert_eq!(run.area.items.get(source_id).unwrap().fluid, source_before);
+        let contact = run.area.interaction.openings[source]
+            .contact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            (
+                contact.particles.capacity(),
+                contact.collisions.capacity(),
+                run.area.interaction.callback_nodes.capacity()
+            ),
+            capacities
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the installed single-Lada export"]
     fn g04_receipts_own_colliders_record_overlap_bounce_and_clear_outputs() {
         let mut r = ReferenceManifest::from_runtime_json(
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
@@ -343,11 +572,11 @@ mod tests {
             .iter()
             .find(|p| p.role == format!("splash_{}", opening.id.0))
             .unwrap();
-        let mut contact = FluidContact::new(&reference, visual, splash, 1);
         reference.gravity_multiplier = 0.;
         reference.bounce = 1.;
         reference.dampen = 0.;
         reference.collision_mask = u32::MAX;
+        let mut contact = FluidContact::new(&reference, visual, splash, 1);
         contact
             .visual
             .curves

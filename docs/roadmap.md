@@ -67,8 +67,10 @@ The WASM compile check passed. G01 session input and G02 browser acceptance rema
 See [G02 verification](g02-parts.md) for source evidence, checks, and limits. G02 stays Verify.
 
 G04 update, 2026-10-20: ordered fluid state, direct fill, particle receipts, and detached tank checks are implemented.
-Targeted checks passed 30 native tests and five Python tests. Both WASM targets passed in each targeted check command.
+Task 5 baseline checks passed 30 native tests and five Python tests. Both WASM targets passed.
 The installed checks include three engine and radiator cycles each, signed save reconstruction, cap ownership, collision ownership, and mass.
+Final review found two P2 defects. Portable mass and receiver particle response are fixed.
+The fix wave passed 12 affected native tests and both WASM checks. Scoped re-review remains pending.
 Two reference-loading runtime cases remain ignored. Normal-input aiming, visible flow, audio, browser reload, and Unity callback timing remain unverified.
 Full-library checks previously failed because `records/managed/coverage.json` is missing. Selected runtime and package checks passed.
 See [G04 evidence](superpowers/reports/2026-10-20-g04-fluids.md) for commands, counts, rulings, and limits. G04 stays Verify.
