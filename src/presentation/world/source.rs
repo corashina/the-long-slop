@@ -283,7 +283,7 @@ impl SourceWorldVisuals {
         frame: &WorldFrame<'_>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
-        roots: &mut Query<&mut Transform>,
+        roots: &mut super::runtime::WorldRoots,
     ) -> Result<(), ReferenceError> {
         if self.session != Some(frame.request.session) {
             for old in self.surfaces.drain(..) {
