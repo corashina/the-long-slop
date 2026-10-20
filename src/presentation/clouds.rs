@@ -249,7 +249,7 @@ impl CloudPass {
 }
 
 /// Prepare source cloud bindings once their mesh and images have uploaded.
-pub fn prepare_clouds(
+pub(crate) fn prepare_clouds(
     mut commands: Commands,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     existing: Option<Res<CloudPass>>,
@@ -258,7 +258,7 @@ pub fn prepare_clouds(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<super::source_lighting::SourceLightingStatus>,
+    status: Res<super::readiness::RendererStateHandle>,
 ) {
     if let Some(pass) = existing {
         use bevy::shader::ShaderCacheError;
@@ -268,19 +268,13 @@ pub fn prepare_clouds(
                 | ShaderCacheError::ShaderImportNotYetAvailable,
             ) => {}
             CachedPipelineState::Err(error) => {
-                *status.0.lock().expect("source lighting status lock") =
-                    super::materials::RenderingState::Failed(format!(
-                        "Source cloud pipeline: {error}"
-                    ));
+                status.fail(format!("Source cloud pipeline: {error}"));
             }
             _ => {}
         }
         return;
     }
-    if matches!(
-        *status.0.lock().expect("source lighting status lock"),
-        super::materials::RenderingState::Failed(_)
-    ) {
+    if status.failure().is_some() {
         return;
     }
     let Some(assets) = assets else {
@@ -293,10 +287,7 @@ pub fn prepare_clouds(
     for (index, cloud) in assets.record.sky.clouds.iter().enumerate() {
         for (slot, texture) in cloud.textures.iter().enumerate() {
             let Some(handle) = assets.textures.get(&texture.texture) else {
-                *status.0.lock().expect("source lighting status lock") =
-                    super::materials::RenderingState::Failed(
-                        "Source cloud texture link is missing".into(),
-                    );
+                status.fail("Source cloud texture link is missing".into());
                 return;
             };
             let Some(image) = images.get(handle.id()) else {
@@ -320,10 +311,7 @@ pub fn prepare_clouds(
             commands.insert_resource(pass);
         }
         Err(error) => {
-            *status.0.lock().expect("source lighting status lock") =
-                super::materials::RenderingState::Failed(format!(
-                    "Source cloud resources: {error}"
-                ));
+            status.fail(format!("Source cloud resources: {error}"));
         }
     }
 }

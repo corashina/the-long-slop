@@ -236,19 +236,16 @@ impl SkyPass {
 }
 
 /// Allocate the source sky once. Main and capture pipeline failures remain named.
-pub fn prepare_sky(
+pub(crate) fn prepare_sky(
     mut commands: Commands,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     existing: Option<Res<SkyPass>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<super::source_lighting::SourceLightingStatus>,
+    status: Res<super::readiness::RendererStateHandle>,
 ) {
-    if matches!(
-        *status.0.lock().expect("source lighting status lock"),
-        super::materials::RenderingState::Failed(_)
-    ) {
+    if status.failure().is_some() {
         return;
     }
     if let Some(pass) = existing {
@@ -260,10 +257,7 @@ pub fn prepare_sky(
                     | ShaderCacheError::ShaderImportNotYetAvailable,
                 ) => {}
                 CachedPipelineState::Err(error) => {
-                    *status.0.lock().expect("source lighting status lock") =
-                        super::materials::RenderingState::Failed(format!(
-                            "Source sky pipeline: {error}"
-                        ));
+                    status.fail(format!("Source sky pipeline: {error}"));
                     return;
                 }
                 _ => {}

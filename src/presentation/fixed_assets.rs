@@ -113,7 +113,7 @@ impl SourceFixedAssets {
 
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         for path in SHADERS {
-            shader_input(&reference.file_catalog, path)?;
+            shader_input(path)?;
         }
         let roots = reference
             .assets
@@ -191,7 +191,7 @@ impl SourceFixedAssets {
                         .ok_or_else(|| ReferenceError("Fixed control strings overflow".into()))
                 })?;
         let control = [
-            super::frame_graph::control_bytes(),
+            super::readiness::control_bytes(),
             std::mem::size_of::<Self>(),
             std::mem::size_of::<AdmittedShaders>(),
             product(roots.capacity(), std::mem::size_of::<Root>())?,
@@ -865,7 +865,7 @@ impl SourceFixedAssets {
         // Imported shader libraries must finish before their importing shaders start.
         if let Some(index) = self.shaders.iter().position(|s| !s.done) {
             if self.shaders[index].handle.is_none() {
-                let bound = shader_input(&reference.file_catalog, SHADERS[index])?;
+                let bound = shader_input(SHADERS[index])?;
                 let (cpu, staging) = (bound.cpu, bound.staging);
                 if crate::reference::fixed_reservation::fixed_room(stream, cpu, 0, staging, true)? {
                     self.shaders[index].cpu = cpu;

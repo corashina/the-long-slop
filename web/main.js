@@ -8,6 +8,24 @@ import {createSaveBridge} from './save-bridge.js';
 export const saveRuntime=createSaveBridge();
 const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime});
 import {createInput} from './input.js';
+import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
+export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
+const startupCpuProfile=new URL(location.href).searchParams.get('profileCpu')==='1';
+const startup=createStartupTrace(()=>performance.now(),{hidden:document.hidden,focused:document.hasFocus(),profileCpu:startupCpuProfile});
+const startupVisibilityChanged=()=>startup.environment(document.hidden,document.hasFocus());
+const startupBlurred=()=>startup.environment(document.hidden,false);
+document.addEventListener('visibilitychange',startupVisibilityChanged);
+window.addEventListener('blur',startupBlurred);
+function stopStartupEnvironment(){startupVisibilityChanged();document.removeEventListener('visibilitychange',startupVisibilityChanged);window.removeEventListener('blur',startupBlurred);}
+cpuProfile.enable(startupCpuProfile);
+let rustCpuProfile,profileStep=0,startupRenderTrace=startupCpuProfile?observeRenderMainThread():null;
+window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled){terrainClient.profileHandshake();roadClients.profileHandshake();grassClients.profileHandshake();}};
+window.gameCpuProfileSnapshot=()=>cpuProfile.snapshot();
+window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,terrain:terrainClient.profileState(),road:roadClients.profileState(),grass:grassClients.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
+window.gameCpuStartupRenderTrace=()=>{const trace=startupRenderTrace?.stop()??null;startupRenderTrace=null;return trace;};
+window.gameCpuInputConsumed=()=>input?.consume(++profileStep);
+window.gameCpuClearInput=()=>cpuProfile.clearInput();
+window.gameCpuSubmitted=token=>cpuProfile.submitFrame(token);
 import {createMenu} from './menu.js';
 import {createFeedback} from './feedback.js';
 import {createLoading} from './loading.js';
@@ -15,16 +33,23 @@ import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {createTerrain,installTerrainBridge} from './terrain.js';
-import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes} from './world-assets.js';
+import {installRoadBridge} from './road.js';
+import {installGrassBridge} from './grass.js';
+import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
+setAssetCpuProfile(cpuProfile);
 // Start the terrain worker and its WASM download early.
-installTerrainBridge(window,createTerrain(new Worker(new URL('./terrain-worker.js',import.meta.url),{type:'module'})));
+const terrainWorkerUrl=new URL('./terrain-worker.js',import.meta.url);
+if(startupCpuProfile)terrainWorkerUrl.searchParams.set('profileCpu','1');
+const terrainClient=createTerrain(new Worker(terrainWorkerUrl,{type:'module'}),cpuProfile);
+installTerrainBridge(window,terrainClient);
+const roadClients=installRoadBridge(window,cpuProfile);
+const grassClients=installGrassBridge(window,cpuProfile);
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
 const loading=createLoading();
 performance.setResourceTimingBufferSize?.(16000);
-const startup=createStartupTrace(()=>performance.now());
 let startupFailureDetails=null,startupDone=false,startupReady=false;
 function fetched(record){
  const entry=performance.getEntriesByName?.(new URL(record.path,location.href).href)?.at(-1);
@@ -33,7 +58,7 @@ function fetched(record){
 window.gameStartupTrace=()=>startup.snapshot();
 window.gameStartupDone=()=>startupDone;
 window.gameStartupFailureDetails=json=>{startupFailureDetails=JSON.parse(json);};
-window.gameStartupStage=(stage,started)=>{if(started)startup.begin(stage);else startup.end(stage);};
+window.gameStartupStage=(stage,started)=>{if(started){startup.begin(stage);cpuProfile.begin(stage);}else{startup.end(stage);cpuProfile.end(stage);}};
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
@@ -111,8 +136,8 @@ const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held
 window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
-function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));startup.finish({inputReady:true});startupDone=true;}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.finish({inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
 window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();startupReady=true;finishStartup();};
@@ -120,6 +145,7 @@ window.addEventListener('error',event=>fail(event.message||'The runtime stopped.
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
+ cpuProfile.begin('startup');
  startup.begin('graphics');
  // ?renderer=webgpu selects the WebGPU build. WebGL2 stays the default until WebGPU acceptance.
  const webgpu=new URLSearchParams(location.search).get('renderer')==='webgpu',name=webgpu?'my_summer_slop_webgpu':'my_summer_slop';
@@ -142,8 +168,9 @@ async function load(){
  const bytes=new Uint8Array(await response.arrayBuffer());
  status.textContent='Loading game code...';
  loading.stage(status.textContent);
- const [{default:init,run,manifest_shell,source_render_failure},module]=await code;
+ const [{default:init,run,manifest_shell,source_render_failure,cpu_profile},module]=await code;
  const exports=await init({module_or_path:module});wasmMemory=exports.memory;renderFailure=source_render_failure;
+ rustCpuProfile=cpu_profile;if(startupCpuProfile)rustCpuProfile(true);
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
@@ -151,7 +178,7 @@ async function load(){
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
  configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
  startup.end('manifest');startup.begin('interface');
- input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings);
+ input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings,cpuProfile);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
  loading.stage(status.textContent);
@@ -169,5 +196,6 @@ async function load(){
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
  run(bytes,manifestHash);
+ cpuProfile.end('startup');
 }
 load().catch(error=>fail(error?.message??String(error)));

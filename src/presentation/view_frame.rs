@@ -3,11 +3,12 @@ use super::lighting_scene::PROBE_COUNT;
 use super::surface_views::{PROBE_START, VIEW_COUNT, WORLD_VIEWS};
 use super::{
     lighting_assets::LightingAssets, lighting_scene::SourceSceneLighting,
-    materials::RenderingState, source_lighting::SourceLightingStatus,
-    surface_views::SourceSurfaceView,
+    readiness::RendererStateHandle, surface_views::SourceSurfaceView,
 };
 use crate::reference::{
-    reflections::{ProbeJob, ProbeSchedule, capture_view_from_world, prepare_probe_face},
+    reflections::{
+        ProbeJob, ProbeSchedule, capture_view_from_world, pending_probe_index, prepare_probe_face,
+    },
     shadow_planes::{CullPlanes, implicit_cull_planes},
 };
 use bevy::render::{extract_resource::ExtractResource, view::ExtractedView};
@@ -49,8 +50,7 @@ impl Default for SourceSceneEpoch {
 pub fn restart_scene(world: &mut World) {
     let acks = world.resource::<SourceSubmissionAcks>().clone();
     if let Err(error) = world.resource_mut::<SourceViewClock>().restart(&acks) {
-        *world.resource::<SourceLightingStatus>().0.lock().unwrap() =
-            RenderingState::Failed(error.into());
+        world.resource::<RendererStateHandle>().fail(error.into());
         return;
     }
     let next = world
@@ -59,11 +59,11 @@ pub fn restart_scene(world: &mut World) {
         .checked_add(1)
         .expect("Source scene generation exhausted");
     world.resource_mut::<SourceSceneEpoch>().0 = next;
-    let mut lighting = world.resource_mut::<super::source_lighting::SourceLighting>();
-    lighting.state = RenderingState::Loading;
-    lighting.first_probe_ready = false;
-    lighting.first_submission_validated = false;
-    *world.resource::<SourceLightingStatus>().0.lock().unwrap() = RenderingState::Loading;
+    world
+        .resource::<RendererStateHandle>()
+        .lock()
+        .proof
+        .invalidate(crate::render_readiness::Invalidation::Scene);
 }
 #[derive(Resource, Default)]
 pub struct SourceViewClock {
@@ -101,6 +101,7 @@ impl SourceViewClock {
                 .checked_add(1)
                 .ok_or("Source main render token exhausted")?;
         }
+        let mut published = false;
         if probe == self.probe_token {
             if self.probe[self.probe_index].job() == ProbeJob::RemainingMipsAndPublish
                 && acks.0.publication.load(Ordering::Acquire) != probe
@@ -109,23 +110,17 @@ impl SourceViewClock {
             }
             let completed = self.probe[self.probe_index].job();
             self.probe[self.probe_index].complete(completed)?;
-            if completed == ProbeJob::RemainingMipsAndPublish {
-                self.probe_index = (self.probe_index + 1) % PROBE_COUNT;
-            }
+            published = completed == ProbeJob::RemainingMipsAndPublish;
             self.probe_token = self
                 .probe_token
                 .checked_add(1)
                 .ok_or("Source probe job token exhausted")?;
         }
         // Each probe captures once per scene. A published probe keeps its cubemap.
-        if !self.probe_wanted(self.probe_index, probe_enabled)
-            && self.probe[self.probe_index].job() == ProbeJob::Face(0)
-        {
-            if let Some(index) = (1..PROBE_COUNT)
-                .map(|offset| (self.probe_index + offset) % PROBE_COUNT)
-                .find(|&index| self.probe_wanted(index, probe_enabled))
-            {
-                self.probe_index = index;
+        let next = pending_probe_index(self.probe_index, &self.probe, probe_enabled);
+        if next != self.probe_index {
+            self.probe_index = next;
+            if !published {
                 self.probe_token = self
                     .probe_token
                     .checked_add(1)
@@ -159,6 +154,8 @@ pub struct ViewSnapshot {
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct SourceViewFrame {
     pub session: u64,
+    pub selection_revision: u64,
+    pub(crate) scale: crate::render_scale::SceneScale,
     pub preparation_warmup: bool,
     pub motion_revision: u32,
     pub scene: u32,
@@ -179,11 +176,22 @@ impl SourceViewFrame {
     pub fn skip_probe_preparation(&self, index: usize) -> bool {
         index >= PROBE_START && self.views[index].is_none()
     }
-    pub(crate) fn loading_key(&self) -> Option<crate::reference::loading_dispatch::LoadingKey> {
-        Some(crate::reference::loading_dispatch::LoadingKey {
+    pub(crate) fn render_identity(&self) -> Option<crate::render_readiness::RenderIdentity> {
+        let view = self.views[0]?;
+        Some(crate::render_readiness::RenderIdentity {
             session: self.session,
             scene: self.scene,
-            extent: self.views[0]?.extent.to_array(),
+            native_extent: view.native_extent.to_array(),
+            scene_extent: view.extent.to_array(),
+            scale: self.scale,
+        })
+    }
+    pub(crate) fn readiness_request(&self) -> Option<crate::render_readiness::ReadinessRequest> {
+        Some(crate::render_readiness::ReadinessRequest {
+            render: self.render_identity()?,
+            selection_revision: self.selection_revision,
+            probe_mask: self.probe_mask(),
+            history_revision: self.motion_revision,
         })
     }
     pub(crate) fn probe_mask(&self) -> u32 {
@@ -235,7 +243,7 @@ pub(crate) fn snapshot(
     mut commands: Commands,
     drive: Res<crate::app::Drive>,
     requests: Res<crate::app::save::SaveRequests>,
-    graph: Res<super::frame_graph::SourceGraphProgress>,
+    graph: Res<super::readiness::RendererStateHandle>,
     reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
@@ -244,7 +252,7 @@ pub(crate) fn snapshot(
     acks: Res<SourceSubmissionAcks>,
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     scale: Res<crate::render_scale::SceneScale>,
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
@@ -254,16 +262,24 @@ pub(crate) fn snapshot(
         &frame,
     );
     frame.session = drive.runtime.stream.frame().request.session;
+    frame.selection_revision = drive.runtime.stream.required_content().selection_revision;
+    frame.scale = *scale;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
     if drive.runtime.stream.frame().failure.is_some() {
-        graph.invalidate_loading();
+        graph
+            .lock()
+            .proof
+            .invalidate(crate::render_readiness::Invalidation::Content);
     }
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
-        graph.invalidate_loading();
+    if status.failure().is_some() {
+        graph
+            .lock()
+            .proof
+            .invalidate(crate::render_readiness::Invalidation::Content);
         return;
     }
     let (Some(assets), Some(scene)) = (assets, scene.0) else {
@@ -275,9 +291,11 @@ pub(crate) fn snapshot(
     let mut input = [None; VIEW_COUNT];
     for (view, camera, pose) in &views {
         if view.index >= VIEW_COUNT || input[view.index].is_some() {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Source snapshot view identity is invalid".into());
-            graph.invalidate_loading();
+            status.fail("Source snapshot view identity is invalid".into());
+            graph
+                .lock()
+                .proof
+                .invalidate(crate::render_readiness::Invalidation::Content);
             return;
         }
         if !camera.is_active {
@@ -306,11 +324,32 @@ pub(crate) fn snapshot(
     }
     let main = input[0].unwrap().0;
     if let Err(error) = clock.consume(&acks, activation.enabled) {
-        *status.0.lock().unwrap() = RenderingState::Failed(error.into());
-        graph.invalidate_loading();
+        status.fail(error.into());
+        graph
+            .lock()
+            .proof
+            .invalidate(crate::render_readiness::Invalidation::Content);
         return;
     }
-    clock.preparation_ready |= matches!(*status.0.lock().unwrap(), RenderingState::Ready);
+    let request = crate::render_readiness::ReadinessRequest {
+        render: crate::render_readiness::RenderIdentity {
+            session: frame.session,
+            scene: frame.scene,
+            native_extent: main.to_array(),
+            scene_extent: scale.extent(main.to_array()),
+            scale: *scale,
+        },
+        selection_revision: frame.selection_revision,
+        probe_mask: activation
+            .enabled
+            .iter()
+            .enumerate()
+            .fold(0, |mask, (index, enabled)| {
+                mask | (u32::from(*enabled) << index)
+            }),
+        history_revision: drive.runtime.audio_motion_revision,
+    };
+    clock.preparation_ready |= graph.lock().proof.graph_ready(request);
     let warmup = !clock.preparation_ready;
     let job = (clock.probe_wanted(clock.probe_index, activation.enabled)
         || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
@@ -365,6 +404,8 @@ pub(crate) fn snapshot(
     });
     *frame = SourceViewFrame {
         session: drive.runtime.stream.frame().request.session,
+        selection_revision: drive.runtime.stream.required_content().selection_revision,
+        scale: *scale,
         preparation_warmup: warmup,
         scene: epoch.0,
         motion_revision: drive.runtime.audio_motion_revision,
@@ -381,15 +422,18 @@ pub(crate) fn snapshot(
         probe_job: job,
         views: snapshots,
     };
-    let (captures_allowed, restart) = graph.loading_snapshot(
-        &frame,
-        drive.ready || drive.runtime.started || requests.pending(),
-        drive.runtime.stream.required_content().selection_revision,
-    );
-    if !captures_allowed || restart {
+    let decision = {
+        let mut state = graph.lock();
+        state.proof.snapshot_loading(
+            frame.readiness_request().unwrap(),
+            frame.frame,
+            drive.ready || drive.runtime.started || requests.pending(),
+        )
+    };
+    if !decision.captures_allowed || decision.restart_scene {
         frame.probe_job = None;
     }
-    if restart {
+    if decision.restart_scene {
         commands.queue(restart_scene);
     }
     timing.snapshots(&frame);

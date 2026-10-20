@@ -25,14 +25,14 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     stream.set_presentation_allocation(allocation).unwrap();
 
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
 
     allocation.pending -= 1;
     stream.set_presentation_allocation(allocation).unwrap();
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
     stream.set_presentation_allocation(allocation).unwrap();
 
@@ -44,7 +44,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
             break;
         }
     }
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_some());
     let bytes = stream.metrics().pending_bytes;
     stream.ready = None;
@@ -52,19 +52,28 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
 
     // A stale request cannot finish or publish its retained terrain work.
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     let bytes = stream.metrics().pending_bytes;
     stream.request.revision += 1;
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert!(stream.metrics().pending_bytes < bytes);
-    assert_eq!(
-        stream.terrain_worker.poll(|| true).unwrap(),
-        TerrainPoll::Idle
+    assert!(
+        stream
+            .terrain_execution
+            .advance(stream.request, || true)
+            .unwrap()
+            .is_none()
     );
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.as_ref().unwrap().id.is_some());
+    for _ in 0..1000 {
+        stream.prepare_terrain(|| true);
+        if stream.ready.is_some() {
+            break;
+        }
+    }
+    assert!(stream.ready.is_some());
 }
 
 #[test]
@@ -331,7 +340,7 @@ fn prepare_step_for_views(
     run.align_startup(reference).unwrap();
 }
 
-fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     let mut surface_claim = None;
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);
@@ -366,6 +375,7 @@ fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
     surface.collision_bytes = 0;
     assert!(run.stream.ready.is_none());
     run.stream.ready = Some(PreparedSurface {
+        road_claim: None,
         pending_bytes: 0,
         renderer_ready: false,
         renderer_reserved: false,
@@ -937,11 +947,12 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
 #[ignore = "requires the installed source export"]
 fn complete_probe_union_preserves_revision_and_fresh_cycles() {
     use crate::{
-        reference::{
-            loading_dispatch::{LoadingDispatch, LoadingKey},
-            reflections::{ProbeJob, ProbeSchedule},
+        reference::reflections::{ProbeJob, ProbeSchedule},
+        render_readiness::{
+            ContentKey, ContentPreparation, EffectsObservation, GraphObservation, ProbeObservation,
+            ReadinessRequest, RenderIdentity, RendererReadiness, RendererStatus, Validation,
         },
-        save::fresh_permit::PresentedFrames,
+        render_scale::SceneScale,
         world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
     };
     let reference = reference();
@@ -1018,12 +1029,60 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
     assert_eq!(required.as_slice().len(), 7);
     assert!(run.stream.required_ready());
     let revision = run.stream.required.revision;
-    let key = LoadingKey {
+    let key = RenderIdentity {
         session: run.stream.request.session,
         scene: 1,
-        extent: [800, 600],
+        native_extent: [800, 600],
+        scene_extent: [800, 600],
+        scale: SceneScale::Native,
     };
-    let mut policy = LoadingDispatch::<1>::default();
+    let mut request = ReadinessRequest {
+        render: key,
+        selection_revision: revision,
+        probe_mask: 1,
+        history_revision: 0,
+    };
+    let mut policy = RendererReadiness::default();
+    let validation = Validation {
+        requested: 1,
+        completed: 1,
+        validated: 1,
+    };
+    let mut graph = GraphObservation {
+        identity: key,
+        frame: 1,
+        token: 1,
+        sky: true,
+        world_mask: 1,
+        display_encoded: true,
+        submitted_token: 1,
+        targets_ready: true,
+        lighting_textures: 1,
+        lighting_gpu_textures: 1,
+        surface_ready: true,
+        camera_ready: true,
+        sky_ready: true,
+        cloud_ready: true,
+        caster_ready: true,
+        probes: [ProbeObservation {
+            pipelines_ready: true,
+            published: false,
+            validation,
+        }; crate::render_readiness::PROBE_COUNT],
+        validation,
+    };
+    let mut effects = EffectsObservation {
+        identity: key,
+        history_revision: 0,
+        frame: 1,
+        token: 1,
+        pipelines_ready: true,
+        inputs_ready: true,
+        encoded_token: 1,
+        submitted_token: 1,
+        committed_token: 1,
+        validation,
+    };
     let mut schedule = ProbeSchedule::default();
     for frame in 1..=8 {
         build(&mut required, [true]);
@@ -1031,35 +1090,65 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         assert_eq!(run.stream.required.structures, ids);
         assert_eq!(run.stream.required.revision, revision);
         assert_eq!(required.as_slice().as_ptr(), storage);
-        policy.snapshot(key, frame, false, run.stream.required_ready(), revision, 1);
+        let content = ContentKey {
+            session: key.session,
+            selection_revision: revision,
+        };
+        policy.content_checked(if run.stream.required_ready() {
+            ContentPreparation::Prepared(content)
+        } else {
+            ContentPreparation::Pending(content)
+        });
+        policy.snapshot_loading(request, frame, false);
         let job = schedule.job();
         if job == ProbeJob::Face(0) {
-            policy.capture_started(key, frame, 0);
+            policy.capture_started(request, frame, 0);
         }
         schedule.complete(job).unwrap();
         if job == ProbeJob::RemainingMipsAndPublish {
-            policy.publication_validated(key, 0);
+            policy.publication_validated(request, 0);
         }
-        assert_eq!(policy.fresh(key, revision, 1), frame == 8);
+        graph.frame = frame;
+        graph.token = frame;
+        graph.submitted_token = frame;
+        graph.probes[0].published = schedule.published();
+        effects.frame = frame;
+        effects.token = frame;
+        effects.encoded_token = frame;
+        effects.submitted_token = frame;
+        effects.committed_token = frame;
+        policy.observe_graph(graph);
+        policy.observe_effects(effects);
+        assert_eq!(policy.graph_ready(request), frame == 8);
     }
-    let mut presented = PresentedFrames::default();
-    assert!(!presented.observe(key.session, key.scene, 8, 8));
-    assert!(!presented.observe(key.session, key.scene, 9, 9));
-    assert!(presented.observe(key.session, key.scene, 10, 10));
+    assert_eq!(policy.check(request, 8, 8), RendererStatus::Loading);
+    assert_eq!(policy.check(request, 9, 9), RendererStatus::Loading);
+    assert_eq!(policy.check(request, 10, 10), RendererStatus::Ready);
     required.reset(seed);
     required
         .append_probe_faces(&[true], |_, _| Ok(first))
         .unwrap();
     run.stream.select_required(required.as_slice());
     assert_ne!(run.stream.required.revision, revision);
-    policy.snapshot(key, 11, false, true, run.stream.required.revision, 1);
-    assert!(!policy.fresh(key, run.stream.required.revision, 1));
+    request.selection_revision = run.stream.required.revision;
+    policy.content_checked(ContentPreparation::Prepared(ContentKey {
+        session: key.session,
+        selection_revision: request.selection_revision,
+    }));
+    policy.snapshot_loading(request, 11, false);
+    assert!(!policy.graph_ready(request));
     build(&mut required, [false]);
     assert_eq!(required.as_slice().len(), 1);
     run.stream.select_required(required.as_slice());
     assert_ne!(run.stream.required.revision, revision);
-    policy.snapshot(key, 12, false, true, run.stream.required.revision, 0);
-    assert!(policy.fresh(key, run.stream.required.revision, 0));
+    request.selection_revision = run.stream.required.revision;
+    request.probe_mask = 0;
+    policy.content_checked(ContentPreparation::Prepared(ContentKey {
+        session: key.session,
+        selection_revision: request.selection_revision,
+    }));
+    policy.snapshot_loading(request, 12, false);
+    assert!(policy.graph_ready(request));
     while required.as_slice().len() < REQUIRED_VIEW_CAPACITY {
         required.push(seed).unwrap();
     }

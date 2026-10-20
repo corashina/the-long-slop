@@ -48,6 +48,7 @@ impl DrivetrainState {
         edges: u32,
         assists: DrivingAssists,
         engine: Option<EngineOutput>,
+        ignition: bool,
         wheel_rpm: f32,
         direction: f32,
         vehicle: &VehicleReference,
@@ -148,7 +149,7 @@ impl DrivetrainState {
             if vehicle.engine.kickstart
                 && !engine.running
                 && self.wheel_rpm > vehicle.engine.shutdown_rpm
-                && engine.ignition
+                && ignition
             {
                 depression = 0.;
             }

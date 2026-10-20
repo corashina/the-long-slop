@@ -37,6 +37,24 @@ impl FluidContainer {
         container
     }
 
+    pub(crate) fn retained_order(&self) -> &[u8] {
+        &self.order[..self.order_len as usize]
+    }
+
+    pub(crate) fn snapshot_order(&self) -> Vec<u8> {
+        let mut snapshot = self.clone();
+        snapshot.track_positive_types();
+        snapshot.retained_order().to_vec()
+    }
+
+    /// Replace quantities and order after save-boundary validation.
+    pub(crate) fn restore_contents(&mut self, quantities: [f32; 6], order: &[u8]) {
+        self.mixture.quantities_liters = quantities;
+        self.order = [0; 6];
+        self.order[..order.len()].copy_from_slice(order);
+        self.order_len = order.len() as u8;
+    }
+
     fn remember(&mut self, index: usize) {
         if self.order[..self.order_len as usize].contains(&(index as u8)) {
             return;
@@ -89,7 +107,12 @@ impl FluidContainer {
                 .iter()
                 .map(|&entry| self.mixture.quantities_liters[entry as usize])
                 .sum();
-            let fraction = self.mixture.quantities_liters[index] / total;
+            // Finite-state correction: retained entries can follow exact depletion.
+            let fraction = if total == 0. {
+                0.
+            } else {
+                self.mixture.quantities_liters[index] / total
+            };
             self.mixture.quantities_liters[index] += amount * fraction;
         }
     }
@@ -234,4 +257,66 @@ pub fn suitability(container: &FluidContainer, required: &FluidMixture) -> f32 {
         }
     }
     result.clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_order_preserves_sequential_drain() {
+        let mut uninterrupted = FluidContainer::new(10., FluidMixture::default());
+        uninterrupted.change_one(3., 3);
+        uninterrupted.change_one(2., 0);
+        let mut restored = FluidContainer::new(10., FluidMixture::default());
+        restored.restore_contents(
+            uninterrupted.mixture.quantities_liters,
+            uninterrupted.retained_order(),
+        );
+        assert_eq!(restored.retained_order(), &[3, 0]);
+        restored.change_without_mix(-0.5);
+        uninterrupted.change_without_mix(-0.5);
+        assert_eq!(restored.mixture, uninterrupted.mixture);
+        assert!((restored.mixture.amount(3) - 2.7).abs() < 0.00001);
+        assert!((restored.mixture.amount(0) - (2.0 - 0.5 * 2.0 / 4.7)).abs() < 0.00001);
+    }
+
+    #[test]
+    fn snapshot_tracks_quantity_only_changes_before_sequential_drain() {
+        let mut uninterrupted = FluidContainer::new(10., FluidMixture::default());
+        uninterrupted.change_one(3., 3);
+        uninterrupted.mixture.quantities_liters[0] = 2.;
+        assert_eq!(uninterrupted.retained_order(), &[3]);
+        let mut restored = FluidContainer::new(10., FluidMixture::default());
+        restored.restore_contents(
+            uninterrupted.mixture.quantities_liters,
+            &uninterrupted.snapshot_order(),
+        );
+        assert_eq!(restored.retained_order(), &[3, 0]);
+        restored.change_without_mix(-0.5);
+        uninterrupted.change_without_mix(-0.5);
+        assert_eq!(restored.mixture, uninterrupted.mixture);
+    }
+
+    #[test]
+    fn restore_replaces_order_and_preserves_retained_zero() {
+        let mut restored = FluidContainer::new(10., FluidMixture::default());
+        restored.change_one(1., 5);
+        restored.restore_contents([2., 0., 0., 0., 0., 0.], &[3, 0]);
+        assert_eq!(restored.retained_order(), &[3, 0]);
+        assert_eq!(restored.mixture.amount(3), 0.);
+        restored.restore_contents([0.; 6], &[]);
+        assert!(restored.retained_order().is_empty());
+        assert_eq!(restored.mixture.total(), 0.);
+    }
+
+    #[test]
+    fn retained_zero_after_depletion_stays_finite() {
+        let mut container = FluidContainer::new(5., FluidMixture::default());
+        container.restore_contents([1., 0., 0., 0., 0., 0.], &[0, 3]);
+        container.change_without_mix(-1.);
+        assert_eq!(container.mixture.quantities_liters, [0.; 6]);
+        container.change_without_mix(-1.);
+        assert_eq!(container.mixture.quantities_liters, [0.; 6]);
+    }
 }

@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,6 +135,7 @@ pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
     pub engine: EngineSnapshot,
+    pub ignition: bool,
     pub gear: usize,
     pub handbrake: bool,
     pub trip_m: f64,
@@ -143,7 +144,6 @@ pub struct VehicleSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineSnapshot {
-    pub ignition: bool,
     pub rpm: f32,
     pub temperature: f32,
     pub elapsed: f32,
@@ -152,6 +152,16 @@ pub struct EngineSnapshot {
     pub random_start: f32,
     pub supplied_fuel: f32,
     pub fan_on: bool,
+    pub oil_penalty: f32,
+    pub fuel_suitability: f32,
+    pub heat_penalty: f32,
+    pub start_draw: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidSnapshot {
+    pub quantities_liters: [f32; 6],
+    pub order: Vec<u8>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,7 +172,7 @@ pub struct ItemSnapshot {
     pub local_pose: LocalPose,
     pub location: ItemLocationSave,
     pub temperature: Option<f32>,
-    pub fluids: Option<[f32; 6]>,
+    pub fluids: Option<FluidSnapshot>,
     pub food: Option<FoodSnapshot>,
     pub removed: bool,
 }

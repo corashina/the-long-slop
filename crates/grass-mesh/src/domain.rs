@@ -1,7 +1,6 @@
 //! Integer, equal-edge triangle tessellation selected by the checked Grass hull program.
 //! Concentric rings follow the D3D11 specification and Microsoft reference algorithm.
 //! Primitive order is canonical here; source GPU leading-vertex order is device dependent.
-use crate::reference::ReferenceError;
 
 #[derive(Default)]
 pub struct GrassDomain {
@@ -9,11 +8,11 @@ pub struct GrassDomain {
     pub triangles: Vec<[u16; 3]>,
 }
 impl GrassDomain {
-    pub fn new(factor: u32) -> Result<Self, ReferenceError> {
+    pub fn new(factor: u32) -> Result<Self, String> {
         if !matches!(factor, 2 | 4 | 8 | 16) {
-            return Err(ReferenceError(format!(
+            return Err(format!(
                 "Unsupported source Grass tessellation factor {factor}"
-            )));
+            ));
         }
         let n = factor as usize;
         let point_count = 3 * (n / 2) * (n / 2 + 1) + 1;
