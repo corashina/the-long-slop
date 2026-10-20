@@ -4,7 +4,7 @@
   "build_id": 11140890,
   "unity_version": "2021.3.18f1",
   "source_assembly_sha256": "9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e",
-  "input_note": "Control values, frame counts, seed, geometry dimensions, and load multipliers are declared experiment inputs. They are not source measurements. Runtime records actual initial pose, body state, wheel state, fluids, and contact surface.",
+  "input_note": "Control rows use probe_kind-specific protocols. Source rows declare keyboard axes, ignition hold, and digital events. Isolated rows declare native actuator fractions. Initial stored parking brake and applied source brake remain measured state.",
   "source_initial_parameters": {
     "body_mass_kg": 961.5999999046326,
     "engine": {
@@ -553,14 +553,12 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 60,
@@ -568,7 +566,10 @@
         "zero",
         "all key endpoints",
         "one source key interval outside both endpoints"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "launch-default",
@@ -629,32 +630,40 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
       "required_observations": [
         "automatic launch",
         "preceding average RPM consumed by AutoShift"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "launch-manual",
@@ -715,40 +724,49 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": 1,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
         },
         {
           "frame": 120,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
-      "required_observations": []
+      "required_observations": [],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "gear-forward-neutral-reverse",
@@ -809,73 +827,82 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
         },
         {
           "frame": 90,
-          "gear": 1,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 109,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": true
         },
         {
           "frame": 110,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 180,
-          "gear": 0,
           "throttle": 0.0,
           "brake": 1.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 0
+          }
         },
         {
           "frame": 240,
-          "gear": -1,
           "throttle": 0.0,
           "brake": 1.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": -1
+          }
         },
         {
           "frame": 300,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 420,
-      "required_observations": []
+      "required_observations": [],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "grip-full-tire-longitudinal",
@@ -936,14 +963,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1011,14 +1034,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 0.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1086,14 +1105,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.5,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.5
         }
       ],
       "duration_frames": 240,
@@ -1161,14 +1176,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1236,14 +1247,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 0.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1311,14 +1318,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.5,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.5
         }
       ],
       "duration_frames": 240,
@@ -1386,14 +1389,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1461,14 +1460,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 0.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1536,14 +1531,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.5,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.5
         }
       ],
       "duration_frames": 240,
@@ -1611,14 +1602,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1686,14 +1673,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
           "motor_scale": 0.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
         }
       ],
       "duration_frames": 240,
@@ -1761,14 +1744,10 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.5,
-          "handbrake": 0.0,
           "motor_scale": 1.0,
-          "ignition": false
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.5
         }
       ],
       "duration_frames": 240,
@@ -1836,25 +1815,30 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -1863,7 +1847,10 @@
         "motor torque",
         "engine brake torque",
         "RPM feedback"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "remove-driven-rims-2",
@@ -1924,25 +1911,30 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -1951,7 +1943,10 @@
         "motor torque",
         "engine brake torque",
         "RPM feedback"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "wheel-spin-source-startup",
@@ -2012,32 +2007,40 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
       "required_observations": [
         "native angular speed under torque",
         "contact status"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "wheel-spin-wheels-clear",
@@ -2098,32 +2101,40 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
       "required_observations": [
         "native angular speed under torque",
         "contact status"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "suspension-settle",
@@ -2184,14 +2195,12 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -2200,7 +2209,10 @@
         "suspension offset",
         "load",
         "contact force"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "suspension-full-travel",
@@ -2261,14 +2273,12 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -2277,7 +2287,10 @@
         "suspension offset",
         "load",
         "contact force"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "suspension-load",
@@ -2338,14 +2351,12 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -2354,7 +2365,10 @@
         "suspension offset",
         "load",
         "contact force"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "suspension-drop",
@@ -2415,14 +2429,12 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 240,
@@ -2431,7 +2443,10 @@
         "suspension offset",
         "load",
         "contact force"
-      ]
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
     },
     {
       "id": "braking-service",
@@ -2467,8 +2482,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2492,40 +2507,84 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 180,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 1.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "service"
+        ],
+        "excluded_contributors": [
+          "motor",
+          "engine",
+          "parking"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "braking-engine",
@@ -2561,8 +2620,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2586,40 +2645,84 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
-          "frame": 210,
-          "gear": -99,
+          "frame": 180,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 210,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "engine"
+        ],
+        "excluded_contributors": [
+          "motor",
+          "service",
+          "parking"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "braking-handbrake",
@@ -2655,8 +2758,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2680,40 +2783,84 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
-          "throttle": 0.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
-        },
-        {
-          "frame": 90,
-          "gear": -99,
-          "throttle": 1.0,
-          "brake": 0.0,
-          "clutch": 0.0,
-          "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
-        },
-        {
-          "frame": 210,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 1.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
+        },
+        {
+          "frame": 90,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 180,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 210,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": true
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "parking"
+        ],
+        "excluded_contributors": [
+          "motor",
+          "engine",
+          "service"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "braking-combined",
@@ -2749,8 +2896,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2774,40 +2921,84 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 180,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 1.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 1.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": true
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "engine",
+          "service",
+          "parking"
+        ],
+        "excluded_contributors": [
+          "motor"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "motor-and-brake-service",
@@ -2843,8 +3034,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2868,40 +3059,74 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 1.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "motor",
+          "service"
+        ],
+        "excluded_contributors": [
+          "parking"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "motor-and-brake-handbrake",
@@ -2937,8 +3162,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -2962,40 +3187,74 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 1.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": true
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "motor",
+          "parking"
+        ],
+        "excluded_contributors": [
+          "service"
+        ],
+        "observe_engine_interlock": false
+      }
     },
     {
       "id": "motor-and-brake-engine",
@@ -3031,8 +3290,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -3056,40 +3315,72 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase. At nonnegative RPM, original engine motor output and engine braking are mutually exclusive. Observe both channels without requiring simultaneous positive output.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [],
+        "excluded_contributors": [
+          "service",
+          "parking"
+        ],
+        "observe_engine_interlock": true
+      }
     },
     {
       "id": "motor-and-brake-all",
@@ -3125,8 +3416,8 @@
       "setup": {
         "seed": 1,
         "removed_driven_rims": 0,
-        "auto_clutch": true,
-        "auto_shift": true,
+        "auto_clutch": false,
+        "auto_shift": false,
         "support": "full-tire",
         "height": "source-startup",
         "engine": "source-startup",
@@ -3150,40 +3441,73 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
-          "clutch": 0.0,
+          "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false,
+          "gear_press": {
+            "value": 1
+          }
+        },
+        {
+          "frame": 120,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 210,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 1.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 1.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": true
         }
       ],
       "duration_frames": 360,
-      "required_observations": []
+      "required_observations": [
+        "declared digital event consumption",
+        "measured source brake contributors",
+        "source engine motor/brake interlock"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original manual input and clutch eligibility apply. Contributor qualification requires measured source-role terms during the declared brake phase. At nonnegative RPM, original engine motor output and engine braking are mutually exclusive. Observe both channels without requiring simultaneous positive output.",
+      "brake_phase": {
+        "start_frame": 210,
+        "end_frame": 360,
+        "required_contributors": [
+          "motor",
+          "service",
+          "parking"
+        ],
+        "excluded_contributors": [],
+        "observe_engine_interlock": true
+      }
     },
     {
       "id": "coast-clutch-stop-slope-hold",
@@ -3244,69 +3568,66 @@
       "controls": [
         {
           "frame": 0,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": true
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
         },
         {
           "frame": 90,
-          "gear": -99,
           "throttle": 1.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 180,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 240,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 1.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 300,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 1.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 0.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": false
         },
         {
           "frame": 360,
-          "gear": -99,
           "throttle": 0.0,
           "brake": 0.0,
           "clutch": 0.0,
           "steer": 0.0,
-          "handbrake": 1.0,
-          "motor_scale": 0.0,
-          "ignition": false
+          "ignition_button_held": false,
+          "handbrake_press": true
         }
       ],
       "duration_frames": 420,
@@ -3316,6 +3637,547 @@
         "stop",
         "hold",
         "measured source contact slope"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Source input requests. Actual automatic reverse, clutch, engine torque, and brake contributors remain measured outputs."
+    },
+    {
+      "id": "braking-service-automatic",
+      "probe_kind": "assembled_lada",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
+        },
+        {
+          "frame": 90,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 210,
+          "throttle": 0.0,
+          "brake": 1.0,
+          "clutch": 1.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 360,
+      "required_observations": [],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original automatic input interpretation, including reverse requests and automatic neutral. No isolated brake contributor claim."
+    },
+    {
+      "id": "braking-engine-automatic",
+      "probe_kind": "assembled_lada",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": false
+        },
+        {
+          "frame": 89,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": true,
+          "handbrake_press": true
+        },
+        {
+          "frame": 90,
+          "throttle": 1.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        },
+        {
+          "frame": 210,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 360,
+      "required_observations": [],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "control_scope_note": "Original automatic input interpretation, including reverse requests and automatic neutral. No isolated brake contributor claim."
+    },
+    {
+      "id": "native-brake-stopped-hold",
+      "probe_kind": "wheel_collider",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "motor_scale": 0.0,
+          "service_brake_fraction": 1.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
+        }
+      ],
+      "duration_frames": 240,
+      "required_observations": [
+        "native signed wheel rpm and motor torque",
+        "native service and parking brake torque",
+        "contact force",
+        "native zero-rpm crossings or explicit absent crossing",
+        "stopped brake hold"
+      ]
+    },
+    {
+      "id": "native-motor-and-service",
+      "probe_kind": "wheel_collider",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "motor_scale": -1.0,
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
+        },
+        {
+          "frame": 90,
+          "motor_scale": 1.0,
+          "service_brake_fraction": 0.25,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
+        },
+        {
+          "frame": 180,
+          "motor_scale": 0.0,
+          "service_brake_fraction": 1.0,
+          "handbrake_fraction": 1.0,
+          "steer": 0.0
+        }
+      ],
+      "duration_frames": 240,
+      "required_observations": [
+        "native signed wheel rpm and motor torque",
+        "native service and parking brake torque",
+        "contact force",
+        "native zero-rpm crossings or explicit absent crossing",
+        "negative motor then positive motor with declared brake fractions then hold"
+      ]
+    },
+    {
+      "id": "native-motor-and-parking",
+      "probe_kind": "wheel_collider",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "motor_scale": -1.0,
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
+        },
+        {
+          "frame": 90,
+          "motor_scale": 1.0,
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.25,
+          "steer": 0.0
+        },
+        {
+          "frame": 180,
+          "motor_scale": 0.0,
+          "service_brake_fraction": 1.0,
+          "handbrake_fraction": 1.0,
+          "steer": 0.0
+        }
+      ],
+      "duration_frames": 240,
+      "required_observations": [
+        "native signed wheel rpm and motor torque",
+        "native service and parking brake torque",
+        "contact force",
+        "native zero-rpm crossings or explicit absent crossing",
+        "negative motor then positive motor with declared brake fractions then hold"
+      ]
+    },
+    {
+      "id": "native-motor-and-both",
+      "probe_kind": "wheel_collider",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "motor_scale": -1.0,
+          "service_brake_fraction": 0.0,
+          "handbrake_fraction": 0.0,
+          "steer": 0.0
+        },
+        {
+          "frame": 90,
+          "motor_scale": 1.0,
+          "service_brake_fraction": 0.25,
+          "handbrake_fraction": 0.25,
+          "steer": 0.0
+        },
+        {
+          "frame": 180,
+          "motor_scale": 0.0,
+          "service_brake_fraction": 1.0,
+          "handbrake_fraction": 1.0,
+          "steer": 0.0
+        }
+      ],
+      "duration_frames": 240,
+      "required_observations": [
+        "native signed wheel rpm and motor torque",
+        "native service and parking brake torque",
+        "contact force",
+        "native zero-rpm crossings or explicit absent crossing",
+        "negative motor then positive motor with declared brake fractions then hold"
       ]
     }
   ]

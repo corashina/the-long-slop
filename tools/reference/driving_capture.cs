@@ -38,9 +38,10 @@ public sealed class G11Capture : MonoBehaviour
     }
     [Serializable] public class Control
     {
-        public int frame, gear;
-        public float throttle, brake, clutch, steer, handbrake, motor_scale;
-        public bool ignition;
+        public int frame;
+        public float throttle, brake, clutch, steer, motor_scale, service_brake_fraction, handbrake_fraction;
+        public bool ignition_button_held, handbrake_press;
+        public G11Controls.GearPress gear_press;
     }
     [Serializable] public class Scenario
     {
@@ -69,6 +70,7 @@ public sealed class G11Capture : MonoBehaviour
         public float time, realtime, delta_time, fixed_dt, rpm, average_rpm, clutch, throttle, brake, handbrake;
         public float engine_output_nm, engine_brake_nm;
         public int gear, installed_driven_rims, torque_divisor;
+        public G11Controls.State controls;
         public Vector3 position, velocity, angular_velocity;
         public Quaternion rotation;
         public Wheel[] wheels;
@@ -136,6 +138,7 @@ public sealed class G11Capture : MonoBehaviour
         public string fuel_json, oil_json, coolant_json;
         public bool auto_clutch, auto_shift, ignition, running, stored_handbrake;
         public int selected_gear;
+        public G11Controls.Mode control_mode;
         public Wheel[] wheel_state;
         public Condition[] conditions;
         public AssemblySetup assembly_setup;
@@ -498,7 +501,8 @@ public sealed class G11Capture : MonoBehaviour
         settingsscript.s.S.BForceManual=false;
         settingsscript.s.S.CBenableGas=false; settingsscript.s.S.CBenableBrake=false;
         settingsscript.s.S.CBenableClutch=false; settingsscript.s.S.CBenableSteer=false;
-        settingsscript.s.S.CBenableHandBrake=false;
+        settingsscript.s.S.CBenableHandBrake=false; settingsscript.s.S.CBHShifter=false;
+        inputscript.i.mouseDrive=false;
         result.setup_changes.Add("Controls and assists: "+JsonUtility.ToJson(scenario.setup));
         if(scenario.setup.engine!="source-startup" || scenario.setup.fluids!="source-startup")
             throw new InvalidOperationException("Unsupported engine or fluid setup");
@@ -640,7 +644,7 @@ public sealed class G11Capture : MonoBehaviour
             inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,
-            auto_clutch=settingsscript.s.S.BAutoClutch,auto_shift=settingsscript.s.S.BAutoShift,
+            auto_clutch=settingsscript.s.S.BAutoClutch,auto_shift=settingsscript.s.S.BAutoShift,control_mode=G11Controls.ReadMode(car),
             ignition=car.ignition,running=car.Engine.running,stored_handbrake=car.BhandBrake,selected_gear=car.gear,
             wheel_state=wheels.Select(w=>ReadWheel(w)).ToArray(),
             conditions=ReadConditions(car),assembly_setup=assemblySetup,assembly_identity=assemblyIdentity,
@@ -670,6 +674,11 @@ public sealed class G11Capture : MonoBehaviour
         var inputs=new List<float>{0f,keys[0].time-interval};
         foreach(var key in keys) inputs.Add(key.time);
         inputs.Add(keys[keys.Length-1].time+interval);
+        for(int index=1;index<keys.Length;index++)
+        {
+            float span=keys[index].time-keys[index-1].time;
+            for(int quarter=1;quarter<=3;quarter++) inputs.Add(keys[index-1].time+span*quarter*.25f);
+        }
         result.curves.Add(new Curve{owner=owner,name=name,keys=keys.Select(k=>new Key(k)).ToArray(),pre_wrap=(int)curve.preWrapMode,
             post_wrap=(int)curve.postWrapMode,inputs=inputs.ToArray(),values=inputs.Select(curve.Evaluate).ToArray()});
     }
@@ -739,48 +748,13 @@ public sealed class G11Capture : MonoBehaviour
         return selected;
     }
     public static float Axis(inputscript input,inputscript.IN action)
-    {
-        if(!active) return 0f;
-        var control=Current();
-        switch(action)
-        {
-            case inputscript.IN.gas:return control.throttle;
-            case inputscript.IN.brake:return control.brake;
-            case inputscript.IN.clutch:return control.clutch;
-            case inputscript.IN.steerleft:return Mathf.Max(0f,-control.steer);
-            case inputscript.IN.steerright:return Mathf.Max(0f,control.steer);
-            default:return 0f;
-        }
-    }
+    { return active?G11Controls.Axis(action,Time.frameCount-startFrame):0f; }
     public static bool Held(inputscript input,inputscript.IN action)
-    {
-        if(!active) return false;
-        var control=Current();
-        if(action==inputscript.IN.ignition) return control.ignition;
-        return Axis(input,action)>0f;
-    }
+    { return active && G11Controls.Held(action,Time.frameCount-startFrame); }
     public static bool Down(inputscript input,inputscript.IN action)
-    {
-        if(!active) return false;
-        var control=Current();
-        if(Time.frameCount-startFrame!=control.frame) return false;
-        if(action==inputscript.IN.handbrake) return control.handbrake>0;
-        if(action==inputscript.IN.ignition) return control.ignition;
-        if(action==inputscript.IN.gearr) return control.gear==-1;
-        if(action==inputscript.IN.gearn) return control.gear==0;
-        if(action>=inputscript.IN.gear1 && action<=inputscript.IN.gear6)
-            return control.gear==(int)action-(int)inputscript.IN.gear1+1;
-        return false;
-    }
+    { return active && G11Controls.Down(action,Time.frameCount-startFrame); }
     public static bool Up(inputscript input,inputscript.IN action)
-    {
-        if(!active) return false;
-        int frame=Time.frameCount-startFrame;
-        for(int index=1;index<scenario.controls.Length;index++)
-            if(scenario.controls[index].frame==frame && action==inputscript.IN.ignition)
-                return scenario.controls[index-1].ignition && !scenario.controls[index].ignition;
-        return false;
-    }
+    { return active && G11Controls.Up(action,Time.frameCount-startFrame); }
     public static float AnalogAxis(string name) { return 0f; }
     void FixedUpdate()
     {
@@ -797,7 +771,7 @@ public sealed class G11Capture : MonoBehaviour
                 for(int index=0;index<4;index++)
                 {
                     wheels[index].motorTorque=control.motor_scale*car.brakePower;
-                    wheels[index].brakeTorque=control.brake*car.brakePower+control.handbrake*car.maxHandBrake;
+                    wheels[index].brakeTorque=control.service_brake_fraction*car.brakePower+control.handbrake_fraction*car.maxHandBrake;
                     wheels[index].steerAngle=control.steer*car.steerAngle;
                 }
             }
@@ -888,6 +862,7 @@ public sealed class G11Capture : MonoBehaviour
                 result.initial=InitialState();
                 RecordSetupBoundary("armed-after-canonical");
                 G11Driver.Arm();
+                G11Controls.Initialize(scenario.controls);
                 startFrame=-1;
                 active=true;
                 StartCoroutine(AfterPhysics());
@@ -918,6 +893,7 @@ public sealed class G11Capture : MonoBehaviour
         sample.angular_velocity=body.angularVelocity; sample.rpm=car.Engine.rpm; sample.average_rpm=car.avgRpm;
         sample.gear=car.gear; sample.clutch=car.clutch; sample.throttle=car.throttle;
         sample.brake=car.brake; sample.handbrake=car.handbrake;
+        sample.controls=G11Controls.Read(car,driverSeat,controlRevision);
         sample.engine_output_nm=car.Engine.actualOutput; sample.engine_brake_nm=car.Engine.brakeOutput;
         sample.installed_driven_rims=0;
         foreach(var slot in car.DrivenWheelSlots) if(slot.part!=null) sample.installed_driven_rims++;

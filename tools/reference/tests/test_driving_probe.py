@@ -11,12 +11,13 @@ from tools.reference.library.archive import sha256
 from tools.reference.driving_geometry import validate_geometry, physical_inputs
 from tools.reference.tests.test_driving_driver import driver_fixture
 from tools.reference.tests.test_driving_lifecycle import lifecycle_fixture
+from tools.reference.tests.test_driving_controls import scenario_fixture, add_control_fixture
 
 
 class DrivingProbeTests(unittest.TestCase):
     def test_geometry_helper_provenance(self):
         revision = observer_revision()
-        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py'):
+        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_controls.cs', 'driving_controls.py'):
             self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
 
     def test_native_helper_restoration_and_physical_readiness(self):
@@ -198,8 +199,7 @@ class DrivingProbeTests(unittest.TestCase):
 
     @staticmethod
     def scenario(kind='assembled_lada'):
-        return {'id': 'launch-default', 'probe_kind': kind, 'duration_frames': 4,
-                'controls': [{'frame': 0}, {'frame': 2}]}
+        return scenario_fixture(kind)
 
     @staticmethod
     def sample_run(kind='assembled_lada', initial_physics=False):
@@ -218,9 +218,9 @@ class DrivingProbeTests(unittest.TestCase):
             phases = (['physics.entry', 'physics.exit'] * (2 if frame == 1 else 1)
                       if frame in (1, 3) or (frame == 0 and initial_physics) else [])
             engine = ['engine.entry', 'engine.exit']
-            car = ['car.entry', 'control.entry', 'control.exit', 'autoshift.entry',
+            car = ['car.entry', 'control.entry', 'control.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'autoshift.entry',
                    'autoshift.exit', 'rpm.entry', 'rpm.exit', 'car.exit']
-            phases += ['input.entry', 'input.exit'] + (engine + car if frame % 2 else car + engine)
+            phases += ['input.entry', 'input.exit', 'input2.entry', 'input2.exit'] + (engine + car if frame % 2 else car + engine)
             for phase in phases:
                 if phase == 'physics.entry': step += 1
                 sequence = len(run['samples']) + 1
@@ -268,7 +268,7 @@ class DrivingProbeTests(unittest.TestCase):
         driver = driver_fixture()
         run['initial'].update(driver.pop('initial'))
         run.update(driver)
-        return lifecycle_fixture(run)
+        return add_control_fixture(lifecycle_fixture(run), scenario_fixture(kind))
 
     @staticmethod
     def remove_sample(run, index):
@@ -352,7 +352,7 @@ class DrivingProbeTests(unittest.TestCase):
             project = Path(name).resolve()
             output = project / '.cache/g11-driving/reset'
             definitions = project / 'scenarios.json'
-            row = dict(self.scenario(), source_objects={}, setup={}, frame_schedule={})
+            row = dict(self.scenario(), source_objects={}, frame_schedule={})
             definitions.write_text(json.dumps({'scenarios': [row]}))
             setup = {'engine_rpm': 0., 'engine_temperature': 0., 'random_state': 'canonical-before-solve',
                      'driver_input': driver_fixture()['driver']['input']}
@@ -363,7 +363,7 @@ class DrivingProbeTests(unittest.TestCase):
                     directory = Path(arguments[arguments.index('-RunRoot') + 1])
                     launched.append(json.loads((directory / 'scenario.json').read_text()))
                     run = self.sample_run()
-                    run.update(setup_state=setup, initial=observed)
+                    run.update(setup_state=setup, initial=dict(run['initial'], **observed))
                     (directory / 'runtime.json').write_text(json.dumps(run))
                 return type('Result', (), {'returncode': 0})()
             with patch('tools.reference.driving_probe.PROJECT', project), \
@@ -392,7 +392,7 @@ class DrivingProbeTests(unittest.TestCase):
                 self.assertEqual(len(verify(evidence)['runs']), 3)
                 output = project / '.cache/g11-driving/reset'
                 definitions = project / 'scenarios.json'
-                row = dict(self.scenario(), source_objects={}, setup={}, frame_schedule={})
+                row = dict(self.scenario(), source_objects={}, frame_schedule={})
                 definitions.write_text(json.dumps({'scenarios': [row, dict(row, id='later-scenario')]}))
                 launched = []
                 def native(arguments, **kwargs):

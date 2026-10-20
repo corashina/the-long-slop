@@ -60,6 +60,7 @@ $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_driver.cs'))))
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_controls.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_lifecycle.cs'))))
 $options=[Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
 $options=$options.WithDeterministic($true).WithOptimizationLevel([Microsoft.CodeAnalysis.OptimizationLevel]::Release)
@@ -228,7 +229,7 @@ Observe 'fpscontroller' 'Update' 'driver.update.exit' $false
 Observe 'mainscript' 'FStart' 'world.entry' $true
 Observe 'mainscript' 'FStart' 'world.exit' $false
 Observe 'mainscript' 'SettingsRefreshed' 'settings.entry' $true
-foreach($spec in @(@('inputscript','DriveStuff','input'),@('carscript','Update','car'),@('enginescript','Update','engine'),@('carscript','AutoShift','autoshift'),@('carscript','Stuff','rpm'),@('carscript','GetPlayerInput','control'))){
+foreach($spec in @(@('inputscript','DriveStuff','input'),@('inputscript','DriveStuff2','input2'),@('carscript','ControlStuff','actuation'),@('carscript','Throttle','torque'),@('carscript','Update','car'),@('enginescript','Update','engine'),@('carscript','AutoShift','autoshift'),@('carscript','Stuff','rpm'),@('carscript','GetPlayerInput','control'))){
     Observe $spec[0] $spec[1] ($spec[2]+'.entry') $true
     Observe $spec[0] $spec[1] ($spec[2]+'.exit') $false
 }

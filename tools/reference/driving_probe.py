@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_driver import validate_driver
+from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
 from .driving_geometry import source_geometry_map, validate_geometry, physical_inputs
 from .export import native_engine_evidence
@@ -17,8 +18,8 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
-PHASES = {'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
+FILES = ('driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+PHASES = {'input2.entry', 'input2.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
 
@@ -98,15 +99,7 @@ def finite(value):
 
 
 def control_frames(scenario):
-    duration = scenario.get('duration_frames')
-    controls = scenario.get('controls')
-    if type(duration) is not int or duration < 2 or not isinstance(controls, list) or not controls:
-        raise ValueError('Declared finite duration and control schedule are required')
-    frames = [control.get('frame') for control in controls]
-    if (any(type(frame) is not int or not 0 <= frame < duration for frame in frames) or
-        frames[0] != 0 or frames != sorted(set(frames))):
-        raise ValueError('Declared control schedule must increase from zero inside the finite interval')
-    return duration, frames
+    return validate_schedule(scenario)
 
 
 def validate_timing(samples, scenario):
@@ -218,8 +211,9 @@ def validate_run(run, scenario):
         if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != 4:
             raise ValueError('Four native wheel samples are required')
     timing = validate_timing(samples, scenario)
+    controls = validate_controls(run, scenario)
     return {'samples': len(samples), 'physics_steps': run['physics_steps'],
-            'phases': sorted(phases), **timing}
+            'phases': sorted(phases), 'controls': controls, **timing}
 
 
 def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) -> dict:
