@@ -119,6 +119,7 @@ Targeted fluid, engine, inventory, generated-owner restore, and instrument check
 The accepted native runs include 63 executions, with repeated filter cases counted.
 Five Python tests, six save-storage web tests, formatting, and both WASM backend checks passed.
 Matching selected assets passed native contract, reference, and immutable package validation.
+Merge commit: 777cedd. The G04 worktree and merged branch were removed after verification.
 Full-library coverage remains incomplete. Full checks, release builds, and browser acceptance remain deferred.
 See [G04 verification](superpowers/reports/2026-10-20-g04-fluids.md) for commands and limits. G04 stays Verify.
 
