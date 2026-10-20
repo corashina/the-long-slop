@@ -40,6 +40,12 @@ def torque_row():
                 values=[float(i) + .25 for i in range(77)])
 
 
+def raw_car_curve_run(token):
+    run = dict(scenario=SCENARIO_ID, probe_kind='curve', runtime='original-unity-player',
+               curves=[torque_row(), dict(owner='carscript', name='other', inputs=['CAR_INPUT_TOKEN'])])
+    return json.dumps(run).replace('"CAR_INPUT_TOKEN"', token)
+
+
 class DrivingCurveInputTests(unittest.TestCase):
     def test_actual_observer_methods_keep_prefix_and_dispatch_only_engine_suffix(self):
         capture = (ROOT / 'driving_capture.cs').read_text()
@@ -179,6 +185,57 @@ class DrivingCurveInputTests(unittest.TestCase):
             self.assertEqual(result['value_bits'][0], bits(.25))
             probe.write_json(path.with_name('receipt.json'), result)
             self.assertEqual(probe.read_json(path.with_name('receipt.json')), result)
+
+    def test_raw_nonengine_decimal_overflow_fails_validate_run(self):
+        with tempfile.TemporaryDirectory() as name:
+            path = Path(name) / 'runtime.json'
+            path.write_text(raw_car_curve_run('1e1000'))
+            run = probe.read_json(path)
+            overflow = run['curves'][1]['inputs'][0]
+            self.assertIs(type(overflow), Decimal)
+            self.assertEqual(overflow, Decimal('1e1000'))
+            checked = validate_curve_run(run, scenario())
+            self.assertEqual(len(checked['value_bits']), 77)
+            self.assertEqual(checked['value_bits'], [bits(float(i) + .25) for i in range(77)])
+            with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
+                probe.validate_run(run, scenario())
+            # Match the old float gate's range. Finite binary64 car values remain valid.
+            path.write_text(raw_car_curve_run('1e100'))
+            probe.finite(probe.read_json(path))
+
+    def test_capture_and_explicit_verify_reject_raw_nonengine_decimal_overflow(self):
+        raw = raw_car_curve_run('1e1000')
+        for operation in ('capture', 'verify'):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as name:
+                project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
+                definitions = project / 'scenarios.json'
+                definitions.write_text(json.dumps({'scenarios': [scenario()]}))
+                launched = []
+                if operation == 'capture':
+                    def native(arguments, **kwargs):
+                        mode = arguments[arguments.index('-Mode') + 1]; launched.append(mode)
+                        if mode == 'Run':
+                            directory = Path(arguments[arguments.index('-RunRoot') + 1])
+                            (directory / 'runtime.json').write_text(raw)
+                        return type('Result', (), {'returncode': 0})()
+                    with patch.object(probe, 'PROJECT', project), \
+                         patch.object(probe, 'preflight', return_value={'powershell': 'pwsh', 'observer_revision': {}}), \
+                         patch.object(probe.subprocess, 'run', side_effect=native):
+                        # Real capture, validate_evidence, and validate_run must stop at finite.
+                        with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
+                            probe.capture(project, project, output, definitions, 3)
+                    self.assertEqual(launched, ['Setup', 'Run'])
+                else:
+                    output.mkdir(parents=True)
+                    probe.write_json(output / 'request.json', {'repeats': 3, 'scenarios': [scenario()]})
+                    directory = output / SCENARIO_ID / 'repeat-1'; directory.mkdir(parents=True)
+                    (directory / 'runtime.json').write_text(raw)
+                    # No validation function or evidence gate is mocked for explicit verify.
+                    with self.assertRaisesRegex(ValueError, 'Nonfinite native sample'):
+                        probe.verify(output)
+                self.assertEqual((output / SCENARIO_ID / 'repeat-1/runtime.json').read_text(), raw)
+                self.assertFalse((output / 'receipt.json').exists())
+                self.assertFalse((output / SCENARIO_ID / 'repeat-2').exists())
 
     def test_capture_and_verify_preserve_declarations_serialize_and_stop_on_bit_changes(self):
         # Run real orchestration and curve validation with synthetic unrelated telemetry.

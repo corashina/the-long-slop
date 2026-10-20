@@ -98,7 +98,7 @@ def preflight(source_root: Path, reference_root: Path) -> dict:
 
 
 def finite(value):
-    if isinstance(value, float) and not math.isfinite(value):
+    if isinstance(value, (float, Decimal)) and not math.isfinite(value):
         raise ValueError('Nonfinite native sample')
     if isinstance(value, dict):
         for item in value.values(): finite(item)
