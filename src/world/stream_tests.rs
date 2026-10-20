@@ -331,7 +331,7 @@ fn prepare_step_for_views(
     run.align_startup(reference).unwrap();
 }
 
-fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     let mut surface_claim = None;
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);

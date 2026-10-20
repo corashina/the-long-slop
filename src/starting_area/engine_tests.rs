@@ -325,3 +325,381 @@ fn interval_draws_preserve_attempts_and_cancellation() {
     assert_eq!(run.vehicles[0].engine.capture_save(), state);
     assert_eq!(run.attempts, attempts);
 }
+
+#[test]
+#[ignore = "requires the installed build 11140890 export"]
+fn garage_engine_remove_restore_continue() {
+    let (reference, stamp) = installed_source();
+    let source = &reference.vehicles[0].engine;
+    let ids = IdentityMap::new(&reference).unwrap();
+    let engine_slot = reference
+        .part_slots
+        .iter()
+        .find(|slot| slot.part == Some(source.item))
+        .unwrap()
+        .id;
+    let held = FrameInput {
+        held: keys::IGNITION,
+        ..Default::default()
+    };
+    let tap = FrameInput {
+        pressed: keys::IGNITION,
+        released: keys::IGNITION,
+        ..Default::default()
+    };
+    let contents = |run: &GarageRuntime| {
+        run.area
+            .items
+            .capture_save(
+                &ids,
+                &run.stream.origin,
+                &run.physics,
+                &run.area.interaction,
+                &reference,
+            )
+            .unwrap()
+            .into_iter()
+            .filter(|item| {
+                [
+                    source.item,
+                    source.fuel_tank,
+                    source.oil_tank,
+                    source.coolant_tank,
+                ]
+                .contains(&ids.item(&item.instance).unwrap())
+            })
+            .collect::<Vec<_>>()
+    };
+    let compare = |run: &GarageRuntime, loaded: &GarageRuntime| {
+        assert_eq!(
+            run.vehicles[0].engine.capture_save(),
+            loaded.vehicles[0].engine.capture_save()
+        );
+        assert_eq!(
+            run.vehicles[0].ignition.ignition,
+            loaded.vehicles[0].ignition.ignition
+        );
+        assert_eq!(
+            run.vehicles[0].ignition.starter,
+            loaded.vehicles[0].ignition.starter
+        );
+        assert_eq!(
+            run.vehicles[0].drivetrain.gear(),
+            loaded.vehicles[0].drivetrain.gear()
+        );
+        assert_eq!(run.vehicles[0].handbrake, loaded.vehicles[0].handbrake);
+        assert_eq!(run.vehicles[0].trip_m, loaded.vehicles[0].trip_m);
+        let expected = contents(run);
+        let actual = contents(loaded);
+        for item in expected {
+            let other = actual
+                .iter()
+                .find(|other| other.instance == item.instance)
+                .unwrap();
+            assert_eq!(other.fluids, item.fluids);
+            assert_eq!(other.temperature, item.temperature);
+            assert_eq!(other.location, item.location);
+        }
+    };
+    let install = |run: &mut GarageRuntime| {
+        let before = run.vehicles[0].engine.capture_save();
+        let items = contents(run);
+        run.area
+            .interaction
+            .parts
+            .install(
+                source.item,
+                engine_slot,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        run.area
+            .interaction
+            .parts
+            .mount_mechanism(source.item, &mut run.area.interaction.mechanisms);
+        run.area
+            .interaction
+            .sync_parts(&mut run.area.items, &mut run.physics)
+            .unwrap();
+        assert!(run.area.items.mounted(source.item));
+        assert_eq!(run.vehicles[0].engine.capture_save(), before);
+        for item in items {
+            let after = contents(run)
+                .into_iter()
+                .find(|other| other.instance == item.instance)
+                .unwrap();
+            assert_eq!(after.fluids, item.fluids);
+            assert_eq!(after.temperature, item.temperature);
+        }
+    };
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    // Empty-fuel cranking consumes real interval draws before mixed fuel is added.
+    run.area
+        .items
+        .get_mut(source.fuel_tank)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .restore_contents([0.; 6], &[]);
+    for _ in 0..600 {
+        step(&mut run, &reference, held);
+        if run.vehicles[0]
+            .engine
+            .capture_save()
+            .start_draw
+            .parse::<u64>()
+            .unwrap()
+            >= 2
+        {
+            break;
+        }
+    }
+    assert!(!run.vehicles[0].engine_output.running);
+    assert!(
+        run.vehicles[0]
+            .engine
+            .capture_save()
+            .start_draw
+            .parse::<u64>()
+            .unwrap()
+            >= 2
+    );
+    // Mixed contents use deliberately nonnumeric order and retain a zero entry.
+    for (item, quantities, order) in [
+        (source.fuel_tank, [5., 0., 0., 0.02, 0., 0.], [3, 0, 5]),
+        (source.oil_tank, [0., 3., 0., 0.02, 0., 0.], [3, 1, 5]),
+        (source.coolant_tank, [0., 0., 0., 3., 0.02, 0.], [4, 3, 5]),
+    ] {
+        run.area
+            .items
+            .get_mut(item)
+            .unwrap()
+            .fluid
+            .as_mut()
+            .unwrap()
+            .restore_contents(quantities, &order);
+    }
+    // Start through the production fixed vehicle step, with installed source rates.
+    for _ in 0..600 {
+        step(&mut run, &reference, held);
+        if run.vehicles[0].engine_output.running {
+            break;
+        }
+    }
+    assert!(run.vehicles[0].engine_output.running);
+    assert!(run.vehicles[0].ignition.starter);
+    let before_remove = run.vehicles[0].engine.capture_save();
+    assert!(before_remove.elapsed > 0. && before_remove.start_draw.parse::<u64>().unwrap() > 0);
+    let before_items = contents(&run);
+    run.area
+        .interaction
+        .parts
+        .can_remove(source.item, &run.area.player, &run.area.items)
+        .unwrap();
+    run.area
+        .interaction
+        .parts
+        .remove(source.item, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area.interaction.parts.detach_mechanism(
+        source.item,
+        &mut run.area.interaction.mechanisms,
+        &mut run.physics,
+    );
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    assert!(!run.area.items.mounted(source.item));
+    assert_eq!(run.vehicles[0].engine.capture_save(), before_remove);
+    for item in before_items {
+        let detached = contents(&run)
+            .into_iter()
+            .find(|other| other.instance == item.instance)
+            .unwrap();
+        assert_eq!(detached.fluids, item.fluids);
+        assert_eq!(detached.temperature, item.temperature);
+    }
+    step(&mut run, &reference, held);
+    assert!(run.vehicles[0].engine_output.running);
+    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
+    assert_eq!(run.vehicles[0].engine_output.brake_torque_nm, 0.);
+    assert!(!run.vehicles[0].engine_output.starter);
+    assert!(run.vehicles[0].ignition.starter);
+    assert!(run.vehicles[0].engine.capture_save().elapsed > before_remove.elapsed);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(loaded.paused);
+    assert!(loaded.restore_pending());
+    assert!(
+        loaded
+            .capture_save(
+                &reference,
+                &stamp,
+                CameraSave::FirstPerson,
+                "2026-10-20T12:00:00Z"
+            )
+            .is_err()
+    );
+    // Full capture is blocked until world restore finishes. Read restored owners directly.
+    assert_eq!(ids.vehicles[0], saved.vehicles[0].instance);
+    assert_eq!(
+        loaded.vehicles[0].ignition.ignition,
+        saved.vehicles[0].ignition
+    );
+    let restored_engine = loaded.vehicles[0].engine.capture_save();
+    assert_eq!(
+        restored_engine.start_draw,
+        saved.vehicles[0].engine.start_draw
+    );
+    assert_eq!(
+        restored_engine.temperature,
+        saved.vehicles[0].engine.temperature
+    );
+    assert_eq!(restored_engine, saved.vehicles[0].engine);
+    assert!(!loaded.vehicles[0].ignition.starter);
+    assert!(!loaded.vehicles[0].engine_output.starter);
+    let restored_items = contents(&loaded);
+    for item in &restored_items {
+        let original = saved
+            .items
+            .iter()
+            .find(|original| original.instance == item.instance)
+            .unwrap();
+        assert_eq!(item.fluids, original.fluids);
+        assert_eq!(item.temperature, original.temperature);
+        assert_eq!(item.location, original.location);
+    }
+    let saved_fuel = saved
+        .items
+        .iter()
+        .find(|item| ids.item(&item.instance).unwrap() == source.fuel_tank)
+        .unwrap();
+    let restored_fuel = restored_items
+        .iter()
+        .find(|item| item.instance == saved_fuel.instance)
+        .unwrap();
+    assert_eq!(restored_fuel.fluids, saved_fuel.fluids);
+    assert_eq!(saved_fuel.fluids.as_ref().unwrap().order, [3, 0]);
+    let loaded_chassis = loaded.physics.chassis_handle(0);
+    let loaded_engine = loaded.area.items.get(source.item).unwrap().body.unwrap();
+    assert!(!loaded.physics.body_active(loaded_chassis));
+    assert!(!loaded.physics.body_active(loaded_engine));
+    // Reuse native renderer receipts, then complete the normal restore lifecycle.
+    // These receipts do not execute browser rendering or asset uploads.
+    crate::world::stream::tests::prepare_ready(&mut loaded, &reference);
+    assert!(loaded.advance_saved_restore(&reference).unwrap());
+    loaded.sync_world_activity(&reference).unwrap();
+    assert!(!loaded.restore_pending());
+    assert!(loaded.physics.body_active(loaded_chassis));
+    assert!(loaded.physics.body_active(loaded_engine));
+    let restored = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    assert_eq!(restored.vehicles[0].ignition, saved.vehicles[0].ignition);
+    assert_eq!(restored.vehicles[0].engine, saved.vehicles[0].engine);
+    let restored_fuel = restored
+        .items
+        .iter()
+        .find(|item| item.instance == saved_fuel.instance)
+        .unwrap();
+    assert_eq!(restored_fuel.fluids, saved_fuel.fluids);
+    run.clear_input();
+    compare(&run, &loaded);
+    for expected in [false, true] {
+        step(&mut run, &reference, tap);
+        step(&mut loaded, &reference, tap);
+        assert_eq!(run.vehicles[0].ignition.ignition, expected);
+        assert_eq!(loaded.instrument_sample(&reference, 0).rpm, 0.);
+        assert_eq!(
+            loaded.instrument_sample(&reference, 0).local_ignition,
+            expected
+        );
+        compare(&run, &loaded);
+    }
+    // Continue both runs through the same fixed vehicle boundary after restoration.
+    for _ in 0..600 {
+        step(&mut run, &reference, FrameInput::default());
+        step(&mut loaded, &reference, FrameInput::default());
+        compare(&run, &loaded);
+        for state in [&run, &loaded] {
+            assert_eq!(state.vehicles[0].engine_output.torque_nm, 0.);
+            assert_eq!(state.vehicles[0].engine_output.brake_torque_nm, 0.);
+        }
+        let state = run.vehicles[0].engine.capture_save();
+        if !run.vehicles[0].engine_output.running
+            && run.vehicles[0].engine_output.rpm <= source.shutdown_rpm
+            && state.elapsed - state.last_start_chance_time
+                > source.start_chance_interval_seconds * source.engine_start_time_modifier
+        {
+            break;
+        }
+    }
+    assert!(!run.vehicles[0].engine_output.running);
+    assert!(run.vehicles[0].engine_output.rpm <= source.shutdown_rpm);
+    assert_eq!(run.vehicles[0].engine.capture_save().supplied_fuel, 0.);
+    let fuel_after = run
+        .area
+        .items
+        .get(source.fuel_tank)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap();
+    assert!(
+        fuel_after.mixture.total()
+            < saved_fuel
+                .fluids
+                .as_ref()
+                .unwrap()
+                .quantities_liters
+                .iter()
+                .sum()
+    );
+    for item in [source.oil_tank, source.coolant_tank] {
+        let original = saved
+            .items
+            .iter()
+            .find(|entry| ids.item(&entry.instance).unwrap() == item)
+            .unwrap();
+        let current = contents(&run)
+            .into_iter()
+            .find(|entry| entry.instance == original.instance)
+            .unwrap();
+        assert_eq!(current.fluids, original.fluids);
+    }
+    install(&mut run);
+    install(&mut loaded);
+    compare(&run, &loaded);
+    for _ in 0..600 {
+        step(&mut run, &reference, held);
+        step(&mut loaded, &reference, held);
+        compare(&run, &loaded);
+        if run.vehicles[0].engine_output.running {
+            break;
+        }
+    }
+    assert!(run.vehicles[0].engine_output.running);
+    assert!(loaded.vehicles[0].engine_output.running);
+    let final_engine = loaded.vehicles[0].engine.capture_save();
+    assert!(
+        final_engine.start_draw.parse::<u64>().unwrap()
+            > saved.vehicles[0].engine.start_draw.parse::<u64>().unwrap()
+    );
+    assert!(!loaded.restore_pending());
+    assert!(loaded.paused);
+}

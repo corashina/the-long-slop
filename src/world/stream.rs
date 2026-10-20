@@ -4439,4 +4439,4 @@ mod content_lamps;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]
-mod tests;
+pub(crate) mod tests;

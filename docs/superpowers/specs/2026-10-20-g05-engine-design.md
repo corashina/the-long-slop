@@ -1,7 +1,7 @@
 # G05 engine design
 
 Date: 2026-10-20.
-Status: Specification approved. Implementation plan awaits review.
+Status: Implementation complete. Final branch review and browser acceptance pending.
 Base commit: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g05-engine`.
 
@@ -17,7 +17,7 @@ Use an isolated worktree and subagents. Keep the branch unmerged.
 Driving physics, extra engines, new audio systems, and general fluid transfer changes remain outside G05.
 Full checks, release builds, and browser acceptance require separate authorization.
 
-## Current defects
+## Baseline defects
 
 `src/simulation/engine.rs` combines chassis ignition with removable engine mechanics.
 Its missing-engine branch resets ignition, RPM, fuel supply, and run grace.
@@ -191,6 +191,6 @@ The startup manifest confirms one initial fluid type in each Lada engine-bound c
 
 ## Review and next stage
 
-The user reviews this committed specification before implementation planning.
-The next stage uses the writing-plans skill.
-The user then reviews the written plan and selects execution before product edits begin.
+The user approved this specification and its implementation plan before product edits.
+Tasks 1 through 5 are implemented. The parent agent owns final branch review.
+Browser acceptance requires separate authorization and remains pending. G05 stays Verify.
