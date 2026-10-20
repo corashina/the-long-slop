@@ -7,12 +7,6 @@ rust-version = "1.99"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-default = ["webgl2"]
-# One renderer backend per WASM build. WebGL2 stays the default until WebGPU acceptance.
-webgl2 = ["bevy/webgl2"]
-webgpu = ["bevy/webgpu"]
-
 [workspace]
 members = ["crates/terrain", "crates/terrain-worker", "crates/road-mesh", "crates/road-worker", "crates/grass-mesh", "crates/grass-worker"]
 
@@ -32,7 +26,7 @@ bevy = { version = "=0.19.1", default-features = false, features = [
     "std", "async_executor", "bevy_asset", "bevy_log", "bevy_window",
     "bevy_winit", "bevy_render", "bevy_core_pipeline", "bevy_pbr",
     "bevy_light", "bevy_mesh", "bevy_camera", "bevy_color",
-    "keyboard", "mouse", "bevy_gltf", "png", "reflect_auto_register",
+    "keyboard", "mouse", "bevy_gltf", "png", "reflect_auto_register", "webgpu",
 ] }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
@@ -43,7 +37,7 @@ console_error_panic_hook = "=0.1.7"
 bevy = { version = "=0.19.1", default-features = false, features = [
     "std", "bevy_asset", "bevy_mesh", "bevy_camera",
 ] }
-naga = { version = "=29.0.4", features = ["wgsl-in", "glsl-out"] }
+naga = { version = "=29.0.4", features = ["wgsl-in"] }
 
 [profile.release]
 opt-level = 3

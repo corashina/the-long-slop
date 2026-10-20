@@ -234,9 +234,6 @@ impl Plugin for SourceFramePlugin {
 /// A WebGPU canvas texture expires when the browser task ends.
 /// Bevy keeps a texture that no view presented, so release it before the next frame.
 fn release_canvas_texture(mut windows: ResMut<bevy::render::view::ExtractedWindows>) {
-    if !cfg!(feature = "webgpu") {
-        return;
-    }
     for window in windows.values_mut() {
         window.swap_chain_texture_view = None;
         window.swap_chain_texture = None;

@@ -13,7 +13,7 @@ fn vertex(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     return vec4(uv * 2.0 - vec2(1.0), 0.0, 1.0);
 }
 // D3D11.3 sections 3.2.2 and 22.4.9: typed half stores truncate.
-// Return an exactly representable half value before the WebGL attachment conversion.
+// Return an exactly representable half value before the attachment conversion.
 fn half_store_bits(bits: u32) -> u32 {
     let magnitude = bits & 0x7fffffffu;
     let sign = bits & 0x80000000u;
