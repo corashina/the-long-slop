@@ -721,7 +721,7 @@ public sealed class G11Capture : MonoBehaviour
         var source=G11Geometry.nativeWheels.Single(w=>G11Geometry.Key(w)==scenario.contact.source_wheel);
         var original=body;var probe=new GameObject("G11SingleWheelContactProbe");
         var copied=CreateHeldProbeBody(probe);
-        wheels=new[]{G11ContactProbe.Configure(scenario.contact,source,original,probe,copied,scenario.contact_body_input_from_source,scenario.contact_body_input,
+        wheels=new[]{G11ContactProbe.Configure(scenario.contact,source,original,probe,copied,scenario.contact_body_input_from_source,scenario.contact_body_input_from_source?null:scenario.contact_body_input,
             new G11ContactProbe.SetupMark{frame=Time.frameCount,physics_step=ObservedPhysicsStep,input_revision=InputRevision})};
         G11Geometry.IsolateSourceCar();body=copied;result.isolated_wheel_probe=true;result.contact=G11ContactProbe.report;
     }

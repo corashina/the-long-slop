@@ -137,7 +137,9 @@ class ContactTests(unittest.TestCase):
         from tools.reference import driving_probe as probe
         rows=contact_rows();base=fixture()[1];canonical=deepcopy(base['contact']['body_input'])
         for mode in ('capture','verify'):
-            for corruption in (None,'first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial'):
+            corruptions=(None,'first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial')
+            if mode=='verify':corruptions+=('raw_first_nonnull','raw_first_missing','raw_first_nonbool','raw_later_null','raw_later_missing','raw_later_nonbool','raw_later_replacement')
+            for corruption in corruptions:
                 with self.subTest(mode=mode,corruption=corruption),tempfile.TemporaryDirectory() as name:
                     project=Path(name).resolve();output=project/'.cache/g11-driving/proof';definitions=project/'rows.json';definitions.write_text(json.dumps(dict(scenarios=rows)));launched=[]
                     def make_run(index,repeat):
@@ -176,7 +178,17 @@ class ContactTests(unittest.TestCase):
                                 for repeat in range(1,4):
                                     d=output/row['id']/f'repeat-{repeat}';d.mkdir(parents=True);first=index==0 and repeat==1
                                     (d/'runtime.json').write_text(json.dumps(make_run(index,repeat)))
-                                    (d/'scenario.json').write_text(json.dumps(dict(contact_body_input_from_source=first,contact_body_input=None if first else canonical)))
+                                    supplied=dict(contact_body_input_from_source=first,contact_body_input=None if first else deepcopy(canonical))
+                                    if first:
+                                        if corruption=='raw_first_nonnull':supplied['contact_body_input']=deepcopy(canonical)
+                                        if corruption=='raw_first_missing':del supplied['contact_body_input']
+                                        if corruption=='raw_first_nonbool':supplied['contact_body_input_from_source']=1
+                                    elif index==1 and repeat==1:
+                                        if corruption=='raw_later_null':supplied['contact_body_input']=None
+                                        if corruption=='raw_later_missing':del supplied['contact_body_input']
+                                        if corruption=='raw_later_nonbool':supplied['contact_body_input_from_source']=0
+                                        if corruption=='raw_later_replacement':supplied['contact_body_input']['mass']+=1
+                                    (d/'scenario.json').write_text(json.dumps(supplied))
                             if corruption:
                                 with self.assertRaises(ValueError):probe.verify(output)
                             else:self.assertEqual(len(probe.verify(output)['runs']),15)
@@ -276,7 +288,7 @@ namespace UnityEngine {
  public static class Object {public static T[] FindObjectsOfType<T>(){return new T[0];}}
  public static class Physics {public static int syncs;public static void SyncTransforms(){syncs++;}public static Vector3 gravity=new Vector3(0,-10,0);public static int DefaultRaycastLayers=-5;public static RaycastHit[] RaycastAll(Vector3 o,Vector3 d,float l,int m,QueryTriggerInteraction q){return new[]{new RaycastHit{collider=new Collider(),normal=Vector3.up,point=Vector3.zero,distance=1}};}}
 }
-public static class G11Geometry {public static int isolates,activation_count;public struct Activation {}public static Activation[] activation_events=new Activation[0];public static void IsolateSourceCar(){isolates++;}public static UnityEngine.WheelCollider[] nativeWheels=new UnityEngine.WheelCollider[0];public struct NativeWheel {public int road_slot,read_revision;}static int reads;public static NativeWheel ReadWheel(UnityEngine.WheelCollider w){return new NativeWheel{read_revision=++reads};}public static void RestoreWheels(){throw new Exception("unexpected source wheel restore");}public static string Key(UnityEngine.WheelCollider w){return w.key;}public static string Key(UnityEngine.Collider c){return "support";}}
+public static class G11Geometry {public static int isolates,activation_count;public struct Activation {}public static Activation[] activation_events=new Activation[0];public static Action onIsolate;public static void IsolateSourceCar(){isolates++;if(onIsolate!=null)onIsolate();}public static UnityEngine.WheelCollider[] nativeWheels=new UnityEngine.WheelCollider[0];public struct NativeWheel {public int road_slot,read_revision;}static int reads;public static NativeWheel ReadWheel(UnityEngine.WheelCollider w){return new NativeWheel{read_revision=++reads};}public static void RestoreWheels(){throw new Exception("unexpected source wheel restore");}public static string Key(UnityEngine.WheelCollider w){return w.key;}public static string Key(UnityEngine.Collider c){return "support";}}
 public static class G11BodyTrace {public static int holds;public static void HoldCopy(UnityEngine.Rigidbody b){b.isKinematic=true;holds++;}}
 '''
 
@@ -365,20 +377,35 @@ public static class ReadoutCaptureChecks {
     Need(parsed.mark.frame==7 && parsed.mark.physics_step==3 && parsed.mark.input_revision==2 && !result.contact_configure_readout.before_guard.observed,"parsed mark or availability differs");
    }
    Reset();result=new Result();UnityEngine.JsonUtility.supplied=new Scenario{probe_kind="curve"};Parse();Need(result.contact_configure_readout==null && !G11ContactProbe.readout.after_from_json.observed,"non-contact parse observed contact");
-   Reset();result=new Result();UnityEngine.JsonUtility.supplied=new Scenario{contact=Input(),contact_body_input_from_source=true,contact_body_input=new G11AngularProbe.BodyInput()};UnityEngine.Time.frameCount=8;observedPhysicsStep=4;controlRevision=3;Parse();
+   Reset();result=new Result();var placeholder=new G11AngularProbe.BodyInput();var sourceScenario=new Scenario{contact=Input(),contact_body_input_from_source=true,contact_body_input=placeholder};UnityEngine.JsonUtility.supplied=sourceScenario;
+   UnityEngine.Time.frameCount=8;observedPhysicsStep=4;controlRevision=3;Parse();
+   var sourceOriginal=new UnityEngine.Rigidbody{id=101,isKinematic=true,mass=400,centerOfMass=new UnityEngine.Vector3(0,2,0),inertiaTensor=new UnityEngine.Vector3(1,2,3),inertiaTensorRotation=new UnityEngine.Quaternion{w=1}};body=sourceOriginal;
+   G11Geometry.nativeWheels=new[]{new UnityEngine.WheelCollider()};int sourceIsolations=G11Geometry.isolates;bool isolatedAfterConfigure=false;
+   G11Geometry.onIsolate=()=>{Need(G11ContactProbe.Active && G11ContactProbe.report.source_body.mass==400 && object.ReferenceEquals(body,sourceOriginal),"source isolated before Configure readback");isolatedAfterConfigure=true;sourceOriginal.mass=999;};
+   UnityEngine.Time.frameCount=10;observedPhysicsStep=15;controlRevision=10;
+   try{CreateContactProbe();}finally{G11Geometry.onIsolate=null;}
+   var sourceReadout=result.contact_configure_readout;var canonicalInput=G11ContactProbe.report.body_input;
+   Need(isolatedAfterConfigure && G11Geometry.isolates==sourceIsolations+1 && result.isolated_wheel_probe && object.ReferenceEquals(result.contact,G11ContactProbe.report) && !object.ReferenceEquals(body,sourceOriginal) && object.ReferenceEquals(wheels[0].attachedRigidbody,body),"source caller ownership or isolation differs");
+   Need(object.ReferenceEquals(scenario.contact_body_input,placeholder) && sourceReadout.after_from_json.observed && sourceReadout.after_from_json.from_source && !sourceReadout.after_from_json.canonical_is_null,"parsed placeholder evidence changed");
+   Need(sourceReadout.before_guard.observed && sourceReadout.before_guard.from_source && sourceReadout.before_guard.canonical_is_null && !sourceReadout.before_guard.reject_canonical_origin && sourceReadout.before_guard.mark.frame==10 && sourceReadout.after_from_json.mark.frame==8,"source caller did not select internal null or lost marks");
+   Need(!object.ReferenceEquals(canonicalInput,placeholder) && canonicalInput.mass==100 && canonicalInput.center_of_mass.y==2.1f && canonicalInput.inertia_tensor.x==1 && body.mass==100 && body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1 && result.contact.source_body.mass==400 && sourceOriginal.mass==999,"source caller input or setter ownership differs");
+   Reset();result=new Result();var canonicalScenario=new Scenario{contact=Input(),contact_body_input_from_source=false,contact_body_input=canonicalInput};UnityEngine.JsonUtility.supplied=canonicalScenario;Parse();body=sourceOriginal;sourceIsolations=G11Geometry.isolates;
+   CreateContactProbe();Need(object.ReferenceEquals(scenario.contact_body_input,canonicalInput) && object.ReferenceEquals(result.contact.body_input,canonicalInput) && !result.contact.body_input_from_source && result.contact.source_body.mass==999 && body.mass==100 && body.centerOfMass.y==2.1f && body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1 && G11Geometry.isolates==sourceIsolations+1,"canonical caller replaced reference or physical input");
+   Need(result.contact_configure_readout.after_from_json.observed && !result.contact_configure_readout.after_from_json.from_source && !result.contact_configure_readout.after_from_json.canonical_is_null && !result.contact_configure_readout.before_guard.from_source && !result.contact_configure_readout.before_guard.canonical_is_null && !result.contact_configure_readout.before_guard.reject_canonical_origin,"canonical caller evidence differs");
+   Reset();result=new Result();UnityEngine.JsonUtility.supplied=new Scenario{contact=Input(),contact_body_input_from_source=false,contact_body_input=null};UnityEngine.Time.frameCount=8;observedPhysicsStep=4;controlRevision=3;Parse();
    var original=new UnityEngine.Rigidbody{id=101,isKinematic=true};body=original;var sourceWheel=new UnityEngine.WheelCollider();G11Geometry.nativeWheels=new[]{sourceWheel};int isolated=G11Geometry.isolates;bool failed=false;finished=false;used=0;active=false;buffer=null;timeoutTimer=null;
    UnityEngine.Time.frameCount=10;observedPhysicsStep=15;controlRevision=10;
    try{CreateContactProbe();}catch(InvalidOperationException error){failed=true;Fail(error);}
    var output=UnityEngine.JsonUtility.serialized as Result;Need(failed && object.ReferenceEquals(output,result) && finished && !active && !G11ContactProbe.Active && result.contact==null && !result.isolated_wheel_probe && G11Geometry.isolates==isolated && object.ReferenceEquals(body,original),"failed configure activated contact or lost failure output");
    Need(!output.completed && output.error.Contains("Contact source, hold, or canonical origin differs") && output.samples.Length==0 && UnityEngine.Application.exitCode==2,"original failure outcome changed");
-   var readout=output.contact_configure_readout;Need(readout.after_from_json.observed && readout.before_guard.observed && readout.after_from_json.from_source && !readout.after_from_json.canonical_is_null && readout.before_guard.from_source && !readout.before_guard.canonical_is_null && readout.before_guard.reject_canonical_origin,"failure serializer lacks actual readouts");
+   var readout=output.contact_configure_readout;Need(readout.after_from_json.observed && readout.before_guard.observed && !readout.after_from_json.from_source && readout.after_from_json.canonical_is_null && !readout.before_guard.from_source && readout.before_guard.canonical_is_null && readout.before_guard.reject_canonical_origin,"failure serializer lacks actual readouts");
    Need(readout.after_from_json.mark.frame==8 && readout.before_guard.mark.frame==10 && readout.before_guard.mark.physics_step==15 && readout.before_guard.mark.input_revision==10,"failure marks lost");
    Need(UnityEngine.Rigidbody.latest.massWrites==0 && UnityEngine.Rigidbody.latest.comWrites==0 && UnityEngine.Rigidbody.latest.tensorWrites==0 && UnityEngine.Rigidbody.latest.rotationWrites==0 && original.massWrites==0 && original.kinematicWrites==1,"failure added body setter");
    var saved=System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(Output,"runtime.json"))).RootElement;
-   var savedReadout=saved.GetProperty("contact_configure_readout");Need(!saved.GetProperty("completed").GetBoolean() && savedReadout.GetProperty("after_from_json").GetProperty("observed").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("observed").GetBoolean() && !savedReadout.GetProperty("after_from_json").GetProperty("canonical_is_null").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("reject_canonical_origin").GetBoolean(),"written failure output lacks actual readouts");
+   var savedReadout=saved.GetProperty("contact_configure_readout");Need(!saved.GetProperty("completed").GetBoolean() && savedReadout.GetProperty("after_from_json").GetProperty("observed").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("observed").GetBoolean() && savedReadout.GetProperty("after_from_json").GetProperty("canonical_is_null").GetBoolean() && savedReadout.GetProperty("before_guard").GetProperty("reject_canonical_origin").GetBoolean(),"written failure output lacks actual readouts");
    Need(System.IO.File.ReadAllText(System.IO.Path.Combine(Output,"completion.json")).Contains("\"completed\":false"),"failure completion not written");
   }finally{System.IO.Directory.Delete(Output,true);}
-  Console.WriteLine("G11_CONTACT_READOUT_TRANSPORT_PASS 32 guard fixtures, 4 parsed fixtures, failed output");
+  Console.WriteLine("G11_CONTACT_READOUT_TRANSPORT_PASS 32 guard fixtures, 4 parsed fixtures, actual source/canonical callers, failed output");
  }
 }
 '''
