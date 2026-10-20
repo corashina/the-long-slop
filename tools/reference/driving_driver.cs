@@ -28,6 +28,14 @@ public static class G11Driver
         public bool source_player,source_main,source_car,source_seat,seat_car,seat_in_use,driver_seat,sitting,parent_matches;
         public bool car_player,car_driving,car_player_driving,driver_update_flag,mind,died,cursor_locked,multi,remote_animation,sleeping,xr;
     }
+    [Serializable] public class BodyState
+    {
+        public string callback,retained_body,current_body,observer_body,rejected_predicate;
+        public int frame,physics_step,update_sequence,input_revision,retained_instance_id,current_instance_id,observer_instance_id;
+        public float time;
+        public bool retained_present,current_present,observer_present,current_is_retained,current_is_observer,kinematic;
+        public Vector3 velocity,angular_velocity;
+    }
     [Serializable] public class Stamp
     {
         public string phase,callback;
@@ -36,6 +44,7 @@ public static class G11Driver
         public bool original_body_present,managed_body_present,owners_transferred,consistent;
         public string[] collider_owners;
         public Context context;
+        public BodyState source_body;
     }
     [Serializable] public class State
     {
@@ -55,17 +64,20 @@ public static class G11Driver
         public Input input;
         public List<Stamp> stamps=new List<Stamp>();
         public List<State> states=new List<State>();
+        public List<BodyState> rejected_bodies=new List<BodyState>();
     }
     public static readonly Report report=new Report();
     static fpscontroller player;
     static carscript car;
     static seatscript seat;
-    static Rigidbody originalBody;
+    static Rigidbody originalBody,retainedCarBody;
+    static string retainedCarBodyKey;static int retainedCarBodyId;
     static Collider[] transfer;
     static Transform[] transforms;
     static readonly string[] fields={"Tb","Th","THeadDir","THeadBob","THeadLean","TdefStandPos","TStandHeadPos","TProneHeadPos"};
     static bool getInExited,removed,transferred,applied,prepared,armed;
     static int ownershipUpdate,appliedUpdate,preparedUpdate,startedFrame;
+    static Stamp readyStamp;static State readyState;
     public static int UpdateSequence { get; private set; }
     public static float ConsumedDt { get; private set; }
     public static float StoredDt { get { return player==null?0f:player.dt; } }
@@ -116,17 +128,31 @@ public static class G11Driver
         throw new InvalidOperationException((XRSettings.enabled?"Unexpected XR driver setup: ":"Inconsistent local source driver state: ")+
             JsonUtility.ToJson(ReadContext()));
     }
-    static void StampAt(string phase,string callback,int step)
+    public static BodyState ReadBody(string callback,int sequence)
     {
-        report.stamps.Add(new Stamp{phase=phase,callback=callback,frame=Time.frameCount,physics_step=step,
+        var current=car.RB;var observer=G11Capture.ObservedBody;
+        return new BodyState{callback=callback,frame=Time.frameCount,physics_step=G11Capture.ObservedPhysicsStep,update_sequence=sequence,
+            input_revision=G11Capture.InputRevision,time=Time.time,retained_body=retainedCarBodyKey,retained_instance_id=retainedCarBodyId,
+            current_body=G11Geometry.Key(current),current_instance_id=current==null?0:current.GetInstanceID(),
+            observer_body=G11Geometry.Key(observer),observer_instance_id=observer==null?0:observer.GetInstanceID(),
+            retained_present=retainedCarBody!=null,current_present=current!=null,observer_present=observer!=null,
+            current_is_retained=ReferenceEquals(current,retainedCarBody),current_is_observer=ReferenceEquals(current,observer),
+            kinematic=current!=null && current.isKinematic,velocity=current==null?Vector3.zero:current.velocity,
+            angular_velocity=current==null?Vector3.zero:current.angularVelocity};
+    }
+    static Stamp ReadStamp(string phase,string callback,int step)
+    {
+        return new Stamp{phase=phase,callback=callback,frame=Time.frameCount,physics_step=step,
             time=Time.time,fixed_time=Time.fixedTime,delta_time=Time.deltaTime,stored_dt=player.dt,consumed_dt=ConsumedDt,
             update_sequence=UpdateSequence,input_revision=G11Capture.InputRevision,original_body_present=originalBody!=null,
             managed_body_present=player.RB!=null,owners_transferred=OwnersTransferred(),consistent=Consistent(),
-            context=ReadContext(),collider_owners=transfer.Select(c=>c==null?"destroyed collider":G11Geometry.Key(c.attachedRigidbody)).ToArray()});
+            context=ReadContext(),source_body=ReadBody(callback,UpdateSequence),collider_owners=transfer.Select(c=>c==null?"destroyed collider":G11Geometry.Key(c.attachedRigidbody)).ToArray()};
     }
+    static void StampAt(string phase,string callback,int step) { report.stamps.Add(ReadStamp(phase,callback,step)); }
     public static void Retain(fpscontroller p,carscript target,seatscript selected)
     {
         player=p;car=target;seat=selected;startedFrame=Time.frameCount;
+        retainedCarBody=car.RB;retainedCarBodyKey=G11Geometry.Key(retainedCarBody);retainedCarBodyId=retainedCarBody.GetInstanceID();
         originalBody=player.RB;
         if(originalBody==null) throw new InvalidOperationException("Original driver Rigidbody missing before GetIn");
         transfer=player.Tb.GetComponentsInChildren<Collider>(true).Where(c=>c.attachedRigidbody==originalBody).ToArray();
@@ -145,6 +171,7 @@ public static class G11Driver
         {
             getInExited=true;StampAt("get-in-exit",phase,step);return;
         }
+        if(applied) G11Lifecycle.Player(player,phase,UpdateSequence+1,appliedUpdate);
         if(phase=="driver.update.entry") { ConsumedDt=player.dt;return; }
         if(phase!="driver.update.exit") return;
         UpdateSequence++;
@@ -153,8 +180,8 @@ public static class G11Driver
         if(UpdateSequence>ownershipUpdate && !applied) StampAt("seated-update-exit",phase,step);
         if(applied && UpdateSequence>appliedUpdate)
         {
-            StampAt(prepared?"held-update-exit":"stationary-update-exit",phase,step);
-            report.states.Add(ReadState(prepared?"backlog-drained-held":"prepared-held"));
+            if(prepared) { StampAt("held-update-exit",phase,step);report.states.Add(ReadState("backlog-drained-held")); }
+            else if(G11Lifecycle.Ready) { readyStamp=ReadStamp("stationary-update-exit",phase,step);readyState=ReadState("prepared-held"); }
         }
     }
     static Input MakeInput()
@@ -195,23 +222,30 @@ public static class G11Driver
         controls.lean=input.lean;controls.leanDown=input.lean_down;controls.leanUp=input.lean_up;
         controls.recenter=input.recenter;controls.recenterDown=input.recenter_down;controls.recenterUp=input.recenter_up;
         controls.keyLooking=input.key_looking;controls.duck=input.input_duck;controls.duckDown=input.input_duck_down;controls.duckUp=input.input_duck_up;
-        report.input=input;report.input_applications++;applied=true;appliedUpdate=UpdateSequence;
+        report.input=input;report.input_applications++;applied=true;appliedUpdate=UpdateSequence;G11Lifecycle.Applied(player);
         StampAt("stationary-input-applied","observer.LateUpdate",G11Capture.ObservedPhysicsStep);
     }
     public static bool Tick(Input canonical,int step)
     {
-        if(Time.frameCount-startedFrame>600) throw new InvalidOperationException("Driver callback or native ownership readiness timeout");
+        if(Time.frameCount-startedFrame>600) throw new InvalidOperationException("Driver callback or native ownership readiness timeout: "+G11Lifecycle.Pending());
         if(!getInExited) return false;
         if(!removed && originalBody==null) { removed=true;ownershipUpdate=UpdateSequence;StampAt("native-body-removed","observer.LateUpdate",step); }
         if(removed && !transferred && OwnersTransferred())
         { transferred=true;ownershipUpdate=UpdateSequence;StampAt("collider-owners-transferred","observer.LateUpdate",step); }
         if(!removed || !transferred || UpdateSequence<=ownershipUpdate) return false;
         RequireLocal();
-        if(!car.RB.isKinematic || !car.RB.velocity.Equals(Vector3.zero) || !car.RB.angularVelocity.Equals(Vector3.zero))
-            throw new InvalidOperationException("Stationary driver setup requires the held source car at zero velocity");
+        var sourceBody=ReadBody("observer.LateUpdate.stationary-guard",UpdateSequence);
+        if(!sourceBody.current_present || !sourceBody.kinematic || !sourceBody.velocity.Equals(Vector3.zero) || !sourceBody.angular_velocity.Equals(Vector3.zero))
+        {
+            sourceBody.rejected_predicate=!sourceBody.current_present?"current source body missing":!sourceBody.kinematic?"isKinematic is false":
+                !sourceBody.velocity.Equals(Vector3.zero)?"velocity differs from exact zero":"angularVelocity differs from exact zero";
+            report.rejected_bodies.Add(sourceBody);StampAt("stationary-car-rejected",sourceBody.callback,step);
+            report.states.Add(ReadState("stationary-car-rejected"));G11Capture.CaptureDriverRejection(sourceBody.callback);
+            throw new InvalidOperationException("Stationary driver setup requires the held source car at zero velocity: "+JsonUtility.ToJson(sourceBody));
+        }
         if(!applied) { Apply(canonical??MakeInput());return false; }
         if(!Neutral()) throw new InvalidOperationException("Stationary driver setup consumed non-neutral input");
-        return UpdateSequence>appliedUpdate;
+        return UpdateSequence>appliedUpdate && G11Lifecycle.Ready;
     }
     public static State ReadState(string phase)
     {
@@ -223,13 +257,17 @@ public static class G11Driver
             drive_head_bob=settingsscript.s.S.BDriveHeadBob,xr=XRSettings.enabled,mind=player.mind,died=player.died,
             cursor_locked=mainscript.M.crsrLocked,driver_update_flag=player.Bdriving,sleeping=mainscript.M.sleeping,look_x=player.LOOKX,look_y=player.LOOKY,scroll=player.scroll,neutral=Neutral()};
     }
-    public static void Prepared() { prepared=true;preparedUpdate=UpdateSequence; }
+    public static void Prepared()
+    {
+        if(readyStamp==null || readyStamp.update_sequence!=UpdateSequence) throw new InvalidOperationException("Missing exact completed source readiness candidate");
+        G11Lifecycle.Prepared();report.stamps.Add(readyStamp);report.states.Add(readyState);prepared=true;preparedUpdate=UpdateSequence;
+    }
     public static bool NextUpdateCompleted { get { return UpdateSequence>preparedUpdate; } }
     public static void RequireHeld()
     {
-        RequireLocal();
+        RequireLocal();G11Lifecycle.RequireHeld();
         if(originalBody!=null || player.RB!=null || !OwnersTransferred() || !Neutral())
             throw new InvalidOperationException("Driver ownership or neutral input changed at held boundary");
     }
-    public static void Arm() { RequireHeld();armed=true; }
+    public static void Arm() { RequireHeld();G11Lifecycle.Arm();armed=true; }
 }

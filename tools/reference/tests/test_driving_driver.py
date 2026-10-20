@@ -5,6 +5,14 @@ import unittest
 from tools.reference.driving_driver import POSE_FIELDS, STAMPS, validate_driver
 
 
+def body_fixture(callback='observer.LateUpdate', sequence=0):
+    return dict(callback=callback, retained_body='car-body', current_body='car-body', observer_body='car-body',
+                retained_instance_id=456, current_instance_id=456, observer_instance_id=456,
+                retained_present=True, current_present=True, observer_present=True, current_is_retained=True, current_is_observer=True,
+                frame=10+sequence, physics_step=sequence, update_sequence=sequence, input_revision=sequence, time=.02*sequence,
+                kinematic=True, velocity=dict.fromkeys('xyz', 0.), angular_velocity=dict.fromkeys('xyz', 0.), rejected_predicate='')
+
+
 def driver_fixture():
     zero = dict.fromkeys('xyz', 0.)
     def pose(field):
@@ -22,7 +30,7 @@ def driver_fixture():
                            frame=update+10, physics_step=update, update_sequence=update, input_revision=update,
                            time=.02*update, fixed_time=.02*update, delta_time=.02, stored_dt=.02, consumed_dt=.02,
                            original_body_present=i<2, managed_body_present=i==0, owners_transferred=i>=3,
-                           consistent=i>=1, collider_owners=['car-body' if i>=3 else 'driver-body']))
+                           consistent=i>=1, source_body=body_fixture(sequence=update), collider_owners=['car-body' if i>=3 else 'driver-body']))
     states = []
     for phase, update in (('prepared-held', 3), ('backlog-drained-held', 4)):
         states.append(dict(source_input, phase=phase, poses=deepcopy(source_input['poses']), piss_pose=pose('piss'),
@@ -30,7 +38,7 @@ def driver_fixture():
                            drive_head_bob=True, xr=False, mind=True, died=False, cursor_locked=True, driver_update_flag=False, sleeping=False,
                            neutral=True, look_x=0., look_y=0., scroll=0.))
     return dict(driver=dict(original_body='driver-body', original_body_instance_id=123, expected_colliders=['driver-shape'],
-                            input_applications=1, input=source_input, stamps=stamps, states=states),
+                            input_applications=1, input=source_input, stamps=stamps, states=states, rejected_bodies=[]),
                 setup_state=dict(driver_input=deepcopy(source_input)), initial=dict(driver_input=deepcopy(source_input)))
 
 
@@ -107,3 +115,23 @@ class DrivingDriverTests(unittest.TestCase):
                 if corrupt == 'look_point': del report['states'][0]['look_point']
                 if corrupt == 'scale': del report['states'][0]['poses'][0]['local_scale']
                 with self.assertRaisesRegex(ValueError, message): validate_driver(run)
+
+    def test_exact_source_body_fields_are_required(self):
+        from tools.reference.driving_driver import validate_body_state
+        valid = body_fixture()
+        validate_body_state(valid)
+        for field in tuple(valid):
+            with self.subTest(field=field):
+                body = deepcopy(valid)
+                del body[field]
+                with self.assertRaises(ValueError): validate_body_state(body)
+        for field in ('current_is_retained', 'current_is_observer'):
+            body = deepcopy(valid)
+            body['current_instance_id'] = 999
+            with self.assertRaises(ValueError): validate_body_state(body)
+        run = driver_fixture()
+        del run['driver']['stamps'][0]['source_body']
+        with self.assertRaises(ValueError): validate_driver(run)
+        run = driver_fixture()
+        run['driver']['rejected_bodies'] = [dict(valid, rejected_predicate='velocity differs from exact zero')]
+        with self.assertRaisesRegex(ValueError, 'rejection'): validate_driver(run)

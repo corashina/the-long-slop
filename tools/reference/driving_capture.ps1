@@ -60,6 +60,7 @@ $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_driver.cs'))))
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_lifecycle.cs'))))
 $options=[Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
 $options=$options.WithDeterministic($true).WithOptimizationLevel([Microsoft.CodeAnalysis.OptimizationLevel]::Release)
 $compilation=[Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create('G11Capture',$trees,$references,$options)
@@ -79,9 +80,10 @@ $changes=[Collections.Generic.List[string]]::new()
 $allowed=[Collections.Generic.HashSet[string]]::new()
 $longBranches=@{}
 [Mono.Cecil.Cil.OpCodes].GetFields([Reflection.BindingFlags]'Public,Static') | ForEach-Object {$opcode=$_.GetValue($null);$longBranches[$opcode.Name]=$opcode}
-function Method($type,$name){
+function Method($type,$name,$signature=''){
     $matches=@($main.MainModule.GetType($type).Methods | Where-Object Name -ceq $name)
-    if($matches.Count -ne 1){throw "Expected one checked method: $type.$name"}
+    if($signature){$matches=@($matches | Where-Object FullName -CEQ $signature)}
+    if($matches.Count -ne 1){throw "Expected one checked method: $type.$name $signature"}
     $matches[0]
 }
 function HookMethod($name){
@@ -98,8 +100,8 @@ function Expand($method){
         }
     }
 }
-function Observe($type,$name,$phase,$entry){
-    $method=Method $type $name
+function Observe($type,$name,$phase,$entry,$signature=''){
+    $method=Method $type $name $signature
     if($method.ReturnType.FullName -ne 'System.Void' -or -not $method.HasBody){throw "Unsupported observed signature: $($method.FullName)"}
     Mark $method;Expand $method
     $il=$method.Body.GetILProcessor();$call=HookMethod 'Observe'
@@ -152,7 +154,17 @@ $changes.Add('Observe original mountStuff.Lock entry/exit with original cargo ar
 
 Observe 'mainmenuscript' 'Start' 'menu.exit' $false
 Observe 'carscript' 'Start' 'car.ready' $false
+Observe 'partslotscript' 'SpawnPart' 'setup.slot.entry' $true
 Observe 'partslotscript' 'SpawnPart' 'slot.ready' $false
+$craftedSignature='System.Void pickupable::Crafted(System.Boolean)'
+$crafted=Method 'pickupable' 'Crafted' $craftedSignature
+$craftedAudio=@($crafted.Body.Instructions | Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -ceq 'UnityEngine.GameObject mainscript::PlayClipAtPoint(UnityEngine.AudioClip,UnityEngine.Vector3,System.Single,System.Boolean,System.Byte)'})
+$craftedWrapper=Method 'pickupable' 'Crafted' 'System.Void pickupable::Crafted()'
+$craftedDelegation=@($craftedWrapper.Body.Instructions | Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -ceq $craftedSignature})
+if($craftedAudio.Count -ne 1 -or $craftedDelegation.Count -ne 1){throw 'Checked Crafted overload source audio/delegation audit failed'}
+$changes.Add('Exact source overload audit: Crafted() delegates once to Crafted(System.Boolean), which calls the original five-argument PlayClipAtPoint once')
+Observe 'pickupable' 'Crafted' 'setup.crafted.entry' $true $craftedSignature
+Observe 'pickupable' 'Crafted' 'setup.crafted.exit' $false $craftedSignature
 # Preserve the original iterator result. Observe only its actual terminal false return.
 $storageIterator=@($main.MainModule.GetType('mountStuff').NestedTypes | Where-Object Name -Match '^<StartFreeze>d__')
 if($storageIterator.Count -ne 1){throw 'Expected one checked source storage StartFreeze iterator'}
@@ -173,6 +185,42 @@ foreach($point in @($method.Body.Instructions | Where-Object {$_.OpCode.Code -eq
     $il.InsertAfter($owner,$label);$il.InsertAfter($label,$invoke);$il.InsertAfter($invoke,$ret)
 }
 $changes.Add('Observe mountStuff.StartFreeze actual terminal MoveNext false; original yields, QuickFreeze calls, return value, and scheduling retained')
+
+# Exact checked writer anchors. Existing writer instructions stay in place.
+function WriterObserve($method,$offset,$signature,$phase,$after){
+    $point=@($method.Body.Instructions | Where-Object {$_.Offset -eq $offset})
+    if($point.Count -ne 1 -or $point[0].Operand.ToString() -cne $signature){throw "Checked writer anchor differs: $phase"}
+    Mark $method;Expand $method;$il=$method.Body.GetILProcessor()
+    $load=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldarg_0);$label=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldstr,$phase);$invoke=$il.Create([Mono.Cecil.Cil.OpCodes]::Call,(HookMethod 'Observe'))
+    if($after){$il.InsertAfter($point[0],$load);$il.InsertAfter($load,$label);$il.InsertAfter($label,$invoke)}
+    else{$il.InsertBefore($point[0],$load);$il.InsertBefore($point[0],$label);$il.InsertBefore($point[0],$invoke)}
+    $changes.Add("Observe checked original writer $phase at source IL offset $offset; original writer unchanged")
+}
+$update=Method 'fpscontroller' 'Update'
+WriterObserve $update 0x1172 'System.Void UnityEngine.Transform::set_forward(UnityEngine.Vector3)' 'driver.forward.before' $false
+WriterObserve $update 0x1172 'System.Void UnityEngine.Transform::set_forward(UnityEngine.Vector3)' 'driver.forward.after' $true
+WriterObserve $update 0x3575 'System.Void UnityEngine.Transform::set_position(UnityEngine.Vector3)' 'driver.midpoint.after' $true
+Observe 'fpscontroller' 'LookPointCalc' 'driver.look-point.entry' $true
+Observe 'fpscontroller' 'LookPointCalc' 'driver.look-point.exit' $false
+Observe 'fpscontroller' 'Look' 'driver.look.exit' $false
+$look=Method 'fpscontroller' 'LookPointCalc';$rays=0
+foreach($instruction in $look.Body.Instructions){
+    if($instruction.Operand -is [Mono.Cecil.MethodReference] -and $instruction.Operand.FullName -ceq 'System.Boolean UnityEngine.Physics::Raycast(UnityEngine.Vector3,UnityEngine.Vector3,UnityEngine.RaycastHit&,System.Single,System.Int32)'){
+        $instruction.OpCode=[Mono.Cecil.Cil.OpCodes]::Call;$instruction.Operand=HookMethod 'DriverRay';$rays++
+    }
+}
+if($rays -ne 2){throw 'Checked LookPointCalc ray boundaries differ'}
+$changes.Add('Observe both exact original LookPointCalc ray calls through a forwarding adapter; arguments, hit output, return, and global trigger policy unchanged')
+$audio=@($main.MainModule.GetType('mainscript').Methods | Where-Object {$_.Name -ceq 'PlayClipAtPoint' -and $_.Parameters.Count -eq 7})
+if($audio.Count -ne 1){throw 'Checked seven-argument source audio method missing'}
+$method=$audio[0];Mark $method;Expand $method;$il=$method.Body.GetILProcessor()
+$creation=@($method.Body.Instructions | Where-Object {$_.Operand -is [Mono.Cecil.GenericInstanceMethod] -and $_.Operand.Name -ceq 'Instantiate'})
+$destruction=@($method.Body.Instructions | Where-Object {$_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -ceq 'System.Void UnityEngine.Object::Destroy(UnityEngine.Object,System.Single)'})
+if($creation.Count -ne 1 -or $creation[0].Offset -ne 0x10 -or $destruction.Count -ne 1 -or $destruction[0].Offset -ne 0xb3){throw 'Checked source audio creation/destruction anchors differ'}
+$dup=$il.Create([Mono.Cecil.Cil.OpCodes]::Dup);$clip=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldarg_0);$invoke=$il.Create([Mono.Cecil.Cil.OpCodes]::Call,(HookMethod 'AudioCreated'))
+$il.InsertAfter($creation[0],$dup);$il.InsertAfter($dup,$clip);$il.InsertAfter($clip,$invoke)
+$destruction[0].Operand=HookMethod 'AudioDestroy'
+$changes.Add('Retain actual M.Audio Instantiate clone and original clip argument; forward original Destroy(Object, clip.length) unchanged; never delete, mute, disable, or alter source audio')
 
 Observe 'fpscontroller' 'GetIn' 'driver.get-in.exit' $false
 Observe 'fpscontroller' 'Update' 'driver.update.entry' $true

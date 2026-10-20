@@ -169,6 +169,7 @@ public sealed class G11Capture : MonoBehaviour
         public List<Curve> curves=new List<Curve>();
         public List<string> setup_changes=new List<string>();
         public G11Driver.Report driver=G11Driver.report;
+        public G11Lifecycle.Report lifecycle=G11Lifecycle.report;
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
@@ -221,10 +222,24 @@ public sealed class G11Capture : MonoBehaviour
         if(!finished && (type==LogType.Exception || type==LogType.Error) && String.IsNullOrEmpty(result.error))
             result.error="Original runtime error before capture flush: "+message+"\n"+stack;
     }
+    public static void AudioCreated(GameObject value,AudioClip clip)
+    { try { G11Lifecycle.Created(value,clip); } catch(Exception error) { Fail(error); } }
+    public static void AudioDestroy(UnityEngine.Object value,float delay)
+    {
+        try { G11Lifecycle.DestroyRequested(value,delay); } catch(Exception error) { Fail(error); }
+        UnityEngine.Object.Destroy(value,delay);
+    }
+    public static bool DriverRay(Vector3 origin,Vector3 direction,out RaycastHit info,float distance,int mask)
+    {
+        bool hit=Physics.Raycast(origin,direction,out info,distance,mask);
+        G11Lifecycle.RayObserved(origin,direction,distance,mask,hit,info);return hit;
+    }
     public static void Observe(object owner,string phase)
     {
         try
         {
+            G11Lifecycle.OwnerBoundary(owner,phase);
+            if(phase.StartsWith("setup.",StringComparison.Ordinal)) return;
             if(phase=="storage.ready")
             {
                 completedStorage.Add((mountStuff)owner);
@@ -270,7 +285,7 @@ public sealed class G11Capture : MonoBehaviour
                 var authored=start.GetComponentsInChildren<carscript>(true).Single(c=>c.carType==itemdatabase.CarType.car02);
                 result.authored_template=DescribeAssembly(authored);
                 car=authored; body=car.RB;
-                G11Geometry.Initialize(car);
+                G11Geometry.Initialize(car);G11Lifecycle.Begin();
                 G11Geometry.Capture("world.entry",observedPhysicsStep,"world.entry",completedStorage);
                 body.isKinematic=true;
                 G11Geometry.HoldWheels();
@@ -371,7 +386,9 @@ public sealed class G11Capture : MonoBehaviour
                 if(scenario.setup.height=="wheels-clear") body.position+=Vector3.up*(wheels[0].radius*4+wheels[0].suspensionDistance);
                 inputPose=new PoseInput{position=body.transform.position,rotation=body.transform.rotation};
             }
+            G11Lifecycle.OwnersCompleted(SourceAssemblyReady(car),"SourceAssemblyReady: original slot SpawnPart exits, cargo StartFreeze terminal exits, crafted/part started flags, source physical readiness, explicit assembly and setup completed");
             pendingDriver=true;
+            result.setup_changes.Add("Observe actual source M.Audio clone references through original Destroy and Unity-null; close setup owners before rest readiness; observe original player forward, ray, Look and midpoint boundaries without pose rewrites");
             result.setup_changes.Add("Retain the original driver Rigidbody and its exact attached collider transfer set before original GetIn; observe native destruction and source Update exits separately");
             result.setup_changes.Add("Observer setup once: Tb/Th/THeadDir/THeadBob/THeadLean/TdefStandPos/TStandHeadPos/TProneHeadPos localPosition/localRotation/localScale; target positions derive from source TdefStandPos; FxRot/FyRot/dt/duckValue/Bduck/lastDucked/standLean/PRBV/parentRigidbody; anim.VCarV/VHeadV/VHeadBob authored zeros; LOOKX/LOOKY/scroll and input lookX/lookY/scroll/lean/leanDown/leanUp/recenter/recenterDown/recenterUp/keyLooking/duck/duckDown/duckUp neutral; source Update owns physical shapes, look point and piss pose");
 
@@ -822,6 +839,8 @@ public sealed class G11Capture : MonoBehaviour
     }
     void LateUpdate()
     {
+        try { if(!finished) G11Lifecycle.PollAudio("observer.LateUpdate"); }
+        catch(Exception error) { Fail(error);return; }
         if(pendingDriver && !finished)
         {
             try

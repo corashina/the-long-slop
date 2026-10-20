@@ -21,8 +21,36 @@ def _poses(poses):
         _pose(pose)
 
 
+def validate_body_state(body):
+    if (not isinstance(body, dict) or not {'callback', 'frame', 'physics_step', 'update_sequence', 'input_revision', 'time',
+            'retained_body', 'retained_instance_id', 'current_body', 'current_instance_id', 'observer_body', 'observer_instance_id',
+            'retained_present', 'current_present', 'observer_present', 'current_is_retained', 'current_is_observer',
+            'kinematic', 'velocity', 'angular_velocity', 'rejected_predicate'} <= body.keys() or
+            not body['callback'] or not body['retained_body'] or not body['retained_instance_id'] or
+            any(type(body[k]) is not bool for k in ('retained_present', 'current_present', 'observer_present',
+                'current_is_retained', 'current_is_observer', 'kinematic')) or
+            any(type(body[k]) is not int for k in ('frame', 'physics_step', 'update_sequence', 'input_revision',
+                'retained_instance_id', 'current_instance_id', 'observer_instance_id')) or type(body['time']) not in (int, float)):
+        raise ValueError('Missing exact source body readiness observation')
+    for name in ('velocity', 'angular_velocity'):
+        value = body[name]
+        if not isinstance(value, dict) or any(type(value.get(axis)) not in (int, float) for axis in 'xyz'):
+            raise ValueError('Missing exact source body velocity observation')
+    for prefix in ('current', 'observer'):
+        if body[prefix+'_present'] != bool(body[prefix+'_body'] and body[prefix+'_instance_id']):
+            raise ValueError('Inconsistent source body reference presence')
+    if body['current_is_retained'] and (not body['retained_present'] or not body['current_present'] or
+            body['current_body'] != body['retained_body'] or body['current_instance_id'] != body['retained_instance_id']):
+        raise ValueError('Inconsistent retained source body identity')
+    if body['current_is_observer'] and (not body['current_present'] or not body['observer_present'] or
+            body['current_body'] != body['observer_body'] or body['current_instance_id'] != body['observer_instance_id']):
+        raise ValueError('Inconsistent current observer body identity')
+
+
 def validate_driver(run):
     report = run.get('driver', {})
+    if report.get('rejected_bodies') != []:
+        raise ValueError('Source body readiness rejection is present or missing')
     transfer = report.get('expected_colliders')
     if (not report.get('original_body') or report.get('original_body_instance_id', 0) == 0 or
             not isinstance(transfer, list) or not transfer or len(set(transfer)) != len(transfer)):
@@ -52,6 +80,7 @@ def validate_driver(run):
     by_phase = {s['phase']: s for s in stamps}
     previous = (-1, -1, -1)
     for stamp in stamps:
+        validate_body_state(stamp.get('source_body'))
         if not {'frame', 'physics_step', 'update_sequence', 'input_revision', 'time', 'fixed_time',
                 'delta_time', 'stored_dt', 'consumed_dt', 'callback'} <= stamp.keys():
             raise ValueError('Missing driver callback timing evidence')

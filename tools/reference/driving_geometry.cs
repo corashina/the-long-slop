@@ -358,6 +358,33 @@ public static class G11Geometry
         return JsonUtility.ToJson(new InputTable{colliders=copy.colliders,transforms=copy.transforms});
     }
     [Serializable] class InputTable { public Shape[] colliders;public Pose[] transforms; }
+    [Serializable] public class RestField { public string key,value; }
+    public static RestField[] DriverRest(Collider[] colliders,Transform[] transforms)
+    {
+        var result=new List<RestField>();
+        foreach(var collider in colliders)
+        {
+            if(collider==null) throw new InvalidOperationException("Retained driver collider destroyed during rest observation");
+            var shape=ReadShape(collider);shape.instance_id=shape.owner_instance_id=0;shape.world_matrix=shape.body_matrix=default(Matrix4x4);
+            result.Add(new RestField{key=shape.key,value=JsonUtility.ToJson(shape)});
+        }
+        foreach(var transform in transforms)
+        {
+            if(transform==null) throw new InvalidOperationException("Retained driver transform destroyed during rest observation");
+            var pose=ReadPose(transform);pose.instance_id=0;pose.world_matrix=pose.body_matrix=default(Matrix4x4);pose.lossy_scale=Vector3.zero;
+            result.Add(new RestField{key=pose.key,value=JsonUtility.ToJson(pose)});
+        }
+        return result.ToArray();
+    }
+    public static string FirstRestChange(RestField[] before,RestField[] after)
+    {
+        if(before.Length!=after.Length) return "driver rest field count";
+        for(int i=0;i<before.Length;i++) if(before[i].key!=after[i].key || before[i].value!=after[i].value) return after[i].key;
+        return null;
+    }
+    public static bool InCaptureScope(Collider value,pickupable extra=null)
+    { return value!=null && value.gameObject.scene.IsValid() && (value.transform.IsChildOf(car.transform) || value.attachedRigidbody==car.RB ||
+        (extra!=null && value.transform.IsChildOf(extra.transform))); }
     public static Snapshot Capture(string phase,int step,string callback,HashSet<mountStuff> completed,pickupable extra=null)
     {
         // Source-generated wheel lock boxes have roles independent of their unnamed sibling paths.
@@ -367,8 +394,9 @@ public static class G11Geometry
             componentKeys[box]="level1:77839/wheel-lock["+index+"]/BoxCollider";
         }
         var shapes=new HashSet<Collider>(car.GetComponentsInChildren<Collider>(true));
-        foreach(var value in Resources.FindObjectsOfTypeAll<Collider>()) if(value.gameObject.scene.IsValid() && value.attachedRigidbody==car.RB) shapes.Add(value);
+        foreach(var value in Resources.FindObjectsOfTypeAll<Collider>()) if(InCaptureScope(value,extra)) shapes.Add(value);
         if(extra!=null) foreach(var value in extra.GetComponentsInChildren<Collider>(true)) shapes.Add(value);
+        G11Lifecycle.CapturedScope(shapes,phase);
         var transforms=new HashSet<Transform>();
         foreach(var shape in shapes)
         {

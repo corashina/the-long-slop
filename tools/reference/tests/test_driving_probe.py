@@ -10,12 +10,13 @@ from tools.reference.driving_probe import preflight, capture, verify, validate_r
 from tools.reference.library.archive import sha256
 from tools.reference.driving_geometry import validate_geometry, physical_inputs
 from tools.reference.tests.test_driving_driver import driver_fixture
+from tools.reference.tests.test_driving_lifecycle import lifecycle_fixture
 
 
 class DrivingProbeTests(unittest.TestCase):
     def test_geometry_helper_provenance(self):
         revision = observer_revision()
-        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py'):
+        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py'):
             self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
 
     def test_native_helper_restoration_and_physical_readiness(self):
@@ -211,7 +212,7 @@ class DrivingProbeTests(unittest.TestCase):
         driver = driver_fixture()
         run['initial'].update(driver.pop('initial'))
         run.update(driver)
-        return run
+        return lifecycle_fixture(run)
 
     @staticmethod
     def remove_sample(run, index):
