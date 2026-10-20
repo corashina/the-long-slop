@@ -1,4 +1,6 @@
 //! Installed Neutral grading LUT. Bake once into persistent 33-cubed RGBA16F storage.
+//! Each slice renders to a 2D texture, then copies into the 3D texture.
+//! wgpu 29 on WebGPU drops `depth_slice`, so the bake does not render into the 3D texture.
 use crate::reference::postprocessing::GradingSettings;
 use bevy::prelude::*;
 use bevy::render::{
@@ -6,7 +8,8 @@ use bevy::render::{
     renderer::{RenderAdapter, RenderDevice, RenderQueue},
 };
 pub const LUT_SIZE: u32 = 33;
-pub const LUT_BYTES: u64 = 33 * 33 * 33 * 8;
+/// The 3D LUT and its 2D slice target.
+pub const LUT_BYTES: u64 = 33 * 33 * 34 * 8;
 pub const CURVE_BYTES: u64 = 128 * 2 * 8;
 #[derive(Clone, Copy, ShaderType)]
 struct Params {
@@ -85,8 +88,10 @@ struct Binding {
     group: BindGroup,
 }
 pub struct LutPass {
-    _texture: Texture,
+    texture: Texture,
     view: TextureView,
+    slice: Texture,
+    slice_view: TextureView,
     _curves: Texture,
     bindings: [Binding; 33],
     pipeline: CachedRenderPipelineId,
@@ -124,10 +129,25 @@ impl LutPass {
             sample_count: 1,
             dimension: TextureDimension::D3,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = texture.create_view(&default());
+        let slice = device.create_texture(&TextureDescriptor {
+            label: Some("source_neutral_lut_slice"),
+            size: Extent3d {
+                width: LUT_SIZE,
+                height: LUT_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let slice_view = slice.create_view(&default());
         let curves = device.create_texture(&TextureDescriptor {
             label: Some("source_grading_curves"),
             size: Extent3d {
@@ -225,8 +245,10 @@ impl LutPass {
             }
         });
         Ok(Self {
-            _texture: texture,
+            texture,
             view,
+            slice,
+            slice_view,
             _curves: curves,
             bindings,
             pipeline,
@@ -254,8 +276,8 @@ impl LutPass {
         };
         for (slice, binding) in self.bindings.iter().enumerate() {
             let colors = [Some(RenderPassColorAttachment {
-                view: &self.view,
-                depth_slice: Some(slice as u32),
+                view: &self.slice_view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(default()),
@@ -270,6 +292,25 @@ impl LutPass {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &binding.group, &[]);
             pass.draw(0..3, 0..1);
+            drop(pass);
+            encoder.copy_texture_to_texture(
+                self.slice.as_image_copy(),
+                TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: slice as u32,
+                    },
+                    aspect: TextureAspect::All,
+                },
+                Extent3d {
+                    width: LUT_SIZE,
+                    height: LUT_SIZE,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
         true
     }
