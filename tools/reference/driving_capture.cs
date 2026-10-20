@@ -818,8 +818,16 @@ public sealed class G11Capture : MonoBehaviour
     public static int InputRevision { get { return controlRevision; } }
     public static int ObservedPhysicsStep { get { return observedPhysicsStep; } }
     public static Rigidbody ObservedBody { get { return body; } }
-    public static void SetSourceActive(GameObject target,bool value,string caller) { G11Geometry.SetActive(target,value,caller); }
-    public static void SetColliderEnabled(Collider collider,bool value) { G11Geometry.SetEnabled(collider,value); }
+    public static void SetSourceActive(GameObject target,bool value,string caller)
+    {
+        if(finished) target.SetActive(value);
+        else G11Geometry.SetActive(target,value,caller);
+    }
+    public static void SetColliderEnabled(Collider collider,bool value)
+    {
+        if(finished) collider.enabled=value;
+        else G11Geometry.SetEnabled(collider,value);
+    }
     public static void ObserveLock(object owner,object cargo,string phase)
     {
         try { if(!finished) G11Geometry.LockBoundary((mountStuff)owner,(pickupable)cargo,phase,observedPhysicsStep,completedStorage); }
