@@ -1,7 +1,7 @@
 # G05 engine design
 
 Date: 2026-10-20.
-Status: Design approved in chat. Written specification awaits review.
+Status: Specification approved. Implementation plan awaits review.
 Base commit: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g05-engine`.
 
