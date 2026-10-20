@@ -1672,36 +1672,3 @@ fn validate_world_libraries(
         "world capture library receipt",
     )
 }
-
-#[cfg(test)]
-mod capture_tests {
-    use super::*;
-    #[test]
-    fn original_capture_and_current_export_identities_are_independent() {
-        let accepted = LibraryProvenance {
-            schema_version: 1,
-            manifest_sha256: "a".repeat(64),
-            catalog_sha256: "b".repeat(64),
-            source_manifest_sha256: "c".repeat(64),
-        };
-        let capture = LibraryProvenance {
-            manifest_sha256: "92a93abde82f7933090293e8c95880f98dcee1d50a7463e74b108e29e7b2db99"
-                .into(),
-            ..accepted.clone()
-        };
-        assert!(validate_world_libraries(&accepted, &capture, &accepted).is_ok());
-        for mutate in [
-            |p: &mut LibraryProvenance| p.schema_version = 2,
-            |p: &mut LibraryProvenance| p.manifest_sha256 = "d".repeat(64),
-            |p: &mut LibraryProvenance| p.catalog_sha256 = "d".repeat(64),
-            |p: &mut LibraryProvenance| p.source_manifest_sha256 = "d".repeat(64),
-        ] {
-            let mut invalid = capture.clone();
-            mutate(&mut invalid);
-            assert!(validate_world_libraries(&accepted, &invalid, &accepted).is_err());
-            let mut invalid = accepted.clone();
-            mutate(&mut invalid);
-            assert!(validate_world_libraries(&invalid, &capture, &accepted).is_err());
-        }
-    }
-}

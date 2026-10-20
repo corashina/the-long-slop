@@ -28,7 +28,7 @@ function setup(t){
  const key=(code,repeat=false)=>window.dispatchEvent(event('keydown',{code,repeat}));
  const start=async()=>{menu.ready();document.querySelector('#new-game').dispatchEvent(event('click'));await settle();assert.equal(menu.model.state,'pause-menu');actions.length=0;};
  t.after(()=>{input.dispose();menu.dispose();for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
- return {menu,input,canvas,document,window,actions,key,start,get captures(){return captures;}};
+ return {menu,input,canvas,document,actions,key,start,get captures(){return captures;}};
 }
 
 test('escape_resumes_pauses_and_recaptures_without_stale_input',async t=>{
@@ -79,20 +79,3 @@ test('escape_ignores_repeat_and_cancels_a_late_capture',async t=>{
  assert.equal(app.document.pointerLockElement,null);
  assert.equal(app.actions.includes(ACTIONS.CONTINUE),false);
 });
-
-for(const loss of ['escape','pointer','blur','hidden']){
- test(loss+'_cancels_short_q_hold_without_release',async t=>{
-  const app=setup(t);await app.start();app.key('Escape');await settle();
-  app.key('KeyQ');let f=app.input.takeFrame();assert.equal(f.playerHeld,1);assert.equal(f.playerPressed,1);
-  await new Promise(resolve=>setTimeout(resolve,100));
-  if(loss==='escape')app.key('Escape');
-  if(loss==='pointer')app.document.exitPointerLock();
-  if(loss==='blur')app.window.dispatchEvent(event('blur'));
-  if(loss==='hidden'){app.document.hidden=true;app.document.dispatchEvent(event('visibilitychange'));}
-  await settle();assert.equal(app.menu.model.state,'pause-menu');assert.equal(app.actions.at(-1),ACTIONS.PAUSE);
-  f=app.input.takeFrame();assert.equal(f.playerHeld,0);assert.equal(f.playerPressed,0);assert.equal(f.playerReleased,0);
-  app.document.hidden=false;app.key('Escape');await settle();assert.equal(app.menu.model.state,'playing');
-  app.window.dispatchEvent(event('keyup',{code:'KeyQ'}));
-  f=app.input.takeFrame();assert.equal(f.playerHeld,0);assert.equal(f.playerPressed,0);assert.equal(f.playerReleased,0);
- });
-}

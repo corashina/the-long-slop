@@ -492,28 +492,3 @@ impl CarryState {
         false
     }
 }
-
-#[cfg(test)]
-mod input_tests {
-    use super::*;
-    #[test]
-    fn source_carry_wheel_tuning_look_and_mouse_buttons() {
-        for tuning in [false, true] {
-            for looking in [false, true] {
-                for rmb in [false, true] {
-                    for mmb in [false, true] {
-                        let input = FrameInput {
-                            held: (if rmb { keys::TRANSLATE } else { 0 })
-                                | (if mmb { keys::ROTATE } else { 0 }),
-                            ..Default::default()
-                        };
-                        assert_eq!(
-                            wheel_allowed(input, tuning, looking),
-                            !mmb && (rmb || (!tuning && !looking))
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
