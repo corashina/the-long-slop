@@ -41,7 +41,7 @@ public sealed class G11Capture : MonoBehaviour
         public int frame;
         public float throttle, brake, clutch, steer, motor_scale, service_brake_fraction, handbrake_fraction;
         public bool ignition_button_held, handbrake_press;
-        public G11Controls.GearPress gear_press;
+        public string gear_press;
     }
     [Serializable] public class Scenario
     {

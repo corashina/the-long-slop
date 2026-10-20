@@ -4,7 +4,6 @@ using UnityEngine;
 // Original input callbacks consume these declarations. No source output is written here.
 public static class G11Controls
 {
-    [Serializable] public class GearPress { public int value; }
     [Serializable] public struct Mode
     {
         public bool auto_clutch,auto_shift,force_manual,force_automatic_transmission,h_shifter;
@@ -53,12 +52,19 @@ public static class G11Controls
         if(frame!=row.frame) return false;
         if(action==inputscript.IN.handbrake) return row.handbrake_press;
         if(action==inputscript.IN.ignition) return row.ignition_button_held && (index==0 || !rows[index-1].ignition_button_held);
-        if(row.gear_press==null) return false;
-        if(action==inputscript.IN.gearr) return row.gear_press.value==-1;
-        if(action==inputscript.IN.gearn) return row.gear_press.value==0;
-        if(action>=inputscript.IN.gear1 && action<=inputscript.IN.gear6)
-            return row.gear_press.value==(int)action-(int)inputscript.IN.gear1+1;
-        return false;
+        if(String.IsNullOrEmpty(row.gear_press)) return false;
+        switch(action)
+        {
+            case inputscript.IN.gearr:return row.gear_press=="reverse";
+            case inputscript.IN.gearn:return row.gear_press=="neutral";
+            case inputscript.IN.gear1:return row.gear_press=="gear1";
+            case inputscript.IN.gear2:return row.gear_press=="gear2";
+            case inputscript.IN.gear3:return row.gear_press=="gear3";
+            case inputscript.IN.gear4:return row.gear_press=="gear4";
+            case inputscript.IN.gear5:return row.gear_press=="gear5";
+            case inputscript.IN.gear6:return row.gear_press=="gear6";
+            default:return false;
+        }
     }
     public static bool Up(inputscript.IN action,int frame)
     {

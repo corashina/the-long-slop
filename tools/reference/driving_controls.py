@@ -5,6 +5,7 @@ import math
 import struct
 from pathlib import Path
 
+GEAR_MASKS = {'': 0, 'reverse': 1, 'neutral': 2, 'gear1': 4, 'gear2': 8, 'gear3': 16, 'gear4': 32, 'gear5': 64, 'gear6': 128}
 SOURCE_FIELDS = {'frame', 'throttle', 'brake', 'clutch', 'steer', 'ignition_button_held', 'handbrake_press'}
 ISOLATED_FIELDS = {'frame', 'motor_scale', 'service_brake_fraction', 'handbrake_fraction', 'steer'}
 MODE_FIELDS = {'h_shifter': False, 'analog_gas': False, 'analog_brake': False,
@@ -51,9 +52,9 @@ def validate_schedule(scenario):
                 raise ValueError('Source button declarations must be Boolean')
             if 'gear_press' in control:
                 event = control['gear_press']
-                if not isinstance(event, dict) or event.keys() != {'value'} or type(event['value']) is not int or not -1 <= event['value'] <= 6:
-                    raise ValueError('Direct gear event requires one integer value from -1 through 6')
-                if scenario.get('setup', {}).get('auto_shift') is not False:
+                if type(event) is not str or event not in GEAR_MASKS:
+                    raise ValueError('Direct gear event requires an exact gear name or empty text')
+                if event and scenario.get('setup', {}).get('auto_shift') is not False:
                     raise ValueError('Direct gear events require original manual input mode')
     if frames[0] != 0 or frames != sorted(set(frames)):
         raise ValueError('Declared control schedule must increase from zero inside the finite interval')
@@ -160,8 +161,8 @@ def validate_controls(run, scenario):
                 raise ValueError('Source input callback revision did not advance once')
             if state['input_handbrake_press'] != press or state['input_handbrake'] != 0:
                 raise ValueError('Declared handbrake event was missed or replayed')
-            gear = row.get('gear_press') if row['frame'] == frame else None
-            if state['input_gears'] != (1 << (gear['value']+1) if gear is not None else 0):
+            gear = row.get('gear_press', '') if row['frame'] == frame else ''
+            if state['input_gears'] != GEAR_MASKS[gear]:
                 raise ValueError('Declared direct gear event was missed or replayed')
             latest_input = sample
         elif phase == 'input2.exit':
@@ -193,7 +194,7 @@ def validate_controls(run, scenario):
                 consumed_gears.add(revision)
                 gear_events.append({'declared_frame': latest_input['frame'], 'frame': frame, 'input_revision': revision,
                                     'input_sequence': sample['input_sequence'], 'consumed_sequence': sample['sequence'],
-                                    'value': row_at(scenario, latest_input['frame'])['gear_press']['value']})
+                                    'gear': row_at(scenario, latest_input['frame'])['gear_press']})
         elif phase == 'actuation.entry':
             if latest_consumed is None or latest_consumed['frame'] != frame or state['stored_handbrake'] != latch:
                 raise ValueError('Source latch before control consumption differs')
@@ -238,7 +239,7 @@ def validate_controls(run, scenario):
     declared = [c['frame'] for c in scenario['controls'] if c['handbrake_press']]
     if [e['declared_frame'] for e in events] != declared:
         raise ValueError('Declared handbrake event consumption is missing or duplicated')
-    if [e['declared_frame'] for e in gear_events] != [c['frame'] for c in scenario['controls'] if 'gear_press' in c]:
+    if [e['declared_frame'] for e in gear_events] != [c['frame'] for c in scenario['controls'] if c.get('gear_press')]:
         raise ValueError('Declared direct gear event consumption is missing or duplicated')
     brake_phase = validate_brake_phase(scenario, phase_samples, samples)
     return {'protocol': 'keyboard-digital', 'evidence': EVIDENCE, 'handbrake_events': events, 'gear_events': gear_events, 'brake_phase': brake_phase,
@@ -341,7 +342,7 @@ def main():
     rows = json.loads(args.scenarios.read_text(encoding='utf-8-sig'))['scenarios']
     for row in rows:
         validate_schedule(row)
-        print(row['id'] + ': ' + json.dumps({'handbrake_presses': [c['frame'] for c in row['controls'] if c.get('handbrake_press')], 'frames': [c['frame'] for c in row['controls']]}))
+        print(row['id'] + ': ' + json.dumps({'handbrake_presses': [c['frame'] for c in row['controls'] if c.get('handbrake_press')], 'frames': [c['frame'] for c in row['controls']], 'gear_presses': [{'frame': c['frame'], 'gear': c['gear_press']} for c in row['controls'] if c.get('gear_press')]}))
     print('CONTROL_PROTOCOL_VALIDATED scenarios=' + str(len(rows)))
 
 

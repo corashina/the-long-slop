@@ -748,9 +748,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -842,9 +840,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 109,
@@ -872,9 +868,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 0
-          }
+          "gear_press": "neutral"
         },
         {
           "frame": 240,
@@ -884,9 +878,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": -1
-          }
+          "gear_press": "reverse"
         },
         {
           "frame": 300,
@@ -2531,9 +2523,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -2669,9 +2659,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -2807,9 +2795,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -2945,9 +2931,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -3083,9 +3067,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -3211,9 +3193,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -3339,9 +3319,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,
@@ -3465,9 +3443,7 @@
           "steer": 0.0,
           "ignition_button_held": false,
           "handbrake_press": false,
-          "gear_press": {
-            "value": 1
-          }
+          "gear_press": "gear1"
         },
         {
           "frame": 120,

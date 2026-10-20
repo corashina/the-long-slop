@@ -7,7 +7,7 @@ import unittest
 
 from tools.reference.driving import method
 from tools.reference.driving_controls import (validate_schedule, validate_controls, row_at,
-                                               ignition_edges, MODE_FIELDS)
+                                               ignition_edges, MODE_FIELDS, GEAR_MASKS)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,8 +53,8 @@ def add_control_fixture(run, scenario):
         if phase == 'input.exit':
             state['input_revision'] += 1
             state['input_handbrake_press'] = row['frame'] == frame and row['handbrake_press']
-            gear = row.get('gear_press') if row['frame'] == frame else None
-            state['input_gears'] = (1 << (gear['value']+1)) if gear else 0
+            gear = row.get('gear_press', '') if row['frame'] == frame else ''
+            state['input_gears'] = GEAR_MASKS[gear]
             for axis in ('throttle','brake','clutch','steer'):
                 state['input_'+axis] = row[axis]
         if phase == 'input2.exit':
@@ -102,7 +102,7 @@ class DrivingControlsTests(unittest.TestCase):
         for key in ('input_mode', 'parking_brake_intent'):
             row = scenario_fixture(); del row[key]
             with self.assertRaises(ValueError): validate_schedule(row)
-        row = scenario_fixture();row['controls'][0]['gear_press'] = {'value': 1}
+        row = scenario_fixture();row['controls'][0]['gear_press'] = 'gear1'
         with self.assertRaisesRegex(ValueError, 'manual input mode'): validate_schedule(row)
 
     def test_isolated_fractions_do_not_toggle_source_latch(self):
@@ -166,7 +166,7 @@ class DrivingControlsTests(unittest.TestCase):
         scenario['setup']['auto_shift'] = False
         scenario['controls'] = [control_row(0), control_row(1), control_row(2)]
         scenario['controls'][0]['ignition_button_held'] = True
-        scenario['controls'][1].update(ignition_button_held=True, handbrake_press=True, gear_press={'value':1})
+        scenario['controls'][1].update(ignition_button_held=True, handbrake_press=True, gear_press='gear1')
         scenario['controls'][2]['throttle'] = 1.
         return self.observed(scenario)
 
@@ -243,10 +243,10 @@ class DrivingControlsTests(unittest.TestCase):
     def test_direct_gear_consumption_is_required_without_forcing_gear(self):
         scenario = scenario_fixture()
         scenario['setup']['auto_shift'] = False
-        scenario['controls'][0]['gear_press'] = {'value': 1}
+        scenario['controls'][0]['gear_press'] = 'gear1'
         run, scenario = self.observed(scenario)
         # Selected gear stays neutral. The original clutch eligibility may reject a consumed request.
-        self.assertEqual(validate_controls(run,scenario)['gear_events'][0]['value'],1)
+        self.assertEqual(validate_controls(run,scenario)['gear_events'][0]['gear'],'gear1')
         bad = deepcopy(run)
         for sample in bad['samples']:
             if sample['phase'] == 'control.exit' and sample['frame']==0:
@@ -306,6 +306,35 @@ class DrivingControlsTests(unittest.TestCase):
                 add_control_fixture(bad,bad_scenario)
             with self.subTest(change=change), self.assertRaises(ValueError):validate_controls(bad,bad_scenario)
 
+    def test_gear_names_default_absence_and_invalid_declarations(self):
+        from tools.reference.driving_probe import validate_run
+        for event,mask in GEAR_MASKS.items():
+            run,scenario=self.event_interval_fixture()
+            scenario['controls'][1]['gear_press']=event
+            add_control_fixture(run,scenario)
+            result=validate_run(run,scenario)
+            emitted=next(s for s in run['samples'] if s['phase']=='input.exit' and s['frame']==1)
+            self.assertEqual(emitted['controls']['input_gears'],mask)
+            self.assertEqual([e['gear'] for e in result['controls']['gear_events']],[event] if event else [])
+        for event in (None,True,0,-99,1.0,{}, {'value':1}, [],'none','noevent','forward','gear0','gear7','Reverse',' neutral','neutral '):
+            scenario=scenario_fixture();scenario['setup']['auto_shift']=False
+            scenario['controls'][0]['gear_press']=event
+            with self.subTest(event=event),self.assertRaises(ValueError):validate_schedule(scenario)
+        scenario=scenario_fixture();scenario['controls'][0]['gear_press']=''
+        validate_schedule(scenario)
+
+    def test_validate_run_keeps_gear_emission_failures_strict(self):
+        from tools.reference.driving_probe import validate_run
+        run,scenario=self.event_interval_fixture()
+        validate_run(run,scenario)
+        for change in ('missing','duplicate','shifted'):
+            bad=deepcopy(run)
+            first=next(s for s in bad['samples'] if s['phase']=='input.exit' and s['frame']==1)
+            later=next(s for s in bad['samples'] if s['phase']=='input.exit' and s['frame']==2)
+            if change in ('missing','shifted'):first['controls']['input_gears']=0
+            if change in ('duplicate','shifted'):later['controls']['input_gears']=GEAR_MASKS['gear1']
+            with self.subTest(change=change),self.assertRaises(ValueError):validate_run(bad,scenario)
+
     def test_actual_csharp_event_and_held_semantics(self):
         source = (ROOT/'driving_controls.cs').read_text()
         capture = (ROOT/'driving_capture.cs').read_text()
@@ -314,7 +343,7 @@ class DrivingControlsTests(unittest.TestCase):
             'public static bool Held(', 'public static bool Down(', 'public static bool Up('))
         control = method(capture, '[Serializable] public class Control')[0]
         code = STUBS + 'public class G11Capture {'+control+'}\npublic static class G11Controls {'
-        code += 'public class GearPress {public int value;} static G11Capture.Control[] rows;'+bodies+'}'+CHECKS
+        code += 'static G11Capture.Control[] rows;'+bodies+'}'+CHECKS
         command = "Add-Type -TypeDefinition @'\n" + code + "\n'@\n[G11ControlTests]::Run()"
         result = subprocess.run(['pwsh','-NoProfile','-Command',command],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -330,9 +359,26 @@ CHECKS = r"""
 public static class G11ControlTests {
     static void Require(bool ok,string name) {if(!ok)throw new Exception(name);}
     public static void Run() {
+        Require(typeof(G11Capture.Control).GetField("gear_press").FieldType==typeof(string),"gear field must be text");
+        var actions=new[]{inputscript.IN.gearr,inputscript.IN.gearn,inputscript.IN.gear1,inputscript.IN.gear2,inputscript.IN.gear3,inputscript.IN.gear4,inputscript.IN.gear5,inputscript.IN.gear6};
+        foreach(var absent in new[]{new G11Capture.Control{frame=0},new G11Capture.Control{frame=0,gear_press=String.Empty}})
+        {
+            G11Controls.Initialize(new[]{absent});
+            foreach(var action in actions) Require(!G11Controls.Down(action,0),"native default omitted gear emitted an event");
+        }
+        var names=new[]{"reverse","neutral","gear1","gear2","gear3","gear4","gear5","gear6"};
+        for(int index=0;index<names.Length;index++)
+        {
+            G11Controls.Initialize(new[]{new G11Capture.Control{frame=7,gear_press=names[index]}});
+            for(int target=0;target<actions.Length;target++)
+            {
+                Require(G11Controls.Down(actions[target],7)==(target==index),"wrong exact gear event");
+                Require(!G11Controls.Down(actions[target],8) && !G11Controls.Held(actions[target],7),"gear event replayed or held");
+            }
+        }
         var rows=new[]{new G11Capture.Control{frame=0,ignition_button_held=true},
             new G11Capture.Control{frame=89,ignition_button_held=true,handbrake_press=true},
-            new G11Capture.Control{frame=90,throttle=1,gear_press=new G11Controls.GearPress{value=1}},
+            new G11Capture.Control{frame=90,throttle=1,gear_press="gear1"},
             new G11Capture.Control{frame=210,handbrake_press=true}};
         G11Controls.Initialize(rows);
         Require(G11Controls.Down(inputscript.IN.ignition,0),"initial ignition down");
