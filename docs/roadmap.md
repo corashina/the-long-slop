@@ -98,8 +98,8 @@ The merged result passed five engine tests, four runtime tests, two audio tests,
 Formatting and both WASM backend checks passed. Existing compiler warnings remain.
 Full checks, release builds, and browser acceptance remain deferred. G05 stays Verify.
 G08 integration, 2026-10-20: G08 is merged into master with the current road and grass worker tasks.
-Targeted merged native, web, formatting, and WASM checks passed. Existing compiler warnings remain.
-The G08 worktree records 22 distinct native tests and six web tests across its implementation runs.
+The merged result passed 22 targeted native tests and seven web tests. Formatting and both WASM checks passed.
+Existing compiler warnings remain. The G08 worktree and merged branch were removed after verification.
 Browser acceptance, full checks, and product release builds remain open. G08 stays Verify.
 See [G08 verification](g08-inventory.md) for commands and limits.
 
