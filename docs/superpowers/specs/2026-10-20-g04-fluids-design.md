@@ -1,7 +1,7 @@
 # G04 fluid handling design
 
 Date: 2026-10-20.
-Status: Written spec for review. The in-chat design is approved.
+Status: Approved on 2026-10-20. Implementation plan review is pending.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g04-fluids`.
 
@@ -113,7 +113,7 @@ Spill debit applies sleep scaling once.
 A contact receipt applies sleep scaling once through the source pour operation.
 
 Particle motion reports struck collider identity and contact position.
-Interaction resolves the struck GameObject and its physics-root tanks through existing source bindings.
+Interaction resolves the struck GameObject and its current transform-root tanks through existing source bindings.
 Receiver caps use their current poses, including detached part poses.
 The existing player contact path remains functional without adding survival behavior.
 
