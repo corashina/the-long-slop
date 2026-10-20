@@ -3257,6 +3257,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let reset_held = reset.area.items.resolve_key(&keys[0]).unwrap();
     assert_eq!(reset.area.interaction.equipment.item(), Some(reset_held));
+    reset.area.items.sync_poses(&reset.physics);
     reset.area.items.mark_dirty(reset_held);
     reset.stream.capture_changes(
         &reference,
@@ -3283,7 +3284,124 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let mut unlisted_equipped = equipped_save.clone();
     unlisted_equipped.inventory.slots[unlisted_equipped.inventory.selected as usize] = None;
-    assert!(GarageRuntime::from_save(&reference, &stamp, &unlisted_equipped).is_err());
+    let mut independent = GarageRuntime::from_save(&reference, &stamp, &unlisted_equipped).unwrap();
+    prepare_ready(&mut independent, &reference);
+    assert!(independent.advance_saved_restore(&reference).unwrap());
+    assert!(!independent.restore_pending());
+    let independent_tool = independent.area.items.resolve_key(&keys[0]).unwrap();
+    assert_eq!(
+        independent.area.interaction.equipment.item(),
+        Some(independent_tool)
+    );
+    assert!(
+        !independent
+            .area
+            .inventory
+            .slots
+            .contains(&Some(independent_tool))
+    );
+    g08_assert_equipment_pose(&independent, &reference, independent_tool);
+    let independent_save = independent
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-19T12:00:01Z",
+        )
+        .unwrap();
+    assert_eq!(independent_save.inventory, unlisted_equipped.inventory);
+    let tool_key = &keys[0];
+    let before_tool = unlisted_equipped
+        .world
+        .changes
+        .get(tool_key)
+        .unwrap()
+        .snapshot
+        .as_ref()
+        .unwrap();
+    let after_tool = independent_save
+        .world
+        .changes
+        .get(tool_key)
+        .unwrap()
+        .snapshot
+        .as_ref()
+        .unwrap();
+    for axis in 0..3 {
+        assert!((before_tool.pose.position[axis] - after_tool.pose.position[axis]).abs() < 0.0001);
+    }
+
+    let rotation_alignment: f32 = before_tool
+        .pose
+        .rotation
+        .iter()
+        .zip(after_tool.pose.rotation)
+        .map(|(before, after)| before * after)
+        .sum();
+    assert!(rotation_alignment.abs() > 0.99999);
+    assert!(independent.stream.required_ready());
+    for key in &keys {
+        assert_eq!(
+            independent
+                .area
+                .items
+                .generated_bindings()
+                .filter(|(id, _)| super::super::ObjectKey::Generated((*id).clone()) == *key)
+                .count(),
+            1
+        );
+    }
+    let mut invalid = unlisted_equipped.clone();
+    invalid.world.changes.remove(tool_key.clone());
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = equipped_save.clone();
+    invalid.inventory.slots[2] = invalid.inventory.equipped.clone();
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    let mut held_state = before_tool.clone();
+    held_state.held = true;
+    invalid
+        .world
+        .changes
+        .record(tool_key.clone(), held_state, before_tool);
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    invalid.inventory.equipped = Some(crate::save::InstanceId::Generated {
+        id: match &keys[1] {
+            super::super::ObjectKey::Generated(id) => id.clone(),
+            _ => unreachable!(),
+        },
+    });
+    invalid.inventory.slots[0] = None;
+    assert!(
+        invalid.validate(&reference, &stamp).is_ok(),
+        "prototype checks wait for generated bindings"
+    );
+    let mut ineligible = GarageRuntime::from_save(&reference, &stamp, &invalid).unwrap();
+    prepare_ready(&mut ineligible, &reference);
+    assert!(
+        ineligible.advance_saved_restore(&reference).is_err(),
+        "generated equipment eligibility remains enforced"
+    );
+    // Reject generated ownership and attachment conflicts without slot membership.
+    let mut invalid = unlisted_equipped.clone();
+    invalid.player.carry = saved_unattached.player.carry.clone();
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    let mut change = invalid.world.changes.get(tool_key).unwrap().clone();
+    change.snapshot.as_mut().unwrap().attachment = Some(super::super::AttachmentSnapshot {
+        owner: Some(keys[1].clone()),
+        slot: None,
+        local_pose: super::super::AbsolutePose {
+            position: [0.; 3],
+            rotation: [0., 0., 0., 1.],
+        },
+    });
+    invalid
+        .world
+        .changes
+        .record(tool_key.clone(), change.snapshot.unwrap(), before_tool);
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
     assert_eq!(
         reset
             .area
@@ -3973,4 +4091,564 @@ fn g08_frame_fresh_gesture_after_cancellation() {
         assert_eq!(run.area.interaction.held(), None);
         assert!(run.area.release_equipped(&mut run.physics).unwrap());
     }
+}
+
+#[test]
+#[ignore = "Requires the installed runtime export"]
+fn source_transfers_reject_atomically_and_restore_both_hands() {
+    use crate::{
+        inventory::InventoryCommand,
+        save::{CameraSave, SourceHash, SourceStamp},
+        simulation::FrameInput,
+    };
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let r = ReferenceManifest::from_json(&bytes).unwrap();
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: r.app_id,
+        build_id: r.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: r
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let mut game = GarageRuntime::new(&r).unwrap();
+    let oil = r.items.iter().find(|i| i.name == "OilCan").unwrap().id;
+    let light = r
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    let food = r.survival.starter_food;
+    for (id, select) in [(oil, 1), (light, 0)] {
+        let point = game.area.items.get(id).unwrap().pose.position;
+        if game.area.interaction.storage.stored(id) {
+            game.area
+                .interaction
+                .pickup_stored_item(
+                    id,
+                    point,
+                    &game.area.player,
+                    &mut game.area.items,
+                    &mut game.physics,
+                )
+                .unwrap();
+        } else {
+            game.area
+                .interaction
+                .pickup_item(
+                    id,
+                    point,
+                    &game.area.player,
+                    &mut game.area.items,
+                    &mut game.physics,
+                )
+                .unwrap();
+        }
+        game.area.sync_inventory();
+        assert!(
+            game.area
+                .apply_inventory_command(InventoryCommand::Select(select), &r, &mut game.physics)
+                .unwrap()
+        );
+    }
+    assert!(
+        game.area
+            .apply_inventory_command(InventoryCommand::Select(1), &r, &mut game.physics)
+            .unwrap()
+    );
+    assert_eq!(game.area.interaction.equipment.item(), Some(light));
+    let point = game.area.items.get(food).unwrap().pose.position;
+    game.area
+        .interaction
+        .pickup_item(
+            food,
+            point,
+            &game.area.player,
+            &mut game.area.items,
+            &mut game.physics,
+        )
+        .unwrap();
+    game.area.sync_inventory();
+    let handle = game.area.items.get(food).unwrap().body.unwrap();
+    let before = (
+        *game.physics.rapier().bodies[handle].position(),
+        game.physics.rapier().bodies[handle].linvel(),
+        game.physics.rapier().impulse_joints.len(),
+        game.area.inventory.slots,
+    );
+    for slot in [0, 1] {
+        assert!(
+            !game
+                .area
+                .apply_inventory_command(InventoryCommand::Select(slot), &r, &mut game.physics)
+                .unwrap()
+        );
+    }
+    assert_eq!(
+        before,
+        (
+            *game.physics.rapier().bodies[handle].position(),
+            game.physics.rapier().bodies[handle].linvel(),
+            game.physics.rapier().impulse_joints.len(),
+            game.area.inventory.slots
+        )
+    );
+    assert!(game.consume(&r, food).unwrap());
+    let saved = game
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .unwrap();
+    let mut loaded = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    prepare_ready(&mut loaded, &r);
+    assert!(loaded.advance_saved_restore(&r).unwrap());
+    let recaptured = loaded
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .unwrap();
+    for (before, after) in saved.items.iter().zip(&recaptured.items) {
+        if matches!(
+            before.location,
+            crate::save::ItemLocationSave::Stored { .. }
+        ) {
+            assert_eq!(before.instance, after.instance);
+            for axis in 0..3 {
+                assert!((before.pose.position[axis] - after.pose.position[axis]).abs() < 0.0001);
+            }
+        }
+    }
+    assert_eq!(loaded.area.inventory.slots, game.area.inventory.slots);
+    assert_eq!(loaded.area.interaction.held(), Some(food));
+    assert_eq!(loaded.area.interaction.equipment.item(), Some(light));
+    assert_eq!(loaded.area.items.get(food).unwrap().food.unwrap().bite, 1);
+    let oil_body = loaded.area.items.get(oil).unwrap().body.unwrap();
+    assert!(!loaded.physics.rapier().bodies[oil_body].is_enabled());
+    let mut invalid = saved.clone();
+    invalid.inventory.slots[0] = invalid.inventory.slots[1].clone();
+    assert!(invalid.validate(&r, &stamp).is_err());
+    let mut invalid = saved.clone();
+    invalid.inventory.equipped = invalid.player.carry.as_ref().map(|c| c.item.clone());
+    assert!(invalid.validate(&r, &stamp).is_err());
+    let mut invalid = saved.clone();
+    invalid.schema_version = 1;
+    assert!(invalid.validate(&r, &stamp).is_err());
+    loaded.started = true;
+    loaded.paused = false;
+    loaded.step(&r, FrameInput::default());
+    assert!(!loaded.physics.rapier().bodies[oil_body].is_enabled());
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .quantities_liters,
+        game.area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .quantities_liters
+    );
+    // Stored food retains its bite, and exhausted food does not return on load.
+    loaded
+        .area
+        .interaction
+        .drop_held(&mut loaded.area.items, &mut loaded.physics);
+    loaded.area.sync_inventory();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(0), &r, &mut loaded.physics)
+        .unwrap();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(2), &r, &mut loaded.physics)
+        .unwrap();
+    let point = loaded.area.items.get(food).unwrap().pose.position;
+    loaded
+        .area
+        .interaction
+        .pickup_item(
+            food,
+            point,
+            &loaded.area.player,
+            &mut loaded.area.items,
+            &mut loaded.physics,
+        )
+        .unwrap();
+    loaded.area.sync_inventory();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(3), &r, &mut loaded.physics)
+        .unwrap();
+    let stored = loaded
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:01Z")
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&r, &stamp, &stored).unwrap();
+    prepare_ready(&mut restored, &r);
+    assert!(restored.advance_saved_restore(&r).unwrap());
+    assert_eq!(restored.area.items.get(food).unwrap().food.unwrap().bite, 1);
+    restored
+        .area
+        .apply_inventory_command(InventoryCommand::Select(2), &r, &mut restored.physics)
+        .unwrap();
+    let bites = r.survival.foods[restored
+        .area
+        .items
+        .get(food)
+        .unwrap()
+        .food
+        .unwrap()
+        .prototype_index]
+        .bites;
+    for _ in 1..bites {
+        assert!(restored.consume(&r, food).unwrap());
+    }
+    assert!(!restored.area.inventory.slots.contains(&Some(food)));
+    let removed = restored
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:02Z")
+        .unwrap();
+    let restored = GarageRuntime::from_save(&r, &stamp, &removed).unwrap();
+    assert!(restored.area.items.get(food).unwrap().removed);
+}
+
+fn g08_assert_equipment_pose(
+    run: &GarageRuntime,
+    reference: &ReferenceManifest,
+    id: crate::reference::ItemId,
+) {
+    use crate::vehicle::{VehiclePose, to_rapier};
+    let item = run.area.items.get(id).unwrap();
+    let rule = run.area.interaction.pickup_rule(id).unwrap();
+    let hand = to_rapier(
+        run.area
+            .pose
+            .anchor(reference.clothing.pose.anchors["RH"].node)
+            .unwrap(),
+    );
+    let offset = if rule.disable_rh_fix {
+        rapier3d::math::Pose::IDENTITY
+    } else {
+        to_rapier(VehiclePose {
+            position: rule.right_hand_position,
+            rotation: rule.right_hand_rotation,
+        })
+    };
+    let expected = hand * offset * to_rapier(item.local_pose).inverse();
+    let body = &run.physics.rapier().bodies[item.body.unwrap()];
+    assert!(
+        (body.position().translation - expected.translation).length() < 0.0001,
+        "completed hand position"
+    );
+    assert!(
+        body.position().rotation.dot(expected.rotation).abs() > 0.99999,
+        "completed hand rotation"
+    );
+    assert!(
+        (to_rapier(item.pose).translation - (hand * offset).translation).length() < 0.0001,
+        "published item hand position"
+    );
+    assert!(body.is_kinematic());
+    assert!(body.is_enabled());
+    assert!(
+        body.colliders()
+            .iter()
+            .all(|handle| !run.physics.rapier().colliders[*handle].is_enabled())
+    );
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_save_independent_equipment_and_both_owners() {
+    use crate::{
+        interaction::items::ItemLocation,
+        inventory::InventoryCommand,
+        save::{CameraSave, InstanceId, ItemLocationSave},
+        simulation::{FrameInput, keys},
+    };
+    let reference = reference();
+    let stamp = roadside_stamp(&reference);
+    let mut run = g08_ready(&reference);
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    let tool = reference.conditions.sprays[0].item;
+    let carry = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    g08_pickup(&mut run, oil);
+    assert!(
+        run.area
+            .apply_inventory_command(InventoryCommand::Select(1), &reference, &mut run.physics)
+            .unwrap()
+    );
+    g08_pickup(&mut run, tool);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    // Slot membership is optional for equipment. Pickup registers a different carry.
+    run.area.inventory.forget(tool);
+    g08_pickup(&mut run, carry);
+    let initial_quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(tool)
+        .unwrap()
+        .quantity
+        .unwrap();
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.04,
+    );
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.04,
+    );
+    let quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(tool)
+        .unwrap()
+        .quantity
+        .unwrap();
+    assert!(quantity < initial_quantity);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    let tool_instance = InstanceId::initial(
+        &reference
+            .items
+            .iter()
+            .find(|i| i.id == tool)
+            .unwrap()
+            .source,
+    );
+    let carry_instance = saved.player.carry.as_ref().unwrap().item.clone();
+    assert_eq!(saved.inventory.equipped.as_ref(), Some(&tool_instance));
+    assert_eq!(
+        saved.inventory.slots[saved.inventory.selected as usize].as_ref(),
+        Some(&carry_instance)
+    );
+    assert!(!saved.inventory.slots.contains(&Some(tool_instance.clone())));
+    let members: std::collections::HashSet<_> = saved.inventory.slots.iter().flatten().collect();
+    assert_eq!(
+        members.len(),
+        saved.inventory.slots.iter().flatten().count()
+    );
+    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(loaded.restore_pending());
+    prepare_ready(&mut loaded, &reference);
+    assert!(loaded.stream.required_ready());
+    assert!(loaded.advance_saved_restore(&reference).unwrap());
+    assert!(!loaded.restore_pending());
+    assert_eq!(loaded.area.interaction.equipment.item(), Some(tool));
+    assert_eq!(loaded.area.interaction.held(), Some(carry));
+    assert_eq!(loaded.area.inventory.slots, run.area.inventory.slots);
+    assert_eq!(
+        loaded.area.items.get(tool).unwrap().location,
+        ItemLocation::Equipped
+    );
+    assert_eq!(
+        loaded.area.items.get(carry).unwrap().location,
+        ItemLocation::Held
+    );
+    assert_eq!(
+        loaded.area.items.get(oil).unwrap().location,
+        ItemLocation::Stored(0)
+    );
+    assert!(
+        !loaded.physics.rapier().bodies[loaded.area.items.get(oil).unwrap().body.unwrap()]
+            .is_enabled()
+    );
+    assert_eq!(
+        loaded.area.interaction.cleaning.get(tool).unwrap().quantity,
+        Some(quantity)
+    );
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .quantities_liters,
+        run.area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture
+            .quantities_liters
+    );
+    g08_assert_equipment_pose(&loaded, &reference, tool);
+    let recaptured = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:01Z",
+        )
+        .unwrap();
+    assert_eq!(recaptured.inventory, saved.inventory);
+    assert_eq!(
+        recaptured.player.carry.as_ref().unwrap().item,
+        carry_instance
+    );
+    assert_eq!(recaptured.conditions.tools, saved.conditions.tools);
+    for id in [oil, tool, carry] {
+        let instance =
+            InstanceId::initial(&reference.items.iter().find(|i| i.id == id).unwrap().source);
+        let before = saved.items.iter().find(|i| i.instance == instance).unwrap();
+        let after = recaptured
+            .items
+            .iter()
+            .find(|i| i.instance == instance)
+            .unwrap();
+        assert_eq!(before.instance, after.instance);
+        assert_eq!(before.location, after.location);
+        assert_eq!(before.fluids, after.fluids);
+    }
+    let mut invalid = saved.clone();
+    invalid.inventory.equipped = Some(carry_instance.clone());
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "shared carry and equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid.inventory.slots[2] = invalid.inventory.slots[0].clone();
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "duplicate membership"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .location = ItemLocationSave::Attached {
+        owner: carry_instance,
+    };
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "attached equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .removed = true;
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "removed equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .location = ItemLocationSave::World;
+    let oil_instance =
+        InstanceId::initial(&reference.items.iter().find(|i| i.id == oil).unwrap().source);
+    invalid.inventory.slots[0] = None;
+    invalid.inventory.equipped = Some(oil_instance.clone());
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == oil_instance)
+        .unwrap()
+        .location = ItemLocationSave::Equipped;
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "ineligible equipment"
+    );
+
+    // Save a pressed Tab while the tool is carried. Its old release cannot equip after load.
+    loaded
+        .area
+        .interaction
+        .drop_held(&mut loaded.area.items, &mut loaded.physics);
+    loaded.area.sync_inventory();
+    assert!(loaded.area.release_equipped(&mut loaded.physics).unwrap());
+    loaded.paused = false;
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    };
+    g08_frame(&mut loaded, &reference, down, 0.02);
+    assert_eq!(loaded.area.interaction.held(), Some(tool));
+    let pressed_save = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:02Z",
+        )
+        .unwrap();
+    let mut after_load = GarageRuntime::from_save(&reference, &stamp, &pressed_save).unwrap();
+    prepare_ready(&mut after_load, &reference);
+    assert!(after_load.advance_saved_restore(&reference).unwrap());
+    after_load.paused = false;
+    g08_frame(&mut after_load, &reference, up, 0.02);
+    assert_eq!(after_load.area.interaction.held(), Some(tool));
+    assert_eq!(after_load.area.interaction.equipment.item(), None);
+    g08_frame(&mut after_load, &reference, down, 0.02);
+    g08_frame(&mut after_load, &reference, up, 0.02);
+    assert_eq!(after_load.area.interaction.equipment.item(), Some(tool));
 }

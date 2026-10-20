@@ -677,8 +677,7 @@ impl SaveSnapshot {
         if let Some(instance @ InstanceId::Generated { .. }) = &saved.equipped {
             let state = generated_state(instance)?;
             links(
-                saved.slots[saved.selected as usize].as_ref() == Some(instance)
-                    && !state.held
+                !state.held
                     && self
                         .player
                         .carry
