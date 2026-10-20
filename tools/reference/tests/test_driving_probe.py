@@ -9,12 +9,13 @@ from unittest.mock import patch
 from tools.reference.driving_probe import preflight, capture, verify, validate_run, observer_revision
 from tools.reference.library.archive import sha256
 from tools.reference.driving_geometry import validate_geometry, physical_inputs
+from tools.reference.tests.test_driving_driver import driver_fixture
 
 
 class DrivingProbeTests(unittest.TestCase):
     def test_geometry_helper_provenance(self):
         revision = observer_revision()
-        for name in ('driving_geometry.cs', 'driving_geometry.py'):
+        for name in ('driving_geometry.cs', 'driving_geometry.py', 'driving_driver.cs', 'driving_driver.py'):
             self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
 
     def test_native_helper_restoration_and_physical_readiness(self):
@@ -207,6 +208,9 @@ class DrivingProbeTests(unittest.TestCase):
                            for phase in phases]
         for sample in run['samples']:
             sample['native_wheels'] = [{'sprung_mass_available': True} for _ in range(5)]
+        driver = driver_fixture()
+        run['initial'].update(driver.pop('initial'))
+        run.update(driver)
         return run
 
     @staticmethod
@@ -293,7 +297,8 @@ class DrivingProbeTests(unittest.TestCase):
             definitions = project / 'scenarios.json'
             row = dict(self.scenario(), source_objects={}, setup={}, frame_schedule={})
             definitions.write_text(json.dumps({'scenarios': [row]}))
-            setup = {'engine_rpm': 0., 'engine_temperature': 0., 'random_state': 'canonical-before-solve'}
+            setup = {'engine_rpm': 0., 'engine_temperature': 0., 'random_state': 'canonical-before-solve',
+                     'driver_input': driver_fixture()['driver']['input']}
             observed = dict(setup, engine_temperature=1.)
             launched = []
             def native(arguments, **kwargs):
@@ -338,7 +343,7 @@ class DrivingProbeTests(unittest.TestCase):
                         directory = Path(arguments[arguments.index('-RunRoot') + 1])
                         launched.append(directory)
                         run = self.sample_run()
-                        run['setup_state'] = {'canonical': True}
+                        run['setup_state']['canonical'] = True
                         if corruption == 'readiness': run['lada_ready'] = False
                         if corruption == 'initial' and len(launched) == 2: run['initial']['engine_rpm'] = 1.
                         for path in (evidence / 'launch-default/repeat-1').iterdir():

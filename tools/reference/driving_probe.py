@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
+from .driving_driver import validate_driver
 from .driving_geometry import source_geometry_map, validate_geometry, physical_inputs
 from .export import native_engine_evidence
 from .library.archive import load_snapshot, verify_snapshot, sha256
@@ -15,7 +16,7 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_probe.py', 'driving_capture.cs', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+FILES = ('driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
@@ -223,6 +224,7 @@ def validate_run(run, scenario):
 def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) -> dict:
     result = validate_run(run, scenario)
     result['geometry'] = validate_geometry(run)
+    result['driver'] = validate_driver(run)
     marker = read_json(directory / 'completion.json')
     process = read_json(directory / 'process.json')
     exit_status = read_json(directory / 'exit.json')

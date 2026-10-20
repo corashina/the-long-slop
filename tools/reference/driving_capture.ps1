@@ -59,6 +59,7 @@ Get-ChildItem -LiteralPath $sourceManaged -Filter '*.dll' | ForEach-Object {$ref
 $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_driver.cs'))))
 $options=[Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
 $options=$options.WithDeterministic($true).WithOptimizationLevel([Microsoft.CodeAnalysis.OptimizationLevel]::Release)
 $compilation=[Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create('G11Capture',$trees,$references,$options)
@@ -173,6 +174,9 @@ foreach($point in @($method.Body.Instructions | Where-Object {$_.OpCode.Code -eq
 }
 $changes.Add('Observe mountStuff.StartFreeze actual terminal MoveNext false; original yields, QuickFreeze calls, return value, and scheduling retained')
 
+Observe 'fpscontroller' 'GetIn' 'driver.get-in.exit' $false
+Observe 'fpscontroller' 'Update' 'driver.update.entry' $true
+Observe 'fpscontroller' 'Update' 'driver.update.exit' $false
 Observe 'mainscript' 'FStart' 'world.entry' $true
 Observe 'mainscript' 'FStart' 'world.exit' $false
 Observe 'mainscript' 'SettingsRefreshed' 'settings.entry' $true

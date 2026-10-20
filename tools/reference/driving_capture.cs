@@ -64,6 +64,8 @@ public sealed class G11Capture : MonoBehaviour
     {
         public string phase;
         public int sequence, step, frame, input_sequence, car_sequence, engine_sequence, rpm_sequence;
+        public float player_stored_dt,player_consumed_dt;
+        public int player_update_sequence;
         public float time, realtime, delta_time, fixed_dt, rpm, average_rpm, clutch, throttle, brake, handbrake;
         public float engine_output_nm, engine_brake_nm;
         public int gear, installed_driven_rims, torque_divisor;
@@ -139,6 +141,7 @@ public sealed class G11Capture : MonoBehaviour
         public AssemblySetup assembly_setup;
         public AssemblyIdentity assembly_identity;
         public PoseInput input_pose, spawn_pose;
+        public G11Driver.Input driver_input;
         public WheelParameters[] wheels;
     }
     [Serializable] public class SetupBoundary
@@ -165,14 +168,14 @@ public sealed class G11Capture : MonoBehaviour
         public List<G11Geometry.Snapshot> geometry=G11Geometry.snapshots;
         public List<Curve> curves=new List<Curve>();
         public List<string> setup_changes=new List<string>();
+        public G11Driver.Report driver=G11Driver.report;
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
     static readonly HashSet<mountStuff> completedStorage=new HashSet<mountStuff>();
     static AssemblyIdentity assemblyIdentity;
-    static bool pendingArm;
+    static bool pendingArm,pendingDriver;
     static string preparedGeometry;
-    static int armAfterFrame;
     static G11Capture instance;
     static Scenario scenario;
     static readonly Result result=new Result();
@@ -184,6 +187,7 @@ public sealed class G11Capture : MonoBehaviour
     static PoseInput inputPose, spawnPose;
     static Sample[] buffer;
     static int observedPhysicsStep;
+    static int controlRevision;
     static int used, sequence, step, startFrame, lastInput, lastEngine, lastCar, lastRpm;
     static bool active, finished, sourceContactAvailable;
     static WheelHit sourceContact;
@@ -279,7 +283,11 @@ public sealed class G11Capture : MonoBehaviour
                 instance.StartCoroutine(instance.Initialize((mainscript)owner));
                 return;
             }
-            if(!active || finished) return;
+            if(finished) return;
+            if(phase.StartsWith("driver.",StringComparison.Ordinal))
+            { G11Driver.Observe(owner,phase,observedPhysicsStep);return; }
+            if(phase=="input.exit") controlRevision++;
+            if(!active) return;
             if(owner is carscript && owner!=car) return;
             if(owner is enginescript && owner!=car.Engine) return;
             if(startFrame<0) startFrame=Time.frameCount;
@@ -343,6 +351,7 @@ public sealed class G11Capture : MonoBehaviour
             ApplySetup(main);
             foreach(var graphic in car.GetComponentsInChildren<wheelgraphicsscript>()) graphic.WheelSize();
             driverSeat=car.GetComponentsInChildren<seatscript>().Single(seat=>seat.driverSeat0 && seat.Car==car);
+            G11Driver.Retain(main.player,car,driverSeat);
             main.player.GetIn(driverSeat);
             if(!car.driving || !car.isPlayerDriving || main.player.Car!=car || driverSeat.Car!=car)
                 throw new InvalidOperationException("Original authored Lada driver ownership failed");
@@ -362,23 +371,29 @@ public sealed class G11Capture : MonoBehaviour
                 if(scenario.setup.height=="wheels-clear") body.position+=Vector3.up*(wheels[0].radius*4+wheels[0].suspensionDistance);
                 inputPose=new PoseInput{position=body.transform.position,rotation=body.transform.rotation};
             }
-            // The first repeat records pre-solve inputs and applies the same path as every later repeat.
-            result.prepared_assembly=DescribeAssembly(car);
-            result.observed_before_canonical=InitialState();
-            result.setup_state=scenario.has_setup_state?scenario.setup_state:result.observed_before_canonical;
-            result.setup_state.profile_path=null;
-            if(!Physics.autoSimulation) throw new InvalidOperationException("Original native auto simulation is inactive");
-            CaptureCurves();
-            buffer=new Sample[(scenario.duration_frames+1)*256];
-            for(int index=0;index<buffer.Length;index++)
-            { buffer[index].wheels=new Wheel[4];buffer[index].native_wheels=new G11Geometry.NativeWheel[G11Geometry.nativeWheels.Length]; }
-            armAfterFrame=Time.frameCount+1;
-            pendingArm=true;
-            RecordSetupBoundary("prepared-held");
-            preparedGeometry=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]);
-            result.setup_changes.Add("Hold fresh body and wheels through the next source frame backlog; switch dynamic and apply canonical state at LateUpdate before arming");
+            pendingDriver=true;
+            result.setup_changes.Add("Retain the original driver Rigidbody and its exact attached collider transfer set before original GetIn; observe native destruction and source Update exits separately");
+            result.setup_changes.Add("Observer setup once: Tb/Th/THeadDir/THeadBob/THeadLean/TdefStandPos/TStandHeadPos/TProneHeadPos localPosition/localRotation/localScale; target positions derive from source TdefStandPos; FxRot/FyRot/dt/duckValue/Bduck/lastDucked/standLean/PRBV/parentRigidbody; anim.VCarV/VHeadV/VHeadBob authored zeros; LOOKX/LOOKY/scroll and input lookX/lookY/scroll/lean/leanDown/leanUp/recenter/recenterDown/recenterUp/keyLooking/duck/duckDown/duckUp neutral; source Update owns physical shapes, look point and piss pose");
+
         }
         catch(Exception error) { Fail(error); }
+    }
+    static void PrepareHeld()
+    {
+        // Record pre-solve inputs after the real source seated Update completes.
+        result.prepared_assembly=DescribeAssembly(car);
+        result.observed_before_canonical=InitialState();
+        result.setup_state=scenario.has_setup_state?scenario.setup_state:result.observed_before_canonical;
+        result.setup_state.profile_path=null;
+        if(!Physics.autoSimulation) throw new InvalidOperationException("Original native auto simulation is inactive");
+        CaptureCurves();
+        buffer=new Sample[(scenario.duration_frames+1)*256];
+        for(int index=0;index<buffer.Length;index++)
+        { buffer[index].wheels=new Wheel[4];buffer[index].native_wheels=new G11Geometry.NativeWheel[G11Geometry.nativeWheels.Length]; }
+        RecordSetupBoundary("prepared-held");
+        preparedGeometry=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]);
+        G11Driver.Prepared();pendingDriver=false;pendingArm=true;
+        result.setup_changes.Add("Require unchanged strict physical geometry across the next completed original seated Update while held; retain normal callbacks and apply no driver correction after arming");
     }
     static bool SourceAssemblyReady(carscript target)
     {
@@ -604,7 +619,7 @@ public sealed class G11Capture : MonoBehaviour
         return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
-            setup_json=JsonUtility.ToJson(scenario.setup), input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            setup_json=JsonUtility.ToJson(scenario.setup), driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
             inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,
@@ -783,6 +798,8 @@ public sealed class G11Capture : MonoBehaviour
             catch(Exception error) { Fail(error); }
         }
     }
+    public static int InputRevision { get { return controlRevision; } }
+    public static int ObservedPhysicsStep { get { return observedPhysicsStep; } }
     public static Rigidbody ObservedBody { get { return body; } }
     public static void SetSourceActive(GameObject target,bool value,string caller) { G11Geometry.SetActive(target,value,caller); }
     public static void SetColliderEnabled(Collider collider,bool value) { G11Geometry.SetEnabled(collider,value); }
@@ -791,9 +808,13 @@ public sealed class G11Capture : MonoBehaviour
         try { if(!finished) G11Geometry.LockBoundary((mountStuff)owner,(pickupable)cargo,phase,observedPhysicsStep,completedStorage); }
         catch(Exception error) { Fail(error); }
     }
+    public static void CaptureDriverRejection(string callback)
+    {
+        G11Geometry.Capture("driver-readiness-rejected",observedPhysicsStep,callback,completedStorage);
+    }
     static void RecordSetupBoundary(string phase)
     {
-        var geometry=G11Geometry.Capture(phase,observedPhysicsStep,phase=="prepared-held"?"observer.Initialize":"observer.LateUpdate",completedStorage);
+        var geometry=G11Geometry.Capture(phase,observedPhysicsStep,"observer.LateUpdate",completedStorage);
         if(!geometry.complete) throw new InvalidOperationException("Incomplete discovered physical geometry: "+String.Join("; ",geometry.unavailable));
         result.setup_boundaries.Add(new SetupBoundary{phase=phase,frame=Time.frameCount,time=Time.time,
             fixed_time=Time.fixedTime,delta_time=Time.deltaTime,kinematic=body.isKinematic,
@@ -801,11 +822,22 @@ public sealed class G11Capture : MonoBehaviour
     }
     void LateUpdate()
     {
-        if(pendingArm && !finished && Time.frameCount>=armAfterFrame)
+        if(pendingDriver && !finished)
+        {
+            try
+            {
+                if(scenario.has_setup_state && scenario.setup_state.driver_input==null)
+                    throw new InvalidOperationException("Canonical source driver input is missing");
+                if(G11Driver.Tick(scenario.has_setup_state?scenario.setup_state.driver_input:null,observedPhysicsStep)) PrepareHeld();
+            }
+            catch(Exception error) { Fail(error); }
+        }
+        if(pendingArm && !finished && G11Driver.NextUpdateCompleted)
         {
             pendingArm=false;
             try
             {
+                G11Driver.RequireHeld();
                 RecordSetupBoundary("backlog-drained-held");
                 if(preparedGeometry!=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]))
                     throw new InvalidOperationException("Physical shape inputs changed across prepared-held and backlog-drained-held");
@@ -828,6 +860,7 @@ public sealed class G11Capture : MonoBehaviour
                     surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
                 result.initial=InitialState();
                 RecordSetupBoundary("armed-after-canonical");
+                G11Driver.Arm();
                 startFrame=-1;
                 active=true;
                 StartCoroutine(AfterPhysics());
@@ -850,6 +883,7 @@ public sealed class G11Capture : MonoBehaviour
         if(used>=buffer.Length) throw new InvalidOperationException("Native sample buffer exhausted");
         var sample=buffer[used];
         sample.phase=phase; sample.sequence=++sequence; sample.step=step; sample.frame=Time.frameCount-startFrame;
+        sample.player_stored_dt=G11Driver.StoredDt;sample.player_consumed_dt=G11Driver.ConsumedDt;sample.player_update_sequence=G11Driver.UpdateSequence;
         sample.time=Time.time; sample.realtime=Time.realtimeSinceStartup; sample.delta_time=Time.deltaTime;
         sample.fixed_dt=Time.fixedDeltaTime; sample.input_sequence=lastInput; sample.car_sequence=lastCar;
         sample.engine_sequence=lastEngine; sample.rpm_sequence=lastRpm;
