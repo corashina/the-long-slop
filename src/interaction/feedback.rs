@@ -152,7 +152,7 @@ impl InteractionState {
             a.item = Some(id);
         }
         if let Some(held) = self.held() {
-            a.actions.0 |= ActionMask::DROP | ActionMask::THROW;
+            a.actions.0 |= ActionMask::DROP | ActionMask::THROW | ActionMask::ROTATE;
             if items
                 .get(held)
                 .is_some_and(|item| item.food.is_some() && !item.removed)
@@ -177,9 +177,6 @@ impl InteractionState {
             if self.held_controls.contains_key(&held) {
                 a.actions.0 |= ActionMask::HELD_SWITCH;
                 a.context = FeedbackContext::LightSwitch;
-            }
-            if self.carry.allows_held_rotation() {
-                a.actions.0 |= ActionMask::ROTATE;
             }
         }
         if let Some(t) = use_target {

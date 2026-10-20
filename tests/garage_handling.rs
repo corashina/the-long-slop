@@ -520,3 +520,660 @@ fn action_priority_and_input_ownership() {
     );
     assert_eq!(before.rotation, after.rotation);
 }
+
+fn place_for_carry(
+    run: &mut GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+) -> ResolvedAim {
+    let view = run.area.player.view_pose(&run.physics);
+    let state = run.area.items.get(item).unwrap();
+    let body = state.body.unwrap();
+    let desired =
+        Vector::from_array(view.position) + Rotation::from_array(view.rotation) * -Vector::Z;
+    let shift = desired - Vector::from_array(state.pose.position);
+    run.physics.edit_body(body, |body| {
+        body.set_translation(body.translation() + shift, true);
+        body.set_linvel(Vector::ZERO, true);
+    });
+    run.physics.recompute_body_mass(body);
+    run.area.items.sync_poses(&run.physics);
+    run.physics.refresh_queries();
+    let collider = run.physics.rapier().bodies[body].colliders()[0];
+    ResolvedAim {
+        grab_target: Some(AimTarget {
+            item,
+            collider,
+            distance: 1.,
+            point: desired.to_array(),
+            slot: None,
+        }),
+        ..Default::default()
+    }
+}
+fn acquire(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
+    let aim = place_for_carry(run, item);
+    let out = step_input(
+        run,
+        FrameInput {
+            held: keys::GRAB,
+            pressed: keys::GRAB,
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Pickup(item)));
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(item),
+        "same-frame F release retains acquisition"
+    );
+    let out = step_input(
+        run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    assert_eq!(out.action, None);
+    assert_eq!(run.area.interaction.held(), Some(item));
+}
+fn anchor_handle(
+    run: &GarageRuntime,
+    item: my_summer_slop::reference::ItemId,
+) -> rapier3d::prelude::RigidBodyHandle {
+    let body = run.area.items.get(item).unwrap().body.unwrap();
+    run.physics
+        .rapier()
+        .impulse_joints
+        .iter()
+        .find_map(|(_, joint)| {
+            (joint.body2() == body && run.physics.rapier().bodies[joint.body1()].is_kinematic())
+                .then_some(joint.body1())
+        })
+        .unwrap()
+}
+fn near_rotation(actual: Rotation, expected: Rotation) {
+    assert!(
+        actual.dot(expected).abs() > 0.99999,
+        "{actual:?} != {expected:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_release_and_pose_follow_source() {
+    use my_summer_slop::interaction::items::ItemLocation;
+    let (reference, mut run) = source_scene();
+    // Keep collision-free release assertions separate from the collision case below.
+    run.area.player.rebase([0., -50., 0.]);
+    let item = reference
+        .items
+        .iter()
+        .find(|i| i.name == "Kolbasz")
+        .unwrap()
+        .id;
+    let body = run.area.items.get(item).unwrap().body.unwrap();
+    let blocked = ResolvedAim {
+        installation_block: Some(InteractionBlock::Incompatible),
+        ..Default::default()
+    };
+    for _ in 0..3 {
+        acquire(&mut run, item);
+        let available = run.area.interaction.available_actions(
+            &blocked,
+            &run.area.player,
+            &run.area.items,
+            &run.physics,
+            run.survival.output(),
+        );
+        assert_ne!(available.actions.0 & ActionMask::DROP, 0);
+        assert_ne!(available.actions.0 & ActionMask::THROW, 0);
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: keys::GRAB,
+                ..Default::default()
+            },
+            blocked,
+        );
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                released: keys::GRAB,
+                ..Default::default()
+            },
+            blocked,
+        );
+        assert_eq!(out.action, Some(InteractionAction::Drop(item)));
+        assert_eq!(run.area.items.get(item).unwrap().body, Some(body));
+        assert_eq!(
+            run.area.items.get(item).unwrap().location,
+            ItemLocation::World
+        );
+    }
+    acquire(&mut run, item);
+    let mut maximum = 0f32;
+    let mut previous = 0f32;
+    let mut fell = false;
+    for frame in 0..100 {
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: if frame == 0 { keys::GRAB } else { 0 },
+                ..Default::default()
+            },
+            blocked,
+        );
+        let charge = run.area.interaction.throw_charge();
+        maximum = maximum.max(charge);
+        fell |= charge < previous;
+        previous = charge;
+    }
+    assert!(maximum >= 1. && fell);
+    assert!(previous <= reference.player.throw_minimum);
+    let outcome = step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        blocked,
+    );
+    assert_eq!(outcome.action, None);
+    assert_eq!(run.area.interaction.held(), Some(item));
+    // Neutral re-arms a new gesture after the canceled falling cycle.
+    step_input(&mut run, FrameInput::default(), blocked);
+    for frame in 0..12 {
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::GRAB,
+                pressed: if frame == 0 { keys::GRAB } else { 0 },
+                ..Default::default()
+            },
+            blocked,
+        );
+    }
+    let velocity = Vector::new(2., 3., 4.);
+    run.physics
+        .edit_body(body, |body| body.set_linvel(velocity, true));
+    let charge = run.area.interaction.throw_charge();
+    let direction =
+        Rotation::from_array(run.area.player.view_pose(&run.physics).rotation) * -Vector::Z;
+    let mass = run.physics.rapier().bodies[body].mass();
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        blocked,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Throw(item)));
+    let expected = velocity
+        + direction
+            * charge
+            * reference.player.throw_multiplier
+            * reference.player.source_force_interval
+            / mass;
+    assert!(
+        (run.physics.rapier().bodies[body].linvel() - expected).length() < 0.001,
+        "actual {:?}, expected {expected:?}, mass {mass}, charge {charge}",
+        run.physics.rapier().bodies[body].linvel()
+    );
+    acquire(&mut run, item);
+    let target = *run.physics.rapier().bodies[anchor_handle(&run, item)].next_position();
+    // The source comparison includes equality at the authored drop distance.
+    run.physics.edit_body(body, |body| {
+        body.set_translation(
+            target.translation + Vector::X * reference.player.carry_drop_distance,
+            true,
+        )
+    });
+    let out = step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    assert_eq!(out.action, Some(InteractionAction::Drop(item)));
+    assert_eq!(
+        run.area.items.get(item).unwrap().location,
+        ItemLocation::World
+    );
+    acquire(&mut run, item);
+    let anchor = anchor_handle(&run, item);
+    let collider = run.physics.rapier().bodies[body].colliders()[0];
+    let shape = &run.physics.rapier().colliders[collider];
+    let groups = shape.collision_groups();
+    let bounds = shape.compute_aabb();
+    let view = Rotation::from_array(run.area.player.view_pose(&run.physics).rotation);
+    let right = view * Vector::X;
+    let center = bounds.center() + right * (bounds.half_extents().dot(right.abs()) + 0.04);
+    let wall = run.physics.insert_collider(
+        rapier3d::prelude::ColliderBuilder::cuboid(0.005, 2., 2.)
+            .translation(center)
+            .rotation(view.to_scaled_axis())
+            .collision_groups(groups),
+    );
+    run.physics.refresh_queries();
+    let current = *run.physics.rapier().bodies[body].position();
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::TRANSLATE,
+            mouse: [100., 0.],
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let desired = *run.physics.rapier().bodies[anchor].next_position();
+    let shift = (desired.translation - current.translation).dot(right);
+    assert!(
+        shift > 0. && shift < 0.04,
+        "wall must constrain carry translation: {shift}"
+    );
+    let shape = &run.physics.rapier().colliders[collider];
+    let wall = &run.physics.rapier().colliders[wall];
+    let local = shape.position_wrt_parent().copied().unwrap();
+    assert!(
+        !rapier3d::parry::query::intersection_test(
+            &(desired * local),
+            shape.shape(),
+            wall.position(),
+            wall.shape()
+        )
+        .unwrap()
+        .intersecting
+    );
+    assert_eq!(shape.collision_groups(), groups);
+    assert!(shape.is_enabled());
+    assert!(run.physics.rapier().bodies[body].is_ccd_enabled());
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_pose_uses_source_frames_and_gestures() {
+    use my_summer_slop::{reference::ItemId, save::IdentityMap};
+    let (reference, mut run) = source_scene();
+    run.area.player.rebase([0., -50., 0.]);
+    let ids = IdentityMap::new(&reference).unwrap();
+    let item = ItemId(120);
+    assert_eq!(
+        reference.items.iter().find(|i| i.id == item).unwrap().name,
+        "OilCan"
+    );
+    acquire(&mut run, item);
+    let anchor = anchor_handle(&run, item);
+    let before = run.physics.rapier().bodies[anchor].next_position().rotation;
+    let available = run.area.interaction.available_actions(
+        &ResolvedAim::default(),
+        &run.area.player,
+        &run.area.items,
+        &run.physics,
+        run.survival.output(),
+    );
+
+    run.area.player.step(
+        FrameInput {
+            mouse: [0., 12.],
+            ..Default::default()
+        },
+        &mut run.physics,
+        FIXED_DT,
+    );
+    step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    near_rotation(
+        run.physics.rapier().bodies[anchor].next_position().rotation,
+        before,
+    );
+    assert_ne!(
+        available.actions.0 & ActionMask::ROTATE,
+        0,
+        "noRot still permits manual rotation"
+    );
+    let root_before = Rotation::from_array(run.area.player.body_pose(&run.physics).rotation);
+    run.area.player.follow_push_grip(8.);
+    let root_after = Rotation::from_array(run.area.player.body_pose(&run.physics).rotation);
+    step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    near_rotation(
+        run.physics.rapier().bodies[anchor].next_position().rotation,
+        root_after * root_before.inverse() * before,
+    );
+    // Manual rotations use head axes, even when the stored frame is the Player root.
+    let body = run.area.items.get(item).unwrap().body.unwrap();
+    let mass = run.physics.rapier().bodies[body].mass();
+    let gain = ((mass - reference.player.carry_max_weight * 2.)
+        / (reference.player.carry_min_weight - reference.player.carry_max_weight * 2.))
+        .clamp(0., 1.);
+    let angle = (FIXED_DT * 10. * reference.player.obj_rotation_sensitivity * gain).to_radians();
+    for (buttons, mouse, axis, sign) in [
+        (keys::ROTATE, [1., 0.], Vector::Y, 1.),
+        (keys::ROTATE, [0., 1.], Vector::X, 1.),
+        (keys::ROTATE | keys::TRANSLATE, [1., 0.], Vector::Z, -1.),
+    ] {
+        let before = run
+            .area
+            .interaction
+            .capture_carry_save(&ids)
+            .unwrap()
+            .unwrap();
+        let rotation_before = run.physics.rapier().bodies[anchor].next_position().rotation;
+        let view = Rotation::from_array(run.area.player.view_pose(&run.physics).rotation);
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: buttons,
+                mouse,
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        let after = run
+            .area
+            .interaction
+            .capture_carry_save(&ids)
+            .unwrap()
+            .unwrap();
+        assert_eq!(out.look_mouse, [0.; 2]);
+        assert_eq!(after.offset, before.offset, "MMB wins over RMB translation");
+        near_rotation(
+            run.physics.rapier().bodies[anchor].next_position().rotation,
+            Rotation::from_axis_angle(view * axis, angle * sign) * rotation_before,
+        );
+    }
+    let before = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::TRANSLATE,
+            mouse: [1., -1.],
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let after = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    assert_ne!(after.offset, before.offset);
+    assert_eq!(after.rotation, before.rotation);
+    // The authored radius bounds all distance and translation input.
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::TRANSLATE,
+            mouse: [10000., -10000.],
+            wheel: 10000.,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let saved = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    assert!(
+        (Vector::from_array(saved.offset).length() - reference.player.carry_offset_radius).abs()
+            < 0.0001
+    );
+    // Recenter uses the view pose and preserves the existing offset formula.
+    step_input(
+        &mut run,
+        FrameInput {
+            held: keys::RECENTER,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    let recentered = run
+        .area
+        .interaction
+        .capture_carry_save(&ids)
+        .unwrap()
+        .unwrap();
+    let rule = reference
+        .items
+        .iter()
+        .find(|i| i.id == item)
+        .unwrap()
+        .pickup
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        recentered.offset,
+        (Vector::from_array(reference.player.carry_anchor_offset) * rule.recenter_distance)
+            .to_array()
+    );
+    let grip = Rotation::from_array(recentered.local_grip.rotation);
+    let view = Rotation::from_array(run.area.player.view_pose(&run.physics).rotation);
+    near_rotation(
+        run.physics.rapier().bodies[anchor].next_position().rotation,
+        view * grip.inverse(),
+    );
+    run.area
+        .interaction
+        .drop_held(&mut run.area.items, &mut run.physics);
+    let ordinary = reference
+        .items
+        .iter()
+        .find(|i| i.name == "Kolbasz")
+        .unwrap()
+        .id;
+    acquire(&mut run, ordinary);
+    let ordinary_anchor = anchor_handle(&run, ordinary);
+    let before = run.physics.rapier().bodies[ordinary_anchor]
+        .next_position()
+        .rotation;
+    let view_before = Rotation::from_array(run.area.player.view_pose(&run.physics).rotation);
+    run.area.player.step(
+        FrameInput {
+            mouse: [0., 5.],
+            ..Default::default()
+        },
+        &mut run.physics,
+        FIXED_DT,
+    );
+    let view_after = Rotation::from_array(run.area.player.view_pose(&run.physics).rotation);
+    step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+    near_rotation(
+        run.physics.rapier().bodies[ordinary_anchor]
+            .next_position()
+            .rotation,
+        view_after * view_before.inverse() * before,
+    );
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_release_shares_tuning_input() {
+    let (reference, mut run) = source_scene();
+    run.area.player.rebase([0., -50., 0.]);
+    let item = reference
+        .items
+        .iter()
+        .find(|i| i.name == "Kolbasz")
+        .unwrap()
+        .id;
+    acquire(&mut run, item);
+    let opening = reference.openings.iter().find(|o| o.can_tune).unwrap();
+    let cap = opening.cap;
+    let tune_mouse = [
+        0.,
+        if run.area.interaction.opening_valve(opening.id) < 0.5 {
+            0.2
+        } else {
+            -0.2
+        },
+    ];
+    let binding = reference
+        .action_bindings
+        .iter()
+        .find(|b| b.use_owner == Some(cap))
+        .unwrap();
+    let collider = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find(|(_, c)| (c.user_data >> 64) as u32 == binding.collider.0)
+        .unwrap()
+        .0;
+    let aim = ResolvedAim {
+        use_target: Some(AimTarget {
+            item: cap,
+            collider,
+            distance: 1.,
+            point: [0.; 3],
+            slot: None,
+        }),
+        ..Default::default()
+    };
+    for frame in 0..12 {
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                held: keys::USE | keys::GRAB,
+                pressed: if frame == 0 { keys::GRAB } else { 0 },
+                mouse: tune_mouse,
+                ..Default::default()
+            },
+            aim,
+        );
+        assert!(matches!(out.action, Some(InteractionAction::Cap(_))));
+        assert_eq!(out.look_mouse, [0.; 2]);
+    }
+    assert!(
+        run.area.interaction.throw_charge() > reference.player.throw_minimum,
+        "tuning must not consume the distinct F gesture"
+    );
+    while run.area.interaction.pop_sound().is_some() {}
+    let valve_before = run.area.interaction.opening_valve(opening.id);
+    let out = step_input(
+        &mut run,
+        FrameInput {
+            held: keys::USE,
+            released: keys::GRAB,
+            mouse: tune_mouse,
+            ..Default::default()
+        },
+        aim,
+    );
+    assert_eq!(out.action, Some(InteractionAction::Throw(item)));
+    assert_eq!(run.area.interaction.held(), None);
+    assert_ne!(run.area.interaction.opening_valve(opening.id), valve_before);
+    assert!(
+        matches!(run.area.interaction.pop_sound(), Some(my_summer_slop::interaction::InteractionSound::Cap { id, tune: Some(_), .. }) if id == opening.id)
+    );
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_release_preserves_held_switch() {
+    use my_summer_slop::{interaction::InteractionSound, save::IdentityMap};
+    let (reference, mut run) = source_scene();
+    run.area.player.rebase([0., -50., 0.]);
+    let item = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    if run.area.interaction.storage.stored(item) {
+        let point = run.area.items.get(item).unwrap().pose.position;
+        run.area
+            .interaction
+            .pickup_stored_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        run.area
+            .interaction
+            .drop_held(&mut run.area.items, &mut run.physics);
+    }
+    let ids = IdentityMap::new(&reference).unwrap();
+    for forced in [false, true] {
+        acquire(&mut run, item);
+        let control = run.area.interaction.held_light_control().unwrap();
+        let source = ids
+            .controllers
+            .iter()
+            .find(|(_, id)| **id == control)
+            .unwrap()
+            .0;
+        let before = run
+            .lighting
+            .capture_save(&reference.lighting, &ids)
+            .unwrap()
+            .controllers
+            .into_iter()
+            .find(|c| &c.source == source)
+            .unwrap()
+            .on;
+        if forced {
+            let anchor = anchor_handle(&run, item);
+            let target = run.physics.rapier().bodies[anchor]
+                .next_position()
+                .translation;
+            let body = run.area.items.get(item).unwrap().body.unwrap();
+            run.physics.edit_body(body, |body| {
+                body.set_translation(
+                    target + Vector::X * reference.player.carry_drop_distance,
+                    true,
+                )
+            });
+        } else {
+            step_input(
+                &mut run,
+                FrameInput {
+                    held: keys::GRAB,
+                    pressed: keys::GRAB,
+                    ..Default::default()
+                },
+                ResolvedAim::default(),
+            );
+        }
+        let out = step_input(
+            &mut run,
+            FrameInput {
+                pressed: keys::PRIMARY,
+                released: if forced { 0 } else { keys::GRAB },
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        assert_eq!(run.area.interaction.held(), None);
+        assert_eq!(out.action, Some(InteractionAction::LightControl(control)));
+        // Execute the external owner from GarageRuntime's action match.
+        if let Some(InteractionAction::LightControl(control)) = out.action {
+            run.lighting.use_control(&reference.lighting, control);
+        }
+        let after = run
+            .lighting
+            .capture_save(&reference.lighting, &ids)
+            .unwrap()
+            .controllers
+            .into_iter()
+            .find(|c| &c.source == source)
+            .unwrap()
+            .on;
+        assert_ne!(before, after);
+        assert!(
+            matches!(run.area.interaction.pop_sound(), Some(InteractionSound::Action(InteractionAction::Drop(dropped))) if dropped == item)
+        );
+        assert!(run.area.interaction.pop_sound().is_none());
+    }
+}

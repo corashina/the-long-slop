@@ -18,6 +18,7 @@ struct HeldState {
     item: ItemId,
     body: RigidBodyHandle,
     offset: Vector,
+    // Relative to the Player root for noRot, otherwise relative to the view.
     rotation: Rotation,
     joint: ImpulseJointHandle,
     local_pose: Pose,
@@ -66,6 +67,7 @@ impl CarryState {
             item,
             body,
             offset: Vector::from_array(saved.offset),
+            // Save rotation uses the same authored frame as acquisition and step.
             rotation: Rotation::from_array(saved.rotation),
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
@@ -175,6 +177,10 @@ impl CarryState {
         if !self.throwing {
             return None;
         }
+        self.throwing = false;
+        if self.charge_stopped {
+            return None;
+        }
         let charge = self.throw_charge;
         let body = self.body()?;
         let direction = to_rapier(player.view_pose(physics)).rotation * -Vector::Z;
@@ -216,10 +222,6 @@ impl CarryState {
     }
     pub fn held(&self) -> Option<ItemId> {
         self.held.as_ref().map(|held| held.item)
-    }
-    pub(super) fn allows_held_rotation(&self) -> bool {
-        self.held()
-            .is_some_and(|item| !self.rules[&item].no_rotation)
     }
     pub fn body(&self) -> Option<RigidBodyHandle> {
         self.held.as_ref().map(|held| held.body)
@@ -304,6 +306,11 @@ impl CarryState {
         let view = to_rapier(player.view_pose(physics));
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
+        let rotation_frame = if self.rules[&id].no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
         physics.edit_body(body, |body| body.enable_ccd(true));
         if self.plates.contains(&id) {
             physics.edit_body(body, |body| body.set_gravity_scale(0., true));
@@ -314,7 +321,7 @@ impl CarryState {
             offset: (view.rotation.inverse() * (item_pose.translation - view.translation)
                 - Vector::from_array(self.reference.carry_anchor_offset))
             .clamp_length_max(self.reference.carry_offset_radius),
-            rotation: view.rotation.inverse() * item_pose.rotation,
+            rotation: rotation_frame.inverse() * item_pose.rotation,
             joint,
             local_pose,
         });
@@ -342,6 +349,12 @@ impl CarryState {
         };
         let view = to_rapier(player.view_pose(physics));
         let rule = &self.rules[&held.item];
+        let rotation_frame = if rule.no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        let view_in_frame = rotation_frame.inverse() * view.rotation;
         let mass = physics.rapier().bodies[held.body].mass();
         let movement_gain = ((mass - self.reference.carry_max_weight)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight))
@@ -355,11 +368,12 @@ impl CarryState {
             } else {
                 Vector::from_array(self.reference.carry_anchor_offset) * rule.recenter_distance
             };
-            held.rotation = if rule.use_recenter_rotation {
-                Rotation::from_array(rule.recenter_rotation)
-            } else {
-                Rotation::IDENTITY
-            };
+            held.rotation = view_in_frame
+                * if rule.use_recenter_rotation {
+                    Rotation::from_array(rule.recenter_rotation)
+                } else {
+                    Rotation::IDENTITY
+                };
         } else {
             let rotating = input.held & keys::ROTATE != 0;
             let moving = input.held & keys::TRANSLATE != 0;
@@ -377,7 +391,7 @@ impl CarryState {
                     * self.reference.obj_move_sensitivity;
             }
             if input.mouse.iter().all(|delta| delta.is_finite()) {
-                if rotating && !rule.no_rotation {
+                if rotating {
                     let sensitivity =
                         dt * 10.0 * self.reference.obj_rotation_sensitivity * rotation_gain;
                     let x = input.mouse[0] * sensitivity;
@@ -386,13 +400,16 @@ impl CarryState {
                         if rule.move_with_rotation {
                             held.rotation * Rotation::from_rotation_z(-x.to_radians())
                         } else {
-                            Rotation::from_rotation_z(-x.to_radians()) * held.rotation
+                            Rotation::from_axis_angle(view_in_frame * Vector::Z, -x.to_radians())
+                                * held.rotation
                         }
                     } else {
-                        Rotation::from_rotation_y(x.to_radians()) * held.rotation
+                        Rotation::from_axis_angle(view_in_frame * Vector::Y, x.to_radians())
+                            * held.rotation
                     };
                     held.rotation = if !rule.move_with_rotation || !moving {
-                        Rotation::from_rotation_x(y.to_radians()) * rotation
+                        Rotation::from_axis_angle(view_in_frame * Vector::X, y.to_radians())
+                            * rotation
                     } else {
                         rotation
                     };
@@ -429,7 +446,7 @@ impl CarryState {
                             self.reference.carry_min_distance,
                             self.reference.carry_max_distance,
                         ),
-            view.rotation * held.rotation,
+            rotation_frame * held.rotation,
         );
         desired *= held.local_pose.inverse();
         if (desired.translation - current.translation).length()
@@ -481,5 +498,240 @@ impl CarryState {
         }
         physics.edit_body(anchor, |body| body.set_next_kinematic_position(desired));
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interaction::{
+        AimTarget, InteractionAction, ResolvedAim, SlotTarget, feedback::ActionMask,
+    };
+    use crate::simulation::FIXED_DT;
+    use crate::starting_area::GarageRuntime;
+
+    #[test]
+    #[ignore = "requires build 11140890 export"]
+    fn release_charge_boundary_is_strict() {
+        let reference = ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reference.build_id, 11140890);
+        let part = reference
+            .items
+            .iter()
+            .find(|i| i.name == "FRDoor")
+            .unwrap()
+            .id;
+        let slot = reference
+            .part_slots
+            .iter()
+            .find(|s| s.part == Some(part))
+            .unwrap()
+            .id;
+        for delta in [-0.0001, 0., 0.0001] {
+            let mut run = GarageRuntime::new(&reference).unwrap();
+            run.area
+                .interaction
+                .parts
+                .remove(part, &mut run.area.items, &mut run.physics)
+                .unwrap();
+            run.area.interaction.parts.detach_mechanism(
+                part,
+                &mut run.area.interaction.mechanisms,
+                &mut run.physics,
+            );
+            run.area
+                .interaction
+                .sync_parts(&mut run.area.items, &mut run.physics)
+                .unwrap();
+            run.area.player.rebase([0., -50., 0.]);
+            let view = to_rapier(run.area.player.view_pose(&run.physics));
+            let body = run.area.items.get(part).unwrap().body.unwrap();
+            let position = view.translation + view.rotation * -Vector::Z;
+            run.physics.edit_body(body, |body| {
+                body.set_translation(position, true);
+                body.set_linvel(Vector::ZERO, true);
+            });
+            run.area.items.sync_poses(&run.physics);
+            run.physics.refresh_queries();
+            run.area
+                .interaction
+                .carry
+                .pickup(
+                    part,
+                    position.to_array(),
+                    &run.area.player,
+                    &mut run.area.items,
+                    &mut run.physics,
+                )
+                .unwrap();
+            run.area
+                .interaction
+                .carry
+                .release_acquisition(FrameInput::default());
+            run.area.interaction.carry.begin_throw();
+            run.area.interaction.carry.throw_charge = reference.player.throw_minimum + delta;
+            let target = AimTarget {
+                item: part,
+                collider: run.physics.rapier().bodies[body].colliders()[0],
+                distance: 1.,
+                point: position.to_array(),
+                slot: Some(SlotTarget::Part(slot)),
+            };
+            let aim = ResolvedAim {
+                installation_target: Some(target),
+                ..Default::default()
+            };
+            let available = run.area.interaction.available_actions(
+                &aim,
+                &run.area.player,
+                &run.area.items,
+                &run.physics,
+                run.survival.output(),
+            );
+            assert_eq!(available.actions.0 & ActionMask::MOUNT != 0, delta < 0.);
+            let out = run.area.interaction.step(
+                FrameInput {
+                    released: keys::GRAB,
+                    ..Default::default()
+                },
+                ResolvedAim::default(),
+                &mut run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+                FIXED_DT,
+                run.survival.output(),
+                1.,
+            );
+            let expected = if delta > 0. {
+                InteractionAction::Throw(part)
+            } else {
+                InteractionAction::Drop(part)
+            };
+            assert_eq!(out.action, Some(expected));
+            assert_eq!(
+                run.area.items.get(part).unwrap().location,
+                ItemLocation::World
+            );
+            let velocity = run.physics.rapier().bodies[body].linvel();
+            if delta > 0. {
+                assert!(velocity.length() > 0.);
+            } else {
+                assert_eq!(
+                    velocity,
+                    Vector::ZERO,
+                    "minimum charge has no throw impulse"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires build 11140890 export"]
+    fn no_rot_save_restore_uses_root_frame() {
+        let reference = ReferenceManifest::from_runtime_json(
+            &std::fs::read("web/assets/reference/manifest.json").unwrap(),
+        )
+        .unwrap();
+        let mut run = GarageRuntime::new(&reference).unwrap();
+        run.area.player.rebase([0., -50., 0.]);
+        run.area.player.step(
+            FrameInput {
+                mouse: [0., 12.],
+                ..Default::default()
+            },
+            &mut run.physics,
+            FIXED_DT,
+        );
+        let item = ItemId(120);
+        let body = run.area.items.get(item).unwrap().body.unwrap();
+        let view = to_rapier(run.area.player.view_pose(&run.physics));
+        let position = view.translation + view.rotation * -Vector::Z;
+        run.physics
+            .edit_body(body, |body| body.set_translation(position, true));
+        run.physics.recompute_body_mass(body);
+        run.area.items.sync_poses(&run.physics);
+        run.physics.refresh_queries();
+        let carry = &mut run.area.interaction.carry;
+        carry
+            .pickup(
+                item,
+                position.to_array(),
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        let pose = *run.physics.rapier().bodies[body].position();
+        let root = to_rapier(run.area.player.body_pose(&run.physics)).rotation;
+        let held = carry.held.as_ref().unwrap();
+        assert!(
+            held.rotation
+                .dot(root.inverse() * (pose * held.local_pose).rotation)
+                .abs()
+                > 0.99999
+        );
+        carry.step(
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [1., 1.],
+                ..Default::default()
+            },
+            &run.area.player,
+            &mut run.physics,
+            FIXED_DT,
+        );
+        let desired = run.physics.rapier().bodies[carry.anchor.unwrap()]
+            .next_position()
+            .rotation;
+        let ids = crate::save::IdentityMap::new(&reference).unwrap();
+        let saved = carry.capture_save(&ids).unwrap().unwrap();
+        carry.drop(&mut run.area.items, &mut run.physics);
+        // Runtime restore reconstructs item locations before restoring the carry link.
+        run.area.items.get_mut(item).unwrap().location = ItemLocation::Held;
+        let mut restored = CarryState::new(&reference).unwrap();
+        restored
+            .restore_save(&saved, &ids, &run.area.items, &mut run.physics)
+            .unwrap();
+        assert_eq!(restored.capture_save(&ids).unwrap(), Some(saved));
+        restored.step(
+            FrameInput::default(),
+            &run.area.player,
+            &mut run.physics,
+            FIXED_DT,
+        );
+        let anchor = restored.anchor.unwrap();
+        assert!(
+            run.physics.rapier().bodies[anchor]
+                .next_position()
+                .rotation
+                .dot(desired)
+                .abs()
+                > 0.99999
+        );
+        run.area.player.step(
+            FrameInput {
+                mouse: [0., 5.],
+                ..Default::default()
+            },
+            &mut run.physics,
+            FIXED_DT,
+        );
+        restored.step(
+            FrameInput::default(),
+            &run.area.player,
+            &mut run.physics,
+            FIXED_DT,
+        );
+        assert!(
+            run.physics.rapier().bodies[anchor]
+                .next_position()
+                .rotation
+                .dot(desired)
+                .abs()
+                > 0.99999
+        );
     }
 }

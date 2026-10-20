@@ -1052,6 +1052,18 @@ impl InteractionState {
         }
     }
 
+    fn complete_carry_release(
+        &mut self,
+        action: &mut Option<InteractionAction>,
+        release: InteractionAction,
+    ) {
+        if matches!(*action, Some(InteractionAction::LightControl(_))) {
+            // The runtime must still execute this external owner.
+            self.completed_action(release);
+        } else {
+            *action = Some(release);
+        }
+    }
     pub fn completed_action(&mut self, action: InteractionAction) {
         self.sound(InteractionSound::Action(action));
     }
@@ -1510,7 +1522,9 @@ impl InteractionState {
         {
             action = Some(InteractionAction::Pickup(target.item));
         }
-        if action.is_some() && (grab_input.held | grab_input.pressed) & keys::GRAB != 0 {
+        if matches!(action, Some(InteractionAction::Pickup(_)))
+            && (grab_input.held | grab_input.pressed) & keys::GRAB != 0
+        {
             self.f_gesture_consumed = true;
         }
         let push_target = aim.push_target.filter(|target| valid(*target));
@@ -1534,11 +1548,7 @@ impl InteractionState {
         {
             action = Some(InteractionAction::Push(item));
         }
-        if action.is_none()
-            && !acquisition_release
-            && !self.f_gesture_consumed
-            && self.held().is_some()
-        {
+        if !acquisition_release && !self.f_gesture_consumed && self.held().is_some() {
             if grab_input.pressed & keys::GRAB != 0 {
                 self.carry.begin_throw();
             }
@@ -1549,18 +1559,19 @@ impl InteractionState {
                 let throwing = self.carry.throw_charge() > self.carry.reference_throw_minimum();
                 if let Some(item) = self.carry.release_throw(player, items, physics) {
                     self.storage.mark_dropped(item);
-                    action = Some(if throwing {
+                    let release = if throwing {
                         InteractionAction::Throw(item)
                     } else {
                         InteractionAction::Drop(item)
-                    });
+                    };
+                    self.complete_carry_release(&mut action, release);
                 }
             }
         }
         if self.carry.step(carry_input, player, physics, dt)
             && let Some(item) = self.drop_held(items, physics)
         {
-            action = Some(InteractionAction::Drop(item));
+            self.complete_carry_release(&mut action, InteractionAction::Drop(item));
         }
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
