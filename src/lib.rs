@@ -1,15 +1,6 @@
 //! Shared driving simulation and browser application.
 #![recursion_limit = "256"]
 
-#[cfg(all(
-    target_arch = "wasm32",
-    not(any(
-        all(feature = "webgl2", not(feature = "webgpu")),
-        all(feature = "webgpu", not(feature = "webgl2"))
-    ))
-))]
-compile_error!("Select exactly one renderer feature: webgl2 or webgpu.");
-
 #[cfg(target_arch = "wasm32")]
 pub mod app;
 pub mod audio;

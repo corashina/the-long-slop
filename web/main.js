@@ -62,8 +62,8 @@ window.gameStartupStage=(stage,started)=>{if(started){startup.begin(stage);cpuPr
 window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads,total,rendering,world);
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
-let wasmMemory,renderAudit,rendererName,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
-const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength,()=>renderAudit&&{name:rendererName,audit:JSON.parse(renderAudit())});
+let wasmMemory,renderAudit,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
+const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength,()=>renderAudit&&{name:'WebGPU',audit:JSON.parse(renderAudit())});
 window.gamePerformanceFrame=(physicsMs,worldMs)=>performancePanel.frame(performance.now(),physicsMs,worldMs);
 window.gamePerformanceCounters=performancePanel.counters;
 const measurementWaiters=[];
@@ -144,20 +144,10 @@ window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading 
 window.gameReady=()=>{if(failed||!worldAdmitted)return;if(initialReadyMs===null)initialReadyMs=performance.now()-bootStarted;loading.finish();menu.ready();startupReady=true;finishStartup();};
 window.addEventListener('error',event=>fail(event.message||'The runtime stopped.'));
 window.addEventListener('unhandledrejection',event=>fail(event.reason?.message||String(event.reason)));
-canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fail('The graphics context was lost.');});
 async function load(){
  cpuProfile.begin('startup');
  startup.begin('graphics');
- // ?renderer=webgpu selects the WebGPU build. WebGL2 stays the default until WebGPU acceptance.
- const webgpu=new URLSearchParams(location.search).get('renderer')==='webgpu',name=webgpu?'my_summer_slop_webgpu':'my_summer_slop';
- rendererName=webgpu?'WebGPU':'WebGL2';
- if(webgpu){
-  if(!await navigator.gpu?.requestAdapter())throw Error('This browser cannot use WebGPU.');
- }else{
-  const probe=document.createElement('canvas'),graphics=probe.getContext('webgl2');
-  if(!graphics)throw Error('This browser cannot use WebGL2.');
-  graphics.getExtension('WEBGL_lose_context')?.loseContext();
- }
+ if(!await navigator.gpu?.requestAdapter())throw Error('This browser cannot use WebGPU.');
  startup.end('graphics');startup.begin('manifest');
  // Download and compile the game code while the manifest downloads.
  const code=Promise.all([import('./pkg/'+name+'.js'),fetch('./pkg/'+name+'_bg.wasm').then(response=>{

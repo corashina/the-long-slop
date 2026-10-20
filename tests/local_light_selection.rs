@@ -1,9 +1,5 @@
 //! Compile the actual selection and fragment iteration code with the renderer's shader compiler.
-use naga::{
-    ShaderStage,
-    back::glsl,
-    valid::{Capabilities, ValidationFlags, Validator},
-};
+use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 fn shader() -> String {
     let lighting = include_str!("../web/assets/shaders/source_lighting.wgsl")
@@ -39,55 +35,11 @@ struct Output {{
 }
 
 #[test]
-fn selection_and_ordered_iteration_compile_for_webgl2() {
+fn selection_and_ordered_iteration_validate() {
     let source = shader();
     let module = naga::front::wgsl::parse_str(&source)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
-    let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
+    Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
-    let options = glsl::Options {
-        version: glsl::Version::new_gles(300),
-        ..Default::default()
-    };
-    for (shader_stage, entry_point) in [
-        (ShaderStage::Vertex, "vertex"),
-        (ShaderStage::Fragment, "fragment"),
-    ] {
-        let mut output = String::new();
-        let reflection = glsl::Writer::new(
-            &mut output,
-            &module,
-            &info,
-            &options,
-            &glsl::PipelineOptions {
-                shader_stage,
-                entry_point: entry_point.into(),
-                multiview: None,
-            },
-            Default::default(),
-        )
-        .unwrap()
-        .write()
-        .unwrap();
-        assert!(output.starts_with("#version 300 es"));
-        assert!(!output.contains("findLSB"), "Requires GLSL ES 3.10");
-        // Selection adds uniform visibility, without adding sampled textures to the vertex stage.
-        if shader_stage == ShaderStage::Vertex {
-            assert!(reflection.texture_mapping.is_empty());
-            assert_eq!(reflection.uniforms.len(), 2);
-        }
-    }
-    let mut layouter = naga::proc::Layouter::default();
-    layouter.update(module.to_ctx()).unwrap();
-    let lighting = module
-        .global_variables
-        .iter()
-        .find(|(_, global)| global.name.as_deref() == Some("lamp_lighting"))
-        .unwrap()
-        .1;
-    assert!(
-        layouter[lighting.ty].size <= 16_384,
-        "WebGL2 uniform block limit"
-    );
 }
