@@ -1,7 +1,7 @@
 # G08 inventory and equipment design
 
 Date: 2026-10-20.
-Status: Approved by the user on 2026-10-20. Implementation plan review remains pending.
+Status: Approved and implemented on 2026-10-20. Targeted checks and reviews passed. Browser acceptance remains open.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g08-inventory`.
 

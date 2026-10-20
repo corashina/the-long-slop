@@ -148,7 +148,7 @@ Existing native and material warnings remain. No new warning was introduced.
 The initial inventory unit baseline passed one test.
 The old export integration baseline failed with `ReconstructionFailure("Save restore is pending")` during immediate recapture after load.
 Task 4 repaired the test through real publication readiness and retained the reconstruction guard.
-That migrated regression passes in the final native run.
+That migrated regression passes in the milestone native run.
 Initial and generated equipment now synchronize the final hand pose after startup alignment and body readiness.
 
 Task 5 first ran the requested text-helper test. One test failed because eligible carry omitted `Tap Tab: equip`.
@@ -178,6 +178,18 @@ Local logs, task reports, and the logged runner are preserved under `.cache/g08-
 That ignored directory is local evidence. This report retains the command results in Git.
 The copied runner still names the old scratch directory. The plan's Docker setup remains the reproducible recipe.
 
+## Review outcome
+
+All five task reviews passed after their fixes.
+Review fixes repaired fresh-gesture cancellation, physical equip hints, and post-recovery input retention.
+The whole-branch review covered `cc7540b..5425807`.
+Its scoped fix review covered `5425807..d0b30a2` and found no new Critical or Important issue.
+No product finding remains open.
+Recorded coverage includes 22 distinct native tests and six web tests across the stated revisions.
+The tables separate the milestone from each later fix run.
+Product head: `d0b30a2794c7ed5349659a033e33c9353c9653c6`.
+The branch and worktree remain unmerged and unpushed.
+
 ## Rulings I made
 
 1. Read assigned task briefs plus shared execution context, rather than the entire plan in each worker. This avoids repeated context and preserves exact requirements. Cost if wrong: a missed cross-task contract, checked at task review.
@@ -188,7 +200,8 @@ The copied runner still names the old scratch directory. The plan's Docker setup
 6. Add InventoryState::record_swap after validated successful Swap only. Rejected transfers retain progress and release-selection eligibility, matching completed-swap semantics. Cost if wrong: another input transition needs a targeted correction.
 7. Extend the task to presentation/conditions.rs and anchor it after app::sync_imported, with crate visibility if needed. Old advance_tools ordering also implied imported entity sync; advance_physics alone would drop that dependency. Cost if wrong: condition visuals could update in the wrong frame; browser timing remains unverified.
 8. Clear the new Drive.frame_input during the existing app/save.rs load reset in Task 3. The new transient field needs a complete lifecycle before save tests. Cost if wrong: restored input can retain stale actions; Task 4 tests cancellation.
-9. On an active skip_elapsed frame, retain unrelated raw fixed-step edges after stripping RECENTER and inventory keys. Keep blocked-state cancellation for recovering, unsupported, sleeping, or dead states. The flag skips elapsed time rather than fresh input. Cost if wrong: a fresh USE edge is lost or a blocked action is queued; targeted pending-input coverage checks this.
+9. Initial decision, superseded by Ruling 13: On an active skip_elapsed frame, retain unrelated raw fixed-step edges after stripping RECENTER and inventory keys. Keep blocked-state cancellation for recovering, unsupported, sleeping, or dead states. The flag skips elapsed time rather than fresh input. Cost if wrong: a fresh USE edge is lost or a blocked action is queued; targeted pending-input coverage checks this.
 10. Limit seated clutch inventory suppression to an actual first-slot binding collision. Cache Clutch/Digit1 collision during setup, since InventoryStuff compares the source bindings. Keep normal exported clutch usable with number slots. Cost if wrong: inventory is wrongly blocked or receives a conflicting slot action; test both binding states.
 11. Put the new save regression and migrated source_transfers regression in world/stream_tests.rs to reuse real prepare_ready publication. Keep both tests explicitly invoked in final verification; do not add public readiness hooks. Cost if wrong: a filter can omit save coverage; report the exact lib commands and executed counts.
 12. Replace the unused InteractionState::prompt path with live ActionAvailability bits and matching static HUD rows through the existing actions mask. Add feedback.rs, web/feedback.js, and a targeted web feedback suite to scope; no bridge field or binding change. Migrate the requested hint regression to live availability and remove obsolete prompt code. The plan incorrectly assumed prompt drove the HUD. Cost if wrong: displayed actions disagree with ownership or seat state; native availability and targeted web feedback tests check this.
+13. Supersede Ruling 9 by retaining all fresh render-frame edges in Drive.frame_input through an active skipped frame. Merge raw samples once; use a small native-testable FrameInput::take_frame lifecycle to consume skip once, retain active skipped input, clear blocked skipped input, and take normal input once. Keep CAMERA on fresh samples and let the coordinator sanitize PRIMARY before one fixed-buffer merge. Clear retained render edges on pending save and cancellation. Cost if wrong: edges can repeat or survive a blocked state; shared-lifecycle and real-coordinator regressions check retention, cancellation, and single consumption.
