@@ -25,7 +25,14 @@ export class FrameTimings {
  }
 }
 
-export function createPerformance(readWasmBytes){
+// Draws per pass in the world view. Counts come from the renderer audit.
+function renderLines(render){
+ if(!render?.audit?.graph)return '\nRenderer: --';
+ const view=render.audit.graph.views[0],sum=values=>values.reduce((a,b)=>a+b,0);
+ return '\nRenderer: '+render.name+'\nDraws depth / shadow / surface: '+view.camera_depth[2]+' / '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4]);
+}
+
+export function createPerformance(readWasmBytes,readRender){
  const root=document.querySelector('#performance'),values=document.querySelector('#performance-values');
  const timings=new FrameTimings();let lastPaint=-Infinity,stopped=false;
  const ms=value=>value.toFixed(1),mib=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MiB':'unavailable';
@@ -51,7 +58,7 @@ export function createPerformance(readWasmBytes){
     '\nPhysics steps/frame: '+steps+'\nWheel contacts: '+wheelContacts+'\nBodies / colliders: '+bodies+' / '+colliders+
     '\nRoads / terrain tiles: '+roads+' / '+terrain+'\nActive generated objects: '+objects+'\nJobs / queued work: '+jobs+' / '+pending+
     '\nWASM: '+mib(readWasmBytes())+'\nJS heap: '+mib(performance.memory?.usedJSHeapSize)+
-    '\nWorld render CPU reserve: '+mib(cpuBytes)+'\nWorld render GPU reserve: '+mib(gpuBytes);
+    '\nWorld render CPU reserve: '+mib(cpuBytes)+'\nWorld render GPU reserve: '+mib(gpuBytes)+renderLines(readRender());
   },
   stop(){stopped=true;timings.reset();values.textContent='Performance counters stopped.';document.removeEventListener('visibilitychange',reset);},
  };
