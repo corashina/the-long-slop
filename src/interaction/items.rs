@@ -663,7 +663,7 @@ impl ItemStore {
             condition: state.generated_condition.unwrap_or(1.),
             food: None,
             temperature: state.temperature,
-            fluids: state.fluid.as_ref().map(|fluid| fluid.entries().collect()),
+            fluids: state.fluid.as_ref().map(crate::fluids::FluidSnapshot::from),
             valve,
         })
     }
@@ -688,7 +688,7 @@ impl ItemStore {
             || snapshot
                 .fluids
                 .as_ref()
-                .is_some_and(|entries| !validate_fluid_entries(entries))
+                .is_some_and(|entries| !validate_fluid_entries(entries.as_slice()))
         {
             return Err(ReferenceError("Invalid generated object snapshot".into()));
         }
@@ -709,7 +709,7 @@ impl ItemStore {
                 .fluid
                 .as_mut()
                 .ok_or_else(|| ReferenceError("Source snapshot has no container".into()))?;
-            fluid.restore_entries(entries);
+            fluid.restore_entries(entries.as_slice());
         }
         Ok(())
     }

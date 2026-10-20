@@ -3,7 +3,7 @@
 use crate::reference::TankReference;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FluidEntry {
     pub fluid_type: u8,
@@ -21,6 +21,67 @@ pub fn validate_fluid_entries(entries: &[FluidEntry]) -> bool {
             seen[index] = true;
             true
         })
+}
+
+/// Fixed ordered state for frame change capture. Its JSON form is an entry list.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FluidSnapshot {
+    entries: [FluidEntry; 6],
+    len: u8,
+}
+impl FluidSnapshot {
+    pub fn as_slice(&self) -> &[FluidEntry] {
+        &self.entries[..self.len as usize]
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [FluidEntry] {
+        &mut self.entries[..self.len as usize]
+    }
+}
+impl From<&FluidContainer> for FluidSnapshot {
+    fn from(container: &FluidContainer) -> Self {
+        let mut snapshot = Self {
+            len: container.order_len,
+            ..Self::default()
+        };
+        for (slot, entry) in snapshot.entries.iter_mut().zip(container.entries()) {
+            *slot = entry;
+        }
+        snapshot
+    }
+}
+impl Serialize for FluidSnapshot {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.as_slice().serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for FluidSnapshot {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries;
+        impl<'de> serde::de::Visitor<'de> for Entries {
+            type Value = FluidSnapshot;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("at most six unique finite fluid entries")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut sequence: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut snapshot = FluidSnapshot::default();
+                while let Some(entry) = sequence.next_element::<FluidEntry>()? {
+                    if snapshot.len as usize == snapshot.entries.len() {
+                        return Err(serde::de::Error::invalid_length(7, &self));
+                    }
+                    snapshot.entries[snapshot.len as usize] = entry;
+                    snapshot.len += 1;
+                }
+                if !validate_fluid_entries(snapshot.as_slice()) {
+                    return Err(serde::de::Error::custom("Invalid fluid snapshot entries"));
+                }
+                Ok(snapshot)
+            }
+        }
+        deserializer.deserialize_seq(Entries)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -322,5 +383,77 @@ mod g04_restore_test {
             serde_json::from_str::<FluidEntry>(r#"{"fluid_type":3,"amount":1,"legacy":true}"#)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod g04_fixed_snapshot {
+    use super::*;
+    #[test]
+    fn keeps_order_and_json_contract_without_heap_storage() {
+        let entries = [
+            FluidEntry {
+                fluid_type: 3,
+                amount: 1.,
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 0.,
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: -0.25,
+            },
+        ];
+        let tank = FluidContainer::new(2., &entries);
+        let snapshot = FluidSnapshot::from(&tank);
+        let copy = snapshot;
+        assert_eq!(snapshot.as_slice(), entries);
+        assert_eq!(copy, snapshot);
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert_eq!(json, serde_json::to_string(&entries).unwrap());
+        assert_eq!(
+            serde_json::from_str::<FluidSnapshot>(&json).unwrap(),
+            snapshot
+        );
+        let oversized = serde_json::to_string(&[entries[0]; 7]).unwrap();
+        assert!(serde_json::from_str::<FluidSnapshot>(&oversized).is_err());
+        assert!(serde_json::from_str::<FluidSnapshot>(r#"[{"fluid_type":6,"amount":1}]"#).is_err());
+        assert!(
+            serde_json::from_str::<FluidSnapshot>(
+                r#"[{"fluid_type":3,"amount":1},{"fluid_type":3,"amount":0}]"#
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn frame_capture_retains_nonfinite_bits_without_validation() {
+        let mut tank = FluidContainer::new(
+            2.,
+            &[
+                FluidEntry {
+                    fluid_type: 3,
+                    amount: 1.,
+                },
+                FluidEntry {
+                    fluid_type: 0,
+                    amount: -0.,
+                },
+                FluidEntry {
+                    fluid_type: 1,
+                    amount: -0.25,
+                },
+            ],
+        );
+        tank.mixture.quantities_liters[3] = f32::from_bits(0x7fc0_abcd);
+        let snapshot = FluidSnapshot::from(&tank);
+        assert_eq!(snapshot.as_slice()[0].fluid_type, 3);
+        assert_eq!(snapshot.as_slice()[0].amount.to_bits(), 0x7fc0_abcd);
+        assert_eq!(
+            snapshot.as_slice()[1].amount.to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert_eq!(snapshot.as_slice()[2].amount, -0.25);
+        assert!(!validate_fluid_entries(snapshot.as_slice()));
     }
 }

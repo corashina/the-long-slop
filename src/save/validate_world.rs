@@ -172,9 +172,9 @@ impl SaveSnapshot {
                 "Generated velocity",
             )?;
             data(
-                s.fluids
-                    .as_ref()
-                    .is_none_or(|entries| crate::fluids::validate_fluid_entries(entries)),
+                s.fluids.as_ref().is_none_or(|entries| {
+                    crate::fluids::validate_fluid_entries(entries.as_slice())
+                }),
                 "Generated fluids",
             )?;
             if let Some(food) = &s.food {

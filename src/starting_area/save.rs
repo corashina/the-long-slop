@@ -73,7 +73,7 @@ impl GarageRuntime {
                     .items
                     .get(ids.item(&item.instance)?)
                     .and_then(|item| item.fluid.as_ref())
-                    .map(|fluid| fluid.entries().collect()),
+                    .map(crate::fluids::FluidSnapshot::from),
                 valve: None,
                 lamp: None,
                 linear_velocity: [0.; 3],
