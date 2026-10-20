@@ -78,8 +78,12 @@ impl SourceViewClock {
     pub fn main_token(&self) -> u32 {
         self.main_token
     }
-    fn probe_wanted(&self, index: usize, probe_enabled: [bool; PROBE_COUNT]) -> bool {
-        probe_enabled[index] && !self.probe[index].published()
+    fn probe_job(&self, enabled: [bool; PROBE_COUNT]) -> Option<ProbeJob> {
+        self.probe[self.probe_index].pending_job(enabled[self.probe_index])
+    }
+    fn probe_cameras_active(&self, enabled: [bool; PROBE_COUNT]) -> bool {
+        self.probe[self.probe_index]
+            .cameras_active(enabled[self.probe_index], !self.preparation_ready)
     }
     fn consume(
         &mut self,
@@ -127,10 +131,6 @@ impl SourceViewClock {
                     .ok_or("Source probe job token exhausted")?;
             }
         }
-        self.frame = self
-            .frame
-            .checked_add(1)
-            .ok_or("Source view frame stamp exhausted")?;
         Ok(())
     }
 }
@@ -238,6 +238,35 @@ pub fn gpu_projection(source: Mat4) -> Mat4 {
     }
     Mat4::from_cols_array_2d(&p)
 }
+/// Consume submitted jobs before camera update, visibility, and extraction.
+fn sync_probe_cameras(
+    assets: Option<Res<LightingAssets>>,
+    scene: Res<SourceSceneLighting>,
+    activation: Res<super::lighting_scene::ProbeActivation>,
+    acks: Res<SourceSubmissionAcks>,
+    mut clock: ResMut<SourceViewClock>,
+    status: Res<RendererStateHandle>,
+    mut views: Query<(&SourceSurfaceView, &mut Camera)>,
+) {
+    if status.failure().is_some() || assets.is_none_or(|assets| !assets.loaded) || scene.0.is_none()
+    {
+        return;
+    }
+    if let Err(error) = clock.consume(&acks, activation.enabled) {
+        status.fail(error.into());
+        status
+            .lock()
+            .proof
+            .invalidate(crate::render_readiness::Invalidation::Content);
+        return;
+    }
+    let active = clock.probe_cameras_active(activation.enabled);
+    for (view, mut camera) in &mut views {
+        if (PROBE_START..VIEW_COUNT).contains(&view.index) && camera.is_active != active {
+            camera.is_active = active;
+        }
+    }
+}
 /// Runs after current physical extents and transforms, before source frustum publication.
 pub(crate) fn snapshot(
     mut commands: Commands,
@@ -249,7 +278,6 @@ pub(crate) fn snapshot(
     scene: Res<SourceSceneLighting>,
     epoch: Res<SourceSceneEpoch>,
     activation: Res<super::lighting_scene::ProbeActivation>,
-    acks: Res<SourceSubmissionAcks>,
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<RendererStateHandle>,
@@ -289,14 +317,21 @@ pub(crate) fn snapshot(
         return;
     }
     let mut input = [None; VIEW_COUNT];
+    let mut identities = [false; VIEW_COUNT];
+    let probe_job = clock.probe_job(activation.enabled);
+    let probes_active = clock.probe_cameras_active(activation.enabled);
     for (view, camera, pose) in &views {
-        if view.index >= VIEW_COUNT || input[view.index].is_some() {
+        if view.index >= VIEW_COUNT || identities[view.index] {
             status.fail("Source snapshot view identity is invalid".into());
             graph
                 .lock()
                 .proof
                 .invalidate(crate::render_readiness::Invalidation::Content);
             return;
+        }
+        identities[view.index] = true;
+        if view.index >= PROBE_START && !probes_active {
+            continue;
         }
         if !camera.is_active {
             return;
@@ -309,7 +344,7 @@ pub(crate) fn snapshot(
         }
         input[view.index] = Some((extent, pose.to_matrix()));
     }
-    if input.iter().any(Option::is_none) {
+    if identities.contains(&false) {
         return;
     }
     let Ok((sky_camera, sky_pose)) = sky_view.single() else {
@@ -323,14 +358,15 @@ pub(crate) fn snapshot(
         return;
     }
     let main = input[0].unwrap().0;
-    if let Err(error) = clock.consume(&acks, activation.enabled) {
-        status.fail(error.into());
+    let Some(next_frame) = clock.frame.checked_add(1) else {
+        status.fail("Source view frame stamp exhausted".into());
         graph
             .lock()
             .proof
             .invalidate(crate::render_readiness::Invalidation::Content);
         return;
-    }
+    };
+    clock.frame = next_frame;
     let request = crate::render_readiness::ReadinessRequest {
         render: crate::render_readiness::RenderIdentity {
             session: frame.session,
@@ -351,9 +387,7 @@ pub(crate) fn snapshot(
     };
     clock.preparation_ready |= graph.lock().proof.graph_ready(request);
     let warmup = !clock.preparation_ready;
-    let job = (clock.probe_wanted(clock.probe_index, activation.enabled)
-        || clock.probe[clock.probe_index].job() != ProbeJob::Face(0))
-    .then(|| clock.probe[clock.probe_index].job());
+    let job = probe_job;
     let fov_degrees = drive
         .runtime
         .area
@@ -493,6 +527,12 @@ pub fn install(app: &mut App) {
         .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
             SourceViewFrame,
         >::default())
+        .add_systems(
+            PostUpdate,
+            sync_probe_cameras
+                .after(super::lighting_scene::sync_lighting)
+                .before(bevy::camera::CameraUpdateSystems),
+        )
         .add_systems(
             PostUpdate,
             snapshot

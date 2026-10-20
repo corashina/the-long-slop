@@ -27,6 +27,14 @@ impl ProbeSchedule {
     pub fn published(&self) -> bool {
         self.published
     }
+    /// Finish an active capture even when distance checks disable its probe.
+    pub fn pending_job(&self, enabled: bool) -> Option<ProbeJob> {
+        let job = self.job();
+        ((enabled && !self.published) || job != ProbeJob::Face(0)).then_some(job)
+    }
+    pub fn cameras_active(&self, enabled: bool, warmup: bool) -> bool {
+        warmup || self.pending_job(enabled).is_some()
+    }
     /// Call after encoding this frame's job. Pipeline waits must leave the job unchanged.
     pub fn complete(&mut self, job: ProbeJob) -> Result<(), &'static str> {
         if job != self.job() {
@@ -111,7 +119,7 @@ pub fn pending_probe_index<const N: usize>(
     enabled: [bool; N],
 ) -> usize {
     let wanted = |index: usize| enabled[index] && !probes[index].published();
-    if !wanted(current) && probes[current].job() == ProbeJob::Face(0) {
+    if probes[current].pending_job(enabled[current]).is_none() {
         return (1..N)
             .map(|offset| (current + offset) % N)
             .find(|&index| wanted(index))

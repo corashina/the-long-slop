@@ -152,7 +152,9 @@ pub(crate) fn prepare_views(
         status.fail("Source surface view extents disagree".into());
         return;
     }
-    if extents[PROBE_START..].iter().any(Option::is_none) {
+    if (PROBE_START..VIEW_COUNT)
+        .any(|index| !frame.skip_probe_preparation(index) && extents[index].is_none())
+    {
         return;
     }
     let Some(snapshot) = frame.views[0] else {
