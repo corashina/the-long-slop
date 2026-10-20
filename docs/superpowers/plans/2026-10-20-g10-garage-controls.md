@@ -14,7 +14,7 @@
 
 **Branch:** `codex/g10-garage-controls`. Planning base: spec commit `bbddf28`.
 
-**Execution method:** Subagents, selected by the user. Plan review remains pending. Do not implement before that review.
+**Execution method:** Subagents, selected by the user. Plan approved 2026-10-20. Execute the selected subagent method.
 
 ## Global constraints
 
@@ -83,6 +83,18 @@ Expected: source build `11140890`, validated reference records, and a matching i
 Check each exit code. Do not run verification after failed derivation.
 Do not change accepted source records to bypass a failed export.
 
+## Native fixture correction
+
+Runtime input requires aligned startup and published terrain support.
+Setting `started` and `paused` alone does not meet those requirements.
+The existing native renderer receipt adapter is private to the library's test modules.
+G10 native tests therefore live under `src/world/stream_tests/garage_controls.rs`.
+Reuse the parent module's `reference` and `prepare_ready` helpers. Assert `world_supported()` before input.
+Later feature tests use child modules named `reactions.rs`, `instruments.rs`, `radio.rs`, and `restore.rs` in that module's directory.
+Use `./scripts/check.ps1 -Filter g10_` for these library tests and both WASM compile checks.
+No public test API or production readiness bypass is permitted.
+This correction follows the execution ruling recorded in the plan ledger.
+
 ## File responsibilities
 
 | Files | Responsibility |
@@ -98,14 +110,14 @@ Do not change accepted source records to bypass a failed export.
 | `tools/reference/gltf.py` | Include radio material variants in the selected glTF. Gauge variants already have a collection path. |
 | `src/presentation/radio.rs`, `src/presentation/radio/needle.rs` | Cached radio transform bindings and parent-space needle placement. New in Task 4. |
 | `src/app.rs`, `src/presentation/mod.rs`, `src/presentation/save.rs`, `src/presentation/lighting.rs` | App scheduling, readiness, warmup, and load integration. |
-| `tests/garage_controls.rs` | Critical input, physics, schema, and restored-state integration checks. New in Task 1. |
+| `src/world/stream_tests/garage_controls.rs` and its feature child modules | Critical native controls checks using the existing test-only world publication adapter. New in Task 1. |
 | `tools/reference/tests/test_mechanisms.py`, `test_instruments.py`, `test_radio.py` | Critical source export tests. New tests under `tools/reference/tests`. |
 | `tests/web/audio.test.mjs`, `input.test.mjs`, `menu.test.mjs` | Existing browser lifecycle checks. Extend only where critical coverage is missing. |
 | `docs/g10-controls.md`, `docs/roadmap.md` | Actual results, source evidence, runtime limits, and roadmap status. |
 
 ### Task 1: Match source handbrake and light input rules
 
-**Files:** Modify `src/interaction/mechanisms.rs` and `src/starting_area.rs`. Create `tests/garage_controls.rs`.
+**Files:** Modify `src/interaction/mechanisms.rs` and `src/starting_area.rs`. Modify `src/world/stream_tests.rs` and create `src/world/stream_tests/garage_controls.rs`.
 
 **Interfaces:**
 
@@ -121,7 +133,7 @@ Copy the primary `web/assets/reference` directory into the empty worktree asset 
 Read its `content_base` with Python and copy that exact package from the primary `web` directory.
 Preserve relative paths. Do not copy the whole runtime cache or use writable directory links.
 If destination assets already exist, verify their receipts instead of overwriting them.
-Record the manifest SHA-256 and package ID. The test helper sets started and unpaused state explicitly. This setup proves no browser acceptance.
+Record the manifest SHA-256 and package ID. The test helper reuses the existing `prepare_ready` native adapter before starting input. This setup proves no browser acceptance.
 The reference must contain one Lada and source build `11140890`.
 
 Run `./scripts/check.ps1 -Test fresh_session`.
@@ -148,7 +160,7 @@ assert_eq!(secondary_control_headlights, 1);
 assert_eq!(ordinary_passenger_headlights, 0);
 ```
 
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: native failures for handbrake LMB and the secondary control seat's L shortcut.
 
 - [ ] **Step 3: Correct the two input predicates.**
@@ -160,7 +172,7 @@ Do not change other vehicle input permissions or source seat records.
 
 - [ ] **Step 4: Run the targeted checks.**
 
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: all added tests pass, formatting passes, and WebGL2 and WebGPU compile checks pass.
 
 - [ ] **Step 5: Commit the input slice.**
@@ -172,7 +184,7 @@ Commit with `fix: match source garage control inputs`.
 
 **Files:** Modify `src/reference.rs`, `src/reference/world.rs`, `tools/reference/mechanisms.py`, `tools/reference/world_mechanisms.py`, `src/world/content_mechanisms.rs`, `src/interaction/mechanisms.rs`, and `src/starting_area.rs`.
 Create `src/interaction/mechanisms/reactions.rs` and `tools/reference/tests/test_mechanisms.py`.
-Extend `tests/garage_controls.rs`.
+Add the feature tests beneath `src/world/stream_tests/garage_controls/` and include them from the shared controls test module.
 
 **Interfaces:**
 
@@ -210,7 +222,7 @@ A restore or rebind after an emitted event must leave no pending impulse.
 Check that changed collider poses still match their mechanism poses.
 
 Run `& $g10Python -m unittest tools.reference.tests.test_mechanisms -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: failures for absent reaction records and absent physics effects.
 
 - [ ] **Step 2: Export and validate the reaction contract.**
@@ -243,7 +255,7 @@ Do not emit from those lifecycle operations.
 
 Run the local export cycle defined above.
 Run `& $g10Python -m unittest tools.reference.tests.test_mechanisms tools.reference.tests.test_world -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: tests pass and both WASM compile checks pass.
 Record any export prerequisite failure without modifying primary assets.
 
@@ -255,7 +267,7 @@ Commit with `feat: apply source mechanism endpoint reactions`.
 ### Task 3: Complete dashboard and needle lighting
 
 **Files:** Modify `tools/reference/instruments.py`, `src/reference/instruments.rs`, `src/presentation/instruments.rs`, `src/app.rs`, `src/presentation/lighting.rs`, and `src/presentation/save.rs`.
-Create `tools/reference/tests/test_instruments.py`. Extend `tests/garage_controls.rs`.
+Create `tools/reference/tests/test_instruments.py`. Add the feature tests beneath `src/world/stream_tests/garage_controls/` and include them from the shared controls test module.
 
 **Interfaces:**
 
@@ -285,7 +297,7 @@ Assert equal needle angles, lamp bits, odometer digits, and lighting state.
 These state tests do not prove that the rendered materials change.
 
 Run `& $g10Python -m unittest tools.reference.tests.test_instruments -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: new link-contract tests fail before implementation.
 
 - [ ] **Step 2: Extend source records and manifest validation.**
@@ -310,7 +322,7 @@ Do not mark a partially bound material set as ready.
 
 Run the local export cycle.
 Run `& $g10Python -m unittest tools.reference.tests.test_instruments -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: native state and contract tests pass, and both WASM compile checks pass.
 Rendered material selection remains subject to Task 5 browser acceptance.
 
@@ -323,7 +335,7 @@ Commit with `feat: complete source dashboard backlights`.
 
 **Files:** Create `tools/reference/radio.py`, `tools/reference/tests/test_radio.py`, `src/presentation/radio.rs`, and `src/presentation/radio/needle.rs`.
 Modify `tools/reference/audio.py`, `tools/reference/export.py`, `tools/reference/gltf.py`, `tools/reference/tests/test_audio.py`, and `src/reference/audio.rs`.
-Modify `src/presentation/instruments.rs`, `src/presentation/mod.rs`, and `src/app.rs`. Extend `tests/garage_controls.rs`.
+Modify `src/presentation/instruments.rs`, `src/presentation/mod.rs`, and `src/app.rs`. Add the feature tests beneath `src/world/stream_tests/garage_controls/` and include them from the shared controls test module.
 
 **Interfaces:**
 
@@ -346,8 +358,8 @@ Python `test_radio_visual_source_links` checks `RS`, `SOn`, `SOff`, `RMutato`, `
 Python `test_radio_material_variants_are_exported` verifies those on and off materials appear in the selected glTF report.
 Native `g10_radio_visual_contract` rejects omitted visuals and invalid renderer, transform, asset, or material links.
 Native `g10_radio_power_and_tuning` checks exported electronics cutoff, volume zero, power-off tuning, and both band endpoints.
-Native `g10_radio_needle_parent_space` imports the small `radio/needle.rs` module directly through a test `#[path]` attribute.
-That module uses Bevy math and Transform, which the existing native dev dependency provides. Import it with `#[path = "../src/presentation/radio/needle.rs"]`.
+Native `g10_radio_needle_parent_space` in `src/world/stream_tests/garage_controls/radio.rs` imports the production needle module through `#[path]`.
+That module uses Bevy math and Transform from the existing native dev dependency. From the radio test child module, import `../../../presentation/radio/needle.rs`.
 
 Use these assertions for the transform test:
 
@@ -361,7 +373,7 @@ translation at tuning -1 or 2 = the corresponding clamped endpoint
 Use a moved, rotated, non-uniformly scaled parent with different endpoint ancestor chains.
 Assert the source needle rotation and scale remain unchanged.
 Run `& $g10Python -m unittest tools.reference.tests.test_radio -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: radio visual and material-export tests fail before implementation.
 
 - [ ] **Step 2: Extend radio export and validation.**
@@ -393,7 +405,7 @@ Keep audio playback independent of material binding.
 
 Run the local export cycle.
 Run `& $g10Python -m unittest tools.reference.tests.test_radio tools.reference.tests.test_audio -v`.
-Run `./scripts/check.ps1 -Test garage_controls`.
+Run `./scripts/check.ps1 -Filter g10_`.
 Expected: source contract and transform tests pass, and both WASM compile checks pass.
 Audible playback and visible display behavior remain subject to Task 5.
 
@@ -404,7 +416,7 @@ Commit with `feat: render source radio controls`.
 
 ### Task 5: Verify lifecycle and accept the normal-input controls
 
-**Files:** Extend `tests/garage_controls.rs` and existing web tests only where critical lifecycle coverage is missing.
+**Files:** Add `src/world/stream_tests/garage_controls/restore.rs`. Extend existing web tests only where critical lifecycle coverage is missing.
 Create `docs/g10-controls.md`. Update `docs/roadmap.md`.
 Repair a reproduced G10 defect in its owning module before marking that scenario complete.
 
@@ -429,7 +441,7 @@ A passing regression case requires no invented product change.
 
 ```powershell
 & $g10Python -m unittest tools.reference.tests.test_mechanisms tools.reference.tests.test_instruments tools.reference.tests.test_radio tools.reference.tests.test_audio tools.reference.tests.test_world -v
-./scripts/check.ps1 -Test garage_controls
+./scripts/check.ps1 -Filter g10_
 ./scripts/check.ps1 -WebTest audio,input,menu
 ```
 
@@ -484,4 +496,4 @@ Commit review fixes before reporting completion.
 - The five review-focus conditions have named tests or final acceptance scenarios in their owning tasks.
 - Material preparation and save validation include the new variants.
 - No task changes G09 seat switching, G11 driving physics, G13 save scope, or the deferred custom radio scope.
-- The plan uses the selected subagent method. Implementation waits for the user's plan review.
+- The plan uses the selected subagent method. The user approved plan execution on 2026-10-20.
