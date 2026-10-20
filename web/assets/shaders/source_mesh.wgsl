@@ -21,7 +21,6 @@ struct SourceVertexOutput {
     @location(1) world_normal: vec3<f32>,
     @location(9) @interpolate(flat) source_renderer: vec2<f32>,
     @location(10) source_fog: f32,
-    @location(11) source_screen: vec4<f32>,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
 #endif
@@ -169,6 +168,5 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
     // Installed Unlit/Color vertex6 evaluates FOG_EXP2 before interpolation.
     out.source_fog = fog_factor(out.position.z,lighting.near_far.x,lighting.near_far.y);
 #endif
-    out.source_screen = vec4(out.position.xy*vec2(0.5,-0.5)+out.position.ww*0.5,out.position.zw);
     return out;
 }

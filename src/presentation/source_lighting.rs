@@ -46,6 +46,7 @@ pub struct LightingUniform {
     pub source_time: Vec4,
     pub clip_from_world: Mat4,
     pub near_far: Vec4,
+    pub sun_shadow: super::shadow_collector::SunShadowUniform,
 }
 
 /// Layout specialization happens only when a pipeline is prepared.
@@ -61,8 +62,8 @@ pub fn surface_lighting_layout() -> BindGroupLayoutDescriptor {
                 sampler(SamplerBindingType::Filtering),
                 texture_cube(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                sampler(SamplerBindingType::Filtering),
+                texture_depth_2d(),
+                sampler(SamplerBindingType::Comparison),
             ),
         ),
     )
@@ -85,7 +86,7 @@ impl SourceViewLighting {
         value: LightingUniform,
         cookie: (&TextureView, &Sampler),
         probe: ([&TextureView; super::lighting_scene::PROBE_COUNT], &Sampler),
-        attenuation: (&TextureView, &Sampler),
+        shadow: (&TextureView, &Sampler),
     ) -> Self {
         let mut uniform = UniformBuffer::from(value);
         uniform.set_label(Some("source_view_lighting_uniform"));
@@ -99,8 +100,8 @@ impl SourceViewLighting {
                 cookie.1,
                 probe.0[0],
                 probe.1,
-                attenuation.0,
-                attenuation.1,
+                shadow.0,
+                shadow.1,
             )),
         );
         Self {

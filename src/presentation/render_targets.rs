@@ -9,7 +9,6 @@ use bevy::render::{
 pub const HDR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth24PlusStencil8;
 pub const SHADOW_FORMAT: TextureFormat = TextureFormat::Depth16Unorm;
-pub const COLLECTOR_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 pub const EXPOSURE_FORMAT: TextureFormat = TextureFormat::R32Float;
 pub const HISTOGRAM_FORMAT: TextureFormat = TextureFormat::Rgba32Uint;
 /// The source uses 8 samples. Four samples is an approved image-quality change.
@@ -33,7 +32,6 @@ pub fn validate_source_device(
         HDR_FORMAT,
         DEPTH_FORMAT,
         SHADOW_FORMAT,
-        COLLECTOR_FORMAT,
         HISTOGRAM_FORMAT,
         EXPOSURE_FORMAT,
     ] {
@@ -191,7 +189,6 @@ pub struct SourceViewTargets {
     pub atlas_size: u32,
     pub multisample_depth: Option<Target>,
     pub depth: Target,
-    pub collector: Target,
     pub atlas: Target,
     /// Excludes shared color storage. Count each color pair once in the graph total.
     pub logical_bytes: u64,
@@ -223,15 +220,6 @@ impl SourceViewTargets {
             )
         });
         let depth = Target::new(device, "source_depth", width, height, 1, DEPTH_FORMAT, true);
-        let collector = Target::new(
-            device,
-            "source_screen_shadows",
-            width,
-            height,
-            1,
-            COLLECTOR_FORMAT,
-            true,
-        );
         let atlas = Target::new(
             device,
             "source_shadow_atlas",
@@ -244,7 +232,7 @@ impl SourceViewTargets {
         // D24S8 uses four logical bytes. Backend allocation overhead is excluded.
         let logical_bytes = u64::from(width)
             * u64::from(height)
-            * (8 + if samples > 1 {
+            * (4 + if samples > 1 {
                 4 * u64::from(samples)
             } else {
                 0
@@ -255,7 +243,6 @@ impl SourceViewTargets {
             atlas_size,
             multisample_depth,
             depth,
-            collector,
             atlas,
             logical_bytes,
         })
@@ -263,7 +250,7 @@ impl SourceViewTargets {
 }
 
 /// The world view owns color storage; six capture views share single-sample scratch.
-/// Depth and collector storage never alias between views.
+/// Depth and shadow atlas storage never alias between views.
 pub struct SurfaceTargets {
     pub world: std::sync::Arc<SourceColorTargets>,
     pub capture: std::sync::Arc<SourceColorTargets>,
