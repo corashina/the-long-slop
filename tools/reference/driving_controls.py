@@ -22,6 +22,7 @@ EVIDENCE = {
                        'engine_motor_and_brake': 'carscript.SetWheel lines 8063-8074',
                        'service': 'carscript.SetWheel line 8101', 'parking': 'carscript.SetWheel line 8109',
                        'engine_clutch': 'enginescript lines 12219-12224'},
+    'arithmetic': 'Single field loads. Binary64 products retain original Single call, field, and native setter boundaries. Service additions precede parking additions. Precision follows original IL and retained totals. Native intermediate registers were not observed.',
     'unavailable_native': ['Independent PhysX engine/service/parking brake torque decomposition']}
 
 
@@ -251,15 +252,11 @@ def validate_controls(run, scenario):
                 raise ValueError('Native torque lacks original source actuation')
             contributions = []
             for role, wheel in zip(wheels, sample['wheels']):
-                engine = f32(abs(f32(f32(f32(sample['engine_brake_nm']) * f32(state['selected_ratio'])) * f32(state['differential_ratio']))) / sample['torque_divisor']) if role['driven'] and state['selected_ratio'] != 0 else 0.
-                service = f32(f32(state['brake_power']) * f32(sample['brake'])) if role['service_brake'] else 0.
-                parking = f32(f32(state['max_handbrake']) * f32(sample['handbrake'])) if role['handbrake'] else 0.
-                expected = f32(f32(engine + service) + parking)
+                terms, expected = source_wheel_torques(sample, role)
                 if f32(wheel['brake_torque']) != expected:
                     raise ValueError('Source wheel-role native brake torque differs')
-                motor = f32(f32(f32(f32(sample['engine_output_nm']) * f32(state['selected_ratio'])) * f32(state['differential_ratio'])) / sample['torque_divisor']) if role['driven'] and state['selected_ratio'] != 0 else 0.
-                contributions.append(dict(derived_engine_brake_nm=engine, derived_service_brake_nm=service, derived_parking_brake_nm=parking,
-                                          derived_engine_motor_nm=motor, native_total_motor_nm=wheel['motor_torque'], native_total_brake_nm=wheel['brake_torque']))
+                contributions.append(dict(terms, native_total_motor_nm=wheel['motor_torque'],
+                                          native_total_brake_nm=wheel['brake_torque']))
             if event_input is not None:
                 phase_samples[row_at(scenario, event_input['frame'])['frame']].append((sample, contributions))
         elif phase in ('physics.entry', 'physics.exit') and sample['input_sequence']:
@@ -314,6 +311,25 @@ def validate_required_gears(scenario, events):
 
 def f32(value):
     return struct.unpack('<f', struct.pack('<f', value))[0]
+
+
+def source_wheel_torques(sample, role):
+    """Reconstruct SetWheel with inferred wide products and original Single boundaries."""
+    state = sample['controls']
+    ratio, differential = f32(state['selected_ratio']), f32(state['differential_ratio'])
+    engine = motor = 0.
+    if role['driven'] and ratio != 0:
+        divisor = f32(sample['torque_divisor'])
+        motor = f32(f32(sample['engine_output_nm']) * ratio * differential / divisor)
+        # Mathf.Abs(Single) narrows its argument before division.
+        engine = f32(abs(f32(f32(sample['engine_brake_nm']) * ratio * differential)) / divisor)
+    service = f32(state['brake_power']) * f32(sample['brake']) if role['service_brake'] else 0.
+    parking = f32(state['max_handbrake']) * f32(sample['handbrake']) if role['handbrake'] else 0.
+    # Each compound assignment reads Single, adds the wide product, then stores Single.
+    total = f32(f32(engine + service) + parking)
+    # Standalone derived terms do not expose native contributor channels.
+    return dict(derived_engine_brake_nm=engine, derived_service_brake_nm=f32(service),
+                derived_parking_brake_nm=f32(parking), derived_engine_motor_nm=motor), total
 
 
 def bounds(values):

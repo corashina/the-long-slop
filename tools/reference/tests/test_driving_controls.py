@@ -7,7 +7,7 @@ import unittest
 
 from tools.reference.driving import method
 from tools.reference.driving_controls import (validate_schedule, validate_controls, row_at,
-                                               ignition_edges, MODE_FIELDS, GEAR_MASKS)
+                                               ignition_edges, MODE_FIELDS, GEAR_MASKS, source_wheel_torques)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -370,6 +370,53 @@ class DrivingControlsTests(unittest.TestCase):
         self.assertEqual(phase['managed_source_brake'],[.25,.25])
         self.assertEqual(phase['wheel_contributors'][2]['derived_service_brake_nm'],[250.,250.])
         self.assertEqual(phase['wheel_contributors'][2]['derived_parking_brake_nm'],[600.,600.])
+
+    def test_retained_native_reverse_brake_total_is_exact(self):
+        # Build 11140890, task-2-body-writer-01, torque.exit 7685.
+        # Scenario frame 389, physics step 334, input revision 411, RR/RL.
+        # runtime.json SHA256 d498b1d4cbc0c1e7cd0a5c5f618db5d7547d8635384e01072669ce30e8354af7.
+        run, scenario = self.observed()
+        for sample in run['samples']:
+            sample['engine_brake_nm'] = 14.206578254699707
+            sample['controls'].update(selected_ratio=-3.869999885559082,
+                                      differential_ratio=4.300000190734863)
+            for wheel in sample['wheels'][:2]:
+                wheel['brake_torque'] = 118.2058334350586
+        result = validate_controls(run, scenario)
+        wheel = result['requested_phases'][0]['wheel_contributors'][0]
+        self.assertEqual(wheel['derived_engine_brake_nm'], [118.2058334350586]*2)
+        self.assertEqual(wheel['native_total_brake_nm'], [118.2058334350586]*2)
+        for wrong in (118.20584106445312, 119.2058334350586):
+            bad = deepcopy(run)
+            next(s for s in bad['samples'] if s['phase'] == 'torque.exit')['wheels'][0]['brake_torque'] = wrong
+            with self.subTest(wrong=wrong), self.assertRaisesRegex(ValueError, 'native brake torque differs'):
+                validate_controls(bad, scenario)
+
+    def test_source_torque_sign_zero_and_compound_assignment_boundaries(self):
+        sample = dict(engine_output_nm=14.206578254699707, engine_brake_nm=14.206578254699707,
+                      torque_divisor=2, brake=0.3333333432674408, handbrake=0.699999988079071,
+                      controls=dict(selected_ratio=-3.869999885559082,
+                                    differential_ratio=4.300000190734863,
+                                    brake_power=1234.5670166015625, max_handbrake=600.))
+        role = dict(driven=True, service_brake=True, handbrake=True)
+        for ratio, motor in ((-3.869999885559082, -118.2058334350586),
+                             (3.869999885559082, 118.2058334350586), (0., 0.)):
+            sample['controls']['selected_ratio'] = ratio
+            terms, total = source_wheel_torques(sample, role)
+            with self.subTest(ratio=ratio):
+                self.assertEqual(terms['derived_engine_motor_nm'], motor)
+                self.assertEqual(terms['derived_engine_brake_nm'], abs(motor))
+                self.assertEqual(total, 949.7282104492188 if ratio else 831.5223388671875)
+        # Reversing additions, rounding each product, or one final store gives 949.7281494140625.
+        sample['controls']['selected_ratio'] = -3.869999885559082
+        sample['torque_divisor'] = 3
+        terms, _ = source_wheel_torques(sample, role)
+        # A three-wheel divisor distinguishes the Abs argument boundary from the motor field store.
+        self.assertEqual(terms['derived_engine_brake_nm'], 78.80388641357422)
+        self.assertEqual(terms['derived_engine_motor_nm'], -78.80389404296875)
+        terms, total = source_wheel_torques(sample, dict(driven=False, service_brake=False, handbrake=False))
+        self.assertEqual(total, 0.)
+        self.assertEqual(list(terms.values()), [0.]*4)
 
     def test_required_native_brake_matrix_and_actual_zero_crossings(self):
         from tools.reference.tests.test_driving_probe import DrivingProbeTests
