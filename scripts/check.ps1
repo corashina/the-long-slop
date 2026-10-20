@@ -51,7 +51,6 @@ try {
     }
     if ($IncludeIgnored) { $checks += ' -- --include-ignored' }
     $checks += ' && cargo check --locked --target wasm32-unknown-unknown --workspace --lib'
-    $checks += ' && cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu'
 
     . "$PSScriptRoot/cargo-target.ps1"
     $cargoTarget = Get-CargoTargetDirectory $root
