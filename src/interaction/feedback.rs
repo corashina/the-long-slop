@@ -57,7 +57,7 @@ pub struct ActionAvailability {
     pub rim: Option<ItemId>,
     pub opening: Option<OpeningId>,
     pub slot: Option<SlotTarget>,
-    pub consumes_mouse: bool,
+    pub(super) use_item: Option<ItemId>,
     pub light_control: Option<LightControlId>,
     pub lmb_use: bool,
     pub fill_reservation: Option<OpeningId>,
@@ -126,12 +126,15 @@ impl InteractionState {
                     && target.distance <= self.reach
             })
         };
-        let use_target = valid(aim.use_target);
+        let use_target = self
+            .active_mechanism_target(player, physics)
+            .or_else(|| valid(aim.use_target));
         let grab_target = valid(aim.grab_target);
         let installation_target = valid(aim.installation_target);
         let filling_target = valid(aim.filling_target);
         let focus = valid(aim.focus_target);
         let mut a = ActionAvailability::default();
+        a.use_item = use_target.map(|t| t.item);
         a.item = use_target
             .or(grab_target)
             .or(filling_target)
@@ -430,6 +433,7 @@ impl InteractionState {
             && !(self.seat_action_latched && self.usable_light_controls.contains(&t.control))
         {
             a.light_control = Some(t.control);
+            a.use_item = None;
             a.actions.0 |= ActionMask::USE;
             a.actions.0 &= !(ActionMask::DOOR
                 | ActionMask::SWITCH
@@ -449,12 +453,9 @@ impl InteractionState {
         if self.carry.throw_charge() >= self.carry.reference_throw_minimum() {
             a.actions.0 &= !ActionMask::MOUNT;
         }
-        let blocked_install = aim.installation_block.is_some()
-            || (self.held().is_some() && installation_target.is_some() && a.slot.is_none());
-        if a.actions.0 & ActionMask::MOUNT != 0 || blocked_install {
+        if a.actions.0 & ActionMask::MOUNT != 0 {
             a.actions.0 &= !(ActionMask::DROP | ActionMask::THROW);
         }
-        a.consumes_mouse = a.actions.0 & (ActionMask::DOOR | ActionMask::TUNE) != 0;
         if let Some(held) = self
             .held()
             .filter(|_| self.cleaning.reserves_lmb(self.held()))

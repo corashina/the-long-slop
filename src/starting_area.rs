@@ -954,14 +954,7 @@ impl GarageRuntime {
         self.aim = aim;
         let previous_seat = self.area.player.seat();
         let seated = previous_seat.is_some();
-        let availability = self.area.interaction.available_actions(
-            &aim,
-            &self.area.player,
-            &self.area.items,
-            &self.physics,
-            self.survival.output(),
-        );
-        let action = self.area.interaction.step(
+        let outcome = self.area.interaction.step(
             input,
             aim,
             &mut self.area.player,
@@ -971,6 +964,7 @@ impl GarageRuntime {
             self.survival.output(),
             factors.fluid_scale,
         );
+        let action = outcome.action;
         if action.is_none()
             && (input.pressed | input.released) & keys::GRAB != 0
             && let Some(block) = aim.installation_block.or(aim.grab_block)
@@ -1093,19 +1087,7 @@ impl GarageRuntime {
             self.notice = "";
         }
         let mut walking_input = input;
-        if (input.held & (keys::USE | keys::PRIMARY) != 0
-            && self.area.interaction.dragging_mechanism().is_some())
-            || (input.held & keys::USE != 0 && self.area.interaction.tuning_opening().is_some())
-            || (input.held & keys::PRIMARY != 0
-                && availability.lmb_use
-                && availability
-                    .item
-                    .is_some_and(|id| self.area.interaction.mechanisms.radio_tunable(id)))
-            || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0
-                && self.area.interaction.held().is_some())
-        {
-            walking_input.mouse = [0.0; 2];
-        }
+        walking_input.mouse = outcome.look_mouse;
         self.area
             .player
             .step(walking_input, &mut self.physics, FIXED_DT);

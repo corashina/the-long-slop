@@ -15,16 +15,19 @@ fn input(
     frame: FrameInput,
     aim: ResolvedAim,
 ) -> Option<InteractionAction> {
-    run.area.interaction.step(
-        frame,
-        aim,
-        &mut run.area.player,
-        &mut run.area.items,
-        &mut run.physics,
-        FIXED_DT,
-        run.survival.output(),
-        1.,
-    )
+    run.area
+        .interaction
+        .step(
+            frame,
+            aim,
+            &mut run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+            FIXED_DT,
+            run.survival.output(),
+            1.,
+        )
+        .action
 }
 
 fn ray_aim(

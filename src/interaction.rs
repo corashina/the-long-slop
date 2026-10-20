@@ -5,6 +5,8 @@ pub mod consumption;
 pub mod equipment;
 pub mod feedback;
 pub mod fluid_contact;
+mod input;
+pub use input::InteractionOutcome;
 pub mod items;
 pub mod labels;
 pub mod mechanisms;
@@ -158,6 +160,7 @@ pub struct InteractionState {
     /// Door usable and owner per lighting controller. Only cabin controllers have links.
     cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
     seat_action_latched: bool,
+    cancelled_input: u32,
     usable_light_controls: HashSet<LightControlId>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
@@ -493,6 +496,7 @@ impl InteractionState {
             storage: storage::StorageLocks::new(reference)?,
             cabin_doors,
             seat_action_latched: false,
+            cancelled_input: 0,
             next_generated_light: reference
                 .lighting
                 .controllers
@@ -1112,6 +1116,12 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.cancelled_input = keys::GRAB
+            | keys::RECENTER
+            | keys::TRANSLATE
+            | keys::ROTATE
+            | keys::USE
+            | keys::PRIMARY;
         self.cleaning.reset_contact();
         self.seat_action_latched = false;
         self.fill_opening = None;
@@ -1181,15 +1191,19 @@ impl InteractionState {
         dt: f32,
         needs: NeedsOutput,
         fluid_scale: f32,
-    ) -> Option<InteractionAction> {
+    ) -> InteractionOutcome {
         self.finish_cancelled_input(player, physics);
+        input = self.filter_cancelled_input(input);
         if self.cleaning.reserves_lmb(self.held()) {
             input.held &= !keys::PRIMARY;
             input.pressed &= !keys::PRIMARY;
             input.released &= !keys::PRIMARY;
         }
         if !dt.is_finite() || dt <= 0.0 {
-            return None;
+            return InteractionOutcome {
+                action: None,
+                look_mouse: input.mouse,
+            };
         }
         for opening in &mut self.openings {
             opening.flow = None;
@@ -1200,7 +1214,6 @@ impl InteractionState {
         let mut cap_sounds = [None; 2];
         self.pending_drink_contacts.clear();
         let acquisition_release = self.carry.acquisition_held();
-        self.carry.release_acquisition(input);
         let reach = self.reach;
         let valid = |target: AimTarget| {
             target.distance.is_finite() && target.distance >= 0.0 && target.distance <= reach
@@ -1208,35 +1221,45 @@ impl InteractionState {
         if input.held & keys::USE == 0 {
             self.seat_action_latched = false;
         }
+        if self.active_mechanism_target(player, physics).is_none() {
+            self.latched_mechanism = None;
+        }
         let availability = self.available_actions(&aim, player, items, physics, needs);
+        let resolved = self.resolve_input(input, &availability);
+        self.carry.release_acquisition(input);
+        let grab_input = resolved.grab_input;
+        let use_input = resolved.use_input;
         let held_switch_pressed =
-            input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
+            use_input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
         let light_action = if held_switch_pressed {
             self.held_light_control()
         } else {
             availability.light_control.filter(|_| {
-                input.pressed & keys::USE != 0
-                    || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+                use_input.pressed & keys::USE != 0
+                    || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
             })
         };
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
         let grab_target = aim.grab_target.filter(|target| valid(*target));
-        let installation_target = aim.installation_target.filter(|target| valid(*target));
         let filling_target = aim.filling_target.filter(|target| valid(*target));
         self.mechanisms.sync(physics, false);
-        let released_mechanism = input.released & keys::USE != 0 && self.use_consumed;
+        let released_mechanism = use_input.released & keys::USE != 0 && self.use_consumed;
         let primary_use = availability.lmb_use && self.held_light_control().is_none();
-        let mechanism_held =
-            input.held & keys::USE != 0 || (input.held & keys::PRIMARY != 0 && primary_use);
+        let mechanism_held = use_input.held & keys::USE != 0
+            || (use_input.held & keys::PRIMARY != 0 && primary_use)
+            || (use_input.wheel != 0.
+                && availability.use_item.is_some_and(|item| {
+                    self.mechanisms.drag_eligible(item) && self.mechanisms.scroll_eligible(item)
+                }));
         if !mechanism_held {
             self.latched_mechanism = None;
             self.use_consumed = false;
         } else if self.latched_mechanism.is_none()
             && let Some(target) = target
             && self.mechanisms.contains(target.item)
-            && (input.held & keys::USE != 0 || self.mechanisms.drag_eligible(target.item))
+            && (use_input.held & keys::USE != 0 || self.mechanisms.drag_eligible(target.item))
             && let Some(&body_id) = self.mechanism_bodies.get(&target.item)
             && let Some(body) = self
                 .bodies
@@ -1251,172 +1274,20 @@ impl InteractionState {
             ));
             self.use_consumed = true;
         }
-        let use_target = if let Some((item, body_id, local, collider)) = self.latched_mechanism {
-            if self.mechanisms.contains(item)
-                && let Some(body) = self
-                    .bodies
-                    .get(&body_id)
-                    .and_then(|handle| physics.rapier().bodies.get(*handle))
-            {
-                let point = *body.position() * local;
-                let distance = (point - Vector::from_array(player.body_pose(physics).position))
-                    .length_squared();
-                if distance < self.mechanism_release_distance_squared {
-                    Some(AimTarget {
-                        collider,
-                        item,
-                        distance: distance.sqrt(),
-                        point: point.to_array(),
-                        slot: None,
-                    })
-                } else {
-                    self.latched_mechanism = None;
-                    None
-                }
-            } else {
-                self.latched_mechanism = None;
-                None
-            }
-        } else {
-            target
-        };
-        let mut action = light_action.map(InteractionAction::LightControl);
-        let mut carry_input = input;
-        if held_switch_pressed {
-            carry_input.pressed &= !keys::PRIMARY;
-        }
-        self.tuning_opening = None;
-        let can_use_target = availability.light_control.is_some()
-            || use_target.is_some_and(|target| {
-                self.mechanisms.contains(target.item)
-                    || self.openings.iter().any(|opening| {
-                        opening.reference.cap == target.item
-                            && (opening.reference.can_toggle || opening.reference.can_tune)
-                    })
-            });
-        if input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
-            if let Some(seat) = self
-                .seats
-                .iter()
-                .find(|seat| Some(seat.id) == player.seat())
-                && player.try_exit(physics, &seat.exit)
-            {
-                self.seat_action_latched = true;
-                action = Some(InteractionAction::Seat(seat.id));
-            }
-        } else if let Some(target) = use_target {
-            if input.held & keys::USE != 0
-                || input.pressed & (keys::USE | keys::PRIMARY) != 0
-                || input.wheel != 0.
-            {
-                items.mark_dirty(target.item);
-            }
-            if input.pressed & keys::USE != 0
-                || (!held_switch_pressed
-                    && input.pressed & keys::PRIMARY != 0
-                    && availability.lmb_use)
-            {
-                for opening in &mut self.openings {
-                    if opening.reference.cap == target.item && opening.reference.can_toggle {
-                        let previous = opening.valve;
-                        items.mark_dirty(target.item);
-                        opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
-                        cap_sounds[0] = Some(InteractionSound::Cap {
-                            id: opening.reference.id,
-                            previous,
-                            current: opening.valve,
-                            tune: None,
-                        });
-                        action = Some(InteractionAction::Cap(opening.reference.id));
-                        break;
-                    }
-                }
-            }
-            if let Some(opening) = self
-                .openings
-                .iter_mut()
-                .find(|opening| opening.reference.cap == target.item && opening.reference.can_tune)
-            {
-                carry_input.wheel = 0.0;
-                let delta = if input.wheel.is_finite() && input.wheel != 0.0 {
-                    input.wheel * self.scroll_sensitivity
-                } else if input.held & keys::USE != 0 {
-                    input.mouse[1]
-                } else {
-                    0.0
-                };
-                if input.held & keys::USE != 0 || delta != 0.0 {
-                    self.tuning_opening = Some(opening.reference.id);
-                }
-                if delta.is_finite() && delta != 0.0 {
-                    items.mark_dirty(target.item);
-                    let previous = opening.valve;
-                    let requested = delta * dt * opening.reference.tune_rate;
-                    opening.valve = (opening.valve + requested).clamp(0.0, 1.0);
-                    cap_sounds[1] = Some(InteractionSound::Cap {
-                        id: opening.reference.id,
-                        previous,
-                        current: opening.valve,
-                        tune: Some(requested),
-                    });
-                    if opening.valve < 1e-6 {
-                        opening.valve = 0.0;
-                    }
-                    action = Some(InteractionAction::Cap(opening.reference.id));
-                }
-            }
-            if input.released & keys::USE != 0
-                && !released_mechanism
-                && self.held().is_none()
-                && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
-                && player.enter(seat.id, seat.pose, physics)
-            {
-                self.seat_action_latched = true;
-                action = Some(InteractionAction::Seat(seat.id));
-            }
-            if self.mechanisms.contains(target.item)
-                && (input.pressed & keys::USE != 0
-                    || (!held_switch_pressed
-                        && input.pressed & keys::PRIMARY != 0
-                        && self.mechanisms.primary_switch(target.item)
-                        && availability.lmb_use)
-                    || input.held & keys::USE != 0
-                    || (input.held & keys::PRIMARY != 0
-                        && (self.mechanisms.radio_tunable(target.item)
-                            || self.mechanisms.drag_eligible(target.item))
-                        && primary_use)
-                    || (input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
-            {
-                let mut mechanism_input = input;
-                if !availability.lmb_use {
-                    mechanism_input.held &= !keys::PRIMARY;
-                    mechanism_input.pressed &= !keys::PRIMARY;
-                }
-                self.mechanisms
-                    .step(target.item, mechanism_input, player.view_pose(physics), dt);
-                carry_input.wheel = 0.0;
-                action = Some(InteractionAction::Mechanism(target.item));
-            }
-        }
-
-        for sound in cap_sounds.into_iter().flatten() {
-            self.sound(sound);
-        }
-        let available = self.available_actions(&aim, player, items, physics, needs);
-        if input.pressed & keys::GRAB != 0 {
+        let use_target = self.active_mechanism_target(player, physics).or(target);
+        let mut action = None;
+        let available = availability;
+        if grab_input.pressed & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
         }
-        let grip_release = self.push.gripping() && input.pressed & keys::GRAB != 0;
+        let grip_release = self.push.gripping() && grab_input.pressed & keys::GRAB != 0;
         if grip_release {
             self.push.stop(player, physics);
             self.f_gesture_consumed = true;
         }
-        let blocked_install = aim.installation_block.is_some()
-            || (self.held().is_some() && installation_target.is_some() && available.slot.is_none());
-        if input.released & keys::GRAB != 0
+        if grab_input.released & keys::GRAB != 0
             && !self.f_gesture_consumed
             && !acquisition_release
-            && !blocked_install
             && available.actions.0 & ActionMask::MOUNT != 0
             && self.carry.throw_charge() < self.carry.reference_throw_minimum()
         {
@@ -1457,9 +1328,8 @@ impl InteractionState {
                 }
             }
         }
-        if input.pressed & keys::GRAB != 0
+        if grab_input.pressed & keys::GRAB != 0
             && !self.carry.acquisition_held()
-            && !blocked_install
             && !grip_release
             && self.held().is_none()
         {
@@ -1487,58 +1357,191 @@ impl InteractionState {
                         action = Some(InteractionAction::Wheel(WheelAction::Remove(target.item)));
                     }
                 }
-            } else if available.actions.0 & ActionMask::PICKUP != 0
-                && let Some(target) = grab_target
-                && (if self.storage.stored(target.item) {
-                    self.pickup_stored_item(target.item, target.point, player, items, physics)
-                        .is_ok()
-                } else {
-                    self.carry
-                        .pickup(target.item, target.point, player, items, physics)
-                        .is_ok()
-                })
-            {
-                action = Some(InteractionAction::Pickup(target.item));
             }
             if action.is_some() {
                 self.f_gesture_consumed = true;
             }
         }
-        if blocked_install
-            && (self.carry.throw_active() || (input.held | input.pressed) & keys::GRAB != 0)
+
+        let carry_input = resolved.carry_input;
+        self.tuning_opening = None;
+        let can_use_target = availability.light_control.is_some()
+            || use_target.is_some_and(|target| {
+                self.mechanisms.contains(target.item)
+                    || self.openings.iter().any(|opening| {
+                        opening.reference.cap == target.item
+                            && (opening.reference.can_toggle || opening.reference.can_tune)
+                    })
+            });
+        if action.is_none() {
+            action = light_action.map(InteractionAction::LightControl);
+            if use_input.pressed & keys::USE != 0 && player.seat().is_some() && !can_use_target {
+                if let Some(seat) = self
+                    .seats
+                    .iter()
+                    .find(|seat| Some(seat.id) == player.seat())
+                    && player.try_exit(physics, &seat.exit)
+                {
+                    self.seat_action_latched = true;
+                    action = Some(InteractionAction::Seat(seat.id));
+                }
+            } else if let Some(target) = use_target {
+                if use_input.held & keys::USE != 0
+                    || use_input.pressed & (keys::USE | keys::PRIMARY) != 0
+                    || use_input.wheel != 0.
+                {
+                    items.mark_dirty(target.item);
+                }
+                if use_input.pressed & keys::USE != 0
+                    || (!held_switch_pressed
+                        && use_input.pressed & keys::PRIMARY != 0
+                        && availability.lmb_use)
+                {
+                    for opening in &mut self.openings {
+                        if opening.reference.cap == target.item && opening.reference.can_toggle {
+                            let previous = opening.valve;
+                            items.mark_dirty(target.item);
+                            opening.valve = if opening.valve > 0.0 { 0.0 } else { 1.0 };
+                            cap_sounds[0] = Some(InteractionSound::Cap {
+                                id: opening.reference.id,
+                                previous,
+                                current: opening.valve,
+                                tune: None,
+                            });
+                            action = Some(InteractionAction::Cap(opening.reference.id));
+                            break;
+                        }
+                    }
+                }
+                if let Some(opening) = self.openings.iter_mut().find(|opening| {
+                    opening.reference.cap == target.item && opening.reference.can_tune
+                }) {
+                    let delta = if use_input.wheel.is_finite() && use_input.wheel != 0.0 {
+                        use_input.wheel * self.scroll_sensitivity
+                    } else if use_input.held & keys::USE != 0
+                        || (primary_use && use_input.held & keys::PRIMARY != 0)
+                    {
+                        use_input.mouse[1]
+                    } else {
+                        0.0
+                    };
+                    if use_input.held & keys::USE != 0
+                        || (primary_use && use_input.held & keys::PRIMARY != 0)
+                        || delta != 0.0
+                    {
+                        self.tuning_opening = Some(opening.reference.id);
+                    }
+                    if delta.is_finite() && delta != 0.0 {
+                        items.mark_dirty(target.item);
+                        let previous = opening.valve;
+                        let requested = delta * dt * opening.reference.tune_rate;
+                        opening.valve = (opening.valve + requested).clamp(0.0, 1.0);
+                        cap_sounds[1] = Some(InteractionSound::Cap {
+                            id: opening.reference.id,
+                            previous,
+                            current: opening.valve,
+                            tune: Some(requested),
+                        });
+                        if opening.valve < 1e-6 {
+                            opening.valve = 0.0;
+                        }
+                        action = Some(InteractionAction::Cap(opening.reference.id));
+                    }
+                }
+                if use_input.released & keys::USE != 0
+                    && !released_mechanism
+                    && self.held().is_none()
+                    && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
+                    && player.enter(seat.id, seat.pose, physics)
+                {
+                    self.seat_action_latched = true;
+                    action = Some(InteractionAction::Seat(seat.id));
+                }
+                if self.mechanisms.contains(target.item)
+                    && (use_input.pressed & keys::USE != 0
+                        || (!held_switch_pressed
+                            && use_input.pressed & keys::PRIMARY != 0
+                            && self.mechanisms.primary_switch(target.item)
+                            && availability.lmb_use)
+                        || use_input.held & keys::USE != 0
+                        || (use_input.held & keys::PRIMARY != 0
+                            && (self.mechanisms.radio_tunable(target.item)
+                                || self.mechanisms.drag_eligible(target.item))
+                            && primary_use)
+                        || (use_input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
+                {
+                    let mut mechanism_input = use_input;
+                    if !availability.lmb_use {
+                        mechanism_input.held &= !keys::PRIMARY;
+                        mechanism_input.pressed &= !keys::PRIMARY;
+                    }
+                    self.mechanisms.step(
+                        target.item,
+                        mechanism_input,
+                        player.view_pose(physics),
+                        dt,
+                    );
+                    action = Some(InteractionAction::Mechanism(target.item));
+                }
+            }
+        }
+        for sound in cap_sounds.into_iter().flatten() {
+            self.sound(sound);
+        }
+        if action.is_none()
+            && !grip_release
+            && !self.carry.acquisition_held()
+            && self.held().is_none()
+            && (grab_input.held | grab_input.pressed) & keys::GRAB != 0
+            && available.actions.0 & ActionMask::PICKUP != 0
+            && let Some(target) = grab_target
+            && (if self.storage.stored(target.item) {
+                self.pickup_stored_item(target.item, target.point, player, items, physics)
+                    .is_ok()
+            } else {
+                self.carry
+                    .pickup(target.item, target.point, player, items, physics)
+                    .is_ok()
+            })
         {
-            self.carry.cancel_input();
+            action = Some(InteractionAction::Pickup(target.item));
+        }
+        if action.is_some() && (grab_input.held | grab_input.pressed) & keys::GRAB != 0 {
+            self.f_gesture_consumed = true;
         }
         let push_target = aim.push_target.filter(|target| valid(*target));
-        let pushing = if (action.is_none() || self.push.gripping())
-            && self.held().is_none()
-            && !blocked_install
-            && !grip_release
-        {
-            self.push
-                .step(input, push_target, &self.bodies, player, physics, dt)
-        } else {
-            self.push.stop(player, physics);
-            None
-        };
+        let pushing =
+            if (action.is_none() || self.push.gripping()) && self.held().is_none() && !grip_release
+            {
+                self.push.step(
+                    resolved.push_input,
+                    push_target,
+                    &self.bodies,
+                    player,
+                    physics,
+                    dt,
+                )
+            } else {
+                self.push.stop(player, physics);
+                None
+            };
         if action.is_none()
             && let Some(item) = pushing
         {
             action = Some(InteractionAction::Push(item));
         }
         if action.is_none()
-            && !blocked_install
             && !acquisition_release
             && !self.f_gesture_consumed
             && self.held().is_some()
         {
-            if input.pressed & keys::GRAB != 0 {
+            if grab_input.pressed & keys::GRAB != 0 {
                 self.carry.begin_throw();
             }
-            if input.held & keys::GRAB != 0 {
+            if grab_input.held & keys::GRAB != 0 {
                 self.carry.charge_throw(dt);
             }
-            if input.released & keys::GRAB != 0 {
+            if grab_input.released & keys::GRAB != 0 {
                 let throwing = self.carry.throw_charge() > self.carry.reference_throw_minimum();
                 if let Some(item) = self.carry.release_throw(player, items, physics) {
                     self.storage.mark_dropped(item);
@@ -1751,7 +1754,10 @@ impl InteractionState {
             });
         }
         self.fill_opening = availability.fill_reservation;
-        action
+        InteractionOutcome {
+            action,
+            look_mouse: resolved.look_mouse,
+        }
     }
 
     pub fn remove_plate(
