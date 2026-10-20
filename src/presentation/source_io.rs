@@ -1,5 +1,5 @@
 //! Receipt checks complete before the existing Bevy decoders receive input.
-use crate::reference::FileCatalog;
+use crate::reference::{FileCatalog, fixed_reservation::FIXED_SHADERS};
 use async_lock::Semaphore;
 use bevy::{
     asset::{
@@ -61,6 +61,10 @@ impl AssetReader for SourceAssetReader {
         let path = path
             .to_str()
             .ok_or_else(|| invalid("Invalid source path".into()))?;
+        // Shaders are code, so they come from the WASM and never from the export.
+        if let Some((_, source)) = FIXED_SHADERS.iter().find(|(p, _)| *p == path) {
+            return Ok(VecReader::new(source.as_bytes().to_vec()));
+        }
         let receipt = self
             .catalog
             .file(path)

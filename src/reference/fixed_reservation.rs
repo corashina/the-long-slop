@@ -466,50 +466,57 @@ pub fn fixed_room(
             .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU))
 }
 
-pub const FIXED_SHADER_PATHS: [&str; 31] = [
-    "shaders/source_lod.wgsl",
-    "shaders/source_float_store.wgsl",
-    "shaders/source_view_lighting.wgsl",
-    "shaders/source_caster_math.wgsl",
-    "shaders/source_world_caster.wgsl",
-    "shaders/source_lighting.wgsl",
-    "shaders/source_surface.wgsl",
-    "shaders/source_mesh.wgsl",
-    "shaders/source_glass.wgsl",
-    "shaders/source_sky.wgsl",
-    "shaders/source_cloud.wgsl",
-    "shaders/source_render_sky.wgsl",
-    "shaders/source_copy.wgsl",
-    "shaders/source_histogram.wgsl",
-    "shaders/source_exposure.wgsl",
-    "shaders/source_probe.wgsl",
-    "shaders/source_caster.wgsl",
-    "shaders/source_bloom.wgsl",
-    "shaders/source_lut.wgsl",
-    "shaders/source_uber.wgsl",
-    "shaders/source_ao_depth.wgsl",
-    "shaders/source_ao_render.wgsl",
-    "shaders/source_ao_upsample.wgsl",
-    "shaders/source_ao_composite.wgsl",
-    "shaders/source_plate_text.wgsl",
-    "shaders/source_grass_displacement.wgsl",
-    "shaders/source_grass.wgsl",
-    "shaders/source_terrain.wgsl",
-    "shaders/source_impostor.wgsl",
-    "shaders/source_particles.wgsl",
-    "shaders/source_shadow_collector.wgsl",
+// Shaders are code. The WASM embeds them, so an export never holds a stale copy.
+macro_rules! fixed_shaders {
+    ($($name:literal),* $(,)?) => {
+        [$((
+            concat!("shaders/", $name),
+            include_str!(concat!("../../web/assets/shaders/", $name)),
+        )),*]
+    };
+}
+/// Path and WGSL source. Imported shader libraries come before their importing shaders.
+pub const FIXED_SHADERS: [(&str, &str); 31] = fixed_shaders![
+    "source_lod.wgsl",
+    "source_float_store.wgsl",
+    "source_view_lighting.wgsl",
+    "source_caster_math.wgsl",
+    "source_world_caster.wgsl",
+    "source_lighting.wgsl",
+    "source_surface.wgsl",
+    "source_mesh.wgsl",
+    "source_glass.wgsl",
+    "source_sky.wgsl",
+    "source_cloud.wgsl",
+    "source_render_sky.wgsl",
+    "source_copy.wgsl",
+    "source_histogram.wgsl",
+    "source_exposure.wgsl",
+    "source_probe.wgsl",
+    "source_caster.wgsl",
+    "source_bloom.wgsl",
+    "source_lut.wgsl",
+    "source_uber.wgsl",
+    "source_ao_depth.wgsl",
+    "source_ao_render.wgsl",
+    "source_ao_upsample.wgsl",
+    "source_ao_composite.wgsl",
+    "source_plate_text.wgsl",
+    "source_grass_displacement.wgsl",
+    "source_grass.wgsl",
+    "source_terrain.wgsl",
+    "source_impostor.wgsl",
+    "source_particles.wgsl",
+    "source_shadow_collector.wgsl",
 ];
 
 /// Source and parser copies, retained main/render shader data, and input scratch.
-pub fn shader_input(catalog: &FileCatalog, path: &str) -> Result<FixedReservation, ReferenceError> {
-    require(
-        FIXED_SHADER_PATHS.contains(&path),
-        "unselected shader input",
-    )?;
-    let receipt = catalog.file(path)?;
-    receipt.validate()?;
-    let bytes = receipt.bytes as usize;
-    require(bytes > 0, "empty selected shader input")?;
+pub fn shader_input(path: &str) -> Result<FixedReservation, ReferenceError> {
+    let bytes = FIXED_SHADERS
+        .iter()
+        .find(|(p, _)| *p == path)
+        .map_or(0, |(_, source)| source.len());
+    require(bytes > 0, "selected shader input")?;
     Ok(FixedReservation {
         mesh_bytes: 0,
         cpu: bytes

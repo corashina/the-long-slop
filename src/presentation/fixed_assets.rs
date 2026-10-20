@@ -34,7 +34,7 @@ use bevy::{
 };
 use std::sync::{Arc, Mutex};
 const ROW_SCRATCH: usize = 5 * (1024 * 1024 + 16);
-use crate::reference::fixed_reservation::{FIXED_SHADER_PATHS as SHADERS, shader_input};
+use crate::reference::fixed_reservation::{FIXED_SHADERS as SHADERS, shader_input};
 type RootState = SelectedMetadata<Handle<SourcePlan>, Handle<Gltf>>;
 struct Root {
     asset: AssetId,
@@ -112,8 +112,8 @@ impl SourceFixedAssets {
     }
 
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        for path in SHADERS {
-            shader_input(&reference.file_catalog, path)?;
+        for (path, _) in SHADERS {
+            shader_input(path)?;
         }
         let roots = reference
             .assets
@@ -271,7 +271,7 @@ impl SourceFixedAssets {
             "payloads_ready": self.payloads_ready(),
             "roots_loading": self.roots.iter().filter(|r| matches!(r.state, RootState::Loading { .. })).count(),
             "rows_pending": self.rows.iter().filter(|r| !r.receipt.completed()).count(),
-            "shaders_pending": self.shaders.iter().zip(SHADERS).filter_map(|(s, path)| (!s.done).then_some(path)).collect::<Vec<_>>(),
+            "shaders_pending": self.shaders.iter().zip(SHADERS).filter_map(|(s, (path, _))| (!s.done).then_some(path)).collect::<Vec<_>>(),
         })
     }
     pub fn descriptors_ready(&self) -> bool {
@@ -865,7 +865,7 @@ impl SourceFixedAssets {
         // Imported shader libraries must finish before their importing shaders start.
         if let Some(index) = self.shaders.iter().position(|s| !s.done) {
             if self.shaders[index].handle.is_none() {
-                let bound = shader_input(&reference.file_catalog, SHADERS[index])?;
+                let bound = shader_input(SHADERS[index].0)?;
                 let (cpu, staging) = (bound.cpu, bound.staging);
                 if crate::reference::fixed_reservation::fixed_room(stream, cpu, 0, staging, true)? {
                     self.shaders[index].cpu = cpu;
@@ -878,12 +878,12 @@ impl SourceFixedAssets {
                         next.replace(*snapshot, stream.presentation_allocation())?,
                     )?;
                     *snapshot = next;
-                    self.shaders[index].handle = Some(server.load(SHADERS[index]));
+                    self.shaders[index].handle = Some(server.load(SHADERS[index].0));
                 }
             }
         } else if !self.shaders_bound {
             let shader = |path: &str| {
-                self.shaders[SHADERS.iter().position(|p| *p == path).unwrap()]
+                self.shaders[SHADERS.iter().position(|(p, _)| *p == path).unwrap()]
                     .handle
                     .as_ref()
                     .unwrap()
@@ -1068,7 +1068,7 @@ impl AdmittedShaders {
     pub(crate) fn get(&self, path: &str) -> Option<&Handle<Shader>> {
         self.0
             .as_ref()
-            .and_then(|handles| SHADERS.iter().position(|p| *p == path).map(|i| &handles[i]))
+            .and_then(|handles| SHADERS.iter().position(|(p, _)| *p == path).map(|i| &handles[i]))
     }
 }
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
