@@ -76,38 +76,6 @@ pub struct InteractionFeedback<'a> {
     pub fluid: Option<FluidFeedback<'a>>,
 }
 impl InteractionState {
-    fn can_reserve_fill(&self, opening: &OpeningState, items: &ItemStore) -> bool {
-        let Some(held) = self.held() else {
-            return false;
-        };
-        if opening.valve <= 0. {
-            return false;
-        }
-        let (source, destination) = if self.supplies.contains(&opening.reference.tank) {
-            (opening.reference.tank, held)
-        } else {
-            (held, opening.reference.tank)
-        };
-        let destination_open = !self.supplies.contains(&opening.reference.tank)
-            || self
-                .openings
-                .iter()
-                .any(|o| o.reference.tank == destination && o.valve > 0.);
-        source != destination
-            && destination_open
-            && self
-                .tank_rules
-                .get(&source)
-                .is_some_and(|r| !r.no_fill_from)
-            && self
-                .tank_rules
-                .get(&destination)
-                .is_some_and(|r| !r.no_fill_this)
-            && items
-                .get(source)
-                .and_then(|i| i.fluid.as_ref())
-                .is_some_and(|f| f.total() > 0.)
-    }
     pub fn available_actions(
         &self,
         aim: &ResolvedAim,
@@ -223,42 +191,11 @@ impl InteractionState {
             }
         }
         if let Some(t) = filling_target
-            && let Some(o) = self
-                .openings
-                .iter()
-                .find(|o| o.reference.cap == t.item && o.valve > 0.)
-            && let Some(held) = self.held()
+            && let Some(o) = self.openings.iter().find(|o| o.reference.cap == t.item)
         {
             a.opening = Some(o.reference.id);
-            if self.can_reserve_fill(o, items) {
+            if self.fill_pair(o, items).is_some() {
                 a.fill_reservation = Some(o.reference.id);
-            }
-            let (source, dest) = if self.supplies.contains(&o.reference.tank) {
-                (o.reference.tank, held)
-            } else {
-                (held, o.reference.tank)
-            };
-            let dest_open = !self.supplies.contains(&o.reference.tank)
-                || self
-                    .openings
-                    .iter()
-                    .any(|v| v.reference.tank == dest && v.valve > 0.);
-            if source != dest
-                && dest_open
-                && self
-                    .tank_rules
-                    .get(&source)
-                    .is_some_and(|r| !r.no_fill_from)
-                && self.tank_rules.get(&dest).is_some_and(|r| !r.no_fill_this)
-                && items
-                    .get(source)
-                    .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.total() > 0.)
-                && items
-                    .get(dest)
-                    .and_then(|i| i.fluid.as_ref())
-                    .is_some_and(|f| f.total() < f.capacity_liters)
-            {
                 a.actions.0 |= ActionMask::FILL;
             }
         }
@@ -409,7 +346,7 @@ impl InteractionState {
         let latched_fill = self
             .fill_opening
             .and_then(|id| self.openings.iter().find(|o| o.reference.id == id))
-            .is_some_and(|opening| self.can_reserve_fill(opening, items));
+            .is_some_and(|opening| self.fill_pair(opening, items).is_some());
         let food_guard = self.held().is_some_and(|held| {
             items
                 .get(held)

@@ -1063,6 +1063,22 @@ impl InteractionState {
         sound
     }
 
+    fn fill_pair(&self, opening: &OpeningState, items: &ItemStore) -> Option<(ItemId, ItemId)> {
+        let source = self.held()?;
+        let destination = opening.reference.tank;
+        if source == destination
+            || opening.valve <= 0.
+            || self.tank_rules.get(&source)?.no_fill_from
+            || self.tank_rules.get(&destination)?.no_fill_this
+        {
+            return None;
+        }
+        let source_fluid = items.get(source)?.fluid.as_ref()?;
+        let destination_fluid = items.get(destination)?.fluid.as_ref()?;
+        (source_fluid.total() > 0. && destination_fluid.total() < destination_fluid.capacity_liters)
+            .then_some((source, destination))
+    }
+
     pub fn opening_flow(&self, id: OpeningId) -> Option<(bool, f32)> {
         self.openings
             .iter()
@@ -1562,46 +1578,19 @@ impl InteractionState {
         if !held_switch_pressed
             && input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
-            && let Some(held) = self.held()
             && let Some(target) = filling_target
         {
             if let Some(opening) = self
                 .openings
                 .iter()
-                .find(|opening| opening.reference.cap == target.item && opening.valve > 0.0)
+                .find(|opening| opening.reference.cap == target.item)
+                && let Some((source_id, destination)) = self.fill_pair(opening, items)
             {
-                let (source_id, destination, flow, destination_opening) =
-                    if self.supplies.contains(&opening.reference.tank) {
-                        if let Some(destination) = self.openings.iter().find(|destination| {
-                            destination.reference.tank == held && destination.valve > 0.0
-                        }) {
-                            (
-                                opening.reference.tank,
-                                held,
-                                opening.reference.flow_liters_per_second * opening.valve,
-                                destination.reference.id,
-                            )
-                        } else {
-                            (held, held, 0.0, opening.reference.id)
-                        }
-                    } else {
-                        (
-                            held,
-                            opening.reference.tank,
-                            opening.reference.flow_liters_per_second * opening.valve,
-                            opening.reference.id,
-                        )
-                    };
-                let source_allowed = self
-                    .tank_rules
-                    .get(&source_id)
-                    .is_some_and(|rules| !rules.no_fill_from);
+                let flow = opening.reference.flow_liters_per_second * opening.valve;
+                let destination_opening = opening.reference.id;
                 let destination_rules = self.tank_rules.get(&destination);
-                if source_id != destination
-                    && source_allowed
-                    && destination_rules.is_some_and(|rules| !rules.no_fill_this)
-                    && let Some((source, destination_state)) =
-                        items.get_pair_mut(source_id, destination)
+                if let Some((source, destination_state)) =
+                    items.get_pair_mut(source_id, destination)
                     && let (Some(source), Some(destination_state)) =
                         (source.fluid.as_mut(), destination_state.fluid.as_mut())
                 {
