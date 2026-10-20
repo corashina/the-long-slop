@@ -739,14 +739,31 @@ impl GarageRuntime {
     }
 }
 
+fn urine_outlet_pose(
+    view: crate::player::PlayerView,
+    body: VehiclePose,
+    reach: f32,
+    queries: &rapier3d::prelude::QueryPipeline<'_>,
+) -> rapier3d::math::Pose {
+    use rapier3d::math::{Rotation, Vector};
+    use rapier3d::prelude::Ray;
+    let view = to_rapier(view.head_pose);
+    let mut outlet = to_rapier(body);
+    let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+    let distance = queries
+        .cast_ray(&ray, reach, true)
+        .map_or(reach, |(_, t)| t);
+    let direction =
+        (ray.point_at(distance) - outlet.translation + Vector::Y * 0.25).normalize_or_zero();
+    outlet.rotation = Rotation::from_rotation_arc(-Vector::Z, direction);
+    outlet
+}
+
 impl GarageRuntime {
     pub(super) fn advance_urine(&mut self, reference: &ReferenceManifest, dt: f32) {
-        use rapier3d::math::{Rotation, Vector};
-        use rapier3d::prelude::{QueryFilter, Ray};
+        use rapier3d::math::Vector;
+        use rapier3d::prelude::QueryFilter;
         let body = self.area.player.body_handle();
-        let view = to_rapier(self.area.player.view(&self.physics).camera_pose);
-        let mut cap = to_rapier(self.area.player.body_pose(&self.physics));
-        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
         let surfaces = |_: rapier3d::prelude::ColliderHandle, c: &rapier3d::prelude::Collider| {
             c.is_enabled()
                 && !c.is_sensor()
@@ -754,14 +771,14 @@ impl GarageRuntime {
                 && c.collision_groups().memberships.bits() & reference.player.action_masks.use_mask
                     != 0
         };
-        let distance = self
-            .physics
-            .queries(QueryFilter::default().predicate(&surfaces))
-            .cast_ray(&ray, reference.player.aim_reach, true)
-            .map_or(reference.player.aim_reach, |(_, t)| t);
-        let direction =
-            (ray.point_at(distance) - cap.translation + Vector::Y * 0.25).normalize_or_zero();
-        cap.rotation = Rotation::from_rotation_arc(-Vector::Z, direction);
+        let cap = urine_outlet_pose(
+            self.area.player.view(&self.physics),
+            self.area.player.body_pose(&self.physics),
+            reference.player.aim_reach,
+            &self
+                .physics
+                .queries(QueryFilter::default().predicate(&surfaces)),
+        );
         // The mouth and urine outlet own tank 73403. Source Tankolas excludes self-drinking.
         self.urine.advance(
             &self.urine_reference,
@@ -778,5 +795,56 @@ impl GarageRuntime {
             self.urine_emission[1],
             None,
         );
+    }
+}
+
+#[cfg(test)]
+mod urine_view_tests {
+    use super::*;
+    use crate::player::PlayerView;
+    use rapier3d::{
+        math::{Rotation, Vector},
+        prelude::{ColliderBuilder, RigidBodyBuilder},
+    };
+    #[test]
+    fn independent_camera_look_does_not_redirect_urine() {
+        let mut physics = rapier3d::prelude::PhysicsWorld::new();
+        physics.gravity = Vector::ZERO;
+        physics.insert(
+            RigidBodyBuilder::fixed(),
+            ColliderBuilder::cuboid(0.25, 0.25, 0.25).translation(Vector::new(0., 1., -2.)),
+        );
+        physics.step();
+        let body = VehiclePose {
+            position: [0.; 3],
+            rotation: Rotation::IDENTITY.to_array(),
+        };
+        let mut view = PlayerView {
+            head_pose: VehiclePose {
+                position: [0., 1., 0.],
+                rotation: Rotation::IDENTITY.to_array(),
+            },
+            camera_pose: VehiclePose {
+                position: [4., 2., 0.],
+                rotation: Rotation::from_rotation_y(-90_f32.to_radians()).to_array(),
+            },
+            fov_degrees: 65.,
+            ray_actions_blocked: false,
+        };
+        assert_ne!(view.head_pose.rotation, view.camera_pose.rotation);
+        let outlet = urine_outlet_pose(view, body, 5., &physics.query_pipeline());
+        let expected = Vector::new(0., 1.25, -1.75).normalize();
+        let direction = outlet.rotation * -Vector::Z;
+        assert!(
+            (direction - expected).length() < 1e-5,
+            "Urine must follow the head ray hit, including the source upward offset"
+        );
+        view.camera_pose = VehiclePose {
+            position: [-4., 3., 2.],
+            rotation: Rotation::from_rotation_y(45_f32.to_radians()).to_array(),
+        };
+        let changed_camera = urine_outlet_pose(view, body, 5., &physics.query_pipeline());
+        assert_eq!(outlet, changed_camera);
+        assert_eq!(outlet.translation, Vector::ZERO);
     }
 }
