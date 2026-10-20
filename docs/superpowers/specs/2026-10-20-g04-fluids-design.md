@@ -2,7 +2,7 @@
 
 Date: 2026-10-20.
 Status: Approved and implemented on 2026-10-20. G04 remains `Verify`.
-Normal-input browser acceptance and scoped final-fix review remain pending.
+Scoped final-fix review passed. Normal-input browser acceptance remains pending.
 Base: `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g04-fluids`.
 
