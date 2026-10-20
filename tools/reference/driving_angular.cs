@@ -65,6 +65,7 @@ public static class G11AngularProbe
     static WheelCollider wheel;
     static Rigidbody body;
     static int revision,assignedStep;
+    static bool armed;
     public static bool Active { get { return input!=null; } }
     public static void ReadProfile(WheelCollider value,Profile target) {
         target.center=value.center;target.radius=value.radius;target.mass=value.mass;target.damping=value.wheelDampingRate;
@@ -112,8 +113,11 @@ public static class G11AngularProbe
     }
     public static void Arm() {
         if(!Active) return;
-        // One declared input, after the reviewed copy release. Never restore state during measurement.
+        if(armed || body.isKinematic || !wheel.enabled || !wheel.gameObject.activeSelf || !wheel.gameObject.activeInHierarchy)
+            throw new InvalidOperationException("Angular arming repeated or copied body/wheel is not active");
+        // One declared input after copied-wheel activation. Never restore state during measurement.
         body.velocity=input.rig.velocity_mps;body.angularVelocity=input.rig.angular_velocity_rad_s;
+        armed=true;
     }
     public static void RetainInitial() { report.initial_state=new State();Read(report.initial_state); }
     public static void Assign(int step) {

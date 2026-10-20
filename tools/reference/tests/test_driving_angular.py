@@ -127,6 +127,12 @@ class AngularTests(unittest.TestCase):
         run['angular']['initial_state']['body']['rotation']['x']=.01
         self.assertNotEqual(before,angular_initial_inputs(run))
 
+    def test_actual_capture_arming_after_activation(self):
+        source=capture_arming_source(Path(__file__).parents[1])
+        result=subprocess.run(['pwsh','-NoProfile','-Command',"Add-Type -TypeDefinition @'\n"+source+"\n'@\n[CaptureArmingChecks]::Run()"],capture_output=True,text=True,timeout=60)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('G11_CAPTURE_ARMING_STUB_PASS',result.stdout)
+
     def test_actual_native_helper_with_compiled_stubs(self):
         source=(Path(__file__).parents[1]/'driving_angular.cs').read_text(encoding='utf-8-sig')+STUBS
         result=subprocess.run(['pwsh','-NoProfile','-Command',"Add-Type -TypeDefinition @'\n"+source+"\n'@\n[AngularChecks]::Run()"],capture_output=True,text=True,timeout=60)
@@ -143,10 +149,11 @@ namespace UnityEngine {
  public enum RigidbodyConstraints { None=0,Freeze=116 }
  public class Transform {public Transform parent;public Vector3 position,localPosition,localScale,lossyScale;public Quaternion rotation,localRotation;}
  public class GameObject {public Transform transform=new Transform();public bool activeSelf=true,activeInHierarchy=true;public GameObject(string n){} public T AddComponent<T>() where T:new(){return new T();}}
- public class Rigidbody {
-  public int id=2,solverIterations=6,solverVelocityIterations=1,interpolation,collisionDetectionMode,writes;
+ public class Rigidbody { public Transform transform=new Transform();
+  public int id=2,solverIterations=6,solverVelocityIterations=1,interpolation,collisionDetectionMode,writes,angularWrites;
   public float mass=100,drag,angularDrag,sleepThreshold,maxAngularVelocity=7;public bool useGravity,isKinematic=true,detectCollisions=true;
-  public RigidbodyConstraints constraints;public Vector3 centerOfMass,inertiaTensor,position,angularVelocity;public Quaternion rotation,inertiaTensorRotation;
+  public RigidbodyConstraints constraints;public Vector3 centerOfMass,inertiaTensor,position;public Quaternion rotation,inertiaTensorRotation;
+  Vector3 spin; public Vector3 angularVelocity {get{return spin;}set{angularWrites++;spin=value;}}
   Vector3 speed;public Vector3 velocity {get{return speed;}set{writes++;speed=value;}}
   public bool IsSleeping(){return false;} public int GetInstanceID(){return id;}
  }
@@ -164,6 +171,11 @@ namespace UnityEngine {
 public static class G11Geometry {public static string Key(UnityEngine.WheelCollider value){return "level1:58684";}}
 public static class AngularChecks {
  static void Need(bool value,string message){if(!value)throw new Exception(message);}
+ static void RejectArm(UnityEngine.Rigidbody body,string message){
+  int writes=body.writes,angularWrites=body.angularWrites;bool rejected=false;
+  try{G11AngularProbe.Arm();}catch(InvalidOperationException){rejected=true;}
+  Need(rejected && body.writes==writes && body.angularWrites==angularWrites,message);
+ }
  public static void Run(){
   var source=new UnityEngine.WheelCollider();var original=new UnityEngine.Rigidbody{id=1};var held=new UnityEngine.Rigidbody();
   var input=new G11AngularProbe.Input{source_wheel="level1:58684",support="full-tire",duration_steps=5,
@@ -173,12 +185,17 @@ public static class AngularChecks {
   Need(held.isKinematic && held.writes==0,"hold changed or setup velocity correction");
   Need(wheel.radius==source.radius && wheel.mass==source.mass && wheel.wheelDampingRate==source.wheelDampingRate,"profile copy");
   Need(G11AngularProbe.report.source_sprung_mass==123 && G11AngularProbe.report.copied_sprung_mass==123,"separate sprung mass");
-  held.isKinematic=false;G11AngularProbe.Arm();Need(held.writes==1 && held.velocity.x==10,"one-time velocity");
-  wheel.enabled=true;G11AngularProbe.RetainInitial();Need(G11AngularProbe.report.initial_state.body.velocity.x==10,"initial state");
+  wheel.enabled=true;RejectArm(held,"held body accepted");held.isKinematic=false;
+  wheel.enabled=false;RejectArm(held,"disabled wheel accepted");wheel.enabled=true;
+  wheel.gameObject.activeSelf=false;RejectArm(held,"inactive self accepted");wheel.gameObject.activeSelf=true;
+  wheel.gameObject.activeInHierarchy=false;RejectArm(held,"inactive hierarchy accepted");wheel.gameObject.activeInHierarchy=true;
+  G11AngularProbe.Arm();Need(held.writes==1 && held.angularWrites==1 && held.velocity.x==10,"one-time velocity");
+  RejectArm(held,"repeated arming accepted");
+  G11AngularProbe.RetainInitial();Need(G11AngularProbe.report.initial_state.body.velocity.x==10,"initial state");
   G11AngularProbe.Assign(1);int writes=wheel.motors;G11AngularProbe.Assign(2);Need(wheel.motors==writes,"repeated event setter");
   var state=new G11AngularProbe.State();G11AngularProbe.Read(state);Need(state.event_revision==1 && state.assignment_step==2 && state.body.instance_id==2,"revision and body");
   G11AngularProbe.Assign(3);Need(wheel.motorTorque==0 && wheel.brakeTorque==0,"active coast torque");
-  Need(wheel.rpm==-7 && held.writes==1,"angular or velocity correction");
+  Need(wheel.rpm==-7 && held.writes==1 && held.angularWrites==1,"angular or velocity correction");
   bool rejected=false;try{G11AngularProbe.Assign(3);}catch(InvalidOperationException){rejected=true;}Need(rejected,"repeated solve accepted");
   rejected=false;try{G11AngularProbe.Assign(5);}catch(InvalidOperationException){rejected=true;}Need(rejected,"missing solve accepted");
   G11AngularProbe.Read(state);Need(state.phase=="coast" && state.event_revision==2 && state.enabled==true,"coast observation");
@@ -186,5 +203,53 @@ public static class AngularChecks {
  }
 }
 '''
+
+def capture_arming_source(reference):
+    """Execute actual caller statements with the observed activation loss as a stub."""
+    capture=(reference/'driving_capture.cs').read_text(encoding='utf-8-sig')
+    canonical=capture.split('body.position=inputPose.position; body.rotation=inputPose.rotation;',1)[1].split('UnityEngine.Random.state=',1)[0]
+    activation=capture.split('                ApplyCanonical(result.setup_state);',1)[1].split('                result.initial=InitialState();',1)[0]
+    stubs=STUBS.split('public static class AngularChecks {',1)[0]
+    stubs=stubs.replace('public struct Vector3 {','public struct Vector3 { public static Vector3 zero;')
+    stubs=stubs.replace('public class Transform {','public class Transform {public Vector3 TransformDirection(Vector3 v){return v;}')
+    stubs=stubs.replace('collisionDetectionMode,writes,angularWrites;','collisionDetectionMode,writes,angularWrites,syncsAtVelocityWrite;')
+    stubs=stubs.replace('writes++;speed=value;','writes++;syncsAtVelocityWrite=Physics.syncs;speed=value;')
+    stubs=stubs.replace('Vector3 speed;','public void ActivationLoss(){speed=new Vector3();} Vector3 speed;')
+    stubs=stubs.replace('public bool enabled=true;','public static Rigidbody activationBody; bool on=true; public bool enabled {get{return on;}set{on=value;if(value && activationBody!=null)activationBody.ActivationLoss();}}')
+    stubs=stubs.replace('public static class Physics {public static Vector3 gravity;}','public static class Physics {public static Vector3 gravity;public static int syncs;public static void SyncTransforms(){syncs++;}} public class Collider {public Transform transform;public int GetInstanceID(){return 0;}} public static class Object {public static T[] FindObjectsOfType<T>(){return new T[0];}}')
+    stubs=stubs.replace('public static class G11Geometry {','public static class G11Geometry {public static void RestoreWheels(){throw new Exception("unexpected source restore");}')
+    return (reference/'driving_angular.cs').read_text(encoding='utf-8-sig')+stubs+CAPTURE_ARMING.replace('CANONICAL_STATEMENTS',canonical).replace('ACTIVATION_STATEMENTS',activation)
+
+
+CAPTURE_ARMING=r"""
+public static class CaptureArmingChecks {
+ static UnityEngine.Rigidbody body=new UnityEngine.Rigidbody();
+ static UnityEngine.WheelCollider[] wheels;
+ class Setup {public UnityEngine.Vector3 velocity_mps=new UnityEngine.Vector3();}
+ class Scenario {public Setup setup=new Setup();}
+ class Result {public bool isolated_wheel_probe=true;}
+ static Scenario scenario=new Scenario();static Result result=new Result();
+ static Dictionary<int,string> surfacePaths=new Dictionary<int,string>();
+ static Dictionary<string,float> boundaries=new Dictionary<string,float>();
+ static string PathOf(UnityEngine.Transform t){return "";}
+ static void RecordSetupBoundary(string phase){boundaries[phase]=body.velocity.x;}
+ static void ApplyCanonical(){CANONICAL_STATEMENTS}
+ static void Need(bool v,string message){if(!v)throw new Exception(message);}
+ public static void Run(){
+  var original=new UnityEngine.Rigidbody{id=1};var source=new UnityEngine.WheelCollider();source.enabled=false;
+  var input=new G11AngularProbe.Input{source_wheel="level1:58684",rig=new G11AngularProbe.Rig{velocity_mps=new UnityEngine.Vector3{x=10},angular_velocity_rad_s=new UnityEngine.Vector3{z=2}},events=new G11AngularProbe.Event[0]};
+  var copied=G11AngularProbe.Configure(input,source,original,new UnityEngine.GameObject("rig"),body);
+  wheels=new[]{copied};UnityEngine.WheelCollider.activationBody=body;body.isKinematic=false;
+  ApplyCanonical();ACTIVATION_STATEMENTS
+  Need(G11AngularProbe.report.initial_state.body.velocity.x==10,"declared velocity lost across observed activation boundary");
+  Need(body.writes==1 && body.angularWrites==1,"declared input not written exactly once");
+  Need(G11AngularProbe.report.initial_state.body.angular_velocity.z==2,"declared angular input differs");
+  Need(boundaries["canonical-transforms-synchronized"]==0 && boundaries["native-wheels-enabled"]==0 && boundaries["angular-input-applied"]==10,"raw boundary placement");
+  Need(UnityEngine.Physics.syncs==2 && body.syncsAtVelocityWrite==2,"activation synchronization missing before declared input");
+  Need(original.isKinematic && original.writes==0 && !source.enabled,"source hold changed");
+  Console.WriteLine("G11_CAPTURE_ARMING_STUB_PASS");
+ }
+}
+"""
 
 if __name__=='__main__': unittest.main()

@@ -622,8 +622,7 @@ public sealed class G11Capture : MonoBehaviour
         }
         result.setup_changes.Add("Recompute original body inertia from synchronized source colliders with ResetInertiaTensor; retain native automatic inertia updates; never set a manual source body tensor");
         body.position=inputPose.position; body.rotation=inputPose.rotation;
-        if(G11AngularProbe.Active) G11AngularProbe.Arm();
-        else { body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);body.angularVelocity=Vector3.zero; }
+        if(!G11AngularProbe.Active) { body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);body.angularVelocity=Vector3.zero; }
         UnityEngine.Random.state=JsonUtility.FromJson<UnityEngine.Random.State>(initial.random_state);
         result.setup_changes.Add("Apply one canonical pre-solve body, engine, fluid, condition, gear, and random record to every repeat");
     }
@@ -896,6 +895,11 @@ public sealed class G11Capture : MonoBehaviour
                 if(result.isolated_wheel_probe) foreach(var wheel in wheels) wheel.enabled=true;
                 else G11Geometry.RestoreWheels();
                 RecordSetupBoundary("native-wheels-enabled");
+                if(G11AngularProbe.Active) {
+                    Physics.SyncTransforms();
+                    G11AngularProbe.Arm();
+                    RecordSetupBoundary("angular-input-applied");
+                }
                 foreach(var collider in UnityEngine.Object.FindObjectsOfType<Collider>())
                     surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
                 if(G11AngularProbe.Active) G11AngularProbe.RetainInitial();
