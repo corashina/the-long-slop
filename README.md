@@ -118,8 +118,9 @@ Aim at an empty wheel slot to install a wheel.
 Some source items, including the fuel can, cannot rotate.
 
 Carry a fuel can. Open the fuel cap. Aim at the opening and hold LMB to fill it.
-Open carried containers before filling them at a supported supply.
-Open containers spill when tilted. Supplies retain their checked fluid types and current stock.
+Direct fill moves fluid from the carried container into the selected open container.
+Aim at an open supply valve to fill the supply from your carried container.
+Open containers spill when tilted. Supplies keep their current mixture and stock.
 The Lada starts with 0.5 L gasoline, 2.5 L oil, and 3.6 L water.
 Its capacities are 39 L fuel, 5 L oil, and 5 L coolant.
 The Skoda starts with the same fluids. Its capacities are 32 L fuel, 5 L oil, and 5 L coolant.

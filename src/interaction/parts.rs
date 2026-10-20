@@ -1196,14 +1196,12 @@ impl PartAttachments {
                             .fluid
                             .as_ref()
                             .unwrap()
-                            .mixture
-                            .total()
+                            .finite_total()
                     })
                     .sum::<f32>())
             .max(0.001);
             if self.parts[i].mass != mass {
-                physics.edit_body(body, |body| body.set_additional_mass(mass, true));
-                physics.recompute_body_mass(body);
+                physics.set_body_mass(body, mass);
                 self.parts[i].mass = mass;
             }
         }

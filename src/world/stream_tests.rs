@@ -25,14 +25,14 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     stream.set_presentation_allocation(allocation).unwrap();
 
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
 
     allocation.pending -= 1;
     stream.set_presentation_allocation(allocation).unwrap();
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     assert_eq!(stream.metrics().pending_work, MAX_PENDING);
     stream.set_presentation_allocation(allocation).unwrap();
 
@@ -44,7 +44,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
             break;
         }
     }
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_some());
     let bytes = stream.metrics().pending_bytes;
     stream.ready = None;
@@ -52,19 +52,28 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
 
     // A stale request cannot finish or publish its retained terrain work.
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_some());
+    assert!(stream.terrain_execution.has_pending());
     let bytes = stream.metrics().pending_bytes;
     stream.request.revision += 1;
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.is_none());
+    assert!(!stream.terrain_execution.has_pending());
     assert!(stream.ready.is_none());
     assert!(stream.metrics().pending_bytes < bytes);
-    assert_eq!(
-        stream.terrain_worker.poll(|| true).unwrap(),
-        TerrainPoll::Idle
+    assert!(
+        stream
+            .terrain_execution
+            .advance(stream.request, || true)
+            .unwrap()
+            .is_none()
     );
     stream.prepare_terrain(|| true);
-    assert!(stream.terrain_work.as_ref().unwrap().id.is_some());
+    for _ in 0..1000 {
+        stream.prepare_terrain(|| true);
+        if stream.ready.is_some() {
+            break;
+        }
+    }
+    assert!(stream.ready.is_some());
 }
 
 #[test]
@@ -331,7 +340,7 @@ fn prepare_step_for_views(
     run.align_startup(reference).unwrap();
 }
 
-fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     let mut surface_claim = None;
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);
@@ -366,6 +375,7 @@ fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
     surface.collision_bytes = 0;
     assert!(run.stream.ready.is_none());
     run.stream.ready = Some(PreparedSurface {
+        road_claim: None,
         pending_bytes: 0,
         renderer_ready: false,
         renderer_reserved: false,
@@ -737,14 +747,11 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
         tank_pose: reference.world.generation_frame,
         cap_pose: reference.world.generation_frame,
         fluids: source_tank
-            .quantities_liters
-            .into_iter()
-            .enumerate()
-            .filter_map(|(fluid_type, amount)| {
-                (amount > 0.).then_some(super::super::placement::SupplyFluid {
-                    fluid_type: fluid_type as i32,
-                    amount,
-                })
+            .fluids
+            .iter()
+            .map(|entry| super::super::placement::SupplyFluid {
+                fluid_type: i32::from(entry.fluid_type),
+                amount: entry.amount,
             })
             .collect(),
         capacity: source_tank.capacity_liters,
@@ -775,7 +782,15 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
     let supply_key = run.area.items.object_key(tank);
     let supply_baseline = run.area.items.generated_snapshot(tank, None).unwrap();
     let mut supply_changed = supply_baseline.clone();
-    supply_changed.fluid_quantities.as_mut().unwrap()[3] -= 1.;
+    supply_changed
+        .fluids
+        .as_mut()
+        .unwrap()
+        .as_mut_slice()
+        .iter_mut()
+        .find(|entry| entry.fluid_type == 3)
+        .unwrap()
+        .amount -= 1.;
     run.stream
         .changes
         .record(supply_key.clone(), supply_changed, &supply_baseline);
@@ -937,11 +952,12 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
 #[ignore = "requires the installed source export"]
 fn complete_probe_union_preserves_revision_and_fresh_cycles() {
     use crate::{
-        reference::{
-            loading_dispatch::{LoadingDispatch, LoadingKey},
-            reflections::{ProbeJob, ProbeSchedule},
+        reference::reflections::{ProbeJob, ProbeSchedule},
+        render_readiness::{
+            ContentKey, ContentPreparation, EffectsObservation, GraphObservation, ProbeObservation,
+            ReadinessRequest, RenderIdentity, RendererReadiness, RendererStatus, Validation,
         },
-        save::fresh_permit::PresentedFrames,
+        render_scale::SceneScale,
         world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
     };
     let reference = reference();
@@ -1018,12 +1034,60 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
     assert_eq!(required.as_slice().len(), 7);
     assert!(run.stream.required_ready());
     let revision = run.stream.required.revision;
-    let key = LoadingKey {
+    let key = RenderIdentity {
         session: run.stream.request.session,
         scene: 1,
-        extent: [800, 600],
+        native_extent: [800, 600],
+        scene_extent: [800, 600],
+        scale: SceneScale::Native,
     };
-    let mut policy = LoadingDispatch::<1>::default();
+    let mut request = ReadinessRequest {
+        render: key,
+        selection_revision: revision,
+        probe_mask: 1,
+        history_revision: 0,
+    };
+    let mut policy = RendererReadiness::default();
+    let validation = Validation {
+        requested: 1,
+        completed: 1,
+        validated: 1,
+    };
+    let mut graph = GraphObservation {
+        identity: key,
+        frame: 1,
+        token: 1,
+        sky: true,
+        world_mask: 1,
+        display_encoded: true,
+        submitted_token: 1,
+        targets_ready: true,
+        lighting_textures: 1,
+        lighting_gpu_textures: 1,
+        surface_ready: true,
+        camera_ready: true,
+        sky_ready: true,
+        cloud_ready: true,
+        caster_ready: true,
+        probes: [ProbeObservation {
+            pipelines_ready: true,
+            published: false,
+            validation,
+        }; crate::render_readiness::PROBE_COUNT],
+        validation,
+    };
+    let mut effects = EffectsObservation {
+        identity: key,
+        history_revision: 0,
+        frame: 1,
+        token: 1,
+        pipelines_ready: true,
+        inputs_ready: true,
+        encoded_token: 1,
+        submitted_token: 1,
+        committed_token: 1,
+        validation,
+    };
     let mut schedule = ProbeSchedule::default();
     for frame in 1..=8 {
         build(&mut required, [true]);
@@ -1031,35 +1095,65 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         assert_eq!(run.stream.required.structures, ids);
         assert_eq!(run.stream.required.revision, revision);
         assert_eq!(required.as_slice().as_ptr(), storage);
-        policy.snapshot(key, frame, false, run.stream.required_ready(), revision, 1);
+        let content = ContentKey {
+            session: key.session,
+            selection_revision: revision,
+        };
+        policy.content_checked(if run.stream.required_ready() {
+            ContentPreparation::Prepared(content)
+        } else {
+            ContentPreparation::Pending(content)
+        });
+        policy.snapshot_loading(request, frame, false);
         let job = schedule.job();
         if job == ProbeJob::Face(0) {
-            policy.capture_started(key, frame, 0);
+            policy.capture_started(request, frame, 0);
         }
         schedule.complete(job).unwrap();
         if job == ProbeJob::RemainingMipsAndPublish {
-            policy.publication_validated(key, 0);
+            policy.publication_validated(request, 0);
         }
-        assert_eq!(policy.fresh(key, revision, 1), frame == 8);
+        graph.frame = frame;
+        graph.token = frame;
+        graph.submitted_token = frame;
+        graph.probes[0].published = schedule.published();
+        effects.frame = frame;
+        effects.token = frame;
+        effects.encoded_token = frame;
+        effects.submitted_token = frame;
+        effects.committed_token = frame;
+        policy.observe_graph(graph);
+        policy.observe_effects(effects);
+        assert_eq!(policy.graph_ready(request), frame == 8);
     }
-    let mut presented = PresentedFrames::default();
-    assert!(!presented.observe(key.session, key.scene, 8, 8));
-    assert!(!presented.observe(key.session, key.scene, 9, 9));
-    assert!(presented.observe(key.session, key.scene, 10, 10));
+    assert_eq!(policy.check(request, 8, 8), RendererStatus::Loading);
+    assert_eq!(policy.check(request, 9, 9), RendererStatus::Loading);
+    assert_eq!(policy.check(request, 10, 10), RendererStatus::Ready);
     required.reset(seed);
     required
         .append_probe_faces(&[true], |_, _| Ok(first))
         .unwrap();
     run.stream.select_required(required.as_slice());
     assert_ne!(run.stream.required.revision, revision);
-    policy.snapshot(key, 11, false, true, run.stream.required.revision, 1);
-    assert!(!policy.fresh(key, run.stream.required.revision, 1));
+    request.selection_revision = run.stream.required.revision;
+    policy.content_checked(ContentPreparation::Prepared(ContentKey {
+        session: key.session,
+        selection_revision: request.selection_revision,
+    }));
+    policy.snapshot_loading(request, 11, false);
+    assert!(!policy.graph_ready(request));
     build(&mut required, [false]);
     assert_eq!(required.as_slice().len(), 1);
     run.stream.select_required(required.as_slice());
     assert_ne!(run.stream.required.revision, revision);
-    policy.snapshot(key, 12, false, true, run.stream.required.revision, 0);
-    assert!(policy.fresh(key, run.stream.required.revision, 0));
+    request.selection_revision = run.stream.required.revision;
+    request.probe_mask = 0;
+    policy.content_checked(ContentPreparation::Prepared(ContentKey {
+        session: key.session,
+        selection_revision: request.selection_revision,
+    }));
+    policy.snapshot_loading(request, 12, false);
+    assert!(policy.graph_ready(request));
     while required.as_slice().len() < REQUIRED_VIEW_CAPACITY {
         required.push(seed).unwrap();
     }
@@ -1097,7 +1191,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         condition: 0.5,
         food: None,
         temperature: None,
-        fluid_quantities: None,
+        fluids: None,
         valve: None,
         lamp: None,
         linear_velocity: [0.; 3],
@@ -3020,6 +3114,28 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .find(|item| item.name == "OilCan")
         .unwrap()
         .id;
+    let oil_entries = [
+        crate::fluids::FluidEntry {
+            fluid_type: 0,
+            amount: -0.5,
+        },
+        crate::fluids::FluidEntry {
+            fluid_type: 3,
+            amount: 1.,
+        },
+        crate::fluids::FluidEntry {
+            fluid_type: 2,
+            amount: -0.25,
+        },
+    ];
+    run.area
+        .items
+        .get_mut(oil)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap()
+        .restore_entries(&oil_entries);
     let owner_colliders = run.physics.rapier().bodies
         [run.area.items.get(held).unwrap().body.unwrap()]
     .colliders()
@@ -3079,6 +3195,19 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
     let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
     assert!(loaded.restore_pending());
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        oil_entries[1..]
+    );
     let mut claim = None;
     for _ in 0..1000 {
         let required = roadside_views(&loaded.stream);
@@ -3115,6 +3244,22 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         loaded.area.items.get(oil).unwrap().location,
         ItemLocation::Attached(restored_held)
     );
+    for _ in 0..2 {
+        assert!(loaded.advance_saved_restore(&reference).unwrap());
+        assert_eq!(
+            loaded
+                .area
+                .items
+                .get(oil)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .entries()
+                .collect::<Vec<_>>(),
+            oil_entries[1..]
+        );
+    }
     assert_eq!(
         loaded.area.items.get(oil).unwrap().body,
         loaded.area.items.get(restored_held).unwrap().body
@@ -3142,6 +3287,16 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             .find(|item| item.id == oil)
             .unwrap()
             .source,
+    );
+    assert_eq!(
+        recaptured
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(&oil_entries[1..])
     );
     assert_eq!(
         saved
@@ -3257,6 +3412,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let reset_held = reset.area.items.resolve_key(&keys[0]).unwrap();
     assert_eq!(reset.area.interaction.equipment.item(), Some(reset_held));
+    reset.area.items.sync_poses(&reset.physics);
     reset.area.items.mark_dirty(reset_held);
     reset.stream.capture_changes(
         &reference,
@@ -3283,13 +3439,130 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let mut unlisted_equipped = equipped_save.clone();
     unlisted_equipped.inventory.slots[unlisted_equipped.inventory.selected as usize] = None;
-    assert!(GarageRuntime::from_save(&reference, &stamp, &unlisted_equipped).is_err());
+    let mut independent = GarageRuntime::from_save(&reference, &stamp, &unlisted_equipped).unwrap();
+    prepare_ready(&mut independent, &reference);
+    assert!(independent.advance_saved_restore(&reference).unwrap());
+    assert!(!independent.restore_pending());
+    let independent_tool = independent.area.items.resolve_key(&keys[0]).unwrap();
+    assert_eq!(
+        independent.area.interaction.equipment.item(),
+        Some(independent_tool)
+    );
+    assert!(
+        !independent
+            .area
+            .inventory
+            .slots
+            .contains(&Some(independent_tool))
+    );
+    g08_assert_equipment_pose(&independent, &reference, independent_tool);
+    let independent_save = independent
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-19T12:00:01Z",
+        )
+        .unwrap();
+    assert_eq!(independent_save.inventory, unlisted_equipped.inventory);
+    let tool_key = &keys[0];
+    let before_tool = unlisted_equipped
+        .world
+        .changes
+        .get(tool_key)
+        .unwrap()
+        .snapshot
+        .as_ref()
+        .unwrap();
+    let after_tool = independent_save
+        .world
+        .changes
+        .get(tool_key)
+        .unwrap()
+        .snapshot
+        .as_ref()
+        .unwrap();
+    for axis in 0..3 {
+        assert!((before_tool.pose.position[axis] - after_tool.pose.position[axis]).abs() < 0.0001);
+    }
+
+    let rotation_alignment: f32 = before_tool
+        .pose
+        .rotation
+        .iter()
+        .zip(after_tool.pose.rotation)
+        .map(|(before, after)| before * after)
+        .sum();
+    assert!(rotation_alignment.abs() > 0.99999);
+    assert!(independent.stream.required_ready());
+    for key in &keys {
+        assert_eq!(
+            independent
+                .area
+                .items
+                .generated_bindings()
+                .filter(|(id, _)| super::super::ObjectKey::Generated((*id).clone()) == *key)
+                .count(),
+            1
+        );
+    }
+    let mut invalid = unlisted_equipped.clone();
+    invalid.world.changes.remove(tool_key.clone());
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = equipped_save.clone();
+    invalid.inventory.slots[2] = invalid.inventory.equipped.clone();
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    let mut held_state = before_tool.clone();
+    held_state.held = true;
+    invalid
+        .world
+        .changes
+        .record(tool_key.clone(), held_state, before_tool);
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    invalid.inventory.equipped = Some(crate::save::InstanceId::Generated {
+        id: match &keys[1] {
+            super::super::ObjectKey::Generated(id) => id.clone(),
+            _ => unreachable!(),
+        },
+    });
+    invalid.inventory.slots[0] = None;
+    assert!(
+        invalid.validate(&reference, &stamp).is_ok(),
+        "prototype checks wait for generated bindings"
+    );
+    let mut ineligible = GarageRuntime::from_save(&reference, &stamp, &invalid).unwrap();
+    prepare_ready(&mut ineligible, &reference);
+    assert!(
+        ineligible.advance_saved_restore(&reference).is_err(),
+        "generated equipment eligibility remains enforced"
+    );
+    // Reject generated ownership and attachment conflicts without slot membership.
+    let mut invalid = unlisted_equipped.clone();
+    invalid.player.carry = saved_unattached.player.carry.clone();
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    let mut invalid = unlisted_equipped.clone();
+    let mut change = invalid.world.changes.get(tool_key).unwrap().clone();
+    change.snapshot.as_mut().unwrap().attachment = Some(super::super::AttachmentSnapshot {
+        owner: Some(keys[1].clone()),
+        slot: None,
+        local_pose: super::super::AbsolutePose {
+            position: [0.; 3],
+            rotation: [0., 0., 0., 1.],
+        },
+    });
+    invalid
+        .world
+        .changes
+        .record(tool_key.clone(), change.snapshot.unwrap(), before_tool);
+    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
     assert_eq!(
         reset
             .area
             .interaction
             .equipment
-            .release(&mut reset.area.items, &mut reset.physics),
+            .detach(&mut reset.area.items, &mut reset.physics),
         Some(reset_held)
     );
     reset.area.sync_inventory();
@@ -3374,4 +3647,1861 @@ fn roadside_views(stream: &WorldStream) -> [super::super::RequiredView; 1] {
         light_mask: u32::MAX,
         origin: stream.origin.offset,
     }]
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
+    use crate::fluids::{FluidContainer, FluidEntry};
+    use crate::save::{CameraSave, SourceHash, SourceStamp};
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: r.app_id,
+        build_id: r.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: r
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let mut run = GarageRuntime::new(&r).unwrap();
+    let oil = r.vehicles[0].engine.oil_tank;
+    let engine = r.vehicles[0].engine.item;
+    run.area
+        .interaction
+        .parts
+        .remove(engine, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    let capacity = run
+        .area
+        .items
+        .get(oil)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap()
+        .capacity_liters;
+    let entries = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: -0.5,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 2,
+            amount: -0.25,
+        },
+        FluidEntry {
+            fluid_type: 1,
+            amount: capacity + 1.,
+        },
+    ];
+    run.area.items.get_mut(oil).unwrap().fluid = Some(FluidContainer::new(capacity, &entries));
+    let saved = run
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    let tank = restored
+        .area
+        .items
+        .get(oil)
+        .unwrap()
+        .fluid
+        .as_ref()
+        .unwrap();
+    assert_eq!(tank.entries().collect::<Vec<_>>(), entries[1..]);
+    let body = restored.area.items.get(engine).unwrap().body.unwrap();
+    assert_ne!(body, restored.physics.chassis_handle(0));
+    // Complete deferred binding through the native renderer-receipt adapter before capture.
+    prepare_ready(&mut restored, &r);
+    assert!(restored.advance_saved_restore(&r).unwrap());
+    assert!(!restored.restore_pending());
+    let mass = restored.physics.rapier().bodies[body].mass();
+    assert_eq!(
+        restored
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[1..]
+    );
+    // A second source load removes the retained zero, without changing mass.
+    let recaptured = restored
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut second = GarageRuntime::from_save(&r, &stamp, &recaptured).unwrap();
+    let second_tank = second.area.items.get(oil).unwrap().fluid.as_ref().unwrap();
+    assert_eq!(second_tank.entries().collect::<Vec<_>>(), entries[2..]);
+    let second_body = second.area.items.get(engine).unwrap().body.unwrap();
+    prepare_ready(&mut second, &r);
+    assert!(second.advance_saved_restore(&r).unwrap());
+    assert!(!second.restore_pending());
+    assert!(
+        (second.physics.rapier().bodies[second_body].mass() - mass).abs() < 0.001,
+        "first completed mass {mass}, second completed mass {}",
+        second.physics.rapier().bodies[second_body].mass()
+    );
+    assert_eq!(
+        second
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[2..]
+    );
+    let third_save = second
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    let mut third = GarageRuntime::from_save(&r, &stamp, &third_save).unwrap();
+    assert_eq!(
+        third
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[3..]
+    );
+    prepare_ready(&mut third, &r);
+    assert!(third.advance_saved_restore(&r).unwrap());
+    assert!(!third.restore_pending());
+    assert_eq!(
+        third
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[3..]
+    );
+    let third_body = third.area.items.get(engine).unwrap().body.unwrap();
+    assert!((third.physics.rapier().bodies[third_body].mass() - mass - 0.25).abs() < 0.001);
+    // World reactivation restores complete state without a logical source load.
+    let snapshot = second.area.items.generated_snapshot(oil, None).unwrap();
+    let mut reactivated = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    reactivated
+        .area
+        .items
+        .restore_generated(oil, &snapshot)
+        .unwrap();
+    assert_eq!(
+        reactivated
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        entries[2..]
+    );
+
+    // Task 5's exact fixture uses the same real deferred-restore adapter.
+    let exact = [
+        FluidEntry {
+            fluid_type: 3,
+            amount: 1.,
+        },
+        FluidEntry {
+            fluid_type: 0,
+            amount: 0.,
+        },
+        FluidEntry {
+            fluid_type: 1,
+            amount: -0.25,
+        },
+    ];
+    let oil_instance = crate::save::InstanceId::initial(
+        &r.items.iter().find(|item| item.id == oil).unwrap().source,
+    );
+    let dry_mass = third.physics.rapier().bodies[third_body].mass() - entries[3].amount;
+    third.area.items.get_mut(oil).unwrap().fluid = Some(FluidContainer::new(capacity, &exact));
+    let exact_save = third
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_save
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(exact.as_slice())
+    );
+    let expected = [exact[0], exact[2]];
+    let mut exact_load = GarageRuntime::from_save(&r, &stamp, &exact_save).unwrap();
+    assert_eq!(
+        exact_load
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .entries()
+            .collect::<Vec<_>>(),
+        expected
+    );
+    prepare_ready(&mut exact_load, &r);
+    for _ in 0..3 {
+        assert!(exact_load.advance_saved_restore(&r).unwrap());
+        assert!(!exact_load.restore_pending());
+        assert_eq!(
+            exact_load
+                .area
+                .items
+                .get(oil)
+                .unwrap()
+                .fluid
+                .as_ref()
+                .unwrap()
+                .entries()
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let exact_body = exact_load.area.items.get(engine).unwrap().body.unwrap();
+    assert_ne!(exact_body, exact_load.physics.chassis_handle(0));
+    assert!(
+        (exact_load.physics.rapier().bodies[exact_body].mass() - dry_mass - 0.75).abs() < 0.001
+    );
+    let exact_recapture = exact_load
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
+        .unwrap();
+    assert_eq!(
+        exact_recapture
+            .items
+            .iter()
+            .find(|item| item.instance == oil_instance)
+            .unwrap()
+            .fluids
+            .as_deref(),
+        Some(expected.as_slice())
+    );
+}
+
+fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
+    let mut run = GarageRuntime::new(reference).unwrap();
+    prepare_ready(&mut run, reference);
+    run.sync_world_activity(reference).unwrap();
+    run.started = true;
+    assert!(run.world_supported());
+    run
+}
+fn g08_pickup(run: &mut GarageRuntime, item: crate::reference::ItemId) {
+    let point = run.area.items.get(item).unwrap().pose.position;
+    if run.area.interaction.storage.stored(item) {
+        run.area
+            .interaction
+            .pickup_stored_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+    } else {
+        run.area
+            .interaction
+            .pickup_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+    }
+    run.area.sync_inventory();
+}
+fn g08_frame(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    input: crate::simulation::FrameInput,
+    dt: f32,
+) -> crate::starting_area::InventoryFrame {
+    let view = run.area.player.view_pose(&run.physics);
+    run.advance_inventory_frame(reference, input, dt, view)
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_combined_input_and_cancellation() {
+    use crate::{
+        interaction::items::ItemLocation,
+        simulation::{FrameInput, keys},
+    };
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        held: keys::ROTATE,
+        ..Default::default()
+    };
+    g08_frame(&mut run, &reference, down, 0.02);
+    g08_frame(&mut run, &reference, up, 0.1);
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    assert_eq!(run.area.interaction.held(), None);
+    // The guard ends next frame. Held MMB can now release.
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::ROTATE,
+            ..Default::default()
+        },
+        0.02,
+    );
+    assert_eq!(run.area.interaction.held(), Some(tool));
+    g08_frame(&mut run, &reference, FrameInput::default(), 0.3);
+    g08_frame(&mut run, &reference, down, 0.02);
+    let selected = run.area.inventory.selected;
+    let target = (selected + 1) % 4;
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << selected,
+            ..up
+        },
+        0.1,
+    );
+    assert_eq!(
+        run.area.interaction.equipment.item(),
+        Some(tool),
+        "explicit equip precedes slot retrieval and retains its update guard"
+    );
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << target,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert_eq!(run.area.inventory.selected, target);
+    assert_eq!(
+        run.area.items.get(tool).unwrap().location,
+        ItemLocation::Stored(selected)
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        None,
+        "Tab equip must occur before selection stores the owner"
+    );
+    // Each number phase executes once. Selection resets progress, then held adds 0.5.
+    let next = (target + 1) % 4;
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << next,
+            inventory_held: 1 << selected,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert_eq!(run.area.inventory.selected, next);
+    assert!((run.area.inventory.swap_progress - 0.5).abs() < 0.00001);
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            inventory_released: 1 << selected,
+            held: keys::ROTATE,
+            ..Default::default()
+        },
+        0.02,
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "immediate retrieval does not set the explicit-equip guard"
+    );
+    for pause in [true, false] {
+        g08_frame(&mut run, &reference, down, 0.02);
+        if pause {
+            run.paused = true;
+            g08_frame(&mut run, &reference, up, 0.1);
+            run.paused = false;
+        } else {
+            run.clear_input();
+        }
+        g08_frame(&mut run, &reference, up, 0.1);
+        assert_eq!(run.area.interaction.held(), Some(tool));
+        assert_eq!(run.area.interaction.equipment.item(), None);
+    }
+    // Reset creates fresh gesture state. A stale release cannot equip.
+    let mut reset = g08_ready(&reference);
+    g08_pickup(&mut reset, tool);
+    g08_frame(&mut reset, &reference, up, 0.1);
+    assert_eq!(reset.area.interaction.equipment.item(), None);
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_zero_and_multiple_fixed_steps() {
+    use crate::{
+        simulation::{FrameInput, keys},
+        vehicle::to_rapier,
+    };
+    let reference = reference();
+    let spray = reference.conditions.sprays[0].item;
+    let sample = |steps: usize| {
+        let mut run = g08_ready(&reference);
+        g08_pickup(&mut run, spray);
+        assert!(run.area.equip_carried(&mut run.physics).unwrap());
+        run.area.sync_equipment(&reference, &mut run.physics);
+        let anchor = reference.clothing.pose.anchors["RH"].node;
+        let item = run.area.items.get(spray).unwrap();
+        let local = to_rapier(item.local_pose);
+        let initial = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
+            * run.physics.rapier().bodies[item.body.unwrap()].position()
+            * local;
+        let rule = run.area.interaction.pickup_rule(spray).unwrap();
+        let target = if rule.disable_rh_fix {
+            rapier3d::math::Pose::IDENTITY
+        } else {
+            to_rapier(crate::vehicle::VehiclePose {
+                position: rule.right_hand_position,
+                rotation: rule.right_hand_rotation,
+            })
+        };
+        let gain = (0.04 * reference.inventory.hand_interpolation_factor).clamp(0., 1.);
+        let expected_position = initial
+            .translation
+            .lerp(target.translation, gain)
+            .lerp(target.translation, gain);
+        let expected_rotation = initial
+            .rotation
+            .lerp(target.rotation, gain)
+            .lerp(target.rotation, gain);
+        let input = FrameInput {
+            held: keys::PRIMARY,
+            inventory_held: 2,
+            ..Default::default()
+        };
+        g08_frame(&mut run, &reference, input, 0.04);
+        let before_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let before_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let frame = g08_frame(&mut run, &reference, input, 0.04);
+        let mut pending = FrameInput::default();
+        frame.merge_fixed_input(&mut pending);
+        for _ in 0..steps {
+            run.step(&reference, pending.take_step());
+        }
+        let after_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let after_age = run.area.interaction.cleaning.spray_particles(0, 0)[0].age;
+        let anchor = reference.clothing.pose.anchors["RH"].node;
+        let hand = to_rapier(run.area.pose.anchor(anchor).unwrap()).inverse()
+            * run.physics.rapier().bodies[run.area.items.get(spray).unwrap().body.unwrap()]
+                .position()
+            * local;
+        assert!(
+            (hand.translation - expected_position).length() < 0.0001,
+            "hand time advances once per frame"
+        );
+        assert!(hand.rotation.dot(expected_rotation).abs() > 0.99999);
+        (
+            after_quantity - before_quantity,
+            after_age - before_age,
+            run.area.inventory.swap_progress,
+            hand,
+        )
+    };
+    let expected = sample(0);
+    assert!(expected.0 < 0.);
+    assert!((expected.1 - 0.04).abs() < 0.00001);
+    for steps in [1, 2] {
+        let actual = sample(steps);
+        assert!((actual.0 - expected.0).abs() < 0.00001);
+        assert!((actual.1 - expected.1).abs() < 0.00001);
+        assert!((actual.2 - expected.2).abs() < 0.00001);
+        assert!((actual.3.translation - expected.3.translation).length() < 0.0001);
+        assert!(actual.3.rotation.dot(expected.3.rotation).abs() > 0.99999);
+    }
+    let mut run = g08_ready(&reference);
+    let light = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|l| l.startup_active)
+        .unwrap()
+        .item;
+    g08_pickup(&mut run, light);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    let control = run.area.interaction.owned_light_control(light).unwrap();
+    let index = reference
+        .lighting
+        .controllers
+        .iter()
+        .position(|c| c.id == control)
+        .unwrap();
+    let carried_spray = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, carried_spray);
+    let quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(carried_spray)
+        .unwrap()
+        .quantity
+        .unwrap();
+    let on = run.lighting.controllers[index].on;
+    let frame = g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            pressed: keys::PRIMARY | keys::USE,
+            held: keys::PRIMARY,
+            mouse: [0.2, 0.3],
+            ..Default::default()
+        },
+        0.04,
+    );
+    assert!(
+        run.area
+            .interaction
+            .cleaning
+            .get(carried_spray)
+            .unwrap()
+            .quantity
+            .unwrap()
+            < quantity,
+        "flashlight reservation preserves raw LMB for carried spray"
+    );
+    assert!(frame.primary_reserved);
+    assert_eq!(run.lighting.controllers[index].on, !on);
+    assert_eq!(frame.fixed_input.pressed & keys::PRIMARY, 0);
+    let mut pending = FrameInput::default();
+    frame.merge_fixed_input(&mut pending);
+    let empty = g08_frame(&mut run, &reference, FrameInput::default(), 0.01);
+    empty.merge_fixed_input(&mut pending);
+    let step = pending.take_step();
+    assert_eq!(step.pressed & keys::USE, keys::USE);
+    assert_eq!(step.mouse, [0.2, 0.3]);
+    run.step(&reference, step);
+    assert_eq!(
+        run.lighting.controllers[index].on, !on,
+        "fixed interaction cannot repeat consumed PRIMARY"
+    );
+    assert_eq!(pending.take_step().pressed & keys::USE, 0);
+    let body = run.area.items.get(light).unwrap().body.unwrap();
+    let hand_before = *run.physics.rapier().bodies[body].position();
+    run.paused = true;
+    let blocked = g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.2,
+    );
+    assert!(blocked.actions_blocked);
+    assert_eq!(
+        *run.physics.rapier().bodies[body].position(),
+        hand_before,
+        "blocked frame does not advance hand animation"
+    );
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_blocked_states_do_not_mutate() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    for blocked in 0..11 {
+        let mut run = g08_ready(&reference);
+        let tool = reference.conditions.sprays[0].item;
+        g08_pickup(&mut run, tool);
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::PRIMARY,
+                ..Default::default()
+            },
+            0.04,
+        );
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::RECENTER,
+                pressed: keys::RECENTER,
+                ..Default::default()
+            },
+            0.02,
+        );
+        match blocked {
+            0 => run.started = false,
+            1 => run.paused = true,
+            2 => run.recovering = true,
+            3 => run.startup_aligned = false,
+            4 => {
+                let input = crate::sleep::SleepInput {
+                    held: true,
+                    active: true,
+                    camera_allowed: true,
+                    dead: false,
+                };
+                run.sleep
+                    .step(&reference.sleep, input, 1., 1. / reference.sleep.hold_gain);
+                run.sleep.step(&reference.sleep, input, 1.1, 0.02);
+                assert!(run.sleeping());
+            }
+            5 => run.survival.damage_instant(&reference.survival, 10000.),
+            _ => {}
+        }
+        let snapshot = |run: &GarageRuntime| {
+            let item = run.area.items.get(tool).unwrap();
+            let body = &run.physics.rapier().bodies[item.body.unwrap()];
+            format!(
+                "{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}",
+                run.area.inventory.slots,
+                run.area.inventory.selected,
+                run.area.interaction.held(),
+                run.area.interaction.equipment.item(),
+                item,
+                body.body_type(),
+                body.is_enabled(),
+                body.position(),
+                run.area.interaction.cleaning.get(tool).unwrap().quantity,
+                reference
+                    .conditions
+                    .surfaces
+                    .iter()
+                    .map(|s| format!("{:?}", run.area.conditions.get(s.id)))
+                    .collect::<Vec<_>>()
+            )
+        };
+        let particles_before: Vec<_> = run
+            .area
+            .interaction
+            .cleaning
+            .spray_particles(0, 0)
+            .iter()
+            .map(|p| p.age)
+            .collect();
+        assert!(!particles_before.is_empty());
+        let physical = |run: &GarageRuntime| {
+            let body = run.area.items.get(tool).unwrap().body.unwrap();
+            let colliders: Vec<_> = run.physics.rapier().bodies[body]
+                .colliders()
+                .iter()
+                .map(|h| format!("{:?}", run.physics.rapier().colliders[*h]))
+                .collect();
+            let joints: Vec<_> = run
+                .physics
+                .rapier()
+                .impulse_joints
+                .iter()
+                .map(|(h, j)| format!("{h:?}{j:?}"))
+                .collect();
+            (colliders, joints)
+        };
+        let physical_before = physical(&run);
+        let before = snapshot(&run);
+        let dt = match blocked {
+            6 => 0.,
+            7 => -0.1,
+            8 => f32::NAN,
+            9 => f32::INFINITY,
+            10 => f32::NEG_INFINITY,
+            _ => 0.1,
+        };
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::PRIMARY | keys::ROTATE,
+                released: keys::RECENTER,
+                inventory_released: 2,
+                inventory_held: 4,
+                ..Default::default()
+            },
+            dt,
+        );
+        assert!(result.actions_blocked, "blocked state {blocked}");
+        assert_eq!(snapshot(&run), before, "blocked state {blocked}");
+        assert_eq!(
+            physical(&run),
+            physical_before,
+            "blocked physical ownership {blocked}"
+        );
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .spray_particles(0, 0)
+                .iter()
+                .map(|p| p.age)
+                .collect::<Vec<_>>(),
+            particles_before,
+            "blocked particle ages {blocked}"
+        );
+        run.started = true;
+        run.paused = false;
+        run.recovering = false;
+        run.startup_aligned = true;
+        run.sleep.interrupt();
+        // Death remains blocked. All other states resume with the old release canceled.
+        g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                released: keys::RECENTER,
+                ..Default::default()
+            },
+            0.1,
+        );
+        assert_eq!(
+            run.area.interaction.equipment.item(),
+            None,
+            "stale release in state {blocked}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_clutch_binding_collision() {
+    use crate::{
+        reference::DrivingAction,
+        simulation::{FrameInput, keys},
+        vehicle::VehiclePose,
+    };
+    for collision in [false, true] {
+        let mut reference = reference();
+        if collision {
+            reference
+                .driving
+                .bindings
+                .iter_mut()
+                .find(|b| b.action == DrivingAction::Clutch)
+                .unwrap()
+                .codes
+                .push("Digit1".into());
+        }
+        let mut run = g08_ready(&reference);
+        let seat = &reference.seats[0];
+        let anchor = reference
+            .anchors
+            .iter()
+            .find(|a| a.id == seat.anchor)
+            .unwrap();
+        assert!(run.area.player.enter(
+            seat.id,
+            VehiclePose {
+                position: anchor.transform.translation,
+                rotation: anchor.transform.rotation
+            },
+            &mut run.physics
+        ));
+        let input = FrameInput {
+            held: keys::CLUTCH,
+            inventory_released: 2,
+            inventory_held: 4,
+            ..Default::default()
+        };
+        assert_eq!(
+            run.area
+                .inventory_context(&run.physics, input)
+                .seated_clutch,
+            collision
+        );
+        g08_frame(&mut run, &reference, input, 0.1);
+        assert_eq!(run.area.inventory.selected, if collision { 0 } else { 1 });
+        assert_eq!(
+            run.area.inventory.swap_progress,
+            if collision { 0. } else { 0.5 }
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_fresh_gesture_after_cancellation() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    };
+    for pause in [true, false] {
+        g08_frame(&mut run, &reference, down, 0.02);
+        if pause {
+            run.paused = true;
+            assert!(g08_frame(&mut run, &reference, FrameInput::default(), 0.02).actions_blocked);
+            run.paused = false;
+        } else {
+            run.clear_input();
+        }
+        // No stale release or idle frame rearms this fresh gesture.
+        g08_frame(&mut run, &reference, down, 0.02);
+        g08_frame(&mut run, &reference, up, 0.1);
+        assert_eq!(
+            run.area.interaction.equipment.item(),
+            Some(tool),
+            "fresh gesture after pause={pause}"
+        );
+        assert_eq!(run.area.interaction.held(), None);
+        assert!(run.area.release_equipped(&mut run.physics).unwrap());
+    }
+}
+
+#[test]
+#[ignore = "Requires the installed runtime export"]
+fn source_transfers_reject_atomically_and_restore_both_hands() {
+    use crate::{
+        inventory::InventoryCommand,
+        save::{CameraSave, SourceHash, SourceStamp},
+        simulation::FrameInput,
+    };
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let r = ReferenceManifest::from_json(&bytes).unwrap();
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: r.app_id,
+        build_id: r.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: r
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let mut game = GarageRuntime::new(&r).unwrap();
+    let oil = r.items.iter().find(|i| i.name == "OilCan").unwrap().id;
+    let light = r
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    let food = r.survival.starter_food;
+    for (id, select) in [(oil, 1), (light, 0)] {
+        let point = game.area.items.get(id).unwrap().pose.position;
+        if game.area.interaction.storage.stored(id) {
+            game.area
+                .interaction
+                .pickup_stored_item(
+                    id,
+                    point,
+                    &game.area.player,
+                    &mut game.area.items,
+                    &mut game.physics,
+                )
+                .unwrap();
+        } else {
+            game.area
+                .interaction
+                .pickup_item(
+                    id,
+                    point,
+                    &game.area.player,
+                    &mut game.area.items,
+                    &mut game.physics,
+                )
+                .unwrap();
+        }
+        game.area.sync_inventory();
+        assert!(
+            game.area
+                .apply_inventory_command(InventoryCommand::Select(select), &r, &mut game.physics)
+                .unwrap()
+        );
+    }
+    assert!(
+        game.area
+            .apply_inventory_command(InventoryCommand::Select(1), &r, &mut game.physics)
+            .unwrap()
+    );
+    assert_eq!(game.area.interaction.equipment.item(), Some(light));
+    let point = game.area.items.get(food).unwrap().pose.position;
+    game.area
+        .interaction
+        .pickup_item(
+            food,
+            point,
+            &game.area.player,
+            &mut game.area.items,
+            &mut game.physics,
+        )
+        .unwrap();
+    game.area.sync_inventory();
+    let handle = game.area.items.get(food).unwrap().body.unwrap();
+    let before = (
+        *game.physics.rapier().bodies[handle].position(),
+        game.physics.rapier().bodies[handle].linvel(),
+        game.physics.rapier().impulse_joints.len(),
+        game.area.inventory.slots,
+    );
+    for slot in [0, 1] {
+        assert!(
+            !game
+                .area
+                .apply_inventory_command(InventoryCommand::Select(slot), &r, &mut game.physics)
+                .unwrap()
+        );
+    }
+    assert_eq!(
+        before,
+        (
+            *game.physics.rapier().bodies[handle].position(),
+            game.physics.rapier().bodies[handle].linvel(),
+            game.physics.rapier().impulse_joints.len(),
+            game.area.inventory.slots
+        )
+    );
+    assert!(game.consume(&r, food).unwrap());
+    let saved = game
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .unwrap();
+    let mut loaded = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    prepare_ready(&mut loaded, &r);
+    assert!(loaded.advance_saved_restore(&r).unwrap());
+    let recaptured = loaded
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
+        .unwrap();
+    for (before, after) in saved.items.iter().zip(&recaptured.items) {
+        if matches!(
+            before.location,
+            crate::save::ItemLocationSave::Stored { .. }
+        ) {
+            assert_eq!(before.instance, after.instance);
+            for axis in 0..3 {
+                assert!((before.pose.position[axis] - after.pose.position[axis]).abs() < 0.0001);
+            }
+        }
+    }
+    assert_eq!(loaded.area.inventory.slots, game.area.inventory.slots);
+    assert_eq!(loaded.area.interaction.held(), Some(food));
+    assert_eq!(loaded.area.interaction.equipment.item(), Some(light));
+    assert_eq!(loaded.area.items.get(food).unwrap().food.unwrap().bite, 1);
+    let oil_body = loaded.area.items.get(oil).unwrap().body.unwrap();
+    assert!(!loaded.physics.rapier().bodies[oil_body].is_enabled());
+    let mut invalid = saved.clone();
+    invalid.inventory.slots[0] = invalid.inventory.slots[1].clone();
+    assert!(invalid.validate(&r, &stamp).is_err());
+    let mut invalid = saved.clone();
+    invalid.inventory.equipped = invalid.player.carry.as_ref().map(|c| c.item.clone());
+    assert!(invalid.validate(&r, &stamp).is_err());
+    let mut invalid = saved.clone();
+    invalid.schema_version = 1;
+    assert!(invalid.validate(&r, &stamp).is_err());
+    loaded.started = true;
+    loaded.paused = false;
+    loaded.step(&r, FrameInput::default());
+    assert!(!loaded.physics.rapier().bodies[oil_body].is_enabled());
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture()
+            .quantities_liters,
+        game.area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture()
+            .quantities_liters
+    );
+    // Stored food retains its bite, and exhausted food does not return on load.
+    loaded
+        .area
+        .interaction
+        .drop_held(&mut loaded.area.items, &mut loaded.physics);
+    loaded.area.sync_inventory();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(0), &r, &mut loaded.physics)
+        .unwrap();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(2), &r, &mut loaded.physics)
+        .unwrap();
+    let point = loaded.area.items.get(food).unwrap().pose.position;
+    loaded
+        .area
+        .interaction
+        .pickup_item(
+            food,
+            point,
+            &loaded.area.player,
+            &mut loaded.area.items,
+            &mut loaded.physics,
+        )
+        .unwrap();
+    loaded.area.sync_inventory();
+    loaded
+        .area
+        .apply_inventory_command(InventoryCommand::Select(3), &r, &mut loaded.physics)
+        .unwrap();
+    let stored = loaded
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:01Z")
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&r, &stamp, &stored).unwrap();
+    prepare_ready(&mut restored, &r);
+    assert!(restored.advance_saved_restore(&r).unwrap());
+    assert_eq!(restored.area.items.get(food).unwrap().food.unwrap().bite, 1);
+    restored
+        .area
+        .apply_inventory_command(InventoryCommand::Select(2), &r, &mut restored.physics)
+        .unwrap();
+    let bites = r.survival.foods[restored
+        .area
+        .items
+        .get(food)
+        .unwrap()
+        .food
+        .unwrap()
+        .prototype_index]
+        .bites;
+    for _ in 1..bites {
+        assert!(restored.consume(&r, food).unwrap());
+    }
+    assert!(!restored.area.inventory.slots.contains(&Some(food)));
+    let removed = restored
+        .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:02Z")
+        .unwrap();
+    let restored = GarageRuntime::from_save(&r, &stamp, &removed).unwrap();
+    assert!(restored.area.items.get(food).unwrap().removed);
+}
+
+fn g08_assert_equipment_pose(
+    run: &GarageRuntime,
+    reference: &ReferenceManifest,
+    id: crate::reference::ItemId,
+) {
+    use crate::vehicle::{VehiclePose, to_rapier};
+    let item = run.area.items.get(id).unwrap();
+    let rule = run.area.interaction.pickup_rule(id).unwrap();
+    let hand = to_rapier(
+        run.area
+            .pose
+            .anchor(reference.clothing.pose.anchors["RH"].node)
+            .unwrap(),
+    );
+    let offset = if rule.disable_rh_fix {
+        rapier3d::math::Pose::IDENTITY
+    } else {
+        to_rapier(VehiclePose {
+            position: rule.right_hand_position,
+            rotation: rule.right_hand_rotation,
+        })
+    };
+    let expected = hand * offset * to_rapier(item.local_pose).inverse();
+    let body = &run.physics.rapier().bodies[item.body.unwrap()];
+    assert!(
+        (body.position().translation - expected.translation).length() < 0.0001,
+        "completed hand position"
+    );
+    assert!(
+        body.position().rotation.dot(expected.rotation).abs() > 0.99999,
+        "completed hand rotation"
+    );
+    assert!(
+        (to_rapier(item.pose).translation - (hand * offset).translation).length() < 0.0001,
+        "published item hand position"
+    );
+    assert!(body.is_kinematic());
+    assert!(body.is_enabled());
+    assert!(
+        body.colliders()
+            .iter()
+            .all(|handle| !run.physics.rapier().colliders[*handle].is_enabled())
+    );
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_save_independent_equipment_and_both_owners() {
+    use crate::{
+        interaction::items::ItemLocation,
+        inventory::InventoryCommand,
+        save::{CameraSave, InstanceId, ItemLocationSave},
+        simulation::{FrameInput, keys},
+    };
+    let reference = reference();
+    let stamp = roadside_stamp(&reference);
+    let mut run = g08_ready(&reference);
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    let tool = reference.conditions.sprays[0].item;
+    let carry = reference
+        .flashlights
+        .instances
+        .iter()
+        .find(|f| f.startup_active)
+        .unwrap()
+        .item;
+    g08_pickup(&mut run, oil);
+    assert!(
+        run.area
+            .apply_inventory_command(InventoryCommand::Select(1), &reference, &mut run.physics)
+            .unwrap()
+    );
+    g08_pickup(&mut run, tool);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    // Slot membership is optional for equipment. Pickup registers a different carry.
+    run.area.inventory.forget(tool);
+    g08_pickup(&mut run, carry);
+    let initial_quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(tool)
+        .unwrap()
+        .quantity
+        .unwrap();
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.04,
+    );
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            held: keys::PRIMARY,
+            ..Default::default()
+        },
+        0.04,
+    );
+    let quantity = run
+        .area
+        .interaction
+        .cleaning
+        .get(tool)
+        .unwrap()
+        .quantity
+        .unwrap();
+    assert!(quantity < initial_quantity);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    let tool_instance = InstanceId::initial(
+        &reference
+            .items
+            .iter()
+            .find(|i| i.id == tool)
+            .unwrap()
+            .source,
+    );
+    let carry_instance = saved.player.carry.as_ref().unwrap().item.clone();
+    assert_eq!(saved.inventory.equipped.as_ref(), Some(&tool_instance));
+    assert_eq!(
+        saved.inventory.slots[saved.inventory.selected as usize].as_ref(),
+        Some(&carry_instance)
+    );
+    assert!(!saved.inventory.slots.contains(&Some(tool_instance.clone())));
+    let members: std::collections::HashSet<_> = saved.inventory.slots.iter().flatten().collect();
+    assert_eq!(
+        members.len(),
+        saved.inventory.slots.iter().flatten().count()
+    );
+    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(loaded.restore_pending());
+    prepare_ready(&mut loaded, &reference);
+    assert!(loaded.stream.required_ready());
+    assert!(loaded.advance_saved_restore(&reference).unwrap());
+    assert!(!loaded.restore_pending());
+    assert_eq!(loaded.area.interaction.equipment.item(), Some(tool));
+    assert_eq!(loaded.area.interaction.held(), Some(carry));
+    assert_eq!(loaded.area.inventory.slots, run.area.inventory.slots);
+    assert_eq!(
+        loaded.area.items.get(tool).unwrap().location,
+        ItemLocation::Equipped
+    );
+    assert_eq!(
+        loaded.area.items.get(carry).unwrap().location,
+        ItemLocation::Held
+    );
+    assert_eq!(
+        loaded.area.items.get(oil).unwrap().location,
+        ItemLocation::Stored(0)
+    );
+    assert!(
+        !loaded.physics.rapier().bodies[loaded.area.items.get(oil).unwrap().body.unwrap()]
+            .is_enabled()
+    );
+    assert_eq!(
+        loaded.area.interaction.cleaning.get(tool).unwrap().quantity,
+        Some(quantity)
+    );
+    assert_eq!(
+        loaded
+            .area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture()
+            .quantities_liters,
+        run.area
+            .items
+            .get(oil)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .mixture()
+            .quantities_liters
+    );
+    g08_assert_equipment_pose(&loaded, &reference, tool);
+    let recaptured = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:01Z",
+        )
+        .unwrap();
+    assert_eq!(recaptured.inventory, saved.inventory);
+    assert_eq!(
+        recaptured.player.carry.as_ref().unwrap().item,
+        carry_instance
+    );
+    assert_eq!(recaptured.conditions.tools, saved.conditions.tools);
+    for id in [oil, tool, carry] {
+        let instance =
+            InstanceId::initial(&reference.items.iter().find(|i| i.id == id).unwrap().source);
+        let before = saved.items.iter().find(|i| i.instance == instance).unwrap();
+        let after = recaptured
+            .items
+            .iter()
+            .find(|i| i.instance == instance)
+            .unwrap();
+        assert_eq!(before.instance, after.instance);
+        assert_eq!(before.location, after.location);
+        assert_eq!(before.fluids, after.fluids);
+    }
+    let mut invalid = saved.clone();
+    invalid.inventory.equipped = Some(carry_instance.clone());
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "shared carry and equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid.inventory.slots[2] = invalid.inventory.slots[0].clone();
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "duplicate membership"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .location = ItemLocationSave::Attached {
+        owner: carry_instance,
+    };
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "attached equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .removed = true;
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "removed equipment"
+    );
+    let mut invalid = saved.clone();
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == tool_instance)
+        .unwrap()
+        .location = ItemLocationSave::World;
+    let oil_instance =
+        InstanceId::initial(&reference.items.iter().find(|i| i.id == oil).unwrap().source);
+    invalid.inventory.slots[0] = None;
+    invalid.inventory.equipped = Some(oil_instance.clone());
+    invalid
+        .items
+        .iter_mut()
+        .find(|i| i.instance == oil_instance)
+        .unwrap()
+        .location = ItemLocationSave::Equipped;
+    assert!(
+        invalid.validate(&reference, &stamp).is_err(),
+        "ineligible equipment"
+    );
+
+    // Save a pressed Tab while the tool is carried. Its old release cannot equip after load.
+    loaded
+        .area
+        .interaction
+        .drop_held(&mut loaded.area.items, &mut loaded.physics);
+    loaded.area.sync_inventory();
+    assert!(loaded.area.release_equipped(&mut loaded.physics).unwrap());
+    loaded.paused = false;
+    let down = FrameInput {
+        pressed: keys::RECENTER,
+        held: keys::RECENTER,
+        ..Default::default()
+    };
+    let up = FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    };
+    g08_frame(&mut loaded, &reference, down, 0.02);
+    assert_eq!(loaded.area.interaction.held(), Some(tool));
+    let pressed_save = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:02Z",
+        )
+        .unwrap();
+    let mut after_load = GarageRuntime::from_save(&reference, &stamp, &pressed_save).unwrap();
+    prepare_ready(&mut after_load, &reference);
+    assert!(after_load.advance_saved_restore(&reference).unwrap());
+    after_load.paused = false;
+    g08_frame(&mut after_load, &reference, up, 0.02);
+    assert_eq!(after_load.area.interaction.held(), Some(tool));
+    assert_eq!(after_load.area.interaction.equipment.item(), None);
+    g08_frame(&mut after_load, &reference, down, 0.02);
+    g08_frame(&mut after_load, &reference, up, 0.02);
+    assert_eq!(after_load.area.interaction.equipment.item(), Some(tool));
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_after_recovery_retains_fresh_edges() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    assert!(run.area.equip_carried(&mut run.physics).unwrap());
+    run.recover(&reference);
+    assert!(run.recovering);
+    for _ in 0..10 {
+        prepare_ready(&mut run, &reference);
+        run.sync_world_activity(&reference).unwrap();
+        if run.advance_recovery(&reference).unwrap() {
+            break;
+        }
+    }
+    assert!(!run.recovering, "real recovery must complete");
+    assert!(run.world_supported());
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    // sync_world clears both buffers after physics and arms the next time skip.
+    run.clear_input();
+    let mut pending = FrameInput::default();
+    let mut skip = true;
+    pending.merge(FrameInput {
+        pressed: keys::RECENTER | keys::USE,
+        held: keys::RECENTER,
+        mouse: [0.2, 0.3],
+        ..Default::default()
+    });
+    assert!(pending.take_frame(&mut skip, false).is_none());
+    assert!(!skip);
+    assert_eq!(run.area.interaction.equipment.item(), Some(tool));
+    pending.merge(FrameInput::default());
+    let raw = pending.take_frame(&mut skip, false).unwrap();
+    let result = g08_frame(&mut run, &reference, raw, 0.02);
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "fresh Tab press survives the recovery time skip"
+    );
+    assert_eq!(run.area.interaction.equipment.item(), None);
+    assert_eq!(pending, FrameInput::default());
+    let mut fixed = FrameInput::default();
+    result.merge_fixed_input(&mut fixed);
+    let first = fixed.take_step();
+    assert_eq!(first.pressed & keys::USE, keys::USE);
+    assert_eq!(first.mouse, [0.2, 0.3]);
+    assert_eq!(fixed.take_step().pressed, 0);
+    assert_eq!(fixed.take_step().mouse, [0.; 2]);
+    pending.merge(FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    });
+    g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.02,
+    );
+    assert_eq!(
+        run.area.interaction.held(),
+        Some(tool),
+        "the following Tab up cannot equip the released item"
+    );
+    run.clear_input();
+    skip = true;
+    pending.merge(FrameInput {
+        inventory_released: 2,
+        ..Default::default()
+    });
+    assert!(pending.take_frame(&mut skip, false).is_none());
+    assert_eq!(run.area.inventory.selected, 0);
+    pending.merge(FrameInput::default());
+    g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.02,
+    );
+    assert_eq!(
+        run.area.inventory.selected, 1,
+        "fresh number release survives the time skip"
+    );
+    assert_eq!(pending, FrameInput::default());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_skip_consumes_tools_and_particles_once() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let sample = |skip_first: bool| {
+        let mut run = g08_ready(&reference);
+        let light = reference
+            .flashlights
+            .instances
+            .iter()
+            .find(|l| l.startup_active)
+            .unwrap()
+            .item;
+        g08_pickup(&mut run, light);
+        assert!(run.area.equip_carried(&mut run.physics).unwrap());
+        let control = run.area.interaction.owned_light_control(light).unwrap();
+        let index = reference
+            .lighting
+            .controllers
+            .iter()
+            .position(|c| c.id == control)
+            .unwrap();
+        let on = run.lighting.controllers[index].on;
+        let spray = reference.conditions.sprays[0].item;
+        g08_pickup(&mut run, spray);
+        let quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        let mut pending = FrameInput::default();
+        let mut skip = skip_first;
+        pending.merge(FrameInput {
+            pressed: keys::PRIMARY | keys::USE,
+            held: keys::PRIMARY,
+            mouse: [0.2, 0.3],
+            ..Default::default()
+        });
+        if skip_first {
+            assert!(pending.take_frame(&mut skip, false).is_none());
+            assert_eq!(run.lighting.controllers[index].on, on);
+            assert_eq!(
+                run.area
+                    .interaction
+                    .cleaning
+                    .get(spray)
+                    .unwrap()
+                    .quantity
+                    .unwrap(),
+                quantity
+            );
+            assert!(
+                run.area
+                    .interaction
+                    .cleaning
+                    .spray_particles(0, 0)
+                    .is_empty()
+            );
+            pending.merge(FrameInput {
+                held: keys::PRIMARY,
+                ..Default::default()
+            });
+        }
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            pending.take_frame(&mut skip, false).unwrap(),
+            0.04,
+        );
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert!(result.primary_reserved);
+        let after_quantity = run
+            .area
+            .interaction
+            .cleaning
+            .get(spray)
+            .unwrap()
+            .quantity
+            .unwrap();
+        assert!(after_quantity < quantity);
+        let ages: Vec<_> = run
+            .area
+            .interaction
+            .cleaning
+            .spray_particles(0, 0)
+            .iter()
+            .map(|p| p.age)
+            .collect();
+        assert!(!ages.is_empty());
+        assert_eq!(pending, FrameInput::default());
+        let mut fixed = FrameInput::default();
+        result.merge_fixed_input(&mut fixed);
+        let input = fixed.take_step();
+        assert_eq!(input.pressed & keys::PRIMARY, 0);
+        assert_eq!(input.pressed & keys::USE, keys::USE);
+        assert_eq!(input.mouse, [0.2, 0.3]);
+        run.step(&reference, input);
+        run.step(&reference, fixed.take_step());
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .get(spray)
+                .unwrap()
+                .quantity
+                .unwrap(),
+            after_quantity
+        );
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .spray_particles(0, 0)
+                .iter()
+                .map(|p| p.age)
+                .collect::<Vec<_>>(),
+            ages
+        );
+        assert_eq!(fixed.take_step().pressed, 0);
+        assert_eq!(fixed.take_step().mouse, [0.; 2]);
+        let result = g08_frame(
+            &mut run,
+            &reference,
+            pending.take_frame(&mut skip, false).unwrap(),
+            0.01,
+        );
+        assert_eq!(result.fixed_input.pressed, 0);
+        assert_eq!(result.fixed_input.mouse, [0.; 2]);
+        assert_eq!(run.lighting.controllers[index].on, !on);
+        assert_eq!(
+            run.area
+                .interaction
+                .cleaning
+                .get(spray)
+                .unwrap()
+                .quantity
+                .unwrap(),
+            after_quantity
+        );
+        (quantity - after_quantity, ages)
+    };
+    assert_eq!(sample(true), sample(false));
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_app_input_blocked_skip_cancels_stale_edges() {
+    use crate::simulation::{FrameInput, keys};
+    let reference = reference();
+    let mut run = g08_ready(&reference);
+    let tool = reference.conditions.sprays[0].item;
+    g08_pickup(&mut run, tool);
+    g08_frame(
+        &mut run,
+        &reference,
+        FrameInput {
+            pressed: keys::RECENTER,
+            held: keys::RECENTER,
+            ..Default::default()
+        },
+        0.02,
+    );
+    let mut pending = FrameInput {
+        released: keys::RECENTER,
+        pressed: keys::USE,
+        inventory_released: 2,
+        mouse: [0.2, 0.3],
+        wheel: 1.,
+        ..Default::default()
+    };
+    let mut skip = true;
+    run.paused = true;
+    assert!(pending.take_frame(&mut skip, true).is_none());
+    assert_eq!(pending, FrameInput::default());
+    run.clear_input();
+    run.paused = false;
+    pending.merge(FrameInput {
+        released: keys::RECENTER,
+        ..Default::default()
+    });
+    let result = g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, false).unwrap(),
+        0.1,
+    );
+    assert_eq!(run.area.interaction.held(), Some(tool));
+    assert_eq!(
+        run.area.interaction.equipment.item(),
+        None,
+        "canceled Tab press cannot equip on stale release"
+    );
+    assert_eq!(run.area.inventory.selected, 0);
+    assert_eq!(result.fixed_input.pressed, 0);
+    assert_eq!(result.fixed_input.mouse, [0.; 2]);
+    assert_eq!(result.fixed_input.wheel, 0.);
+    // A normal blocked frame still reaches the coordinator's death-look path.
+    run.survival.damage_instant(&reference.survival, 10000.);
+    pending.merge(FrameInput {
+        mouse: [0.4, 0.5],
+        ..Default::default()
+    });
+    let result = g08_frame(
+        &mut run,
+        &reference,
+        pending.take_frame(&mut skip, true).unwrap(),
+        0.02,
+    );
+    assert!(result.actions_blocked);
+    assert_eq!(result.fixed_input.mouse, [0.4, 0.5]);
+    assert_eq!(pending, FrameInput::default());
+}
+#[test]
+#[ignore = "requires the installed source export"]
+fn g08_frame_carry_deltas_follow_slot_owner() {
+    use crate::{
+        inventory::InventoryCommand,
+        reference::ItemId,
+        simulation::{FrameInput, keys},
+    };
+    let reference = reference();
+    for recenter in [false, true] {
+        let mut run = g08_ready(&reference);
+        let oil = ItemId(120);
+        let spray = ItemId(132);
+        g08_pickup(&mut run, oil);
+        assert!(
+            run.area
+                .apply_inventory_command(InventoryCommand::Select(1), &reference, &mut run.physics)
+                .unwrap()
+        );
+        g08_pickup(&mut run, spray);
+        assert!(
+            run.area
+                .apply_inventory_command(InventoryCommand::Select(0), &reference, &mut run.physics)
+                .unwrap()
+        );
+        assert_eq!(run.area.inventory.slots[0], Some(oil));
+        assert_eq!(run.area.inventory.slots[1], Some(spray));
+        assert_eq!(run.area.interaction.held(), Some(oil));
+        let first = g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::TRANSLATE,
+                mouse: [1., 2.],
+                wheel: 0.3,
+                ..Default::default()
+            },
+            0.02,
+        );
+        let mut pending = FrameInput::default();
+        first.merge_fixed_input(&mut pending);
+        assert_eq!(pending.carry.owner, Some(oil));
+        assert_eq!(pending.carry.mouse, [1., 2.]);
+        assert_eq!(pending.carry.wheel, 0.3);
+        // No fixed step runs before selection stores oil and releases the retrieved spray through MMB.
+        let second = g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                inventory_released: 2,
+                held: keys::ROTATE | if recenter { keys::RECENTER } else { 0 },
+                pressed: if recenter { keys::RECENTER } else { 0 },
+                mouse: [0.1, 0.2],
+                ..Default::default()
+            },
+            0.02,
+        );
+        assert_eq!(run.area.interaction.held(), Some(spray));
+        assert_eq!(run.area.interaction.equipment.item(), None);
+        assert_eq!(second.recentered, recenter.then_some(oil));
+        second.merge_fixed_input(&mut pending);
+        assert_eq!(pending.carry.owner, Some(spray));
+        assert_eq!(
+            pending.carry.mouse,
+            [0.1, 0.2],
+            "new carry must not receive the previous item's queued mouse"
+        );
+        assert_eq!(
+            pending.carry.wheel, 0.,
+            "new carry must not receive the previous item's queued wheel"
+        );
+        let third = g08_frame(
+            &mut run,
+            &reference,
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [0.2, 0.3],
+                ..Default::default()
+            },
+            0.02,
+        );
+        third.merge_fixed_input(&mut pending);
+        assert_eq!(
+            pending.carry.mouse,
+            [0.3, 0.5],
+            "same-owner frames accumulate once"
+        );
+        let step = pending.take_step();
+        let ids = crate::save::IdentityMap::new(&reference).unwrap();
+        let before = run.area.interaction.capture_carry_save(&ids).unwrap();
+        let mut stale = step;
+        stale.carry.owner = Some(oil);
+        stale.carry.mouse = [5., 6.];
+        stale.carry.wheel = 7.;
+        let out = run.area.interaction.step(
+            stale,
+            crate::interaction::ResolvedAim::default(),
+            &mut run.area.player,
+            &mut run.area.items,
+            &mut run.physics,
+            crate::simulation::FIXED_DT,
+            run.survival.output(),
+            1.,
+        );
+        assert_eq!(out.action, None);
+        assert_eq!(
+            run.area.interaction.capture_carry_save(&ids).unwrap(),
+            before,
+            "fixed interaction rejects a stale carry owner"
+        );
+        assert_eq!(
+            pending.take_step().carry,
+            crate::simulation::CarryDeltas::default()
+        );
+        run.step(&reference, step);
+        assert_eq!(run.area.interaction.held(), Some(spray));
+    }
 }

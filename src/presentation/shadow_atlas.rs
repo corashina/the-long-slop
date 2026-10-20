@@ -1,9 +1,9 @@
 //! Source four-cascade atlas dispatch over the persistent caster phase.
 use super::{
-    materials::{MaterialLoading, RenderingState},
+    materials::MaterialLoading,
+    readiness::RendererStateHandle,
     shadow_phase::{ShadowDrawState, SourceShadow},
     shadow_queue::ShadowQueues,
-    source_lighting::SourceLightingStatus,
     surface_graph::SurfaceViewTargets,
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
@@ -29,7 +29,7 @@ pub fn tile_rect(atlas_size: u32, cascade: usize) -> [u32; 4] {
     ]
 }
 
-pub fn render_atlas(
+pub(crate) fn render_atlas(
     world: &World,
     view: ViewQuery<(
         &ExtractedView,
@@ -41,11 +41,11 @@ pub fn render_atlas(
     cache: Res<PipelineCache>,
     frame: Res<SourceViewFrame>,
     queues: Res<ShadowQueues>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
-    if !loading.is_ready() || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if !loading.is_ready() || status.failure().is_some() {
         return;
     }
     let entity = view.entity();
@@ -88,8 +88,7 @@ pub fn render_atlas(
         pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0., 1.);
         pass.set_scissor_rect(x, y, width, height);
         if let Err(error) = phase.render(&mut pass, world, entity) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed(format!("Source shadow atlas draw: {error:?}"));
+            status.fail(format!("Source shadow atlas draw: {error:?}"));
             return;
         }
     }
@@ -100,7 +99,7 @@ pub fn render_atlas(
         || instances[0] != queues.instances[source.index]
         || instances[1] != queues.instances[source.index]
     {
-        *status.0.lock().unwrap() = RenderingState::Failed(format!(
+        status.fail(format!(
             "Source shadow atlas skipped draw at epoch{epoch}: attempted{attempted:?}, issued{issued:?}, instances{instances:?}, required{:?}",
             queues.instances[source.index]
         ));

@@ -78,7 +78,6 @@ pub struct VehicleAudioInput {
     pub horn: bool,
     pub ambient_temperature: f32,
     pub electronics_output: f32,
-    pub engine_present: bool,
 }
 fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     ((value - a) / (b - a)).clamp(0., 1.)
@@ -123,6 +122,8 @@ pub struct AudioState {
     engine_formula: [f32; 11],
     voice_indices: HashMap<u32, usize>,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
+    engine_item: Option<ItemId>,
+    engine_emitters: Vec<(u32, rapier3d::math::Pose)>,
     pub reference: AudioReference,
     pub session: u32,
     pub game_seconds: f64,
@@ -211,6 +212,8 @@ impl AudioState {
                 .map(|(i, v)| (v.id, i))
                 .collect(),
             emitter_anchors: HashMap::new(),
+            engine_item: None,
+            engine_emitters: Vec::new(),
             session,
             game_seconds: 0.,
             outside_gain: outside.initial_gain,
@@ -282,11 +285,28 @@ impl AudioState {
             .iter()
             .position(|v| v.engine.source == self.reference.engine.source)
             .expect("validated audio vehicle");
+        let engine_item = game.vehicles[self.vehicle_index].engine.item;
+        let engine_node = game
+            .items
+            .iter()
+            .find(|item| item.id == engine_item)
+            .unwrap()
+            .node;
+        let engine_pose =
+            to_rapier(crate::interaction::items::node_pose(game, engine_node).unwrap());
+        self.engine_item = Some(engine_item);
+        self.engine_emitters.clear();
+        self.emitter_anchors.clear();
         for emitter in &self.reference.emitters {
             let world = to_rapier(
                 crate::interaction::items::node_pose(game, emitter.node)
                     .expect("validated emitter node"),
             );
+            if emitter.item == Some(engine_item) {
+                self.engine_emitters
+                    .push((emitter.id, engine_pose.inverse() * world));
+                continue;
+            }
             let mut node = Some(emitter.node);
             while let Some(id) = node {
                 if area.interaction.mechanisms.node_pose(id).is_some() {
@@ -749,7 +769,7 @@ impl AudioState {
             mp_max,
             max_rpm,
         ] = self.engine_formula;
-        let running = input.engine_present && input.running;
+        let running = input.running;
         self.voice(
             self.reference.engine.idle_voice,
             running,
@@ -768,8 +788,8 @@ impl AudioState {
                     * (inverse_lerp(motor_min, max_rpm, input.rpm)
                         + inverse_lerp(max_rpm, max_rpm * 2., input.rpm)),
         );
-        self.starter_enabled = input.engine_present && input.starter;
-        if input.engine_present && self.last_running && !running {
+        self.starter_enabled = input.starter;
+        if self.last_running && !running {
             if let Some(id) = self.reference.engine.stop_binding {
                 let b = self.binding(id).unwrap();
                 let event = AudioEvent {
@@ -800,6 +820,10 @@ impl AudioState {
                     input.ambient_temperature,
                 );
         self.voice(h.voice, self.horn_gain > 0., self.horn_gain, pitch);
+    }
+    pub(crate) fn restore_engine(&mut self, running: bool) {
+        self.last_running = running;
+        self.starter_enabled = false;
     }
     pub fn event_count(&self) -> usize {
         self.length
@@ -951,16 +975,6 @@ impl AudioState {
         self.radio_frame = self
             .radio
             .advance(self.game_seconds, self.reference.radio.electronics_output);
-        if let Some(&(anchor, local)) = self.emitter_anchors.get(&self.reference.engine.emitter) {
-            let mut world = anchor
-                .and_then(|node| area.interaction.mechanisms.node_pose(node))
-                .map_or(local, |pose| to_rapier(pose) * local);
-            if anchor.is_none() {
-                world.translation -=
-                    rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
-            }
-            self.engine_position = crate::vehicle::from_rapier(&world).position;
-        }
         for (&id, &(anchor, local)) in &self.emitter_anchors {
             let mut world = anchor
                 .and_then(|node| area.interaction.mechanisms.node_pose(node))
@@ -970,6 +984,15 @@ impl AudioState {
                     rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
             }
             *self.positions.get_mut(&id).unwrap() = crate::vehicle::from_rapier(&world).position;
+        }
+        if let Some(item) = self.engine_item {
+            // Item poses already use the current world origin.
+            let engine = to_rapier(area.items.get(item).expect("bound engine item").pose);
+            for &(id, local) in &self.engine_emitters {
+                *self.positions.get_mut(&id).unwrap() =
+                    crate::vehicle::from_rapier(&(engine * local)).position;
+            }
+            self.engine_position = self.positions[&self.reference.engine.emitter];
         }
         for i in 0..self.mechanism_sounds.len() {
             let item = self.mechanism_sounds[i].item;
@@ -1375,5 +1398,330 @@ impl AmbientState {
         self.only_modifier =
             (self.only_modifier + dt * reference.recovery_per_second).clamp(0., 1.);
         gains
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::save::{CameraSave, SourceHash, SourceStamp};
+    use crate::simulation::FIXED_DT;
+    use crate::simulation::engine::EngineInput;
+    use crate::starting_area::GarageRuntime;
+
+    fn installed_source() -> (ReferenceManifest, SourceStamp) {
+        let path = "web/assets/reference/manifest.json";
+        let bytes = std::fs::read(path).unwrap();
+        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        assert_eq!(reference.build_id, 11140890);
+        assert_eq!(reference.vehicles.len(), 1);
+        assert_eq!(reference.vehicles[0].engine.source.file, "level1");
+        assert_eq!(reference.vehicles[0].engine.source.path_id, 68282);
+        let digest = std::process::Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(digest.status.success());
+        let stamp = SourceStamp {
+            app_id: reference.app_id,
+            build_id: reference.build_id,
+            manifest_sha256: String::from_utf8(digest.stdout)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .into(),
+            source_hashes: reference
+                .source_hashes
+                .iter()
+                .map(|hash| SourceHash {
+                    file: hash.file.clone(),
+                    sha256: hash.sha256.clone(),
+                })
+                .collect(),
+        };
+        (reference, stamp)
+    }
+
+    fn seed_running(run: &mut GarageRuntime) {
+        let mut saved = run.vehicles[0].engine.capture_save();
+        saved.rpm = 2000.;
+        saved.elapsed = 1.;
+        saved.last_run_time = 1.;
+        saved.supplied_fuel = 0.4;
+        run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&saved).unwrap();
+    }
+
+    fn publish(run: &mut GarageRuntime) {
+        run.area.items.sync_poses(&run.physics);
+        let output = run.vehicles[0].engine_output;
+        let audio = run.audio.as_mut().unwrap();
+        audio.fixed_step(&run.area, &run.physics, FIXED_DT);
+        audio.vehicle(
+            VehicleAudioInput {
+                rpm: output.rpm,
+                running: output.running,
+                starter: output.starter,
+                ignition: run.vehicles[0].ignition.ignition,
+                ..Default::default()
+            },
+            FIXED_DT,
+            audio.game_seconds,
+        );
+    }
+
+    fn detach(
+        run: &mut GarageRuntime,
+        reference: &ReferenceManifest,
+    ) -> crate::reference::PartSlotId {
+        let item = reference.vehicles[0].engine.item;
+        let slot = reference
+            .part_slots
+            .iter()
+            .find(|slot| slot.part == Some(item))
+            .unwrap()
+            .id;
+        run.area
+            .interaction
+            .parts
+            .remove(item, &mut run.area.items, &mut run.physics)
+            .unwrap();
+        run.area.interaction.parts.detach_mechanism(
+            item,
+            &mut run.area.interaction.mechanisms,
+            &mut run.physics,
+        );
+        run.area
+            .interaction
+            .sync_parts(&mut run.area.items, &mut run.physics)
+            .unwrap();
+        slot
+    }
+
+    fn advance_detached(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+        run.vehicles[0].engine_output = run.vehicles[0].engine.step(
+            EngineInput::default(),
+            run.area.items.vehicle_fluids(0).unwrap(),
+            &reference.vehicles[0].engine,
+            |_| panic!("detached engine cannot request a start draw"),
+            FIXED_DT,
+        );
+        publish(run);
+    }
+
+    fn assert_voices(audio: &AudioState, playing: bool) {
+        for id in [
+            audio.reference.engine.idle_voice,
+            audio.reference.engine.motor_voice,
+        ] {
+            assert_eq!(audio.signals[audio.voice_indices[&id]].playing, playing);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the installed build 11140890 export"]
+    fn engine_audio_follows_detached_state() {
+        // Source enginescript.Update, 12105-12213: audio follows running, not attachment.
+        let (reference, stamp) = installed_source();
+        let mut run = GarageRuntime::new(&reference).unwrap();
+        seed_running(&mut run);
+        publish(&mut run);
+        assert_voices(run.audio.as_ref().unwrap(), true);
+        while run.audio.as_mut().unwrap().pop_event().is_some() {}
+        let slot = detach(&mut run, &reference);
+        let item = reference.vehicles[0].engine.item;
+        let body = run.area.items.get(item).unwrap().body.unwrap();
+        run.physics.edit_body(body, |body| {
+            body.set_translation(rapier3d::math::Vector::new(13., 4., -9.), true)
+        });
+        advance_detached(&mut run, &reference);
+        assert!(
+            run.vehicles[0].engine_output.running,
+            "source run grace remains active"
+        );
+        assert_voices(run.audio.as_ref().unwrap(), true);
+        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
+        assert!(!run.audio.as_ref().unwrap().starter_enabled);
+        let stop_binding_id = run
+            .audio
+            .as_ref()
+            .unwrap()
+            .reference
+            .engine
+            .stop_binding
+            .unwrap();
+        for _ in 0..20 {
+            if !run.vehicles[0].engine_output.running {
+                break;
+            }
+            advance_detached(&mut run, &reference);
+        }
+        assert!(!run.vehicles[0].engine_output.running);
+        let audio = run.audio.as_mut().unwrap();
+        let emitter = audio
+            .reference
+            .emitters
+            .iter()
+            .find(|e| e.id == audio.binding(stop_binding_id).unwrap().emitter)
+            .unwrap();
+        let original_engine = to_rapier(
+            crate::interaction::items::node_pose(
+                &reference,
+                reference.items.iter().find(|i| i.id == item).unwrap().node,
+            )
+            .unwrap(),
+        );
+        let local = original_engine.inverse()
+            * to_rapier(crate::interaction::items::node_pose(&reference, emitter.node).unwrap());
+        let expected_emitter_position = crate::vehicle::from_rapier(
+            &(to_rapier(run.area.items.get(item).unwrap().pose) * local),
+        )
+        .position;
+        let stop = audio.pop_event().unwrap();
+        assert_eq!(stop.binding, stop_binding_id);
+        assert_eq!(stop.position, expected_emitter_position);
+        assert!(audio.pop_event().is_none());
+        assert_voices(audio, false);
+        advance_detached(&mut run, &reference);
+        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
+        run.vehicles[0].engine_output.starter = true;
+        publish(&mut run);
+        assert!(run.audio.as_ref().unwrap().starter_enabled);
+        run.clear_input();
+        assert!(
+            !run.audio.as_ref().unwrap().starter_enabled,
+            "cancellation clears published starter immediately"
+        );
+        publish(&mut run);
+        assert!(!run.audio.as_ref().unwrap().starter_enabled);
+        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
+        // A chassis ignition switch still emits while its engine slot is empty.
+        run.audio.as_mut().unwrap().ignition_changed(&run.area);
+        let audio = run.audio.as_mut().unwrap();
+        let ignition = audio.reference.bindings[audio.ignition.unwrap()].id;
+        assert_eq!(audio.pop_event().unwrap().binding, ignition);
+        assert!(audio.pop_event().is_none());
+        // Restore stopped mechanics, then reattach the same engine without replaying a stop.
+        let saved = run
+            .capture_save(
+                &reference,
+                &stamp,
+                CameraSave::FirstPerson,
+                "2026-10-20T12:00:00Z",
+            )
+            .unwrap();
+        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        assert!(!restored.audio.as_ref().unwrap().last_running);
+        restored
+            .area
+            .interaction
+            .parts
+            .install(item, slot, &mut restored.area.items, &mut restored.physics)
+            .unwrap();
+        restored
+            .area
+            .interaction
+            .parts
+            .mount_mechanism(item, &mut restored.area.interaction.mechanisms);
+        restored
+            .area
+            .interaction
+            .sync_parts(&mut restored.area.items, &mut restored.physics)
+            .unwrap();
+        publish(&mut restored);
+        assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);
+        assert!(!restored.audio.as_ref().unwrap().starter_enabled);
+    }
+
+    #[test]
+    #[ignore = "requires the installed build 11140890 export"]
+    fn engine_emitters_follow_item_pose_and_restore() {
+        let (reference, stamp) = installed_source();
+        let mut run = GarageRuntime::new(&reference).unwrap();
+        seed_running(&mut run);
+        publish(&mut run);
+        detach(&mut run, &reference);
+        let item = reference.vehicles[0].engine.item;
+        let engine_node = reference.items.iter().find(|i| i.id == item).unwrap().node;
+        let original =
+            to_rapier(crate::interaction::items::node_pose(&reference, engine_node).unwrap());
+        let audio = run.audio.as_ref().unwrap();
+        let emitter_ids = [
+            audio.reference.engine.emitter,
+            audio.reference.voices[audio.voice_indices[&audio.reference.engine.idle_voice]].emitter,
+            audio.reference.voices[audio.voice_indices[&audio.reference.engine.motor_voice]]
+                .emitter,
+            audio
+                .binding(audio.reference.engine.starter_binding.unwrap())
+                .unwrap()
+                .emitter,
+            audio
+                .binding(audio.reference.engine.stop_binding.unwrap())
+                .unwrap()
+                .emitter,
+        ];
+        let locals: Vec<_> = emitter_ids
+            .iter()
+            .map(|id| {
+                let emitter = audio
+                    .reference
+                    .emitters
+                    .iter()
+                    .find(|e| e.id == *id)
+                    .unwrap();
+                original.inverse()
+                    * to_rapier(
+                        crate::interaction::items::node_pose(&reference, emitter.node).unwrap(),
+                    )
+            })
+            .collect();
+        let body = run.area.items.get(item).unwrap().body.unwrap();
+        let moved = to_rapier(crate::vehicle::VehiclePose {
+            position: [21., 8., -14.],
+            rotation: [0., 0.70710677, 0., 0.70710677],
+        });
+        run.physics
+            .edit_body(body, |body| body.set_position(moved, true));
+        publish(&mut run);
+        for (&id, local) in emitter_ids.iter().zip(&locals) {
+            let expected = crate::vehicle::from_rapier(
+                &(to_rapier(run.area.items.get(item).unwrap().pose) * local),
+            )
+            .position;
+            assert_eq!(
+                run.audio.as_ref().unwrap().positions[&id],
+                expected,
+                "emitter {id} follows engine item"
+            );
+        }
+        // Item poses already use the current origin. Do not subtract its shift twice.
+        let shift = [16., 0., -8.];
+        run.area.items.rebase(shift);
+        run.area.origin = shift.map(f64::from);
+        run.audio.as_mut().unwrap().rebase(shift);
+        let shifted = to_rapier(run.area.items.get(item).unwrap().pose);
+        run.physics
+            .edit_body(body, |body| body.set_position(shifted, true));
+        publish(&mut run);
+        for (&id, local) in emitter_ids.iter().zip(&locals) {
+            assert_eq!(
+                run.audio.as_ref().unwrap().positions[&id],
+                crate::vehicle::from_rapier(&(shifted * local)).position
+            );
+        }
+        // Restore must synchronize the prior running edge before its first audio update.
+        let saved = run
+            .capture_save(
+                &reference,
+                &stamp,
+                CameraSave::FirstPerson,
+                "2026-10-20T12:00:00Z",
+            )
+            .unwrap();
+        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        assert!(restored.vehicles[0].engine_output.running);
+        assert!(restored.audio.as_ref().unwrap().last_running);
+        publish(&mut restored);
+        assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);
     }
 }

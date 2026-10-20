@@ -193,6 +193,7 @@ pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
     physics.integration_parameters.dt = crate::simulation::FIXED_DT;
     crate::vehicle::PhysicsWorld {
         inactive_bodies: Default::default(),
+        body_mass_override: None,
         physics,
         query_bounds: QueryBounds::default(),
         chassis: Vec::new(),
@@ -1079,4 +1080,30 @@ fn rebase_and_save_replacement_keep_query_state_local() {
         assert_eq!(ray_hit(&world, 4.0, 0.0), None);
         assert_eq!(ray_hit(&restored, 4.0, 0.0), Some(restored_collider));
     }
+}
+
+#[test]
+fn carried_mass_commits_pending_properties_and_clears_removed_override() {
+    let mut world = empty_world();
+    let (body, _) = world.insert(
+        RigidBodyBuilder::dynamic().additional_mass(7.),
+        ColliderBuilder::ball(0.2).density(0.),
+    );
+    assert_eq!(world.rapier().bodies[body].mass(), 0.);
+    world.set_body_mass_override(body, Some(1.));
+    assert!((world.authored_body_mass(body) - 7.).abs() < 0.0001);
+    assert_eq!(world.rapier().bodies[body].mass(), 1.);
+    world.set_body_mass(body, 9.);
+    assert!((world.authored_body_mass(body) - 9.).abs() < 0.0001);
+    assert_eq!(world.rapier().bodies[body].mass(), 1.);
+    world.set_body_mass_override(body, None);
+    world.edit_body(body, |b| b.apply_impulse(Vector::X * 9., true));
+    assert!((world.rapier().bodies[body].linvel() - Vector::X).length() < 0.0001);
+    world.set_body_mass_override(body, Some(1.));
+    world.remove_body(body).unwrap();
+    let other = world.insert_body(RigidBodyBuilder::dynamic().additional_mass(5.));
+    world.set_body_mass_override(other, Some(1.));
+    assert!((world.authored_body_mass(other) - 5.).abs() < 0.0001);
+    world.set_body_mass_override(other, None);
+    assert!((world.rapier().bodies[other].mass() - 5.).abs() < 0.0001);
 }

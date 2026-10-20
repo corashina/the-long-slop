@@ -1,7 +1,6 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
 pub mod fixed_reservation;
-pub mod loading_dispatch;
 pub mod package;
 pub mod prototype_plan;
 pub use package::{FileCatalog, FileReceipt, PlanReceipt};
@@ -464,8 +463,8 @@ pub struct TankReference {
     pub item: ItemId,
     pub source: SourceId,
     pub capacity_liters: f32,
-    /// Gasoline, oil, alcohol, water, blood, diesel.
-    pub quantities_liters: [f32; 6],
+    /// Entries retain source list order.
+    pub fluids: Vec<crate::fluids::FluidEntry>,
     pub openings: Vec<OpeningId>,
     pub no_drink: bool,
     pub no_fill_this: bool,
@@ -1630,9 +1629,10 @@ impl ReferenceManifest {
             require(
                 r.capacity_liters.is_finite()
                     && r.capacity_liters > 0.0
-                    && finite(&r.quantities_liters)
-                    && r.quantities_liters.iter().all(|v| *v >= 0.0)
-                    && r.quantities_liters.iter().sum::<f32>() <= r.capacity_liters + 0.001,
+                    && crate::fluids::validate_fluid_entries(&r.fluids)
+                    && r.fluids.iter().all(|v| v.amount >= 0.0)
+                    && r.fluids.iter().map(|v| f64::from(v.amount)).sum::<f64>()
+                        <= f64::from(r.capacity_liters),
                 "tank quantities",
             )?;
         }

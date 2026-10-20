@@ -1,6 +1,6 @@
 //! Source startup ownership, alignment, and hole coordinates.
 use super::{TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoint};
-use crate::reference::{ReferenceError, WorldReference, WorldValue};
+use crate::reference::{BodyId, ReferenceError, ReferenceManifest, WorldReference, WorldValue};
 use rapier3d::math::Vector;
 
 /// Startup offsets retain imported ownership; callers apply them before collider insertion.
@@ -14,6 +14,53 @@ pub struct StartupTerrain {
 }
 
 impl StartupTerrain {
+    pub(crate) fn body_offsets(&self, reference: &ReferenceManifest) -> Vec<(BodyId, f32)> {
+        use std::collections::HashMap;
+        let nodes: HashMap<_, _> = reference.nodes.iter().map(|node| (node.id, node)).collect();
+        let records: HashMap<_, _> = reference
+            .world
+            .records
+            .iter()
+            .map(|r| (&r.source, r))
+            .collect();
+        reference
+            .bodies
+            .iter()
+            .map(|body| {
+                let mut node = &nodes[&body.node];
+                let mut offset = 0.0_f32;
+                loop {
+                    offset += self
+                        .root_offsets
+                        .iter()
+                        .filter(|(id, _)| *id == node.source)
+                        .map(|(_, value)| *value)
+                        .sum::<f32>();
+                    if let Some(parent) = node.parent {
+                        node = &nodes[&parent];
+                    } else {
+                        break;
+                    }
+                }
+                // Asset roots can have source parents outside the exported scene.
+                let mut source = &node.source;
+                while let Some(WorldValue::Link(parent)) = records
+                    .get(source)
+                    .and_then(|record| record.fields.get("m_Father"))
+                {
+                    offset += self
+                        .root_offsets
+                        .iter()
+                        .filter(|(id, _)| id == parent)
+                        .map(|(_, value)| *value)
+                        .sum::<f32>();
+                    source = parent;
+                }
+                (body.id, offset)
+            })
+            .collect()
+    }
+
     pub fn new<'a>(
         reference: &'a WorldReference,
         evaluator: &TerrainEvaluator,

@@ -1,8 +1,7 @@
 //! Persistent source camera-depth and directional-shadow caster state.
 use super::{
-    materials::RenderingState,
+    readiness::RendererStateHandle,
     render_targets::{DEPTH_FORMAT, SHADOW_FORMAT},
-    source_lighting::SourceLightingStatus,
 };
 use crate::reference::shadow_profile;
 use bevy::ecs as bevy_ecs;
@@ -121,7 +120,6 @@ impl CasterViews {
 #[derive(Resource, Default)]
 pub struct CasterPasses {
     inspected: usize,
-    isolated: HashSet<CachedRenderPipelineId>,
     classified: HashSet<CachedRenderPipelineId>,
     variants: HashMap<CachedRenderPipelineId, [Option<CachedRenderPipelineId>; 2]>,
 }
@@ -198,35 +196,35 @@ impl CasterPasses {
             .get(&base)
             .and_then(|p| p[usize::from(shadow)])
     }
-    pub fn ready(&self, cache: &PipelineCache) -> bool {
+    pub fn ready(
+        &self,
+        cache: &PipelineCache,
+        owners: &super::pipeline_ownership::PipelineOwners,
+    ) -> bool {
         !self.variants.is_empty()
             && self
                 .variants
                 .iter()
-                .filter(|(base, _)| !self.isolated.contains(base))
+                .filter(|(base, _)| !owners.base_isolated(**base))
                 .flat_map(|(_, ids)| ids.iter().flatten())
                 .all(|id| cache.get_render_pipeline(*id).is_some())
     }
     /// Called during preparation. Descriptors are cloned only once per new source surface variant.
-    pub fn prepare(
+    pub(crate) fn prepare(
         &mut self,
         cache: &PipelineCache,
         shader: &Handle<Shader>,
-        status: &SourceLightingStatus,
-        isolation: &super::world::pipelines::PipelineIsolation,
+        status: &RendererStateHandle,
         owners: &super::pipeline_ownership::PipelineOwners,
     ) {
-        self.isolated.clone_from(&isolation.0);
-        if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+        if status.failure().is_some() {
             return;
         }
         let first = self.inspected;
         for (index, entry) in cache.pipelines().enumerate().skip(first) {
             self.inspected = index + 1;
             let base_id = CachedRenderPipelineId::new(index);
-            if self.classified.contains(&base_id)
-                || owners.owner(base_id).is_some_and(|o| o.cancelled())
-            {
+            if self.classified.contains(&base_id) || owners.cancelled(base_id) {
                 continue;
             }
             let PipelineDescriptor::RenderPipelineDescriptor(base) = &entry.descriptor else {
@@ -247,27 +245,14 @@ impl CasterPasses {
             }
             let Some(reflected) = flag(&fragment.shader_defs, "SOURCE_OBJECT_REFLECTED") else {
                 let error = "Source caster requires object transform parity metadata".to_string();
-                if let Some(owner) = owners.owner(CachedRenderPipelineId::new(index)) {
-                    owner.fail(error);
-                } else {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                if !owners.fail(base_id, error.clone()) {
+                    status.fail(error);
                 }
                 return;
             };
             let base_id = CachedRenderPipelineId::new(index);
-            let owner = owners.owner(base_id);
             let ids = std::array::from_fn(|index| {
-                let _queue = if let Some(owner) = &owner {
-                    match super::pipeline_ownership::queue_scope(cache) {
-                        Ok(scope) => Some(scope),
-                        Err(error) => {
-                            owner.fail(error.into());
-                            return None;
-                        }
-                    }
-                } else {
-                    None
-                };
+                match owners.queue_companion(cache, base_id, || {
                 let mut descriptor = base.clone();
                 let shadow = index == 1;
                 if !shadow && flag(&fragment.shader_defs, "SOURCE_TRANSPARENT") == Some(true) {
@@ -327,9 +312,16 @@ impl CasterPasses {
                     stencil: StencilState::default(),
                     bias: DepthBiasState::default(),
                 });
-                let id = cache.queue_render_pipeline(*descriptor);
-                owners.companion(cache, base_id, id);
-                Some(id)
+                    Some(*descriptor)
+                }) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        if !owners.fail(base_id, error.0.clone()) {
+                            status.fail(error.0);
+                        }
+                        None
+                    }
+                }
             });
             self.variants
                 .insert(CachedRenderPipelineId::new(index), ids);
@@ -337,7 +329,7 @@ impl CasterPasses {
         for id in self
             .variants
             .iter()
-            .filter(|(base, _)| !self.isolated.contains(base))
+            .filter(|(base, _)| !owners.base_isolated(**base))
             .flat_map(|(_, ids)| ids.iter().flatten())
         {
             match cache.get_render_pipeline_state(*id) {
@@ -346,8 +338,7 @@ impl CasterPasses {
                     | ShaderCacheError::ShaderImportNotYetAvailable,
                 ) => {}
                 CachedPipelineState::Err(error) => {
-                    *status.0.lock().unwrap() =
-                        RenderingState::Failed(format!("Source caster pipeline: {error}"));
+                    status.fail(format!("Source caster pipeline: {error}"));
                     return;
                 }
                 _ => {}
@@ -358,7 +349,7 @@ impl CasterPasses {
 
 /// Prepare once per view, then update only its existing camera-depth uniform buffer.
 /// Shadow slots remain untouched until the source candidate set and cascade fit are ready.
-pub fn prepare_views(
+pub(crate) fn prepare_views(
     mut commands: Commands,
     frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
@@ -376,13 +367,13 @@ pub fn prepare_views(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Caster,
         &frame,
     );
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     let (Some(assets), Some(scene)) = (assets, scene.0) else {
@@ -428,16 +419,15 @@ pub fn prepare_views(
     }
 }
 
-pub fn prepare_passes(
+pub(crate) fn prepare_passes(
     mut passes: ResMut<CasterPasses>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
-    isolation: Res<super::world::pipelines::PipelineIsolation>,
+    status: Res<RendererStateHandle>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
 ) {
     let Some(assets) = assets else {
         return;
     };
-    passes.prepare(&cache, &assets.shaders.caster, &status, &isolation, &owners);
+    passes.prepare(&cache, &assets.shaders.caster, &status, &owners);
 }

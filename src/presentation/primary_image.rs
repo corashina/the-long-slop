@@ -123,6 +123,8 @@ impl AssetLoader for SourcePrimaryImageLoader {
                 )));
             }
             let srgb = record.color_space == TextureColorSpace::Srgb;
+            let _profile =
+                crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::AssetDecode);
             let mut image = Image::from_buffer(
                 &input,
                 ImageType::Extension("png"),

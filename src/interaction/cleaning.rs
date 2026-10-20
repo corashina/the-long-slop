@@ -17,12 +17,16 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ToolFrame {
-    pub held: Option<ItemId>,
     pub lmb: bool,
     pub active: bool,
     pub dt: f32,
     pub view: VehiclePose,
     pub origin: [f64; 3],
+}
+#[derive(Clone, Copy, Debug)]
+pub enum ToolOwner {
+    Equipped(ItemId),
+    Carried(ItemId),
 }
 #[derive(Clone, Copy, Debug)]
 pub struct ToolSignals {
@@ -48,12 +52,21 @@ struct WashEffect {
     emitter: [f64; 3],
 }
 struct Spray {
+    owned: bool,
+    firing: bool,
+    painted: bool,
     nozzle: Pose,
     emitter: Vector,
     rotation: Rotation,
     particles: Vec<ParticleState>,
 }
 struct Contact {
+    equipped: bool,
+    hit: Option<(
+        ColliderHandle,
+        rapier3d::parry::query::RayIntersection,
+        Target,
+    )>,
     target: Option<Target>,
     collider: Option<ColliderHandle>,
     relative: Vector,
@@ -105,6 +118,8 @@ impl CleaningTools {
                 super::items::node_pose(reference, n).map(to_rapier)
             })?;
             contacts.push(Contact {
+                equipped: false,
+                hit: None,
                 target: None,
                 collider: None,
                 relative: Vector::ZERO,
@@ -146,6 +161,9 @@ impl CleaningTools {
                 .map(|(i, r)| ParticleState::new(r, b.source.path_id as u64 + i as u64))
                 .collect();
             sprays.push(Spray {
+                owned: false,
+                firing: false,
+                painted: false,
                 nozzle,
                 emitter,
                 rotation: Rotation::from_xyzw(
@@ -276,8 +294,12 @@ impl CleaningTools {
             physics.refresh_queries();
         }
     }
-    pub fn reserves_lmb(&self, held: Option<ItemId>) -> bool {
-        held.is_some_and(|item| self.signals.iter().any(|s| s.item == item))
+    pub fn reserves_lmb(&self, equipped: Option<ItemId>, _carried: Option<ItemId>) -> bool {
+        equipped.is_some_and(|item| {
+            self.signals[..self.contacts.len()]
+                .iter()
+                .any(|s| s.item == item)
+        })
     }
     pub fn prompt(&self, item: ItemId) -> Option<u32> {
         self.get(item)
@@ -313,7 +335,12 @@ impl CleaningTools {
         self.washes[wash].particles[particle].particles()
     }
     pub fn reset_contact(&mut self) {
+        for state in &mut self.states {
+            state.valve = 0.;
+        }
         for c in &mut self.contacts {
+            c.equipped = false;
+            c.hit = None;
             c.target = None;
             c.collider = None;
             c.sampled = false;
@@ -322,6 +349,9 @@ impl CleaningTools {
             }
         }
         for spray in &mut self.sprays {
+            spray.owned = false;
+            spray.firing = false;
+            spray.painted = false;
             for p in &mut spray.particles {
                 p.reset_emitter();
             }
@@ -421,8 +451,26 @@ impl CleaningTools {
             })
             .or(b.pickup_condition)
     }
-    pub fn advance(
+    pub fn begin_frame(&mut self, frame: ToolFrame) {
+        for contact in &mut self.contacts {
+            contact.equipped = false;
+            contact.hit = None;
+        }
+        for signal in &mut self.signals {
+            signal.doing_work = false;
+        }
+        for spray in &mut self.sprays {
+            spray.owned = false;
+            spray.firing = false;
+            spray.painted = false;
+        }
+        if !frame.active || !frame.dt.is_finite() || frame.dt <= 0. {
+            self.reset_contact();
+        }
+    }
+    pub fn advance_owner(
         &mut self,
+        owner: ToolOwner,
         frame: ToolFrame,
         reference: &ReferenceManifest,
         conditions: &mut ConditionStore,
@@ -430,223 +478,314 @@ impl CleaningTools {
         physics: &PhysicsWorld,
         parts: &PartAttachments,
     ) -> bool {
-        let reserved = self.reserves_lmb(frame.held);
+        let (item, equipped) = match owner {
+            ToolOwner::Equipped(item) => (item, true),
+            ToolOwner::Carried(item) => (item, false),
+        };
+        let reserved = self.reserves_lmb(equipped.then_some(item), (!equipped).then_some(item));
         if !frame.active || !frame.dt.is_finite() || frame.dt <= 0. {
-            self.reset_contact();
             return reserved;
         }
+        if let Some(index) = reference
+            .conditions
+            .brushes
+            .iter()
+            .position(|b| b.item == item)
+        {
+            self.contacts[index].equipped = equipped;
+            self.contacts[index].hit = self.brush_hit(
+                index, equipped, frame, reference, conditions, items, physics, parts,
+            );
+            if equipped {
+                self.use_brush(index, frame, reference, conditions);
+            } else {
+                self.signals[index].doing_work = false;
+            }
+        }
+        if let Some(index) = reference
+            .conditions
+            .sprays
+            .iter()
+            .position(|b| b.item == item)
+        {
+            self.advance_spray(
+                index, equipped, frame, reference, conditions, items, physics, parts,
+            );
+        }
+        reserved
+    }
+    fn brush_hit(
+        &self,
+        index: usize,
+        equipped: bool,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        conditions: &ConditionStore,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        parts: &PartAttachments,
+    ) -> Option<(
+        ColliderHandle,
+        rapier3d::parry::query::RayIntersection,
+        Target,
+    )> {
         let view = to_rapier(frame.view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        for index in 0..self.contacts.len() {
-            let b = &reference.conditions.brushes[index];
-            let held = frame.held == Some(b.item);
-            let root = items
-                .get(b.item)
-                .map(|i| to_rapier(i.pose))
-                .unwrap_or(self.contacts[index].model);
-            let own_body = items.get(b.item).and_then(|i| i.body);
-            let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
-                c.is_enabled()
-                    && (own_body.is_none() || c.parent() != own_body)
-                    && c.collision_groups().memberships.bits() & b.mask != 0
-                    && !c.shape().contains_point(c.position(), ray.origin)
-            };
-            let hit = if held && frame.lmb {
-                physics
-                    .queries(QueryFilter::default().predicate(&filter))
-                    .cast_ray_and_get_normal(&ray, b.distance, true)
-            } else {
-                None
-            };
-            let mut selected = hit.and_then(|(handle, _)| {
-                self.target(
-                    ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32),
-                    b.cleaning_type,
-                    reference,
-                    conditions,
-                    items,
-                    parts,
-                )
-            });
-            if let Some((_, hit)) = hit {
-                if !matches!(selected, Some(Target::Wash(_))) && !self.states[index].disabled {
-                    let point = ray.point_at(hit.time_of_impact);
-                    // Only checked wash collider links can participate in the nearby trigger search.
-                    for &(handle, wash, _) in &self.wash_colliders {
-                        let collider = &physics.rapier().colliders[handle];
-                        if !collider.is_enabled()
-                            || collider.collision_groups().memberships.bits() & b.wash_mask == 0
-                            || !conditions.wash(wash).visible()
-                        {
-                            continue;
-                        }
-                        let projected =
-                            collider
-                                .shape()
-                                .project_point(collider.position(), point, true);
-                        if projected.is_inside
-                            || projected.point.distance_squared(point)
-                                <= b.wash_radius * b.wash_radius
-                        {
-                            selected = Some(Target::Wash(wash));
-                            break;
-                        }
+        let b = &reference.conditions.brushes[index];
+        let own_body = items.get(b.item).and_then(|i| i.body);
+        let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+            c.is_enabled()
+                && (own_body.is_none() || c.parent() != own_body)
+                && c.collision_groups().memberships.bits() & b.mask != 0
+                && !c.shape().contains_point(c.position(), ray.origin)
+        };
+        let hit = if equipped && frame.lmb {
+            physics
+                .queries(QueryFilter::default().predicate(&filter))
+                .cast_ray_and_get_normal(&ray, b.distance, true)
+        } else {
+            None
+        };
+        let mut selected = hit.and_then(|(handle, _)| {
+            self.target(
+                ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32),
+                b.cleaning_type,
+                reference,
+                conditions,
+                items,
+                parts,
+            )
+        });
+        if let Some((_, hit)) = hit {
+            if !matches!(selected, Some(Target::Wash(_))) && !self.states[index].disabled {
+                let point = ray.point_at(hit.time_of_impact);
+                // Only checked wash collider links can participate in the nearby trigger search.
+                for &(handle, wash, _) in &self.wash_colliders {
+                    let collider = &physics.rapier().colliders[handle];
+                    if !collider.is_enabled()
+                        || collider.collision_groups().memberships.bits() & b.wash_mask == 0
+                        || !conditions.wash(wash).visible()
+                    {
+                        continue;
+                    }
+                    let projected =
+                        collider
+                            .shape()
+                            .project_point(collider.position(), point, true);
+                    if projected.is_inside
+                        || projected.point.distance_squared(point) <= b.wash_radius * b.wash_radius
+                    {
+                        selected = Some(Target::Wash(wash));
+                        break;
                     }
                 }
             }
-            let c = &mut self.contacts[index];
-            let s = &mut self.signals[index];
-            s.doing_work = false;
-            s.emission = [0.; 2];
-            if !c.motion_ready {
-                c.model = root * c.default;
-                c.origin = frame.origin;
-            }
-            if c.origin != frame.origin {
-                c.sampled = false;
-                c.target = None;
-                c.model.translation -= Vector::from_array(std::array::from_fn(|j| {
-                    (frame.origin[j] - c.origin[j]) as f32
-                }));
-                c.origin = frame.origin;
-            }
-            if let Some((handle, hit)) = hit {
-                let target = selected.unwrap_or(Target::Solid(handle));
-                let target_position = physics.rapier().colliders[handle].position().translation;
-                let point = ray.point_at(hit.time_of_impact) + hit.normal * b.contact_offset;
-                let forward = -hit.normal;
-                let head_forward = view.rotation * -Vector::Z;
-                let horizontal = Vector::new(head_forward.x, 0., head_forward.z);
-                let up = horizontal.normalize_or_zero();
-                let right = forward.cross(up).normalize_or_zero();
-                let up = right.cross(forward).normalize_or_zero();
-                let rotation = if right.length_squared() > 0. {
-                    Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(right, up, -forward))
-                } else {
-                    Rotation::from_rotation_arc(-Vector::Z, forward)
-                };
-                let reset = !c.sampled || c.target != Some(target) || c.collider != Some(handle);
-                if reset {
-                    s.force = 0.;
+        }
+        hit.map(|(handle, hit)| (handle, hit, selected.unwrap_or(Target::Solid(handle))))
+    }
+    fn use_brush(
+        &mut self,
+        index: usize,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+    ) {
+        let Some((handle, _, target)) = self.contacts[index].hit else {
+            return;
+        };
+        let c = &self.contacts[index];
+        let s = &mut self.signals[index];
+        let b = &reference.conditions.brushes[index];
+        // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
+        if c.origin == frame.origin
+            && c.sampled
+            && c.target == Some(target)
+            && c.collider == Some(handle)
+            && s.force > b.min_force
+            && !self.states[index].disabled
+        {
+            let gain = b.repair_modifier * reference.conditions.repair_rate * frame.dt;
+            let mut completed = false;
+            match target {
+                Target::Surface(id) => {
+                    s.doing_work = conditions.can_repair(id, b.cleaning_type);
+                    completed = conditions.repair(id, b.cleaning_type, gain) != RepairResult::None;
                 }
-                c.model.translation = c
-                    .model
-                    .translation
-                    .lerp(point, (b.position_lerp * frame.dt).clamp(0., 1.));
-                c.model.rotation = c
-                    .model
-                    .rotation
-                    .slerp(rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
-                let relative = if b.model.is_some() {
-                    c.model.translation
-                } else {
-                    root.translation
-                } - target_position;
-                let ray_relative = point - target_position;
-                // Port invariant: model settling cannot count as rubbing on a stationary contact ray.
-                let force = if reset || ray_relative == c.ray_relative {
-                    0.
-                } else {
-                    ((relative - c.relative).length() - b.minimum_displacement)
-                        / (b.maximum_displacement - b.minimum_displacement)
-                }
-                .clamp(0., 1.);
-                // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
-                if !reset && s.force > b.min_force && !self.states[index].disabled {
-                    let gain = b.repair_modifier * reference.conditions.repair_rate * frame.dt;
-                    let mut completed = false;
-                    match target {
-                        Target::Surface(id) => {
-                            s.doing_work = conditions.can_repair(id, b.cleaning_type);
-                            completed =
-                                conditions.repair(id, b.cleaning_type, gain) != RepairResult::None;
-                        }
-                        Target::Wash(id) => {
-                            let wi = self.wash_indices[&id];
-                            let w = &reference.conditions.washes[wi];
-                            if reference.conditions.clean_tables[w.permission_index as usize]
-                                [b.cleaning_type as usize]
-                            {
-                                s.doing_work = true;
-                                let state = &mut conditions.washes[wi];
-                                state.repair_progress += gain;
-                                if state.repair_progress > 1. && !w.never_repair {
-                                    state.repair_progress = 0.;
-                                    state.active = false;
-                                    state.on = false;
-                                    state.destroyed = w.destroy_on_repair;
-                                    completed = true;
-                                    if w.destroy_on_repair {
-                                        let effect = &mut self.washes[wi];
-                                        effect.elapsed = Some(0.);
-                                    }
-                                }
+                Target::Wash(id) => {
+                    let wi = self.wash_indices[&id];
+                    let w = &reference.conditions.washes[wi];
+                    if reference.conditions.clean_tables[w.permission_index as usize]
+                        [b.cleaning_type as usize]
+                    {
+                        s.doing_work = true;
+                        let state = &mut conditions.washes[wi];
+                        state.repair_progress += gain;
+                        if state.repair_progress > 1. && !w.never_repair {
+                            state.repair_progress = 0.;
+                            state.active = false;
+                            state.on = false;
+                            state.destroyed = w.destroy_on_repair;
+                            completed = true;
+                            if w.destroy_on_repair {
+                                let effect = &mut self.washes[wi];
+                                effect.elapsed = Some(0.);
                             }
                         }
-                        Target::Solid(_) => {}
-                    }
-                    if completed && b.can_ruin {
-                        self.states[index].disabled = conditions.wear(b.own_condition);
                     }
                 }
-                c.target = Some(target);
-                c.collider = Some(handle);
-                c.relative = relative;
-                c.ray_relative = ray_relative;
-                c.sampled = true;
-                s.force = force;
-                s.playing = b.has_sound && (b.sound_when_disabled || !self.states[index].disabled);
-                if s.playing {
-                    s.voice_gain += (force * b.max_volume - s.voice_gain)
-                        * (b.volume_lerp * frame.dt).clamp(0., 1.);
-                } else {
-                    s.voice_gain = 0.;
-                }
-                if !self.states[index].disabled {
-                    for (pi, p) in b.particles.iter().enumerate() {
-                        let first = p.role.ends_with("-particle");
-                        s.emission[pi] = if (first && (!s.doing_work || b.both_work))
-                            || (!first && s.doing_work)
-                        {
+                Target::Solid(_) => {}
+            }
+            if completed && b.can_ruin {
+                self.states[index].disabled = conditions.wear(b.own_condition);
+            }
+        }
+    }
+    fn finish_brush(
+        &mut self,
+        index: usize,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) {
+        let equipped = self.contacts[index].equipped;
+        let hit = self.contacts[index].hit;
+        let view = to_rapier(frame.view);
+        let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
+        let b = &reference.conditions.brushes[index];
+        let root = items
+            .get(b.item)
+            .map(|i| to_rapier(i.pose))
+            .unwrap_or(self.contacts[index].model);
+        let c = &mut self.contacts[index];
+        let s = &mut self.signals[index];
+        s.emission = [0.; 2];
+        if !c.motion_ready {
+            c.model = root * c.default;
+            c.origin = frame.origin;
+        }
+        if c.origin != frame.origin {
+            c.sampled = false;
+            c.target = None;
+            c.model.translation -= Vector::from_array(std::array::from_fn(|j| {
+                (frame.origin[j] - c.origin[j]) as f32
+            }));
+            c.origin = frame.origin;
+        }
+        if let Some((handle, hit, target)) = hit {
+            let target_position = physics.rapier().colliders[handle].position().translation;
+            let point = ray.point_at(hit.time_of_impact) + hit.normal * b.contact_offset;
+            let forward = -hit.normal;
+            let head_forward = view.rotation * -Vector::Z;
+            let horizontal = Vector::new(head_forward.x, 0., head_forward.z);
+            let up = horizontal.normalize_or_zero();
+            let right = forward.cross(up).normalize_or_zero();
+            let up = right.cross(forward).normalize_or_zero();
+            let rotation = if right.length_squared() > 0. {
+                Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(right, up, -forward))
+            } else {
+                Rotation::from_rotation_arc(-Vector::Z, forward)
+            };
+            let reset = !c.sampled || c.target != Some(target) || c.collider != Some(handle);
+            if reset {
+                s.force = 0.;
+            }
+            c.model.translation = c
+                .model
+                .translation
+                .lerp(point, (b.position_lerp * frame.dt).clamp(0., 1.));
+            c.model.rotation = c
+                .model
+                .rotation
+                .slerp(rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
+            let relative = if b.model.is_some() {
+                c.model.translation
+            } else {
+                root.translation
+            } - target_position;
+            let ray_relative = point - target_position;
+            // Port invariant: model settling cannot count as rubbing on a stationary contact ray.
+            let force = if reset || ray_relative == c.ray_relative {
+                0.
+            } else {
+                ((relative - c.relative).length() - b.minimum_displacement)
+                    / (b.maximum_displacement - b.minimum_displacement)
+            }
+            .clamp(0., 1.);
+            c.target = Some(target);
+            c.collider = Some(handle);
+            c.relative = relative;
+            c.ray_relative = ray_relative;
+            c.sampled = true;
+            s.force = force;
+            s.playing = b.has_sound && (b.sound_when_disabled || !self.states[index].disabled);
+            if s.playing {
+                s.voice_gain += (force * b.max_volume - s.voice_gain)
+                    * (b.volume_lerp * frame.dt).clamp(0., 1.);
+            } else {
+                s.voice_gain = 0.;
+            }
+            if !self.states[index].disabled {
+                for (pi, p) in b.particles.iter().enumerate() {
+                    let first = p.role.ends_with("-particle");
+                    s.emission[pi] =
+                        if (first && (!s.doing_work || b.both_work)) || (!first && s.doing_work) {
                             force
                         } else {
                             0.
                         };
-                    }
-                }
-            } else {
-                c.target = None;
-                c.collider = None;
-                c.sampled = false;
-                s.force = 0.;
-                let desired = if held && frame.lmb {
-                    Pose::from_parts(
-                        view.translation + view.rotation * Vector::new(0., -0.25, -0.75),
-                        root.rotation * c.equip.rotation,
-                    )
-                } else {
-                    Pose::from_parts(
-                        (root * c.equip).translation,
-                        (root * if held { c.equip } else { c.default }).rotation,
-                    )
-                };
-                c.model.translation = c.model.translation.lerp(
-                    desired.translation,
-                    (b.position_lerp * frame.dt).clamp(0., 1.),
-                );
-                c.model.rotation = c
-                    .model
-                    .rotation
-                    .slerp(desired.rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
-                if held && frame.lmb {
-                    s.voice_gain += (0. - s.voice_gain) * (b.volume_lerp * frame.dt).clamp(0., 1.);
-                } else {
-                    s.playing = false;
-                    s.voice_gain = 0.;
                 }
             }
-            c.motion_ready = true;
-            s.pose = from_rapier(&c.model);
+        } else {
+            c.target = None;
+            c.collider = None;
+            c.sampled = false;
+            s.force = 0.;
+            let desired = if equipped && frame.lmb {
+                Pose::from_parts(
+                    view.translation + view.rotation * Vector::new(0., -0.25, -0.75),
+                    root.rotation * c.equip.rotation,
+                )
+            } else {
+                Pose::from_parts(
+                    (root * c.equip).translation,
+                    (root * if equipped { c.equip } else { c.default }).rotation,
+                )
+            };
+            c.model.translation = c.model.translation.lerp(
+                desired.translation,
+                (b.position_lerp * frame.dt).clamp(0., 1.),
+            );
+            c.model.rotation = c
+                .model
+                .rotation
+                .slerp(desired.rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
+            if equipped && frame.lmb {
+                s.voice_gain += (0. - s.voice_gain) * (b.volume_lerp * frame.dt).clamp(0., 1.);
+            } else {
+                s.playing = false;
+                s.voice_gain = 0.;
+            }
+        }
+        c.motion_ready = true;
+        s.pose = from_rapier(&c.model);
+    }
+    pub fn finish_frame(
+        &mut self,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        _conditions: &mut ConditionStore,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        _parts: &PartAttachments,
+    ) {
+        if !frame.active || !frame.dt.is_finite() || frame.dt <= 0. {
+            return;
+        }
+        for index in 0..self.contacts.len() {
+            self.finish_brush(index, frame, reference, items, physics);
+            let c = &mut self.contacts[index];
+            let s = &self.signals[index];
             for (pi, p) in c.particles.iter_mut().enumerate() {
                 p.rotation = c.model.rotation;
                 p.set_origin(frame.origin);
@@ -658,7 +797,7 @@ impl CleaningTools {
                 );
             }
         }
-        self.advance_sprays(frame, reference, conditions, items, physics, parts);
+        self.finish_sprays(frame, reference, items, physics);
         for effect in &mut self.washes {
             if let Some(elapsed) = effect.elapsed.as_mut() {
                 for (index, p) in effect.particles.iter_mut().enumerate() {
@@ -677,10 +816,11 @@ impl CleaningTools {
                 *elapsed += frame.dt;
             }
         }
-        reserved
     }
-    fn advance_sprays(
+    fn advance_spray(
         &mut self,
+        index: usize,
+        equipped: bool,
         frame: ToolFrame,
         reference: &ReferenceManifest,
         conditions: &mut ConditionStore,
@@ -689,73 +829,98 @@ impl CleaningTools {
         parts: &PartAttachments,
     ) {
         let offset = self.contacts.len();
-        for index in 0..self.sprays.len() {
-            let b = &reference.conditions.sprays[index];
-            let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
-            let nozzle = root * self.sprays[index].nozzle;
-            let emitter = root * self.sprays[index].emitter;
-            let firing = frame.held == Some(b.item) && frame.lmb;
-            let ti = offset + index;
-            let color = self.states[ti].color.expect("spray color");
-            let mut rotation = root.rotation * self.sprays[index].rotation;
-            let mut painted = false;
-            if firing {
-                let state = &mut self.states[ti];
-                state.valve += (1. - state.valve) * (b.valve_speed * frame.dt).clamp(0., 1.);
-                let quantity = state.quantity.as_mut().expect("spray quantity");
-                if *quantity > 0. {
-                    // Fire checks ammo, consumes it, then paints even on the last shot.
-                    *quantity -= (b.paint_loss * state.valve * frame.dt).clamp(0., *quantity);
-                    rotation = nozzle.rotation;
-                    let ray = Ray::new(nozzle.translation, nozzle.rotation * -Vector::Z);
-                    let own = items.get(b.item).and_then(|i| i.body);
-                    let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
-                        c.is_enabled()
-                            && (own.is_none() || c.parent() != own)
-                            && c.collision_groups().memberships.bits() & b.mask != 0
-                            && !c.shape().contains_point(c.position(), ray.origin)
-                    };
-                    if let Some((handle, hit)) = physics
-                        .queries(QueryFilter::default().predicate(&filter))
-                        .cast_ray_and_get_normal(&ray, b.distance, true)
-                    {
-                        let id =
-                            ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
-                        if let Some(target) = self.paint_target(id, items, parts, reference) {
-                            let previous = conditions.get(target).color;
-                            let falloff = ((hit.time_of_impact - b.distance) / (1. - b.distance))
-                                .clamp(0., 1.);
-                            let factor = (b.color_lerp * frame.dt * falloff).clamp(0., 1.);
-                            painted = conditions.paint(
-                                target,
-                                std::array::from_fn(|j| {
-                                    previous[j] + (color[j] - previous[j]) * factor
-                                }),
-                            );
-                        }
-                        let forward =
-                            (ray.point_at(hit.time_of_impact) - emitter).normalize_or_zero();
-                        let right = forward
-                            .cross(nozzle.rotation * Vector::Y)
-                            .normalize_or_zero();
-                        if right.length_squared() > 0. {
-                            rotation = Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(
-                                right,
-                                right.cross(forward),
-                                -forward,
-                            ));
-                        }
+        let b = &reference.conditions.sprays[index];
+        let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
+        let nozzle = root * self.sprays[index].nozzle;
+        let emitter = root * self.sprays[index].emitter;
+        let firing = frame.lmb;
+        self.sprays[index].owned = true;
+        self.sprays[index].firing |= firing;
+        let ti = offset + index;
+        let color = self.states[ti].color.expect("spray color");
+        let mut rotation = root.rotation * self.sprays[index].rotation;
+        let mut painted = false;
+        if firing {
+            let state = &mut self.states[ti];
+            state.valve += (1. - state.valve) * (b.valve_speed * frame.dt).clamp(0., 1.);
+            let quantity = state.quantity.as_mut().expect("spray quantity");
+            if *quantity > 0. {
+                // Fire checks ammo, consumes it, then paints even on the last shot.
+                *quantity -= (b.paint_loss * state.valve * frame.dt).clamp(0., *quantity);
+                rotation = nozzle.rotation;
+                let direction = if equipped {
+                    to_rapier(frame.view)
+                } else {
+                    nozzle
+                };
+                let ray = Ray::new(direction.translation, direction.rotation * -Vector::Z);
+                let own = items.get(b.item).and_then(|i| i.body);
+                let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+                    c.is_enabled()
+                        && (own.is_none() || c.parent() != own)
+                        && c.collision_groups().memberships.bits() & b.mask != 0
+                        && !c.shape().contains_point(c.position(), ray.origin)
+                };
+                if let Some((handle, hit)) = physics
+                    .queries(QueryFilter::default().predicate(&filter))
+                    .cast_ray_and_get_normal(&ray, b.distance, true)
+                {
+                    let id =
+                        ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+                    if let Some(target) = self.paint_target(id, items, parts, reference) {
+                        let previous = conditions.get(target).color;
+                        let falloff =
+                            ((hit.time_of_impact - b.distance) / (1. - b.distance)).clamp(0., 1.);
+                        let factor = (b.color_lerp * frame.dt * falloff).clamp(0., 1.);
+                        painted = conditions.paint(
+                            target,
+                            std::array::from_fn(|j| {
+                                previous[j] + (color[j] - previous[j]) * factor
+                            }),
+                        );
+                    }
+                    let forward = (ray.point_at(hit.time_of_impact) - emitter).normalize_or_zero();
+                    let right = forward
+                        .cross(nozzle.rotation * Vector::Y)
+                        .normalize_or_zero();
+                    if right.length_squared() > 0. {
+                        rotation = Rotation::from_mat3(&rapier3d::math::Matrix::from_cols(
+                            right,
+                            right.cross(forward),
+                            -forward,
+                        ));
                     }
                 }
             }
-            self.sprays[index].rotation = root.rotation.inverse() * rotation;
+        }
+        self.sprays[index].rotation = root.rotation.inverse() * rotation;
+        self.sprays[index].painted |= painted;
+    }
+    fn finish_sprays(
+        &mut self,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) {
+        let offset = self.contacts.len();
+        for index in 0..self.sprays.len() {
+            let b = &reference.conditions.sprays[index];
+            let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
+            let emitter = root * self.sprays[index].emitter;
+            let rotation = root.rotation * self.sprays[index].rotation;
+            let ti = offset + index;
             let state = &mut self.states[ti];
+            let color = state.color.expect("spray color");
+            if !self.sprays[index].owned {
+                state.valve = 0.;
+            }
             let signal = &mut self.signals[ti];
             // Update reads the open valve before it performs release interpolation.
             let emitting = state.quantity.unwrap() > 0. && state.valve > 0.;
             signal.pose = from_rapier(&Pose::from_parts(emitter, rotation));
             signal.color = color;
-            signal.doing_work = painted;
+            signal.doing_work = self.sprays[index].painted;
             signal.playing = emitting && b.voice.is_some();
             signal.voice_gain = if emitting {
                 state.valve * b.max_volume
@@ -775,7 +940,7 @@ impl CleaningTools {
                     physics,
                 );
             }
-            if !firing {
+            if !self.sprays[index].firing {
                 state.valve += (0. - state.valve) * (b.valve_speed * frame.dt).clamp(0., 1.);
             }
         }

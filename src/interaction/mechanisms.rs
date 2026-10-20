@@ -159,6 +159,7 @@ impl MechanismState {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
         let mut needed = HashSet::new();
         needed.extend(reference.items.iter().map(|i| i.node));
+        needed.extend(reference.colliders.iter().map(|c| c.node));
         needed.extend(reference.anchors.iter().map(|a| a.node));
         let driven: HashSet<_> = reference
             .mechanisms
@@ -566,6 +567,16 @@ impl MechanismState {
                     child
                 },
         )
+    }
+    pub(crate) fn root_node(&self, node: NodeId) -> Option<NodeId> {
+        let mut index = *self.nodes.get(&node)?;
+        loop {
+            let frame = &self.frames[index];
+            if frame.external.is_some() || frame.parent.is_none() {
+                return Some(frame.node);
+            }
+            index = frame.parent.unwrap();
+        }
     }
     /// Current world pose, in rebased runtime coordinates.
     pub fn node_pose(&self, node: NodeId) -> Option<VehiclePose> {

@@ -1,3 +1,4 @@
+pub(crate) mod cpu_profile;
 mod performance;
 pub(crate) mod save;
 use crate::browser::*;
@@ -9,7 +10,7 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
-use crate::simulation::instruments::{InstrumentSample, InstrumentState};
+use crate::simulation::instruments::InstrumentState;
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -31,8 +32,7 @@ pub(crate) struct Drive {
     /// Gauge state per vehicle.
     instruments: Vec<InstrumentState>,
     input: FrameInput,
-    tool_lmb: bool,
-    tool_delta_seconds: f32,
+    frame_input: FrameInput,
     pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
@@ -106,6 +106,7 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 
 #[wasm_bindgen]
 pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue> {
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Startup);
     console_error_panic_hook::set_once();
     let reference = Arc::new(
         ReferenceManifest::from_runtime_json(reference_json)
@@ -118,8 +119,8 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
         GarageRuntime::new(&reference).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,
-        presentation::frame_graph::control_bytes(),
-        presentation::frame_graph::SourceGraphProgress::default,
+        presentation::readiness::control_bytes(),
+        presentation::readiness::RendererStateHandle::default,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
@@ -140,8 +141,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 .collect(),
             runtime,
             input: FrameInput::default(),
-            tool_lmb: false,
-            tool_delta_seconds: 0.,
+            frame_input: FrameInput::default(),
             clock: StepClock::default(),
             previous: current,
             current,
@@ -196,6 +196,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                     ..default()
                 }),
         )
+        .add_plugins(presentation::readiness::install)
         .add_plugins((
             presentation::lighting::SourceLightingPlugin,
             presentation::materials::SourceMaterialPlugin,
@@ -226,6 +227,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
             Update,
             (
                 initialize_storage,
+                presentation::readiness::observe_main_readiness.before(check_ready),
                 check_ready,
                 read_input,
                 save::dispatch,
@@ -234,7 +236,6 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 advance_physics,
                 sync_world,
                 sync_imported,
-                advance_tools,
                 presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
@@ -322,7 +323,7 @@ fn initialize_storage(
 
 fn update_scene_scale(
     mut scale: ResMut<crate::render_scale::SceneScale>,
-    status: Res<presentation::source_lighting::SourceLightingStatus>,
+    status: Res<presentation::readiness::RendererStateHandle>,
 ) {
     match crate::render_scale::SceneScale::from_factor(game_scene_scale()) {
         Ok(value) => {
@@ -331,8 +332,7 @@ fn update_scene_scale(
             }
         }
         Err(error) => {
-            *status.0.lock().unwrap() =
-                presentation::materials::RenderingState::Failed(error.into());
+            status.fail(error.into());
         }
     }
 }
@@ -349,263 +349,184 @@ fn check_ready(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    mut readiness: Local<crate::save::fresh_permit::PresentedFrames>,
+    mut renderer: presentation::readiness::RendererReadinessAccess,
     lighting: (
         Res<presentation::lighting::SourceLighting>,
-        Res<presentation::source_lighting::SourceLighting>,
         Res<presentation::fixed_assets::SourceFixedAssets>,
-        Res<presentation::source_lighting::SourceLightingStatus>,
     ),
     mut materials: ResMut<presentation::materials::SourceMaterials>,
     plates: (
         Res<presentation::plates::PlateTextStatus>,
         Res<presentation::particles::ParticleRender>,
-        Res<presentation::view_frame::SourceSubmissionAcks>,
-        Res<presentation::view_frame::SourceViewClock>,
-        Res<presentation::view_frame::SourceSceneEpoch>,
-        Res<presentation::frame_graph::SourceGraphProgress>,
-        Res<presentation::lighting_scene::ProbeActivation>,
-        Query<(&presentation::surface_views::SourceSurfaceView, &Camera)>,
-        Query<&Window>,
-        Res<crate::render_scale::SceneScale>,
     ),
 ) {
-    let (lighting, source_lighting, fixed, status) = lighting;
-    let (
-        plates,
-        particles,
-        submissions,
-        view_clock,
-        epoch,
-        graph,
-        activation,
-        cameras,
-        windows,
-        scale,
-    ) = plates;
-    graph.content_checked(None);
-    let shared_status = status.0.lock().unwrap();
-    if let presentation::materials::RenderingState::Failed(error) = &*shared_status {
-        game_failure(error);
-        drop(shared_status);
-        visuals.failed = true;
-        graph.invalidate_loading();
-        readiness.reset();
-        return;
-    }
-    drop(shared_status);
-    if let presentation::materials::RenderingState::Failed(error) = &source_lighting.state {
-        game_failure(error);
-        visuals.failed = true;
-        graph.invalidate_loading();
-        readiness.reset();
-        return;
-    }
-    if let Some(error) = plates.failure() {
-        game_failure(error);
-        visuals.failed = true;
-        graph.invalidate_loading();
-    }
-    if visuals.failed {
-        readiness.reset();
-        return;
-    }
-    if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
-        game_failure(error);
-        visuals.failed = true;
-        graph.invalidate_loading();
-        readiness.reset();
-        return;
-    }
-    if let presentation::materials::RenderingState::Failed(error) = &materials.state {
-        game_failure(error);
-        visuals.failed = true;
-        graph.invalidate_loading();
-        readiness.reset();
-        return;
-    }
-    if drive.ready {
-        readiness.reset();
-        return;
-    }
-    if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
-        readiness.reset();
-        return;
-    }
-    if !drive
-        .runtime
-        .area
-        .interaction
-        .storage
-        .initialization_ready()
-    {
-        readiness.reset();
-        return;
-    }
-    for (path, handle) in &visuals.handles {
-        let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
-            readiness.reset();
-            return;
-        };
-        if let LoadState::Failed(error) = load {
-            game_failure(&format!("Cannot load {path}: {error}"));
+    let (lighting, fixed) = lighting;
+    let (plates, particles) = plates;
+    let prepared = (|| -> bool {
+        if renderer.failure().is_some() {
+            return false;
+        }
+        if let Some(error) = plates.failure() {
+            game_failure(error);
             visuals.failed = true;
-            graph.invalidate_loading();
-            readiness.reset();
-            return;
         }
-        if let RecursiveDependencyLoadState::Failed(error) = recursive {
-            game_failure(&format!("Cannot load dependencies for {path}: {error}"));
+        if visuals.failed {
+            return false;
+        }
+        if let presentation::lighting::RenderingState::Failed(error) = &lighting.state {
+            game_failure(error);
             visuals.failed = true;
-            graph.invalidate_loading();
-            readiness.reset();
-            return;
+            return false;
         }
-        if !server.is_loaded_with_dependencies(handle.id()) || !gltfs.contains(handle.id()) {
-            readiness.reset();
-            return;
-        }
-        if gltfs.get(handle).unwrap().scenes.is_empty() {
-            game_failure(&format!("Required source scene 0 is missing from {path}"));
+        if let presentation::materials::RenderingState::Failed(error) = &materials.state {
+            game_failure(error);
             visuals.failed = true;
-            graph.invalidate_loading();
-            readiness.reset();
-            return;
+            return false;
         }
-    }
-    if !lighting.materials_ready {
-        readiness.reset();
-        return;
-    }
-    if !visuals.spawned {
-        presentation::reference::spawn_scenes(&mut commands, &reference.0, &mut visuals, &gltfs);
-        readiness.reset();
-        return;
-    }
-    match presentation::reference::bind(
-        &mut commands,
-        &reference.0,
-        &mut visuals,
-        &extras,
-        &primitives,
-    ) {
-        Ok(true) => {
-            match instruments.bind(
+        if drive.ready {
+            return true;
+        }
+        if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
+            return false;
+        }
+        if !drive
+            .runtime
+            .area
+            .interaction
+            .storage
+            .initialization_ready()
+        {
+            return false;
+        }
+        for (path, handle) in &visuals.handles {
+            let Some((load, _, recursive)) = server.get_load_states(handle.id()) else {
+                return false;
+            };
+            if let LoadState::Failed(error) = load {
+                game_failure(&format!("Cannot load {path}: {error}"));
+                visuals.failed = true;
+                return false;
+            }
+            if let RecursiveDependencyLoadState::Failed(error) = recursive {
+                game_failure(&format!("Cannot load dependencies for {path}: {error}"));
+                visuals.failed = true;
+                return false;
+            }
+            if !server.is_loaded_with_dependencies(handle.id()) || !gltfs.contains(handle.id()) {
+                return false;
+            }
+            if gltfs.get(handle).unwrap().scenes.is_empty() {
+                game_failure(&format!("Required source scene 0 is missing from {path}"));
+                visuals.failed = true;
+                return false;
+            }
+        }
+        if !lighting.materials_ready {
+            return false;
+        }
+        if !visuals.spawned {
+            presentation::reference::spawn_scenes(
+                &mut commands,
                 &reference.0,
-                &visuals.nodes,
-                &primitives,
-                &visuals.gltfs,
+                &mut visuals,
                 &gltfs,
-                &gltf_materials,
-                &mut standard_materials,
-                &mut materials,
-            ) {
-                Ok(true) => {}
-                Ok(false) => {
-                    readiness.reset();
-                    return;
+            );
+            return false;
+        }
+        match presentation::reference::bind(
+            &mut commands,
+            &reference.0,
+            &mut visuals,
+            &extras,
+            &primitives,
+        ) {
+            Ok(true) => {
+                match instruments.bind(
+                    &reference.0,
+                    &visuals.nodes,
+                    &primitives,
+                    &visuals.gltfs,
+                    &gltfs,
+                    &gltf_materials,
+                    &mut standard_materials,
+                    &mut materials,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return false;
+                    }
+                    Err(e) => {
+                        game_failure(&e.to_string());
+                        visuals.failed = true;
+                        return false;
+                    }
                 }
-                Err(e) => {
-                    game_failure(&e.to_string());
-                    visuals.failed = true;
-                    graph.invalidate_loading();
-                    readiness.reset();
-                    return;
+                match &lighting.state {
+                    presentation::lighting::RenderingState::Loading => {
+                        return false;
+                    }
+                    presentation::lighting::RenderingState::Failed(error) => {
+                        game_failure(error);
+                        visuals.failed = true;
+                        return false;
+                    }
+                    presentation::lighting::RenderingState::Ready => {}
                 }
-            }
-            match &lighting.state {
-                presentation::lighting::RenderingState::Loading => {
-                    readiness.reset();
-                    return;
+                if materials.state != presentation::materials::RenderingState::Ready {
+                    return false;
                 }
-                presentation::lighting::RenderingState::Failed(error) => {
-                    game_failure(error);
-                    visuals.failed = true;
-                    graph.invalidate_loading();
-                    readiness.reset();
-                    return;
+                if !drive.runtime.world_supported()
+                    || !drive.runtime.stream.required_ready()
+                    || !lighting.road_lamps.ready()
+                {
+                    return false;
                 }
-                presentation::lighting::RenderingState::Ready => {}
+                if !plates.ready() || !particles.prepared() {
+                    return false;
+                }
+                true
             }
-            if materials.state != presentation::materials::RenderingState::Ready {
-                readiness.reset();
-                return;
+            Ok(false) => false,
+            Err(error) => {
+                game_failure(&error);
+                visuals.failed = true;
+                false
             }
-            if !drive.runtime.world_supported()
-                || !drive.runtime.stream.required_ready()
-                || !lighting.road_lamps.ready()
-            {
-                readiness.reset();
-                return;
-            }
-            if !plates.ready() || !particles.prepared() {
-                readiness.reset();
-                return;
-            }
-            let session = drive.runtime.stream.frame().request.session;
-            let revision = drive.runtime.stream.required_content().selection_revision;
-            graph.content_checked(Some((session, revision)));
-            if source_lighting.state != presentation::materials::RenderingState::Ready {
-                readiness.reset();
-                return;
-            }
-            let extent =
-                cameras
-                    .iter()
-                    .find(|(view, _)| view.index == 0)
-                    .and_then(|(_, camera)| {
-                        let extent = camera.physical_viewport_size()?;
-                        let target = camera.physical_target_size()?;
-                        (extent == target
-                            && windows.single().is_ok_and(|window| {
-                                window.physical_width() == target.x
-                                    && window.physical_height() == target.y
-                            }))
-                        .then_some(scale.extent(extent.to_array()))
-                    });
-            let enabled = activation
-                .enabled
-                .iter()
-                .enumerate()
-                .fold(0, |mask, (i, enabled)| mask | (u32::from(*enabled) << i));
-            if extent.is_none_or(|extent| {
-                !graph.complete_scene(
-                    crate::reference::loading_dispatch::LoadingKey {
-                        session,
-                        scene: epoch.0,
-                        extent,
-                    },
-                    revision,
-                    enabled,
-                )
-            }) {
-                readiness.reset();
-                return;
-            }
-            if readiness.observe(
-                drive.runtime.stream.frame().request.session,
-                epoch.0,
-                view_clock.main_token(),
-                submissions.main_token(),
-            ) {
+        }
+    })();
+    let key = crate::render_readiness::ContentKey {
+        session: drive.runtime.stream.frame().request.session,
+        selection_revision: drive.runtime.stream.required_content().selection_revision,
+    };
+    let preparation = if prepared {
+        crate::render_readiness::ContentPreparation::Prepared(key)
+    } else {
+        crate::render_readiness::ContentPreparation::Pending(key)
+    };
+    match renderer.check(presentation::readiness::RendererContentCheck {
+        preparation,
+        history_revision: drive.runtime.audio_motion_revision,
+    }) {
+        crate::render_readiness::RendererStatus::Loading => {}
+        crate::render_readiness::RendererStatus::Ready => {
+            if !drive.ready {
                 drive.ready = true;
                 game_ready();
             }
         }
-        Ok(false) => readiness.reset(),
-        Err(error) => {
+        crate::render_readiness::RendererStatus::Failed(error) => {
             game_failure(&error);
             visuals.failed = true;
-            graph.invalidate_loading();
-            readiness.reset();
         }
     }
 }
 
 fn clear_input(drive: &mut Drive) {
+    if cpu_profile::enabled() {
+        game_cpu_clear_input();
+    }
     drive.input.clear();
-    drive.tool_lmb = false;
-    drive.tool_delta_seconds = 0.;
+    drive.frame_input.clear();
     drive.runtime.clear_input();
     drive.current = drive
         .runtime
@@ -624,6 +545,7 @@ fn read_input(
     mut drive: ResMut<Drive>,
     requests: Res<save::SaveRequests>,
 ) {
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     let runtime = &drive.runtime;
     let assists = runtime.driving_assists;
     game_driving_state(
@@ -648,9 +570,13 @@ fn read_input(
             game_mouse_y() * reference.0.player.look_sensitivity[1],
         ],
         wheel: game_wheel(),
+        carry: crate::simulation::CarryDeltas::default(),
     };
-    drive.tool_lmb = frame.held & keys::PRIMARY != 0;
     if requests.pending() {
+        if cpu_profile::enabled() {
+            game_cpu_clear_input();
+        }
+        drive.frame_input.clear();
         return;
     }
     if actions & 2 != 0 {
@@ -684,6 +610,11 @@ fn read_input(
     }
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
+        if cpu_profile::enabled() {
+            game_cpu_clear_input();
+        }
+        drive.frame_input.clear();
+        drive.runtime.clear_input();
         return;
     }
     if actions & 22 != 0 {
@@ -701,7 +632,7 @@ fn read_input(
         };
     }
     drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
-    drive.input.merge(frame);
+    drive.frame_input.merge(frame);
 }
 fn advance_physics(
     time: Res<Time<Real>>,
@@ -711,15 +642,28 @@ fn advance_physics(
     drive.physics_ms = 0.;
     drive.frame_steps = 0;
     drive.render_delta_seconds = 0.;
-    drive.tool_delta_seconds = 0.;
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
-    if drive.skip_elapsed {
-        drive.skip_elapsed = false;
+    let blocked = drive.skip_elapsed
+        && (drive.runtime.recovering
+            || !drive.runtime.world_supported()
+            || drive.runtime.sleeping()
+            || drive.runtime.needs_output().dead);
+    let Drive {
+        frame_input,
+        skip_elapsed,
+        ..
+    } = &mut *drive;
+    let Some(raw) = frame_input.take_frame(skip_elapsed, blocked) else {
+        if blocked {
+            drive.input.clear();
+            drive.runtime.clear_input();
+        }
         return;
-    }
+    };
     let started = game_now();
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
         let calendar = game_audio_calendar();
         audio
@@ -727,8 +671,12 @@ fn advance_physics(
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.tool_delta_seconds = delta;
     drive.runtime.area.conditions.update(delta, true);
+    let view = drive.rendered;
+    let frame = drive
+        .runtime
+        .advance_inventory_frame(&reference.0, raw, delta, view);
+    frame.merge_fixed_input(&mut drive.input);
     drive.clock.accept_frame(time.delta_secs_f64());
     loop {
         let scale = drive.runtime.clock_factors(&reference.0).time_scale;
@@ -824,7 +772,7 @@ fn sync_world(
         rows.w_axis - rows.y_axis,
     ]
     .map(|p| p / p.truncate().length());
-    let view = presentation::materials::grass::GrassView {
+    let view = grass_mesh::GrassView {
         position: position * Vec3::new(1., 1., -1.),
         screen_height: windows.single().map_or(1., |w| w.physical_height() as f32),
         clip_planes: planes,
@@ -938,7 +886,7 @@ fn sync_world(
     drive.world_ms = game_now() - started;
 }
 
-fn sync_imported(
+pub(crate) fn sync_imported(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     mut query: Query<(
@@ -990,47 +938,6 @@ fn sync_imported(
     );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
 }
-pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let frame = crate::interaction::cleaning::ToolFrame {
-        held: drive.runtime.area.interaction.held(),
-        lmb: drive.tool_lmb,
-        active: drive.ready
-            && !drive.runtime.recovering
-            && drive.runtime.world_supported()
-            && drive.tool_delta_seconds > 0.,
-        dt: drive.tool_delta_seconds,
-        view: drive.rendered,
-        origin: drive.runtime.stream.origin.offset,
-    };
-    drive.runtime.advance_tools(&reference.0, frame);
-}
-fn instrument_sample(
-    reference: &ReferenceManifest,
-    run: &GarageRuntime,
-    index: usize,
-) -> InstrumentSample {
-    let amount = |id: ItemId| {
-        run.area
-            .items
-            .get(id)
-            .and_then(|i| i.fluid.as_ref())
-            .map_or(0., |f| f.mixture.total())
-    };
-    let vehicle = &reference.vehicles[index];
-    let state = &run.vehicles[index];
-    let r = &vehicle.instruments;
-    InstrumentSample {
-        speed_kmh: run.physics.snapshot(index).speed_mps * 3.6,
-        fuel_liters: amount(vehicle.engine.fuel_tank),
-        oil_liters: amount(vehicle.engine.oil_tank),
-        temperature: state.engine_output.temperature,
-        rpm: state.engine_output.rpm,
-        headlights: run.lighting.headlights(index),
-        local_ignition: state.engine_output.ignition
-            && r.electronics_output > r.electronics_off_threshold,
-        distance_m: state.trip_m,
-    }
-}
 fn sync_instruments(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
@@ -1042,7 +949,7 @@ fn sync_instruments(
     let run = &drive.runtime;
     for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
         let r = &vehicle.instruments;
-        let sample = instrument_sample(&reference.0, run, index);
+        let sample = run.instrument_sample(&reference.0, index);
         if run.started && !run.paused {
             drive.instruments[index].update(r, sample, drive.render_delta_seconds);
         }
@@ -1087,7 +994,7 @@ fn publish_loading(
     visuals: Res<ReferenceVisuals>,
     materials: Res<presentation::materials::SourceMaterials>,
     lighting: Res<presentation::lighting::SourceLighting>,
-    source_lighting: Res<presentation::source_lighting::SourceLighting>,
+    renderer: presentation::readiness::RendererReadinessAccess,
     plates: Res<presentation::plates::PlateTextStatus>,
     time: Res<Time<Real>>,
     mut last: Local<f64>,
@@ -1098,7 +1005,15 @@ fn publish_loading(
     let rendering = visuals.bound
         && materials.state == presentation::materials::RenderingState::Ready
         && lighting.state == presentation::lighting::RenderingState::Ready
-        && source_lighting.state == presentation::materials::RenderingState::Ready
+        && renderer.graph_ready(presentation::readiness::RendererContentCheck {
+            preparation: crate::render_readiness::ContentPreparation::Prepared(
+                crate::render_readiness::ContentKey {
+                    session: stream.frame().request.session,
+                    selection_revision: stream.required_content().selection_revision,
+                },
+            ),
+            history_revision: drive.runtime.audio_motion_revision,
+        })
         && plates.ready();
     if stream.initial_generation_ready() && *traced & 1 == 0 {
         game_startup_stage("generation", false);
@@ -1186,7 +1101,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .items
         .get(reference.0.vehicles[runtime.vehicle].engine.fuel_tank)
         .and_then(|item| item.fluid.as_ref())
-        .map_or(0.0, |fluid| fluid.mixture.total());
+        .map_or(0.0, |fluid| fluid.finite_total());
     game_update(
         snapshot.speed_mps * 3.6,
         (drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none()) as u32,
@@ -1263,14 +1178,23 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     } else {
         ""
     };
+    let rpm = if runtime
+        .area
+        .items
+        .mounted(reference.0.vehicles[runtime.vehicle].engine.item)
+    {
+        current.engine_output.rpm
+    } else {
+        0.
+    };
     let stamp = FeedbackStamp {
         condition: condition.to_bits(),
         held,
         throw_charge: runtime.area.interaction.throw_charge().to_bits(),
         throw_active: runtime.area.interaction.throw_active(),
-        rpm: current.engine_output.rpm.to_bits(),
+        rpm: rpm.to_bits(),
         engine_flags: [
-            current.engine_output.ignition,
+            current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
             runtime.area.player.seat().is_some(),
@@ -1321,8 +1245,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
                 .unwrap_or(""),
             runtime.area.interaction.throw_charge(),
             runtime.area.interaction.throw_active(),
-            current.engine_output.rpm,
-            current.engine_output.ignition,
+            rpm,
+            current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
             runtime.area.player.seat().is_some(),
@@ -1417,11 +1341,6 @@ fn publish_audio(
     audio.survival_events.clear();
     for emitter in &audio.reference.emitters {
         let alive = audio.owner_alive(emitter.id)
-            && (emitter.id != audio.reference.engine.emitter
-                || runtime
-                    .area
-                    .items
-                    .mounted(reference.0.vehicles[audio.vehicle_index].engine.item))
             && emitter.item.is_none_or(|id| {
                 runtime
                     .area

@@ -1,8 +1,5 @@
 //! Slot membership is independent of carry and right-hand ownership.
-use crate::{
-    reference::{InventoryReference, ItemId},
-    simulation::FrameInput,
-};
+use crate::reference::{InventoryReference, ItemId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InventoryCommand {
     Select(u8),
@@ -43,133 +40,106 @@ impl InventoryState {
             }
         }
     }
-    pub fn step(
+    pub fn released_command(
+        &self,
+        released: u8,
+        context: InventoryContext,
+    ) -> Option<InventoryCommand> {
+        if context.seated_clutch || self.swapped {
+            return None;
+        }
+        (0..4)
+            .find(|i| released & (1 << i) != 0)
+            .map(InventoryCommand::Select)
+    }
+    pub fn held_command(
         &mut self,
-        input: FrameInput,
+        held: u8,
         dt: f32,
         context: InventoryContext,
     ) -> Option<InventoryCommand> {
         if context.seated_clutch || !dt.is_finite() || dt <= 0. {
             return None;
         }
-        let bits = [1u8, 2, 4, 8];
-        if !self.swapped
-            && let Some(i) = bits.iter().position(|b| input.inventory_released & b != 0)
-        {
-            return Some(InventoryCommand::Select(i as u8));
-        }
-        if let Some(i) = bits.iter().position(|b| input.inventory_held & b != 0) {
-            if !self.swapped
-                && !context.ancestor_carry
-                && !(context.carried.is_some()
-                    && context.equipped.is_some()
-                    && self.slots[i].is_some())
-            {
-                if self.swap_progress < 1. {
-                    self.swap_progress += self.gain * dt;
-                } else {
-                    self.swapped = true;
-                    self.swap_progress = 0.;
-                    return Some(InventoryCommand::Swap(i as u8));
-                }
-            }
-        } else {
+        let Some(i) = (0..4).find(|i| held & (1 << i) != 0) else {
             self.swapped = false;
+            return None;
+        };
+        if self.swapped
+            || context.ancestor_carry
+            || (context.carried.is_some()
+                && context.equipped.is_some()
+                && self.slots[i as usize].is_some())
+        {
+            return None;
         }
-        None
+        if self.swap_progress < 1. {
+            self.swap_progress += self.gain * dt;
+            None
+        } else {
+            Some(InventoryCommand::Swap(i))
+        }
+    }
+    pub(crate) fn record_swap(&mut self) {
+        self.swapped = true;
+        self.swap_progress = 0.;
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn release_priority_hold_order_and_cancellation() {
-        let mut s = InventoryState {
+    fn state() -> InventoryState {
+        InventoryState {
             slots: [None; 4],
             selected: 0,
             swap_progress: 0.,
             gain: 5.,
             swapped: false,
-        };
-        let context = InventoryContext::default();
-        let key2 = 2;
-        let key3 = 4;
+        }
+    }
+    #[test]
+    fn release_priority_hold_order_and_cancellation() {
+        let mut s = state();
+        let c = InventoryContext::default();
         assert_eq!(
-            s.step(
-                FrameInput {
-                    inventory_released: key2 | key3,
-                    ..Default::default()
-                },
-                0.1,
-                context
-            ),
+            s.released_command(2 | 4, c),
             Some(InventoryCommand::Select(1))
         );
-        for _ in 0..2 {
-            assert_eq!(
-                s.step(
-                    FrameInput {
-                        inventory_held: key3,
-                        ..Default::default()
-                    },
-                    0.1,
-                    context
-                ),
-                None
-            );
-        }
+        assert_eq!(s.held_command(4 | 8, 0.1, c), None);
+        assert_eq!(s.held_command(0, 0.1, c), None);
+        assert_eq!(s.swap_progress, 0.5);
+        assert_eq!(s.held_command(4, 0.1, c), None);
+        assert_eq!(s.swap_progress, 1.);
         assert_eq!(
-            s.step(
-                FrameInput {
-                    inventory_held: key3,
-                    ..Default::default()
-                },
-                0.1,
-                context
-            ),
+            s.held_command(4 | 8, 0.1, c),
             Some(InventoryCommand::Swap(2))
         );
-        assert_eq!(
-            s.step(
-                FrameInput {
-                    inventory_released: key3,
-                    ..Default::default()
-                },
-                0.1,
-                context
-            ),
-            None
-        );
-        s.step(
-            FrameInput {
-                inventory_held: key2,
-                ..Default::default()
-            },
-            0.1,
-            context,
-        );
+        assert_eq!(s.swap_progress, 1.);
+        assert_eq!(s.released_command(2, c), Some(InventoryCommand::Select(1)));
+        s.record_swap();
+        assert_eq!(s.swap_progress, 0.);
+        assert_eq!(s.released_command(4, c), None);
+        assert_eq!(s.held_command(0, 0.1, c), None);
+        assert_eq!(s.released_command(4, c), Some(InventoryCommand::Select(2)));
+        s.held_command(2, 0.1, c);
         s.cancel_input();
         assert_eq!(s.swap_progress, 0.);
-        assert_eq!(s.step(FrameInput::default(), 0.1, context), None);
         s.slots[1] = Some(ItemId(1));
         let blocked = InventoryContext {
             carried: Some(ItemId(2)),
             equipped: Some(ItemId(3)),
-            ..context
+            ..c
         };
         for _ in 0..4 {
-            assert_eq!(
-                s.step(
-                    FrameInput {
-                        inventory_held: key2,
-                        ..Default::default()
-                    },
-                    0.1,
-                    blocked
-                ),
-                None
-            );
+            assert_eq!(s.held_command(2, 0.1, blocked), None);
         }
+        assert_eq!(s.swap_progress, 0.);
+        let clutch = InventoryContext {
+            seated_clutch: true,
+            ..c
+        };
+        assert_eq!(s.released_command(2, clutch), None);
+        assert_eq!(s.held_command(2, 0.5, clutch), None);
         assert_eq!(s.swap_progress, 0.);
     }
 }

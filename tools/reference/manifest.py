@@ -12,6 +12,24 @@ from .driving import recover_driving
 from .player_movement import recover_player_movement, recover_seat_view
 
 
+def fluid_entries(value: dict) -> list[dict]:
+    """Validate initial tank contents and retain source list order."""
+    capacity = value['maxC']
+    if not math.isfinite(capacity) or capacity <= 0:
+        raise ValueError('Invalid fluid capacity')
+    entries = []
+    seen = set()
+    for fluid in value['fluids']:
+        kind, amount = fluid['type'], fluid['amount']
+        if kind not in range(6) or kind in seen or not math.isfinite(amount) or amount < 0:
+            raise ValueError('Invalid initial fluid entry')
+        seen.add(kind)
+        entries.append({'fluid_type': kind, 'amount': amount})
+    if len(entries) > 6 or sum(entry['amount'] for entry in entries) > capacity:
+        raise ValueError('Initial fluid exceeds capacity')
+    return entries
+
+
 def build_manifest(source, roots, reports, hashes, library, cars, output):
     """`cars` names the vehicle roots in manifest order."""
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
@@ -169,10 +187,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('tankscript',[]):
-            full=source.read(reader);value=full['F'];quantities=[0.]*6
-            for fluid in value['fluids']:quantities[fluid['type']]+=fluid['amount']
+            full=source.read(reader);value=full['F']
             owner=body_for(node)
-            tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'quantities_liters':quantities,'openings':[],
+            tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'fluids':fluid_entries(value),'openings':[],
                 'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
                 'role':'vehicle' if owner in car_bodies else 'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
     for node,group in components.items():

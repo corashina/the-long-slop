@@ -23,3 +23,5 @@ pub mod lod;
 pub mod instances;
 
 pub mod runtime;
+
+pub mod grass_worker;

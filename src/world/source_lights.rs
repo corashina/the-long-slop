@@ -243,7 +243,16 @@ impl SourceRoadLight {
             .iter()
             .find(|p| p.source == reference.road.prototypes[segment.biome as usize])
             .unwrap();
-        let frames = super::road::road_frames(prototype, segment);
+        let frames = road_mesh::frames(
+            prototype.nodes.iter().map(|node| road_mesh::RoadNode {
+                parent: node.parent,
+                translation: node.transform.translation,
+                rotation: node.transform.rotation,
+                scale: node.transform.scale,
+            }),
+            &prototype.controls,
+            &segment.source_rotations,
+        );
         let frame = frames[recipe.pole_node];
         let rotation = super::lamps::flatten_then_tilt(
             frame.rotation,

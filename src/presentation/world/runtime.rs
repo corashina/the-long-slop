@@ -7,10 +7,7 @@ use super::{
 use crate::{
     presentation::{
         lighting::SourceLighting,
-        materials::{
-            grass::{GrassView, writers::GrassWriters},
-            terrain::TerrainMaterial,
-        },
+        materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
     starting_area::StartingArea,
@@ -21,6 +18,7 @@ use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
     prelude::*,
 };
+use grass_mesh::GrassView;
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,
@@ -139,6 +137,8 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        let _profile =
+            crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::RenderPreparation);
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
@@ -172,7 +172,7 @@ impl WorldPresentation<'_, '_> {
                 &mut self.grass,
                 &mut self.writers,
             )?;
-            self.grass.release_domains();
+            self.grass.release_domains(stream)?;
             self.materials.cache.begin_world_session();
             self.surfaces
                 .retire_session(&mut self.commands, &mut self.meshes);

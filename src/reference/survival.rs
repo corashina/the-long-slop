@@ -106,7 +106,7 @@ pub struct SurvivalReference {
     pub blood: SourceId,
     pub initial: NeedValues,
     pub maximum: NeedValues,
-    pub initial_bladder: [f32; 6],
+    pub initial_bladder: Vec<crate::fluids::FluidEntry>,
     pub bladder_capacity_liters: f32,
     pub initial_queue: ConsumptionEffect,
     pub starter_food: ItemId,
@@ -200,11 +200,12 @@ impl SurvivalReference {
             "initial needs",
         )?;
         require(
-            finite(&self.initial_bladder)
-                && self.initial_bladder.iter().all(|v| *v >= 0.)
+            crate::fluids::validate_fluid_entries(&self.initial_bladder)
+                && self.initial_bladder.iter().all(|v| v.amount >= 0.)
                 && self.bladder_capacity_liters.is_finite()
                 && self.bladder_capacity_liters > 0.
-                && self.initial_bladder.iter().sum::<f32>() <= self.bladder_capacity_liters
+                && self.initial_bladder.iter().map(|v| v.amount).sum::<f32>()
+                    <= self.bladder_capacity_liters
                 && self.initial_queue.valid(),
             "initial bladder and queue",
         )?;

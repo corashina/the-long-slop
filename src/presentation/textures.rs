@@ -57,6 +57,8 @@ impl AssetLoader for SourceImageLoader {
                 "Invalid source mip payload",
             )
         };
+        let _profile =
+            crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::AssetDecode);
         if data.len() < 16 || &data[..4] != b"SMIP" {
             return Err(invalid());
         }

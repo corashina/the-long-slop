@@ -2,12 +2,11 @@
 use super::{
     lighting_assets::LightingRenderAssets,
     lighting_scene::SourceSceneLighting,
-    materials::RenderingState,
+    readiness::RendererStateHandle,
     render_targets::{COLLECTOR_FORMAT, SourceViewTargets},
     shadow_phase::ShadowDrawState,
     shadow_queue::ShadowQueues,
     shadow_scene::ShadowScene,
-    source_lighting::SourceLightingStatus,
     surface_graph::{SourceSurface, SourceSurfaceStage, SurfaceViewTargets},
     surface_views::SourceSurfaceView,
     view_frame::SourceViewFrame,
@@ -82,7 +81,7 @@ fn prepare(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Collector,
@@ -95,7 +94,7 @@ fn prepare(
     if scene.frame == 0
         || scene.frame != frame.frame
         || !frame.required_views_ready()
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || status.failure().is_some()
     {
         return;
     }
@@ -138,8 +137,7 @@ fn prepare(
             bevy::shader::ShaderCacheError::ShaderNotLoaded(_)
                 | bevy::shader::ShaderCacheError::ShaderImportNotYetAvailable
         ) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed(format!("Source shadow collector pipeline: {error}"));
+            status.fail(format!("Source shadow collector pipeline: {error}"));
             return;
         }
     }
@@ -285,7 +283,7 @@ fn collect(
     frame: Res<SourceViewFrame>,
     queues: Res<ShadowQueues>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
     let (view, collector, shadow) = view.into_inner();
@@ -293,7 +291,7 @@ fn collect(
         || queues.frame != frame.frame
         || collector.prepared_frame != frame.frame
         || shadow.encoded_frame() != frame.frame
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || status.failure().is_some()
     {
         return;
     }
