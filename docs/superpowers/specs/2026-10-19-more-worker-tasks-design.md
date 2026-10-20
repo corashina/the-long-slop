@@ -293,3 +293,14 @@ Preserve source registration, distance cadence, GPU capacity, shader layout, and
 Reject zero probes and counts above capacity at the data boundary.
 Verify critical native regressions and the routine WASM check before review.
 Release and browser acceptance remain the next parent-owned Task 2 milestone.
+
+## User implementation override, 2026-10-20
+
+The user instructed: "Implement workers. Skip tests."
+Implement both road and grass workers in the existing isolated worktree.
+Do not gate implementation on further profiling, candidate selection, or A/B/A acceptance.
+Preserve the calculation, ownership, memory, save/load, and input contracts above.
+Skip test creation, test execution, browser acceptance, and benchmarks.
+Static source review and compile-only checks may detect implementation errors.
+Do not claim runtime parity, deterministic equivalence, or performance gains without evidence.
+Keep the branch unmerged.

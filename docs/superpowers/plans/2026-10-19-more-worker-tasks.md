@@ -403,3 +403,13 @@ Preserve source registration, distance cadence, GPU capacity, shader layout, and
 Reject zero probes and counts above capacity at the data boundary.
 Verify critical native regressions and the routine WASM check before review.
 Release and browser acceptance remain the next parent-owned Task 2 milestone.
+
+## User execution override, 2026-10-20
+
+The user instructed: "Implement workers. Skip tests."
+Resume Tasks 3 through 7 for both road and grass, in that order.
+Task 2 profiling is retained as partial evidence, not an implementation gate.
+Skip all test creation and execution steps, browser runs, and benchmark steps.
+Keep production correctness and lifecycle requirements.
+Use compile-only checks and source review. Do not run scripts/check.ps1 or scripts/build.ps1.
+Task 8 records implementation and unverified costs, without gain or acceptance claims.
