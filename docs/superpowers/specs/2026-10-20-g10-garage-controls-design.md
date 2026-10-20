@@ -1,7 +1,7 @@
 # G10 garage and car controls design
 
 Date: 2026-10-20.
-Status: approved in-chat design, written spec awaiting review.
+Status: written spec approved 2026-10-20. Implementation plan awaiting review.
 Base: `master`, commit `cc7540b255d683722c67e09103a66bfa789c0fe7`.
 Branch: `codex/g10-garage-controls`.
 
