@@ -1,6 +1,7 @@
 """Execute actual curve observers and reject changed frozen query boundaries."""
 from copy import deepcopy
 from decimal import Decimal
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -13,7 +14,7 @@ from tools.reference.driving import method
 from tools.reference import driving_probe as probe
 from tools.reference.driving_curve import (
     SCENARIO_ID, INPUT_FIELD, PROVENANCE_FIELD, INPUT_BITS, PROVENANCE,
-    bits, original_inputs, source_curve, validate_curve_scenario, validate_curve_run)
+    bits, original_inputs, serialized_torque_curve, validate_curve_scenario, validate_curve_run)
 
 ROOT = Path(__file__).resolve().parents[1]
 FROZEN_INPUTS = [31.25, 656.25, 687.5, 1437.5, 1468.75, 1984.375, 2390.625,
@@ -35,8 +36,8 @@ def scenario():
 
 
 def torque_row():
-    return dict(owner='enginescript', name='torqueCurve', keys=source_curve()['keys'],
-                pre_wrap=2, post_wrap=2, inputs=PREFIX + FROZEN_INPUTS,
+    return dict(owner='enginescript', name='torqueCurve', keys=serialized_torque_curve()['keys'],
+                pre_wrap=8, post_wrap=8, inputs=PREFIX + FROZEN_INPUTS,
                 values=[float(i) + .25 for i in range(77)])
 
 
@@ -57,7 +58,7 @@ class DrivingCurveInputTests(unittest.TestCase):
                   'weighted_mode': 'weightedMode'}
         keys = ','.join('new Keyframe{' + ','.join(
             fields[k] + '=' + (str(v) if k == 'weighted_mode' else repr(v) + 'f')
-            for k, v in key.items()) + '}' for key in source_curve()['keys'])
+            for k, v in key.items()) + '}' for key in serialized_torque_curve()['keys'])
         arrays = ('static Keyframe[] SourceKeys(){return new[]{' + keys + '};}' +
                   'static float[] Prefix(){return new float[]{' + ','.join(str(v) + 'f' for v in PREFIX) + '};}' +
                   'static float[] Holdouts(){return new float[]{' + ','.join(str(v) + 'f' for v in FROZEN_INPUTS) + '};}' +
@@ -72,7 +73,7 @@ class DrivingCurveInputTests(unittest.TestCase):
     def test_exact_scenario_and_all_invalid_declarations(self):
         validate_curve_scenario(scenario())
         self.assertEqual(tuple(map(bits, FROZEN_INPUTS)), INPUT_BITS)
-        self.assertEqual(original_inputs(source_curve()['keys']), PREFIX)
+        self.assertEqual(original_inputs(serialized_torque_curve()['keys']), PREFIX)
         changes = {
             'missing inputs': lambda r: r.pop(INPUT_FIELD),
             'missing provenance': lambda r: r.pop(PROVENANCE_FIELD),
@@ -109,6 +110,22 @@ class DrivingCurveInputTests(unittest.TestCase):
         old = scenario(); old['id'] = 'curve-boundaries'; old.pop(INPUT_FIELD); old.pop(PROVENANCE_FIELD)
         validate_curve_scenario(old)
         self.assertIsNone(validate_curve_run({}, old))
+
+    def test_serialized_and_native_wrap_domains_are_distinct(self):
+        serialized = serialized_torque_curve()
+        self.assertEqual((serialized['pre_wrap_mode'], serialized['post_wrap_mode']), (2, 2))
+        semantic = json.dumps(serialized, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('ascii')
+        self.assertEqual(hashlib.sha256(semantic).hexdigest(),
+                         '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89')
+        # Native modes are literal observations from qualified focused07, independent of authoring modes.
+        row = torque_row()
+        with self.subTest(native=(8, 8)):
+            self.assertEqual(len(validate_curve_run({'curves': [row]}, scenario())['value_bits']), 77)
+        for pre, post in ((2, 2), (2, 8), (8, 2), (0, 0), (1, 1), (4, 4), (16, 16),
+                          (8.0, 8), (8, 8.0), (True, 8), (8, False), ('8', 8), (8, None)):
+            wrong = dict(row, pre_wrap=pre, post_wrap=post)
+            with self.subTest(native=(pre, post)), self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'):
+                validate_curve_run({'curves': [wrong]}, scenario())
 
     def test_result_requires_exact_identity_keys_wraps_prefix_suffix_and_lengths(self):
         run = {'curves': [torque_row()]}
@@ -239,7 +256,7 @@ class DrivingCurveInputTests(unittest.TestCase):
 
     def test_capture_and_verify_preserve_declarations_serialize_and_stop_on_bit_changes(self):
         # Run real orchestration and curve validation with synthetic unrelated telemetry.
-        for corrupt in (False, True):
+        for corrupt in ('none', 'value', 'serialized wraps'):
             with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as name:
                 project = Path(name).resolve(); output = project / '.cache/g11-driving/new'
                 definitions = project / 'scenarios.json'; definitions.write_text(json.dumps({'scenarios': [scenario()]}))
@@ -255,7 +272,8 @@ class DrivingCurveInputTests(unittest.TestCase):
                     else:
                         directory = Path(arguments[arguments.index('-RunRoot') + 1]); launched.append(directory)
                         row = torque_row()
-                        if corrupt and len(launched) == 2: row['values'][52] += .5
+                        if corrupt == 'value' and len(launched) == 2: row['values'][52] += .5
+                        if corrupt == 'serialized wraps': row.update(pre_wrap=2, post_wrap=2)
                         probe.write_json(directory / 'runtime.json', dict(scenario=SCENARIO_ID, curves=[row],
                             initial={'rpm': .2}, setup_state={'held': True}, geometry=[dict(
                                 phase='armed-after-canonical', colliders=[], transforms=[])]))
@@ -264,10 +282,11 @@ class DrivingCurveInputTests(unittest.TestCase):
                     return {'curve_holdout': validate_curve_run(run, row)}
                 with patch.object(probe, 'PROJECT', project), patch.object(probe, 'preflight', return_value=pre), \
                      patch.object(probe.subprocess, 'run', side_effect=native), patch.object(probe, 'validate_evidence', side_effect=validate):
-                    if corrupt:
-                        with self.assertRaisesRegex(ValueError, 'different engine torque curve bits'):
+                    if corrupt != 'none':
+                        message, repeats = ('different engine torque curve bits', 2) if corrupt == 'value' else ('Native engine torque wraps differ', 1)
+                        with self.assertRaisesRegex(ValueError, message):
                             probe.capture(project, project, output, definitions, 3)
-                        self.assertEqual(len(launched), 2)
+                        self.assertEqual(len(launched), repeats)
                         self.assertFalse((output / 'receipt.json').exists())
                         continue
                     receipt = probe.capture(project, project, output, definitions, 3)
@@ -284,6 +303,9 @@ class DrivingCurveInputTests(unittest.TestCase):
                     changed = launched[-1] / 'runtime.json'; data = json.loads(changed.read_text())
                     data['curves'][0]['values'][52] += .5; probe.write_json(changed, data)
                     with self.assertRaisesRegex(ValueError, 'different engine torque curve bits'): probe.verify(output)
+                    data['curves'][0] = torque_row(); data['curves'][0].update(pre_wrap=2, post_wrap=2)
+                    probe.write_json(changed, data)
+                    with self.assertRaisesRegex(ValueError, 'Native engine torque wraps differ'): probe.verify(output)
 
 
 STUBS = r"""
@@ -293,7 +315,7 @@ using System.Linq;
 public struct Keyframe {public float time,value,inTangent,outTangent,inWeight,outWeight;public int weightedMode;}
 public class AnimationCurve {
     public Keyframe[] keys; public int length {get{return keys.Length;}}
-    public int preWrapMode=2,postWrapMode=2;
+    public int preWrapMode=8,postWrapMode=8;
     public List<float> evaluated=new List<float>();
     public float Evaluate(float input){evaluated.Add(input);return evaluated.Count+1234.25f;}
 }
@@ -323,7 +345,7 @@ CHECKS = r"""
                 Need(row.inputs.Select(Bits).SequenceEqual(expected.Select(Bits)),"ordered input bits");
                 Need(source.evaluated.Select(Bits).SequenceEqual(expected.Select(Bits)),"native Evaluate call order");
                 Need(row.values.SequenceEqual(Enumerable.Range(1,expected.Length).Select(x=>x+1234.25f)),"distinct native Evaluate return values");
-                Need(row.pre_wrap==2 && row.post_wrap==2,"source wraps");
+                Need(row.pre_wrap==8 && row.post_wrap==8,"source wraps");
                 Need(row.keys.Length==13,"source key count");
                 for(int k=0;k<13;k++){
                     var a=row.keys[k];var b=source.keys[k];

@@ -20,7 +20,9 @@ PROVENANCE = {
     'holdouts_sha256': '976095da27c1537f328b518640b74d4b419eae00f8e3aaf21fcc2da7ac9ffae2',
     'inputs_binary32_le_sha256': '4e48751084e1efd7557d0659cc301cc05aa6173f2c3e229d3c8c42eafd9d03e2'}
 BASE_ROW_SHA256 = '611dd801fb756b26726bd81e6d528080958d0813d49b47e20a744f6408fe4411'
-SOURCE_CURVE_SHA256 = '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89'
+SERIALIZED_TORQUE_CURVE_SHA256 = '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89'
+# Shipped WrapMode.ClampForever, confirmed by qualified focused07 native metadata.
+NATIVE_TORQUE_WRAPS = (8, 8)
 
 
 def definition_hash(value):
@@ -71,11 +73,11 @@ def validate_curve_scenario(scenario):
         raise ValueError('Curve holdout base row differs from its bound definition')
 
 
-def source_curve():
+def serialized_torque_curve():
     path = Path(__file__).resolve().parents[2] / 'tests/fixtures/driving/scenarios.json'
     curve = json.loads(path.read_text(encoding='utf-8'))['source_initial_parameters']['engine']['torque_curve']
-    if definition_hash(curve) != SOURCE_CURVE_SHA256:
-        raise ValueError('Bound source torque keys or wraps differ')
+    if definition_hash(curve) != SERIALIZED_TORQUE_CURVE_SHA256:
+        raise ValueError('Bound serialized torque keys or authoring wraps differ')
     return curve
 
 
@@ -100,23 +102,23 @@ def validate_curve_run(run, scenario):
     if len(rows) != 1 or (rows[0].get('owner'), rows[0].get('name')) != ('enginescript', 'torqueCurve'):
         raise ValueError('Native engine torque curve identity or count differs')
     row = rows[0]
-    source = source_curve()
+    serialized = serialized_torque_curve()
     keys = row.get('keys')
     if not isinstance(keys, list) or len(keys) != 13:
         raise ValueError('Native engine torque key count differs')
-    for actual, expected in zip(keys, source['keys']):
+    for actual, expected in zip(keys, serialized['keys']):
         if not isinstance(actual, dict) or actual.keys() != expected.keys() or type(actual['weighted_mode']) is not int:
             raise ValueError('Native engine torque key fields differ')
         if (actual['weighted_mode'] != expected['weighted_mode'] or
             any(bits(actual[name]) != bits(value) for name, value in expected.items() if name != 'weighted_mode')):
             raise ValueError('Native engine torque key bits differ')
-    if any(type(row.get(field)) is not int or row[field] != source[expected]
-           for field, expected in (('pre_wrap', 'pre_wrap_mode'), ('post_wrap', 'post_wrap_mode'))):
+    if any(type(row.get(field)) is not int or row[field] != expected
+           for field, expected in zip(('pre_wrap', 'post_wrap'), NATIVE_TORQUE_WRAPS)):
         raise ValueError('Native engine torque wraps differ')
     inputs, values = row.get('inputs'), row.get('values')
     if not isinstance(inputs, list) or not isinstance(values, list) or len(inputs) != 77 or len(values) != 77:
         raise ValueError('Native engine torque requires 77 inputs and values')
-    expected = tuple(bits(value) for value in original_inputs(source['keys'])) + INPUT_BITS
+    expected = tuple(bits(value) for value in original_inputs(serialized['keys'])) + INPUT_BITS
     if tuple(bits(value) for value in inputs) != expected:
         raise ValueError('Native engine torque prefix or suffix bits differ')
     # Keep native decimal tokens separately. Qualification compares the binary32 readouts only.
