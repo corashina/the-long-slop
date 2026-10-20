@@ -74,7 +74,8 @@ Seat entry follows source usable identity. Tab retains carried-object priority. 
 Recovery preserves posture. Save schema 7 stores posture and rejects schema 6. Load clears temporary lean and zoom.
 One resolved view supplies separate source head and camera poses to gameplay, rendering, and prepared load state.
 The final native player checks passed 21 tests. Existing checks passed 4 projection, 5 source, and 14 input and menu tests.
-The source audit found no scoped code gap. Final installed checks await a verified branch export.
+Final review found a source-root gap in the urine outlet. The fix follows posture and unsmoothed seated lean.
+The midpoint and head-ray regressions passed. Both WASM targets passed. Final installed checks await a verified branch export.
 Normal-input garage, driving, carry, seats, recovery, and save/load acceptance remain open. G09 is Verify for code coverage.
 Full checks, release builds, and browser acceptance were not run. The branch remains unmerged.
 See the [G09 specification](superpowers/specs/2026-10-20-g09-player-movement-design.md) for the approved source contract.

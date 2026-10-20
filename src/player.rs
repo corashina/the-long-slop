@@ -766,6 +766,15 @@ impl PlayerState {
         };
         yaw * Rotation::from_rotation_x(-self.pitch.to_radians())
     }
+    /// Source THeadDir/TProneHeadPos midpoint. Seated THeadDir follows unsmoothed lean.
+    pub(crate) fn source_anchor_midpoint(&self, physics: &PhysicsWorld) -> Vector {
+        let body = to_rapier(self.body_pose(physics));
+        body.translation
+            + body.rotation
+                * self
+                    .view_state
+                    .source_anchor_midpoint(self.posture.value(), self.occupancy.is_some())
+    }
     pub fn neutral_view_at(&self, body_pose: VehiclePose) -> PlayerView {
         self.view_state.resolve(
             to_rapier(body_pose),

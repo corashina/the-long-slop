@@ -62,6 +62,14 @@ impl ViewState {
     fn neutral_head(&self, posture: f32) -> Vector {
         self.prone.lerp(self.standing, posture)
     }
+    pub(super) fn source_anchor_midpoint(&self, posture: f32, seated: bool) -> Vector {
+        let direction_anchor = if seated {
+            self.lean
+        } else {
+            self.neutral_head(posture)
+        };
+        (direction_anchor + self.prone) * 0.5
+    }
     pub(super) fn cancel(&mut self, posture: f32) {
         self.charge = None;
         self.independent = [0.; 2];
@@ -355,6 +363,28 @@ mod tests {
                 dt,
             )
             .is_some()
+    }
+    #[test]
+    fn source_anchor_midpoint_uses_posture_and_unsmoothed_seated_lean() {
+        let mut view = state();
+        for posture in [1., 0.17, 0.] {
+            let expected = Vector::Y * (-0.685 + 1.335 * posture * 0.5);
+            assert!((view.source_anchor_midpoint(posture, false) - expected).length() < 1e-6);
+        }
+        step(
+            &mut view,
+            FrameInput {
+                player_held: player_keys::LEAN,
+                player_pressed: player_keys::LEAN,
+                wheel: 1.,
+                ..Default::default()
+            },
+            true,
+            0.02,
+        );
+        let expected = (view.lean + view.prone) * 0.5;
+        assert!((view.source_anchor_midpoint(1., true) - expected).length() < 1e-6);
+        assert!((expected - (view.head + view.prone) * 0.5).length() > 0.001);
     }
     #[test]
     fn zoom_reduces_normal_look_but_keeps_q_source_sensitivity() {

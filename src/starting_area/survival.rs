@@ -741,14 +741,14 @@ impl GarageRuntime {
 
 fn urine_outlet_pose(
     view: crate::player::PlayerView,
-    body: VehiclePose,
+    anchor_midpoint: rapier3d::math::Vector,
     reach: f32,
     queries: &rapier3d::prelude::QueryPipeline<'_>,
 ) -> rapier3d::math::Pose {
     use rapier3d::math::{Rotation, Vector};
     use rapier3d::prelude::Ray;
     let view = to_rapier(view.head_pose);
-    let mut outlet = to_rapier(body);
+    let mut outlet = rapier3d::math::Pose::from_translation(anchor_midpoint);
     let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
     let distance = queries
         .cast_ray(&ray, reach, true)
@@ -773,7 +773,7 @@ impl GarageRuntime {
         };
         let cap = urine_outlet_pose(
             self.area.player.view(&self.physics),
-            self.area.player.body_pose(&self.physics),
+            self.area.player.source_anchor_midpoint(&self.physics),
             reference.player.aim_reach,
             &self
                 .physics
@@ -815,10 +815,7 @@ mod urine_view_tests {
             ColliderBuilder::cuboid(0.25, 0.25, 0.25).translation(Vector::new(0., 1., -2.)),
         );
         physics.step();
-        let body = VehiclePose {
-            position: [0.; 3],
-            rotation: Rotation::IDENTITY.to_array(),
-        };
+        let midpoint = Vector::new(0., -0.0175, 0.);
         let mut view = PlayerView {
             head_pose: VehiclePose {
                 position: [0., 1., 0.],
@@ -832,8 +829,8 @@ mod urine_view_tests {
             ray_actions_blocked: false,
         };
         assert_ne!(view.head_pose.rotation, view.camera_pose.rotation);
-        let outlet = urine_outlet_pose(view, body, 5., &physics.query_pipeline());
-        let expected = Vector::new(0., 1.25, -1.75).normalize();
+        let outlet = urine_outlet_pose(view, midpoint, 5., &physics.query_pipeline());
+        let expected = Vector::new(0., 1.2675, -1.75).normalize();
         let direction = outlet.rotation * -Vector::Z;
         assert!(
             (direction - expected).length() < 1e-5,
@@ -843,8 +840,140 @@ mod urine_view_tests {
             position: [-4., 3., 2.],
             rotation: Rotation::from_rotation_y(45_f32.to_radians()).to_array(),
         };
-        let changed_camera = urine_outlet_pose(view, body, 5., &physics.query_pipeline());
+        let changed_camera = urine_outlet_pose(view, midpoint, 5., &physics.query_pipeline());
         assert_eq!(outlet, changed_camera);
-        assert_eq!(outlet.translation, Vector::ZERO);
+        assert_eq!(outlet.translation, midpoint);
+    }
+}
+
+#[cfg(test)]
+mod installed_urine_posture_tests {
+    use super::*;
+    use crate::{
+        player::{PlayerState, PlayerStepContext},
+        simulation::{FIXED_DT, FrameInput, player_keys},
+    };
+    use rapier3d::math::{Pose, Rotation, Vector};
+
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn source_outlet_and_exported_emitter_follow_posture_and_seated_lean() {
+        let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+        let anchors = &reference.player.posture;
+        let prone = Vector::from_array(anchors.prone_head.translation);
+        let standing = Vector::from_array(anchors.standing_head.translation);
+        for (posture, seated) in [(1., false), (0.17, false), (0., false), (1., true)] {
+            let mut run = GarageRuntime::new(&reference).unwrap();
+            let root = Pose::from_parts(
+                Vector::new(2000., 30., 2000.),
+                Rotation::from_rotation_z(0.3) * Rotation::from_rotation_y(0.7),
+            );
+            run.area.player = PlayerState::new(
+                &reference.player,
+                crate::vehicle::from_rapier(&root),
+                &mut run.physics,
+            );
+            run.area.player.configure_seats(&reference.seats);
+            let direction_anchor = if seated {
+                let chassis = run.physics.chassis_handle(reference.seats[0].vehicle);
+                run.physics
+                    .edit_body(chassis, |body| body.set_position(root, false));
+                assert!(run.area.player.enter(
+                    reference.seats[0].id,
+                    VehiclePose {
+                        position: [0.; 3],
+                        rotation: [0., 0., 0., 1.],
+                    },
+                    &mut run.physics
+                ));
+                run.area.player.step_view(
+                    FrameInput {
+                        player_pressed: player_keys::LEAN,
+                        player_held: player_keys::LEAN,
+                        wheel: 1. / reference.player.scroll_sensitivity,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                    FIXED_DT,
+                );
+                standing
+                    + Vector::Y
+                        * reference.player.view.lean_scroll_multiplier
+                        * reference.player.view.lean_sensitivity
+                        * FIXED_DT
+            } else {
+                run.area.player.step_movement(
+                    FrameInput {
+                        wheel: (posture - 1.)
+                            / (anchors.scroll_step * reference.player.scroll_sensitivity),
+                        ..Default::default()
+                    },
+                    PlayerStepContext {
+                        wheel_posture_allowed: true,
+                        ..Default::default()
+                    },
+                    &mut run.physics,
+                    FIXED_DT,
+                );
+                prone.lerp(standing, posture)
+            };
+            run.physics.refresh_queries();
+            let body = to_rapier(run.area.player.body_pose(&run.physics));
+            let expected_midpoint =
+                body.translation + body.rotation * ((direction_anchor + prone) * 0.5);
+            let midpoint = run.area.player.source_anchor_midpoint(&run.physics);
+            assert!(
+                (midpoint - expected_midpoint).length() < 0.0002,
+                "posture {posture}, seated {seated}"
+            );
+            let resolved = run.area.player.view(&run.physics);
+            if seated {
+                let smoothed = (Vector::from_array(resolved.head_pose.position)
+                    + body.translation
+                    + body.rotation * prone)
+                    * 0.5;
+                assert!((midpoint - smoothed).length() > 0.001);
+            }
+            let player_body = run.area.player.body_handle();
+            let surfaces = |_: rapier3d::prelude::ColliderHandle,
+                            c: &rapier3d::prelude::Collider| {
+                c.is_enabled()
+                    && !c.is_sensor()
+                    && c.parent() != Some(player_body)
+                    && c.collision_groups().memberships.bits()
+                        & reference.player.action_masks.use_mask
+                        != 0
+            };
+            let cap = urine_outlet_pose(
+                resolved,
+                midpoint,
+                reference.player.aim_reach,
+                &run.physics
+                    .queries(rapier3d::prelude::QueryFilter::default().predicate(&surfaces)),
+            );
+
+            let local = &run.urine_reference.local_pose;
+            let emitter = cap
+                * Pose::from_parts(
+                    Vector::from_array(local.translation),
+                    Rotation::from_array(local.rotation),
+                );
+            assert!(Vector::from_array(local.translation).length() > 0.001);
+            // Isolate emitter motion from spread, gravity, and collision. Keep the exported cap-local transform.
+            run.urine_reference.capacity = 1;
+            run.urine_reference.cone_degrees = 0.;
+            run.urine_reference.cone_radius = 0.;
+            run.urine_reference.gravity_multiplier = 0.;
+            run.urine_reference.collision_mask = 0;
+            run.urine_emission = [1. / FIXED_DT, 1.];
+            run.advance_urine(&reference, FIXED_DT);
+            assert_eq!(run.urine.particles().len(), 1);
+            let expected_particle = emitter.translation + emitter.rotation * -Vector::Z * FIXED_DT;
+            assert!(
+                (run.urine.particles()[0].position - expected_particle).length() < 0.0002,
+                "The final emitter must apply its exported local pose exactly once"
+            );
+        }
     }
 }
