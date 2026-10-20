@@ -704,7 +704,7 @@ fn carry_release_and_pose_follow_source() {
     let charge = run.area.interaction.throw_charge();
     let direction =
         Rotation::from_array(run.area.player.view_pose(&run.physics).rotation) * -Vector::Z;
-    let mass = run.physics.rapier().bodies[body].mass();
+    let mass = run.physics.authored_body_mass(body);
     let out = step_input(
         &mut run,
         FrameInput {
@@ -841,7 +841,7 @@ fn carry_pose_uses_source_frames_and_gestures() {
     );
     // Manual rotations use head axes, even when the stored frame is the Player root.
     let body = run.area.items.get(item).unwrap().body.unwrap();
-    let mass = run.physics.rapier().bodies[body].mass();
+    let mass = run.physics.authored_body_mass(body);
     let gain = ((mass - reference.player.carry_max_weight * 2.)
         / (reference.player.carry_min_weight - reference.player.carry_max_weight * 2.))
         .clamp(0., 1.);
@@ -1176,4 +1176,545 @@ fn carry_release_preserves_held_switch() {
         );
         assert!(run.area.interaction.pop_sound().is_none());
     }
+}
+
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_mass_save_and_assembly_lifecycle() {
+    use my_summer_slop::{
+        interaction::items::ItemLocation,
+        reference::ItemKind,
+        save::{CameraSave, SourceHash, SourceStamp},
+    };
+    let (reference, mut run) = source_scene();
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    let oil_body = run.area.items.get(oil).unwrap().body.unwrap();
+    let source_body = reference.items.iter().find(|i| i.id == oil).unwrap().body;
+    let initial_mass = reference
+        .bodies
+        .iter()
+        .find(|b| b.id == source_body)
+        .unwrap()
+        .mass_kg;
+    let parents: Vec<_> = run.physics.rapier().bodies[oil_body].colliders().to_vec();
+    let quality = run.area.conditions.item_quality(oil);
+    run.physics
+        .edit_body(oil_body, |body| body.set_gravity_scale(0.35, true));
+    let mut authored_mass = initial_mass;
+    for _ in 0..3 {
+        // Acquisition commits pending Rapier mass before recording authored mass.
+        let point = run.area.items.get(oil).unwrap().pose.position;
+        run.area
+            .interaction
+            .pickup_item(
+                oil,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        assert_eq!(run.physics.rapier().bodies[oil_body].mass(), 1.0);
+        assert_eq!(run.physics.rapier().bodies[oil_body].gravity_scale(), 0.0);
+        near_mass(run.physics.authored_body_mass(oil_body), authored_mass);
+        drain_tank(&mut run, oil, 0.2);
+        authored_mass -= 0.2;
+        sync_handling_mass(&mut run);
+        assert_eq!(run.physics.rapier().bodies[oil_body].mass(), 1.0);
+        near_mass(run.physics.authored_body_mass(oil_body), authored_mass);
+        let fluid = run.area.items.get(oil).unwrap().fluid.clone();
+        assert_eq!(
+            run.area
+                .interaction
+                .drop_held(&mut run.area.items, &mut run.physics),
+            Some(oil)
+        );
+        near_mass(run.physics.rapier().bodies[oil_body].mass(), authored_mass);
+        assert_eq!(run.physics.rapier().bodies[oil_body].gravity_scale(), 0.35);
+        assert_eq!(run.area.items.get(oil).unwrap().body, Some(oil_body));
+        assert_eq!(run.area.items.get(oil).unwrap().fluid, fluid);
+        assert_eq!(run.area.conditions.item_quality(oil), quality);
+        assert_eq!(run.physics.rapier().bodies[oil_body].colliders(), parents);
+        for &handle in &parents {
+            assert_eq!(
+                run.physics.rapier().colliders[handle].parent(),
+                Some(oil_body)
+            );
+        }
+    }
+    // General part mass includes the current contents of retained tank descendants.
+    let engine = reference.vehicles[0].engine.item;
+    let sump = reference.vehicles[0].engine.oil_tank;
+    run.area
+        .interaction
+        .parts
+        .remove(engine, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area.interaction.parts.detach_mechanism(
+        engine,
+        &mut run.area.interaction.mechanisms,
+        &mut run.physics,
+    );
+    sync_handling_mass(&mut run);
+    let engine_body = run.area.items.get(engine).unwrap().body.unwrap();
+    assert_eq!(run.area.items.get(sump).unwrap().body, Some(engine_body));
+    let members: Vec<_> = run
+        .area
+        .items
+        .iter()
+        .filter(|i| i.body == Some(engine_body))
+        .map(|i| (i.id, i.location, run.area.conditions.item_quality(i.id)))
+        .collect();
+    let engine_colliders = run.physics.rapier().bodies[engine_body]
+        .colliders()
+        .to_vec();
+    for _ in 0..3 {
+        let mass = run.physics.authored_body_mass(engine_body);
+        let point = run.area.items.get(engine).unwrap().pose.position;
+        run.area
+            .interaction
+            .pickup_item(
+                engine,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        drain_tank(&mut run, sump, 0.1);
+        sync_handling_mass(&mut run);
+        assert_eq!(run.physics.rapier().bodies[engine_body].mass(), 1.0);
+        near_mass(run.physics.authored_body_mass(engine_body), mass - 0.1);
+        let fluids: Vec<_> = members
+            .iter()
+            .map(|(id, _, _)| run.area.items.get(*id).unwrap().fluid.clone())
+            .collect();
+        run.area
+            .interaction
+            .drop_held(&mut run.area.items, &mut run.physics);
+        near_mass(run.physics.rapier().bodies[engine_body].mass(), mass - 0.1);
+        assert_eq!(
+            run.physics.rapier().bodies[engine_body].gravity_scale(),
+            1.0
+        );
+        for ((id, location, quality), fluid) in members.iter().zip(fluids) {
+            let state = run.area.items.get(*id).unwrap();
+            assert_eq!(state.body, Some(engine_body));
+            assert_eq!(state.location, *location);
+            assert_eq!(state.fluid, fluid);
+            assert_eq!(run.area.conditions.item_quality(*id), *quality);
+        }
+        assert_eq!(
+            run.physics.rapier().bodies[engine_body].colliders(),
+            engine_colliders
+        );
+        for &handle in &engine_colliders {
+            assert_eq!(
+                run.physics.rapier().colliders[handle].parent(),
+                Some(engine_body)
+            );
+        }
+    }
+    // A held loose wheel retains its override when a mounted cover changes its mass.
+    let slot = &reference.wheel_slots[0];
+    let rim = slot.rim;
+    let tire = slot.tire;
+    let cover_slot = reference
+        .wheel_parts
+        .iter()
+        .find(|p| p.item == rim)
+        .unwrap()
+        .cover_slot
+        .unwrap();
+    let cover = run.area.interaction.parts.slot_item(cover_slot).unwrap();
+    run.area
+        .interaction
+        .parts
+        .remove(cover, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.wheels
+        .remove(slot.id, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.area
+        .interaction
+        .parts
+        .install(cover, cover_slot, &mut run.area.items, &mut run.physics)
+        .unwrap();
+    sync_handling_mass(&mut run);
+    let rim_body = run.area.items.get(rim).unwrap().body.unwrap();
+    let cover_mass = run
+        .physics
+        .authored_body_mass(run.area.interaction.parts.loose_body(cover).unwrap());
+    let wheel_colliders = run.physics.rapier().bodies[rim_body].colliders().to_vec();
+    let qualities = [rim, tire, cover].map(|id| run.area.conditions.item_quality(id));
+    assert!(matches!(
+        reference.items.iter().find(|i| i.id == rim).unwrap().kind,
+        ItemKind::Rim
+    ));
+    for _ in 0..3 {
+        let mass = run.physics.authored_body_mass(rim_body);
+        let point = run.area.items.get(rim).unwrap().pose.position;
+        run.area
+            .interaction
+            .pickup_item(
+                rim,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics,
+            )
+            .unwrap();
+        run.area
+            .interaction
+            .parts
+            .remove(cover, &mut run.area.items, &mut run.physics)
+            .unwrap();
+        sync_handling_mass(&mut run);
+        assert_eq!(run.physics.rapier().bodies[rim_body].mass(), 1.0);
+        near_mass(run.physics.authored_body_mass(rim_body), mass - cover_mass);
+        assert_eq!(run.area.items.get(tire).unwrap().body, Some(rim_body));
+        assert_eq!(
+            run.area.items.get(tire).unwrap().location,
+            ItemLocation::Attached(rim)
+        );
+        run.area
+            .interaction
+            .drop_held(&mut run.area.items, &mut run.physics);
+        near_mass(
+            run.physics.rapier().bodies[rim_body].mass(),
+            mass - cover_mass,
+        );
+        assert_eq!(run.physics.rapier().bodies[rim_body].gravity_scale(), 1.0);
+        run.area
+            .interaction
+            .parts
+            .install(cover, cover_slot, &mut run.area.items, &mut run.physics)
+            .unwrap();
+        sync_handling_mass(&mut run);
+        near_mass(run.physics.authored_body_mass(rim_body), mass);
+        assert_eq!(run.area.items.get(rim).unwrap().body, Some(rim_body));
+        assert_eq!(run.area.items.get(cover).unwrap().body, Some(rim_body));
+        assert_eq!(
+            run.area.interaction.parts.slot_item(cover_slot),
+            Some(cover)
+        );
+        assert_eq!(
+            [rim, tire, cover].map(|id| run.area.conditions.item_quality(id)),
+            qualities
+        );
+        assert_eq!(
+            run.physics.rapier().bodies[rim_body].colliders().len(),
+            wheel_colliders.len()
+        );
+        for &handle in &wheel_colliders {
+            assert_eq!(
+                run.physics.rapier().colliders[handle].parent(),
+                Some(rim_body)
+            );
+        }
+    }
+    // Save current contents and a root-relative held pose, while a throw is armed.
+    run.physics
+        .edit_body(oil_body, |body| body.set_gravity_scale(1.0, true));
+    run.area.player.rebase([0., -50., 0.]);
+    acquire(&mut run, oil);
+    run.area.player.follow_push_grip(15.);
+    for _ in 0..8 {
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [1., 0.5],
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        run.physics.step_physics();
+    }
+    for _ in 0..12 {
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+        run.physics.step_physics();
+    }
+    step_input(
+        &mut run,
+        FrameInput {
+            pressed: keys::GRAB,
+            held: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    assert!(run.area.interaction.throw_active());
+    let digest = std::process::Command::new("sha256sum")
+        .arg("web/assets/reference/manifest.json")
+        .output()
+        .unwrap();
+    assert!(digest.status.success());
+    let stamp = SourceStamp {
+        app_id: reference.app_id,
+        build_id: reference.build_id,
+        manifest_sha256: String::from_utf8(digest.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .into(),
+        source_hashes: reference
+            .source_hashes
+            .iter()
+            .map(|h| SourceHash {
+                file: h.file.clone(),
+                sha256: h.sha256.clone(),
+            })
+            .collect(),
+    };
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            CameraSave::FirstPerson,
+            "2026-10-20T12:00:00Z",
+        )
+        .unwrap();
+    let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let restored_body = restored.area.items.get(oil).unwrap().body.unwrap();
+    assert_eq!(restored.area.interaction.held(), Some(oil));
+    assert_eq!(restored.physics.rapier().bodies[restored_body].mass(), 1.0);
+    assert_eq!(
+        restored.physics.rapier().bodies[restored_body].gravity_scale(),
+        0.0
+    );
+    near_mass(
+        restored.physics.authored_body_mass(restored_body),
+        authored_mass,
+    );
+    assert_eq!(
+        restored.area.items.get(oil).unwrap().fluid,
+        run.area.items.get(oil).unwrap().fluid
+    );
+    assert!(!restored.area.interaction.throw_active());
+    assert_eq!(restored.area.interaction.throw_charge(), 0.0);
+    assert_eq!(
+        restored
+            .physics
+            .rapier()
+            .impulse_joints
+            .iter()
+            .filter(|(_, j)| j.body2() == restored_body)
+            .count(),
+        1
+    );
+    let ids = my_summer_slop::save::IdentityMap::new(&reference).unwrap();
+    assert_eq!(
+        saved.player.carry,
+        restored.area.interaction.capture_carry_save(&ids).unwrap()
+    );
+    let oil_instance = &saved.player.carry.as_ref().unwrap().item;
+    let before = &saved
+        .items
+        .iter()
+        .find(|i| &i.instance == oil_instance)
+        .unwrap()
+        .pose;
+    let after = *restored.physics.rapier().bodies[restored_body].position()
+        * my_summer_slop::vehicle::to_rapier(restored.area.items.get(oil).unwrap().local_pose);
+    let absolute = restored
+        .stream
+        .origin
+        .absolute(after.translation.to_array());
+    for axis in 0..3 {
+        assert!((before.position[axis] - absolute[axis]).abs() < 0.0001);
+    }
+    near_rotation(Rotation::from_array(before.rotation), after.rotation);
+    // A later publication updates authored mass without removing the carried override.
+    restored
+        .physics
+        .set_body_mass(restored_body, authored_mass + 0.4);
+    assert_eq!(restored.physics.rapier().bodies[restored_body].mass(), 1.0);
+    near_mass(
+        restored.physics.authored_body_mass(restored_body),
+        authored_mass + 0.4,
+    );
+    let out = step_input(
+        &mut restored,
+        FrameInput {
+            released: keys::GRAB,
+            ..Default::default()
+        },
+        ResolvedAim::default(),
+    );
+    assert_eq!(out.action, None);
+    assert_eq!(restored.area.interaction.held(), Some(oil));
+    restored
+        .area
+        .interaction
+        .drop_held(&mut restored.area.items, &mut restored.physics);
+    near_mass(
+        restored.physics.rapier().bodies[restored_body].mass(),
+        authored_mass + 0.4,
+    );
+    assert_eq!(
+        restored.physics.rapier().bodies[restored_body].gravity_scale(),
+        1.0
+    );
+    assert!(
+        restored
+            .physics
+            .rapier()
+            .impulse_joints
+            .iter()
+            .all(|(_, j)| j.body2() != restored_body)
+    );
+    assert_eq!(
+        restored.physics.rapier().bodies[restored_body]
+            .colliders()
+            .len(),
+        parents.len()
+    );
+    for &handle in restored.physics.rapier().bodies[restored_body].colliders() {
+        assert_eq!(
+            restored.physics.rapier().colliders[handle].parent(),
+            Some(restored_body)
+        );
+    }
+}
+
+fn drain_tank(run: &mut GarageRuntime, item: my_summer_slop::reference::ItemId, amount: f32) {
+    let fluid = run
+        .area
+        .items
+        .get_mut(item)
+        .unwrap()
+        .fluid
+        .as_mut()
+        .unwrap();
+    let quantity = fluid
+        .mixture
+        .quantities_liters
+        .iter_mut()
+        .find(|q| **q > amount)
+        .unwrap();
+    *quantity -= amount;
+}
+fn near_mass(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.0001,
+        "mass {actual} != {expected}"
+    );
+}
+fn sync_handling_mass(run: &mut GarageRuntime) {
+    run.area.sync_portable_mass(&mut run.physics);
+    run.area
+        .interaction
+        .sync_parts(&mut run.area.items, &mut run.physics)
+        .unwrap();
+    run.wheels
+        .sync(&mut run.area.items, &mut run.physics)
+        .unwrap();
+}
+#[test]
+#[ignore = "requires build 11140890 export"]
+fn carry_body_follows_solver_pose_and_collision() {
+    let (reference, mut run) = source_scene();
+    let oil = reference
+        .items
+        .iter()
+        .find(|i| i.name == "OilCan")
+        .unwrap()
+        .id;
+    run.area.player.rebase([0., -50., 0.]);
+    acquire(&mut run, oil);
+    let body = run.area.items.get(oil).unwrap().body.unwrap();
+    assert_eq!(run.physics.rapier().bodies[body].mass(), 1.0);
+    let initial = *run.physics.rapier().bodies[body].position();
+    run.area.player.rebase([0.2, 0., 0.]);
+    for _ in 0..20 {
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+        run.physics.step_physics();
+    }
+    let moved = *run.physics.rapier().bodies[body].position();
+    assert!(
+        initial.translation.x - moved.translation.x > 0.1,
+        "actual held body follows translation: {initial:?} -> {moved:?}"
+    );
+    for _ in 0..8 {
+        step_input(
+            &mut run,
+            FrameInput {
+                held: keys::ROTATE,
+                mouse: [2., 1.],
+                ..Default::default()
+            },
+            ResolvedAim::default(),
+        );
+        run.physics.step_physics();
+    }
+    for _ in 0..12 {
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+        run.physics.step_physics();
+    }
+    let rotated = *run.physics.rapier().bodies[body].position();
+    assert!(
+        rotated.rotation.dot(moved.rotation).abs() < 0.999,
+        "actual held body rotates: {moved:?} -> {rotated:?}; mass properties {:?}",
+        run.physics.rapier().bodies[body].mass_properties()
+    );
+    let colliders: Vec<_> = run.physics.rapier().bodies[body]
+        .colliders()
+        .iter()
+        .copied()
+        .filter(|h| !run.physics.rapier().colliders[*h].is_sensor())
+        .collect();
+    assert!(!colliders.is_empty());
+    let edge = colliders
+        .iter()
+        .map(|h| run.physics.rapier().colliders[*h].compute_aabb().maxs.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let wall_x = edge + 0.25;
+    let (_, wall) = run.physics.insert(
+        rapier3d::prelude::RigidBodyBuilder::fixed().translation(Vector::new(
+            wall_x,
+            rotated.translation.y,
+            rotated.translation.z,
+        )),
+        rapier3d::prelude::ColliderBuilder::cuboid(0.1, 2., 2.),
+    );
+    run.physics.refresh_queries();
+    run.area.player.rebase([-1., 0., 0.]);
+    for _ in 0..50 {
+        step_input(&mut run, FrameInput::default(), ResolvedAim::default());
+        run.physics.step_physics();
+    }
+    let blocked = run.physics.rapier().bodies[body].translation();
+    assert!(
+        blocked.x > rotated.translation.x + 0.05,
+        "actual body reaches the wall"
+    );
+    assert!(
+        blocked.x < rotated.translation.x + 0.3,
+        "actual body cannot pass the wall"
+    );
+    let wall = &run.physics.rapier().colliders[wall];
+    for handle in colliders {
+        let collider = &run.physics.rapier().colliders[handle];
+        assert_eq!(collider.parent(), Some(body));
+        assert!(collider.is_enabled());
+        assert_eq!(collider.density(), 0.0);
+        assert!(
+            !rapier3d::parry::query::intersection_test(
+                collider.position(),
+                collider.shape(),
+                wall.position(),
+                wall.shape()
+            )
+            .unwrap()
+            .intersecting
+        );
+    }
+    assert!(run.physics.rapier().bodies[body].is_ccd_enabled());
 }

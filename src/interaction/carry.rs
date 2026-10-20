@@ -22,12 +22,12 @@ struct HeldState {
     rotation: Rotation,
     joint: ImpulseJointHandle,
     local_pose: Pose,
+    gravity_scale: f32,
 }
 
 pub struct CarryState {
     reference: PlayerReference,
     rules: HashMap<ItemId, PickupReference>,
-    plates: std::collections::HashSet<ItemId>,
     held: Option<HeldState>,
     anchor: Option<RigidBodyHandle>,
     acquisition_held: bool,
@@ -59,6 +59,8 @@ impl CarryState {
                 "Held body is inactive or fixed".into(),
             ));
         }
+        let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
         let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), false);
@@ -71,8 +73,12 @@ impl CarryState {
             rotation: Rotation::from_array(saved.rotation),
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
+            gravity_scale,
         });
-        physics.edit_body(body, |body| body.enable_ccd(true));
+        physics.edit_body(body, |body| {
+            body.enable_ccd(true);
+            body.set_gravity_scale(0.0, true);
+        });
         self.cancel_input();
         Ok(())
     }
@@ -111,7 +117,6 @@ impl CarryState {
                 .iter()
                 .filter_map(|item| item.pickup.clone().map(|rule| (item.id, rule)))
                 .collect(),
-            plates: reference.plates.plates.iter().map(|p| p.item).collect(),
             held: None,
             anchor: None,
             acquisition_held: false,
@@ -244,9 +249,10 @@ impl CarryState {
     pub fn drop(&mut self, items: &mut ItemStore, physics: &mut PhysicsWorld) -> Option<ItemId> {
         let held = self.held.take()?;
         physics.remove_impulse_joint(held.joint, true);
-        if self.plates.contains(&held.item) {
-            physics.edit_body(held.body, |body| body.set_gravity_scale(1., true));
-        }
+        physics.set_body_mass_override(held.body, None);
+        physics.edit_body(held.body, |body| {
+            body.set_gravity_scale(held.gravity_scale, true)
+        });
         if let Some(item) = items.get_mut(held.item) {
             item.location = ItemLocation::World;
         }
@@ -297,6 +303,8 @@ impl CarryState {
             .ok_or_else(|| ReferenceError("Cannot carry this item".into()))?;
         self.can_acquire(id, point, player, body, physics)?;
         let item = items.get_mut(id).unwrap();
+        let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = *self.anchor.get_or_insert_with(|| {
             physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
@@ -311,10 +319,10 @@ impl CarryState {
         } else {
             view.rotation
         };
-        physics.edit_body(body, |body| body.enable_ccd(true));
-        if self.plates.contains(&id) {
-            physics.edit_body(body, |body| body.set_gravity_scale(0., true));
-        }
+        physics.edit_body(body, |body| {
+            body.enable_ccd(true);
+            body.set_gravity_scale(0.0, true);
+        });
         self.held = Some(HeldState {
             item: id,
             body,
@@ -324,6 +332,7 @@ impl CarryState {
             rotation: rotation_frame.inverse() * item_pose.rotation,
             joint,
             local_pose,
+            gravity_scale,
         });
         item.location = ItemLocation::Held;
         self.cancel_input();
@@ -355,7 +364,7 @@ impl CarryState {
             view.rotation
         };
         let view_in_frame = rotation_frame.inverse() * view.rotation;
-        let mass = physics.rapier().bodies[held.body].mass();
+        let mass = physics.authored_body_mass(held.body);
         let movement_gain = ((mass - self.reference.carry_max_weight)
             / (self.reference.carry_min_weight - self.reference.carry_max_weight))
             .clamp(0.0, 1.0);

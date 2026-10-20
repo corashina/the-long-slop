@@ -433,7 +433,7 @@ impl StartingArea {
                     })
                     .sum::<f32>();
             if (mass - *current).abs() > 0.0001 {
-                physics.edit_body(*handle, |body| body.set_additional_mass(mass, true));
+                physics.set_body_mass(*handle, mass);
                 *current = mass;
             }
         }

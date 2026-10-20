@@ -1,3 +1,4 @@
+mod mass;
 mod mutations;
 mod query_bounds;
 
@@ -92,6 +93,7 @@ struct VehicleBody {
 }
 
 pub struct PhysicsWorld {
+    body_mass_override: Option<mass::BodyMassOverride>,
     pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
     query_bounds: QueryBounds,
@@ -110,6 +112,7 @@ impl PhysicsWorld {
         }
         let mut physics = Self {
             physics: rapier3d::prelude::PhysicsWorld::new(),
+            body_mass_override: None,
             query_bounds: QueryBounds::default(),
             chassis: Vec::with_capacity(poses.len()),
             vehicles: Vec::with_capacity(poses.len()),
