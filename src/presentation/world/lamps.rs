@@ -337,7 +337,7 @@ pub(crate) fn sync_source_lamps(
     enabled: bool,
     source: &mut SourceLighting,
     commands: &mut Commands,
-    roots: &mut Query<&mut Transform>,
+    roots: &mut super::runtime::WorldRoots,
 ) -> Result<(), crate::reference::ReferenceError> {
     if source.road_lamps.recipe.is_none() || source.warming {
         return Ok(());

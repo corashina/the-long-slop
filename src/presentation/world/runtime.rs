@@ -47,10 +47,13 @@ impl SourcePresentationAllocation {
         }
     }
 }
+/// World object roots. The drive camera is excluded, so systems can also read its Transform.
+pub type WorldRoots<'w, 's> =
+    Query<'w, 's, &'static mut Transform, Without<crate::presentation::camera::DriveCamera>>;
 #[derive(SystemParam)]
 pub struct WorldPresentation<'w, 's> {
     pub commands: Commands<'w, 's>,
-    pub roots: Query<'w, 's, &'static mut Transform>,
+    pub roots: WorldRoots<'w, 's>,
     pub prototypes: ResMut<'w, SourcePrototypes>,
     pub pipelines: ResMut<'w, WorldPipelines>,
     pub surfaces: ResMut<'w, SourceWorldVisuals>,

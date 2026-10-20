@@ -845,7 +845,7 @@ impl SourceInstances {
         physics: &crate::vehicle::PhysicsWorld,
         items: &crate::interaction::items::ItemStore,
         commands: &mut Commands,
-        transforms: &mut Query<&mut Transform>,
+        transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
