@@ -3,6 +3,7 @@ pub mod carry;
 pub mod cleaning;
 pub mod consumption;
 pub mod equipment;
+pub(crate) mod equipment_input;
 pub mod feedback;
 pub mod fluid_contact;
 pub mod items;
@@ -179,6 +180,7 @@ pub struct InteractionState {
     seats: Vec<SeatState>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
+    pub(crate) equipment_input: equipment_input::EquipmentInput,
     push: push::PushState,
     player_body: Option<RigidBodyHandle>,
     reach: f32,
@@ -550,6 +552,9 @@ impl InteractionState {
             seats,
             carry: carry::CarryState::new(reference)?,
             equipment: equipment::EquipmentState::new(reference),
+            equipment_input: equipment_input::EquipmentInput::new(
+                reference.inventory.equip_hold_seconds,
+            ),
             push: push::PushState::new(reference),
             player_body: None,
             reach: reference.player.aim_reach,
@@ -620,11 +625,51 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    pub(crate) fn can_equip_carried(
+        &self,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(id) = self.held() else {
+            return false;
+        };
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.equipment.item().is_none()
+            && item.location == ItemLocation::Held
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && body.is_enabled()
+            && body.is_dynamic()
+            && self.carry.body() == item.body
+            && self
+                .pickup_rule(id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && self
+                .carry
+                .allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+    }
+    pub fn owned_light_control(&self, item: ItemId) -> Option<LightControlId> {
+        (self.equipment.item() == Some(item) || self.held() == Some(item))
+            .then(|| self.held_controls.get(&item).copied())
+            .flatten()
+    }
     pub fn held_light_control(&self) -> Option<LightControlId> {
         self.equipment
             .item()
-            .or(self.held())
-            .and_then(|item| self.held_controls.get(&item).copied())
+            .and_then(|item| self.owned_light_control(item))
+            .or_else(|| self.held().and_then(|item| self.owned_light_control(item)))
     }
     pub fn pickup_stored_item(
         &mut self,
@@ -1112,6 +1157,7 @@ impl InteractionState {
         })
     }
     pub fn cancel_input(&mut self) {
+        self.equipment_input.cancel_input();
         self.cleaning.reset_contact();
         self.seat_action_latched = false;
         self.fill_opening = None;
@@ -1183,7 +1229,10 @@ impl InteractionState {
         fluid_scale: f32,
     ) -> Option<InteractionAction> {
         self.finish_cancelled_input(player, physics);
-        if self.cleaning.reserves_lmb(self.held()) {
+        if self
+            .cleaning
+            .reserves_lmb(self.equipment.item(), self.held())
+        {
             input.held &= !keys::PRIMARY;
             input.pressed &= !keys::PRIMARY;
             input.released &= !keys::PRIMARY;
@@ -1209,16 +1258,10 @@ impl InteractionState {
             self.seat_action_latched = false;
         }
         let availability = self.available_actions(&aim, player, items, physics, needs);
-        let held_switch_pressed =
-            input.pressed & keys::PRIMARY != 0 && self.held_light_control().is_some();
-        let light_action = if held_switch_pressed {
-            self.held_light_control()
-        } else {
-            availability.light_control.filter(|_| {
-                input.pressed & keys::USE != 0
-                    || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
-            })
-        };
+        let light_action = availability.light_control.filter(|_| {
+            input.pressed & keys::USE != 0
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+        });
         let target = aim
             .use_target
             .filter(|target| valid(*target) && availability.light_control.is_none());
@@ -1282,9 +1325,6 @@ impl InteractionState {
         };
         let mut action = light_action.map(InteractionAction::LightControl);
         let mut carry_input = input;
-        if held_switch_pressed {
-            carry_input.pressed &= !keys::PRIMARY;
-        }
         self.tuning_opening = None;
         let can_use_target = availability.light_control.is_some()
             || use_target.is_some_and(|target| {
@@ -1312,9 +1352,7 @@ impl InteractionState {
                 items.mark_dirty(target.item);
             }
             if input.pressed & keys::USE != 0
-                || (!held_switch_pressed
-                    && input.pressed & keys::PRIMARY != 0
-                    && availability.lmb_use)
+                || (input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
             {
                 for opening in &mut self.openings {
                     if opening.reference.cap == target.item && opening.reference.can_toggle {
@@ -1376,8 +1414,7 @@ impl InteractionState {
             }
             if self.mechanisms.contains(target.item)
                 && (input.pressed & keys::USE != 0
-                    || (!held_switch_pressed
-                        && input.pressed & keys::PRIMARY != 0
+                    || (input.pressed & keys::PRIMARY != 0
                         && self.mechanisms.primary_switch(target.item)
                         && availability.lmb_use)
                     || input.held & keys::USE != 0
@@ -1559,8 +1596,7 @@ impl InteractionState {
         items.sync_poses(physics);
         let mut filling = None;
         let mut filled_destination = None;
-        if !held_switch_pressed
-            && input.held & keys::PRIMARY != 0
+        if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
             && let Some(held) = self.held()
             && let Some(target) = filling_target

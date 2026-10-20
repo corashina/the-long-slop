@@ -32,8 +32,7 @@ pub(crate) struct Drive {
     /// Gauge state per vehicle.
     instruments: Vec<InstrumentState>,
     input: FrameInput,
-    tool_lmb: bool,
-    tool_delta_seconds: f32,
+    frame_input: FrameInput,
     pub(crate) clock: StepClock,
     previous: VehiclePose,
     current: VehiclePose,
@@ -142,8 +141,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 .collect(),
             runtime,
             input: FrameInput::default(),
-            tool_lmb: false,
-            tool_delta_seconds: 0.,
+            frame_input: FrameInput::default(),
             clock: StepClock::default(),
             previous: current,
             current,
@@ -238,7 +236,6 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 advance_physics,
                 sync_world,
                 sync_imported,
-                advance_tools,
                 presentation::consumables::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
@@ -523,8 +520,7 @@ fn clear_input(drive: &mut Drive) {
         game_cpu_clear_input();
     }
     drive.input.clear();
-    drive.tool_lmb = false;
-    drive.tool_delta_seconds = 0.;
+    drive.frame_input.clear();
     drive.runtime.clear_input();
     drive.clock.reset();
     drive.previous = drive.current;
@@ -558,11 +554,11 @@ fn read_input(
         ],
         wheel: game_wheel(),
     };
-    drive.tool_lmb = frame.held & keys::PRIMARY != 0;
     if requests.pending() {
         if cpu_profile::enabled() {
             game_cpu_clear_input();
         }
+        drive.frame_input.clear();
         return;
     }
     if actions & 2 != 0 {
@@ -594,6 +590,8 @@ fn read_input(
         if cpu_profile::enabled() {
             game_cpu_clear_input();
         }
+        drive.frame_input.clear();
+        drive.runtime.clear_input();
         return;
     }
     if actions & 22 != 0 {
@@ -611,7 +609,7 @@ fn read_input(
         };
     }
     drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
-    drive.input.merge(frame);
+    drive.frame_input.merge(frame);
 }
 fn advance_physics(
     time: Res<Time<Real>>,
@@ -621,14 +619,26 @@ fn advance_physics(
     drive.physics_ms = 0.;
     drive.frame_steps = 0;
     drive.render_delta_seconds = 0.;
-    drive.tool_delta_seconds = 0.;
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         return;
     }
-    if drive.skip_elapsed {
-        drive.skip_elapsed = false;
+    let blocked = drive.skip_elapsed
+        && (drive.runtime.recovering
+            || !drive.runtime.world_supported()
+            || drive.runtime.sleeping()
+            || drive.runtime.needs_output().dead);
+    let Drive {
+        frame_input,
+        skip_elapsed,
+        ..
+    } = &mut *drive;
+    let Some(raw) = frame_input.take_frame(skip_elapsed, blocked) else {
+        if blocked {
+            drive.input.clear();
+            drive.runtime.clear_input();
+        }
         return;
-    }
+    };
     let started = game_now();
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
@@ -638,8 +648,19 @@ fn advance_physics(
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.tool_delta_seconds = delta;
     drive.runtime.area.conditions.update(delta, true);
+    let view = drive.rendered;
+    let frame = drive
+        .runtime
+        .advance_inventory_frame(&reference.0, raw, delta, view);
+    if frame.actions_blocked {
+        drive.input.clear();
+    } else if frame.primary_reserved {
+        drive.input.held &= !keys::PRIMARY;
+        drive.input.pressed &= !keys::PRIMARY;
+        drive.input.released &= !keys::PRIMARY;
+    }
+    drive.input.merge(frame.fixed_input);
     drive.clock.accept_frame(time.delta_secs_f64());
     loop {
         let scale = drive.runtime.clock_factors(&reference.0).time_scale;
@@ -815,7 +836,7 @@ fn sync_world(
     drive.world_ms = game_now() - started;
 }
 
-fn sync_imported(
+pub(crate) fn sync_imported(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
     mut query: Query<(
@@ -866,20 +887,6 @@ fn sync_imported(
         &mut items,
     );
     presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
-}
-pub(crate) fn advance_tools(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let frame = crate::interaction::cleaning::ToolFrame {
-        held: drive.runtime.area.interaction.held(),
-        lmb: drive.tool_lmb,
-        active: drive.ready
-            && !drive.runtime.recovering
-            && drive.runtime.world_supported()
-            && drive.tool_delta_seconds > 0.,
-        dt: drive.tool_delta_seconds,
-        view: drive.rendered,
-        origin: drive.runtime.stream.origin.offset,
-    };
-    drive.runtime.advance_tools(&reference.0, frame);
 }
 fn sync_instruments(
     reference: Res<RuntimeReference>,
