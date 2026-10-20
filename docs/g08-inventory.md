@@ -200,6 +200,19 @@ The merge report records the failure and repair.
 The compiler still reports existing renderer and material warnings.
 Full checks, release builds, and browser acceptance remain deferred.
 
+## Master integration
+
+Merged into master on 2026-10-20 with commit `2deb8f6eaddf6b7efeca36d06c8df8935e410123`.
+The merge retains the current engine, road worker, grass worker, and restore finalizer behavior.
+Equipment synchronization runs before the finalizer publishes item poses and readiness.
+An obsolete instrument helper caused the first WASM check to fail. Removing it repaired the compile failure.
+The merged result passed 22 targeted native tests, seven web tests, formatting, and both WASM checks.
+Existing warnings remain. Browser acceptance, full checks, and product release builds remain open.
+The G08 worktree and fully merged branch were removed after verification.
+Ignored validation evidence was copied and hash-checked before removal.
+Existing master edits and other worktrees were preserved.
+The local merge report and logs are under `.cache/g08-validation/2026-10-20-merge-64a4399/`.
+
 ## Rulings I made
 
 1. Read assigned task briefs plus shared execution context, rather than the entire plan in each worker. This avoids repeated context and preserves exact requirements. Cost if wrong: a missed cross-task contract, checked at task review.
