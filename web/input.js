@@ -8,17 +8,20 @@ export class InputState {
  clear(){this.codes.clear();this.inventoryHeld=this.inventoryReleased=0;this.held=this.pressed=this.released=this.mouseX=this.mouseY=this.wheel=0;}
  takeFrame(){const f=this.frame;f.held=this.held;f.pressed=this.pressed;f.released=this.released;f.mouseX=this.mouseX;f.mouseY=this.mouseY;f.wheel=this.wheel;f.inventoryHeld=this.inventoryHeld;f.inventoryReleased=this.inventoryReleased;this.inventoryReleased=0;this.pressed=this.released=this.mouseX=this.mouseY=this.wheel=0;return f;}
 }
-export function createInput(canvas,acceptInput,bindings) {
+export function createInput(canvas,acceptInput,bindings,profile) {
  const state=new InputState(bindings);const listeners=[];
+ let sequence=0,frameSequence=0;
+ const mark=e=>{if(profile?.enabled)profile.input(++sequence,e.timeStamp,e.isTrusted);};
+ const clear=()=>{state.clear();frameSequence=sequence;profile?.clearInput();};
  const listen=(node,event,handler,options)=>{node.addEventListener(event,handler,options);listeners.push([node,event,handler,options]);};
- listen(window,'keydown',e=>{if(acceptInput() && (e.code in state.bits||e.code in state.inventoryBits)){e.preventDefault();if(!e.repeat)state.code(e.code,true);}});
- listen(window,'keyup',e=>{if((e.code in state.bits||e.code in state.inventoryBits)){if(acceptInput())e.preventDefault();state.code(e.code,false);}});
- listen(canvas,'mousedown',e=>{if(acceptInput() && e.button<=2){e.preventDefault();state.code('Mouse'+e.button,true);}});
- listen(window,'mouseup',e=>{if(e.button<=2)state.code('Mouse'+e.button,false);});
- listen(canvas,'mousemove',e=>{if(acceptInput())state.mouse(e.movementX*0.12,e.movementY*0.12);});
- listen(canvas,'wheel',e=>{if(acceptInput()){e.preventDefault();state.scroll(-e.deltaY*0.001);}},{passive:false});
+ listen(window,'keydown',e=>{if(acceptInput() && (e.code in state.bits||e.code in state.inventoryBits)){e.preventDefault();if(!e.repeat){state.code(e.code,true);mark(e);}}});
+ listen(window,'keyup',e=>{if((e.code in state.bits||e.code in state.inventoryBits)){if(acceptInput())e.preventDefault();state.code(e.code,false);mark(e);}});
+ listen(canvas,'mousedown',e=>{if(acceptInput() && e.button<=2){e.preventDefault();state.code('Mouse'+e.button,true);mark(e);}});
+ listen(window,'mouseup',e=>{if(e.button<=2){state.code('Mouse'+e.button,false);mark(e);}});
+ listen(canvas,'mousemove',e=>{if(acceptInput()){state.mouse(e.movementX*0.12,e.movementY*0.12);if(e.movementX||e.movementY)mark(e);}});
+ listen(canvas,'wheel',e=>{if(acceptInput()){e.preventDefault();state.scroll(-e.deltaY*0.001);mark(e);}},{passive:false});
  listen(canvas,'contextmenu',e=>e.preventDefault());
- listen(window,'blur',()=>state.clear());
- listen(document,'visibilitychange',()=>{if(document.hidden)state.clear();});
- return {state,clear:()=>state.clear(),takeFrame:()=>state.takeFrame(),dispose:()=>{for(const [n,e,h,o] of listeners)n.removeEventListener(e,h,o);}};
+ listen(window,'blur',clear);
+ listen(document,'visibilitychange',()=>{if(document.hidden)clear();});
+ return {state,clear,takeFrame:()=>{frameSequence=sequence;return state.takeFrame();},consume:step=>profile?.consume(frameSequence,step),dispose:()=>{for(const [n,e,h,o] of listeners)n.removeEventListener(e,h,o);}};
 }

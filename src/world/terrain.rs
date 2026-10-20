@@ -166,6 +166,9 @@ impl TerrainWorker {
     fn read(&mut self, unit: [i64; 2], tile: TerrainTile, surface: &mut WorldSurface) {
         let vertices = crate::browser::game_terrain_vertex_count() as usize;
         let triangles = crate::browser::game_terrain_triangle_count() as usize;
+        let profile = crate::app::cpu_profile::Timer::new(
+            crate::app::cpu_profile::Stage::TerrainResultAllocation,
+        );
         surface.origin = surface_origin(unit, tile);
         surface.vertices = vec![[0.0; 3]; vertices];
         surface.normals = vec![[0.0; 3]; vertices];
@@ -173,6 +176,7 @@ impl TerrainWorker {
         surface.uv = vec![[0.0; 2]; vertices];
         surface.colors = vec![[0.0; 4]; vertices];
         surface.triangles = vec![[0; 3]; triangles];
+        drop(profile);
         crate::browser::game_terrain_read(
             surface.vertices.as_flattened_mut(),
             surface.normals.as_flattened_mut(),

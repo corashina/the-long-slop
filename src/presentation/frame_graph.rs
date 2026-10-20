@@ -836,6 +836,9 @@ fn submitted(
             state.audit.first_token = state.audit.token;
         }
         acks.main_submitted(state.audit.token);
+        if crate::app::cpu_profile::enabled() {
+            crate::browser::game_cpu_submitted(state.audit.token);
+        }
         if state.audit.validation == 0 {
             state.audit.validation = gate.watch_submission(&queue);
         }

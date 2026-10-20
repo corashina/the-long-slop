@@ -900,7 +900,15 @@ impl GarageRuntime {
         }
         if !self.started || self.paused || self.recovering || !self.world_supported() {
             self.clear_input();
+            #[cfg(target_arch = "wasm32")]
+            if crate::app::cpu_profile::enabled() {
+                crate::browser::game_cpu_clear_input();
+            }
             return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if crate::app::cpu_profile::enabled() {
+            crate::browser::game_cpu_input_consumed();
         }
         let factors = self.clock_factors(reference);
         let sleep = self.sleep.output();

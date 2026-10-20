@@ -6,7 +6,9 @@ use super::{
     readiness::RendererStateHandle, surface_views::SourceSurfaceView,
 };
 use crate::reference::{
-    reflections::{ProbeJob, ProbeSchedule, capture_view_from_world, prepare_probe_face},
+    reflections::{
+        ProbeJob, ProbeSchedule, capture_view_from_world, pending_probe_index, prepare_probe_face,
+    },
     shadow_planes::{CullPlanes, implicit_cull_planes},
 };
 use bevy::render::{extract_resource::ExtractResource, view::ExtractedView};
@@ -99,6 +101,7 @@ impl SourceViewClock {
                 .checked_add(1)
                 .ok_or("Source main render token exhausted")?;
         }
+        let mut published = false;
         if probe == self.probe_token {
             if self.probe[self.probe_index].job() == ProbeJob::RemainingMipsAndPublish
                 && acks.0.publication.load(Ordering::Acquire) != probe
@@ -107,23 +110,17 @@ impl SourceViewClock {
             }
             let completed = self.probe[self.probe_index].job();
             self.probe[self.probe_index].complete(completed)?;
-            if completed == ProbeJob::RemainingMipsAndPublish {
-                self.probe_index = (self.probe_index + 1) % PROBE_COUNT;
-            }
+            published = completed == ProbeJob::RemainingMipsAndPublish;
             self.probe_token = self
                 .probe_token
                 .checked_add(1)
                 .ok_or("Source probe job token exhausted")?;
         }
         // Each probe captures once per scene. A published probe keeps its cubemap.
-        if !self.probe_wanted(self.probe_index, probe_enabled)
-            && self.probe[self.probe_index].job() == ProbeJob::Face(0)
-        {
-            if let Some(index) = (1..PROBE_COUNT)
-                .map(|offset| (self.probe_index + offset) % PROBE_COUNT)
-                .find(|&index| self.probe_wanted(index, probe_enabled))
-            {
-                self.probe_index = index;
+        let next = pending_probe_index(self.probe_index, &self.probe, probe_enabled);
+        if next != self.probe_index {
+            self.probe_index = next;
+            if !published {
                 self.probe_token = self
                     .probe_token
                     .checked_add(1)

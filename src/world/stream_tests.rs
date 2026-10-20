@@ -375,6 +375,7 @@ fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
     surface.collision_bytes = 0;
     assert!(run.stream.ready.is_none());
     run.stream.ready = Some(PreparedSurface {
+        road_claim: None,
         pending_bytes: 0,
         renderer_ready: false,
         renderer_reserved: false,
