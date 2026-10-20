@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,6 +155,12 @@ pub struct EngineSnapshot {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct FluidSnapshot {
+    pub quantities_liters: [f32; 6],
+    pub order: Vec<u8>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ItemSnapshot {
     pub instance: InstanceId,
     pub pose: AbsolutePose,
@@ -162,7 +168,7 @@ pub struct ItemSnapshot {
     pub local_pose: LocalPose,
     pub location: ItemLocationSave,
     pub temperature: Option<f32>,
-    pub fluids: Option<[f32; 6]>,
+    pub fluids: Option<FluidSnapshot>,
     pub food: Option<FoodSnapshot>,
     pub removed: bool,
 }

@@ -68,7 +68,7 @@ impl GarageRuntime {
                         bite: food.bite,
                     }),
                 temperature: item.temperature,
-                fluid_quantities: item.fluids,
+                fluid_quantities: item.fluids.as_ref().map(|fluid| fluid.quantities_liters),
                 valve: None,
                 lamp: None,
                 linear_velocity: [0.; 3],
@@ -87,6 +87,16 @@ impl GarageRuntime {
                 &mut self.physics,
                 &mut self.wheels,
             )? {
+                if let Some(saved) = &item.fluids {
+                    self.area
+                        .items
+                        .get_mut(ids.item(&item.instance)?)
+                        .unwrap()
+                        .fluid
+                        .as_mut()
+                        .unwrap()
+                        .restore_contents(saved.quantities_liters, &saved.order);
+                }
                 pending.items.swap_remove(index);
             } else {
                 index += 1;
