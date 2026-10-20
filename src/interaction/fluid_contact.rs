@@ -79,6 +79,11 @@ impl FluidContact {
                     (force[i] - self.start_color[i]) * self.visual.scalars["outlet.forceColorM"];
             }
         }
+        for component in &mut self.start_color {
+            if !component.is_finite() {
+                *component = 0.;
+            }
+        }
     }
     pub(crate) fn rebase(&mut self, shift: Vector) {
         for i in 0..3 {
@@ -119,6 +124,8 @@ impl FluidContact {
         if !dt.is_finite() || dt <= 0. {
             return false;
         }
+        let rate = if rate.is_finite() { rate } else { 0. };
+        let speed = if speed.is_finite() { speed } else { 0. };
         self.last_poured = poured.unwrap_or(0.);
         self.splash.rotation = cap_pose.rotation;
         self.splash.set_origin(self.origin);

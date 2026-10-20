@@ -201,12 +201,9 @@ impl SurvivalState {
         } else {
             self.food_hurt = false;
         }
-        let fullness =
-            inverse_lerp(reference.maximum.bowel, 0., self.needs.bowel).min(inverse_lerp(
-                self.bladder.capacity_liters,
-                0.,
-                self.bladder.mixture().total(),
-            ));
+        let fullness = inverse_lerp(reference.maximum.bowel, 0., self.needs.bowel).min(
+            inverse_lerp(self.bladder.capacity_liters, 0., self.bladder.total()),
+        );
         let heal = inverse_lerp(0., reference.maximum.water, self.needs.water).min(inverse_lerp(
             0.,
             reference.maximum.food,
@@ -272,13 +269,13 @@ impl SurvivalState {
         );
         if input.urinate {
             self.show_stats();
-            if self.bladder.mixture().total() <= reference.toilet.empty_amount {
+            if self.bladder.total() <= reference.toilet.empty_amount {
                 self.emptied_bladder = true;
             }
         } else {
             self.emptied_bladder = false;
         }
-        if self.valve > 0. && self.bladder.mixture().total() > 0. {
+        if self.valve > 0. && self.bladder.total() > 0. {
             let area =
                 reference.toilet.radius * reference.toilet.radius * std::f32::consts::PI * 0.025;
             let poured = area * self.valve * 2. * dt * fluid_scale;
@@ -331,7 +328,7 @@ impl SurvivalState {
         };
         NeedsOutput {
             needs: self.needs,
-            bladder_liters: self.bladder.mixture().total(),
+            bladder_liters: self.bladder.total(),
             can_eat: !self.dead && self.needs.bowel + self.pending.bowel < self.maximum.bowel,
             opacity,
             dead: self.dead,
@@ -348,7 +345,7 @@ impl SurvivalState {
     fn convert_water_to_bladder(&mut self, reference: &SurvivalReference, amount: f32) {
         self.needs.water = (self.needs.water - amount).clamp(0., reference.maximum.water);
         let addition = (amount * reference.water_to_piss_ratio)
-            .min((self.bladder.capacity_liters - self.bladder.mixture().total()).max(0.));
+            .min((self.bladder.capacity_liters - self.bladder.total()).max(0.));
         self.bladder.change_one(addition, 3);
     }
 

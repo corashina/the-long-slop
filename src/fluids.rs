@@ -128,6 +128,17 @@ impl FluidContainer {
             })
     }
 
+    /// Source GetAmount sums retained entries in list order.
+    pub fn total(&self) -> f32 {
+        self.entries().map(|entry| entry.amount).sum()
+    }
+
+    /// Finite derived volume for physics and presentation only.
+    pub(crate) fn finite_total(&self) -> f32 {
+        let total = self.total();
+        if total.is_finite() { total } else { 0. }
+    }
+
     pub fn mixture(&self) -> &FluidMixture {
         &self.mixture
     }
@@ -150,7 +161,7 @@ impl FluidContainer {
     }
 
     pub(crate) fn change_one(&mut self, amount: f32, index: usize) -> f32 {
-        let free = self.capacity_liters - self.mixture.total();
+        let free = self.capacity_liters - self.total();
         let changed = if amount < f32::MIN {
             f32::MIN
         } else if amount > free {
@@ -170,17 +181,17 @@ impl FluidContainer {
         changed
     }
 
-    /// Source ChangeWithoutMix updates retained entries with each new total.
-    pub(crate) fn change_without_mix(&mut self, amount: f32) {
+    /// Returns the signed change before source tank cleanup.
+    pub(crate) fn change_without_mix(&mut self, amount: f32) -> f32 {
+        let mut changed = 0.;
         for position in 0..self.order_len as usize {
             let index = self.order[position] as usize;
-            let total: f32 = self.order[..self.order_len as usize]
-                .iter()
-                .map(|&entry| self.mixture.quantities_liters[entry as usize])
-                .sum();
-            let fraction = self.mixture.quantities_liters[index] / total;
-            self.mixture.quantities_liters[index] += amount * fraction;
+            let fraction = self.mixture.quantities_liters[index] / self.total();
+            let change = amount * fraction;
+            self.mixture.quantities_liters[index] += change;
+            changed += change;
         }
+        changed
     }
 
     pub(crate) fn cleanup_one(&mut self) {
@@ -209,35 +220,17 @@ pub struct VehicleFluids<'a> {
     pub coolant: &'a mut FluidContainer,
 }
 
+/// Both helpers receive amounts after caller sleep scaling.
 pub fn transfer(source: &mut FluidContainer, destination: &mut FluidContainer, liters: f32) -> f32 {
-    let total = source.mixture.total();
-    if !liters.is_finite() || liters <= 0.0 || total <= 0.0 {
-        return 0.0;
-    }
-    let capacity = (destination.capacity_liters - destination.mixture.total()).max(0.0);
-    let accepted = liters.min(total).min(capacity);
-    let ratio = accepted / total;
-    for position in 0..source.order_len as usize {
-        let index = source.order[position] as usize;
-        let amount = source.mixture.quantities_liters[index] * ratio;
-        source.mixture.quantities_liters[index] -= amount;
-        destination.change_one(amount, index);
-    }
-    source.cleanup_one();
-    destination.cleanup_one();
-    accepted
+    drink_transfer(source, destination, liters, false, false)
 }
 
+/// Returns the ordered debit before the source tank update removes one entry.
 pub fn spill(container: &mut FluidContainer, liters: f32) -> f32 {
-    let total = container.mixture.total();
-    if !liters.is_finite() || liters <= 0.0 || total <= 0.0 {
-        return 0.0;
+    if !liters.is_finite() || liters <= 0. {
+        return 0.;
     }
-    let removed = liters.min(total);
-    let ratio = removed / total;
-    for amount in &mut container.mixture.quantities_liters {
-        *amount -= *amount * ratio;
-    }
+    let removed = -container.change_without_mix(-liters);
     container.cleanup_one();
     removed
 }
@@ -256,12 +249,11 @@ pub fn drink_transfer(
     let mut debited = 0.;
     for position in 0..source.order_len as usize {
         let index = source.order[position] as usize;
-        let total = source.mixture.total();
+        let total = source.total();
         let fraction = source.mixture.quantities_liters[index] / total;
-        let source_before = source.mixture.quantities_liters[index].max(0.);
         let accepted = destination.change_one(liters * fraction, index);
         source.change_one(-accepted, index);
-        debited += accepted.max(0.).min(source_before);
+        debited += accepted;
         if (index == 3 && filter_water) || (index == 4 && filter_blood) {
             destination.change_one(-liters * fraction, index);
         }
@@ -297,7 +289,7 @@ pub fn contact_drink_transfer(
 
 /// The source `canRun` takes the smallest supplied-to-required fluid fraction.
 pub fn suitability(container: &FluidContainer, required: &FluidMixture) -> f32 {
-    let total = container.mixture.total();
+    let total = container.total();
     let required_total = required.total();
     if total <= 0.0 || required_total <= 0.0 {
         return 0.0;
@@ -455,5 +447,89 @@ mod g04_fixed_snapshot {
         );
         assert_eq!(snapshot.as_slice()[2].amount, -0.25);
         assert!(!validate_fluid_entries(snapshot.as_slice()));
+    }
+}
+
+#[cfg(test)]
+mod g04_source_arithmetic {
+    use super::*;
+
+    fn tank(entries: &[(u8, f32)]) -> FluidContainer {
+        let entries: Vec<_> = entries
+            .iter()
+            .map(|&(fluid_type, amount)| FluidEntry { fluid_type, amount })
+            .collect();
+        FluidContainer::new(10., &entries)
+    }
+
+    #[test]
+    fn g04_ordered_total() {
+        let source = tank(&[(0, 100000000.), (3, 1.), (1, -100000000.)]);
+        assert_eq!(source.total(), 0.);
+        assert_eq!(source.mixture().total(), 1.);
+    }
+
+    #[test]
+    fn g04_cleanup_removes_one_entry_per_update() {
+        let mut source = tank(&[(0, 1.), (1, 0.), (3, 1.)]);
+        spill(&mut source, 2.);
+        assert_eq!(
+            source.entries().map(|e| e.fluid_type).collect::<Vec<_>>(),
+            [1, 3]
+        );
+        source.cleanup_one();
+        assert_eq!(
+            source.entries().collect::<Vec<_>>(),
+            [FluidEntry {
+                fluid_type: 3,
+                amount: -1.
+            }]
+        );
+        source.cleanup_one();
+        assert_eq!(source.entries().count(), 0);
+    }
+
+    #[test]
+    fn g04_cleanup_retains_nonfinite_state() {
+        let mut source = tank(&[(0, 1.), (1, 0.)]);
+        spill(&mut source, 1.);
+        let before = source.mixture().amount(1).to_bits();
+        for _ in 0..2 {
+            source.cleanup_one();
+            assert_eq!(source.entries().count(), 1);
+            assert!(source.mixture().amount(1).is_nan());
+            assert_eq!(source.mixture().amount(1).to_bits(), before);
+        }
+        assert_eq!(source.finite_total(), 0.);
+        assert_eq!(source.mixture().amount(1).to_bits(), before);
+    }
+
+    #[test]
+    fn g04_change_one_uses_ordered_total_and_source_capacity_clamp() {
+        let mut source = tank(&[(0, 100000000.), (3, 1.), (1, -100000000.)]);
+        assert_eq!(source.change_one(10., 5), 10.);
+        assert_eq!(source.entries().last().unwrap().fluid_type, 5);
+        let mut receiver = tank(&[(0, 12.)]);
+        assert_eq!(receiver.change_one(1., 0), -2.);
+        assert_eq!(receiver.total(), 10.);
+        assert_eq!(receiver.change_one(-1., 3), 0.);
+        assert_eq!(receiver.entries().count(), 1);
+    }
+
+    #[test]
+    fn g04_drink_filter_uses_ordered_mutations() {
+        let mut source = tank(&[(0, 2.), (3, 2.)]);
+        let mut receiver = tank(&[]);
+        assert!(
+            (drink_transfer(&mut source, &mut receiver, 2., true, false) - 7. / 3.).abs() <= 1e-6
+        );
+        assert!((source.mixture().amount(3) - 2. / 3.).abs() <= 1e-6);
+        assert_eq!(
+            receiver.entries().collect::<Vec<_>>(),
+            [FluidEntry {
+                fluid_type: 0,
+                amount: 1.
+            }]
+        );
     }
 }

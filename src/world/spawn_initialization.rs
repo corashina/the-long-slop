@@ -386,7 +386,7 @@ fn change_fluid(
     let current = container.mixture().quantities_liters[kind as usize];
     let accepted = amount
         .max(-current)
-        .min((container.capacity_liters - container.mixture().total()).max(0.));
+        .min((container.capacity_liters - container.total()).max(0.));
     container.change_one(accepted, kind as usize);
     Ok(accepted)
 }

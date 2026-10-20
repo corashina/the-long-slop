@@ -417,7 +417,7 @@ impl EngineState {
                 radiator.thermostat_range[1],
                 self.temperature,
             );
-            let total = fluids.coolant.mixture().total();
+            let total = fluids.coolant.total();
             let water_blood = if total > 0.0 {
                 fluids
                     .coolant

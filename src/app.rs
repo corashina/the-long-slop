@@ -958,7 +958,7 @@ fn instrument_sample(
             .items
             .get(id)
             .and_then(|i| i.fluid.as_ref())
-            .map_or(0., |f| f.mixture().total())
+            .map_or(0., |f| f.finite_total())
     };
     let vehicle = &reference.vehicles[index];
     let state = &run.vehicles[index];
@@ -1120,7 +1120,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .items
         .get(reference.0.vehicles[runtime.vehicle].engine.fuel_tank)
         .and_then(|item| item.fluid.as_ref())
-        .map_or(0.0, |fluid| fluid.mixture().total());
+        .map_or(0.0, |fluid| fluid.finite_total());
     game_update(
         snapshot.speed_mps * 3.6,
         (drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none()) as u32,

@@ -1196,8 +1196,7 @@ impl PartAttachments {
                             .fluid
                             .as_ref()
                             .unwrap()
-                            .mixture()
-                            .total()
+                            .finite_total()
                     })
                     .sum::<f32>())
             .max(0.001);

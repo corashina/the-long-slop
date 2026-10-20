@@ -358,8 +358,7 @@ impl StartingArea {
                             .fluid
                             .as_ref()
                             .unwrap()
-                            .mixture()
-                            .total()
+                            .finite_total()
                     })
                     .sum();
                 Some((bodies[&body.id], body.mass_kg - volume, tanks, body.mass_kg))
@@ -428,8 +427,7 @@ impl StartingArea {
                             .fluid
                             .as_ref()
                             .expect("portable fluid")
-                            .mixture()
-                            .total()
+                            .finite_total()
                     })
                     .sum::<f32>();
             if (mass - *current).abs() > 0.0001 {
@@ -1557,7 +1555,7 @@ impl GarageRuntime {
             .items
             .get(reference.vehicles[self.vehicle].engine.fuel_tank)
             .and_then(|item| item.fluid.as_ref())
-            .is_some_and(|fluid| fluid.mixture().total() <= 0.0);
+            .is_some_and(|fluid| fluid.total() <= 0.0);
         match self.stream.recovery_target(position, empty) {
             Ok(_) => {
                 self.recovering = true;

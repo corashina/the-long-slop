@@ -923,3 +923,37 @@ mod g04_ordered_state {
         assert_eq!(tank.entries().next().unwrap().amount, f32::INFINITY);
     }
 }
+
+#[cfg(test)]
+mod g04_nonfinite_capture {
+    use super::*;
+
+    #[test]
+    fn g04_nonfinite_capture() {
+        let mut tank = FluidContainer::new(
+            10.,
+            &[
+                FluidEntry {
+                    fluid_type: 0,
+                    amount: 1.,
+                },
+                FluidEntry {
+                    fluid_type: 1,
+                    amount: 0.,
+                },
+            ],
+        );
+        crate::fluids::spill(&mut tank, 1.);
+        assert!(tank.mixture().amount(1).is_nan());
+        let before: Vec<_> = tank
+            .entries()
+            .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+            .collect();
+        assert!(capture_fluids(&tank).is_err());
+        let after: Vec<_> = tank
+            .entries()
+            .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+            .collect();
+        assert_eq!(after, before);
+    }
+}

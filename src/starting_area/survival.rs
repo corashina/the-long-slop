@@ -262,7 +262,7 @@ impl GarageRuntime {
         {
             return Err(ReferenceError("Missing particle source".into()));
         }
-        if self.survival.bladder.mixture().total() >= self.survival.bladder.capacity_liters {
+        if self.survival.bladder.total() >= self.survival.bladder.capacity_liters {
             return Ok(DrinkResult {
                 requested_liters: poured_liters,
                 debited_liters: 0.,
@@ -315,8 +315,8 @@ impl GarageRuntime {
             return Err(ReferenceError("Drink source has no fluid".into()));
         };
         if state.removed
-            || container.mixture().total() <= 0.
-            || self.survival.bladder.mixture().total() >= self.survival.bladder.capacity_liters
+            || container.total() <= 0.
+            || self.survival.bladder.total() >= self.survival.bladder.capacity_liters
         {
             return Ok(DrinkResult {
                 requested_liters,
@@ -324,7 +324,7 @@ impl GarageRuntime {
                 effect: ConsumptionEffect::default(),
             });
         }
-        let total = container.mixture().total();
+        let total = container.total();
         let fractions = container
             .mixture()
             .quantities_liters
@@ -575,7 +575,7 @@ impl GarageRuntime {
         } else {
             (0, 0., 1., 0.)
         };
-        let total = self.survival.bladder.mixture().total();
+        let total = self.survival.bladder.total();
         let fill = (total / self.survival.bladder.capacity_liters).clamp(0., 1.);
         if total > 0. {
             self.urine.set_color(
