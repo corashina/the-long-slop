@@ -474,16 +474,11 @@ impl PlayerState {
         self.pose.translation += movement.translation;
         self.grounded = movement.grounded && self.vertical_velocity <= 0.0;
         self.support_body = if self.grounded {
-            let height = if self.crouched {
-                self.reference.crouch_height
-            } else {
-                self.reference.standing_height
-            };
             physics
                 .queries(filter)
                 .cast_ray(
                     &Ray::new(self.pose.translation, -Vector::Y),
-                    height * 0.5 + 0.1,
+                    -self.sweep.compute_local_aabb().mins.y + 0.1,
                     true,
                 )
                 .and_then(|(collider, _)| physics.rapier().colliders[collider].parent())

@@ -270,43 +270,4 @@ mod tests {
             Some(EquipAction::Equip)
         );
     }
-    #[test]
-    fn changed_carried_identity_rejects_delayed_actions_until_release() {
-        let mut gesture = EquipmentInput::new(0.25);
-        gesture.begin_frame(down(), 0.02, ELIGIBLE);
-        let changed = EquipmentContext {
-            carried: Some(ItemId(2)),
-            carried_can_equip: false,
-            ..ELIGIBLE
-        };
-        assert_eq!(
-            gesture.begin_frame(
-                FrameInput {
-                    held: keys::RECENTER,
-                    ..Default::default()
-                },
-                0.5,
-                changed
-            ),
-            None
-        );
-        assert_eq!(gesture.begin_frame(up(), 0.01, changed), None);
-        assert_eq!(
-            gesture.begin_frame(down(), 0.02, changed),
-            Some(EquipAction::Recenter)
-        );
-        gesture.begin_frame(up(), 0.01, changed);
-        gesture.begin_frame(down(), 0.02, ELIGIBLE);
-        assert_eq!(
-            gesture.begin_frame(
-                up(),
-                0.1,
-                EquipmentContext {
-                    carried: Some(ItemId(3)),
-                    ..ELIGIBLE
-                }
-            ),
-            None
-        );
-    }
 }

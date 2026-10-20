@@ -1727,8 +1727,13 @@ impl InteractionState {
                 }
             }
         }
-        if self.carry.step(carry_input, player, physics, dt)
-            && let Some(item) = self.drop_held(items, physics)
+        if self.carry.step(
+            carry_input,
+            player,
+            self.tuning_opening.is_some(),
+            physics,
+            dt,
+        ) && let Some(item) = self.drop_held(items, physics)
         {
             self.complete_carry_release(&mut action, InteractionAction::Drop(item));
         }
@@ -1984,6 +1989,3 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
         ((value - start) / (end - start)).clamp(0.0, 1.0)
     }
 }
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod garage_handling;

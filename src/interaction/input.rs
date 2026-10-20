@@ -81,7 +81,13 @@ impl InteractionState {
             mouse: input.mouse,
             wheel: input.wheel,
         };
-        let resolved = self.resolve_input(input, available);
+        let mut resolved = self.resolve_input(input, available);
+        if player.seat().is_some() && input.player_held & crate::simulation::player_keys::LEAN != 0
+        {
+            // Seated lean can share this sample with carry distance. The view step
+            // updates the ray target after this route, so prior-frame tuning is stale.
+            resolved.carry_input.wheel = input.wheel;
+        }
         let view_owns_wheel = input.player_held & crate::simulation::player_keys::LEAN != 0
             || player.view_owns_look_input();
         input.carry = if let Some(owner) = self.held() {

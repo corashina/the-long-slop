@@ -341,8 +341,8 @@ mod g04_ordered_state {
     use super::*;
 
     #[test]
-    fn schema_six_and_seven_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7] {
+    fn older_schemas_are_rejected_before_payload_reconstruction() {
+        for version in [6, 7, 8] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),

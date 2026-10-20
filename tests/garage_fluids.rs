@@ -189,7 +189,7 @@ fn hold_tank(run: &mut GarageRuntime, tank: my_summer_slop::reference::ItemId) {
     use my_summer_slop::vehicle::to_rapier;
     use rapier3d::math::Vector;
     let body = run.area.items.get(tank).unwrap().body.unwrap();
-    let view = to_rapier(run.area.player.view_pose(&run.physics));
+    let view = to_rapier(run.area.player.view(&run.physics).head_pose);
     let point = view.translation + view.rotation * Vector::NEG_Z;
     run.physics
         .edit_body(body, |body| body.set_translation(point, true));

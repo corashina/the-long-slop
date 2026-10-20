@@ -596,7 +596,7 @@ mod tests {
         )
         .unwrap();
         let mut run = crate::starting_area::GarageRuntime::new(&r).unwrap();
-        let view = to_rapier(run.area.player.view_pose(&run.physics));
+        let view = to_rapier(run.area.player.view(&run.physics).head_pose);
         let center = view.translation + view.rotation * run.area.interaction.drink_collider_center;
         let source = ItemId(116);
         run.area.items.get_mut(source).unwrap().fluid = Some(FluidContainer::new(
