@@ -715,25 +715,6 @@ pub(crate) fn road_prototype(
     }
 }
 
-pub(crate) fn road_surface_bound(reference: &WorldReference, biome: u8) -> usize {
-    let prototype = reference
-        .prototypes
-        .iter()
-        .find(|p| p.source == reference.road.prototypes[biome as usize])
-        .expect("road prototype");
-    prototype
-        .skins
-        .iter()
-        .map(|s| {
-            s.positions.len() * 24
-                + s.tangents.len() * 16
-                + s.uv.len() * 8
-                + s.triangles.iter().map(|t| t.len() * 12).sum::<usize>()
-                + s.triangles.len() * std::mem::size_of::<std::ops::Range<usize>>()
-        })
-        .sum::<usize>()
-        + prototype.nodes.len() * std::mem::size_of::<road_mesh::RoadFrame>()
-}
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoadIndexSnapshot {

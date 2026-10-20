@@ -30,6 +30,10 @@ pub struct WorldMetrics {
     pub building_checkpoints: usize,
     pub road_replay_ms: f64,
     pub peak_road_replay_ms: f64,
+    /// Actual road worker linear-memory capacity. Separate from logical reservations.
+    pub road_worker_wasm_bytes: usize,
+    /// Subset of active CPU, retained immutable road worker sources.
+    pub road_worker_cache_bytes: usize,
     pub generation_jobs: usize,
     pub road_segments: usize,
     pub near_tiles: usize,
@@ -402,7 +406,7 @@ pub(crate) mod browser {
             ),
             process_bytes: None,
             driver_bytes: None,
-            limits: "World values are capacity charges and reservations; pending overlaps active/prototype charges. Asset values count unique logical mesh/image storage and retained CPU payloads. They exclude ECS/physics allocator overhead, skins, uniforms, and renderer-internal targets. Imported asset payloads are a partial baseline. Logical handles do not prove GPU allocation or residency. Snapshot scratch and JSON are transient development allocations.",
+            limits: "World values are capacity charges and reservations; pending overlaps active/prototype charges. Road worker WASM bytes report linear-memory capacity separately. Asset values count unique logical mesh/image storage and retained CPU payloads. They exclude ECS/physics allocator overhead, skins, uniforms, and renderer-internal targets. Imported asset payloads are a partial baseline. Logical handles do not prove GPU allocation or residency. Snapshot scratch and JSON are transient development allocations.",
         };
         if let Ok(json) = serde_json::to_string(&snapshot) {
             crate::browser::game_measurements(&json);

@@ -31,6 +31,7 @@ pub use road::{
     ROAD_CHECKPOINT_INTERVAL, ROAD_CONTROLS, ROAD_SEGMENTS, RoadBlock, RoadCheckpoint, RoadCurve,
     RoadIndex, RoadIndexSnapshot, RoadSegment, RoadSequence, RoadState,
 };
+pub use road_worker::{RoadJobId, RoadPoll, RoadWorker};
 mod instances;
 pub use instances::{StructureInstance, StructureRecipe};
 pub(crate) mod metrics;

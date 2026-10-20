@@ -1,6 +1,8 @@
 //! Source road skinning and frame calculation.
 mod codec;
-pub use codec::{decode_pose, decode_prototype, encode_pose, encode_prototype};
+pub use codec::{
+    decode_pose, decode_prototype, encode_pose, encode_prototype, prototype_encoded_len,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RoadNode {

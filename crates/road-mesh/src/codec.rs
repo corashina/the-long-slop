@@ -287,3 +287,24 @@ pub fn decode_pose(input: &[u8]) -> Result<RoadPose, String> {
     reader.done()?;
     Ok(RoadPose { origin, rotations })
 }
+
+/// Encoded bytes, excluding transport ownership.
+pub fn prototype_encoded_len(input: &RoadPrototype) -> usize {
+    12 + input.nodes.len() * 44
+        + input.controls.len() * 4
+        + input
+            .skins
+            .iter()
+            .map(|s| {
+                36 + s.bones.len() * 4
+                    + s.bind_poses.len() * 64
+                    + s.positions.len() * 12
+                    + s.normals.len() * 12
+                    + s.tangents.len() * 16
+                    + s.uv.len() * 8
+                    + s.joints.len() * 16
+                    + s.weights.len() * 16
+                    + s.triangles.iter().map(|g| 4 + g.len() * 12).sum::<usize>()
+            })
+            .sum::<usize>()
+}

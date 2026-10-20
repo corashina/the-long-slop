@@ -25,7 +25,7 @@ export function contentIndexSampleFailures(sample) {
 
 export function assertCpuProfileMode(profileCpu,profileStreaming,state){
  if(profileCpu)return;
- if(state.browserEnabled||state.rustEnabled||state.startupRenderTraceActive||state.terrain.jobActive||state.terrain.handshakeActive||state.streamingEnabled&&!profileStreaming)throw Error('CPU or streaming profiling is active; stop it before this sample');
+ if(state.browserEnabled||state.rustEnabled||state.startupRenderTraceActive||state.terrain.jobActive||state.terrain.handshakeActive||state.road.jobActive||state.road.handshakeActive||state.road.publicationActive||state.streamingEnabled&&!profileStreaming)throw Error('CPU or streaming profiling is active; stop it before this sample');
 }
 
 export async function measureContentIndex({durationMs=10000,instrument=false,profileStreaming=false,profileCpu=false,label='sample',scenario='garage',cacheState='unknown',route='unspecified',seed=null,browserTrace=null,traceRecording=false}={}) {

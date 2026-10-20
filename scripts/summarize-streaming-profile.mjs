@@ -51,14 +51,16 @@ function metrics(receipt){
 function workerCosts(receipt){
  const groups=new Map(),excluded=[];
  for(const row of receipt.cpuProfile?.browser?.workers??[]){
-  let fields=groups.get(row.kind);if(!fields){fields=new Map();groups.set(row.kind,fields);}
+  const group=row.phase?`${row.kind}.${row.phase}`:row.kind;
+  let fields=groups.get(group);if(!fields){fields=new Map();groups.set(group,fields);}
   for(const [prefix,record] of [['main',row],['worker',row.worker??{}]])for(const [name,value] of Object.entries(record)){
    if(!name.endsWith('Ms'))continue;
-   const diagnostic=prefix==='main'&&name==='submitDeliveryMs'?row.timing?.submitDelivery:prefix==='main'&&name==='returnDeliveryMs'?row.timing?.returnDelivery:null;
+   const diagnostic=prefix==='main'&&name==='submitDeliveryMs'?row.timing?.submitDelivery:prefix==='main'&&name==='returnDeliveryMs'?row.timing?.returnDelivery:typeof value==='object'&&value!==null?value:row.timing?.[name]??null;
+   const duration=typeof value==='object'&&value!==null?value.valueMs:value;
    const crossContext=prefix==='main'&&['submitDeliveryMs','returnDeliveryMs'].includes(name);
-   const reason=crossContext&&diagnostic?.valid!==true?diagnostic?.reason??'missing-clock-diagnostic':!Number.isFinite(value)?'unavailable-or-non-finite-duration':value<0?'negative-duration':null;
+   const reason=crossContext&&diagnostic?.valid!==true?diagnostic?.reason??'missing-clock-diagnostic':diagnostic?.valid===false?diagnostic.reason??'invalid-duration':!Number.isFinite(duration)?'unavailable-or-non-finite-duration':duration<0?'negative-duration':null;
    if(reason){excluded.push({kind:row.kind,id:row.id??null,phase:row.phase??null,metric:`${prefix}.${name}`,reason,rawValue:typeof value==='number'&&!Number.isFinite(value)?String(value):value,diagnostic});continue;}
-   const key=`${prefix}.${name}`;let values=fields.get(key);if(!values){values=[];fields.set(key,values);}values.push(value);
+   const key=`${prefix}.${name}`;let values=fields.get(key);if(!values){values=[];fields.set(key,values);}values.push(duration);
   }
  }
  const values=Object.fromEntries([...groups].map(([kind,fields])=>[kind,Object.fromEntries([...fields].map(([name,values])=>{

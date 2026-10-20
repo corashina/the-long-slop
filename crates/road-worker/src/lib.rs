@@ -3,23 +3,40 @@ use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
 thread_local! {
-    static PROTOTYPE: RefCell<Option<road_mesh::RoadPrototype>> = const { RefCell::new(None) };
+    static PROTOTYPES: RefCell<[Option<road_mesh::RoadPrototype>; 3]> = const { RefCell::new([None, None, None]) };
 }
 
 #[wasm_bindgen]
-pub fn install(input: &[u8]) -> Result<(), JsError> {
-    PROTOTYPE.with(|slot| *slot.borrow_mut() = None);
+pub fn install(owner: u32, input: &[u8]) -> Result<(), JsError> {
+    if owner >= 3 {
+        return Err(JsError::new("Invalid road source owner"));
+    }
+    if PROTOTYPES.with(|slots| slots.borrow()[owner as usize].is_some()) {
+        return Err(JsError::new("Road source slot is already installed"));
+    }
     let prototype = road_mesh::decode_prototype(input).map_err(|error| JsError::new(&error))?;
-    PROTOTYPE.with(|slot| *slot.borrow_mut() = Some(prototype));
+    PROTOTYPES.with(|slots| slots.borrow_mut()[owner as usize] = Some(prototype));
     Ok(())
 }
 
 /// Each getter moves its attribute out once.
 #[wasm_bindgen]
-pub struct RoadSurface(road_mesh::RoadMesh);
+pub struct RoadSurface(road_mesh::RoadMesh, f64, f64);
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = roadCpuNow)]
+    fn cpu_now() -> f64;
+}
 
 #[wasm_bindgen]
 impl RoadSurface {
+    pub fn decode_ms(&self) -> f64 {
+        self.1
+    }
+    pub fn compute_ms(&self) -> f64 {
+        self.2
+    }
     pub fn origin(&mut self) -> Vec<f64> {
         std::mem::take(&mut self.0.origin).to_vec()
     }
@@ -52,13 +69,18 @@ impl RoadSurface {
 }
 
 #[wasm_bindgen]
-pub fn evaluate(input: &[u8]) -> Result<RoadSurface, JsError> {
+pub fn evaluate(owner: u32, input: &[u8], profile: bool) -> Result<RoadSurface, JsError> {
+    let started = if profile { cpu_now() } else { 0.0 };
     let pose = road_mesh::decode_pose(input).map_err(|error| JsError::new(&error))?;
-    PROTOTYPE.with(|slot| {
-        let slot = slot.borrow();
-        let prototype = slot
-            .as_ref()
+    let decoded = if profile { cpu_now() } else { 0.0 };
+    PROTOTYPES.with(|slots| {
+        let slots = slots.borrow();
+        let prototype = slots
+            .get(owner as usize)
+            .and_then(Option::as_ref)
             .ok_or_else(|| JsError::new("Road source is not installed"))?;
-        Ok(RoadSurface(road_mesh::deform(prototype, &pose)))
+        let mesh = road_mesh::deform(prototype, &pose);
+        let computed = if profile { cpu_now() } else { 0.0 };
+        Ok(RoadSurface(mesh, decoded - started, computed - decoded))
     })
 }

@@ -34,8 +34,11 @@ pub(crate) enum Stage {
     StreamGeometry,
     Terrain,
     Road,
+    RoadPacking,
+    RoadResult,
+    RoadPublication,
 }
-const NAMES: [&str; 27] = [
+const NAMES: [&str; 30] = [
     "Cleanup",
     "FixedInputs",
     "Pipelines",
@@ -63,6 +66,9 @@ const NAMES: [&str; 27] = [
     "StreamGeometry",
     "Terrain",
     "Road",
+    "RoadPacking",
+    "RoadResult",
+    "RoadPublication",
 ];
 #[derive(Clone, Copy, Default, serde::Serialize)]
 struct Measurement {
@@ -73,14 +79,14 @@ struct Measurement {
 }
 static ENABLED: AtomicBool = AtomicBool::new(false);
 const SAMPLE_CAPACITY: usize = 4096;
-static SAMPLES: Mutex<[[f64; SAMPLE_CAPACITY]; 27]> = Mutex::new([[0.; SAMPLE_CAPACITY]; 27]);
-static VALUES: Mutex<[Measurement; 27]> = Mutex::new(
+static SAMPLES: Mutex<[[f64; SAMPLE_CAPACITY]; 30]> = Mutex::new([[0.; SAMPLE_CAPACITY]; 30]);
+static VALUES: Mutex<[Measurement; 30]> = Mutex::new(
     [Measurement {
         calls: 0,
         total_ms: 0.,
         max_ms: 0.,
         over_2_ms: 0,
-    }; 27],
+    }; 30],
 );
 
 pub(crate) struct Timer {
@@ -136,7 +142,7 @@ fn now() -> std::time::Instant {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub fn streaming_profile(enabled: bool) {
     ENABLED.store(false, Ordering::Relaxed);
-    *VALUES.lock().unwrap() = [Measurement::default(); 27];
+    *VALUES.lock().unwrap() = [Measurement::default(); 30];
     if enabled {
         for samples in SAMPLES.lock().unwrap().iter_mut() {
             samples.fill(0.);
@@ -163,7 +169,7 @@ pub fn streaming_profile_audit() -> String {
         "stages": NAMES,
         "measurements": measurements,
         "retainedBytes": std::mem::size_of_val(&*samples) + std::mem::size_of_val(&*values),
-        "nested_stages": ["StreamDescriptors", "StreamGeometry", "Terrain", "Road"],
+        "nested_stages": ["StreamDescriptors", "StreamGeometry", "Terrain", "Road", "RoadPacking", "RoadResult", "RoadPublication"],
     }))
     .expect("streaming measurements serialize")
 }

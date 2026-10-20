@@ -19,9 +19,9 @@ window.addEventListener('blur',startupBlurred);
 function stopStartupEnvironment(){startupVisibilityChanged();document.removeEventListener('visibilitychange',startupVisibilityChanged);window.removeEventListener('blur',startupBlurred);}
 cpuProfile.enable(startupCpuProfile);
 let rustCpuProfile,profileStep=0,startupRenderTrace=startupCpuProfile?observeRenderMainThread():null;
-window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled)terrainClient.profileHandshake();};
+window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled){terrainClient.profileHandshake();roadClients.profileHandshake();}};
 window.gameCpuProfileSnapshot=()=>cpuProfile.snapshot();
-window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,terrain:terrainClient.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
+window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,terrain:terrainClient.profileState(),road:roadClients.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
 window.gameCpuStartupRenderTrace=()=>{const trace=startupRenderTrace?.stop()??null;startupRenderTrace=null;return trace;};
 window.gameCpuInputConsumed=()=>input?.consume(++profileStep);
 window.gameCpuClearInput=()=>cpuProfile.clearInput();
@@ -33,6 +33,7 @@ import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
 import {createTerrain,installTerrainBridge} from './terrain.js';
+import {installRoadBridge} from './road.js';
 import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
 setAssetCpuProfile(cpuProfile);
 // Start the terrain worker and its WASM download early.
@@ -40,6 +41,7 @@ const terrainWorkerUrl=new URL('./terrain-worker.js',import.meta.url);
 if(startupCpuProfile)terrainWorkerUrl.searchParams.set('profileCpu','1');
 const terrainClient=createTerrain(new Worker(terrainWorkerUrl,{type:'module'}),cpuProfile);
 installTerrainBridge(window,terrainClient);
+const roadClients=installRoadBridge(window,cpuProfile);
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
