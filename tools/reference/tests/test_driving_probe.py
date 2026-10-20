@@ -1,15 +1,56 @@
 """Critical G11 provenance and native evidence gates."""
 import json
+from copy import deepcopy
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.reference.driving_probe import preflight, capture, verify, validate_run
+from tools.reference.driving_probe import preflight, capture, verify, validate_run, observer_revision
 from tools.reference.library.archive import sha256
+from tools.reference.driving_geometry import validate_geometry, physical_inputs
 
 
 class DrivingProbeTests(unittest.TestCase):
+    def test_geometry_helper_provenance(self):
+        revision = observer_revision()
+        for name in ('driving_geometry.cs', 'driving_geometry.py'):
+            self.assertEqual(revision[name], sha256(Path(__file__).parents[1] / name))
+
+    def test_native_helper_restoration_and_physical_readiness(self):
+        for change, message in (('helper', 'intended state'), ('cargo', 'deferred cargo'),
+                                ('shape', 'shape data'), ('spring', 'profile scalar'), ('empty_spring', 'profile scalar'), ('empty_friction', 'friction profile'), ('missing_friction_scalar', 'friction profile'), ('helper_samples', 'helper or sprungMass'),
+                                ('roles', 'four separate road roles'), ('held_geometry', 'held boundary')):
+            with self.subTest(change=change):
+                run = self.sample_run()
+                validate_geometry(run)
+                snapshot = next(row for row in run['geometry'] if row['phase'] == 'native-wheels-enabled')
+                if change == 'helper': snapshot['colliders'][0]['enabled'] = True
+                if change == 'cargo': snapshot['physical_ready'] = False
+                if change == 'shape': snapshot['colliders'][0]['complete'] = False
+                if change == 'spring': del snapshot['colliders'][0]['spring_n_per_m']
+                if change == 'empty_spring': snapshot['colliders'][0]['spring_n_per_m'] = {}
+                if change == 'empty_friction': snapshot['colliders'][0]['forward'] = {}
+                if change == 'missing_friction_scalar': del snapshot['colliders'][0]['sideways']['stiffness']
+                if change == 'roles': snapshot['colliders'][0]['road_slot'] = 0
+                if change == 'helper_samples': run['samples'][0]['native_wheels'].pop()
+                if change == 'held_geometry':
+                    held = next(row for row in run['geometry'] if row['phase'] == 'backlog-drained-held')
+                    held['colliders'][0]['radius'] = 1.
+                with self.assertRaisesRegex(ValueError, message): validate_geometry(run)
+
+    def test_geometry_outputs_do_not_hide_local_shape_inputs(self):
+        run = self.sample_run()
+        left, right = run['geometry'][:2]
+        for row in (left, right):
+            row['transforms'] = [{'key': 'body-transform', 'local_position': 1., 'local_rotation': 2.,
+                                  'local_scale': 1., 'world_matrix': 3., 'body_matrix': 4., 'lossy_scale': 1.}]
+        right['transforms'][0]['local_rotation'] = 99.
+        right['transforms'][0]['world_matrix'] = 99.
+        self.assertEqual(physical_inputs(left), physical_inputs(right))
+        right['colliders'][0]['radius'] = 99.
+        self.assertNotEqual(physical_inputs(left), physical_inputs(right))
+
     def test_preflight_rejects_changed_source(self):
         with tempfile.TemporaryDirectory() as name:
             project = Path(name)
@@ -73,6 +114,22 @@ class DrivingProbeTests(unittest.TestCase):
                         'rotation': [0., 0., 0., 1.], 'contact_point': [0., 0., 0.],
                         'contact_normal': [0., 1., 0.], 'force_n': 0.,
                         'forward_slip': 0., 'sideways_slip': 0.} for _ in range(4)]})
+        wheels = [{'key': f'wheel-{i}', 'type': 'WheelCollider', 'road_slot': i-1,
+                   'complete': True, 'sprung_mass_available': True, 'enabled': i != 0,
+                   'intended_enabled': i != 0, 'restored_enabled': i != 0,
+                   'restoration_applied': True, 'center': {'x': 0., 'y': 0., 'z': 0.}, 'radius': .3, 'mass': 1., 'damping': .25,
+                   'suspension_distance': .3, 'force_application_distance': 0., 'spring_n_per_m': 35000.,
+                   'damper_n_s_per_m': 4500., 'spring_target': .5,
+                   'forward': {'extremum_slip': .4, 'extremum_value': 1., 'asymptote_slip': .8, 'asymptote_value': .5, 'stiffness': 1.},
+                   'sideways': {'extremum_slip': .2, 'extremum_value': 1., 'asymptote_slip': .5, 'asymptote_value': .75, 'stiffness': 1.}} for i in range(5)]
+        phases = ('world.entry', 'source-physical-ready', 'prepared-held', 'backlog-drained-held',
+                  'before-dynamic', 'switched-dynamic', 'before-inertia-reset', 'after-inertia-reset',
+                  'canonical-transforms-synchronized', 'native-wheels-enabled', 'armed-after-canonical')
+        run['geometry'] = [{'phase': phase, 'complete': True, 'physical_ready': True, 'unavailable': [],
+                            'colliders': deepcopy(wheels), 'transforms': [], 'body': {'transform_key': 'body-transform'}}
+                           for phase in phases]
+        for sample in run['samples']:
+            sample['native_wheels'] = [{'sprung_mass_available': True} for _ in range(5)]
         return run
 
     @staticmethod

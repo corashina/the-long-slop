@@ -8,13 +8,14 @@ import subprocess
 from pathlib import Path
 
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
+from .driving_geometry import source_geometry_map, validate_geometry, physical_inputs
 from .export import native_engine_evidence
 from .library.archive import load_snapshot, verify_snapshot, sha256
 from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_probe.py', 'driving_capture.cs', 'driving_capture.ps1')
+FILES = ('driving_probe.py', 'driving_capture.cs', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
@@ -82,7 +83,7 @@ def preflight(source_root: Path, reference_root: Path) -> dict:
         'managed_source_sha256': DECOMPILED_SHA256, 'assembly_sha256': ASSEMBLY_SHA256,
         'native_engine': native, 'dependencies': {name: receipts[name].sha256 for name in required},
         'roslyn': {str(path): sha256(path) for path in roslyn}, 'powershell': powershell,
-        'observer_revision': observer_revision()}
+        'observer_revision': observer_revision(), 'source_geometry_map': source_geometry_map(reader)}
 
 
 def finite(value):
@@ -221,6 +222,7 @@ def validate_run(run, scenario):
 
 def validate_evidence(output: Path, directory: Path, run: dict, scenario: dict) -> dict:
     result = validate_run(run, scenario)
+    result['geometry'] = validate_geometry(run)
     marker = read_json(directory / 'completion.json')
     process = read_json(directory / 'process.json')
     exit_status = read_json(directory / 'exit.json')
@@ -272,6 +274,7 @@ def verify(output_root: Path) -> dict:
             result = validate_evidence(output, directory, run, scenario)
             state = {key: value for key, value in run['initial'].items()
                      if key != 'profile_path'}
+            state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
@@ -316,7 +319,8 @@ def capture(source_root: Path, reference_root: Path,
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
         control_frames(row)
     output.mkdir(parents=True)
-    write_json(output / 'preflight.json', pre)
+    write_json(output / 'preflight.json', {k: v for k, v in pre.items() if k != 'source_geometry_map'})
+    write_json(output / 'source-geometry-map.json', pre.get('source_geometry_map', {}))
     write_json(output / 'request.json', {'repeats': repeats, 'scenarios': rows,
                                        'observer_revision': pre['observer_revision']})
     script = Path(__file__).with_name('driving_capture.ps1')
@@ -347,6 +351,7 @@ def capture(source_root: Path, reference_root: Path,
             validate_evidence(output, directory, native_run, row)
             state = {key: value for key, value in native_run['initial'].items()
                      if key != 'profile_path'}
+            state['physical_geometry'] = physical_inputs(next(row for row in native_run['geometry'] if row['phase'] == 'armed-after-canonical'))
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state

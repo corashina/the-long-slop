@@ -58,6 +58,7 @@ $references=[Collections.Generic.List[Microsoft.CodeAnalysis.MetadataReference]]
 Get-ChildItem -LiteralPath $sourceManaged -Filter '*.dll' | ForEach-Object {$references.Add([Microsoft.CodeAnalysis.MetadataReference]::CreateFromFile($_.FullName))}
 $trees=[Collections.Generic.List[Microsoft.CodeAnalysis.SyntaxTree]]::new()
 $trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_capture.cs'))))
+$trees.Add([Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'driving_geometry.cs'))))
 $options=[Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
 $options=$options.WithDeterministic($true).WithOptimizationLevel([Microsoft.CodeAnalysis.OptimizationLevel]::Release)
 $compilation=[Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create('G11Capture',$trees,$references,$options)
@@ -115,6 +116,39 @@ function Observe($type,$name,$phase,$entry){
     }
     $changes.Add("Observe $type.$name $phase; original instructions and branch targets retained")
 }
+function AllMethods($type){$type.Methods;foreach($nested in $type.NestedTypes){AllMethods $nested}}
+# Retain source component intent while the observer holds every native source wheel.
+# GameObject.SetActive calls remain original, including carscript.Lock and enableObjs.
+foreach($type in $main.MainModule.Types){foreach($method in (AllMethods $type)){
+    if(-not $method.HasBody){continue}
+    foreach($instruction in @($method.Body.Instructions)){
+        $target=$instruction.Operand
+        if($target -is [Mono.Cecil.MethodReference] -and $target.Name -ceq 'SetActive' -and $target.DeclaringType.FullName -ceq 'UnityEngine.GameObject'){
+            Mark $method;Expand $method
+            $instruction.OpCode=[Mono.Cecil.Cil.OpCodes]::Ldstr;$instruction.Operand=(Identity $method)
+            $method.Body.GetILProcessor().InsertAfter($instruction,$method.Body.GetILProcessor().Create([Mono.Cecil.Cil.OpCodes]::Call,(HookMethod 'SetSourceActive')))
+            $changes.Add("Observe original GameObject.SetActive input in $(Identity $method); original activation retained")
+        }
+        elseif($target -is [Mono.Cecil.MethodReference] -and $target.Name -ceq 'set_enabled' -and $target.DeclaringType.FullName -ceq 'UnityEngine.Collider'){
+            Mark $method;Expand $method
+            $instruction.OpCode=[Mono.Cecil.Cil.OpCodes]::Call;$instruction.Operand=HookMethod 'SetColliderEnabled'
+            $changes.Add("Retain original Collider.enabled input in $(Identity $method); temporary native wheel hold only")
+        }
+    }
+}}
+$lock=Method 'mountStuff' 'Lock';Mark $lock;Expand $lock
+$il=$lock.Body.GetILProcessor();$call=HookMethod 'ObserveLock'
+foreach($entry in @($true,$false)){
+    if($entry){$points=@($lock.Body.Instructions[0]);$phase='storage.lock.entry'}else{$points=@($lock.Body.Instructions | Where-Object {$_.OpCode.Code -eq 'Ret'});$phase='storage.lock.exit'}
+    foreach($point in $points){
+        $load=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldarg_0);$cargo=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldarg_1)
+        $label=$il.Create([Mono.Cecil.Cil.OpCodes]::Ldstr,$phase);$invoke=$il.Create([Mono.Cecil.Cil.OpCodes]::Call,$call)
+        if($entry){$il.InsertBefore($point,$load);$il.InsertBefore($point,$cargo);$il.InsertBefore($point,$label);$il.InsertBefore($point,$invoke)}
+        else{$point.OpCode=[Mono.Cecil.Cil.OpCodes]::Nop;$il.InsertAfter($point,$load);$il.InsertAfter($load,$cargo);$il.InsertAfter($cargo,$label);$il.InsertAfter($label,$invoke);$il.InsertAfter($invoke,$il.Create([Mono.Cecil.Cil.OpCodes]::Ret))}
+    }
+}
+$changes.Add('Observe original mountStuff.Lock entry/exit with original cargo argument; retain deferred Destroy and source scheduling')
+
 Observe 'mainmenuscript' 'Start' 'menu.exit' $false
 Observe 'carscript' 'Start' 'car.ready' $false
 Observe 'partslotscript' 'SpawnPart' 'slot.ready' $false
@@ -188,7 +222,6 @@ foreach($method in $core.MainModule.GetType('UnityEngine.PlayerPrefs').Methods){
 }
 $main.Write((Join-Path $managed 'Assembly-CSharp.dll'))
 $core.Write((Join-Path $managed 'UnityEngine.CoreModule.dll'))
-function AllMethods($type){$type.Methods;foreach($nested in $type.NestedTypes){AllMethods $nested}}
 function Fingerprint($method){
     if(-not $method.HasBody){return [string]$method.ImplAttributes}
     ($method.Body.Instructions | ForEach-Object {$_.ToString()}) -join "`n"

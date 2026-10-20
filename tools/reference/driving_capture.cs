@@ -70,6 +70,7 @@ public sealed class G11Capture : MonoBehaviour
         public Vector3 position, velocity, angular_velocity;
         public Quaternion rotation;
         public Wheel[] wheels;
+        public G11Geometry.NativeWheel[] native_wheels;
     }
     [Serializable] public class WheelParameters
     {
@@ -159,7 +160,9 @@ public sealed class G11Capture : MonoBehaviour
         public AssemblyIdentity held_assembly;
         public string template_source="level1/64898.StartCar02 -> level1/206 -> level1/17687 carscript level1/77839";
         public Sample[] samples;
+        public G11Geometry.Activation[] wheel_activation_events;
         public List<SetupBoundary> setup_boundaries=new List<SetupBoundary>();
+        public List<G11Geometry.Snapshot> geometry=G11Geometry.snapshots;
         public List<Curve> curves=new List<Curve>();
         public List<string> setup_changes=new List<string>();
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses"};
@@ -168,6 +171,7 @@ public sealed class G11Capture : MonoBehaviour
     static readonly HashSet<mountStuff> completedStorage=new HashSet<mountStuff>();
     static AssemblyIdentity assemblyIdentity;
     static bool pendingArm;
+    static string preparedGeometry;
     static int armAfterFrame;
     static G11Capture instance;
     static Scenario scenario;
@@ -232,7 +236,8 @@ public sealed class G11Capture : MonoBehaviour
                 if(ready.carType==itemdatabase.CarType.car02 && ready.RB!=null)
                 {
                     ready.RB.isKinematic=true;
-                    foreach(var wheel in ready.allWH) wheel.enabled=false;
+                    if(ready==car) G11Geometry.HoldWheels();
+                    else foreach(var wheel in ready.allWH) wheel.enabled=false;
                     result.setup_changes.Add("Hold source Lada body and disable native wheels after original car Start");
                 }
                 return;
@@ -260,8 +265,10 @@ public sealed class G11Capture : MonoBehaviour
                 var authored=start.GetComponentsInChildren<carscript>(true).Single(c=>c.carType==itemdatabase.CarType.car02);
                 result.authored_template=DescribeAssembly(authored);
                 car=authored; body=car.RB;
+                G11Geometry.Initialize(car);
+                G11Geometry.Capture("world.entry",step,"world.entry",completedStorage);
                 body.isKinematic=true;
-                foreach(var wheel in car.GetComponentsInChildren<WheelCollider>(true)) wheel.enabled=false;
+                G11Geometry.HoldWheels();
                 result.target_held_before_activation=true;
                 result.setup_changes.Add("Use the actual authored StartCar02 car in each fresh source process; hold body and disable every native wheel before original activation");
                 return;
@@ -314,7 +321,11 @@ public sealed class G11Capture : MonoBehaviour
         try
         {
             if(!result.target_held_before_activation || !SourceAssemblyReady(car) || !main.player.mind)
-                throw new InvalidOperationException("Original selected Lada, source storage, and player did not initialize");
+            {
+                G11Geometry.Capture("readiness-timeout",step,"Initialize bounded timeout",completedStorage);
+                throw new InvalidOperationException("Original selected Lada, source storage, and player did not initialize; physical readiness: "+G11Geometry.ReadinessFailure()+"; source readiness: "+SourceReadinessFailure(car));
+            }
+            G11Geometry.Capture("source-physical-ready",step,"Initialize source readiness",completedStorage);
             main.PressedContinue();
             body=car.RB;
             body.isKinematic=true;
@@ -358,10 +369,12 @@ public sealed class G11Capture : MonoBehaviour
             if(!Physics.autoSimulation) throw new InvalidOperationException("Original native auto simulation is inactive");
             CaptureCurves();
             buffer=new Sample[(scenario.duration_frames+1)*256];
-            for(int index=0;index<buffer.Length;index++) buffer[index].wheels=new Wheel[4];
+            for(int index=0;index<buffer.Length;index++)
+            { buffer[index].wheels=new Wheel[4];buffer[index].native_wheels=new G11Geometry.NativeWheel[G11Geometry.nativeWheels.Length]; }
             armAfterFrame=Time.frameCount+1;
             pendingArm=true;
             RecordSetupBoundary("prepared-held");
+            preparedGeometry=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]);
             result.setup_changes.Add("Hold fresh body and wheels through the next source frame backlog; switch dynamic and apply canonical state at LateUpdate before arming");
         }
         catch(Exception error) { Fail(error); }
@@ -377,7 +390,26 @@ public sealed class G11Capture : MonoBehaviour
                slot.part.slot!=slot || !slot.part.p.crafted || !slot.part.tosaveitem.started)) return false;
         }
         if(target.GetComponentsInChildren<mountStuff>(true).Any(m=>m.isActiveAndEnabled && !completedStorage.Contains(m))) return false;
-        return target.GetComponentsInChildren<partconditionscript>(true).All(p=>p.started);
+        return target.GetComponentsInChildren<partconditionscript>(true).All(p=>p.started) && G11Geometry.PhysicalReady();
+    }
+    static string SourceReadinessFailure(carscript target)
+    {
+        var errors=new List<string>();
+        if(target==null) return "selected car missing";
+        if(target.RB==null) errors.Add("source car.RB missing");
+        if(target.Engine==null) errors.Add("source Engine missing");
+        if(target.allWH.Count!=4) errors.Add("source allWH count="+target.allWH.Count);
+        foreach(var slot in target.GetComponentsInChildren<partslotscript>(true))
+        {
+            if(slot.isActiveAndEnabled && !completedMounts.Contains(slot)) errors.Add("source slot callback pending "+G11Geometry.Key(slot));
+            if(slot.part!=null && (!slot.part.transform.IsChildOf(target.transform) || slot.part.slot!=slot || !slot.part.p.crafted || !slot.part.tosaveitem.started))
+                errors.Add("source slot ancestry/craft/start pending "+G11Geometry.Key(slot));
+        }
+        foreach(var mount in target.GetComponentsInChildren<mountStuff>(true))
+            if(mount.isActiveAndEnabled && !completedStorage.Contains(mount)) errors.Add("source storage callback pending "+G11Geometry.Key(mount));
+        foreach(var condition in target.GetComponentsInChildren<partconditionscript>(true))
+            if(!condition.started) errors.Add("source condition startup pending "+G11Geometry.Key(condition));
+        return String.Join("; ",errors.ToArray());
     }
     static string ScalarValue(object value)
     {
@@ -532,7 +564,12 @@ public sealed class G11Capture : MonoBehaviour
         ApplyConditions(car,initial.conditions);
         RefreshSourceWheels(car);
         Physics.SyncTransforms();
-        if(body==car.RB) body.ResetInertiaTensor();
+        if(body==car.RB)
+        {
+            RecordSetupBoundary("before-inertia-reset");
+            body.ResetInertiaTensor();
+            RecordSetupBoundary("after-inertia-reset");
+        }
         result.setup_changes.Add("Recompute original body inertia from synchronized source colliders with ResetInertiaTensor; retain native automatic inertia updates; never set a manual source body tensor");
         body.position=inputPose.position; body.rotation=inputPose.rotation;
         body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps); body.angularVelocity=Vector3.zero;
@@ -656,6 +693,8 @@ public sealed class G11Capture : MonoBehaviour
             }
         }
         if(!planeCreated) throw new InvalidOperationException("No measured source contact for isolated probe surface");
+        G11Geometry.IsolateSourceCar();
+        result.setup_changes.Add("Isolated probe keeps the original source car held with all native wheels disabled; assembled restoration is separate");
         body=rb; result.isolated_wheel_probe=true;
     }
     static Control Current()
@@ -741,8 +780,18 @@ public sealed class G11Capture : MonoBehaviour
             catch(Exception error) { Fail(error); }
         }
     }
+    public static Rigidbody ObservedBody { get { return body; } }
+    public static void SetSourceActive(GameObject target,bool value,string caller) { G11Geometry.SetActive(target,value,caller); }
+    public static void SetColliderEnabled(Collider collider,bool value) { G11Geometry.SetEnabled(collider,value); }
+    public static void ObserveLock(object owner,object cargo,string phase)
+    {
+        try { if(!finished) G11Geometry.LockBoundary((mountStuff)owner,(pickupable)cargo,phase,step,completedStorage); }
+        catch(Exception error) { Fail(error); }
+    }
     static void RecordSetupBoundary(string phase)
     {
+        var geometry=G11Geometry.Capture(phase,step,phase=="prepared-held"?"observer.Initialize":"observer.LateUpdate",completedStorage);
+        if(!geometry.complete) throw new InvalidOperationException("Incomplete discovered physical geometry: "+String.Join("; ",geometry.unavailable));
         result.setup_boundaries.Add(new SetupBoundary{phase=phase,frame=Time.frameCount,time=Time.time,
             fixed_time=Time.fixedTime,delta_time=Time.deltaTime,kinematic=body.isKinematic,
             rotation=body.rotation,inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation});
@@ -755,10 +804,13 @@ public sealed class G11Capture : MonoBehaviour
             try
             {
                 RecordSetupBoundary("backlog-drained-held");
+                if(preparedGeometry!=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]))
+                    throw new InvalidOperationException("Physical shape inputs changed across prepared-held and backlog-drained-held");
                 result.held_conditions=ReadConditions(car);
                 result.held_assembly=DescribeAssembly(car);
                 if(!SourceAssemblyReady(car)) throw new InvalidOperationException("Source mounted assembly changed readiness during held boundary");
                 RequireAssembly(result.prepared_assembly,result.held_assembly,"stable authored membership through held boundary");
+                RecordSetupBoundary("before-dynamic");
                 body.isKinematic=false;
                 RecordSetupBoundary("switched-dynamic");
                 if(scenario.setup.height=="wheels-clear") body.constraints=RigidbodyConstraints.FreezeAll;
@@ -766,7 +818,8 @@ public sealed class G11Capture : MonoBehaviour
                 RecordSetupBoundary("canonical-applied");
                 Physics.SyncTransforms();
                 RecordSetupBoundary("canonical-transforms-synchronized");
-                foreach(var wheel in wheels) wheel.enabled=true;
+                if(result.isolated_wheel_probe) foreach(var wheel in wheels) wheel.enabled=true;
+                else G11Geometry.RestoreWheels();
                 RecordSetupBoundary("native-wheels-enabled");
                 foreach(var collider in UnityEngine.Object.FindObjectsOfType<Collider>())
                     surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
@@ -806,6 +859,8 @@ public sealed class G11Capture : MonoBehaviour
         foreach(var slot in car.DrivenWheelSlots) if(slot.part!=null) sample.installed_driven_rims++;
         sample.torque_divisor=car.DrivenWheelsNum();
         for(int index=0;index<4;index++) sample.wheels[index]=ReadWheel(wheels[index]);
+        for(int index=0;index<G11Geometry.nativeWheels.Length;index++)
+            sample.native_wheels[index]=G11Geometry.ReadWheel(G11Geometry.nativeWheels[index]);
         buffer[used++]=sample;
     }
     static Wheel ReadWheel(WheelCollider collider)
@@ -836,6 +891,8 @@ public sealed class G11Capture : MonoBehaviour
         if(finished) return; finished=true; active=false;
         if(timeoutTimer!=null) timeoutTimer.Dispose();
         Application.logMessageReceived-=CaptureLog;
+        result.wheel_activation_events=new G11Geometry.Activation[G11Geometry.activation_count];
+        Array.Copy(G11Geometry.activation_events,result.wheel_activation_events,G11Geometry.activation_count);
         result.samples=new Sample[used];
         if(buffer!=null) Array.Copy(buffer,result.samples,used);
         File.WriteAllText(Path.Combine(Output,"runtime.json"),JsonUtility.ToJson(result,true));
