@@ -7,40 +7,13 @@ use rapier3d::math::{Pose, Rotation, Vector};
 
 impl StartingArea {
     pub fn equip_carried(&mut self, physics: &mut PhysicsWorld) -> Result<bool, ReferenceError> {
-        let Some(id) = self.interaction.held() else {
-            return Ok(false);
-        };
-        let Some(item) = self.items.get(id) else {
-            return Ok(false);
-        };
-        let Some(body) = item
-            .body
-            .and_then(|handle| physics.rapier().bodies.get(handle))
-        else {
-            return Ok(false);
-        };
-        if self.interaction.equipment.item().is_some()
-            || item.location != ItemLocation::Held
-            || item.removed
-            || item.pending_attachment
-            || item.inactive_pose.is_some()
-            || !body.is_enabled()
-            || !body.is_dynamic()
-            || self.interaction.carry.body() != item.body
-            || !self
-                .interaction
-                .pickup_rule(id)
-                .is_some_and(|rule| rule.can_hold_right_hand)
-            || !self.interaction.carry.allows_pickup(
-                id,
-                self.player.seat().is_some(),
-                self.items.mounted(id),
-            )
-            || !physics.body_active(item.body.unwrap())
-            || physics.vehicle_of(item.body.unwrap()).is_some()
+        if !self
+            .interaction
+            .can_equip_carried(&self.player, &self.items, physics)
         {
             return Ok(false);
         }
+        let id = self.interaction.held().expect("validated carry equipment");
         self.interaction.carry.drop(&mut self.items, physics);
         self.interaction.equipment.equip(
             id,

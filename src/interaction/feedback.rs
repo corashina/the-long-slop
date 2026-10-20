@@ -153,14 +153,7 @@ impl InteractionState {
         }
         if let Some(held) = self.held() {
             a.actions.0 |= ActionMask::DROP | ActionMask::THROW | ActionMask::RECENTER;
-            if self.equipment.item().is_none()
-                && self
-                    .pickup_rule(held)
-                    .is_some_and(|rule| rule.can_hold_right_hand)
-                && self
-                    .carry
-                    .allows_pickup(held, player.seat().is_some(), items.mounted(held))
-            {
+            if self.can_equip_carried(player, items, physics) {
                 a.actions.0 |= ActionMask::EQUIP;
             }
             if items

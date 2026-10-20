@@ -1074,6 +1074,37 @@ fn g08_frame_context_hints_match_available_actions() {
         "eligible carry advertises equip and recenter"
     );
     assert_eq!(actions(&game) & (RELEASE | SEATED_RELEASE), 0);
+    let carried = ItemId(128);
+    let body = game.area.items.get(carried).unwrap().body.unwrap();
+    for invalid in 0..5 {
+        match invalid {
+            0 => game.physics.edit_body(body, |body| body.set_enabled(false)),
+            1 => game.area.items.get_mut(carried).unwrap().body = None,
+            2 => game.area.items.get_mut(carried).unwrap().removed = true,
+            3 => game.area.items.get_mut(carried).unwrap().pending_attachment = true,
+            _ => game.physics.edit_body(body, |body| {
+                body.set_body_type(
+                    rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+                    false,
+                )
+            }),
+        }
+        assert_eq!(
+            actions(&game) & EQUIP,
+            0,
+            "invalid carried state {invalid} cannot advertise equip"
+        );
+        assert!(!game.area.equip_carried(&mut game.physics).unwrap());
+        let item = game.area.items.get_mut(carried).unwrap();
+        item.body = Some(body);
+        item.removed = false;
+        item.pending_attachment = false;
+        game.physics.edit_body(body, |body| {
+            body.set_enabled(true);
+            body.set_body_type(rapier3d::prelude::RigidBodyType::Dynamic, false);
+        });
+    }
+    assert_eq!(actions(&game) & EQUIP, EQUIP);
     assert!(game.area.equip_carried(&mut game.physics).unwrap());
     assert_eq!(
         actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),

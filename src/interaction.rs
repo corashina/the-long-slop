@@ -625,6 +625,41 @@ impl InteractionState {
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
+    pub(crate) fn can_equip_carried(
+        &self,
+        player: &PlayerState,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(id) = self.held() else {
+            return false;
+        };
+        let Some(item) = items.get(id) else {
+            return false;
+        };
+        let Some(body) = item
+            .body
+            .and_then(|handle| physics.rapier().bodies.get(handle))
+        else {
+            return false;
+        };
+        self.equipment.item().is_none()
+            && item.location == ItemLocation::Held
+            && !item.removed
+            && !item.pending_attachment
+            && item.inactive_pose.is_none()
+            && body.is_enabled()
+            && body.is_dynamic()
+            && self.carry.body() == item.body
+            && self
+                .pickup_rule(id)
+                .is_some_and(|rule| rule.can_hold_right_hand)
+            && self
+                .carry
+                .allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && physics.body_active(item.body.unwrap())
+            && physics.vehicle_of(item.body.unwrap()).is_none()
+    }
     pub fn owned_light_control(&self, item: ItemId) -> Option<LightControlId> {
         (self.equipment.item() == Some(item) || self.held() == Some(item))
             .then(|| self.held_controls.get(&item).copied())

@@ -51,7 +51,7 @@ Static rows are created at HUD setup. The change adds no allocation to the frame
 The commands below use the read-only reference export and worktree-specific Docker target.
 The [plan's Docker setup](superpowers/plans/2026-10-20-g08-inventory.md#verification-commands) defines the reproducible environment.
 The toolchain image build prepares dependencies. It is separate from a product release build.
-The final native run executed 19 tests, with 19 passed and zero failed.
+The Task 5 milestone at `c9cc930` ran on 2026-10-20. It executed 19 native tests, with zero failures.
 Every filter executed at least one test. The two targeted web feedback tests also passed.
 
 | Exact Cargo command inside Docker | Passed | Failed | Log |
@@ -78,6 +78,32 @@ Input handling did not change. The input web suite was not run.
 | `cargo check --locked --target wasm32-unknown-unknown --workspace --lib` | Exit 0 | `cargo-20261020-104239-260.log` |
 | `cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu` | Exit 0 | `cargo-20261020-104251-917.log` |
 
+## Task 5 review fix 1
+
+Date: 2026-10-20. Base: `c9cc930`.
+The first Task 5 review found an equip hint without the transfer's full physical checks.
+Disabling an eligible carried body left the hint visible, although `equip_carried` rejected it.
+The behavioral RED ran one test and failed on the disabled body.
+Log `cargo-20261020-104855-651.log` records `EQUIP = 16777216` instead of zero.
+
+`InteractionState::can_equip_carried` now owns the complete existing validation.
+Both `equip_carried` and `available_actions` use that predicate. Transfer acceptance is unchanged.
+The source rule-only `EquipmentContext` and recenter timing remain unchanged.
+The helper adds no allocations or retained state.
+The hint regression also checks missing bodies, removed items, pending attachments, and wrong body types.
+Each state suppresses the equip hint and rejects the transfer. Restored valid carry advertises equip again.
+
+The fix run executed all five ignored inventory integration tests. All five passed with zero failures.
+Log `cargo-20261020-105006-795.log` records that run.
+
+| Exact fix check inside Docker | Result | Log |
+| --- | --- | --- |
+| `cargo test --locked --test inventory -- --ignored` | 5 passed, 0 failed | `cargo-20261020-105006-795.log` |
+| `cargo fmt --all -- --check` | Exit 0 | Runner named `cargo-20261020-105045-144.log`. No output file was created. |
+| `cargo check --locked --target wasm32-unknown-unknown --workspace --lib` | Exit 0 | `cargo-20261020-105049-759.log` |
+| `cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu` | Exit 0 | `cargo-20261020-105106-075.log` |
+The earlier 19-test milestone remains separate. Unchanged native filters and HUD web tests were not repeated.
+JavaScript did not change. Browser acceptance, full checks, and product release builds remain deferred.
 ## Failures and repairs
 
 The initial inventory unit baseline passed one test.
@@ -93,7 +119,7 @@ The live availability regression then failed once because the G08 mask bits were
 Log `cargo-20261020-103621-404.log` records that expected failure.
 The first feedback web run failed both tests because rows were missing and scroll text overwrote the flashlight row.
 After the changes, the focused native test and both web tests passed.
-The final native run also includes the availability regression.
+The milestone native run also includes the availability regression.
 
 ## Limits and warnings
 
