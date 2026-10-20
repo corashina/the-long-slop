@@ -52,6 +52,7 @@ public sealed class G11Capture : MonoBehaviour
         public bool has_setup_state;
         public Control[] controls;
         public G11AngularProbe.Input angular;
+        public G11ContactProbe.Input contact;public G11AngularProbe.BodyInput contact_body_input;public bool contact_body_input_from_source;
         public float[] engine_torque_holdout_inputs;
     }
     [Serializable] public struct Wheel
@@ -77,7 +78,7 @@ public sealed class G11Capture : MonoBehaviour
         public Quaternion rotation;
         public Wheel[] wheels;
         public G11Geometry.NativeWheel[] native_wheels;
-        public G11AngularProbe.State angular_state;
+        public G11AngularProbe.State angular_state;public G11ContactProbe.State contact_state;
     }
     [Serializable] public class WheelParameters
     {
@@ -149,7 +150,7 @@ public sealed class G11Capture : MonoBehaviour
         public PoseInput input_pose, spawn_pose;
         public G11Driver.Input driver_input;
         public G11Cargo.Input cargo_input;
-        public G11AngularProbe.BodyInput angular_body_input;
+        public G11AngularProbe.BodyInput angular_body_input;public G11AngularProbe.BodyInput contact_body_input;
         public WheelParameters[] wheels;
         public WheelParameters[] source_control_wheels;
     }
@@ -172,7 +173,7 @@ public sealed class G11Capture : MonoBehaviour
         public AssemblyIdentity held_assembly;
         public string template_source="level1/64898.StartCar02 -> level1/206 -> level1/17687 carscript level1/77839";
         public Sample[] samples;
-        public G11AngularProbe.Report angular;
+        public G11AngularProbe.Report angular;public G11ContactProbe.Report contact;
         public G11Geometry.Activation[] wheel_activation_events;
         public List<G11Geometry.OwnershipCheckpoint> wheel_ownership=G11Geometry.ownershipCheckpoints;
         public List<SetupBoundary> setup_boundaries=new List<SetupBoundary>();
@@ -394,11 +395,12 @@ public sealed class G11Capture : MonoBehaviour
             foreach(var wheel in wheels) if(wheel.GetGroundHit(out sourceContact)) { sourceContactAvailable=true; break; }
             if(scenario.probe_kind=="wheel_collider") CreateIsolatedProbe();
             if(scenario.probe_kind=="wheel_angular") CreateAngularProbe();
+            if(scenario.probe_kind=="single_wheel_contact") CreateContactProbe();
             foreach(var wheel in wheels) wheel.enabled=false;
             if(scenario.has_setup_state) inputPose=scenario.setup_state.input_pose;
             else
             {
-                if(!G11AngularProbe.Active) body.mass*=scenario.setup.load_multiplier;
+                if(!G11AngularProbe.Active && !G11ContactProbe.Active) body.mass*=scenario.setup.load_multiplier;
                 if(scenario.setup.surface=="nearby-source-slope") PlaceOnSourceSlope();
                 if(scenario.setup.height=="one-source-suspension-drop") body.position+=Vector3.up*wheels[0].suspensionDistance;
                 if(scenario.setup.height=="wheels-clear") body.position+=Vector3.up*(wheels[0].radius*4+wheels[0].suspensionDistance);
@@ -424,7 +426,7 @@ public sealed class G11Capture : MonoBehaviour
         CaptureCurves();
         buffer=new Sample[(scenario.duration_frames+1)*256];
         for(int index=0;index<buffer.Length;index++)
-        { buffer[index].wheels=new Wheel[wheels.Length];buffer[index].angular_state=G11AngularProbe.Active?new G11AngularProbe.State():null;buffer[index].native_wheels=new G11Geometry.NativeWheel[G11Geometry.nativeWheels.Length]; }
+        { buffer[index].wheels=new Wheel[wheels.Length];buffer[index].angular_state=G11AngularProbe.Active?new G11AngularProbe.State():null;buffer[index].contact_state=G11ContactProbe.Active?new G11ContactProbe.State():null;buffer[index].native_wheels=new G11Geometry.NativeWheel[G11Geometry.nativeWheels.Length]; }
         RecordSetupBoundary("prepared-held");
         preparedGeometry=G11Geometry.Inputs(G11Geometry.snapshots[G11Geometry.snapshots.Count-1]);
         G11Driver.Prepared();pendingDriver=false;pendingArm=true;
@@ -605,7 +607,7 @@ public sealed class G11Capture : MonoBehaviour
     }
     static void ApplyCanonical(Initial initial)
     {
-        if(!G11AngularProbe.Active) {
+        if(!G11AngularProbe.Active && !G11ContactProbe.Active) {
             body.mass=initial.mass;
             body.centerOfMass=initial.center_of_mass;
         }
@@ -626,7 +628,7 @@ public sealed class G11Capture : MonoBehaviour
         }
         result.setup_changes.Add("Recompute original body inertia from synchronized source colliders with ResetInertiaTensor; retain native automatic inertia updates; never set a manual source body tensor");
         body.position=inputPose.position; body.rotation=inputPose.rotation;
-        if(!G11AngularProbe.Active) { body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);body.angularVelocity=Vector3.zero; }
+        if(!G11AngularProbe.Active && !G11ContactProbe.Active) { body.velocity=body.transform.TransformDirection(scenario.setup.velocity_mps);body.angularVelocity=Vector3.zero; }
         UnityEngine.Random.state=JsonUtility.FromJson<UnityEngine.Random.State>(initial.random_state);
         result.setup_changes.Add("Apply one canonical pre-solve body, engine, fluid, condition, gear, and random record to every repeat");
     }
@@ -657,14 +659,14 @@ public sealed class G11Capture : MonoBehaviour
         return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
-            setup_json=JsonUtility.ToJson(scenario.setup), angular_body_input=G11AngularProbe.Active?G11AngularProbe.report.body_input:null, cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
+            setup_json=JsonUtility.ToJson(scenario.setup), angular_body_input=G11AngularProbe.Active?G11AngularProbe.report.body_input:null, contact_body_input=G11ContactProbe.Active?G11ContactProbe.report.body_input:null, cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
             inertia_tensor=body.inertiaTensor,inertia_tensor_rotation=body.inertiaTensorRotation,
             position=body.position, rotation=body.rotation, velocity=body.velocity, angular_velocity=body.angularVelocity,
             fixed_dt=Time.fixedDeltaTime, gravity=Physics.gravity, engine_rpm=car.Engine.rpm, engine_temperature=car.Engine.temp,
             auto_clutch=settingsscript.s.S.BAutoClutch,auto_shift=settingsscript.s.S.BAutoShift,control_mode=G11Controls.ReadMode(car),
             ignition=car.ignition,running=car.Engine.running,stored_handbrake=car.BhandBrake,selected_gear=car.gear,
             wheel_state=wheels.Select(w=>ReadWheel(w)).ToArray(),
-            source_control_wheels=G11AngularProbe.Active?DescribeAssembly(car).wheels:null,
+            source_control_wheels=(G11AngularProbe.Active || G11ContactProbe.Active)?DescribeAssembly(car).wheels:null,
             conditions=ReadConditions(car),assembly_setup=assemblySetup,assembly_identity=assemblyIdentity,
             fuel_json=car.Tank==null?"unavailable":JsonUtility.ToJson(car.Tank.F),
             oil_json=car.Engine.T==null?"unavailable":JsonUtility.ToJson(car.Engine.T.F),
@@ -674,8 +676,8 @@ public sealed class G11Capture : MonoBehaviour
                 suspension_distance=w.suspensionDistance,force_application_distance=w.forceAppPointDistance,
                 spring_n_per_m=w.suspensionSpring.spring,damper_n_s_per_m=w.suspensionSpring.damper,
                 spring_target=w.suspensionSpring.targetPosition,forward=new Friction(w.forwardFriction),sideways=new Friction(w.sidewaysFriction),
-                driven=!G11AngularProbe.Active && car.WHDriven.Contains(sourceWheels[index]),steer=!G11AngularProbe.Active && car.WHSteer.Contains(sourceWheels[index]),service_brake=!G11AngularProbe.Active && car.WHBrakeOnly.Contains(sourceWheels[index]),
-                handbrake=!G11AngularProbe.Active && car.WHHandBrake.Contains(sourceWheels[index])}).ToArray() };
+                driven=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHDriven.Contains(sourceWheels[index]),steer=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHSteer.Contains(sourceWheels[index]),service_brake=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHBrakeOnly.Contains(sourceWheels[index]),
+                handbrake=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHHandBrake.Contains(sourceWheels[index])}).ToArray() };
     }
     static void CaptureCurves()
     {
@@ -706,6 +708,14 @@ public sealed class G11Capture : MonoBehaviour
         var copied=probe.AddComponent<Rigidbody>();
         G11BodyTrace.HoldCopy(copied);
         return copied;
+    }
+    static void CreateContactProbe()
+    {
+        var source=G11Geometry.nativeWheels.Single(w=>G11Geometry.Key(w)==scenario.contact.source_wheel);
+        var original=body;var probe=new GameObject("G11SingleWheelContactProbe");
+        var copied=CreateHeldProbeBody(probe);
+        wheels=new[]{G11ContactProbe.Configure(scenario.contact,source,original,probe,copied,scenario.contact_body_input_from_source,scenario.contact_body_input)};
+        G11Geometry.IsolateSourceCar();body=copied;result.isolated_wheel_probe=true;result.contact=G11ContactProbe.report;
     }
     static void CreateAngularProbe()
     {
@@ -801,9 +811,10 @@ public sealed class G11Capture : MonoBehaviour
             G11BodyTrace.BeforeSolve();
             if(!active) return;
             if(startFrame<0) startFrame=Time.frameCount;
-            if(G11AngularProbe.Active && step>=scenario.angular.duration_steps) return;
+            if(G11AngularProbe.Active && step>=scenario.angular.duration_steps || G11ContactProbe.Active && step>=scenario.contact.duration_steps) return;
             step++;
-            if(G11AngularProbe.Active) G11AngularProbe.Assign(step);
+            if(G11ContactProbe.Active) G11ContactProbe.Assign(step,observedPhysicsStep,Time.frameCount-startFrame,Time.time,Time.fixedDeltaTime);
+            else if(G11AngularProbe.Active) G11AngularProbe.Assign(step);
             else if(result.isolated_wheel_probe)
             {
                 var control=Current();
@@ -897,7 +908,7 @@ public sealed class G11Capture : MonoBehaviour
                 RecordSetupBoundary("canonical-applied");
                 Physics.SyncTransforms();
                 RecordSetupBoundary("canonical-transforms-synchronized");
-                if(result.isolated_wheel_probe) foreach(var wheel in wheels) wheel.enabled=true;
+                if(result.isolated_wheel_probe) foreach(var wheel in wheels) wheel.enabled=!G11ContactProbe.Active || G11ContactProbe.WheelEnabled;
                 else G11Geometry.RestoreWheels();
                 RecordSetupBoundary("native-wheels-enabled");
                 if(G11AngularProbe.Active) {
@@ -907,6 +918,7 @@ public sealed class G11Capture : MonoBehaviour
                 }
                 foreach(var collider in UnityEngine.Object.FindObjectsOfType<Collider>())
                     surfacePaths[collider.GetInstanceID()]=PathOf(collider.transform);
+                if(G11ContactProbe.Active) {Physics.SyncTransforms();G11ContactProbe.Arm();RecordSetupBoundary("contact-input-applied");G11ContactProbe.RetainInitial();}
                 if(G11AngularProbe.Active) G11AngularProbe.RetainInitial();
                 result.initial=InitialState();
                 RecordSetupBoundary("armed-after-canonical");
@@ -918,9 +930,11 @@ public sealed class G11Capture : MonoBehaviour
             }
             catch(Exception error) { Fail(error); }
         }
+        if(active && !finished && G11ContactProbe.Active && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames && step<scenario.contact.duration_steps)
+        { Fail(new InvalidOperationException("Contact render bound exceeded before required solves"));return; }
         if(active && !finished && G11AngularProbe.Active && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames && step<scenario.angular.duration_steps)
         { Fail(new InvalidOperationException("Angular declared render bound exceeded before required solves"));return; }
-        if(active && !finished && startFrame>=0 && (G11AngularProbe.Active?step>=scenario.angular.duration_steps:Time.frameCount-startFrame>=scenario.duration_frames))
+        if(active && !finished && startFrame>=0 && (G11ContactProbe.Active?step>=scenario.contact.duration_steps:G11AngularProbe.Active?step>=scenario.angular.duration_steps:Time.frameCount-startFrame>=scenario.duration_frames))
         {
             try { G11Geometry.NativeOwnershipCheckpoint("measurement-complete",ObservedPhysicsStep);G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
             catch(Exception error) { Fail(error); }
@@ -951,6 +965,7 @@ public sealed class G11Capture : MonoBehaviour
         sample.torque_divisor=car.DrivenWheelsNum();
         for(int index=0;index<wheels.Length;index++) sample.wheels[index]=ReadWheel(wheels[index]);
         if(G11AngularProbe.Active) G11AngularProbe.Read(sample.angular_state);
+        if(G11ContactProbe.Active) G11ContactProbe.Read(sample.contact_state);
         for(int index=0;index<G11Geometry.nativeWheels.Length;index++)
             sample.native_wheels[index]=G11Geometry.ReadWheel(G11Geometry.nativeWheels[index]);
         buffer[used++]=sample;

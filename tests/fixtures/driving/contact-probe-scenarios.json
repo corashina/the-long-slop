@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "contact-full-tire-baseline",
+      "probe_kind": "single_wheel_contact",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured static copied support",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 5.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one copied native wheel and static measured support",
+        "exact 240 solves and one declared center-of-mass impulse",
+        "body momentum residual with boundary availability"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "contact": {
+        "source_wheel": "level1:58684",
+        "support": "full-tire",
+        "mode": "force",
+        "duration_steps": 240,
+        "event_steps": [
+          1,
+          121,
+          145
+        ],
+        "wheel_enabled": true,
+        "side_speed_mps": 0.0,
+        "torque_scale": 0.0,
+        "offset_m": {
+          "x": 10000.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+      }
+    },
+    {
+      "id": "contact-full-tire-longitudinal",
+      "probe_kind": "single_wheel_contact",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured static copied support",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 5.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one copied native wheel and static measured support",
+        "exact 240 solves and one declared center-of-mass impulse",
+        "body momentum residual with boundary availability"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "contact": {
+        "source_wheel": "level1:58684",
+        "support": "full-tire",
+        "mode": "force",
+        "duration_steps": 240,
+        "event_steps": [
+          1,
+          121,
+          145
+        ],
+        "wheel_enabled": true,
+        "side_speed_mps": 0.0,
+        "torque_scale": 0.25,
+        "offset_m": {
+          "x": 10000.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+      }
+    },
+    {
+      "id": "contact-full-tire-lateral",
+      "probe_kind": "single_wheel_contact",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured static copied support",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 5.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one copied native wheel and static measured support",
+        "exact 240 solves and one declared center-of-mass impulse",
+        "body momentum residual with boundary availability"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "contact": {
+        "source_wheel": "level1:58684",
+        "support": "full-tire",
+        "mode": "force",
+        "duration_steps": 240,
+        "event_steps": [
+          1,
+          121,
+          145
+        ],
+        "wheel_enabled": true,
+        "side_speed_mps": 0.5,
+        "torque_scale": 0.0,
+        "offset_m": {
+          "x": 10000.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+      }
+    },
+    {
+      "id": "contact-full-tire-combined",
+      "probe_kind": "single_wheel_contact",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured static copied support",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 5.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one copied native wheel and static measured support",
+        "exact 240 solves and one declared center-of-mass impulse",
+        "body momentum residual with boundary availability"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "contact": {
+        "source_wheel": "level1:58684",
+        "support": "full-tire",
+        "mode": "force",
+        "duration_steps": 240,
+        "event_steps": [
+          1,
+          121,
+          145
+        ],
+        "wheel_enabled": true,
+        "side_speed_mps": 0.5,
+        "torque_scale": 0.25,
+        "offset_m": {
+          "x": 10000.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+      }
+    },
+    {
+      "id": "contact-full-tire-disabled-combined",
+      "probe_kind": "single_wheel_contact",
+      "source_objects": {
+        "car": {
+          "file": "level1",
+          "path_id": 77839
+        },
+        "engine": {
+          "file": "level1",
+          "path_id": 68282
+        },
+        "wheel_slots": [
+          {
+            "file": "level1",
+            "path_id": 77840
+          },
+          {
+            "file": "level1",
+            "path_id": 77847
+          },
+          {
+            "file": "level1",
+            "path_id": 77862
+          },
+          {
+            "file": "level1",
+            "path_id": 77858
+          }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured static copied support",
+        "velocity_mps": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 5.0
+        },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        {
+          "frame": 0,
+          "throttle": 0.0,
+          "brake": 0.0,
+          "clutch": 0.0,
+          "steer": 0.0,
+          "ignition_button_held": false,
+          "handbrake_press": false
+        }
+      ],
+      "duration_frames": 1800,
+      "required_observations": [
+        "one copied native wheel and static measured support",
+        "exact 240 solves and one declared center-of-mass impulse",
+        "body momentum residual with boundary availability"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "parked",
+      "contact": {
+        "source_wheel": "level1:58684",
+        "support": "full-tire",
+        "mode": "force",
+        "duration_steps": 240,
+        "event_steps": [
+          1,
+          121,
+          145
+        ],
+        "wheel_enabled": false,
+        "side_speed_mps": 0.5,
+        "torque_scale": 0.25,
+        "offset_m": {
+          "x": 10000.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "schedule_unit": "native physics step from 1; assign before consuming solve",
+        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+      }
+    }
+  ]
+}

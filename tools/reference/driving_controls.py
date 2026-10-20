@@ -32,7 +32,7 @@ def validate_schedule(scenario):
     if type(duration) is not int or duration < 2 or not isinstance(controls, list) or not controls:
         raise ValueError('Declared finite duration and control schedule are required')
     isolated = scenario.get('probe_kind') == 'wheel_collider'
-    if scenario.get('probe_kind') not in ('curve', 'assembled_lada', 'wheel_collider', 'wheel_angular'):
+    if scenario.get('probe_kind') not in ('curve', 'assembled_lada', 'wheel_collider', 'wheel_angular', 'single_wheel_contact'):
         raise ValueError('Unknown control protocol')
     fields = ISOLATED_FIELDS if isolated else SOURCE_FIELDS
     frames = []
@@ -138,7 +138,7 @@ def validate_controls(run, scenario):
     validate_mode(initial.get('control_mode'), scenario)
     if type(initial.get('stored_handbrake')) is not bool or initial['stored_handbrake'] is not True:
         raise ValueError('Original garage parking brake initial state is required')
-    wheels = initial.get('source_control_wheels', []) if scenario['probe_kind']=='wheel_angular' else initial.get('wheels', [])
+    wheels = initial.get('source_control_wheels', []) if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact') else initial.get('wheels', [])
     if len(wheels) != 4 or any(any(type(w.get(k)) is not bool for k in ('driven', 'service_brake', 'handbrake')) for w in wheels) or not any(w['handbrake'] for w in wheels):
         raise ValueError('Source wheel brake roles are required')
     samples = run['samples']
@@ -250,7 +250,7 @@ def validate_controls(run, scenario):
         elif phase == 'torque.exit':
             if latest_actuation is None or latest_actuation['frame'] != frame:
                 raise ValueError('Native torque lacks original source actuation')
-            if scenario['probe_kind']=='wheel_angular':
+            if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact'):
                 # Disabled original wheels do not expose active native torque channels.
                 continue
             contributions = []
@@ -271,7 +271,9 @@ def validate_controls(run, scenario):
     if [e['declared_frame'] for e in gear_events] != [c['frame'] for c in scenario['controls'] if c.get('gear_press')]:
         raise ValueError('Declared direct gear event consumption is missing or duplicated')
     validate_required_gears(scenario, gear_events)
-    if scenario['probe_kind']=='wheel_angular':
+    if scenario['probe_kind']=='single_wheel_contact':
+        return dict(protocol='keyboard-digital with separate fixed-step copied contact inputs',handbrake_events=events,gear_events=gear_events,source_native_torque='unavailable while original wheels disabled')
+    if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact'):
         return dict(protocol='keyboard-digital with separate fixed-step copied angular inputs',handbrake_events=events,gear_events=gear_events,source_native_torque='unavailable while original wheels disabled')
     brake_phase = validate_brake_phase(scenario, phase_samples, samples)
     return {'protocol': 'keyboard-digital', 'evidence': EVIDENCE, 'handbrake_events': events, 'gear_events': gear_events, 'brake_phase': brake_phase,

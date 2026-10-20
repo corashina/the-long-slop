@@ -258,9 +258,9 @@ def validate_cargo_input(run, by_phase):
 
 def validate_geometry(run):
     snapshots = run.get('geometry', [])
-    if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider','wheel_angular'):
+    if run.get('probe_kind') not in ('assembled_lada', 'curve', 'wheel_collider','wheel_angular','single_wheel_contact'):
         raise ValueError('Unknown declared physical capture path')
-    isolated = run['probe_kind'] in ('wheel_collider','wheel_angular')
+    isolated = run['probe_kind'] in ('wheel_collider','wheel_angular','single_wheel_contact')
     if run.get('isolated_wheel_probe') is not isolated:
         raise ValueError('Declared physical source-body or isolated-probe path differs')
     required = {'world.entry', 'source-physical-ready', 'cargo-input-applied-held', 'prepared-held', 'backlog-drained-held',

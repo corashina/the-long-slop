@@ -121,7 +121,7 @@ class BodyInputTests(unittest.TestCase):
         capture = (reference/'driving_capture.cs').read_text(encoding='utf-8-sig')
         canonical = capture.split('static void ApplyCanonical(Initial initial)', 1)[1].split('car.Engine.rpm=', 1)[0].strip()[1:]
         load = capture.split('if(scenario.has_setup_state) inputPose=scenario.setup_state.input_pose;', 1)[1].split('if(scenario.setup.surface==', 1)[0].split('{', 1)[1]
-        stubs = STUBS.split('public static class AngularChecks {', 1)[0]
+        stubs = STUBS.split('public static class AngularChecks {', 1)[0]+'public static class G11ContactProbe {public static bool Active {get{return false;}} public static bool WheelEnabled {get{throw new System.Exception("Unexpected contact execution");}} public static void Arm(){throw new System.Exception("Unexpected contact execution");} public static void RetainInitial(){throw new System.Exception("Unexpected contact execution");}}'
         stubs = stubs.replace('public float mass=100,drag,', 'public int massWrites,comWrites,tensorWrites,rotationWrites; float m=100; public float mass {get{return m;}set{massWrites++;m=value;}} public float drag,')
         stubs = stubs.replace('public Vector3 centerOfMass,inertiaTensor,position;public Quaternion rotation,inertiaTensorRotation;', """public Vector3 position;public Quaternion rotation;
         Vector3 com,tensor;Quaternion tensorRotation;public bool normalizeRotation;

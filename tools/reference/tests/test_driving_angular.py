@@ -263,7 +263,7 @@ def capture_arming_source(reference):
     capture=(reference/'driving_capture.cs').read_text(encoding='utf-8-sig')
     canonical=capture.split('body.position=inputPose.position; body.rotation=inputPose.rotation;',1)[1].split('UnityEngine.Random.state=',1)[0]
     activation=capture.split('                ApplyCanonical(result.setup_state);',1)[1].split('                result.initial=InitialState();',1)[0]
-    stubs=STUBS.split('public static class AngularChecks {',1)[0]
+    stubs=STUBS.split('public static class AngularChecks {',1)[0]+'public static class G11ContactProbe {public static bool Active {get{return false;}} public static bool WheelEnabled {get{throw new System.Exception("Unexpected contact execution");}} public static void Arm(){throw new System.Exception("Unexpected contact execution");} public static void RetainInitial(){throw new System.Exception("Unexpected contact execution");}}'
     stubs=stubs.replace('public struct Vector3 {','public struct Vector3 { public static Vector3 zero;')
     stubs=stubs.replace('public class Transform {','public class Transform {public Vector3 TransformDirection(Vector3 v){return v;}')
     stubs=stubs.replace('collisionDetectionMode,writes,angularWrites;','collisionDetectionMode,writes,angularWrites,syncsAtVelocityWrite;')

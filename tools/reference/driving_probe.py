@@ -12,6 +12,7 @@ from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
 from .driving_curve import validate_curve_scenario, validate_curve_run, require_same_curve
 from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input
+from .driving_contact import validate_contact_schedule, validate_contact, contact_initial_inputs, validate_contact_body_input
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
@@ -22,7 +23,7 @@ from .library.types import APP_ID, BUILD_ID, UNITY_VERSION, LibraryReceipt
 from .library.reader import LibraryReader, checked
 
 PROJECT = Path(__file__).resolve().parents[2]
-FILES = ('driving_curve.py', 'driving_angular.cs', 'driving_angular.py', 'driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
+FILES = ('driving_contact.cs', 'driving_contact.py', 'driving_curve.py', 'driving_angular.cs', 'driving_angular.py', 'driving_body_hold.py', 'driving_cargo.cs', 'driving_body_trace.cs', 'driving_controls.cs', 'driving_controls.py', 'driving_probe.py', 'driving_capture.cs', 'driving_driver.cs', 'driving_driver.py', 'driving_lifecycle.cs', 'driving_lifecycle.py', 'driving_geometry.cs', 'driving_geometry.py', 'driving_capture.ps1')
 PHASES = {'input2.entry', 'input2.exit', 'actuation.entry', 'actuation.exit', 'torque.entry', 'torque.exit', 'input.entry', 'input.exit', 'car.entry', 'car.exit', 'engine.entry',
           'engine.exit', 'control.entry', 'control.exit', 'rpm.entry', 'rpm.exit', 'physics.entry', 'physics.exit'}
 
@@ -194,12 +195,12 @@ def validate_run(run, scenario):
     if len(samples) < 2 or run.get('physics_steps', 0) < 2:
         raise ValueError('Native physics samples are missing')
     phases = {s['phase'] for s in samples}
-    required = PHASES if scenario['probe_kind'] in ('assembled_lada','wheel_angular') else {'physics.entry', 'physics.exit'}
+    required = PHASES if scenario['probe_kind'] in ('assembled_lada','wheel_angular','single_wheel_contact') else {'physics.entry', 'physics.exit'}
     if not required <= phases:
         raise ValueError(f'Missing native callback phases: {sorted(required - phases)}')
     if scenario['probe_kind'] == 'curve' and not run.get('curves'):
         raise ValueError('Native Unity curve observations are missing')
-    if scenario['probe_kind'] in ('wheel_collider','wheel_angular') and not run.get('isolated_wheel_probe'):
+    if scenario['probe_kind'] in ('wheel_collider','wheel_angular','single_wheel_contact') and not run.get('isolated_wheel_probe'):
         raise ValueError('Isolated native WheelCollider observations are missing')
     sequence = [s['sequence'] for s in samples]
     if sequence != list(range(1, len(samples) + 1)):
@@ -225,20 +226,24 @@ def validate_run(run, scenario):
                 raise ValueError('Missing native wheel metrics')
         if sample.get('fixed_dt', 0) <= 0:
             raise ValueError('Native fixed timestep is missing')
-        if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != (1 if scenario['probe_kind']=='wheel_angular' else 4):
+        if sample['phase'] == 'physics.exit' and len(sample.get('wheels', [])) != (1 if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact') else 4):
             raise ValueError('Declared native measurement wheel count differs')
-    if scenario['probe_kind']=='wheel_angular' and samples[-1]['frame']>scenario['duration_frames']:
+    if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact') and samples[-1]['frame']>scenario['duration_frames']:
         raise ValueError('Angular render observation bound was exceeded')
-    checked_scenario = dict(scenario, duration_frames=samples[-1]['frame']) if scenario['probe_kind']=='wheel_angular' else scenario
+    checked_scenario = dict(scenario, duration_frames=samples[-1]['frame']) if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact') else scenario
     timing = validate_timing(samples, checked_scenario)
     controls = validate_controls(run, checked_scenario)
     if scenario['probe_kind']=='wheel_angular':
         timing['angular'] = validate_angular(run, scenario)
+    if scenario['probe_kind']=='single_wheel_contact':
+        timing['contact'] = validate_contact(run, scenario)
     domain = (dict(kind='native-engine-curve', input_boundary='reported native curve inputs',
                    qualified_measurements=['enginescript.torqueCurve.Evaluate'],
                    physical_measurements_qualified=False,
                    unqualified_context=['chassis', 'driving', 'suspension'])
               if curve is not None else dict(kind='physical', physical_measurements_qualified=True))
+    if scenario['probe_kind']=='single_wheel_contact':
+        domain=dict(kind='physical-contact',physical_measurements_qualified=True,scope='single copied wheel; measured static support; force mode; body momentum residual',native_contact_impulse_qualified=False)
     return {**({'engine_curve': curve} if curve is not None else {}),
             'qualification_domain': domain,
             'samples': len(samples), 'physics_steps': run['physics_steps'],
@@ -294,6 +299,8 @@ def repeat_state(run, scenario, result):
     state['physical_geometry'] = physical_inputs(next(row for row in run['geometry'] if row['phase'] == 'armed-after-canonical'))
     if scenario['probe_kind'] == 'wheel_angular':
         state['angular_initial'] = angular_initial_inputs(run)
+    if scenario['probe_kind']=='single_wheel_contact':
+        state['contact_initial'] = contact_initial_inputs(run)
     return state
 
 
@@ -303,6 +310,7 @@ def verify(output_root: Path) -> dict:
     if request.get('repeats') != 3:
         raise ValueError('Three fresh native repeats are required')
     results = []
+    contact_body_input = None
     for scenario in request['scenarios']:
         validate_curve_scenario(scenario)
         first_curve = None
@@ -315,6 +323,13 @@ def verify(output_root: Path) -> dict:
             if scenario['probe_kind']=='wheel_angular':
                 validate_angular_body_input(run, canonical_body_input, repeat==1)
                 if repeat==1: canonical_body_input = run['setup_state']['angular_body_input']
+            if scenario['probe_kind']=='single_wheel_contact':
+                first_contact=contact_body_input is None
+                supplied=read_json(directory/'scenario.json')
+                if ('contact_body_input' not in supplied or supplied.get('contact_body_input_from_source') is not first_contact or supplied.get('contact_body_input')!=contact_body_input):
+                    raise ValueError('Contact scenario canonical transport or origin differs')
+                validate_contact_body_input(run,contact_body_input,first_contact)
+                if first_contact: contact_body_input=run['contact']['body_input']
             result = validate_evidence(output, directory, run, scenario)
             if scenario['probe_kind'] == 'curve':
                 require_same_curve(first_curve, result['engine_curve'])
@@ -358,13 +373,14 @@ def capture(source_root: Path, reference_root: Path,
         raise ValueError('Scenario identities must be unique')
     for row in rows:
         if (not row['id'].replace('-', '').isalnum() or row['probe_kind'] not in
-            ('assembled_lada', 'wheel_collider', 'curve', 'wheel_angular') or row['duration_frames'] < 2):
+            ('assembled_lada', 'wheel_collider', 'curve', 'wheel_angular', 'single_wheel_contact') or row['duration_frames'] < 2):
             raise ValueError('Invalid native scenario')
         for key in ('source_objects', 'setup', 'frame_schedule', 'controls'):
             if key not in row: raise ValueError(f'Missing scenario field: {key}')
         validate_curve_scenario(row)
         validate_schedule(row)
         if row['probe_kind']=='wheel_angular': validate_angular_schedule(row)
+        if row['probe_kind']=='single_wheel_contact': validate_contact_schedule(row)
     output.mkdir(parents=True)
     write_json(output / 'preflight.json', {k: v for k, v in pre.items() if k != 'source_geometry_map'})
     write_json(output / 'source-geometry-map.json', pre.get('source_geometry_map', {}))
@@ -381,6 +397,7 @@ def capture(source_root: Path, reference_root: Path,
         if process.returncode:
             raise ValueError(f'Native capture failed; evidence retained: {log}')
     invoke(['-Mode', 'Setup', '-RequestPath', str(output / 'request.json')], output / 'setup.log', 120)
+    contact_body_input = None
     for row in rows:
         first_curve = None
         setup_state = None
@@ -389,6 +406,9 @@ def capture(source_root: Path, reference_root: Path,
             directory = output / row['id'] / f'repeat-{repeat}'
             directory.mkdir(parents=True)
             run_scenario = dict(row)
+            if row['probe_kind']=='single_wheel_contact':
+                run_scenario['contact_body_input']=contact_body_input
+                run_scenario['contact_body_input_from_source']=contact_body_input is None
             if setup_state is not None:
                 run_scenario['setup_state'] = setup_state
                 run_scenario['has_setup_state'] = True
@@ -398,6 +418,9 @@ def capture(source_root: Path, reference_root: Path,
             native_run = read_json(directory / 'runtime.json')
             if row['probe_kind']=='wheel_angular':
                 validate_angular_body_input(native_run, None if setup_state is None else setup_state.get('angular_body_input'), repeat==1)
+            if row['probe_kind']=='single_wheel_contact':
+                validate_contact_body_input(native_run,contact_body_input,contact_body_input is None)
+                if contact_body_input is None: contact_body_input=native_run['contact']['body_input']
             result = validate_evidence(output, directory, native_run, row)
             if row['probe_kind'] == 'curve':
                 require_same_curve(first_curve, result['engine_curve'])

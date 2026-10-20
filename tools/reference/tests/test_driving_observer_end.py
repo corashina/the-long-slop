@@ -43,6 +43,7 @@ public class WheelCollider : Collider {
     public GameObject gameObject { get { if(destroyed) throw new InvalidOperationException("destroyed tracked wheel"); return target; } }
 }
 public static class G11BodyTrace { public static void End() {} }
+public static class G11ContactProbe { public static bool Active {get{return false;}} public class Input { public int duration_steps {get{throw new Exception("Unexpected contact execution");}} } }
 public static class G11AngularProbe { public static bool Active; public class Input { public int duration_steps=1; } }
 public static class Time { public static int frameCount=1; }
 public static class Application {
@@ -69,7 +70,7 @@ CAPTURE = r'''
     public class Sample {}
     public class Result { public bool completed; public string error; public int physics_steps;
         public G11Geometry.Activation[] wheel_activation_events; public Sample[] samples; }
-    public class Scenario { public int duration_frames=1; public G11AngularProbe.Input angular=new G11AngularProbe.Input(); }
+    public class Scenario { public int duration_frames=1; public G11AngularProbe.Input angular=new G11AngularProbe.Input(); public G11ContactProbe.Input contact=new G11ContactProbe.Input(); }
     static Scenario scenario=new Scenario(); public static Result result;
     static bool active,finished; static int startFrame,used,step=1; static Sample[] buffer;
     static readonly object bufferGate=new object(); static Timer timeoutTimer=null;
