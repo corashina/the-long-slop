@@ -16,7 +16,7 @@ from tools.reference.tests.test_driving_controls import scenario_fixture
 
 
 def curve_scenario(holdouts):
-    row = scenario(complete=holdouts == 'complete')
+    row = scenario(complete='confirmation' if holdouts == 'confirmation' else holdouts == 'complete')
     if not holdouts:
         row['id'] = 'curve-boundaries'
         del row['engine_torque_holdout_inputs']; del row['engine_torque_holdout_provenance']
@@ -28,7 +28,7 @@ def observed_run(row, repeat):
     run = probe_fixtures.DrivingProbeTests.sample_run(row['probe_kind'])
     run['scenario'] = row['id']
     if row['probe_kind'] == 'curve':
-        engine = torque_row(complete=row['id'] == 'curve-complete-identification')
+        engine = torque_row(complete='confirmation' if row['id'] == 'curve-predictor-confirmation' else row['id'] == 'curve-complete-identification')
         if row['id'] == 'curve-boundaries':
             engine['inputs'] = PREFIX.copy(); engine['values'] = engine['values'][:52]
         run['curves'] = [engine, dict(owner='carscript', name='other', inputs=[0.], values=[.5])]
@@ -108,7 +108,7 @@ class CurveDomainTests(unittest.TestCase):
         return result, calls, launched
 
     def test_curve_rows_accept_later_body_variation_in_capture_and_verify(self):
-        for holdouts in (False, True, 'complete'):
+        for holdouts in (False, True, 'complete', 'confirmation'):
             for operation in ('capture','verify'):
                 with self.subTest(holdouts=holdouts, operation=operation), tempfile.TemporaryDirectory() as name:
                     output = Path(name).resolve()/'.cache/g11-driving/new'; row = curve_scenario(holdouts)
@@ -118,7 +118,7 @@ class CurveDomainTests(unittest.TestCase):
                         self.assertEqual(run['qualification_domain']['kind'],'native-engine-curve')
                         self.assertIs(run['qualification_domain']['physical_measurements_qualified'],False)
                         self.assertEqual(run['qualification_domain']['qualified_measurements'], ['enginescript.torqueCurve.Evaluate'])
-                    expected_count = 366 if holdouts == 'complete' else 77 if holdouts else 52
+                    expected_count = 244 if holdouts == 'confirmation' else 366 if holdouts == 'complete' else 77 if holdouts else 52
                     states = [item['engine_curve']['input_state'] for item in result['runs']]
                     self.assertEqual(states, [states[0]]*3)
                     state = states[0]
@@ -142,14 +142,16 @@ class CurveDomainTests(unittest.TestCase):
 
 
     def test_both_curve_rows_reject_changed_inputs_and_output_bits(self):
-        for holdouts in (False, True, 'complete'):
+        for holdouts in (False, True, 'complete', 'confirmation'):
             for operation in ('capture','verify'):
-                for change in ('key','wrap','wrap type','input','suffix','output'):
+                for change in ('key','wrap','wrap type','input','suffix','output','missing curve','duplicate curve'):
                     with self.subTest(holdouts=holdouts,operation=operation,change=change), tempfile.TemporaryDirectory() as name:
                         row = curve_scenario(holdouts); output = Path(name).resolve()/'.cache/g11-driving/new'
                         def corrupt(run, repeat):
                             if repeat != 2: return
                             engine = run['curves'][0]
+                            if change == 'missing curve': run['curves'] = []
+                            if change == 'duplicate curve': run['curves'].append(deepcopy(engine))
                             if change == 'key': engine['keys'][0]['out_tangent'] += .001
                             if change == 'wrap': engine['pre_wrap'] = 2
                             if change == 'wrap type': engine['pre_wrap'] = 8.0
@@ -158,13 +160,14 @@ class CurveDomainTests(unittest.TestCase):
                             if change == 'output': engine['values'][0] += .5
                         message = {'key':'key bits differ','wrap':'wraps differ','wrap type':'wraps differ',
                                    'suffix':'prefix or suffix bits differ','input':'input|prefix or suffix bits differ',
-                                   'output':'different engine torque curve bits'}[change]
+                                   'output':'different engine torque curve bits',
+                                   'missing curve':'identity or count differs','duplicate curve':'identity or count differs'}[change]
                         with self.assertRaisesRegex(ValueError,message): self.execute(operation,row,output,change=corrupt)
                         self.assertFalse((output/'receipt.json').exists())
                         if operation == 'capture': self.assertEqual(len(self.last_launched),2)
 
     def test_both_curve_rows_require_all_three_repeats(self):
-        for holdouts in (False, True, 'complete'):
+        for holdouts in (False, True, 'complete', 'confirmation'):
             for operation in ('capture','verify'):
                 with self.subTest(holdouts=holdouts,operation=operation), tempfile.TemporaryDirectory() as name:
                     row = curve_scenario(holdouts); output = Path(name).resolve()/'.cache/g11-driving/new'
@@ -173,7 +176,7 @@ class CurveDomainTests(unittest.TestCase):
                     self.assertFalse((output/'receipt.json').exists())
 
     def test_every_per_run_gate_still_rejects_before_curve_qualification(self):
-        for holdouts in (True, 'complete'):
+        for holdouts in (True, 'complete', 'confirmation'):
             for operation in ('capture','verify'):
                 for gate in self.GATES:
                     with self.subTest(operation=operation,gate=gate), tempfile.TemporaryDirectory() as name:
@@ -185,7 +188,7 @@ class CurveDomainTests(unittest.TestCase):
                         if operation=='capture': self.assertEqual(len(self.last_launched),2)
 
     def test_initial_and_raw_log_gates_remain_required_for_curve_rows(self):
-        for holdouts in (True, 'complete'):
+        for holdouts in (True, 'complete', 'confirmation'):
             for operation in ('capture','verify'):
                 for failure in ('initial','log','completion','exit'):
                     with self.subTest(operation=operation,failure=failure), tempfile.TemporaryDirectory() as name:
@@ -216,7 +219,7 @@ class CurveDomainTests(unittest.TestCase):
             'physics': ('scratch/patch-receipt.json', lambda d: d.update(
                 source_physics_module_sha256='changed'), 'physics dependencies'),
         }
-        for operation in ('capture', 'verify'):
+        for holdouts, operation in ((h, op) for h in ('complete', 'confirmation') for op in ('capture', 'verify')):
             for name, (filename, change, message) in defects.items():
                 with self.subTest(operation=operation, defect=name), tempfile.TemporaryDirectory() as directory:
                     output = Path(directory).resolve()/'.cache/g11-driving/new'
@@ -224,11 +227,11 @@ class CurveDomainTests(unittest.TestCase):
                         path = root/filename
                         data = probe.read_json(path); change(data); probe.write_json(path, data)
                     with self.assertRaisesRegex(ValueError, message):
-                        self.execute(operation, curve_scenario('complete'), output, campaign_change=corrupt)
+                        self.execute(operation, curve_scenario(holdouts), output, campaign_change=corrupt)
                     self.assertFalse((output/'receipt.json').exists())
 
     def test_complete_audio_and_process_gates_stop_at_second_repeat(self):
-        for operation in ('capture', 'verify'):
+        for holdouts, operation in ((h, op) for h in ('complete', 'confirmation') for op in ('capture', 'verify')):
             for defect in ('audio', 'process'):
                 with self.subTest(operation=operation, defect=defect), tempfile.TemporaryDirectory() as directory:
                     output = Path(directory).resolve()/'.cache/g11-driving/new'
@@ -240,7 +243,7 @@ class CurveDomainTests(unittest.TestCase):
                             probe.write_json(path/'process.json', dict(pid=0, executable='changed'))
                     message = 'audio creation or destruction provenance' if defect == 'audio' else 'process evidence failed'
                     with self.assertRaisesRegex(ValueError, message):
-                        self.execute(operation, curve_scenario('complete'), output, change=corrupt, file_change=corrupt_file)
+                        self.execute(operation, curve_scenario(holdouts), output, change=corrupt, file_change=corrupt_file)
                     self.assertFalse((output/'receipt.json').exists())
                     if operation == 'capture': self.assertEqual(len(self.last_launched), 2)
 

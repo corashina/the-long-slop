@@ -8,6 +8,7 @@ import struct
 
 SCENARIO_ID = 'curve-coefficient-holdouts'
 COMPLETE_SCENARIO_ID = 'curve-complete-identification'
+CONFIRMATION_SCENARIO_ID = 'curve-predictor-confirmation'
 INPUT_FIELD = 'engine_torque_holdout_inputs'
 PROVENANCE_FIELD = 'engine_torque_holdout_provenance'
 INPUT_BITS = (
@@ -66,6 +67,36 @@ COMPLETE_PROVENANCE = {
     'owner': 'enginescript', 'name': 'torqueCurve',
     'design_results_sha256': '4d75b86cbe88acd58f20dda76eeb2c4be809478b1aa29e1e210e8c2002c63e61',
     'inputs_binary32_le_sha256': 'd07975062c25a031100585f2f308cc7c0fc5cfce328c8a788849c1ca171c5a8b'}
+CONFIRMATION_INPUT_BITS = (
+    '04072d2d', '080e5a5a', '0c158787', '101cb4b4', '1423e1e1', '182b0f0f', '1c323c3c', '20396969',
+    '24409696', '2847c3c3', '2c4ef0f0', '30561e1e', '345d4b4b', '38647878', '3c6ba5a5', '4072d2d2',
+    '447dda5a', '4481b4b4', '44858f0f', '44896969', '448d43c3', '44911e1e', '4494f878', '4498d2d2',
+    '449cad2d', '44a08787', '44a461e1', '44a83c3c', '44ac1696', '44aff0f0', '44b3cb4b', '44b7a5a5',
+    '44bf2d2d', '44c2da5a', '44c68787', '44ca34b4', '44cde1e1', '44d18f0f', '44d53c3c', '44d8e969',
+    '44dc9696', '44e043c3', '44e3f0f0', '44e79e1e', '44eb4b4b', '44eef878', '44f2a5a5', '44f652d2',
+    '44fc03c3', '44fe0787', '45000b4b', '45020f0f', '450412d2', '45061696', '45081a5a', '450a1e1e',
+    '450c21e1', '450e25a5', '45102969', '45122d2d', '451430f0', '451634b4', '45183878', '451a3c3c',
+    '451e1696', '451fed2d', '4521c3c3', '45239a5a', '452570f0', '45274787', '45291e1e', '452af4b4',
+    '452ccb4b', '452ea1e1', '45307878', '45324f0f', '453425a5', '4535fc3c', '4537d2d2', '4539a969',
+    '453d5696', '453f2d2d', '454103c3', '4542da5a', '4544b0f0', '45468787', '45485e1e', '454a34b4',
+    '454c0b4b', '454de1e1', '454fb878', '45518f0f', '455365a5', '45553c3c', '455712d2', '4558e969',
+    '455c9696', '455e6d2d', '456043c3', '45621a5a', '4563f0f0', '4565c787', '45679e1e', '456974b4',
+    '456b4b4b', '456d21e1', '456ef878', '4570cf0f', '4572a5a5', '45747c3c', '457652d2', '45782969',
+    '457b1878', '457c30f0', '457d4969', '457e61e1', '457f7a5a', '458092d2', '4581ab4b', '4582c3c3',
+    '4583dc3c', '4584f4b4', '45860d2d', '458725a5', '45883e1e', '45895696', '458a6f0f', '458b8787',
+    '458d8b4b', '458e7696', '458f61e1', '45904d2d', '45913878', '459223c3', '45930f0f', '4593fa5a',
+    '4594e5a5', '4595d0f0', '4596bc3c', '4597a787', '459892d2', '45997e1e', '459a6969', '459b54b4',
+    '459d2b4b', '459e1696', '459f01e1', '459fed2d', '45a0d878', '45a1c3c3', '45a2af0f', '45a39a5a',
+    '45a485a5', '45a570f0', '45a65c3c', '45a74787', '45a832d2', '45a91e1e', '45aa0969', '45aaf4b4',
+    '45acfa5a', '45ae14b4', '45af2f0f', '45b04969', '45b163c3', '45b27e1e', '45b39878', '45b4b2d2',
+    '45b5cd2d', '45b6e787', '45b801e1', '45b91c3c', '45ba3696', '45bb50f0', '45bc6b4b', '45bd85a5',
+    '45bf8b4b', '45c07696', '45c161e1', '45c24d2d', '45c33878', '45c423c3', '45c50f0f', '45c5fa5a',
+    '45c6e5a5', '45c7d0f0', '45c8bc3c', '45c9a787', '45ca92d2', '45cb7e1e', '45cc6969', '45cd54b4',
+)
+CONFIRMATION_PROVENANCE = {
+    'owner': 'enginescript', 'name': 'torqueCurve',
+    'experiment_freeze_sha256': '18c05918d03b43f570eb69b9ee5785a8ab6b6779cb3358cd7a5a3646b77d0a4a',
+    'inputs_binary32_le_sha256': 'c7d1dff06cc0404a73a8b91cb691986af6b6ada272c8eeb0eb3ccfe8f03496d9'}
 BASE_ROW_SHA256 = '611dd801fb756b26726bd81e6d528080958d0813d49b47e20a744f6408fe4411'
 SERIALIZED_TORQUE_CURVE_SHA256 = '5586ee5cf414a3d7db1a64f198af209ecd5bfcf95310bf853c5a7af85737ea89'
 # Shipped WrapMode.ClampForever, confirmed by qualified focused07 native metadata.
@@ -98,6 +129,8 @@ def validate_curve_scenario(scenario):
         expected_bits, provenance = INPUT_BITS, PROVENANCE
     elif scenario.get('id') == COMPLETE_SCENARIO_ID:
         expected_bits, provenance = COMPLETE_INPUT_BITS, COMPLETE_PROVENANCE
+    elif scenario.get('id') == CONFIRMATION_SCENARIO_ID:
+        expected_bits, provenance = CONFIRMATION_INPUT_BITS, CONFIRMATION_PROVENANCE
     else:
         if present:
             raise ValueError('Engine torque holdouts are reserved for their exact scenario')
@@ -173,6 +206,8 @@ def validate_curve_run(run, scenario):
         expected += INPUT_BITS
     elif scenario['id'] == COMPLETE_SCENARIO_ID:
         expected += COMPLETE_INPUT_BITS
+    elif scenario['id'] == CONFIRMATION_SCENARIO_ID:
+        expected += CONFIRMATION_INPUT_BITS
     count = len(expected)
     if not isinstance(inputs, list) or not isinstance(values, list) or len(inputs) != count or len(values) != count:
         raise ValueError(f'Native engine torque requires {count} inputs and values')
