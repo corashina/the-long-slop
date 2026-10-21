@@ -71,7 +71,7 @@
       "duration_frames": 1800,
       "required_observations": [
         "one copied native wheel and static measured support",
-        "exact 240 solves and one declared center-of-mass impulse",
+        "exact 240 solves and one additive velocity assignment",
         "body momentum residual with boundary availability"
       ],
       "input_mode": "keyboard-digital",
@@ -79,7 +79,7 @@
       "contact": {
         "source_wheel": "level1:58684",
         "support": "full-tire",
-        "mode": "force",
+        "mode": "direct-velocity",
         "duration_steps": 240,
         "event_steps": [
           1,
@@ -95,7 +95,7 @@
           "z": 0.0
         },
         "schedule_unit": "native physics step from 1; assign before consuming solve",
-        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+        "provenance": "declared copied-rig additive velocity delta; consuming body response starts at physics.entry"
       }
     },
     {
@@ -168,7 +168,7 @@
       "duration_frames": 1800,
       "required_observations": [
         "one copied native wheel and static measured support",
-        "exact 240 solves and one declared center-of-mass impulse",
+        "exact 240 solves and one additive velocity assignment",
         "body momentum residual with boundary availability"
       ],
       "input_mode": "keyboard-digital",
@@ -176,7 +176,7 @@
       "contact": {
         "source_wheel": "level1:58684",
         "support": "full-tire",
-        "mode": "force",
+        "mode": "direct-velocity",
         "duration_steps": 240,
         "event_steps": [
           1,
@@ -192,7 +192,7 @@
           "z": 0.0
         },
         "schedule_unit": "native physics step from 1; assign before consuming solve",
-        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+        "provenance": "declared copied-rig additive velocity delta; consuming body response starts at physics.entry"
       }
     },
     {
@@ -265,7 +265,7 @@
       "duration_frames": 1800,
       "required_observations": [
         "one copied native wheel and static measured support",
-        "exact 240 solves and one declared center-of-mass impulse",
+        "exact 240 solves and one additive velocity assignment",
         "body momentum residual with boundary availability"
       ],
       "input_mode": "keyboard-digital",
@@ -273,7 +273,7 @@
       "contact": {
         "source_wheel": "level1:58684",
         "support": "full-tire",
-        "mode": "force",
+        "mode": "direct-velocity",
         "duration_steps": 240,
         "event_steps": [
           1,
@@ -289,7 +289,7 @@
           "z": 0.0
         },
         "schedule_unit": "native physics step from 1; assign before consuming solve",
-        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+        "provenance": "declared copied-rig additive velocity delta; consuming body response starts at physics.entry"
       }
     },
     {
@@ -362,7 +362,7 @@
       "duration_frames": 1800,
       "required_observations": [
         "one copied native wheel and static measured support",
-        "exact 240 solves and one declared center-of-mass impulse",
+        "exact 240 solves and one additive velocity assignment",
         "body momentum residual with boundary availability"
       ],
       "input_mode": "keyboard-digital",
@@ -370,7 +370,7 @@
       "contact": {
         "source_wheel": "level1:58684",
         "support": "full-tire",
-        "mode": "force",
+        "mode": "direct-velocity",
         "duration_steps": 240,
         "event_steps": [
           1,
@@ -386,7 +386,7 @@
           "z": 0.0
         },
         "schedule_unit": "native physics step from 1; assign before consuming solve",
-        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+        "provenance": "declared copied-rig additive velocity delta; consuming body response starts at physics.entry"
       }
     },
     {
@@ -459,7 +459,7 @@
       "duration_frames": 1800,
       "required_observations": [
         "one copied native wheel and static measured support",
-        "exact 240 solves and one declared center-of-mass impulse",
+        "exact 240 solves and one additive velocity assignment",
         "body momentum residual with boundary availability"
       ],
       "input_mode": "keyboard-digital",
@@ -467,7 +467,7 @@
       "contact": {
         "source_wheel": "level1:58684",
         "support": "full-tire",
-        "mode": "force",
+        "mode": "direct-velocity",
         "duration_steps": 240,
         "event_steps": [
           1,
@@ -483,7 +483,7 @@
           "z": 0.0
         },
         "schedule_unit": "native physics step from 1; assign before consuming solve",
-        "provenance": "declared copied-rig contact input; body momentum residual is not a native contact impulse"
+        "provenance": "declared copied-rig additive velocity delta; consuming body response starts at physics.entry"
       }
     }
   ]

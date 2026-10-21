@@ -32,9 +32,10 @@ public static class G11ContactProbe
     [Serializable] public class Assignment {
         public int step,event_revision;public float motor_argument_nm,brake_argument_nm,steer_argument_degrees,motor_nm,brake_nm,steer_degrees;
     }
-    [Serializable] public class Impulse {
-        public int producer_revision,consuming_step,application_count,mode;
-        public float mass,side_speed_mps;public Vector3 pre_velocity,target_velocity,argument,application_point;
+    [Serializable] public class VelocityInput {
+        public int schema_version=1,step,event_revision,application_count,entry_sequence;
+        public bool parsed_observed,assignment_observed,entry_observed;
+        public int parsed_delta;public G11AngularProbe.VectorWords sideways,pre_velocity,setter_argument,entry_velocity;
     }
     [Serializable] public class Geometry {
         public Vector3 query_origin,query_direction,source_point,normal,forward,sideways,source_forward,source_up;
@@ -51,13 +52,13 @@ public static class G11ContactProbe
         public G11AngularProbe.BodyInput body_input;public bool body_input_from_source;
         public G11AngularProbe.TransformInput wheel_input;public Geometry geometry;
         public bool source_sprung_mass_available,copied_sprung_mass_available;public float source_sprung_mass,copied_sprung_mass;
-        public float n0,q0,motor_argument;public Assignment[] assignments;public Impulse impulse;public State initial_state;
+        public float n0,q0,motor_argument;public Assignment[] assignments;public VelocityInput velocity_input;public State initial_state;
     }
     [Serializable] public struct SetupMark {
         public int frame,physics_step,input_revision;
     }
     [Serializable] public struct ParsedReadout {
-        public bool observed,from_source,canonical_is_null;public SetupMark mark;
+        public bool observed,from_source,canonical_is_null;public int parsed_delta;public SetupMark mark;
     }
     [Serializable] public struct ConfigureReadout {
         public bool observed,active,copied_kinematic,source_kinematic,from_source,canonical_is_null;
@@ -69,9 +70,9 @@ public static class G11ContactProbe
         public ParsedReadout after_from_json;public ConfigureReadout before_guard;
     }
     public static readonly Readout readout=new Readout();
-    public static void ObserveAfterFromJson(bool fromSource,G11AngularProbe.BodyInput canonical,SetupMark mark)
+    public static void ObserveAfterFromJson(float sideDelta,bool fromSource,G11AngularProbe.BodyInput canonical,SetupMark mark)
     {
-        readout.after_from_json=new ParsedReadout{observed=true,from_source=fromSource,canonical_is_null=canonical==null,mark=mark};
+        readout.after_from_json=new ParsedReadout{observed=true,from_source=fromSource,canonical_is_null=canonical==null,parsed_delta=G11AngularProbe.Word(sideDelta),mark=mark};
     }
     public static Report report;
     static Input input;static WheelCollider wheel;static Rigidbody body,original;static Collider support;
@@ -90,7 +91,7 @@ public static class G11ContactProbe
         readout.before_guard=observed;
         if(observed.reject_active || observed.reject_copied_dynamic || observed.reject_source_dynamic || observed.reject_source_key || observed.reject_canonical_origin)
             throw new InvalidOperationException("Contact source, hold, or canonical origin differs");
-        if(declared.duration_steps!=240 || declared.mode!="force" || declared.support!="full-tire" || declared.event_steps==null || declared.event_steps.Length!=3 || declared.event_steps[0]!=1 || declared.event_steps[1]!=121 || declared.event_steps[2]!=145)
+        if(declared.duration_steps!=240 || declared.mode!="direct-velocity" || declared.support!="full-tire" || declared.event_steps==null || declared.event_steps.Length!=3 || declared.event_steps[0]!=1 || declared.event_steps[1]!=121 || declared.event_steps[2]!=145)
             throw new InvalidOperationException("Contact fixed schedule differs");
         input=declared;body=held;original=sourceBody;
         var constructor=G11AngularProbe.ReadBody(body);var raw=G11AngularProbe.ReadBody(original);
@@ -126,7 +127,7 @@ public static class G11ContactProbe
             wheel_input=new G11AngularProbe.TransformInput {position=child.transform.position,rotation=rotation,local_scale=Vector3.one},n0=n0,q0=q0,motor_argument=input.torque_scale*q0,
             geometry=new Geometry {query_origin=origin,query_direction=-source.transform.up,query_distance=10f,query_mask=Physics.DefaultRaycastLayers,selection_rule="nearest non-trigger static hit outside original car hierarchy",source_collider_key=G11Geometry.Key(chosen.collider),source_collider_id=chosen.collider.GetInstanceID(),source_material_id=chosen.collider.sharedMaterial==null?0:chosen.collider.sharedMaterial.GetInstanceID(),source_point=chosen.point,normal=n,forward=f,sideways=s,source_forward=source.transform.forward,source_up=source.transform.up,source_center=center,source_world_com=original.worldCenterOfMass,source_center_offset=sourceOffset,source_signed_height=height,copied_center=copiedCenter,copied_com_offset=body.worldCenterOfMass-copiedCenter,copied_held_world_com=body.worldCenterOfMass,
                 support_id=support.GetInstanceID(),support_material_id=support.sharedMaterial==null?0:support.sharedMaterial.GetInstanceID(),support_position=plane.transform.position,support_scale=plane.transform.localScale,support_rotation=plane.transform.rotation,position_spacing=new Vector3(Spacing(copiedCenter.x),Spacing(copiedCenter.y),Spacing(copiedCenter.z))},
-            assignments=new Assignment[3],impulse=new Impulse(),initial_state=new State()};
+            assignments=new Assignment[3],velocity_input=new VelocityInput {parsed_observed=readout.after_from_json.observed,parsed_delta=readout.after_from_json.parsed_delta,sideways=new G11AngularProbe.VectorWords(s)},initial_state=new State()};
         for(int i=0;i<3;i++)report.assignments[i]=new Assignment();
         G11AngularProbe.ReadProfile(source,report.source_profile);G11AngularProbe.ReadProfile(wheel,report.copied_profile);
         try {report.source_sprung_mass=source.sprungMass;report.source_sprung_mass_available=true;}catch {report.source_sprung_mass_available=false;}
@@ -144,12 +145,13 @@ public static class G11ContactProbe
         var before=Observe();preInputs[step-1]=new PreInput {native_wheel_count=5,native_wheel0=G11Geometry.ReadWheel(G11Geometry.nativeWheels[0]),native_wheel1=G11Geometry.ReadWheel(G11Geometry.nativeWheels[1]),native_wheel2=G11Geometry.ReadWheel(G11Geometry.nativeWheels[2]),native_wheel3=G11Geometry.ReadWheel(G11Geometry.nativeWheels[3]),native_wheel4=G11Geometry.ReadWheel(G11Geometry.nativeWheels[4]),step=step,observed_step=observedStep,frame=frame,time=time,fixed_dt=dt,input_revision=revision,observed=before};
         if(revision<3 && input.event_steps[revision]==step) {
             if(revision==1) {
-                if(report.impulse.application_count!=0) throw new InvalidOperationException("Contact impulse repeated");
-                var v=before.body.velocity;var target=5f*report.geometry.forward+input.side_speed_mps*report.geometry.sideways+Vector3.Dot(v,report.geometry.normal)*report.geometry.normal;
-                var argument=report.body_input.mass*(target-v);
-                var impulse=report.impulse;impulse.mass=report.body_input.mass;impulse.pre_velocity=v;impulse.target_velocity=target;impulse.side_speed_mps=input.side_speed_mps;
-                impulse.argument=argument;impulse.application_point=before.world_center_of_mass;impulse.mode=(int)ForceMode.Impulse;impulse.producer_revision=revision+1;impulse.consuming_step=step;
-                body.AddForce(argument,ForceMode.Impulse);impulse.application_count++;
+                var journal=report.velocity_input;
+                if(journal.application_count!=0) throw new InvalidOperationException("Contact velocity assignment repeated");
+                var target=before.body.velocity+report.geometry.sideways*input.side_speed_mps;
+                journal.pre_velocity=new G11AngularProbe.VectorWords(before.body.velocity);
+                journal.setter_argument=new G11AngularProbe.VectorWords(target);
+                journal.step=step;journal.event_revision=revision+1;
+                body.velocity=target;journal.application_count++;journal.assignment_observed=true;
             }
             float motorArgument=revision==1?report.motor_argument:0f,brakeArgument=0f,steerArgument=0f;
             wheel.motorTorque=motorArgument;wheel.brakeTorque=brakeArgument;wheel.steerAngle=steerArgument;
@@ -159,7 +161,15 @@ public static class G11ContactProbe
         }
         if(revision==0 || revision<3 && input.event_steps[revision]<step) throw new InvalidOperationException("Contact assignment missing or late");
         assignedStep=step;
-        if(step==240 && (revision!=3 || report.impulse.application_count!=1)) throw new InvalidOperationException("Contact event completion differs");
+        if(step==240 && (revision!=3 || report.velocity_input.application_count!=1)) throw new InvalidOperationException("Contact event completion differs");
+    }
+    public static void ObserveEntry(State state,int sequence,int step,string phase) {
+        if(step!=121 || phase!="physics.entry") return;
+        var journal=report.velocity_input;
+        if(journal.entry_observed || !journal.assignment_observed || journal.application_count!=1)
+            throw new InvalidOperationException("Contact entry capture repeated or assignment missing");
+        journal.entry_velocity=new G11AngularProbe.VectorWords(state.observed.body.velocity);
+        journal.entry_sequence=sequence;journal.entry_observed=true;
     }
     static Observation Observe() {
         var value=new Observation {body_parent_is_null=body.transform.parent==null,wheel_parent_is_body=wheel.transform.parent==body.transform,body=G11AngularProbe.ReadBody(body),original_body=G11AngularProbe.ReadBody(original),body_scale=body.transform.localScale,body_lossy_scale=body.transform.lossyScale,world_center_of_mass=body.worldCenterOfMass,

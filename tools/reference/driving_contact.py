@@ -4,11 +4,11 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from .driving_angular import BODY_INPUT_FIELDS, validate_source_ownership, validate_angular_inertia
+from .driving_angular import BODY_INPUT_FIELDS, validate_source_ownership, validate_angular_inertia, binary32_word, binary32_value, word_shape
 from .driving_controls import f32
 
 ZERO=dict(x=0.,y=0.,z=0.)
-PROVENANCE='declared copied-rig contact input; body momentum residual is not a native contact impulse'
+PROVENANCE='declared copied-rig additive velocity delta; consuming body response starts at physics.entry'
 PROFILE_FIELDS=('center','radius','mass','damping','suspension_distance','force_application_distance','spring_n_per_m','damper_n_s_per_m','spring_target','forward','sideways')
 
 def contact_rows():
@@ -20,15 +20,15 @@ def contact_rows():
         row.update(id='contact-full-tire-'+suffix,probe_kind='single_wheel_contact',duration_frames=1800,input_mode='keyboard-digital',parking_brake_intent='parked')
         row['setup'].update(support='full-tire',surface='measured static copied support',load_multiplier=1.,removed_driven_rims=0,velocity_mps=dict(x=0.,y=0.,z=5.))
         row['controls']=[dict(frame=0,throttle=0.,brake=0.,clutch=0.,steer=0.,ignition_button_held=False,handbrake_press=False)]
-        row['contact']=dict(source_wheel='level1:58684',support='full-tire',mode='force',duration_steps=240,event_steps=[1,121,145],wheel_enabled=enabled,side_speed_mps=side,torque_scale=scale,offset_m=dict(x=10000.,y=0.,z=0.),schedule_unit='native physics step from 1; assign before consuming solve',provenance=PROVENANCE)
-        row['required_observations']=['one copied native wheel and static measured support','exact 240 solves and one declared center-of-mass impulse','body momentum residual with boundary availability']
+        row['contact']=dict(source_wheel='level1:58684',support='full-tire',mode='direct-velocity',duration_steps=240,event_steps=[1,121,145],wheel_enabled=enabled,side_speed_mps=side,torque_scale=scale,offset_m=dict(x=10000.,y=0.,z=0.),schedule_unit='native physics step from 1; assign before consuming solve',provenance=PROVENANCE)
+        row['required_observations']=['one copied native wheel and static measured support','exact 240 solves and one additive velocity assignment','body momentum residual with boundary availability']
         row['frame_schedule']['sampling']='fixed-step contact pre-input before physics.entry; native physics.exit; original callbacks unchanged'
         rows.append(row)
     return rows
 
 def validate_contact_schedule(row):
     expected=next((r for r in contact_rows() if r['id']==row.get('id')),None)
-    if row!=expected:raise ValueError('Declared contact inputs changed; review a new row before measurement')
+    if contact_exact(row)!=contact_exact(expected):raise ValueError('Declared contact inputs changed; review a new row before measurement')
     return row['contact']
 
 def dot(a,b):return sum(a[k]*b[k] for k in ZERO)
@@ -59,6 +59,51 @@ def validate_contact_body_input(run,canonical,from_source):
     require(value==expected and all(run.get(n,{}).get('contact_body_input')==expected for n in ('setup_state','initial')),'Contact exact canonical body input differs')
     require(value['mass']>0 and vector(value['center_of_mass']) and vector(value['inertia_tensor']) and all(v>0 for v in value['inertia_tensor'].values()),'Contact declared mass or tensor invalid')
 
+def validate_contact_supplied(run,row,supplied):
+    validate_contact_schedule(row)
+    require(isinstance(supplied,dict),'Contact supplied row missing')
+    require(all(contact_exact(supplied.get(key))==contact_exact(value) for key,value in row.items()),'Contact supplied row differs')
+    journal=run.get('contact',{}).get('velocity_input',{})
+    delta=supplied['contact']['side_speed_mps']
+    require(type(delta) in (int,float) and type(journal.get('parsed_delta')) is int and
+            binary32_word(delta)==journal['parsed_delta'],'Contact supplied delta word differs')
+
+def validate_velocity_input(run):
+    report=run['contact'];journal=word_shape(report.get('velocity_input'),
+        ('schema_version','parsed_observed','assignment_observed','entry_observed','step','event_revision',
+         'application_count','entry_sequence','parsed_delta','sideways','pre_velocity','setter_argument','entry_velocity'),'contact velocity input')
+    require('impulse' not in report,'Contact obsolete impulse schema')
+    for key in ('parsed_observed','assignment_observed','entry_observed'):
+        require(journal[key] is True,'Contact velocity input observation missing')
+    for key,value in (('schema_version',1),('step',121),('event_revision',2),('application_count',1)):
+        require(type(journal[key]) is int and journal[key]==value,'Contact velocity input metadata differs')
+    require(type(journal['entry_sequence']) is int and journal['entry_sequence']>0,'Contact entry sequence differs')
+    delta=binary32_value(journal['parsed_delta'])
+    require(journal['parsed_delta']==binary32_word(report['declared']['side_speed_mps']),'Contact parsed delta differs from declared row')
+    decoded={}
+    for name in ('sideways','pre_velocity','setter_argument','entry_velocity'):
+        words=word_shape(journal[name],ZERO,'contact '+name)
+        decoded[name]={axis:binary32_value(words[axis]) for axis in ZERO}
+    entries=[sample for sample in run['samples'] if sample['step']==121 and sample['phase']=='physics.entry']
+    require(len(entries)==1,'Contact velocity entry link missing or duplicated')
+    sample=entries[0];state=sample['contact_state']
+    require(type(sample.get('sequence')) is int and journal['entry_sequence']==sample['sequence'],'Contact entry sequence link differs')
+    require(type(sample['step']) is int and type(state['step']) is int and type(state['event_revision']) is int and state['step']==journal['step'] and state['event_revision']==journal['event_revision'],'Contact entry revision link differs')
+    for name,values in (('sideways',report['geometry']['sideways']),
+                        ('pre_velocity',state['pre_input']['observed']['body']['velocity']),
+                        ('entry_velocity',state['observed']['body']['velocity'])):
+        require(vector(values),'Contact saved '+name+' vector missing')
+    expected={axis:binary32_word(f32(decoded['pre_velocity'][axis]+f32(decoded['sideways'][axis]*delta))) for axis in ZERO}
+    require(journal['setter_argument']==expected,'Contact velocity setter arithmetic differs')
+    require(journal['entry_velocity']==journal['setter_argument'],'Contact velocity entry readback differs')
+    return journal
+
+def contact_exact(value):
+    if isinstance(value,dict):return {key:contact_exact(item) for key,item in value.items()}
+    if isinstance(value,list):return [contact_exact(item) for item in value]
+    if type(value) is float:return ('float',value.hex())
+    return (type(value).__name__,value)
+
 def contact_initial_inputs(run):
     report=run['contact'];state=deepcopy(report['initial_state']);observed=state['observed']
     # Raw source properties and origin remain provenance outside compared copied Initial inputs.
@@ -66,7 +111,15 @@ def contact_initial_inputs(run):
     for key in ('wheel_id','owner_id','collider_id','attached_body_id'):del observed[key]
     del observed['body']['instance_id']
     geometry=report['geometry']
-    return dict(initial_state=state,body_input=report['body_input'],source_profile=report['source_profile'],copied_profile=report['copied_profile'],wheel_input=report['wheel_input'],geometry={k:geometry[k] for k in ('normal','forward','sideways','copied_center','support_position','support_rotation','support_scale','position_spacing')})
+    return dict(sideways_words=report['velocity_input']['sideways'],initial_state=state,body_input=report['body_input'],source_profile=report['source_profile'],copied_profile=report['copied_profile'],wheel_input=report['wheel_input'],geometry={k:geometry[k] for k in ('normal','forward','sideways','copied_center','support_position','support_rotation','support_scale','position_spacing')})
+
+def contact_pre_inputs(run):
+    entry=next(sample for sample in run['samples'] if sample['step']==121 and sample['phase']=='physics.entry')
+    observed=deepcopy(entry['contact_state']['pre_input']['observed'])
+    del observed['original_body']
+    for key in ('wheel_id','owner_id','collider_id','attached_body_id'):del observed[key]
+    del observed['body']['instance_id']
+    return dict(observed=observed,pre_velocity_words=run['contact']['velocity_input']['pre_velocity'])
 
 def validate_observation(value,report,enabled):
     require(value.get('wheel_id')==report['copied_wheel_id'] and value.get('body',{}).get('instance_id')==report['copied_body_id'],'Contact copied identity differs')
@@ -95,7 +148,7 @@ def validate_observation(value,report,enabled):
     body=value['body'];held=report['copied_held_body']
     require(all(body.get(k)==held.get(k) for k in ('mass','center_of_mass','drag','angular_drag','sleep_threshold','max_angular_velocity','solver_iterations','solver_velocity_iterations','interpolation','collision_detection_mode','detect_collisions','use_gravity','constraints','inertia_tensor_rotation')),'Contact copied body settings changed')
     require(body.get('kinematic') is False and type(body.get('sleeping')) is bool,'Contact copied body mode missing')
-    require(body['constraints']==112 and body['use_gravity'] is True and body['drag']==0 and body['angular_drag']==0,'Contact force mode differs')
+    require(body['constraints']==112 and body['use_gravity'] is True and body['drag']==0 and body['angular_drag']==0,'Contact body response mode differs')
     require(body['angular_velocity']==ZERO and value['brake_nm']==0 and value['steer_degrees']==0,'Contact frozen rotation or wheel assignment differs')
 
 def analyze_contact(run,scenario):
@@ -113,15 +166,13 @@ def analyze_contact(run,scenario):
         require(pre['observed_step']>0 and (step==1 or pre['observed_step']==previous_observed+1),'Contact observed step linkage differs');previous_observed=pre['observed_step']
         before=pre['observed']['body'];after=exit['contact_state']['observed']['body'];start=entry['contact_state']['observed']['body']
         require(all(b['mass']==report['body_input']['mass'] and b['drag']==0 and b['constraints']==112 for b in (before,start,after)),'Contact momentum mass, drag, or free axes differ')
-        impulse=report['impulse']['argument'] if step==121 else ZERO
-        if step==121:
-            require(report['impulse']['pre_velocity']==before['velocity'] and report['impulse']['application_point']==pre['observed']['world_center_of_mass'],'Contact impulse pre-input operands differ')
-        # Decode the retained Single values exactly. Raw JSON records remain unchanged.
+        # Body response uses producer precision. Input words only qualify the setter boundary.
         mass=f32(before['mass']);dt=f32(pre['fixed_dt'])
-        residual={k:mass*(f32(after['velocity'][k])-f32(before['velocity'][k]))-(mass*f32(before['gravity'][k])*dt if before['use_gravity'] else 0.)-f32(impulse[k]) for k in ZERO}
+        jump={k:mass*(f32(start['velocity'][k])-f32(before['velocity'][k])) for k in ZERO}
+        residual={k:mass*(f32(after['velocity'][k])-f32(start['velocity'][k]))-(mass*f32(before['gravity'][k])*dt if before['use_gravity'] else 0.) for k in ZERO}
         awake=not any(b['sleeping'] or b['kinematic'] for b in (start,after))
         active=awake and spec['wheel_enabled'] and entry['contact_state']['observed']['contact'] and exit['contact_state']['observed']['contact']
-        output.append(dict(step=step,residual=residual,declared_impulse=impulse,pre_sleeping=before['sleeping'],entry_sleeping=start['sleeping'],exit_sleeping=after['sleeping'],entry_kinematic=start['kinematic'],exit_kinematic=after['kinematic'],awake_dynamic_boundaries=awake,active_response_available=active,projections={k:dot(residual,basis[k]) for k in ('normal','forward','sideways')},step_average={k:dot(residual,basis[k])/dt for k in ('normal','forward','sideways')}))
+        output.append(dict(step=step,residual=residual,control_jump=jump,pre_sleeping=before['sleeping'],entry_sleeping=start['sleeping'],exit_sleeping=after['sleeping'],entry_kinematic=start['kinematic'],exit_kinematic=after['kinematic'],awake_dynamic_boundaries=awake,active_response_available=active,projections={k:dot(residual,basis[k]) for k in ('normal','forward','sideways')},step_average={k:dot(residual,basis[k])/dt for k in ('normal','forward','sideways')}))
     return output
 
 def validate_contact(run,scenario):
@@ -165,9 +216,7 @@ def validate_contact(run,scenario):
         require(all(type(event[k]) in (int,float) and math.isfinite(event[k]) for k in scalar_fields),'Contact event scalar argument or getter missing')
         require(event['motor_argument_nm']==motor and event['brake_argument_nm']==0 and event['steer_argument_degrees']==0,'Contact event setter arguments differ')
         require(event['brake_nm']==0 and event['steer_degrees']==0 and (not spec['wheel_enabled'] or event['motor_nm']==motor),'Contact event immediate getters differ')
-    impulse=report.get('impulse',{});require(impulse.get('application_count')==1 and impulse.get('consuming_step')==121 and impulse.get('producer_revision')==2 and impulse.get('mode')==1 and impulse.get('mass')==report['body_input']['mass'] and impulse.get('side_speed_mps')==spec['side_speed_mps'],'Contact impulse consumption differs')
-    v=impulse['pre_velocity'];target={k:f32(f32(f32(5.*f32(geometry['forward'][k]))+f32(f32(spec['side_speed_mps'])*f32(geometry['sideways'][k])))+f32(fdot(v,geometry['normal'])*f32(geometry['normal'][k]))) for k in ZERO}
-    require(fv(impulse['target_velocity'])==target and fv(impulse['argument'])=={k:f32(f32(report['body_input']['mass'])*f32(target[k]-f32(v[k]))) for k in ZERO},'Contact impulse argument differs')
+    validate_velocity_input(run)
     initial=report['initial_state'];validate_observation(initial['observed'],report,spec['wheel_enabled'])
     require(initial['step']==0 and initial['event_revision']==0 and fv(initial['observed']['body']['velocity'])=={k:f32(5.*f32(geometry['forward'][k])) for k in ZERO} and initial['observed']['body']['position']==geometry['copied_center'] and initial['observed']['body']['rotation']==report['wheel_input']['rotation'] and initial['observed']['body']['sleeping'] is False,'Contact initial input proof differs')
     validate_angular_inertia(initial['observed']['body'],report['body_input']['inertia_tensor'],112)
@@ -206,7 +255,7 @@ def contact_summary(run,residuals):
     values=[s['contact_state']['observed'] for s in run['samples'] if s['phase'] in ('physics.entry','physics.exit')]
     velocities=[fv(value['body']['velocity']) for value in values]
     def bounds(items):return dict(min=min(items),max=max(items)) if items else None
-    return dict(numeric_precision='raw Unity JSON remains retained; formula operands decode exactly to binary32, then offline momentum arithmetic uses binary64',contact_boundaries=sum(v['contact'] for v in values),nonzero_residual_intervals=sum(any(x!=0 for x in r['residual'].values()) for r in residuals),rpm=bounds([v['rpm'] for v in values]),projected_offset_q=bounds([v['q'] for v in values]),speed=bounds([math.sqrt(dot(velocity,velocity)) for velocity in velocities]),native_sprung_mass=bounds([v['sprung_mass'] for v in values if v['sprung_mass_available']]),hit_force_scalar=bounds([v['force_scalar'] for v in values if v['contact']]),forward_slip=bounds([v['forward_slip'] for v in values if v['contact']]),sideways_slip=bounds([v['sideways_slip'] for v in values if v['contact']]),overlap_limit='compare these observed ranges across independently qualified rows; absent overlap supplies no combined-slip identification')
+    return dict(numeric_precision='five finite binary32 input word fields; body response uses producer JSON precision and offline binary64 arithmetic',contact_boundaries=sum(v['contact'] for v in values),nonzero_residual_intervals=sum(any(x!=0 for x in r['residual'].values()) for r in residuals),rpm=bounds([v['rpm'] for v in values]),projected_offset_q=bounds([v['q'] for v in values]),speed=bounds([math.sqrt(dot(velocity,velocity)) for velocity in velocities]),native_sprung_mass=bounds([v['sprung_mass'] for v in values if v['sprung_mass_available']]),hit_force_scalar=bounds([v['force_scalar'] for v in values if v['contact']]),forward_slip=bounds([v['forward_slip'] for v in values if v['contact']]),sideways_slip=bounds([v['sideways_slip'] for v in values if v['contact']]),overlap_limit='compare these observed ranges across independently qualified rows; absent overlap supplies no combined-slip identification')
 
 def main():
     import argparse

@@ -12,7 +12,7 @@ from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
 from .driving_curve import validate_curve_scenario, validate_curve_run, require_same_curve
 from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input, angular_transport_initial, validate_angular_supplied
-from .driving_contact import validate_contact_schedule, validate_contact, contact_initial_inputs, validate_contact_body_input
+from .driving_contact import validate_contact_schedule, validate_contact, contact_initial_inputs, validate_contact_body_input, validate_contact_supplied, contact_exact, contact_pre_inputs
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
 from .driving_lifecycle import validate_lifecycle
@@ -243,7 +243,7 @@ def validate_run(run, scenario):
                    unqualified_context=['chassis', 'driving', 'suspension'])
               if curve is not None else dict(kind='physical', physical_measurements_qualified=True))
     if scenario['probe_kind']=='single_wheel_contact':
-        domain=dict(kind='physical-contact',physical_measurements_qualified=True,scope='single copied wheel; measured static support; force mode; body momentum residual',native_contact_impulse_qualified=False)
+        domain=dict(kind='physical-contact',physical_measurements_qualified=True,scope='single copied wheel; measured static support; direct velocity input; entry-to-exit body momentum residual',native_contact_impulse_qualified=False)
     return {**({'engine_curve': curve} if curve is not None else {}),
             'qualification_domain': domain,
             'samples': len(samples), 'physics_steps': run['physics_steps'],
@@ -311,6 +311,9 @@ def verify(output_root: Path) -> dict:
         raise ValueError('Three fresh native repeats are required')
     results = []
     contact_body_input = None
+    contact_group_initial = None
+    contact_group_pre = None
+    contact_enabled_count = 0
     for scenario in request['scenarios']:
         validate_curve_scenario(scenario)
         first_curve = None
@@ -331,6 +334,7 @@ def verify(output_root: Path) -> dict:
             if scenario['probe_kind']=='single_wheel_contact':
                 first_contact=contact_body_input is None
                 supplied=read_json(directory/'scenario.json')
+                validate_contact_supplied(run,scenario,supplied)
                 if ('contact_body_input' not in supplied or supplied.get('contact_body_input_from_source') is not first_contact or supplied.get('contact_body_input')!=contact_body_input):
                     raise ValueError('Contact scenario canonical transport or origin differs')
                 validate_contact_body_input(run,contact_body_input,first_contact)
@@ -340,11 +344,23 @@ def verify(output_root: Path) -> dict:
                 require_same_curve(first_curve, result['engine_curve'])
                 first_curve = result['engine_curve']
             state = repeat_state(run, scenario, result)
-            if initial is not None and state != initial:
+            if scenario['probe_kind']=='single_wheel_contact' and scenario['contact']['wheel_enabled']:
+                physical = dict(initial=contact_initial_inputs(run),fixed_dt=run['initial']['fixed_dt'])
+                before_input = contact_pre_inputs(run)
+                if contact_group_pre is not None and contact_exact(before_input)!=contact_exact(contact_group_pre):
+                    raise ValueError('Contact enabled rows have different step-121 pre_input states')
+                contact_group_pre = before_input
+                if contact_group_initial is not None and contact_exact(physical)!=contact_exact(contact_group_initial):
+                    raise ValueError('Contact enabled rows have different physical Initial states')
+                contact_group_initial = physical
+                contact_enabled_count += 1
+            if initial is not None and (contact_exact(state)!=contact_exact(initial) if scenario['probe_kind']=='single_wheel_contact' else state!=initial):
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
             result.update(scenario=scenario['id'], repeat=repeat, sha256=sha256(path))
             results.append(result)
+    if contact_group_initial is not None and contact_enabled_count!=12:
+        raise ValueError('Contact requires twelve matching enabled physical Initial states')
     setup = read_json(output / 'scratch/patch-receipt.json')
     if not setup.get('changed_methods') or setup.get('observer_revision') != request.get('observer_revision'):
         raise ValueError('Checked observer patch receipt differs')
@@ -403,6 +419,9 @@ def capture(source_root: Path, reference_root: Path,
             raise ValueError(f'Native capture failed; evidence retained: {log}')
     invoke(['-Mode', 'Setup', '-RequestPath', str(output / 'request.json')], output / 'setup.log', 120)
     contact_body_input = None
+    contact_group_initial = None
+    contact_group_pre = None
+    contact_enabled_count = 0
     for row in rows:
         first_curve = None
         setup_state = None
@@ -425,6 +444,7 @@ def capture(source_root: Path, reference_root: Path,
                 validate_angular_supplied(native_run,row,read_json(directory/'scenario.json'),setup_state)
                 validate_angular_body_input(native_run,None if setup_state is None else setup_state['angular_body_input'],repeat==1)
             if row['probe_kind']=='single_wheel_contact':
+                validate_contact_supplied(native_run,row,read_json(directory/'scenario.json'))
                 validate_contact_body_input(native_run,contact_body_input,contact_body_input is None)
                 if contact_body_input is None: contact_body_input=native_run['contact']['body_input']
             result = validate_evidence(output, directory, native_run, row)
@@ -432,11 +452,23 @@ def capture(source_root: Path, reference_root: Path,
                 require_same_curve(first_curve, result['engine_curve'])
                 first_curve = result['engine_curve']
             state = repeat_state(native_run, row, result)
-            if initial is not None and state != initial:
+            if row['probe_kind']=='single_wheel_contact' and row['contact']['wheel_enabled']:
+                physical = dict(initial=contact_initial_inputs(native_run),fixed_dt=native_run['initial']['fixed_dt'])
+                before_input = contact_pre_inputs(native_run)
+                if contact_group_pre is not None and contact_exact(before_input)!=contact_exact(contact_group_pre):
+                    raise ValueError('Contact enabled rows have different step-121 pre_input states')
+                contact_group_pre = before_input
+                if contact_group_initial is not None and contact_exact(physical)!=contact_exact(contact_group_initial):
+                    raise ValueError('Contact enabled rows have different physical Initial states')
+                contact_group_initial = physical
+                contact_enabled_count += 1
+            if initial is not None and (contact_exact(state)!=contact_exact(initial) if row['probe_kind']=='single_wheel_contact' else state!=initial):
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
             if setup_state is None:
                 setup_state=angular_transport_initial(native_run) if row['probe_kind']=='wheel_angular' else native_run['setup_state']
+    if contact_group_initial is not None and contact_enabled_count!=12:
+        raise ValueError('Contact requires twelve matching enabled physical Initial states')
     receipt = verify(output)
     write_json(output / 'receipt.json', receipt)
     return receipt

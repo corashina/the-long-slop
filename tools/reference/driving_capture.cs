@@ -291,7 +291,7 @@ public sealed class G11Capture : MonoBehaviour
                 if(scenario.probe_kind=="single_wheel_contact")
                 {
                     result.contact_configure_readout=G11ContactProbe.readout;
-                    G11ContactProbe.ObserveAfterFromJson(scenario.contact_body_input_from_source,scenario.contact_body_input,
+                    G11ContactProbe.ObserveAfterFromJson(scenario.contact.side_speed_mps,scenario.contact_body_input_from_source,scenario.contact_body_input,
                         new G11ContactProbe.SetupMark{frame=Time.frameCount,physics_step=ObservedPhysicsStep,input_revision=InputRevision});
                 }
                 if(scenario.probe_kind=="wheel_angular")
@@ -988,7 +988,10 @@ public sealed class G11Capture : MonoBehaviour
                     sample.fixed_dt,selected.motor_torque,selected.brake_torque,selected.rpm);
             }
         }
-        if(G11ContactProbe.Active) G11ContactProbe.Read(sample.contact_state);
+        if(G11ContactProbe.Active) {
+            G11ContactProbe.Read(sample.contact_state);
+            G11ContactProbe.ObserveEntry(sample.contact_state,sample.sequence,sample.step,sample.phase);
+        }
         for(int index=0;index<G11Geometry.nativeWheels.Length;index++)
             sample.native_wheels[index]=G11Geometry.ReadWheel(G11Geometry.nativeWheels[index]);
         buffer[used++]=sample;
