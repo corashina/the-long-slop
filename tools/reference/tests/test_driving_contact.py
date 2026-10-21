@@ -21,7 +21,7 @@ def fixture(index=0):
     for snap in run['geometry']:
         for shape in snap['colliders']:shape['radius']=.5
     report=dict(other_external_input_count=0,declared=deepcopy(spec),source_key=spec['source_wheel'],source_index=0,road_role=0,source_wheel_id=10,copied_wheel_id=50,original_body_id=1,copied_body_id=2,source_body=source,body_input=declared,body_input_from_source=True,source_profile=profile,copied_profile=deepcopy(profile),copied_constructor_body=deepcopy(body),copied_held_body=dict(deepcopy(body),kinematic=True),geometry=geometry,source_sprung_mass_available=True,copied_sprung_mass_available=True,source_sprung_mass=100.,copied_sprung_mass=100.,n0=1000.,q0=500.,motor_argument=spec['torque_scale']*500.,wheel_input=dict(position=deepcopy(body['position']),rotation=q,local_scale=one))
-    motor=report['motor_argument'];report['assignments']=[dict(step=step,event_revision=i+1,motor_nm=motor if i==1 else 0.,brake_nm=0.,steer_degrees=0.) for i,step in enumerate((1,121,145))]
+    motor=report['motor_argument'];report['assignments']=[dict(step=step,event_revision=i+1,motor_argument_nm=motor if i==1 else 0.,brake_argument_nm=0.,steer_argument_degrees=0.,motor_nm=motor if i==1 and spec['wheel_enabled'] else 0.,brake_nm=0.,steer_degrees=0.) for i,step in enumerate((1,121,145))]
     report['impulse']=dict(producer_revision=2,consuming_step=121,application_count=1,mode=1,mass=100.,side_speed_mps=spec['side_speed_mps'],pre_velocity=dict(x=0.,y=0.,z=5.),target_velocity=dict(x=spec['side_speed_mps'],y=0.,z=5.),argument=dict(x=100.*spec['side_speed_mps'],y=0.,z=0.),application_point=deepcopy(obs['world_center_of_mass']))
     report['initial_state']=dict(deepcopy(profile),step=0,event_revision=0,assignment_step=0,observed=deepcopy(obs))
     samples=[]
@@ -32,7 +32,7 @@ def fixture(index=0):
         pre['native_wheel_count']=5
         pre.update({'native_wheel'+str(i):deepcopy(w) for i,w in enumerate(run['samples'][0]['native_wheels'])})
         for phase in ('physics.entry','physics.exit'):
-            state=dict(deepcopy(profile),step=step,event_revision=revision,assignment_step=step,pre_input=deepcopy(pre),observed=deepcopy(obs));state['observed']['motor_nm']=motor if 121<=step<=144 else 0.
+            state=dict(deepcopy(profile),step=step,event_revision=revision,assignment_step=step,pre_input=deepcopy(pre),observed=deepcopy(obs));state['observed']['motor_nm']=motor if spec['wheel_enabled'] and 121<=step<=144 else 0.
             if step>1 or phase=='physics.exit':state['observed']['body']['inertia_tensor']=deepcopy(z)
             samples.append(dict(step=step,phase=phase,frame=step,time=step*.02,fixed_dt=.02,contact_state=state,wheels=[{}],native_wheels=deepcopy(run['samples'][0]['native_wheels'])))
     run.update(contact=report,samples=samples,initial=dict(fixed_dt=.02,contact_body_input=deepcopy(declared)),setup_state=dict(contact_body_input=deepcopy(declared)),physics_steps=240,probe_kind='single_wheel_contact')
@@ -74,6 +74,59 @@ class ContactTests(unittest.TestCase):
             if case=='revision':sample['contact_state']['event_revision']=3
             with self.subTest(case=case),self.assertRaises(ValueError):
                 validate_contact_body_input(bad,None,True);validate_contact(bad,row)
+
+
+    def test_assignment_arguments_and_independent_actual_getters(self):
+        cases=('missing_event','duplicate_event','wrong_step','wrong_revision','step_type','revision_type','old_schema',
+               'motor_argument_nm','brake_argument_nm','steer_argument_degrees',
+               'missing_argument','enabled_getter','boundary_motor','phase','assignment','pre_revision','pre_step','disabled_flag')
+        row,run=fixture(3)
+        for case in cases:
+            bad=deepcopy(run);events=bad['contact']['assignments'];state=bad['samples'][240]['contact_state']
+            if case=='missing_event':events.pop()
+            elif case=='duplicate_event':events.append(deepcopy(events[1]))
+            elif case=='wrong_step':events[1]['step']=122
+            elif case=='wrong_revision':events[1]['event_revision']=3
+            elif case=='step_type':events[0]['step']=True
+            elif case=='revision_type':events[0]['event_revision']=True
+            elif case=='old_schema':
+                for event in events:
+                    for key in ('motor_argument_nm','brake_argument_nm','steer_argument_degrees'):del event[key]
+            elif case in ('motor_argument_nm','brake_argument_nm','steer_argument_degrees'):events[1][case]+=1
+            elif case=='missing_argument':del events[1]['motor_argument_nm']
+            elif case=='enabled_getter':events[1]['motor_nm']=0.
+            elif case=='boundary_motor':state['observed']['motor_nm']=0.
+            elif case=='phase':bad['samples'][240]['phase']='physics.exit'
+            elif case=='assignment':state['assignment_step']=122
+            elif case=='pre_revision':state['pre_input']['input_revision']=2
+            elif case=='pre_step':state['pre_input']['step']=122
+            elif case=='disabled_flag':state['observed']['enabled']=False
+            with self.subTest(case=case),self.assertRaises(ValueError):validate_contact(bad,row)
+        for index in (3,4):
+            row,run=fixture(index)
+            for key in ('motor_argument_nm','brake_argument_nm','steer_argument_degrees','motor_nm','brake_nm','steer_degrees'):
+                for wrong in (False,True,None,'0',float('nan'),float('inf'),float('-inf')):
+                    bad=deepcopy(run);bad['contact']['assignments'][1][key]=wrong
+                    with self.subTest(index=index,key=key,wrong=wrong),self.assertRaises(ValueError):validate_contact(bad,row)
+            for key in ('brake_nm','steer_degrees'):
+                bad=deepcopy(run);bad['contact']['assignments'][1][key]=1.
+                with self.subTest(index=index,key=key),self.assertRaises(ValueError):validate_contact(bad,row)
+        row,run=fixture(4)
+        for actual in (0.,-7.,125.,13.25):
+            changed=deepcopy(run)
+            for event in changed['contact']['assignments']:event['motor_nm']=actual
+            for sample in changed['samples']:
+                sample['contact_state']['observed']['motor_nm']=actual
+                sample['contact_state']['pre_input']['observed']['motor_nm']=actual
+            saved=deepcopy(changed);self.assertEqual(validate_contact(changed,row)['steps'],240);self.assertEqual(changed,saved)
+            self.assertFalse(any(r['active_response_available'] for r in analyze_contact(changed,row)))
+        for case in ('motor_nonfinite','brake','steer','disabled_flag'):
+            bad=deepcopy(run);value=bad['samples'][240]['contact_state']['observed']
+            if case=='motor_nonfinite':value['motor_nm']=float('nan')
+            elif case=='brake':value['brake_nm']=1.
+            elif case=='steer':value['steer_degrees']=1.
+            else:value['enabled']=True
+            with self.subTest(case=case),self.assertRaises(ValueError):validate_contact(bad,row)
 
     def test_unit_local_scale_and_observed_hierarchy_contract(self):
         row,run=fixture();report=run['contact'];value=report['initial_state']['observed']
@@ -175,13 +228,13 @@ class ContactTests(unittest.TestCase):
         from tools.reference import driving_probe as probe
         rows=contact_rows();base=fixture()[1];canonical=deepcopy(base['contact']['body_input'])
         for mode in ('capture','verify'):
-            corruptions=(None,'first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial','lossy_initial','hierarchy_initial')
+            corruptions=(None,'journal_motor_argument','journal_brake_argument','journal_steer_argument','journal_missing','journal_duplicate','journal_step','journal_revision','journal_old_schema','first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial','lossy_initial','hierarchy_initial')
             if mode=='verify':corruptions+=('raw_first_nonnull','raw_first_missing','raw_first_nonbool','raw_later_null','raw_later_missing','raw_later_nonbool','raw_later_replacement')
             for corruption in corruptions:
                 with self.subTest(mode=mode,corruption=corruption),tempfile.TemporaryDirectory() as name:
                     project=Path(name).resolve();output=project/'.cache/g11-driving/proof';definitions=project/'rows.json';definitions.write_text(json.dumps(dict(scenarios=rows)));launched=[]
                     def make_run(index,repeat):
-                        run=deepcopy(base);run['row_only']=index;run['initial']['row_only']=index;run['setup_state']['row_only']=index
+                        run=fixture(index)[1];run['row_only']=index;run['initial']['row_only']=index;run['setup_state']['row_only']=index
                         first=index==0 and repeat==1;run['contact']['body_input_from_source']=first
                         if not first:run['contact']['source_body']['mass']=999.+index+repeat
                         bad=index==1 and repeat==1
@@ -193,7 +246,30 @@ class ContactTests(unittest.TestCase):
                         if corruption=='hierarchy_initial' and index==0 and repeat==2:run['contact']['initial_state']['observed']['wheel_parent_is_body']=False
                         if (corruption=='replacement' and bad) or (corruption=='repeat_replacement' and index==0 and repeat==2):
                             for rec in (run['contact']['body_input'],run['initial']['contact_body_input'],run['setup_state']['contact_body_input']):rec['mass']+=1
+                        if bad and corruption and corruption.startswith('journal_'):
+                            events=run['contact']['assignments']
+                            if corruption=='journal_motor_argument':events[1]['motor_argument_nm']+=1
+                            elif corruption=='journal_brake_argument':events[1]['brake_argument_nm']=1.
+                            elif corruption=='journal_steer_argument':events[1]['steer_argument_degrees']=1.
+                            elif corruption=='journal_missing':events.pop()
+                            elif corruption=='journal_duplicate':events.append(deepcopy(events[1]))
+                            elif corruption=='journal_step':events[1]['step']=122
+                            elif corruption=='journal_revision':events[1]['event_revision']=3
+                            elif corruption=='journal_old_schema':
+                                for event in events:
+                                    for key in ('motor_argument_nm','brake_argument_nm','steer_argument_degrees'):del event[key]
                         return run
+                    def write_run(directory,index,repeat):
+                        run=make_run(index,repeat)
+                        (directory/'runtime.json').write_text(json.dumps(run))
+                        (directory/'completion.json').write_text(json.dumps(dict(completed=True,sample_count=len(run['samples']),physics_steps=240)))
+                        (directory/'process.json').write_text(json.dumps(dict(pid=123,executable=str(output/'scratch/game/TheLongDrive.exe'))))
+                        (directory/'exit.json').write_text(json.dumps(dict(exit_code=0)))
+                        (directory/'unity.log').write_text('G11_NATIVE_CAPTURE_FLUSHED completed=True')
+                    checked=[]
+                    def contact_gate(run,row):
+                        checked.append(row['id'])
+                        return dict(contact=validate_contact(run,row))
                     def fake_player(args,**kwargs):
                         if args[args.index('-Mode')+1]=='Run':
                             d=Path(args[args.index('-RunRoot')+1]);supplied=json.loads((d/'scenario.json').read_text());index=len(launched)//3;repeat=len(launched)%3+1;launched.append(supplied)
@@ -201,14 +277,14 @@ class ContactTests(unittest.TestCase):
                             self.assertEqual(supplied['contact_body_input'],None if index==0 and repeat==1 else canonical)
                             self.assertEqual(supplied.get('has_setup_state',False),repeat>1)
                             if repeat>1:self.assertEqual(supplied['setup_state']['row_only'],index)
-                            (d/'runtime.json').write_text(json.dumps(make_run(index,repeat)))
+                            write_run(d,index,repeat)
                         return type('Result',(),dict(returncode=0))()
-                    # Unrelated provenance, geometry, and full per-run gates have their own existing critical suites.
-                    with patch.object(probe,'PROJECT',project),patch.object(probe,'physical_inputs',return_value={}),patch.object(probe,'validate_evidence',return_value={}):
+                    # Keep the real evidence and contact gates. Stub unrelated run and structural boundaries.
+                    with patch.object(probe,'PROJECT',project),patch.object(probe,'physical_inputs',return_value={}),patch.object(probe,'validate_run',side_effect=contact_gate),patch.object(probe,'validate_body_hold',return_value={}),patch.object(probe,'validate_geometry',return_value={}),patch.object(probe,'validate_driver',return_value={}),patch.object(probe,'validate_lifecycle',return_value={}):
                         if mode=='capture':
                             with patch.object(probe,'preflight',return_value=dict(powershell='pwsh',observer_revision={})),patch.object(probe.subprocess,'run',side_effect=fake_player),patch.object(probe,'verify',return_value={'runs':list(range(15))}):
                                 if corruption:
-                                    with self.assertRaises(ValueError):probe.capture(project,project,output,definitions,3)
+                                    with self.assertRaisesRegex(ValueError,'Contact event' if corruption.startswith('journal_') else ''):probe.capture(project,project,output,definitions,3)
                                 else:self.assertEqual(len(probe.capture(project,project,output,definitions,3)['runs']),15)
                         else:
                             output.mkdir(parents=True);(output/'scratch').mkdir();(output/'request.json').write_text(json.dumps(dict(repeats=3,scenarios=rows,observer_revision={})))
@@ -217,7 +293,7 @@ class ContactTests(unittest.TestCase):
                             for index,row in enumerate(rows):
                                 for repeat in range(1,4):
                                     d=output/row['id']/f'repeat-{repeat}';d.mkdir(parents=True);first=index==0 and repeat==1
-                                    (d/'runtime.json').write_text(json.dumps(make_run(index,repeat)))
+                                    write_run(d,index,repeat)
                                     supplied=dict(contact_body_input_from_source=first,contact_body_input=None if first else deepcopy(canonical))
                                     if first:
                                         if corruption=='raw_first_nonnull':supplied['contact_body_input']=deepcopy(canonical)
@@ -230,8 +306,9 @@ class ContactTests(unittest.TestCase):
                                         if corruption=='raw_later_replacement':supplied['contact_body_input']['mass']+=1
                                     (d/'scenario.json').write_text(json.dumps(supplied))
                             if corruption:
-                                with self.assertRaises(ValueError):probe.verify(output)
+                                with self.assertRaisesRegex(ValueError,'Contact event' if corruption.startswith('journal_') else ''):probe.verify(output)
                             else:self.assertEqual(len(probe.verify(output)['runs']),15)
+                    if corruption and corruption.startswith('journal_'):self.assertIn(rows[1]['id'],checked)
 
     def test_exact_single_round_trip_and_one_bit_rejection(self):
         import struct
@@ -299,7 +376,7 @@ class ContactTests(unittest.TestCase):
             source_path.write_text(source)
             script_path.write_text("param($SourcePath)\n$ErrorActionPreference='Stop'\nAdd-Type -Path $SourcePath\n[ContactChecks]::Run()\n")
             result=subprocess.run(['pwsh','-NoProfile','-File',str(script_path),str(source_path)],capture_output=True,text=True,timeout=60)
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('G11_CONTACT_METHODS_PASS',result.stdout);self.assertIn('G11_CONTACT_READOUT_TRANSPORT_PASS',result.stdout)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('G11_CONTACT_ASSIGN_ARGUMENTS_PASS',result.stdout);self.assertIn('G11_CONTACT_METHODS_PASS',result.stdout);self.assertIn('G11_CONTACT_READOUT_TRANSPORT_PASS',result.stdout)
 
 CONTACT_STUBS=r'''
 namespace UnityEngine {
@@ -322,7 +399,11 @@ namespace UnityEngine {
  Vector3 speed,spin;public Vector3 velocity {get{return speed;}set{writes++;speed=value;}}public Vector3 angularVelocity {get{return spin;}set{angularWrites++;spin=value;}}public bool IsSleeping(){return sleeping;}public int GetInstanceID(){return id;}public void WakeUp(){wakes++;sleeping=false;}public Vector3 GetPointVelocity(Vector3 p){return velocity;}public void AddForce(Vector3 j,ForceMode m){impulses++;sleeping=false;}}
  public class Collider {public Transform transform=new Transform();public bool isTrigger;public Rigidbody attachedRigidbody;public Material sharedMaterial;public int GetInstanceID(){return 99;}}
  public class WheelCollider {public string key="level1:58684";public static int created;public GameObject gameObject=new GameObject("wheel");public Transform transform {get{return gameObject.transform;}}public Rigidbody attachedRigidbody;public bool enabled=true;
- public Vector3 center=new Vector3(0,-.1f,0);public float radius=.5f,mass=20,wheelDampingRate=.25f,suspensionDistance=.3f,forceAppPointDistance,sprungMass=123,rpm=-7,steerAngle;public WheelFrictionCurve forwardFriction,sidewaysFriction;public JointSpring suspensionSpring;public float motorTorque,brakeTorque;public int GetInstanceID(){return 50;}public void GetWorldPose(out Vector3 p,out Quaternion q){p=transform.position;q=transform.rotation;}public bool GetGroundHit(out WheelHit h){h=new WheelHit();return false;}}
+ public Vector3 center=new Vector3(0,-.1f,0);public float radius=.5f,mass=20,wheelDampingRate=.25f,suspensionDistance=.3f,forceAppPointDistance,sprungMass=123,rpm=-7;public WheelFrictionCurve forwardFriction,sidewaysFriction;public JointSpring suspensionSpring;public int motorReads,brakeReads,steerReads;float motor,brake,steer;
+ public List<string> setterNames=new List<string>();public List<float> setterValues=new List<float>();
+ public float motorTorque {get{motorReads++;return enabled?motor:0f;}set{setterNames.Add("motor");setterValues.Add(value);motor=value;}}
+ public float brakeTorque {get{brakeReads++;return brake;}set{setterNames.Add("brake");setterValues.Add(value);brake=value;}}
+ public float steerAngle {get{steerReads++;return steer;}set{setterNames.Add("steer");setterValues.Add(value);steer=value;}}public int GetInstanceID(){return 50;}public void GetWorldPose(out Vector3 p,out Quaternion q){p=transform.position;q=transform.rotation;}public bool GetGroundHit(out WheelHit h){h=new WheelHit();return false;}}
  public struct WheelHit {public Collider collider;public Vector3 point,normal,forwardDir,sidewaysDir;public float forwardSlip,sidewaysSlip,force;}
  public struct RaycastHit {public Collider collider;public Vector3 point,normal;public float distance;}
  public static class Object {public static T[] FindObjectsOfType<T>(){return new T[0];}}
@@ -341,6 +422,20 @@ public static class ContactChecks {
  static void ApplyCanonical(Initial initial){CANONICAL_METHOD}
  static void ApplyLoad(){if(!scenario.has_setup_state){LOAD_METHOD}}
  static void Need(bool b,string m){if(!b)throw new Exception(m);}static void Reset(){typeof(G11ContactProbe).GetField("input",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,null);typeof(G11ContactProbe).GetField("armed",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,false);typeof(G11ContactProbe).GetField("assignedStep",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,0);typeof(G11ContactProbe).GetField("revision",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic).SetValue(null,0);}
+
+ static void AssignChecked(UnityEngine.WheelCollider wheel,int step,int observed,int frame,float time,float dt){
+  int calls=wheel.setterNames.Count,m=wheel.motorReads,b=wheel.brakeReads,s=wheel.steerReads;bool eventStep=step==1 || step==121 || step==145;
+  G11ContactProbe.Assign(step,observed,frame,time,dt);
+  int reads=eventStep?2:1;Need(wheel.motorReads-m==reads && wheel.brakeReads-b==reads && wheel.steerReads-s==reads,"native getter count changed");
+  Need(wheel.setterNames.Count-calls==(eventStep?3:0),"setter count changed");
+  if(eventStep){
+   int revision=step==1?1:step==121?2:3;float expected=step==121?G11ContactProbe.report.motor_argument:0f;var a=G11ContactProbe.report.assignments[revision-1];
+   Need(wheel.setterNames[calls]=="motor" && wheel.setterNames[calls+1]=="brake" && wheel.setterNames[calls+2]=="steer","setter order changed");
+   Need(a.step==step && a.event_revision==revision && wheel.setterValues[calls]==expected && wheel.setterValues[calls+1]==0 && wheel.setterValues[calls+2]==0,"setter schedule changed");
+   Need(a.motor_argument_nm==wheel.setterValues[calls] && a.brake_argument_nm==wheel.setterValues[calls+1] && a.steer_argument_degrees==wheel.setterValues[calls+2],"journal does not record actual setter arguments");
+   Need(a.motor_nm==(wheel.enabled?expected:0f) && a.brake_nm==0 && a.steer_degrees==0,"journal replaced immediate native getters");
+  }
+ }
  static void Reject(Action action){bool rejected=false;try{action();}catch(InvalidOperationException){rejected=true;}Need(rejected,"invalid call accepted");}
  public static void Run(){
   var original=new UnityEngine.Rigidbody{id=1,isKinematic=true,mass=400,centerOfMass=new UnityEngine.Vector3(0,2,0),inertiaTensor=new UnityEngine.Vector3(1,2,3)};
@@ -366,13 +461,16 @@ public static class ContactChecks {
   Need(hierarchy.body_parent_is_null && hierarchy.wheel_parent_is_body && hierarchy.body_lossy_scale.x==.99999988f && hierarchy.body_lossy_scale.y==2 && hierarchy.wheel_lossy_scale.y==.99999988f && hierarchy.wheel_lossy_scale.x==4,"native lossy readback changed");
   Console.WriteLine("G11_CONTACT_HIERARCHY_RELATIONS_PASS");
   Reject(()=>G11ContactProbe.Arm());body.isKinematic=false;wheels=new[]{wheel};RunActivation();Need(body.writes==1 && body.angularWrites==1 && body.wakes==1 && body.velocity.z==5,"arming velocity and wake count");Reject(()=>G11ContactProbe.Arm());
-  var entry=new G11ContactProbe.State();G11ContactProbe.Assign(1,10,0,0,.02f);G11ContactProbe.Read(entry);var saved=entry.pre_input;
+  var entry=new G11ContactProbe.State();AssignChecked(wheel,1,10,0,0,.02f);G11ContactProbe.Read(entry);var saved=entry.pre_input;
   Reject(()=>G11ContactProbe.Assign(1,10,0,0,.02f));Reject(()=>G11ContactProbe.Assign(3,12,0,0,.02f));
-  for(int step=2;step<=240;step++){if(step==121)body.sleeping=true;G11ContactProbe.Assign(step,step+9,step,step*.02f,.02f);if(step==121){Need(body.impulses==1 && !body.sleeping && G11ContactProbe.report.impulse.argument.x==50,"declared impulse argument");Need(wheel.motorTorque==125,"declared motor torque");}if(step==145)Need(wheel.motorTorque==0,"release torque");}
+  for(int step=2;step<=240;step++){if(step==121)body.sleeping=true;AssignChecked(wheel,step,step+9,step,step*.02f,.02f);if(step==121){Need(body.impulses==1 && !body.sleeping && G11ContactProbe.report.impulse.argument.x==50,"declared impulse argument");Need(wheel.motorTorque==125,"declared motor torque");}if(step==145)Need(wheel.motorTorque==0,"release torque");}
   Need(entry.pre_input.step==1 && entry.pre_input.native_wheel0.read_revision==saved.native_wheel0.read_revision && entry.pre_input.native_wheel0.read_revision<G11Geometry.ReadWheel(source).read_revision && entry.pre_input.observed.body.velocity.z==saved.observed.body.velocity.z,"retained pre-input aliased later mutable snapshot");
   Need(body.writes==1 && body.angularWrites==1 && body.wakes==1 && body.impulses==1,"repeated input write");Need(G11ContactProbe.report.assignments[2].step==145,"third assignment missing");Reject(()=>G11ContactProbe.Assign(241,250,241,5,.02f));
   Reset();original.mass=999;original.centerOfMass=new UnityEngine.Vector3(0,9,0);original.inertiaTensor=new UnityEngine.Vector3(9,8,7);scenario.has_setup_state=true;body=CreateHeldProbeBody(new UnityEngine.GameObject("reused"));
   input.wheel_enabled=false;wheel=G11ContactProbe.Configure(input,source,original,probe,body,false,canonical,new G11ContactProbe.SetupMark());ApplyLoad();ApplyCanonical(new Initial());Need(body.mass==100 && body.centerOfMass.y==2.1f && body.inertiaTensor.x==1 && G11ContactProbe.report.source_body.mass==999,"canonical reuse replaced by later source readback");Need(body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1,"reused property owner");body.isKinematic=false;G11ContactProbe.Arm();Need(!wheel.enabled && body.wakes==1,"disabled control arming");
+  for(int step=1;step<=240;step++)AssignChecked(wheel,step,step+9,step,step*.02f,.02f);
+  Need(G11ContactProbe.report.assignments[1].motor_argument_nm==125 && G11ContactProbe.report.assignments[1].motor_nm==0,"disabled native getter was equated with its setter argument");
+  Console.WriteLine("G11_CONTACT_ASSIGN_ARGUMENTS_PASS enabled+disabled 480 solves, 18 ordered setters, 1458 getters");
   ReadoutCaptureChecks.Run();Console.WriteLine("G11_CONTACT_METHODS_PASS");
  }
 }

@@ -30,7 +30,7 @@ public static class G11ContactProbe
         public int step,event_revision,assignment_step; public PreInput pre_input; public Observation observed;
     }
     [Serializable] public class Assignment {
-        public int step,event_revision;public float motor_nm,brake_nm,steer_degrees;
+        public int step,event_revision;public float motor_argument_nm,brake_argument_nm,steer_argument_degrees,motor_nm,brake_nm,steer_degrees;
     }
     [Serializable] public class Impulse {
         public int producer_revision,consuming_step,application_count,mode;
@@ -151,8 +151,11 @@ public static class G11ContactProbe
                 impulse.argument=argument;impulse.application_point=before.world_center_of_mass;impulse.mode=(int)ForceMode.Impulse;impulse.producer_revision=revision+1;impulse.consuming_step=step;
                 body.AddForce(argument,ForceMode.Impulse);impulse.application_count++;
             }
-            wheel.motorTorque=revision==1?report.motor_argument:0f;wheel.brakeTorque=0;wheel.steerAngle=0;
-            var a=report.assignments[revision];a.step=step;a.event_revision=revision+1;a.motor_nm=wheel.motorTorque;a.brake_nm=wheel.brakeTorque;a.steer_degrees=wheel.steerAngle;revision++;
+            float motorArgument=revision==1?report.motor_argument:0f,brakeArgument=0f,steerArgument=0f;
+            wheel.motorTorque=motorArgument;wheel.brakeTorque=brakeArgument;wheel.steerAngle=steerArgument;
+            var a=report.assignments[revision];a.step=step;a.event_revision=revision+1;
+            a.motor_argument_nm=motorArgument;a.brake_argument_nm=brakeArgument;a.steer_argument_degrees=steerArgument;
+            a.motor_nm=wheel.motorTorque;a.brake_nm=wheel.brakeTorque;a.steer_degrees=wheel.steerAngle;revision++;
         }
         if(revision==0 || revision<3 && input.event_steps[revision]<step) throw new InvalidOperationException("Contact assignment missing or late");
         assignedStep=step;

@@ -155,8 +155,16 @@ def validate_contact(run,scenario):
     require(report.get('source_sprung_mass_available') is True and report.get('copied_sprung_mass_available') is True,'Contact source/copied sprung mass availability missing')
     n0=f32(f32(report['body_input']['mass'])*abs(fdot(held['gravity'],geometry['normal'])));q0=f32(n0*f32(profile['radius']));motor=f32(f32(spec['torque_scale'])*q0)
     require(f32(report['n0'])==n0 and f32(report['q0'])==q0 and f32(report['motor_argument'])==motor,'Contact declared torque operands differ')
-    expected=[dict(step=step,event_revision=i+1,motor_nm=report['motor_argument'] if i==1 else 0.,brake_nm=0.,steer_degrees=0.) for i,step in enumerate((1,121,145))]
-    require(report.get('assignments')==expected,'Contact event assignment missing or duplicated')
+    assignments=report.get('assignments')
+    scalar_fields=('motor_argument_nm','brake_argument_nm','steer_argument_degrees','motor_nm','brake_nm','steer_degrees')
+    require(isinstance(assignments,list) and len(assignments)==3,'Contact event assignment missing or duplicated')
+    for i,step in enumerate((1,121,145)):
+        event=assignments[i];motor=report['motor_argument'] if i==1 else 0.
+        require(isinstance(event,dict) and set(event)=={'step','event_revision',*scalar_fields},'Contact event assignment fields differ')
+        require(type(event['step']) is int and type(event['event_revision']) is int and event['step']==step and event['event_revision']==i+1,'Contact event assignment step or revision differs')
+        require(all(type(event[k]) in (int,float) and math.isfinite(event[k]) for k in scalar_fields),'Contact event scalar argument or getter missing')
+        require(event['motor_argument_nm']==motor and event['brake_argument_nm']==0 and event['steer_argument_degrees']==0,'Contact event setter arguments differ')
+        require(event['brake_nm']==0 and event['steer_degrees']==0 and (not spec['wheel_enabled'] or event['motor_nm']==motor),'Contact event immediate getters differ')
     impulse=report.get('impulse',{});require(impulse.get('application_count')==1 and impulse.get('consuming_step')==121 and impulse.get('producer_revision')==2 and impulse.get('mode')==1 and impulse.get('mass')==report['body_input']['mass'] and impulse.get('side_speed_mps')==spec['side_speed_mps'],'Contact impulse consumption differs')
     v=impulse['pre_velocity'];target={k:f32(f32(f32(5.*f32(geometry['forward'][k]))+f32(f32(spec['side_speed_mps'])*f32(geometry['sideways'][k])))+f32(fdot(v,geometry['normal'])*f32(geometry['normal'][k]))) for k in ZERO}
     require(fv(impulse['target_velocity'])==target and fv(impulse['argument'])=={k:f32(f32(report['body_input']['mass'])*f32(target[k]-f32(v[k]))) for k in ZERO},'Contact impulse argument differs')
@@ -183,7 +191,7 @@ def validate_contact(run,scenario):
         require(all(state.get(k)==profile[k] for k in PROFILE_FIELDS),'Contact measured profile changed')
         require(state.get('event_revision')==revision and state.get('assignment_step')==step and state['pre_input']['input_revision']==(0 if step==1 else 1 if step<=121 else 2 if step<=145 else 3),'Contact event revision differs')
         value=state['observed'];validate_observation(value,report,spec['wheel_enabled'])
-        require(value['motor_nm']==(report['motor_argument'] if 121<=step<=144 else 0),'Contact motor assignment differs')
+        if spec['wheel_enabled']:require(value['motor_nm']==(report['motor_argument'] if 121<=step<=144 else 0),'Contact motor assignment differs')
         validate_angular_inertia(value['body'],report['body_input']['inertia_tensor'],112,step,sample['phase'])
         pre=state['pre_input'];require(pre.get('native_wheel_count')==5,'Contact pre-input source cohort missing')
         validate_source_ownership([pre.get('native_wheel'+str(i),{}) for i in range(5)],native_expected,report['original_body_id'],trace['retained_body'])
