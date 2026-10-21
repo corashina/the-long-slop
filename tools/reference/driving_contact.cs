@@ -15,6 +15,7 @@ public static class G11ContactProbe
         public Vector3 body_scale,body_lossy_scale,world_center_of_mass,wheel_center,wheel_up,wheel_position,wheel_scale,wheel_lossy_scale;
         public Quaternion wheel_rotation,pose_rotation;public Vector3 pose_position;
         public int wheel_id,owner_id;public bool owner_is_null,owner_available,enabled,active_self,active_hierarchy;
+        public bool body_parent_is_null,wheel_parent_is_body;
         public bool rpm_available,sprung_mass_available,contact,hit_available,body_point_velocity_available,attached_body_available,attached_point_velocity_available;
         public float rpm,sprung_mass,q,motor_nm,brake_nm,steer_degrees;
         public int collider_id,attached_body_id;public Vector3 point,normal,forward_direction,sideways_direction,body_point_velocity,attached_point_velocity;
@@ -158,7 +159,7 @@ public static class G11ContactProbe
         if(step==240 && (revision!=3 || report.impulse.application_count!=1)) throw new InvalidOperationException("Contact event completion differs");
     }
     static Observation Observe() {
-        var value=new Observation {body=G11AngularProbe.ReadBody(body),original_body=G11AngularProbe.ReadBody(original),body_scale=body.transform.localScale,body_lossy_scale=body.transform.lossyScale,world_center_of_mass=body.worldCenterOfMass,
+        var value=new Observation {body_parent_is_null=body.transform.parent==null,wheel_parent_is_body=wheel.transform.parent==body.transform,body=G11AngularProbe.ReadBody(body),original_body=G11AngularProbe.ReadBody(original),body_scale=body.transform.localScale,body_lossy_scale=body.transform.lossyScale,world_center_of_mass=body.worldCenterOfMass,
             wheel_id=wheel.GetInstanceID(),enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
             wheel_center=wheel.transform.TransformPoint(wheel.center),wheel_up=wheel.transform.up,wheel_position=wheel.transform.position,wheel_rotation=wheel.transform.rotation,wheel_scale=wheel.transform.localScale,wheel_lossy_scale=wheel.transform.lossyScale,
             motor_nm=wheel.motorTorque,brake_nm=wheel.brakeTorque,steer_degrees=wheel.steerAngle};

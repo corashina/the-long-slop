@@ -88,8 +88,10 @@ def validate_observation(value,report,enabled):
         require(not value['attached_body_available'] and value['attached_body_id']==0 and not value['attached_point_velocity_available'],'Contact static support has attached body')
     else:
         require(value['collider_id']==0 and value['attached_body_id']==0 and not value['attached_body_available'] and not value['attached_point_velocity_available'],'Contact failed hit contains available data')
-    require(value['body_scale']==dict(x=1.,y=1.,z=1.) and value['body_lossy_scale']==dict(x=1.,y=1.,z=1.),'Contact copied body scale differs')
-    require(value['wheel_scale']==dict(x=1.,y=1.,z=1.) and value['wheel_lossy_scale']==dict(x=1.,y=1.,z=1.),'Contact copied scale differs')
+    require(value.get('body_parent_is_null') is True and value.get('wheel_parent_is_body') is True,'Contact copied hierarchy differs')
+    require(value['body_scale']==dict(x=1.,y=1.,z=1.),'Contact copied body scale differs')
+    require(value['wheel_scale']==dict(x=1.,y=1.,z=1.),'Contact copied scale differs')
+    require(all(component>0 for key in ('body_lossy_scale','wheel_lossy_scale') for component in value[key].values()),'Contact native lossy scale invalid')
     body=value['body'];held=report['copied_held_body']
     require(all(body.get(k)==held.get(k) for k in ('mass','center_of_mass','drag','angular_drag','sleep_threshold','max_angular_velocity','solver_iterations','solver_velocity_iterations','interpolation','collision_detection_mode','detect_collisions','use_gravity','constraints','inertia_tensor_rotation')),'Contact copied body settings changed')
     require(body.get('kinematic') is False and type(body.get('sleeping')) is bool,'Contact copied body mode missing')

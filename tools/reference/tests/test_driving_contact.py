@@ -16,7 +16,7 @@ def fixture(index=0):
     body=deepcopy(angular['copied_held_body']);body.update(position=dict(x=10000.,y=f32(.5+f32(.3*.5)),z=0.),constraints=112,center_of_mass=dict(x=0.,y=2.,z=0.),use_gravity=True,gravity=dict(x=0.,y=-10.,z=0.),sleep_threshold=.005,velocity=dict(x=0.,y=0.,z=5.),kinematic=False)
     declared={k:deepcopy(body[k]) for k in BODY_INPUT_FIELDS}
     geometry=dict(normal=n,forward=f,sideways=s,source_center_offset=dict(x=0.,y=2.,z=0.),source_up=n,source_signed_height=2.,source_center=z,source_world_com=dict(x=0.,y=2.,z=0.),copied_center=deepcopy(body['position']),copied_com_offset=dict(x=0.,y=2.,z=0.),copied_held_world_com=dict(x=10000.,y=f32(body['position']['y']+2.),z=0.),query_origin=dict(x=0.,y=.5,z=0.),query_direction=dict(x=0.,y=-1.,z=0.),source_point=z,source_forward=f,source_collider_key='support-source',source_collider_id=98,query_mask=-5,support_position=dict(x=10000.,y=-.5,z=0.),support_rotation=q,support_scale=dict(x=200.,y=1.,z=200.),position_spacing=z,support_id=99,source_material_id=0,support_material_id=0,query_distance=10.,selection_rule='nearest non-trigger static hit outside original car hierarchy')
-    obs=dict(body_scale=one,body_lossy_scale=one,body=body,original_body=source,world_center_of_mass=deepcopy(geometry['copied_held_world_com']),wheel_center=deepcopy(body['position']),wheel_up=n,wheel_position=deepcopy(body['position']),wheel_rotation=q,pose_position=deepcopy(body['position']),pose_rotation=q,wheel_id=50,owner_id=2,owner_is_null=False,owner_available=True,enabled=spec['wheel_enabled'],active_self=True,active_hierarchy=True,rpm_available=True,sprung_mass_available=True,contact=spec['wheel_enabled'],hit_available=spec['wheel_enabled'],body_point_velocity_available=spec['wheel_enabled'],attached_body_available=False,attached_point_velocity_available=False,collider_id=99 if spec['wheel_enabled'] else 0,attached_body_id=0,wheel_scale=one,wheel_lossy_scale=one,rpm=0.,sprung_mass=100.,q=0.,motor_nm=0.,brake_nm=0.,steer_degrees=0.,point=z,normal=n,forward_direction=f,sideways_direction=s,body_point_velocity=z,attached_point_velocity=z,force_scalar=0.,forward_slip=0.,sideways_slip=0.)
+    obs=dict(body_parent_is_null=True,wheel_parent_is_body=True,body_scale=one,body_lossy_scale=one,body=body,original_body=source,world_center_of_mass=deepcopy(geometry['copied_held_world_com']),wheel_center=deepcopy(body['position']),wheel_up=n,wheel_position=deepcopy(body['position']),wheel_rotation=q,pose_position=deepcopy(body['position']),pose_rotation=q,wheel_id=50,owner_id=2,owner_is_null=False,owner_available=True,enabled=spec['wheel_enabled'],active_self=True,active_hierarchy=True,rpm_available=True,sprung_mass_available=True,contact=spec['wheel_enabled'],hit_available=spec['wheel_enabled'],body_point_velocity_available=spec['wheel_enabled'],attached_body_available=False,attached_point_velocity_available=False,collider_id=99 if spec['wheel_enabled'] else 0,attached_body_id=0,wheel_scale=one,wheel_lossy_scale=one,rpm=0.,sprung_mass=100.,q=0.,motor_nm=0.,brake_nm=0.,steer_degrees=0.,point=z,normal=n,forward_direction=f,sideways_direction=s,body_point_velocity=z,attached_point_velocity=z,force_scalar=0.,forward_slip=0.,sideways_slip=0.)
     profile=angular['source_profile'];profile['radius']=.5
     for snap in run['geometry']:
         for shape in snap['colliders']:shape['radius']=.5
@@ -75,6 +75,33 @@ class ContactTests(unittest.TestCase):
             with self.subTest(case=case),self.assertRaises(ValueError):
                 validate_contact_body_input(bad,None,True);validate_contact(bad,row)
 
+    def test_unit_local_scale_and_observed_hierarchy_contract(self):
+        row,run=fixture();report=run['contact'];value=report['initial_state']['observed']
+        value['body_lossy_scale']=dict(x=f32(.99999988),y=2.,z=.125)
+        value['wheel_lossy_scale']=dict(x=4.,y=f32(.99999988),z=.25)
+        raw=deepcopy(value)
+        validate_observation(value,report,row['contact']['wheel_enabled'])
+        self.assertEqual(value,raw)
+        for key in ('body_scale','wheel_scale'):
+            for axis in ZERO:
+                bad=deepcopy(value);bad[key][axis]=f32(1.00000012)
+                with self.subTest(key=key,axis=axis),self.assertRaises(ValueError):
+                    validate_observation(bad,report,True)
+        for key in ('body_parent_is_null','wheel_parent_is_body'):
+            for wrong in (False,None,0,1,'true'):
+                bad=deepcopy(value);bad[key]=wrong
+                with self.subTest(key=key,wrong=wrong),self.assertRaises(ValueError):
+                    validate_observation(bad,report,True)
+            bad=deepcopy(value);del bad[key]
+            with self.subTest(key=key,missing=True),self.assertRaises(ValueError):
+                validate_observation(bad,report,True)
+        for key in ('body_lossy_scale','wheel_lossy_scale'):
+            for axis in ZERO:
+                for wrong in (0.,-1.,float('nan'),float('inf'),float('-inf')):
+                    bad=deepcopy(value);bad[key][axis]=wrong
+                    with self.subTest(key=key,axis=axis,wrong=wrong),self.assertRaises(ValueError):
+                        validate_observation(bad,report,True)
+
     def test_exact_input_origin_and_later_source_variation(self):
         row,run=fixture();canonical=deepcopy(run['contact']['body_input']);validate_contact_body_input(run,None,True)
         run['contact']['body_input_from_source']=False;run['contact']['source_body']['mass']=999.;validate_contact_body_input(run,canonical,False)
@@ -132,12 +159,23 @@ class ContactTests(unittest.TestCase):
         self.assertNotIn('contact_body_input_from_source',run['initial'])
         run['contact']['initial_state']['observed']['body']['rotation']['w']=.99
         self.assertNotEqual(contact_initial_inputs(run),first)
+        _,run=fixture();observed=run['contact']['initial_state']['observed']
+        observed['body_lossy_scale']=dict(x=f32(.99999988),y=1.,z=1.)
+        observed['wheel_lossy_scale']=dict(x=1.,y=f32(.99999988),z=1.)
+        raw=deepcopy(run);first=contact_initial_inputs(run);compared=first['initial_state']['observed']
+        self.assertEqual(run,raw)
+        for key in ('body_parent_is_null','wheel_parent_is_body','body_lossy_scale','wheel_lossy_scale'):
+            self.assertEqual(compared[key],observed[key])
+            changed=deepcopy(run)
+            if key.endswith('_scale'):changed['contact']['initial_state']['observed'][key]['x']=2.
+            else:changed['contact']['initial_state']['observed'][key]=False
+            self.assertNotEqual(contact_initial_inputs(changed),first,key)
 
     def test_actual_capture_and_verify_group_transport(self):
         from tools.reference import driving_probe as probe
         rows=contact_rows();base=fixture()[1];canonical=deepcopy(base['contact']['body_input'])
         for mode in ('capture','verify'):
-            corruptions=(None,'first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial')
+            corruptions=(None,'first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial','lossy_initial','hierarchy_initial')
             if mode=='verify':corruptions+=('raw_first_nonnull','raw_first_missing','raw_first_nonbool','raw_later_null','raw_later_missing','raw_later_nonbool','raw_later_replacement')
             for corruption in corruptions:
                 with self.subTest(mode=mode,corruption=corruption),tempfile.TemporaryDirectory() as name:
@@ -151,6 +189,8 @@ class ContactTests(unittest.TestCase):
                         if corruption=='later_origin' and bad:run['contact']['body_input_from_source']=True
                         if corruption=='missing' and bad:del run['initial']['contact_body_input']
                         if corruption=='physical_initial' and index==0 and repeat==2:run['initial']['velocity']=dict(x=1.,y=0.,z=0.)
+                        if corruption=='lossy_initial' and index==0 and repeat==2:run['contact']['initial_state']['observed']['body_lossy_scale']['x']=f32(.99999988)
+                        if corruption=='hierarchy_initial' and index==0 and repeat==2:run['contact']['initial_state']['observed']['wheel_parent_is_body']=False
                         if (corruption=='replacement' and bad) or (corruption=='repeat_replacement' and index==0 and repeat==2):
                             for rec in (run['contact']['body_input'],run['initial']['contact_body_input'],run['setup_state']['contact_body_input']):rec['mass']+=1
                         return run
@@ -311,6 +351,20 @@ public static class ContactChecks {
   Need(body.mass==100 && body.centerOfMass.y==2.1f && body.inertiaTensor.x==1 && body.constraints==(UnityEngine.RigidbodyConstraints)112,"declared body inputs");
   Need(wheel.radius==source.radius && wheel.center.y==source.center.y && wheel.forceAppPointDistance==0,"source profile copy");Need(wheel.transform.position.y+wheel.center.y==.65f,"wheel center placement");
   var canonical=G11ContactProbe.report.body_input;ApplyLoad();ApplyCanonical(new Initial());Need(body.massWrites==1 && body.comWrites==1 && body.tensorWrites==1 && body.rotationWrites==1,"competing property owner");
+  G11ContactProbe.RetainInitial();var hierarchy=G11ContactProbe.report.initial_state.observed;
+  Need(hierarchy.body_parent_is_null && hierarchy.wheel_parent_is_body,"actual unit rig hierarchy missing");
+  body.transform.parent=new UnityEngine.Transform();G11ContactProbe.RetainInitial();
+  Need(!G11ContactProbe.report.initial_state.observed.body_parent_is_null && G11ContactProbe.report.initial_state.observed.wheel_parent_is_body,"parented body relation hidden");
+  body.transform.parent=null;wheel.transform.parent=null;G11ContactProbe.RetainInitial();
+  Need(G11ContactProbe.report.initial_state.observed.body_parent_is_null && !G11ContactProbe.report.initial_state.observed.wheel_parent_is_body,"parentless wheel relation hidden");
+  wheel.transform.parent=new UnityEngine.Transform();G11ContactProbe.RetainInitial();
+  Need(!G11ContactProbe.report.initial_state.observed.wheel_parent_is_body,"wrong immediate parent hidden");
+  wheel.transform.parent.parent=body.transform;G11ContactProbe.RetainInitial();
+  Need(!G11ContactProbe.report.initial_state.observed.wheel_parent_is_body,"descendant accepted as direct child");
+  wheel.transform.parent=body.transform;body.transform.lossyScale=new UnityEngine.Vector3(.99999988f,2,.125f);wheel.transform.lossyScale=new UnityEngine.Vector3(4,.99999988f,.25f);G11ContactProbe.RetainInitial();
+  hierarchy=G11ContactProbe.report.initial_state.observed;
+  Need(hierarchy.body_parent_is_null && hierarchy.wheel_parent_is_body && hierarchy.body_lossy_scale.x==.99999988f && hierarchy.body_lossy_scale.y==2 && hierarchy.wheel_lossy_scale.y==.99999988f && hierarchy.wheel_lossy_scale.x==4,"native lossy readback changed");
+  Console.WriteLine("G11_CONTACT_HIERARCHY_RELATIONS_PASS");
   Reject(()=>G11ContactProbe.Arm());body.isKinematic=false;wheels=new[]{wheel};RunActivation();Need(body.writes==1 && body.angularWrites==1 && body.wakes==1 && body.velocity.z==5,"arming velocity and wake count");Reject(()=>G11ContactProbe.Arm());
   var entry=new G11ContactProbe.State();G11ContactProbe.Assign(1,10,0,0,.02f);G11ContactProbe.Read(entry);var saved=entry.pre_input;
   Reject(()=>G11ContactProbe.Assign(1,10,0,0,.02f));Reject(()=>G11ContactProbe.Assign(3,12,0,0,.02f));
