@@ -7,8 +7,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from tools.reference.tests.test_driving_angular import gate_fixture, STUBS
+from tools.reference.tests import test_driving_angular as angular_tests
 from tools.reference.driving_angular import validate_angular
 
+
+TRANSPORT_CASES = (None,'missing','setup','input','first_origin','reused_origin','self_consistent_replacement','supplied','consuming_word')
 
 class BodyInputTests(unittest.TestCase):
     def test_first_and_reused_input_gates(self):
@@ -31,6 +34,7 @@ class BodyInputTests(unittest.TestCase):
         reused = deepcopy(first)
         reused['angular']['body_input_from_source'] = False
         reused['angular']['source_body']['mass'] += 10
+        angular_tests.add_word_fixture(row,reused)
         validate_angular_body_input(reused, canonical, False)
         self.assertEqual(validate_angular(reused, row)['steps'], 480)
         with self.assertRaises(ValueError): validate_angular_body_input(reused, None, False)
@@ -49,6 +53,7 @@ class BodyInputTests(unittest.TestCase):
         run['angular']['source_body'] = deepcopy(run['angular']['source_body'])
         for record in (run['angular']['body_input'], run['setup_state']['angular_body_input'], run['initial']['angular_body_input'], run['angular']['source_body']):
             record['inertia_tensor_rotation']['w'] = .99999
+        angular_tests.add_word_fixture(row,run)
         # Native readbacks remain normalized. Input retains the exact source argument.
         self.assertEqual(validate_angular(run, row)['steps'], 480)
         self.assertEqual(run['angular']['body_input']['inertia_tensor_rotation']['w'], .99999)
@@ -57,64 +62,146 @@ class BodyInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'copied body setup changed'): validate_angular(run, row)
 
     def test_capture_and_verify_bind_repeat_input_origin(self):
+        for mode in ('capture','verify'):
+            for corruption in TRANSPORT_CASES:
+                with self.subTest(mode=mode,corruption=corruption):
+                    self.transport_case(mode,corruption)
+
+    def transport_case(self,mode,corruption):
+        from contextlib import ExitStack
         from tools.reference import driving_probe as probe
-        row, first = gate_fixture()
-        for mode in ('capture', 'verify'):
-            for corruption in (None, 'missing', 'setup', 'input', 'first_origin', 'reused_origin', 'self_consistent_replacement'):
-                with self.subTest(mode=mode, corruption=corruption), tempfile.TemporaryDirectory() as name:
-                    project = Path(name).resolve()
-                    output = project/'.cache/g11-driving/proof'
-                    definitions = project/'scenarios.json'
-                    definitions.write_text(json.dumps(dict(scenarios=[row])))
-                    launched = []
-                    def make_run(repeat):
-                        run = deepcopy(first)
-                        if repeat > 1:
-                            run['angular']['body_input_from_source'] = False
-                            run['angular']['source_body']['mass'] += 10
-                        if repeat == 1 and corruption == 'first_origin': run['angular']['body_input_from_source'] = False
-                        if repeat == 2:
-                            if corruption == 'missing': del run['angular']['body_input']
-                            if corruption == 'setup': del run['setup_state']['angular_body_input']
-                            if corruption == 'input': run['angular']['body_input']['mass'] += 1
-                            if corruption == 'reused_origin': run['angular']['body_input_from_source'] = True
-                            if corruption == 'self_consistent_replacement':
-                                for target in (run['angular']['body_input'], run['setup_state']['angular_body_input'], run['initial']['angular_body_input']): target['mass'] += 1
-                        return run
-                    def fake_player(arguments, **kwargs):
-                        if arguments[arguments.index('-Mode')+1] == 'Run':
-                            directory = Path(arguments[arguments.index('-RunRoot')+1])
-                            supplied = json.loads((directory/'scenario.json').read_text())
-                            launched.append(supplied)
-                            repeat = len(launched)
-                            self.assertEqual(supplied.get('has_setup_state', False), repeat>1)
-                            if repeat>1: self.assertEqual(supplied['setup_state']['angular_body_input'], first['angular']['body_input'])
-                            (directory/'runtime.json').write_text(json.dumps(make_run(repeat)))
-                        return type('Result', (), dict(returncode=0))()
-                    def check_evidence(output, directory, run, scenario): return validate_angular(run, scenario)
-                    with patch.object(probe, 'PROJECT', project), patch.object(probe, 'physical_inputs', return_value={}), patch.object(probe, 'validate_evidence', side_effect=check_evidence):
-                        if mode == 'capture':
-                            with patch.object(probe, 'preflight', return_value=dict(powershell='pwsh',observer_revision={})), patch.object(probe.subprocess, 'run', side_effect=fake_player), patch.object(probe, 'verify', return_value=dict(runs=[1,2,3])):
-                                if corruption:
-                                    with self.assertRaises(ValueError): probe.capture(project, project, output, definitions, 3)
-                                    self.assertEqual(len(launched), 1 if corruption=='first_origin' else 2)
-                                    self.assertFalse((output/'receipt.json').exists())
-                                else:
-                                    self.assertEqual(len(probe.capture(project, project, output, definitions, 3)['runs']), 3)
-                                    self.assertEqual(len(launched), 3)
-                        else:
-                            output.mkdir(parents=True)
-                            (output/'scratch').mkdir()
-                            (output/'request.json').write_text(json.dumps(dict(repeats=3,scenarios=[row],observer_revision={})))
-                            (output/'preflight.json').write_text(json.dumps(dict(app_id=probe.APP_ID,build_id=probe.BUILD_ID,unity_version=probe.UNITY_VERSION,native_engine=dict(sha256='engine'),dependencies={'TheLongDrive_Data/Managed/UnityEngine.PhysicsModule.dll':'physics'})))
-                            (output/'scratch/patch-receipt.json').write_text(json.dumps(dict(changed_methods=['checked'],observer_revision={},native_engine_sha256='engine',source_physics_module_sha256='physics')))
-                            for repeat in range(1,4):
-                                directory=output/row['id']/f'repeat-{repeat}'
-                                directory.mkdir(parents=True)
-                                (directory/'runtime.json').write_text(json.dumps(make_run(repeat)))
-                            if corruption:
-                                with self.assertRaises(ValueError): probe.verify(output)
-                            else: self.assertEqual(len(probe.verify(output)['runs']), 3)
+        from tools.reference.driving_angular import body_word_values, body_words
+        row,first=gate_fixture()
+        # A producer decimal that does not reconstruct the actual setter argument.
+        exact=1061.3505859375
+        raw_mass=1061.351
+        for target in (first['angular']['source_body'],first['angular']['body_input'],first['setup_state']['angular_body_input'],
+                       first['initial']['angular_body_input'],first['angular']['copied_held_body'],first['angular']['initial_state']['body']):
+            target['mass']=raw_mass
+        for sample in first['samples']:sample['angular_state']['body']['mass']=raw_mass
+        angular_tests.add_word_fixture(row,first)
+        actual_words=deepcopy(first['angular']['argument_words'])
+        from tools.reference.driving_angular import binary32_word
+        actual_words['mass']=binary32_word(exact)
+        first['angular']['argument_words']=deepcopy(actual_words)
+        first['angular']['source_argument_words']=deepcopy(actual_words)
+        # Keep the actual raw producer numbers and their number lexemes.
+        original=deepcopy(first)
+        with tempfile.TemporaryDirectory() as name:
+            project=Path(name).resolve();output=project/'.cache/g11-driving/proof'
+            definitions=project/'scenarios.json'
+            definitions.write_text(json.dumps(dict(scenarios=[row])))
+            launched=[]
+            canonical=deepcopy(first['setup_state']);canonical['angular_body_input']=body_word_values(actual_words)
+            def scenario_input(repeat):
+                value=deepcopy(row)
+                if repeat>1:value.update(has_setup_state=True,setup_state=deepcopy(canonical))
+                if repeat==2 and corruption=='supplied':
+                    value['setup_state']['angular_body_input']['mass']=exact+1.
+                if repeat==2 and corruption=='supplied_zero':value['setup']['velocity_mps']['y']=-0.0
+                return value
+            def make_run(repeat):
+                run=deepcopy(first)
+                run.update(runtime='original-unity-player',scenario=row['id'],probe_kind='wheel_angular',completed=True,
+                    menu_ready=True,lada_ready=True,control_capture_active=True,isolated_wheel_probe=True,physics_steps=480)
+                if repeat>1:
+                    run['angular']['body_input_from_source']=False
+                    run['angular']['source_body']['mass']+=10.
+                    run['angular']['parsed_words'].update(canonical_supplied=True,canonical_is_null=False,canonical_arguments=deepcopy(actual_words))
+                # Populate unrelated lower capture fields. The angular dispatch stays real.
+                prefix=[]
+                for phase in sorted(probe.PHASES-{'physics.entry','physics.exit'}):
+                    value=deepcopy(run['samples'][0]);value.update(phase=phase,frame=0,step=0);prefix.append(value)
+                run['samples']=prefix+run['samples']
+                for sequence,sample in enumerate(run['samples'],1):
+                    sample['sequence']=sequence
+                    for key in ('rpm','gear','clutch','engine_sequence','car_sequence','rpm_sequence','engine_output_nm','engine_brake_nm','average_rpm','torque_divisor'):
+                        sample.setdefault(key,0)
+                    for key in ('position','rotation','velocity','angular_velocity'):sample.setdefault(key,{})
+                    for wheel in sample['wheels']:
+                        for key in ('radius','suspension_distance','suspension_offset_m','pose','rotation','contact_point','contact_normal','force_n','forward_slip','sideways_slip'):
+                            wheel.setdefault(key,0)
+                    if sample['phase'] in ('physics.entry','physics.exit'):
+                        sample['angular_words']['sequence']=sequence
+                if repeat==1 and corruption=='first_origin':run['angular']['body_input_from_source']=False
+                if repeat==2:
+                    if corruption=='missing':del run['angular']['body_input']
+                    if corruption=='setup':del run['setup_state']['angular_body_input']
+                    if corruption=='input':run['angular']['body_input']['mass']+=1.
+                    if corruption=='reused_origin':run['angular']['body_input_from_source']=True
+                    if corruption=='self_consistent_replacement':
+                        for target in (run['angular']['body_input'],run['setup_state']['angular_body_input'],run['initial']['angular_body_input']):target['mass']+=1.
+                        run['angular']['argument_words']['mass']=binary32_word(exact+1.)
+                        run['angular']['parsed_words']['canonical_arguments']['mass']=binary32_word(exact+1.)
+                    if corruption=='consuming_word':run['samples'][-1]['angular_words']['fixed_dt']+=1
+                return run
+            def write_run(directory,repeat):
+                directory.mkdir(parents=True,exist_ok=True)
+                supplied=scenario_input(repeat)
+                if mode=='verify' or corruption in ('supplied','supplied_zero'):(directory/'scenario.json').write_text(json.dumps(supplied))
+                run=make_run(repeat)
+                (directory/'runtime.json').write_text(json.dumps(run))
+                (directory/'completion.json').write_text(json.dumps(dict(completed=True,sample_count=len(run['samples']),physics_steps=480)))
+                (directory/'process.json').write_text(json.dumps(dict(pid=123,executable=str(output/'scratch/game/TheLongDrive.exe'))))
+                (directory/'exit.json').write_text(json.dumps(dict(exit_code=0)))
+                (directory/'unity.log').write_text('G11_NATIVE_CAPTURE_FLUSHED completed=True\n')
+            def fake_player(arguments,**kwargs):
+                kind=arguments[arguments.index('-Mode')+1]
+                if kind=='Setup':
+                    (output/'scratch').mkdir()
+                    (output/'scratch/patch-receipt.json').write_text(json.dumps(dict(changed_methods=['checked'],observer_revision={},native_engine_sha256='engine',source_physics_module_sha256='physics')))
+                if kind=='Run':
+                    directory=Path(arguments[arguments.index('-RunRoot')+1]);repeat=len(launched)+1
+                    supplied=json.loads((directory/'scenario.json').read_text())
+                    self.assertEqual(supplied,scenario_input(repeat) if corruption!='supplied' else dict(row,has_setup_state=True,setup_state=canonical) if repeat>1 else row)
+                    if repeat>1:self.assertEqual(supplied['setup_state']['angular_body_input']['mass'],exact)
+                    launched.append(supplied);write_run(directory,repeat)
+                return type('Result',(),dict(returncode=0))()
+            pre=dict(powershell='pwsh',observer_revision={},app_id=probe.APP_ID,build_id=probe.BUILD_ID,unity_version=probe.UNITY_VERSION,native_engine=dict(sha256='engine'),dependencies={'TheLongDrive_Data/Managed/UnityEngine.PhysicsModule.dll':'physics'})
+            with ExitStack() as patches:
+                patches.enter_context(patch.object(probe,'PROJECT',project))
+                for key,value in (('physical_inputs',{}),('validate_timing',{}),('validate_controls',{}),('validate_body_hold',{}),
+                                  ('validate_geometry',{}),('validate_driver',{}),('validate_lifecycle',{})):
+                    patches.enter_context(patch.object(probe,key,return_value=value))
+                if mode=='capture':
+                    patches.enter_context(patch.object(probe,'preflight',return_value=pre))
+                    patches.enter_context(patch.object(probe.subprocess,'run',side_effect=fake_player))
+                    invoke=lambda:probe.capture(project,project,output,definitions,3)
+                else:
+                    output.mkdir(parents=True);(output/'scratch').mkdir()
+                    (output/'request.json').write_text(json.dumps(dict(repeats=3,scenarios=[row],observer_revision={})))
+                    (output/'preflight.json').write_text(json.dumps(pre))
+                    (output/'scratch/patch-receipt.json').write_text(json.dumps(dict(changed_methods=['checked'],observer_revision={},native_engine_sha256='engine',source_physics_module_sha256='physics')))
+                    for repeat in range(1,4):write_run(output/row['id']/f'repeat-{repeat}',repeat)
+                    invoke=lambda:probe.verify(output)
+                if corruption:
+                    with self.assertRaisesRegex(ValueError,'Angular word'):
+                        invoke()
+                else:
+                    result=invoke()
+                    self.assertEqual(len(result['runs']),3)
+                    self.assertTrue(all(r['angular']['steps']==480 for r in result['runs']))
+                    first_runtime=(output/row['id']/'repeat-1/runtime.json').read_text()
+                    self.assertIn('"mass": 1061.351',first_runtime)
+                    self.assertEqual(json.loads(first_runtime)['angular']['body_input']['mass'],raw_mass)
+            self.assertEqual(first,original)
+
+    def test_supplied_declaration_words_are_checked(self):
+        for mode in ('capture','verify'):
+            with self.subTest(mode=mode):self.transport_case(mode,'supplied_zero')
+
+    def test_production_word_dispatch_is_required(self):
+        import inspect
+        from tools.reference import driving_probe as probe
+        text=inspect.getsource(probe.validate_run)
+        original="timing['angular'] = validate_angular(run, scenario)"
+        self.assertIn(original,text)
+        namespace=dict(probe.__dict__)
+        exec(compile(text.replace(original,"timing['angular'] = {}"),'<angular dispatch removed>','exec'),namespace)
+        with patch.object(probe,'validate_run',namespace['validate_run']):
+            for mode in ('capture','verify'):
+                with self.subTest(mode=mode),self.assertRaises(AssertionError):
+                    self.transport_case(mode,'consuming_word')
 
     def test_actual_setup_methods_have_one_property_owner(self):
         reference = Path(__file__).parents[1]

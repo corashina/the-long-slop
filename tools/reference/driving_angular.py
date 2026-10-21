@@ -1,6 +1,8 @@
 """Declared native angular inputs and evidence gates. No response model lives here."""
 from copy import deepcopy
 import json
+import math
+import struct
 from pathlib import Path
 
 SUPPORTS = ('full-tire', 'worn-tire', 'bare-rim', 'hub')
@@ -23,6 +25,8 @@ CONFIRMATION = events([('positive-independent',35.,0.),('coast-independent',0.,0
 HELPER = events([('positive-high',3.,0.),('positive-low',1.,0.),('coast-positive',0.,0.),
                  ('negative-high',-3.,0.),('negative-low',-1.,0.),('coast-negative',0.,0.),
                  ('positive-revisit',1.,0.),('coast-revisit',0.,0.)])
+
+IDENTIFICATION_INPUTS = (('angular-identification-full-tire-x-below-five-adjacent', 'angular-full-tire-excitation', (4.999999523162842, 0.0, 0.0), None), ('angular-identification-full-tire-x-five', 'angular-full-tire-excitation', (5.0, 0.0, 0.0), None), ('angular-identification-full-tire-x-above-five-adjacent', 'angular-full-tire-excitation', (5.000000476837158, 0.0, 0.0), None), ('angular-identification-full-tire-x-five-z-positive-ten', 'angular-full-tire-excitation', (5.0, 0.0, 10.0), None), ('angular-identification-full-tire-x-five-z-negative-ten', 'angular-full-tire-excitation', (5.0, 0.0, -10.0), None), ('angular-identification-worn-tire-zero-body-speed', 'angular-worn-tire-excitation', (0.0, 0.0, 0.0), None), ('angular-identification-full-tire-zero-low-brake-start', 'angular-full-tire-brake-excitation-zero-body-speed', (0.0, 0.0, 0.0), None), ('angular-identification-full-tire-zero-high-brake-start', 'angular-full-tire-brake-excitation-zero-body-speed', (0.0, 0.0, 0.0), 1800.0))
 
 def angular_rows():
     """Generate the committed rows from existing checked setup metadata."""
@@ -80,6 +84,13 @@ def angular_rows():
         clone['setup']['velocity_mps']=dict(zip(('x','y','z'),velocity))
         clone['angular']['rig']['velocity_mps']=dict(zip(('x','y','z'),velocity))
         rows.append(clone)
+    for identity,parent,velocity,brake in IDENTIFICATION_INPUTS:
+        clone=deepcopy(next(row for row in rows if row['id']==parent))
+        clone['id']=identity
+        clone['setup']['velocity_mps']=dict(zip(('x','y','z'),velocity))
+        clone['angular']['rig']['velocity_mps']=dict(zip(('x','y','z'),velocity))
+        if brake is not None:clone['angular']['events'][0]['brake_nm']=brake
+        rows.append(clone)
     return rows
 
 
@@ -97,6 +108,7 @@ def validate_angular_schedule(scenario):
     expected=next((row for row in angular_rows() if row['id']==scenario['id']),None)
     if scenario!=expected:
         raise ValueError('Declared angular inputs changed; review a new row before measurement')
+    validate_angular_declaration_words(scenario,expected)
     for event in spec['events']:
         if event['phase'].startswith('coast') and (event['motor_nm']!=0 or event['brake_nm']!=0):
             raise ValueError('Active coast requires zero motor and zero brake')
@@ -111,31 +123,201 @@ def angular_initial_inputs(run):
     del initial['body']['instance_id']
     return dict(initial_state=initial,source_profile=report['source_profile'],copied_profile=report['copied_profile'],
                 source_transform=report['source_transform'],copied_transform=report['copied_transform'],
-                body_input=report['body_input'],wheel_input=report['wheel_input'])
+                body_input=report['body_input'],argument_words=report['argument_words'],wheel_input=report['wheel_input'])
 
 
 BODY_INPUT_FIELDS = ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')
 
 
 def validate_angular_body_input(run,canonical,from_source):
-    """Bind exact setter arguments to first-source input or supplied canonical input."""
+    """Bind setter words to source arguments or the actual supplied canonical input."""
     report=run.get('angular',{})
+    parsed=require_word_schema(report)
     body_input=report.get('body_input')
     if (type(report.get('body_input_from_source')) is not bool or
         report['body_input_from_source'] is not from_source or
         not isinstance(body_input,dict) or set(body_input)!=set(BODY_INPUT_FIELDS)):
-        raise ValueError('Angular body input or origin is missing or differs')
-    source=report.get('source_body',{})
+        word_error('body input or origin is missing or differs')
+    arguments=report['argument_words']
     if from_source:
-        if canonical is not None or not set(BODY_INPUT_FIELDS)<=source.keys():
-            raise ValueError('Angular first-source body input provenance differs')
-        expected={key:source[key] for key in BODY_INPUT_FIELDS}
+        source=report.get('source_body',{})
+        if canonical is not None or not set(BODY_INPUT_FIELDS)<=source.keys() or body_input!={key:source[key] for key in BODY_INPUT_FIELDS}:
+            word_error('first-source body input provenance differs')
+        if arguments!=report['source_argument_words'] or parsed['canonical_supplied'] is not False:
+            word_error('first-source arguments or parser origin differ')
     else:
-        if canonical is None:
-            raise ValueError('Angular reused canonical body input is missing')
-        expected=canonical
-    if body_input!=expected or any(run.get(name,{}).get('angular_body_input')!=expected for name in ('setup_state','initial')):
-        raise ValueError('Angular canonical body input differs from exact setter arguments')
+        if canonical is None or arguments!=body_words(canonical):
+            word_error('reused canonical setter arguments differ')
+        if parsed['canonical_supplied'] is not True or parsed['canonical_is_null'] is not False or parsed['canonical_arguments']!=arguments:
+            word_error('parsed canonical arguments or origin differ')
+    if any(run.get(name,{}).get('angular_body_input')!=body_input for name in ('setup_state','initial')):
+        word_error('stored canonical body input differs from setter record')
+
+
+WORD_SCHEMA = 1
+VECTOR_FIELDS = ('x','y','z')
+
+
+def word_error(message):
+    raise ValueError('Angular word '+message)
+
+
+def word_shape(value, fields, label):
+    if not isinstance(value,dict) or set(value)!=set(fields):
+        word_error(label+' shape is missing or differs')
+    return value
+
+
+def binary32_word(value):
+    if type(value) not in (int,float) or not math.isfinite(value):
+        word_error('value is not finite numeric input')
+    try:
+        return struct.unpack('<i',struct.pack('<f',value))[0]
+    except (OverflowError,struct.error):
+        word_error('value is outside binary32')
+
+
+def binary32_value(word):
+    if type(word) is not int or not -2147483648<=word<=2147483647:
+        word_error('evidence must be typed signed int32')
+    value=struct.unpack('<f',struct.pack('<i',word))[0]
+    if not math.isfinite(value):
+        word_error('candidate value is not finite')
+    return value
+
+
+def vector_words(value, fields=VECTOR_FIELDS):
+    word_shape(value,fields,'vector input')
+    return {key:binary32_word(value[key]) for key in fields}
+
+
+def body_words(value):
+    word_shape(value,BODY_INPUT_FIELDS,'body input')
+    return dict(mass=binary32_word(value['mass']),
+                center_of_mass=vector_words(value['center_of_mass']),
+                inertia_tensor=vector_words(value['inertia_tensor']),
+                inertia_tensor_rotation=vector_words(value['inertia_tensor_rotation'],(*VECTOR_FIELDS,'w')))
+
+
+def body_word_values(value):
+    word_shape(value,BODY_INPUT_FIELDS,'body arguments')
+    result=dict(mass=binary32_value(value['mass']))
+    for name,fields in (('center_of_mass',VECTOR_FIELDS),('inertia_tensor',VECTOR_FIELDS),('inertia_tensor_rotation',(*VECTOR_FIELDS,'w'))):
+        word_shape(value[name],fields,name)
+        result[name]={key:binary32_value(value[name][key]) for key in fields}
+    return result
+
+
+def require_word_schema(report):
+    if type(report.get('word_schema_version')) is not int or report['word_schema_version']!=WORD_SCHEMA:
+        word_error('schema is missing or obsolete')
+    for name in ('argument_words','source_argument_words'):
+        body_word_values(report.get(name))
+    parsed=word_shape(report.get('parsed_words'),('observed','canonical_supplied','canonical_is_null','setup_velocity','rig_velocity','rig_angular_velocity','canonical_arguments'),'parser')
+    if parsed['observed'] is not True or any(type(parsed[k]) is not bool for k in ('canonical_supplied','canonical_is_null')):
+        word_error('parser observation or origin is missing')
+    body_word_values(parsed['canonical_arguments'])
+    return parsed
+
+
+def angular_transport_initial(run):
+    """Separate request copy. Preserve all recorded physical Initial fields."""
+    result=deepcopy(run['setup_state'])
+    result['angular_body_input']=body_word_values(run['angular']['argument_words'])
+    return result
+
+
+
+def validate_angular_declaration_words(scenario,expected):
+    """Keep the frozen numeric declarations, including zero signs and types."""
+    for actual,wanted in ((scenario['setup']['velocity_mps'],expected['setup']['velocity_mps']),
+                          (scenario['angular']['rig']['velocity_mps'],expected['angular']['rig']['velocity_mps']),
+                          (scenario['angular']['rig']['angular_velocity_rad_s'],expected['angular']['rig']['angular_velocity_rad_s'])):
+        word_shape(actual,VECTOR_FIELDS,'declared vector')
+        if any(type(actual[key]) is not type(wanted[key]) for key in VECTOR_FIELDS) or vector_words(actual)!=vector_words(wanted):
+            word_error('declared vector differs from registered input')
+    for actual,wanted in zip(scenario['angular']['events'],expected['angular']['events']):
+        for key in ('motor_nm','brake_nm'):
+            if type(actual[key]) is not type(wanted[key]) or binary32_word(actual[key])!=binary32_word(wanted[key]):
+                word_error('declared torque/brake differs from registered input')
+
+
+def validate_angular_supplied(run,scenario,supplied,canonical):
+    """Read the actual supplied input, independently of receipts or capture."""
+    source=canonical is None
+    expected=deepcopy(scenario)
+    if not source:
+        expected.update(has_setup_state=True,setup_state=canonical)
+        actual=supplied.get('setup_state',{}).get('angular_body_input')
+        if body_words(actual)!=run['angular']['argument_words']:
+            word_error('supplied canonical arguments differ')
+    if supplied!=expected:
+        word_error('supplied scenario or first/reused origin differs')
+    validate_angular_declaration_words(supplied,scenario)
+    parsed=require_word_schema(run['angular'])
+    if parsed['canonical_supplied'] is not (not source):
+        word_error('supplied parser origin differs')
+
+
+def validate_angular_words(run,scenario):
+    """Finite binary32 view. Raw producer floats remain unchanged."""
+    report=run.get('angular',{})
+    parsed=require_word_schema(report)
+    spec=scenario['angular']
+    for key,expected in (('setup_velocity',scenario['setup']['velocity_mps']),
+                         ('rig_velocity',spec['rig']['velocity_mps']),
+                         ('rig_angular_velocity',spec['rig']['angular_velocity_rad_s'])):
+        word_shape(parsed[key],VECTOR_FIELDS,key)
+        if any(type(parsed[key][axis]) is not int for axis in VECTOR_FIELDS) or parsed[key]!=vector_words(expected):
+            word_error('parsed '+key+' differs from frozen declaration')
+    for name in ('source_profile_words','copied_profile_words'):
+        values=word_shape(report.get(name),('mass','radius','damping'),name)
+        for value in values.values():binary32_value(value)
+    if report['source_profile_words']!=report['copied_profile_words']:
+        word_error('source/copy profile binding differs')
+    initial=word_shape(report.get('initial_words'),('observed','wheel_id','fixed_dt','rpm','velocity','angular_velocity'),'initial')
+    if initial['observed'] is not True or type(initial['wheel_id']) is not int or initial['wheel_id']!=report['copied_wheel_id']:
+        word_error('initial selected wheel binding differs')
+    if binary32_value(initial['fixed_dt'])<=0 or type(initial['rpm']) is not int or initial['rpm']!=0:
+        word_error('initial timestep or positive zero RPM differs')
+    for key,expected in (('velocity',spec['rig']['velocity_mps']),('angular_velocity',spec['rig']['angular_velocity_rad_s'])):
+        word_shape(initial[key],VECTOR_FIELDS,'initial '+key)
+        if any(type(initial[key][axis]) is not int for axis in VECTOR_FIELDS) or initial[key]!=vector_words(expected):
+            word_error('initial '+key+' differs')
+    wheels=run.get('initial',{}).get('wheel_state',[])
+    if len(wheels)!=1 or wheels[0].get('rpm')!=0:
+        word_error('stored Initial selected wheel zero is missing')
+    for sample in run.get('samples',[]):
+        if sample.get('phase') not in ('physics.entry','physics.exit'):continue
+        words=word_shape(sample.get('angular_words'),('observed','wheel_id','sequence','step','phase','fixed_dt','motor_nm','brake_nm','rpm'),'sample')
+        if words['observed'] is not True:
+            word_error('sample observation is missing')
+        for key,expected in (('wheel_id',report['copied_wheel_id']),('sequence',sample['sequence']),('step',sample['step'])):
+            if type(words[key]) is not int or words[key]!=expected:
+                word_error('sample '+key+' binding differs')
+        if words['phase']!=sample['phase']:
+            word_error('sample phase binding differs')
+        for key in ('fixed_dt','motor_nm','brake_nm','rpm'):binary32_value(words[key])
+        if words['fixed_dt']!=initial['fixed_dt']:
+            word_error('consuming timestep differs from initial')
+        event=next((e for e in reversed(spec['events']) if e['step']<=sample['step']),None)
+        if event is None or words['motor_nm']!=binary32_word(event['motor_nm']) or words['brake_nm']!=binary32_word(event['brake_nm']):
+            word_error('consuming motor/brake binding differs')
+
+
+
+def angular_candidate_view(run):
+    """Decode only the finite candidate fields. Do not alter native records."""
+    report=run['angular']
+    require_word_schema(report)
+    profile=word_shape(report['copied_profile_words'],('mass','radius','damping'),'candidate profile')
+    return dict(profile={key:binary32_value(value) for key,value in profile.items()},
+                fixed_dt=binary32_value(report['initial_words']['fixed_dt']),
+                samples=[dict(sequence=s['sequence'],step=s['step'],phase=s['phase'],wheel_id=s['angular_words']['wheel_id'],
+                              motor_nm=binary32_value(s['angular_words']['motor_nm']),
+                              brake_nm=binary32_value(s['angular_words']['brake_nm']),
+                              rpm=binary32_value(s['angular_words']['rpm']))
+                         for s in run['samples'] if s['phase']=='physics.exit'])
 
 
 def validate_source_ownership(native,expected,original_id,original_key):
@@ -178,7 +360,12 @@ def validate_angular_inertia(body,declared,constraints,step=0,phase='initial'):
 def validate_angular(run,scenario):
     spec=validate_angular_schedule(scenario)
     report=run.get('angular',{})
-    if report.get('declared')!=spec or report.get('source_key')!=spec['source_wheel'] or report.get('support')!=spec['support']:
+    validate_angular_words(run,scenario)
+    declared=deepcopy(report.get('declared',{}));expected=deepcopy(spec)
+    for value in (declared,expected):
+        if isinstance(value.get('rig'),dict):
+            value['rig'].pop('velocity_mps',None);value['rig'].pop('angular_velocity_rad_s',None)
+    if declared!=expected or report.get('source_key')!=spec['source_wheel'] or report.get('support')!=spec['support']:
         raise ValueError('Angular profile identity or provenance differs')
     trace=run.get('body_trace',{})
     if (not report.get('copied_wheel_id') or report.get('source_wheel_id')==report.get('copied_wheel_id') or
@@ -220,7 +407,7 @@ def validate_angular(run,scenario):
     held=report.get('copied_held_body',{})
     body_input=report.get('body_input',{})
     from_source=report.get('body_input_from_source')
-    validate_angular_body_input(run,None if from_source else run.get('setup_state',{}).get('angular_body_input'),from_source)
+    validate_angular_body_input(run,None if from_source else body_word_values(report['argument_words']),from_source)
     if not constructor or not held or any(held.get(k)!=body_input[k] for k in ('mass','center_of_mass','inertia_tensor')):
         raise ValueError('Copied body source-property provenance differs')
     for name in ('source_transform','copied_transform'):
@@ -243,7 +430,6 @@ def validate_angular(run,scenario):
     if (not body_fields<=initial_body.keys() or initial_state.get('wheel_id')!=report['copied_wheel_id'] or not initial_state.get('enabled') or
         initial_state.get('event_revision')!=0 or initial_state.get('assignment_step')!=0 or
         initial_state.get('phase')!='before-first-assignment' or
-        initial_body.get('velocity')!=rig['velocity_mps'] or initial_body.get('angular_velocity')!=rig['angular_velocity_rad_s'] or
         initial_body.get('instance_id')!=report['copied_body_id'] or initial_body.get('kinematic') is not False):
         raise ValueError('Angular one-time initial body input is missing or differs')
     new_row=any(row['id']==scenario['id'] for row in angular_rows()[10:])

@@ -5,6 +5,62 @@ using UnityEngine;
 // Native measurements only. Rig inputs do not define source physics or wheel inertia.
 public static class G11AngularProbe
 {
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit,Size=4)]
+    public struct FloatWord {
+        [System.Runtime.InteropServices.FieldOffset(0)] public float value;
+        [System.Runtime.InteropServices.FieldOffset(0)] public int word;
+    }
+    public static int Word(float value) { var view=new FloatWord{value=value};return view.word; }
+    [Serializable] public struct VectorWords {
+        public int x,y,z;
+        public VectorWords(Vector3 value) { x=Word(value.x);y=Word(value.y);z=Word(value.z); }
+    }
+    [Serializable] public struct QuaternionWords {
+        public int x,y,z,w;
+        public QuaternionWords(Quaternion value) { x=Word(value.x);y=Word(value.y);z=Word(value.z);w=Word(value.w); }
+    }
+    [Serializable] public struct BodyWords {
+        public int mass;public VectorWords center_of_mass,inertia_tensor;public QuaternionWords inertia_tensor_rotation;
+        public BodyWords(float mass,Vector3 center,Vector3 tensor,Quaternion rotation) {
+            this.mass=Word(mass);center_of_mass=new VectorWords(center);inertia_tensor=new VectorWords(tensor);inertia_tensor_rotation=new QuaternionWords(rotation);
+        }
+    }
+    [Serializable] public struct ProfileWords {
+        public int mass,radius,damping;
+        public ProfileWords(Profile value) { mass=Word(value.mass);radius=Word(value.radius);damping=Word(value.damping); }
+    }
+    [Serializable] public struct ParsedWords {
+        public bool observed,canonical_supplied,canonical_is_null;
+        public VectorWords setup_velocity,rig_velocity,rig_angular_velocity;
+        public BodyWords canonical_arguments;
+    }
+    [Serializable] public struct InitialWords {
+        public bool observed;public int wheel_id,fixed_dt,rpm;
+        public VectorWords velocity,angular_velocity;
+    }
+    [Serializable] public struct SampleWords {
+        public bool observed;public int wheel_id,sequence,step,fixed_dt,motor_nm,brake_nm,rpm;public string phase;
+    }
+    static ParsedWords parsedWords;
+    public static void ObserveAfterFromJson(Vector3 setupVelocity,Input declared,bool supplied,BodyInput canonical) {
+        parsedWords=new ParsedWords{observed=true,canonical_supplied=supplied,canonical_is_null=canonical==null,
+            setup_velocity=new VectorWords(setupVelocity),rig_velocity=new VectorWords(declared.rig.velocity_mps),
+            rig_angular_velocity=new VectorWords(declared.rig.angular_velocity_rad_s)};
+        if(supplied && canonical!=null) parsedWords.canonical_arguments=new BodyWords(canonical.mass,canonical.center_of_mass,canonical.inertia_tensor,canonical.inertia_tensor_rotation);
+    }
+    public static bool IsSelectedWheel(WheelCollider candidate) { return System.Object.ReferenceEquals(candidate,wheel); }
+    public static void ObserveInitial(WheelCollider selected,float fixedDt,float rpm) {
+        if(!IsSelectedWheel(selected) || report.initial_state==null) return;
+        var initial=report.initial_state;
+        report.initial_words=new InitialWords{observed=true,wheel_id=initial.wheel_id,fixed_dt=Word(fixedDt),rpm=Word(rpm),
+            velocity=new VectorWords(initial.body.velocity),angular_velocity=new VectorWords(initial.body.angular_velocity)};
+    }
+    public static SampleWords ObserveSample(WheelCollider selected,State state,int sequence,int step,string phase,float fixedDt,float motor,float brake,float rpm) {
+        if(!IsSelectedWheel(selected)) return new SampleWords();
+        return new SampleWords{observed=true,wheel_id=state.wheel_id,sequence=sequence,step=step,phase=phase,
+            fixed_dt=Word(fixedDt),motor_nm=Word(motor),brake_nm=Word(brake),rpm=Word(rpm)};
+    }
+
     [Serializable] public class Event { public int step; public string phase; public float motor_nm,brake_nm; }
     [Serializable] public class Rig {
         public bool use_gravity; public float drag,angular_drag,sleep_threshold; public int constraints;
@@ -46,6 +102,8 @@ public static class G11AngularProbe
         public Vector3 position,local_scale;public Quaternion rotation;
     }
     [Serializable] public class Report {
+        public int word_schema_version=1;public ParsedWords parsed_words;public BodyWords argument_words,source_argument_words;
+        public ProfileWords source_profile_words,copied_profile_words;public InitialWords initial_words;
         public Input declared;public string source_key,support;
         public int source_wheel_id,copied_wheel_id,original_body_id,copied_body_id;
         public Profile source_profile,copied_profile;public Body source_body,copied_constructor_body,copied_held_body;
@@ -90,6 +148,7 @@ public static class G11AngularProbe
         input=declared;body=held;var constructorBody=ReadBody(body);var sourceBody=ReadBody(original);
         var bodyInput=hasCanonical?canonical:new BodyInput{mass=sourceBody.mass,center_of_mass=sourceBody.center_of_mass,
             inertia_tensor=sourceBody.inertia_tensor,inertia_tensor_rotation=sourceBody.inertia_tensor_rotation};
+        var argumentWords=new BodyWords(bodyInput.mass,bodyInput.center_of_mass,bodyInput.inertia_tensor,bodyInput.inertia_tensor_rotation);
         body.mass=bodyInput.mass;body.centerOfMass=bodyInput.center_of_mass;
         body.inertiaTensor=bodyInput.inertia_tensor;body.inertiaTensorRotation=bodyInput.inertia_tensor_rotation;
         body.constraints=(RigidbodyConstraints)input.rig.constraints;body.useGravity=input.rig.use_gravity;
@@ -104,12 +163,15 @@ public static class G11AngularProbe
         wheel.suspensionDistance=source.suspensionDistance;wheel.suspensionSpring=source.suspensionSpring;
         wheel.forceAppPointDistance=source.forceAppPointDistance;wheel.forwardFriction=source.forwardFriction;wheel.sidewaysFriction=source.sidewaysFriction;
         wheel.motorTorque=0;wheel.brakeTorque=0;wheel.steerAngle=0;
-        report=new Report{declared=input,source_key=G11Geometry.Key(source),support=input.support,
+        report=new Report{parsed_words=parsedWords,argument_words=argumentWords,
+            source_argument_words=new BodyWords(sourceBody.mass,sourceBody.center_of_mass,sourceBody.inertia_tensor,sourceBody.inertia_tensor_rotation),
+            declared=input,source_key=G11Geometry.Key(source),support=input.support,
             source_wheel_id=source.GetInstanceID(),copied_wheel_id=wheel.GetInstanceID(),original_body_id=original.GetInstanceID(),copied_body_id=body.GetInstanceID(),
             source_profile=new Profile(),copied_profile=new Profile(),source_body=sourceBody,copied_constructor_body=constructorBody,copied_held_body=ReadBody(body),
             source_sprung_mass=source.sprungMass,copied_sprung_mass=wheel.sprungMass,
             source_transform=new TransformState(source.transform),copied_transform=new TransformState(wheel.transform),body_input=bodyInput,body_input_from_source=!hasCanonical,wheel_input=wheelInput,assignments=new Assignment[input.events.Length]};
         ReadProfile(source,report.source_profile);ReadProfile(wheel,report.copied_profile);
+        report.source_profile_words=new ProfileWords(report.source_profile);report.copied_profile_words=new ProfileWords(report.copied_profile);
         for(int i=0;i<report.assignments.Length;i++) report.assignments[i]=new Assignment();
         return wheel;
     }

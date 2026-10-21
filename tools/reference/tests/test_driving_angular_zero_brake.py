@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import unittest
+import sys
 from unittest.mock import patch
 from tools.reference.driving_angular import angular_rows, validate_angular_schedule, validate_angular
 from tools.reference.tests import test_driving_angular as angular_tests
@@ -46,13 +47,33 @@ def new_fixture(index=10, spinning=False):
             run['samples'][2*(step-1)]['wheels'][0]['rpm'] = previous
             run['samples'][2*(step-1)+1]['wheels'][0]['rpm'] = rpm
             previous = rpm
-    return row, run
+    return angular_tests.add_word_fixture(row,run)
 
+
+
+IDENTIFICATION_BRAKE_IDS = ('angular-identification-full-tire-zero-low-brake-start',
+                            'angular-identification-full-tire-zero-high-brake-start')
+
+ORIGINAL_NEW_FIXTURE = new_fixture
+
+
+def identification_brake_fixture(row,spinning=False):
+    parent=next(i for i,row in enumerate(angular_rows()) if row['id']=='angular-full-tire-brake-excitation')
+    _,run=ORIGINAL_NEW_FIXTURE(parent,spinning)
+    run['angular']['declared']=deepcopy(row['angular'])
+    velocity=deepcopy(row['setup']['velocity_mps'])
+    run['angular']['initial_state']['body']['velocity']=velocity
+    run['angular']['assignments']=[dict(event_revision=i+1,**event) for i,event in enumerate(row['angular']['events'])]
+    for sample in run['samples']:
+        sample['angular_state']['body']['velocity']=deepcopy(velocity)
+        event=next(e for e in reversed(row['angular']['events']) if e['step']<=sample['step'])
+        sample['wheels'][0].update(motor_torque=event['motor_nm'],brake_torque=event['brake_nm'])
+    return angular_tests.add_word_fixture(row,run)
 
 class ZeroBrakeTests(unittest.TestCase):
     def test_exact_rows_and_unchanged_prefix(self):
         rows = angular_rows()
-        self.assertEqual(len(rows), 21)
+        self.assertEqual(len(rows), 29)
         self.assertEqual(hashlib.sha256(json.dumps(rows[:10],sort_keys=True,separators=(',',':')).encode()).hexdigest(), 'e6e7765656c9ca1b945ce7f61f859e1356db9c4e51f044f86fe93802c6cf19b5')
         stored = json.loads((Path(__file__).parents[3]/'tests/fixtures/driving/angular-scenarios.json').read_text())
         self.assertEqual({k:v for k,v in stored.items() if k!='scenarios'}, {'schema_version': 1})
@@ -104,11 +125,19 @@ class ZeroBrakeTests(unittest.TestCase):
                 bad = deepcopy(run)
                 initial = bad['angular']['initial_state']
                 if case in ('sleeping','kinematic'): initial['body'][case] = True
-                elif case == 'velocity': initial['body']['velocity']['x'] += 1
+                elif case == 'velocity':
+                    initial['body']['velocity']['x'] += 1
+                    angular_tests.add_word_fixture(row,bad)
                 else: initial[case] = False
                 with self.subTest(index=index, case=case), self.assertRaises(ValueError): validate_angular(bad,row)
 
     def test_brake_accepts_locked_spinning_and_opposite_sign_low_brake(self):
+        for row in (row for row in angular_rows() if row['id'] in IDENTIFICATION_BRAKE_IDS):
+            with patch.object(sys.modules[__name__],'new_fixture',side_effect=lambda index=11,spinning=False,row=row:identification_brake_fixture(row,spinning)):
+                self.check_brake_accepts_locked_spinning_and_opposite_sign_low_brake()
+        self.check_brake_accepts_locked_spinning_and_opposite_sign_low_brake()
+
+    def check_brake_accepts_locked_spinning_and_opposite_sign_low_brake(self):
         for spinning in (False, True):
             row, run = new_fixture(11, spinning)
             result = validate_angular(run,row)
@@ -127,6 +156,12 @@ class ZeroBrakeTests(unittest.TestCase):
         self.assertEqual(result['low_brake_response'][0]['solves'][0]['exit_rpm'], -3.)
 
     def test_brake_rejects_missing_zero_and_release_gates(self):
+        for row in (row for row in angular_rows() if row['id'] in IDENTIFICATION_BRAKE_IDS):
+            with patch.object(sys.modules[__name__],'new_fixture',side_effect=lambda index=11,spinning=False,row=row:identification_brake_fixture(row,spinning)):
+                self.check_brake_rejects_missing_zero_and_release_gates()
+        self.check_brake_rejects_missing_zero_and_release_gates()
+
+    def check_brake_rejects_missing_zero_and_release_gates(self):
         row, run = new_fixture(11)
         for case in ('initial_missing','initial_count','initial_rpm','initial_motor','initial_brake','first_entry', 'release_positive','release_negative','release_unchanged',
                      '179_entry','179_exit','180_entry','180_exit','419_entry','419_exit','420_entry','420_exit','181_entry','421_entry'):

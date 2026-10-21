@@ -506,7 +506,9 @@ namespace UnityEngine {
  }
 }
 public static class ReadoutCaptureChecks {
- class Scenario {public string id="contact-test",probe_kind="single_wheel_contact";public bool contact_body_input_from_source;public G11AngularProbe.BodyInput contact_body_input;public G11ContactProbe.Input contact;}
+ class Setup {public UnityEngine.Vector3 velocity_mps=new UnityEngine.Vector3();}
+ class Initial {public G11AngularProbe.BodyInput angular_body_input=null;}
+ class Scenario {public string id="contact-test",probe_kind="single_wheel_contact";public bool contact_body_input_from_source;public bool has_setup_state=false;public Setup setup=null;public Initial setup_state=null;public G11AngularProbe.Input angular=null;public G11AngularProbe.BodyInput contact_body_input;public G11ContactProbe.Input contact;}
  class Sample {}
  class Result {public bool completed,isolated_wheel_probe;public string error;public int physics_steps=0;public G11ContactProbe.Report contact;public G11ContactProbe.Readout contact_configure_readout;public G11Geometry.Activation[] wheel_activation_events;public Sample[] samples;}
  static Scenario scenario;static Result result;static UnityEngine.Rigidbody body;static UnityEngine.WheelCollider[] wheels;

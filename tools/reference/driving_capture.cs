@@ -79,6 +79,7 @@ public sealed class G11Capture : MonoBehaviour
         public Wheel[] wheels;
         public G11Geometry.NativeWheel[] native_wheels;
         public G11AngularProbe.State angular_state;public G11ContactProbe.State contact_state;
+        public G11AngularProbe.SampleWords angular_words;
     }
     [Serializable] public class WheelParameters
     {
@@ -293,6 +294,9 @@ public sealed class G11Capture : MonoBehaviour
                     G11ContactProbe.ObserveAfterFromJson(scenario.contact_body_input_from_source,scenario.contact_body_input,
                         new G11ContactProbe.SetupMark{frame=Time.frameCount,physics_step=ObservedPhysicsStep,input_revision=InputRevision});
                 }
+                if(scenario.probe_kind=="wheel_angular")
+                    G11AngularProbe.ObserveAfterFromJson(scenario.setup.velocity_mps,scenario.angular,scenario.has_setup_state,
+                        scenario.setup_state==null?null:scenario.setup_state.angular_body_input);
                 result.scenario=scenario.id; result.probe_kind=scenario.probe_kind;
                 new GameObject("G11NativeObserver").AddComponent<G11Capture>();
                 instance.StartCoroutine(instance.Load((mainmenuscript)owner));
@@ -663,7 +667,7 @@ public sealed class G11Capture : MonoBehaviour
     }
     static Initial InitialState()
     {
-        return new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
+        var initial=new Initial { car_path=PathOf(car.transform), engine_path=PathOf(car.Engine.transform), driver_seat_path=PathOf(driverSeat.transform),
             scene=UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, car_type=(int)car.carType,
             random_state=JsonUtility.ToJson(UnityEngine.Random.state), profile_path=ProfilePath(),
             setup_json=JsonUtility.ToJson(scenario.setup), angular_body_input=G11AngularProbe.Active?G11AngularProbe.report.body_input:null, contact_body_input=G11ContactProbe.Active?G11ContactProbe.report.body_input:null, cargo_input=G11Cargo.report.input, driver_input=G11Driver.report.input, input_pose=inputPose, spawn_pose=spawnPose, mass=body.mass, center_of_mass=body.centerOfMass,
@@ -685,6 +689,10 @@ public sealed class G11Capture : MonoBehaviour
                 spring_target=w.suspensionSpring.targetPosition,forward=new Friction(w.forwardFriction),sideways=new Friction(w.sidewaysFriction),
                 driven=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHDriven.Contains(sourceWheels[index]),steer=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHSteer.Contains(sourceWheels[index]),service_brake=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHBrakeOnly.Contains(sourceWheels[index]),
                 handbrake=!G11AngularProbe.Active && !G11ContactProbe.Active && car.WHHandBrake.Contains(sourceWheels[index])}).ToArray() };
+        if(G11AngularProbe.Active)
+            for(int index=0;index<wheels.Length;index++)
+                G11AngularProbe.ObserveInitial(wheels[index],initial.fixed_dt,initial.wheel_state[index].rpm);
+        return initial;
     }
     static void CaptureCurves()
     {
@@ -972,7 +980,14 @@ public sealed class G11Capture : MonoBehaviour
         foreach(var slot in car.DrivenWheelSlots) if(slot.part!=null) sample.installed_driven_rims++;
         sample.torque_divisor=car.DrivenWheelsNum();
         for(int index=0;index<wheels.Length;index++) sample.wheels[index]=ReadWheel(wheels[index]);
-        if(G11AngularProbe.Active) G11AngularProbe.Read(sample.angular_state);
+        if(G11AngularProbe.Active) {
+            G11AngularProbe.Read(sample.angular_state);
+            for(int index=0;index<wheels.Length;index++) if(G11AngularProbe.IsSelectedWheel(wheels[index])) {
+                var selected=sample.wheels[index];
+                sample.angular_words=G11AngularProbe.ObserveSample(wheels[index],sample.angular_state,sample.sequence,sample.step,sample.phase,
+                    sample.fixed_dt,selected.motor_torque,selected.brake_torque,selected.rpm);
+            }
+        }
         if(G11ContactProbe.Active) G11ContactProbe.Read(sample.contact_state);
         for(int index=0;index<G11Geometry.nativeWheels.Length;index++)
             sample.native_wheels[index]=G11Geometry.ReadWheel(G11Geometry.nativeWheels[index]);

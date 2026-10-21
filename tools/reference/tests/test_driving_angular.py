@@ -6,6 +6,38 @@ import unittest
 from tools.reference.driving_angular import angular_rows, validate_angular_schedule, validate_angular
 
 
+
+def add_word_fixture(row,run):
+    """Fabricated observer words. This is not native producer evidence."""
+    from tools.reference.driving_angular import binary32_word, body_words, vector_words
+    report=run['angular']
+    source=report['body_input_from_source']
+    report['word_schema_version']=1
+    report['argument_words']=body_words(report['body_input'])
+    report['source_argument_words']=body_words({k:report['source_body'][k] for k in ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')})
+    zero=dict(mass=0.,center_of_mass=dict(x=0.,y=0.,z=0.),inertia_tensor=dict(x=0.,y=0.,z=0.),inertia_tensor_rotation=dict(x=0.,y=0.,z=0.,w=0.))
+    report['parsed_words']=dict(observed=True,canonical_supplied=not source,canonical_is_null=source,
+        setup_velocity=vector_words(row['setup']['velocity_mps']),
+        rig_velocity=vector_words(row['angular']['rig']['velocity_mps']),
+        rig_angular_velocity=vector_words(row['angular']['rig']['angular_velocity_rad_s']),
+        canonical_arguments=body_words(zero if source else report['body_input']))
+    for name in ('source_profile','copied_profile'):
+        report[name+'_words']={key:binary32_word(report[name][key]) for key in ('mass','radius','damping')}
+    initial=report['initial_state']
+    run['initial'].setdefault('wheel_state',[dict(rpm=0.,contact=False,motor_torque=0.,brake_torque=0.)])
+    report['initial_words']=dict(observed=True,wheel_id=initial['wheel_id'],
+        fixed_dt=binary32_word(run['initial']['fixed_dt']),rpm=binary32_word(run['initial']['wheel_state'][0]['rpm']),
+        velocity=vector_words(initial['body']['velocity']),angular_velocity=vector_words(initial['body']['angular_velocity']))
+    for sample in run['samples']:
+        if sample['phase'] not in ('physics.entry','physics.exit'):continue
+        wheel=sample['wheels'][0]
+        sample['angular_words']=dict(observed=True,wheel_id=sample['angular_state']['wheel_id'],
+            sequence=sample['sequence'],step=sample['step'],phase=sample['phase'],
+            fixed_dt=binary32_word(sample['fixed_dt']),motor_nm=binary32_word(wheel['motor_torque']),
+            brake_nm=binary32_word(wheel['brake_torque']),rpm=binary32_word(wheel['rpm']))
+    return row,run
+
+
 def gate_fixture(index=0):
     """Fabricated gate input. This is not native evidence or a response model."""
     row=angular_rows()[index];spec=row['angular'];z=dict(x=0.,y=0.,z=0.);q=dict(x=0.,y=0.,z=0.,w=1.)
@@ -35,16 +67,17 @@ def gate_fixture(index=0):
                 samples[-1]['angular_state']['body']['inertia_tensor']=deepcopy(z)
         previous=rpm
     phases=('prepared-held','backlog-drained-held','before-dynamic','switched-dynamic','canonical-applied','canonical-transforms-synchronized','native-wheels-enabled','armed-after-canonical')
-    return row,dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,setup_state=dict(angular_body_input=deepcopy(report['body_input'])),initial=dict(fixed_dt=.02,angular_body_input=deepcopy(report['body_input'])))
+    run=dict(angular=report,body_trace=dict(retained_instance_id=1,retained_body='source-body',copied_instance_id=2),geometry=[dict(phase=phase,colliders=deepcopy(shapes)) for phase in phases],wheel_ownership=[dict(phase=phase,order=i+1,frame=0,physics_step=0,time=0.,wheels=deepcopy(native)) for i,phase in enumerate(('source-role-bound',*phases,'measurement-complete'))],samples=samples,setup_state=dict(angular_body_input=deepcopy(report['body_input'])),initial=dict(fixed_dt=.02,angular_body_input=deepcopy(report['body_input'])))
+    return add_word_fixture(row,run)
 
 
 class AngularTests(unittest.TestCase):
     def test_declared_rows(self):
         rows=angular_rows()
-        self.assertEqual(len(rows),21)
+        self.assertEqual(len(rows),29)
         committed=json.loads((Path(__file__).parents[3]/'tests/fixtures/driving/angular-scenarios.json').read_text())
         self.assertEqual(committed['scenarios'],rows)
-        self.assertEqual(len({r['id'] for r in rows}),21)
+        self.assertEqual(len({r['id'] for r in rows}),29)
         for row in rows: validate_angular_schedule(row)
         self.assertEqual({r['angular']['support'] for r in rows}, {'full-tire','worn-tire','bare-rim','hub','auxiliary-helper'})
 

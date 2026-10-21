@@ -11,7 +11,7 @@ from pathlib import Path
 from .driving import ASSEMBLY_SHA256, DECOMPILED_SHA256
 from .driving_body_hold import validate_body_hold
 from .driving_curve import validate_curve_scenario, validate_curve_run, require_same_curve
-from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input
+from .driving_angular import validate_angular_schedule, validate_angular, angular_initial_inputs, validate_angular_body_input, angular_transport_initial, validate_angular_supplied
 from .driving_contact import validate_contact_schedule, validate_contact, contact_initial_inputs, validate_contact_body_input
 from .driving_driver import validate_driver
 from .driving_controls import validate_schedule, validate_controls
@@ -316,13 +316,18 @@ def verify(output_root: Path) -> dict:
         first_curve = None
         initial = None
         canonical_body_input = None
+        angular_setup_state = None
         for repeat in range(1, 4):
             directory = output / scenario['id'] / f'repeat-{repeat}'
             path = directory / 'runtime.json'
             run = read_json(path)
             if scenario['probe_kind']=='wheel_angular':
-                validate_angular_body_input(run, canonical_body_input, repeat==1)
-                if repeat==1: canonical_body_input = run['setup_state']['angular_body_input']
+                supplied=read_json(directory/'scenario.json')
+                validate_angular_supplied(run,scenario,supplied,angular_setup_state)
+                validate_angular_body_input(run,canonical_body_input,repeat==1)
+                if repeat==1:
+                    angular_setup_state=angular_transport_initial(run)
+                    canonical_body_input=angular_setup_state['angular_body_input']
             if scenario['probe_kind']=='single_wheel_contact':
                 first_contact=contact_body_input is None
                 supplied=read_json(directory/'scenario.json')
@@ -417,7 +422,8 @@ def capture(source_root: Path, reference_root: Path,
                    directory / 'launcher.log', 200)
             native_run = read_json(directory / 'runtime.json')
             if row['probe_kind']=='wheel_angular':
-                validate_angular_body_input(native_run, None if setup_state is None else setup_state.get('angular_body_input'), repeat==1)
+                validate_angular_supplied(native_run,row,read_json(directory/'scenario.json'),setup_state)
+                validate_angular_body_input(native_run,None if setup_state is None else setup_state['angular_body_input'],repeat==1)
             if row['probe_kind']=='single_wheel_contact':
                 validate_contact_body_input(native_run,contact_body_input,contact_body_input is None)
                 if contact_body_input is None: contact_body_input=native_run['contact']['body_input']
@@ -429,7 +435,8 @@ def capture(source_root: Path, reference_root: Path,
             if initial is not None and state != initial:
                 raise ValueError('Fresh native repeats have different initial states')
             initial = state
-            if setup_state is None: setup_state = native_run['setup_state']
+            if setup_state is None:
+                setup_state=angular_transport_initial(native_run) if row['probe_kind']=='wheel_angular' else native_run['setup_state']
     receipt = verify(output)
     write_json(output / 'receipt.json', receipt)
     return receipt
