@@ -226,7 +226,7 @@ class ContactTests(unittest.TestCase):
 
     def test_actual_capture_and_verify_group_transport(self):
         from tools.reference import driving_probe as probe
-        rows=contact_rows();base=fixture()[1];canonical=deepcopy(base['contact']['body_input'])
+        rows=contact_rows();base=fixture()[1];canonical=deepcopy(base['contact']['body_input']);real_contact=probe.validate_contact
         for mode in ('capture','verify'):
             corruptions=(None,'journal_motor_argument','journal_brake_argument','journal_steer_argument','journal_missing','journal_duplicate','journal_step','journal_revision','journal_old_schema','first_origin','later_origin','missing','replacement','repeat_replacement','physical_initial','lossy_initial','hierarchy_initial')
             if mode=='verify':corruptions+=('raw_first_nonnull','raw_first_missing','raw_first_nonbool','raw_later_null','raw_later_missing','raw_later_nonbool','raw_later_replacement')
@@ -258,6 +258,23 @@ class ContactTests(unittest.TestCase):
                             elif corruption=='journal_old_schema':
                                 for event in events:
                                     for key in ('motor_argument_nm','brake_argument_nm','steer_argument_degrees'):del event[key]
+                        run.update(runtime='original-unity-player',scenario=rows[index]['id'],completed=True,error=None,
+                                   menu_ready=True,lada_ready=True,control_capture_active=True,isolated_wheel_probe=True)
+                        callbacks=('input2','input','car','engine','control','actuation','torque','rpm')
+                        prefix=[dict(deepcopy(run['samples'][0]),phase=callback+'.'+boundary,step=0,frame=0,time=0.)
+                                for callback in callbacks for boundary in ('entry','exit')]
+                        run['samples']=prefix+run['samples']
+                        for sequence,sample in enumerate(run['samples'],1):
+                            value=sample['contact_state']['observed'];body=value['body']
+                            sample.update(sequence=sequence,rpm=value['rpm'],gear=0,clutch=0.,position=body['position'],
+                                          rotation=body['rotation'],velocity=body['velocity'],angular_velocity=body['angular_velocity'],
+                                          input_sequence=0,engine_sequence=0,car_sequence=0,rpm_sequence=0,
+                                          engine_output_nm=0.,engine_brake_nm=0.,average_rpm=0.,torque_divisor=1)
+                            sample['wheels']=[dict(contact=value['contact'],rpm=value['rpm'],motor_torque=value['motor_nm'],
+                                brake_torque=value['brake_nm'],radius=sample['contact_state']['radius'],
+                                suspension_distance=sample['contact_state']['suspension_distance'],suspension_offset_m=value['q'],
+                                pose=value['pose_position'],rotation=value['pose_rotation'],contact_point=value['point'],
+                                contact_normal=value['normal'],force_n=value['force_scalar'],forward_slip=value['forward_slip'],sideways_slip=value['sideways_slip'])]
                         return run
                     def write_run(directory,index,repeat):
                         run=make_run(index,repeat)
@@ -267,9 +284,9 @@ class ContactTests(unittest.TestCase):
                         (directory/'exit.json').write_text(json.dumps(dict(exit_code=0)))
                         (directory/'unity.log').write_text('G11_NATIVE_CAPTURE_FLUSHED completed=True')
                     checked=[]
-                    def contact_gate(run,row):
+                    def contact_spy(run,row):
                         checked.append(row['id'])
-                        return dict(contact=validate_contact(run,row))
+                        return real_contact(run,row)
                     def fake_player(args,**kwargs):
                         if args[args.index('-Mode')+1]=='Run':
                             d=Path(args[args.index('-RunRoot')+1]);supplied=json.loads((d/'scenario.json').read_text());index=len(launched)//3;repeat=len(launched)%3+1;launched.append(supplied)
@@ -279,8 +296,8 @@ class ContactTests(unittest.TestCase):
                             if repeat>1:self.assertEqual(supplied['setup_state']['row_only'],index)
                             write_run(d,index,repeat)
                         return type('Result',(),dict(returncode=0))()
-                    # Keep the real evidence and contact gates. Stub unrelated run and structural boundaries.
-                    with patch.object(probe,'PROJECT',project),patch.object(probe,'physical_inputs',return_value={}),patch.object(probe,'validate_run',side_effect=contact_gate),patch.object(probe,'validate_body_hold',return_value={}),patch.object(probe,'validate_geometry',return_value={}),patch.object(probe,'validate_driver',return_value={}),patch.object(probe,'validate_lifecycle',return_value={}):
+                    # Keep production run, evidence, and contact dispatch. Stub lower unrelated boundaries.
+                    with patch.object(probe,'PROJECT',project),patch.object(probe,'physical_inputs',return_value={}),patch.object(probe,'validate_contact',side_effect=contact_spy),patch.object(probe,'validate_timing',side_effect=lambda *_:{}),patch.object(probe,'validate_controls',return_value={}),patch.object(probe,'validate_body_hold',return_value={}),patch.object(probe,'validate_geometry',return_value={}),patch.object(probe,'validate_driver',return_value={}),patch.object(probe,'validate_lifecycle',return_value={}):
                         if mode=='capture':
                             with patch.object(probe,'preflight',return_value=dict(powershell='pwsh',observer_revision={})),patch.object(probe.subprocess,'run',side_effect=fake_player),patch.object(probe,'verify',return_value={'runs':list(range(15))}):
                                 if corruption:
