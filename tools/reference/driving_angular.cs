@@ -25,6 +25,20 @@ public static class G11AngularProbe
             this.mass=Word(mass);center_of_mass=new VectorWords(center);inertia_tensor=new VectorWords(tensor);inertia_tensor_rotation=new QuaternionWords(rotation);
         }
     }
+    [Serializable] public struct BodyReadbackWords {
+        public QuaternionWords rotation,inertia_tensor_rotation;public VectorWords inertia_tensor;
+        public BodyReadbackWords(Body value) { rotation=new QuaternionWords(value.rotation);
+            inertia_tensor_rotation=new QuaternionWords(value.inertia_tensor_rotation);inertia_tensor=new VectorWords(value.inertia_tensor); }
+    }
+    [Serializable] public struct TransformReadbackWords {
+        public QuaternionWords rotation,local_rotation;public VectorWords local_scale,lossy_scale;
+        public TransformReadbackWords(TransformState value) { rotation=new QuaternionWords(value.rotation);local_rotation=new QuaternionWords(value.local_rotation);
+            local_scale=new VectorWords(value.local_scale);lossy_scale=new VectorWords(value.lossy_scale); }
+    }
+    [Serializable] public struct WheelInputWords {
+        public QuaternionWords rotation;public VectorWords local_scale;
+        public WheelInputWords(TransformInput value) { rotation=new QuaternionWords(value.rotation);local_scale=new VectorWords(value.local_scale); }
+    }
     [Serializable] public struct ProfileWords {
         public int mass,radius,damping;
         public ProfileWords(Profile value) { mass=Word(value.mass);radius=Word(value.radius);damping=Word(value.damping); }
@@ -36,10 +50,11 @@ public static class G11AngularProbe
     }
     [Serializable] public struct InitialWords {
         public bool observed;public int wheel_id,fixed_dt,rpm;
-        public VectorWords velocity,angular_velocity;
+        public VectorWords velocity,angular_velocity;public BodyReadbackWords body;
     }
     [Serializable] public struct SampleWords {
         public bool observed;public int wheel_id,sequence,step,fixed_dt,motor_nm,brake_nm,rpm;public string phase;
+        public BodyReadbackWords body;public VectorWords velocity;
     }
     static ParsedWords parsedWords;
     public static void ObserveAfterFromJson(Vector3 setupVelocity,Input declared,bool supplied,BodyInput canonical) {
@@ -53,12 +68,13 @@ public static class G11AngularProbe
         if(!IsSelectedWheel(selected) || report.initial_state==null) return;
         var initial=report.initial_state;
         report.initial_words=new InitialWords{observed=true,wheel_id=initial.wheel_id,fixed_dt=Word(fixedDt),rpm=Word(rpm),
-            velocity=new VectorWords(initial.body.velocity),angular_velocity=new VectorWords(initial.body.angular_velocity)};
+            velocity=new VectorWords(initial.body.velocity),angular_velocity=new VectorWords(initial.body.angular_velocity),body=new BodyReadbackWords(initial.body)};
     }
     public static SampleWords ObserveSample(WheelCollider selected,State state,int sequence,int step,string phase,float fixedDt,float motor,float brake,float rpm) {
         if(!IsSelectedWheel(selected)) return new SampleWords();
         return new SampleWords{observed=true,wheel_id=state.wheel_id,sequence=sequence,step=step,phase=phase,
-            fixed_dt=Word(fixedDt),motor_nm=Word(motor),brake_nm=Word(brake),rpm=Word(rpm)};
+            fixed_dt=Word(fixedDt),motor_nm=Word(motor),brake_nm=Word(brake),rpm=Word(rpm),
+            body=new BodyReadbackWords(state.body),velocity=new VectorWords(state.body.velocity)};
     }
 
     [Serializable] public class Event { public int step; public string phase; public float motor_nm,brake_nm; }
@@ -102,8 +118,11 @@ public static class G11AngularProbe
         public Vector3 position,local_scale;public Quaternion rotation;
     }
     [Serializable] public class Report {
-        public int word_schema_version=1;public ParsedWords parsed_words;public BodyWords argument_words,source_argument_words;
+        public int word_schema_version=2;public ParsedWords parsed_words;public BodyWords argument_words,source_argument_words;
         public ProfileWords source_profile_words,copied_profile_words;public InitialWords initial_words;
+        public QuaternionWords source_body_rotation_words;
+        public BodyReadbackWords copied_constructor_words,copied_held_words;
+        public TransformReadbackWords source_transform_words,copied_transform_words;public WheelInputWords wheel_input_words;
         public Input declared;public string source_key,support;
         public int source_wheel_id,copied_wheel_id,original_body_id,copied_body_id;
         public Profile source_profile,copied_profile;public Body source_body,copied_constructor_body,copied_held_body;
@@ -170,6 +189,12 @@ public static class G11AngularProbe
             source_profile=new Profile(),copied_profile=new Profile(),source_body=sourceBody,copied_constructor_body=constructorBody,copied_held_body=ReadBody(body),
             source_sprung_mass=source.sprungMass,copied_sprung_mass=wheel.sprungMass,
             source_transform=new TransformState(source.transform),copied_transform=new TransformState(wheel.transform),body_input=bodyInput,body_input_from_source=!hasCanonical,wheel_input=wheelInput,assignments=new Assignment[input.events.Length]};
+        report.source_body_rotation_words=new QuaternionWords(report.source_body.rotation);
+        report.copied_constructor_words=new BodyReadbackWords(report.copied_constructor_body);
+        report.copied_held_words=new BodyReadbackWords(report.copied_held_body);
+        report.source_transform_words=new TransformReadbackWords(report.source_transform);
+        report.copied_transform_words=new TransformReadbackWords(report.copied_transform);
+        report.wheel_input_words=new WheelInputWords(report.wheel_input);
         ReadProfile(source,report.source_profile);ReadProfile(wheel,report.copied_profile);
         report.source_profile_words=new ProfileWords(report.source_profile);report.copied_profile_words=new ProfileWords(report.copied_profile);
         for(int i=0;i<report.assignments.Length;i++) report.assignments[i]=new Assignment();

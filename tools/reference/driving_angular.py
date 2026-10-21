@@ -154,8 +154,11 @@ def validate_angular_body_input(run,canonical,from_source):
         word_error('stored canonical body input differs from setter record')
 
 
-WORD_SCHEMA = 1
+WORD_SCHEMA = 2
 VECTOR_FIELDS = ('x','y','z')
+QUATERNION_FIELDS = (*VECTOR_FIELDS,'w')
+BODY_READBACK_FIELDS = ('rotation','inertia_tensor_rotation','inertia_tensor')
+TRANSFORM_READBACK_FIELDS = ('rotation','local_rotation','local_scale','lossy_scale')
 
 
 def word_error(message):
@@ -208,11 +211,36 @@ def body_word_values(value):
     return result
 
 
+def vector_word_values(value, fields=VECTOR_FIELDS):
+    word_shape(value,fields,'observation vector')
+    return {key:binary32_value(value[key]) for key in fields}
+
+
+def body_readback_values(value):
+    word_shape(value,BODY_READBACK_FIELDS,'body readback')
+    return {key:vector_word_values(value[key],VECTOR_FIELDS if key=='inertia_tensor' else QUATERNION_FIELDS)
+            for key in BODY_READBACK_FIELDS}
+
+
+def transform_readback_values(value):
+    word_shape(value,TRANSFORM_READBACK_FIELDS,'transform readback')
+    return {key:vector_word_values(value[key],QUATERNION_FIELDS if key in ('rotation','local_rotation') else VECTOR_FIELDS)
+            for key in TRANSFORM_READBACK_FIELDS}
+
+
 def require_word_schema(report):
     if type(report.get('word_schema_version')) is not int or report['word_schema_version']!=WORD_SCHEMA:
         word_error('schema is missing or obsolete')
     for name in ('argument_words','source_argument_words'):
         body_word_values(report.get(name))
+    vector_word_values(report.get('source_body_rotation_words'),QUATERNION_FIELDS)
+    for name in ('copied_constructor_words','copied_held_words'):
+        body_readback_values(report.get(name))
+    for name in ('source_transform_words','copied_transform_words'):
+        transform_readback_values(report.get(name))
+    wheel=word_shape(report.get('wheel_input_words'),('rotation','local_scale'),'wheel setter arguments')
+    vector_word_values(wheel['rotation'],QUATERNION_FIELDS)
+    vector_word_values(wheel['local_scale'])
     parsed=word_shape(report.get('parsed_words'),('observed','canonical_supplied','canonical_is_null','setup_velocity','rig_velocity','rig_angular_velocity','canonical_arguments'),'parser')
     if parsed['observed'] is not True or any(type(parsed[k]) is not bool for k in ('canonical_supplied','canonical_is_null')):
         word_error('parser observation or origin is missing')
@@ -275,7 +303,16 @@ def validate_angular_words(run,scenario):
         for value in values.values():binary32_value(value)
     if report['source_profile_words']!=report['copied_profile_words']:
         word_error('source/copy profile binding differs')
-    initial=word_shape(report.get('initial_words'),('observed','wheel_id','fixed_dt','rpm','velocity','angular_velocity'),'initial')
+    initial=word_shape(report.get('initial_words'),('observed','wheel_id','fixed_dt','rpm','velocity','angular_velocity','body'),'initial')
+    body_readback_values(initial['body'])
+    for name,owner in (('source_body','original_body_id'),('copied_constructor_body','copied_body_id'),('copied_held_body','copied_body_id')):
+        identity=report.get(name,{}).get('instance_id')
+        if type(identity) is not int or type(report.get(owner)) is not int or identity!=report.get(owner):
+            word_error(name+' body ownership differs')
+    state=report.get('initial_state',{})
+    if (type(state.get('wheel_id')) is not int or type(state.get('body',{}).get('instance_id')) is not int or
+        state.get('wheel_id')!=report.get('copied_wheel_id') or state.get('body',{}).get('instance_id')!=report.get('copied_body_id')):
+        word_error('initial saved State ownership differs')
     if initial['observed'] is not True or type(initial['wheel_id']) is not int or initial['wheel_id']!=report['copied_wheel_id']:
         word_error('initial selected wheel binding differs')
     if binary32_value(initial['fixed_dt'])<=0 or type(initial['rpm']) is not int or initial['rpm']!=0:
@@ -287,14 +324,27 @@ def validate_angular_words(run,scenario):
     wheels=run.get('initial',{}).get('wheel_state',[])
     if len(wheels)!=1 or wheels[0].get('rpm')!=0:
         word_error('stored Initial selected wheel zero is missing')
+    pairs={}
+    previous_sequence=None
     for sample in run.get('samples',[]):
         if sample.get('phase') not in ('physics.entry','physics.exit'):continue
-        words=word_shape(sample.get('angular_words'),('observed','wheel_id','sequence','step','phase','fixed_dt','motor_nm','brake_nm','rpm'),'sample')
+        words=word_shape(sample.get('angular_words'),('observed','wheel_id','sequence','step','phase','fixed_dt','motor_nm','brake_nm','rpm','body','velocity'),'sample')
+        body_readback_values(words['body'])
+        vector_word_values(words['velocity'])
+        state=sample.get('angular_state',{})
+        if (type(state.get('wheel_id')) is not int or type(state.get('body',{}).get('instance_id')) is not int or
+            state.get('wheel_id')!=report.get('copied_wheel_id') or state.get('body',{}).get('instance_id')!=report.get('copied_body_id')):
+            word_error('sample saved State ownership differs')
         if words['observed'] is not True:
             word_error('sample observation is missing')
         for key,expected in (('wheel_id',report['copied_wheel_id']),('sequence',sample['sequence']),('step',sample['step'])):
             if type(words[key]) is not int or words[key]!=expected:
                 word_error('sample '+key+' binding differs')
+        if previous_sequence is not None and words['sequence']<=previous_sequence:
+            word_error('sample sequence order differs')
+        previous_sequence=words['sequence']
+        pair=pairs.setdefault(words['step'],[])
+        pair.append(words['phase'])
         if words['phase']!=sample['phase']:
             word_error('sample phase binding differs')
         for key in ('fixed_dt','motor_nm','brake_nm','rpm'):binary32_value(words[key])
@@ -303,7 +353,30 @@ def validate_angular_words(run,scenario):
         event=next((e for e in reversed(spec['events']) if e['step']<=sample['step']),None)
         if event is None or words['motor_nm']!=binary32_word(event['motor_nm']) or words['brake_nm']!=binary32_word(event['brake_nm']):
             word_error('consuming motor/brake binding differs')
+    if sorted(pairs)!=list(range(1,spec['duration_steps']+1)) or any(phases!=['physics.entry','physics.exit'] for phases in pairs.values()):
+        word_error('complete entry/exit linkage differs')
 
+
+
+def angular_observation_view(run):
+    """Decode saved observation words. Preserve producer text and argument records."""
+    report=run['angular']
+    require_word_schema(report)
+    source=body_word_values(report['source_argument_words'])
+    initial=report['initial_words']
+    wheel=report['wheel_input_words']
+    return dict(source_body=dict(rotation=vector_word_values(report['source_body_rotation_words'],QUATERNION_FIELDS),
+                                inertia_tensor=source['inertia_tensor'],inertia_tensor_rotation=source['inertia_tensor_rotation']),
+                copied_constructor_body=body_readback_values(report['copied_constructor_words']),
+                copied_held_body=body_readback_values(report['copied_held_words']),
+                source_transform=transform_readback_values(report['source_transform_words']),
+                copied_transform=transform_readback_values(report['copied_transform_words']),
+                wheel_input=dict(rotation=vector_word_values(wheel['rotation'],QUATERNION_FIELDS),local_scale=vector_word_values(wheel['local_scale'])),
+                initial=dict(wheel_id=initial['wheel_id'],body=body_readback_values(initial['body']),velocity=vector_word_values(initial['velocity'])),
+                samples=[dict(sequence=s['angular_words']['sequence'],step=s['angular_words']['step'],phase=s['angular_words']['phase'],
+                              wheel_id=s['angular_words']['wheel_id'],body=body_readback_values(s['angular_words']['body']),
+                              velocity=vector_word_values(s['angular_words']['velocity']))
+                         for s in run['samples'] if s['phase'] in ('physics.entry','physics.exit')])
 
 
 def angular_candidate_view(run):

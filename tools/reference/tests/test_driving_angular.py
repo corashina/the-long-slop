@@ -12,7 +12,7 @@ def add_word_fixture(row,run):
     from tools.reference.driving_angular import binary32_word, body_words, vector_words
     report=run['angular']
     source=report['body_input_from_source']
-    report['word_schema_version']=1
+    report['word_schema_version']=2
     report['argument_words']=body_words(report['body_input'])
     report['source_argument_words']=body_words({k:report['source_body'][k] for k in ('mass','center_of_mass','inertia_tensor','inertia_tensor_rotation')})
     zero=dict(mass=0.,center_of_mass=dict(x=0.,y=0.,z=0.),inertia_tensor=dict(x=0.,y=0.,z=0.),inertia_tensor_rotation=dict(x=0.,y=0.,z=0.,w=0.))
@@ -23,18 +23,30 @@ def add_word_fixture(row,run):
         canonical_arguments=body_words(zero if source else report['body_input']))
     for name in ('source_profile','copied_profile'):
         report[name+'_words']={key:binary32_word(report[name][key]) for key in ('mass','radius','damping')}
+    def readback(body):
+        return {key:vector_words(body[key],('x','y','z') if key=='inertia_tensor' else ('x','y','z','w'))
+                for key in ('rotation','inertia_tensor_rotation','inertia_tensor')}
+    report['source_body_rotation_words']=vector_words(report['source_body']['rotation'],('x','y','z','w'))
+    for name in ('copied_constructor','copied_held'):
+        report[name+'_words']=readback(report[name+'_body'])
+    for name in ('source_transform','copied_transform'):
+        report[name+'_words']={key:vector_words(report[name][key],('x','y','z','w') if key in ('rotation','local_rotation') else ('x','y','z'))
+                              for key in ('rotation','local_rotation','local_scale','lossy_scale')}
+    report['wheel_input_words']=dict(rotation=vector_words(report['wheel_input']['rotation'],('x','y','z','w')),
+                                    local_scale=vector_words(report['wheel_input']['local_scale']))
     initial=report['initial_state']
     run['initial'].setdefault('wheel_state',[dict(rpm=0.,contact=False,motor_torque=0.,brake_torque=0.)])
     report['initial_words']=dict(observed=True,wheel_id=initial['wheel_id'],
         fixed_dt=binary32_word(run['initial']['fixed_dt']),rpm=binary32_word(run['initial']['wheel_state'][0]['rpm']),
-        velocity=vector_words(initial['body']['velocity']),angular_velocity=vector_words(initial['body']['angular_velocity']))
+        velocity=vector_words(initial['body']['velocity']),angular_velocity=vector_words(initial['body']['angular_velocity']),body=readback(initial['body']))
     for sample in run['samples']:
         if sample['phase'] not in ('physics.entry','physics.exit'):continue
         wheel=sample['wheels'][0]
         sample['angular_words']=dict(observed=True,wheel_id=sample['angular_state']['wheel_id'],
             sequence=sample['sequence'],step=sample['step'],phase=sample['phase'],
             fixed_dt=binary32_word(sample['fixed_dt']),motor_nm=binary32_word(wheel['motor_torque']),
-            brake_nm=binary32_word(wheel['brake_torque']),rpm=binary32_word(wheel['rpm']))
+            brake_nm=binary32_word(wheel['brake_torque']),rpm=binary32_word(wheel['rpm']),
+            body=readback(sample['angular_state']['body']),velocity=vector_words(sample['angular_state']['body']['velocity']))
     return row,run
 
 

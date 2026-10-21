@@ -6,6 +6,7 @@ import json
 import subprocess
 import unittest
 import sys
+import tempfile
 from unittest.mock import patch
 from tools.reference.driving_angular import angular_rows, validate_angular_schedule, validate_angular
 from tools.reference.tests import test_driving_angular as angular_tests
@@ -217,10 +218,15 @@ class ZeroBrakeTests(unittest.TestCase):
         for speed in ('0','10'):
             self.compile(source.replace('x=10}', 'x='+speed+'}').replace('==10', '=='+speed),'CaptureArmingChecks','G11_CAPTURE_ARMING_STUB_PASS')
 
-    def compile(self,source,check,marker):
-        result=subprocess.run(['pwsh','-NoProfile','-Command',"Add-Type -TypeDefinition @'\n"+source+"\n'@\n["+check+"]::Run()"],capture_output=True,text=True,timeout=60)
+    def compile(self,source,check,marker,after=""):
+        with tempfile.TemporaryDirectory(prefix='g11-angular-compile-') as temporary:
+            source_path=Path(temporary)/'check.cs'
+            source_path.write_text(source,encoding='utf-8')
+            command="Add-Type -Path '"+str(source_path).replace("'","''")+"'\n["+check+"]::Run()\n"+after
+            result=subprocess.run(['pwsh','-NoProfile','-Command',command],capture_output=True,text=True,timeout=60)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertIn(marker,result.stdout)
+        return result.stdout
 
 
 SCHEDULE_CHECK = r"""
