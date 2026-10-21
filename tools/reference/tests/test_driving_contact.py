@@ -501,6 +501,9 @@ public static class ContactChecks {
  static void AssignChecked(UnityEngine.WheelCollider wheel,int step,int observed,int frame,float time,float dt){
   int calls=wheel.setterNames.Count,m=wheel.motorReads,b=wheel.brakeReads,s=wheel.steerReads,vr=body.velocityReads,vw=body.writes,wakes=body.wakes;bool eventStep=step==1 || step==121 || step==145;
   G11ContactProbe.Assign(step,observed,frame,time,dt);
+  Need(body.velocityReads-vr==1,"Assign velocity read count differs");
+  Need(body.writes-vw==(step==121?1:0),"Assign velocity write count differs");
+  Need(body.wakes-wakes==0,"Assign WakeUp count differs");
   int reads=eventStep?2:1;Need(wheel.motorReads-m==reads && wheel.brakeReads-b==reads && wheel.steerReads-s==reads,"native getter count changed");
   Need(wheel.setterNames.Count-calls==(eventStep?3:0),"setter count changed");
   if(eventStep){
