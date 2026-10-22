@@ -196,6 +196,7 @@ pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
         body_mass_override: None,
         physics,
         query_bounds: QueryBounds::default(),
+        presentation_bodies: Default::default(),
         chassis: Vec::new(),
         vehicles: Vec::new(),
     }

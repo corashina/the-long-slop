@@ -270,6 +270,7 @@ impl WorldStream {
             ) {
                 rollback(&mut content, instance, items, interaction, physics, wheels);
                 self.structures.swap_remove(index).retire(physics);
+                self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }
             crate::world::content_mechanisms::sync(&mut content, items, interaction, physics);
@@ -423,8 +424,7 @@ impl WorldStream {
                 );
                 let id = items.insert_generated(placement.id.clone(), prototype, pickup_pose)?;
                 content.item = Some(id);
-                let state = items.get_mut(id).unwrap();
-                state.body = Some(body);
+                let state = items.set_body(id, Some(body)).unwrap();
                 state.fluid = content.content.fluid.clone();
                 state.generated_condition = Some(content.content.condition);
                 state.local_pose = from_rapier(
@@ -587,6 +587,7 @@ impl WorldStream {
                     .position(|s| s.placement.id == placement.id)
                     .unwrap();
                 self.structures.swap_remove(index).retire(physics);
+                self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }
         }
@@ -689,6 +690,7 @@ impl WorldStream {
     ) -> Result<(), ReferenceError> {
         let count = self.contents.active.len() + self.static_controls.len();
         for index in 0..count {
+            self.publish_content_visual(index, items);
             let pending_parent = {
                 let content = self
                     .contents
@@ -813,6 +815,7 @@ impl WorldStream {
             if complete {
                 crate::world::content_mechanisms::sync(content, items, interaction, physics);
             }
+            self.publish_content_visual(index, items);
             if let Some(error) = restore_error {
                 physics.refresh_queries();
                 return Err(error);
@@ -820,6 +823,28 @@ impl WorldStream {
         }
         Ok(())
     }
+    fn publish_content_visual(&mut self, index: usize, items: &ItemStore) {
+        let active_count = self.contents.active.len();
+        let (content, slot) = if index < active_count {
+            (
+                &mut self.contents.active[index],
+                super::content_index::ContentSlot::Active(index),
+            )
+        } else {
+            (
+                &mut self.static_controls[index - active_count],
+                super::content_index::ContentSlot::Control(index - active_count),
+            )
+        };
+        let food = content
+            .item
+            .and_then(|id| items.get(id))
+            .and_then(|item| item.food.map(|food| (food, item.removed)));
+        if content.take_visual_change(food) {
+            self.presentation_changes.push(slot);
+        }
+    }
+
     pub fn bindings_ready(&self, id: &crate::world::GeneratedId) -> bool {
         self.contents
             .active
@@ -1006,7 +1031,7 @@ impl WorldStream {
                         interaction.unbind_generated(binding.item, std::slice::from_ref(collider));
                     }
                 }
-                items.get_mut(binding.item).unwrap().body = None;
+                items.set_body(binding.item, None);
                 items.get_mut(binding.item).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(binding.item);
@@ -1023,7 +1048,7 @@ impl WorldStream {
                         interaction.unbind_generated(id, std::slice::from_ref(collider));
                     }
                 }
-                items.get_mut(id).unwrap().body = None;
+                items.set_body(id, None);
                 items.get_mut(id).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(id);
@@ -1085,8 +1110,7 @@ pub(super) fn rollback(
         for (_, collider) in &instance.colliders {
             interaction.unbind_generated(item, std::slice::from_ref(collider));
         }
-        if let Some(state) = items.get_mut(item) {
-            state.body = None;
+        if let Some(state) = items.set_body(item, None) {
             state.location = crate::interaction::items::ItemLocation::World;
         }
         items.remove_generated(item);
@@ -1212,8 +1236,13 @@ pub(crate) fn restore_item(
                     });
                 }
                 let pose = *physics.rapier().bodies[parent_body].position();
-                for child in items.iter_mut().filter(|i| i.body == Some(old_body)) {
-                    child.body = Some(parent_body);
+                let children: Vec<_> = items
+                    .iter()
+                    .filter(|i| i.body == Some(old_body))
+                    .map(|i| i.id)
+                    .collect();
+                for child_id in children {
+                    let child = items.set_body(child_id, Some(parent_body)).unwrap();
                     child.local_pose = from_rapier(&(transform * to_rapier(child.local_pose)));
                     child.pose = from_rapier(&(pose * to_rapier(child.local_pose)));
                     child.inactive_pose = None;

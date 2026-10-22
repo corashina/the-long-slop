@@ -24,6 +24,7 @@ pub struct SourcePresentationAllocation {
     session: u64,
     pub(crate) fixed: crate::reference::fixed_reservation::FixedAllocation,
     pub(crate) lighting_cpu: usize,
+    instance_cache_cpu: usize,
     lamps: (usize, usize, usize),
     imported_writers: Vec<(Entity, Handle<Mesh>)>,
     writers_bound: bool,
@@ -472,6 +473,19 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
             &mut self.materials,
         )?;
+        let instance_cache_cpu = self.instances.cache_bytes();
+        if self.allocation.instance_cache_cpu != instance_cache_cpu {
+            let mut allocation = stream.presentation_allocation();
+            allocation.active_cpu = allocation
+                .active_cpu
+                .checked_sub(self.allocation.instance_cache_cpu)
+                .and_then(|bytes| bytes.checked_add(instance_cache_cpu))
+                .ok_or_else(|| ReferenceError("Generated presentation cache accounting".into()))?;
+            stream.set_presentation_allocation(allocation)?;
+            self.allocation.instance_cache_cpu = instance_cache_cpu;
+        }
+        physics.clear_presentation_bodies();
+        stream.clear_presentation_changes();
         timer.next(crate::world::stream_profile::Stage::LampSync);
         super::lamps::sync_source_lamps(
             &stream.frame(),

@@ -6,6 +6,9 @@ use std::{
 pub(super) fn map<K, V>(m: &HashMap<K, V>) -> usize {
     table(m.capacity(), size_of::<(K, V)>())
 }
+pub(crate) fn platform_map<K, V>(m: &bevy_platform::collections::HashMap<K, V>) -> usize {
+    table(m.capacity(), size_of::<(K, V)>())
+}
 pub(super) fn set<K>(m: &HashSet<K>) -> usize {
     table(m.capacity(), size_of::<K>())
 }

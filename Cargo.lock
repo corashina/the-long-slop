@@ -3100,6 +3100,7 @@ version = "0.1.0"
 dependencies = [
  "async-lock",
  "bevy",
+ "bevy_platform",
  "console_error_panic_hook",
  "gltf",
  "grass-mesh",

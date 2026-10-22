@@ -1,57 +1,42 @@
-//! Cached lookup from generated identities to live content and lamp buttons.
+//! Cached membership bindings and retained presentation changes.
 use super::WorldStream;
+#[cfg(any(target_arch = "wasm32", test))]
 use crate::reference::{SourceId, Transform};
 use crate::world::{GeneratedCapVisual, GeneratedId, NodeAppearance, contents::ContentInstance};
-use std::hash::{Hash, Hasher};
+use bevy_platform::collections::HashMap;
 
-/// Sorted identity hashes. Only membership and order are cached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ContentSlot {
+    Active(usize),
+    Control(usize),
+}
 #[derive(Default)]
 pub struct ContentIndex {
-    contents: Vec<(u64, u32)>,
-    lamps: Vec<(u64, u32)>,
+    contents: HashMap<GeneratedId, ContentSlot>,
+    lamps: HashMap<GeneratedId, Vec<usize>>,
     content_key: Option<(u64, u64, u64)>,
     lamp_key: Option<(u64, u64)>,
     #[cfg(test)]
     pub(super) rebuilds: [usize; 2],
 }
-
-fn identity_hash(id: &GeneratedId) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    id.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn matches(entries: &[(u64, u32)], hash: u64) -> impl Iterator<Item = usize> + '_ {
-    let start = entries.partition_point(|(h, _)| *h < hash);
-    entries[start..]
-        .iter()
-        .take_while(move |(h, _)| *h == hash)
-        .map(|(_, i)| *i as usize)
-}
-
-/// Live content of one generated identity.
 pub struct IndexedContent<'a> {
     content: Option<&'a ContentInstance>,
     active: bool,
 }
 impl<'a> IndexedContent<'a> {
-    /// Same result as [`WorldStream::bindings_ready`].
     pub fn bindings_ready(&self) -> bool {
         self.content.is_none_or(|c| c.item.is_none() || c.restored)
     }
-    /// Same result as [`WorldStream::generated_cap_visuals`].
     pub fn caps(&self) -> &'a [GeneratedCapVisual] {
         match self.content {
             Some(c) if self.active => &c.caps,
             _ => &[],
         }
     }
-    /// Same result as [`WorldStream::generated_node_pose`].
     pub fn node_pose(&self, node: usize) -> Option<crate::vehicle::VehiclePose> {
         self.content.and_then(|c| c.poses.get(node)).copied()
     }
 }
-
 impl ContentIndex {
     fn update_contents(
         &mut self,
@@ -59,78 +44,109 @@ impl ContentIndex {
         active: &[ContentInstance],
         controls: &[ContentInstance],
     ) {
-        if self.content_key != Some(key) {
-            #[cfg(test)]
-            {
-                self.rebuilds[0] += 1;
-            }
-            self.contents.clear();
-            self.contents.extend(
-                active
-                    .iter()
-                    .chain(controls)
-                    .enumerate()
-                    .map(|(i, c)| (identity_hash(&c.content.placement.id), i as u32)),
-            );
-            // Original indices preserve first-match order, including hash collisions.
-            self.contents.sort_unstable();
-            self.content_key = Some(key);
+        if self.content_key == Some(key) {
+            return;
         }
+        #[cfg(test)]
+        {
+            self.rebuilds[0] += 1;
+        }
+        self.contents.clear();
+        for (i, c) in active.iter().enumerate() {
+            self.contents
+                .entry(c.content.placement.id.clone())
+                .or_insert(ContentSlot::Active(i));
+        }
+        for (i, c) in controls.iter().enumerate() {
+            self.contents
+                .entry(c.content.placement.id.clone())
+                .or_insert(ContentSlot::Control(i));
+        }
+        self.content_key = Some(key);
     }
     pub(super) fn update_lamps(
         &mut self,
         key: (u64, u64),
         lamps: &[super::content_lamps::LampBinding],
     ) {
-        if self.lamp_key != Some(key) {
-            #[cfg(test)]
-            {
-                self.rebuilds[1] += 1;
-            }
-            self.lamps.clear();
-            self.lamps.extend(
-                lamps
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (identity_hash(&b.parent), i as u32)),
-            );
-            self.lamps.sort_unstable();
-            self.lamp_key = Some(key);
+        if self.lamp_key == Some(key) {
+            return;
         }
+        #[cfg(test)]
+        {
+            self.rebuilds[1] += 1;
+        }
+        for indices in self.lamps.values_mut() {
+            indices.clear();
+        }
+        for (i, b) in lamps.iter().enumerate() {
+            self.lamps.entry(b.parent.clone()).or_default().push(i);
+        }
+        self.lamps.retain(|_, indices| !indices.is_empty());
+        self.lamp_key = Some(key);
     }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn retained_bytes(&self) -> usize {
+        crate::interaction::memory::platform_map(&self.contents)
+            + crate::interaction::memory::platform_map(&self.lamps)
+            + self
+                .contents
+                .keys()
+                .map(crate::world::contents::identity_heap)
+                .sum::<usize>()
+            + self
+                .lamps
+                .iter()
+                .map(|(id, slots)| {
+                    crate::world::contents::identity_heap(id)
+                        + slots.capacity() * std::mem::size_of::<usize>()
+                })
+                .sum::<usize>()
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn slot(&self, id: &GeneratedId) -> Option<ContentSlot> {
+        self.contents.get(id).copied()
+    }
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn lamp_slots(&self, id: &GeneratedId) -> &[usize] {
+        self.lamps.get(id).map_or(&[], Vec::as_slice)
+    }
+    #[cfg(test)]
     fn content<'a>(
         &self,
         active: &'a [ContentInstance],
         controls: &'a [ContentInstance],
         id: &GeneratedId,
     ) -> IndexedContent<'a> {
-        let found = matches(&self.contents, identity_hash(id))
-            .map(|i| {
-                if i < active.len() {
-                    (&active[i], true)
-                } else {
-                    (&controls[i - active.len()], false)
-                }
-            })
-            .find(|(c, _)| &c.content.placement.id == id);
-        IndexedContent {
-            content: found.map(|(c, _)| c),
-            active: found.is_some_and(|(_, a)| a),
-        }
+        content_at(active, controls, self.slot(id))
     }
+    #[cfg(test)]
     pub(super) fn buttons<'a>(
         &'a self,
         lamps: &'a [super::content_lamps::LampBinding],
         parent: &'a GeneratedId,
     ) -> impl Iterator<Item = (&'a SourceId, Transform)> + 'a {
-        matches(&self.lamps, identity_hash(parent))
-            .map(|i| &lamps[i])
-            .filter(move |b| &b.parent == parent)
-            .filter_map(|b| b.button.as_ref())
+        self.lamp_slots(parent)
+            .iter()
+            .filter_map(|i| lamps[*i].button.as_ref())
             .map(|b| (&b.node, b.pose))
     }
 }
-
+#[cfg(any(target_arch = "wasm32", test))]
+fn content_at<'a>(
+    active: &'a [ContentInstance],
+    controls: &'a [ContentInstance],
+    slot: Option<ContentSlot>,
+) -> IndexedContent<'a> {
+    let content = slot.and_then(|slot| match slot {
+        ContentSlot::Active(i) => active.get(i),
+        ContentSlot::Control(i) => controls.get(i),
+    });
+    IndexedContent {
+        content,
+        active: matches!(slot, Some(ContentSlot::Active(_))),
+    }
+}
 impl WorldStream {
     pub fn index_contents(&self, index: &mut ContentIndex) {
         index.update_contents(
@@ -147,11 +163,24 @@ impl WorldStream {
             &self.lamp_bindings,
         );
     }
-    /// Requires an index built from the current stream.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn presentation_membership(&self) -> (u64, u64, u64, u64, u64) {
+        (
+            self.request.session,
+            self.contents.active_revision(),
+            self.static_control_revision,
+            self.lamp_binding_revision,
+            self.structure_revision,
+        )
+    }
+    #[cfg(test)]
     pub fn indexed_content(&self, index: &ContentIndex, id: &GeneratedId) -> IndexedContent<'_> {
         index.content(&self.contents.active, &self.static_controls, id)
     }
-    /// Same result as [`WorldStream::appearance`].
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn content_at(&self, slot: Option<ContentSlot>) -> IndexedContent<'_> {
+        content_at(&self.contents.active, &self.static_controls, slot)
+    }
     pub fn indexed_appearance<'a>(
         &'a self,
         content: &IndexedContent<'a>,
@@ -162,13 +191,65 @@ impl WorldStream {
             _ => self.contents.cursor_appearance(id),
         }
     }
-    /// Lamp button poses of one parent, as [`WorldStream::lamp_button_pose`] reads them.
-    pub fn indexed_lamp_buttons<'a>(
-        &'a self,
-        index: &'a ContentIndex,
-        parent: &'a GeneratedId,
-    ) -> impl Iterator<Item = (&'a SourceId, Transform)> + 'a {
-        index.buttons(&self.lamp_bindings, parent)
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn lamp_button_at(&self, index: usize) -> Option<(&SourceId, Transform)> {
+        self.lamp_bindings
+            .get(index)?
+            .button
+            .as_ref()
+            .map(|b| (&b.node, b.pose))
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn presentation_contents(&self) -> impl Iterator<Item = ContentSlot> + '_ {
+        self.presentation_changes.iter().copied()
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn presentation_lamps(&self) -> impl Iterator<Item = usize> + '_ {
+        self.presentation_lamp_changes.iter().copied()
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn clear_presentation_changes(&mut self) {
+        self.presentation_changes.clear();
+        self.presentation_lamp_changes.clear();
+    }
+}
+/// Reused dense selection queue. Producers can name the same instance more than once.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Default)]
+pub(crate) struct InstanceSelection {
+    queued: Vec<bool>,
+    indices: Vec<usize>,
+}
+#[cfg(any(target_arch = "wasm32", test))]
+impl InstanceSelection {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.queued.capacity() * std::mem::size_of::<bool>()
+            + self.indices.capacity() * std::mem::size_of::<usize>()
+    }
+    pub(crate) fn reset(&mut self, count: usize) {
+        self.queued.clear();
+        self.queued.resize(count, false);
+        self.indices.clear();
+        self.indices.reserve(count);
+    }
+    pub(crate) fn push(&mut self, index: usize) {
+        if let Some(queued) = self.queued.get_mut(index) {
+            if !*queued {
+                *queued = true;
+                self.indices.push(index);
+            }
+        }
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.indices.len()
+    }
+    pub(crate) fn at(&self, index: usize) -> usize {
+        self.indices[index]
+    }
+    pub(crate) fn clear(&mut self) {
+        for index in self.indices.drain(..) {
+            self.queued[index] = false;
+        }
     }
 }
 
@@ -179,19 +260,7 @@ mod tests {
     use crate::world::{AbsolutePose, Placement, WorldBounds, WorldLayer};
 
     #[test]
-    fn hash_matches_keep_original_order() {
-        let mut entries = [(7, 4), (2, 9), (7, 1), (9, 0), (7, 3)];
-        entries.sort_unstable();
-        assert_eq!(matches(&entries, 7).collect::<Vec<_>>(), [1, 3, 4]);
-        assert_eq!(matches(&entries, 2).collect::<Vec<_>>(), [9]);
-        assert_eq!(matches(&entries, 9).collect::<Vec<_>>(), [0]);
-        assert_eq!(matches(&entries, 0).next(), None);
-        assert_eq!(matches(&entries, 8).next(), None);
-        assert_eq!(matches(&entries, 10).next(), None);
-    }
-
-    #[test]
-    fn cache_tracks_membership_and_reads_live_content() {
+    fn world_sync_cache_tracks_membership_and_reads_live_content() {
         let source = SourceId {
             file: "test.assets".into(),
             path_id: 1,
@@ -230,6 +299,34 @@ mod tests {
                 open_euler_degrees: [0.; 3],
             },
         };
+        let mut visual = instance(8);
+        assert!(visual.take_visual_change(None));
+        let initial = visual.visual_revision;
+        assert!(!visual.take_visual_change(None));
+        assert_eq!(visual.visual_revision, initial);
+        visual.item = Some(ItemId(1));
+        assert!(visual.take_visual_change(None));
+        assert!(!visual.take_visual_change(None));
+        visual.restored = true;
+        assert!(visual.take_visual_change(None));
+        visual.caps.push(cap());
+        assert!(visual.take_visual_change(None));
+        let food = crate::interaction::items::FoodState {
+            prototype_index: 0,
+            bite: 1,
+        };
+        assert!(visual.take_visual_change(Some((food, false))));
+        assert!(!visual.take_visual_change(Some((food, false))));
+        assert!(visual.take_visual_change(Some((
+            crate::interaction::items::FoodState { bite: 2, ..food },
+            false
+        ))));
+        assert!(visual.take_visual_change(Some((food, true))));
+        assert!(!visual.take_visual_change(Some((food, true))));
+        // Mechanism and appearance producers publish one pending revision.
+        visual.visual_revision = visual.visual_revision.wrapping_add(1);
+        assert!(visual.take_visual_change(None));
+        assert!(!visual.take_visual_change(None));
         let mut active = vec![instance(0), instance(1), instance(1)];
         let mut controls = vec![instance(1), instance(2)];
         let first = placement(1).id;
@@ -238,6 +335,7 @@ mod tests {
         let mut index = ContentIndex::default();
         index.update_contents((1, 0, 0), &active, &controls);
         assert_eq!(index.rebuilds, [1, 0]);
+        assert!(index.retained_bytes() > 0);
         assert!(std::ptr::eq(
             index.content(&active, &controls, &first).content.unwrap(),
             &active[1]
@@ -311,25 +409,6 @@ mod tests {
             Some([3.; 3])
         );
 
-        // Hash collisions must still compare each complete identity.
-        active[0].content.placement.id = first.clone();
-        active[0]
-            .content
-            .placement
-            .id
-            .children
-            .push((source.clone(), 0));
-        index.contents = vec![
-            (identity_hash(&first), 0),
-            (identity_hash(&first), 1),
-            (identity_hash(&first), 2),
-            (identity_hash(&first), 3),
-        ];
-        assert!(std::ptr::eq(
-            index.content(&active, &controls, &first).content.unwrap(),
-            &active[1]
-        ));
-
         active.swap_remove(0);
         active.push(instance(3));
         index.update_contents((1, 1, 0), &active, &controls);
@@ -378,5 +457,29 @@ mod tests {
         );
         index.update_contents((2, 2, 1), &active, &controls);
         assert_eq!(index.rebuilds, [5, 0]);
+    }
+    #[test]
+    fn world_sync_selection_visits_only_named_instances_and_retains_capacity() {
+        let mut selection = InstanceSelection::default();
+        selection.reset(50_000);
+        selection.push(12);
+        selection.push(49_999);
+        selection.push(12);
+        assert_eq!(selection.len(), 2);
+        assert_eq!((selection.at(0), selection.at(1)), (12, 49_999));
+        let capacity = selection.indices.capacity();
+        let bytes = selection.retained_bytes();
+        selection.clear();
+        assert_eq!(selection.len(), 0);
+        selection.push(12);
+        assert_eq!(selection.len(), 1);
+        assert_eq!(selection.indices.capacity(), capacity);
+        assert_eq!(selection.retained_bytes(), bytes);
+        // Retirement, swap_remove, and new sessions discard old slot numbers.
+        selection.reset(1);
+        selection.push(49_999);
+        assert_eq!(selection.len(), 0);
+        selection.push(0);
+        assert_eq!(selection.at(0), 0);
     }
 }

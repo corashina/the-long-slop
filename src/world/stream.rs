@@ -200,6 +200,9 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    structure_revision: u64,
+    presentation_changes: Vec<content_index::ContentSlot>,
+    presentation_lamp_changes: Vec<usize>,
     saved_item_protection: Vec<super::ObjectKey>,
     change_dependencies: Vec<super::ObjectKey>,
     external_dependencies: HashSet<super::ObjectKey>,
@@ -744,6 +747,9 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            structure_revision: 0,
+            presentation_changes: Vec::new(),
+            presentation_lamp_changes: Vec::new(),
             saved_item_protection: Vec::new(),
             change_dependencies: Vec::new(),
             external_dependencies: HashSet::new(),
@@ -3764,6 +3770,7 @@ impl WorldStream {
         }
         self.release_structure_renderer(&instance.placement.id);
         self.structures.push(instance);
+        self.structure_revision = self.structure_revision.wrapping_add(1);
         self.binding_reserved = binding_reservation;
         self.publication_available = false;
         Ok(())
@@ -3781,7 +3788,7 @@ impl WorldStream {
         let owned = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes();
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
         let baseline = *self.binding_baseline.get_or_insert(owned);
         self.binding_bytes = owned.saturating_sub(baseline);
         self.binding_owner_bytes = owned;
@@ -3793,7 +3800,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3802,7 +3809,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3811,7 +3818,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3820,7 +3827,7 @@ impl WorldStream {
         self.binding_bytes = (items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes())
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes()))
         .saturating_sub(baseline);
 
         for supply in &mut self.supplies {
@@ -3912,7 +3919,7 @@ impl WorldStream {
         self.binding_owner_bytes = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes();
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
         self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
         self.binding_objects = items.len();
         self.binding_reserved = 0;
@@ -4073,6 +4080,7 @@ impl WorldStream {
                 continue;
             }
             let instance = self.structures.swap_remove(index);
+            self.structure_revision = self.structure_revision.wrapping_add(1);
             self.change_dependencies.clear();
             for content in self
                 .static_controls
@@ -4488,6 +4496,9 @@ impl WorldStream {
                     .sum::<usize>()
                 + self.binding_reserved
                 + self.binding_bytes
+                + self.presentation_changes.capacity()
+                    * std::mem::size_of::<content_index::ContentSlot>()
+                + self.presentation_lamp_changes.capacity() * std::mem::size_of::<usize>()
                 + self.lamp_bindings.capacity() * std::mem::size_of::<content_lamps::LampBinding>()
                 + self
                     .lamp_bindings

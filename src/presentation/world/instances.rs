@@ -7,12 +7,14 @@ use super::{
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
 };
+use crate::world::stream::content_index::{ContentSlot, InstanceSelection};
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::{Placement, WorldStream},
 };
 use bevy::math::{DMat4, DVec3};
+use bevy::platform::collections::HashMap;
 use bevy::{
     camera::visibility::RenderLayers,
     ecs as bevy_ecs,
@@ -46,7 +48,10 @@ struct Instance {
     placement: Placement,
     prototype: usize,
     structure: usize,
-    settled: bool,
+    sync_pending: bool,
+    content: Option<ContentSlot>,
+    lamp_buttons: Vec<usize>,
+    food: Option<crate::reference::ItemId>,
     session: u64,
     root: Entity,
     nodes: Vec<Entity>,
@@ -71,8 +76,39 @@ pub struct SourceInstances {
     instances: Vec<Instance>,
     pending: Option<Placement>,
     contents: crate::world::ContentIndex,
+    membership: Option<((u64, u64, u64, u64, u64), u64)>,
+    bindings_dirty: bool,
+    origin: Option<[f64; 3]>,
+    bodies: HashMap<rapier3d::prelude::RigidBodyHandle, Vec<usize>>,
+    content_instances: HashMap<ContentSlot, Vec<usize>>,
+    lamp_instances: HashMap<usize, Vec<usize>>,
+    selection: InstanceSelection,
+    cache_bytes: usize,
 }
 impl SourceInstances {
+    pub(crate) fn cache_bytes(&self) -> usize {
+        self.cache_bytes
+    }
+    fn measure_cache_bytes(&self) -> usize {
+        use crate::interaction::memory::platform_map;
+        platform_map(&self.bodies)
+            + platform_map(&self.content_instances)
+            + platform_map(&self.lamp_instances)
+            + self
+                .bodies
+                .values()
+                .chain(self.content_instances.values())
+                .chain(self.lamp_instances.values())
+                .map(|owners| owners.capacity() * std::mem::size_of::<usize>())
+                .sum::<usize>()
+            + self
+                .instances
+                .iter()
+                .map(|instance| instance.lamp_buttons.capacity() * std::mem::size_of::<usize>())
+                .sum::<usize>()
+            + self.contents.retained_bytes()
+            + self.selection.retained_bytes()
+    }
     pub(crate) fn drained(&self) -> bool {
         self.instances
             .iter()
@@ -116,10 +152,22 @@ impl SourceInstances {
         }
         materials.cache.generated.reset();
         self.pending = None;
+        self.bindings_dirty = true;
+        self.membership = None;
+        self.bodies.clear();
+        self.content_instances.clear();
+        self.lamp_instances.clear();
+        self.selection.reset(0);
+        self.origin = None;
+        self.cache_bytes = self.measure_cache_bytes();
     }
 
     fn rebase(&mut self, origin: crate::world::WorldOrigin, commands: &mut Commands) {
-        for instance in &mut self.instances {
+        if self.origin == Some(origin.offset) {
+            return;
+        }
+        self.origin = Some(origin.offset);
+        for (index, instance) in self.instances.iter_mut().enumerate() {
             if instance.origin == origin.offset {
                 continue;
             }
@@ -135,7 +183,8 @@ impl SourceInstances {
                 scale: Vec3::from_array(instance.placement.scale),
             });
             instance.origin = origin.offset;
-            instance.settled = false;
+            instance.sync_pending = true;
+            self.selection.push(index);
         }
     }
     pub(crate) fn measurement_meshes(
@@ -719,8 +768,11 @@ impl SourceInstances {
                                 caps_bound: false,
                                 placement: placement.clone(),
                                 prototype: prototype_index,
-                                structure: 0,
-                                settled: false,
+                                structure: usize::MAX,
+                                sync_pending: true,
+                                content: None,
+                                lamp_buttons: Vec::new(),
+                                food: None,
                                 session: stream.frame().request.session,
                                 root,
                                 active_nodes: prototype
@@ -763,6 +815,7 @@ impl SourceInstances {
                                 instance.continuation = Some(continuation);
                                 instance.upload = Some(upload);
                                 self.instances.push(instance);
+                                self.bindings_dirty = true;
                             }
                             Err(error) => {
                                 commands.entity(root).despawn();
@@ -849,13 +902,104 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
-        stream.index_contents(&mut self.contents);
+        let membership = (
+            stream.presentation_membership(),
+            items.membership_revision(),
+        );
+        if self.bindings_dirty || self.membership != Some(membership) {
+            let session_changed = self
+                .membership
+                .is_none_or(|previous| previous.0.0 != membership.0.0);
+            stream.index_contents(&mut self.contents);
+            self.selection.reset(self.instances.len());
+            for owners in self.bodies.values_mut() {
+                owners.clear();
+            }
+            for owners in self.content_instances.values_mut() {
+                owners.clear();
+            }
+            for owners in self.lamp_instances.values_mut() {
+                owners.clear();
+            }
+            let frame = stream.frame();
+            let mut published = HashMap::new();
+            for (index, structure) in frame.structures.iter().enumerate() {
+                published.entry(&structure.placement.id).or_insert(index);
+            }
+            for (index, instance) in self.instances.iter_mut().enumerate() {
+                let content = self.contents.slot(&instance.placement.id);
+                let lamp_buttons = self.contents.lamp_slots(&instance.placement.id);
+                let food = items.generated_item_id(&instance.placement.id);
+                let structure = published
+                    .get(&instance.placement.id)
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                instance.sync_pending |= session_changed
+                    || instance.content != content
+                    || instance.lamp_buttons.as_slice() != lamp_buttons
+                    || instance.food != food
+                    || instance.structure != structure;
+                instance.content = content;
+                instance.lamp_buttons.clear();
+                instance.lamp_buttons.extend_from_slice(lamp_buttons);
+                instance.food = food;
+                instance.structure = structure;
+                if let Some(structure) = frame.structures.get(instance.structure) {
+                    for body in &structure.bodies {
+                        self.bodies.entry(*body).or_default().push(index);
+                    }
+                }
+                if let Some(slot) = instance.content {
+                    self.content_instances.entry(slot).or_default().push(index);
+                }
+                for lamp in &instance.lamp_buttons {
+                    self.lamp_instances.entry(*lamp).or_default().push(index);
+                }
+                if instance.sync_pending {
+                    self.selection.push(index);
+                }
+            }
+            self.bodies.retain(|_, owners| !owners.is_empty());
+            self.content_instances
+                .retain(|_, owners| !owners.is_empty());
+            self.lamp_instances.retain(|_, owners| !owners.is_empty());
+            self.membership = Some(membership);
+            self.bindings_dirty = false;
+            self.cache_bytes = self.measure_cache_bytes();
+        }
+        for body in physics.presentation_bodies() {
+            if let Some(owners) = self.bodies.get(&body) {
+                for index in owners {
+                    self.selection.push(*index);
+                }
+            }
+        }
+        for slot in stream.presentation_contents() {
+            if let Some(owners) = self.content_instances.get(&slot) {
+                for index in owners {
+                    self.selection.push(*index);
+                }
+            }
+        }
+        for lamp in stream.presentation_lamps() {
+            if let Some(owners) = self.lamp_instances.get(&lamp) {
+                for index in owners {
+                    self.selection.push(*index);
+                }
+            }
+        }
         let frame = stream.frame();
-        for instance in &mut self.instances {
+        let selected = self.selection.len();
+        for selected_index in 0..selected {
+            self.instances[self.selection.at(selected_index)].sync_pending = true;
+        }
+        for selected_index in 0..selected {
+            let instance_index = self.selection.at(selected_index);
+            let instance = &mut self.instances[instance_index];
             if instance.retirement.started() {
                 continue;
             }
-            let content = stream.indexed_content(&self.contents, &instance.placement.id);
+            let content = stream.content_at(instance.content);
             if !content.bindings_ready() {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
@@ -863,18 +1007,7 @@ impl SourceInstances {
                 }
                 continue;
             }
-            let cached = frame
-                .structures
-                .get(instance.structure)
-                .filter(|s| s.placement.id == instance.placement.id);
-            let Some(published) = cached.or_else(|| {
-                let index = frame
-                    .structures
-                    .iter()
-                    .position(|s| s.placement.id == instance.placement.id)?;
-                instance.structure = index;
-                Some(&frame.structures[index])
-            }) else {
+            let Some(published) = frame.structures.get(instance.structure) else {
                 continue;
             };
             if !instance.visible {
@@ -894,8 +1027,9 @@ impl SourceInstances {
                 instance.caps_bound = true;
             }
             let appearance = stream.indexed_appearance(&content, &instance.placement.id);
-            let food = items
-                .generated_item(&instance.placement.id)
+            let food = instance
+                .food
+                .and_then(|id| items.get(id))
                 .filter(|item| item.food.is_some());
             if let Some(item) = food {
                 let recipe = &reference.survival.foods[item.food.unwrap().prototype_index];
@@ -920,13 +1054,13 @@ impl SourceInstances {
                     ));
                 }
             }
-            let mut moved = false;
             for (i, node) in prototype.nodes.iter().enumerate() {
-                if let Some((_, pose)) = stream
-                    .indexed_lamp_buttons(&self.contents, &instance.placement.id)
+                if let Some((_, pose)) = instance
+                    .lamp_buttons
+                    .iter()
+                    .filter_map(|index| stream.lamp_button_at(*index))
                     .find(|(button, _)| *button == &node.source)
                 {
-                    moved = true;
                     if let Ok(mut transform) =
                         transforms.get_mut(instance.nodes[node.gltf_node as usize])
                     {
@@ -969,7 +1103,6 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.binding, &mut variant.binding);
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
                     std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
-                    moved = true;
                     renderer.lod_state = None;
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
@@ -997,7 +1130,6 @@ impl SourceInstances {
                     ),
                 ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
-                    moved = true;
                     let delta = world * instance.worlds[index].inverse();
                     let source_changed = source_world != instance.source_worlds[index];
                     let source_delta = source_world * instance.source_worlds[index].inverse();
@@ -1042,22 +1174,6 @@ impl SourceInstances {
                     )
                     .as_dmat4()
                 };
-            moved = moved
-                || prototype
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .any(|(node_index, node)| {
-                        let index = node.gltf_node as usize;
-                        content.node_pose(node_index).is_some_and(|pose| {
-                            instance.worlds[index] != pose_world(instance, index, pose)
-                        })
-                    });
-            let settled = instance.settled && !moved;
-            instance.settled = !moved;
-            if settled {
-                continue;
-            }
             for (node_index, node) in prototype.nodes.iter().enumerate() {
                 let Some(pose) = content.node_pose(node_index) else {
                     continue;
@@ -1096,6 +1212,10 @@ impl SourceInstances {
                 }
             }
         }
+        for selected_index in 0..selected {
+            self.instances[self.selection.at(selected_index)].sync_pending = false;
+        }
+        self.selection.clear();
         Ok(())
     }
     pub fn select_lods(
@@ -1255,6 +1375,7 @@ impl SourceInstances {
                 continue;
             }
             let mut instance = self.instances.swap_remove(index);
+            self.bindings_dirty = true;
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
                 writers.retire(stream, renderer.entity)?;

@@ -560,7 +560,7 @@ fn g10_generated_endpoint_root() {
         if !present {
             // A live item body must not substitute for an absent source root body.
             prototype.bodies.clear();
-            run.area.items.get_mut(root_item).unwrap().body = Some(root_body);
+            run.area.items.set_body(root_item, Some(root_body));
         }
         crate::world::content_mechanisms::bind(
             &mut content,
