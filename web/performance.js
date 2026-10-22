@@ -26,10 +26,10 @@ export class FrameTimings {
 }
 
 // Draws per pass in the world view. Counts come from the renderer audit.
-function renderLines(render){
- if(!render?.audit?.graph)return '\nRenderer: --';
- const view=render.audit.graph.views[0],sum=values=>values.reduce((a,b)=>a+b,0);
- return '\nRenderer: '+render.name+'\nDraws depth / shadow / surface: '+view.camera_depth[2]+' / '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4]);
+function renderLines(audit){
+ if(!audit?.graph)return '';
+ const view=audit.graph.views[0],sum=values=>values.reduce((a,b)=>a+b,0);
+ return '\nDraws depth / shadow / surface: '+view.camera_depth[2]+' / '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4]);
 }
 
 export function createPerformance(readWasmBytes,readRender){
