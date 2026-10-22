@@ -497,6 +497,7 @@
     {
       "id": "curve-boundaries",
       "probe_kind": "curve",
+      "comparison_group": "drivetrain",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -574,6 +575,7 @@
     {
       "id": "launch-default",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -668,6 +670,7 @@
     {
       "id": "launch-manual",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -769,6 +772,7 @@
     {
       "id": "gear-forward-neutral-reverse",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -925,6 +929,7 @@
     {
       "id": "grip-full-tire-longitudinal",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -996,6 +1001,7 @@
     {
       "id": "grip-full-tire-lateral",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1067,6 +1073,7 @@
     {
       "id": "grip-full-tire-combined",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1138,6 +1145,7 @@
     {
       "id": "grip-worn-tire-longitudinal",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1209,6 +1217,7 @@
     {
       "id": "grip-worn-tire-lateral",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1280,6 +1289,7 @@
     {
       "id": "grip-worn-tire-combined",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1351,6 +1361,7 @@
     {
       "id": "grip-bare-rim-longitudinal",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1422,6 +1433,7 @@
     {
       "id": "grip-bare-rim-lateral",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1493,6 +1505,7 @@
     {
       "id": "grip-bare-rim-combined",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1564,6 +1577,7 @@
     {
       "id": "grip-hub-longitudinal",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1635,6 +1649,7 @@
     {
       "id": "grip-hub-lateral",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1706,6 +1721,7 @@
     {
       "id": "grip-hub-combined",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1777,6 +1793,7 @@
     {
       "id": "remove-driven-rims-1",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1873,6 +1890,7 @@
     {
       "id": "remove-driven-rims-2",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -1969,6 +1987,7 @@
     {
       "id": "wheel-spin-source-startup",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2063,6 +2082,7 @@
     {
       "id": "wheel-spin-wheels-clear",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2157,6 +2177,7 @@
     {
       "id": "suspension-settle",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2235,6 +2256,7 @@
     {
       "id": "suspension-full-travel",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2313,6 +2335,7 @@
     {
       "id": "suspension-load",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2391,6 +2414,7 @@
     {
       "id": "suspension-drop",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2469,6 +2493,7 @@
     {
       "id": "braking-service",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2605,6 +2630,7 @@
     {
       "id": "braking-engine",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2741,6 +2767,7 @@
     {
       "id": "braking-handbrake",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -2877,6 +2904,7 @@
     {
       "id": "braking-combined",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3013,6 +3041,7 @@
     {
       "id": "motor-and-brake-service",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3139,6 +3168,7 @@
     {
       "id": "motor-and-brake-handbrake",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3265,6 +3295,7 @@
     {
       "id": "motor-and-brake-engine",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3389,6 +3420,7 @@
     {
       "id": "motor-and-brake-all",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3514,6 +3546,7 @@
     {
       "id": "coast-clutch-stop-slope-hold",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3647,6 +3680,7 @@
     {
       "id": "braking-service-automatic",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3747,6 +3781,7 @@
     {
       "id": "braking-engine-automatic",
       "probe_kind": "assembled_lada",
+      "comparison_group": "assembled_lada",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3847,6 +3882,7 @@
     {
       "id": "native-brake-stopped-hold",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -3921,6 +3957,7 @@
     {
       "id": "native-motor-and-service",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -4009,6 +4046,7 @@
     {
       "id": "native-motor-and-parking",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
@@ -4097,6 +4135,7 @@
     {
       "id": "native-motor-and-both",
       "probe_kind": "wheel_collider",
+      "comparison_group": "wheel",
       "source_objects": {
         "car": {
           "file": "level1",
