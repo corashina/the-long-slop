@@ -975,9 +975,8 @@ impl WheelAssemblies {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         let state = items
-            .get_mut(self.parts[part].item)
+            .set_body(self.parts[part].item, Some(body))
             .ok_or_else(|| error("Missing wheel item"))?;
-        state.body = Some(body);
         state.local_pose = from_rapier(&local);
         state.pose = from_rapier(&(*physics.rapier().bodies[body].position() * local));
         let vehicle = physics.vehicle_of(body).is_some();
@@ -1111,9 +1110,8 @@ impl WheelAssemblies {
                     * slot.hub_to_mount
                     * Pose::from_rotation(part.rotation);
                 let state = items
-                    .get_mut(part.item)
+                    .set_body(part.item, Some(chassis))
                     .ok_or_else(|| error("Missing mounted rim"))?;
-                state.body = Some(chassis);
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
                 let (radius, quality) = if let Some(tire) = part.tire {
@@ -1124,9 +1122,8 @@ impl WheelAssemblies {
                             .ok_or_else(|| error("Missing rim tire mount"))?
                         * Pose::from_rotation(tire_part.rotation);
                     let tire_state = items
-                        .get_mut(tire_part.item)
+                        .set_body(tire_part.item, Some(chassis))
                         .ok_or_else(|| error("Missing mounted tire"))?;
-                    tire_state.body = Some(chassis);
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);

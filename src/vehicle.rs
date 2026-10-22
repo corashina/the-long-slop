@@ -1,7 +1,9 @@
 mod mass;
 mod mutations;
+mod presentation_bodies;
 mod query_bounds;
 
+use presentation_bodies::{BodyPresentationState, PresentationBodies};
 use query_bounds::QueryBounds;
 use rapier3d::control::{DynamicRayCastVehicleController, Wheel, WheelTuning};
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -97,6 +99,7 @@ pub struct PhysicsWorld {
     pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
     query_bounds: QueryBounds,
+    presentation_bodies: PresentationBodies,
     chassis: Vec<RigidBodyHandle>,
     vehicles: Vec<VehicleBody>,
 }
@@ -114,6 +117,7 @@ impl PhysicsWorld {
             physics: rapier3d::prelude::PhysicsWorld::new(),
             body_mass_override: None,
             query_bounds: QueryBounds::default(),
+            presentation_bodies: PresentationBodies::default(),
             chassis: Vec::with_capacity(poses.len()),
             vehicles: Vec::with_capacity(poses.len()),
             inactive_bodies: std::collections::HashSet::with_capacity(
@@ -327,7 +331,11 @@ impl PhysicsWorld {
             || handbrake != vehicle.last_handbrake
         {
             self.query_bounds.mark_body(vehicle.chassis);
-            self.physics.bodies[vehicle.chassis].wake_up(true);
+            let body = &mut self.physics.bodies[vehicle.chassis];
+            let before = BodyPresentationState::capture(body);
+            body.wake_up(true);
+            self.presentation_bodies
+                .mark_if_changed(vehicle.chassis, before, body);
         }
         vehicle.last_handbrake = handbrake;
         if self.physics.bodies[vehicle.chassis].is_sleeping() {
@@ -405,10 +413,12 @@ impl PhysicsWorld {
     pub fn step_physics(&mut self) {
         for body in self.physics.islands.active_bodies() {
             self.query_bounds.mark_simulated_body(body);
+            self.presentation_bodies.mark(body);
         }
         self.physics.step();
         for body in self.physics.islands.active_bodies() {
             self.query_bounds.mark_simulated_body(body);
+            self.presentation_bodies.mark(body);
         }
         self.query_bounds.requeue_step_mutations();
         self.query_bounds.refresh(&mut self.physics);
@@ -492,8 +502,11 @@ impl PhysicsWorld {
             .sum();
         self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
+        let before = BodyPresentationState::capture(body);
         body.set_additional_mass((mass_kg - geometry_mass).max(0.0), true);
         body.recompute_mass_properties_from_colliders(&self.physics.colliders);
+        self.presentation_bodies
+            .mark_if_changed(vehicle.chassis, before, body);
         let mass = body.mass();
         for (wheel, reference) in vehicle
             .resting_wheels
@@ -563,7 +576,11 @@ impl PhysicsWorld {
         }
         vehicle.controller = controller;
         self.query_bounds.mark_body(vehicle.chassis);
-        self.physics.bodies[vehicle.chassis].wake_up(true);
+        let body = &mut self.physics.bodies[vehicle.chassis];
+        let before = BodyPresentationState::capture(body);
+        body.wake_up(true);
+        self.presentation_bodies
+            .mark_if_changed(vehicle.chassis, before, body);
         Ok(())
     }
 
@@ -669,12 +686,15 @@ impl PhysicsWorld {
         let vehicle = &mut self.vehicles[index];
         self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
+        let before = BodyPresentationState::capture(body);
 
         body.set_position(to_rapier(pose), true);
         body.set_linvel(Vector::ZERO, true);
         body.set_angvel(Vector::ZERO, true);
         body.reset_forces(true);
         body.reset_torques(true);
+        self.presentation_bodies
+            .mark_if_changed(vehicle.chassis, before, body);
         for (wheel, &slot) in vehicle
             .controller
             .wheels_mut()
@@ -781,7 +801,11 @@ impl PhysicsWorld {
                 .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
             {
                 self.query_bounds.mark_body(vehicle.chassis);
-                self.physics.bodies[vehicle.chassis].wake_up(true);
+                let body = &mut self.physics.bodies[vehicle.chassis];
+                let before = BodyPresentationState::capture(body);
+                body.wake_up(true);
+                self.presentation_bodies
+                    .mark_if_changed(vehicle.chassis, before, body);
             }
         }
         if self.physics.colliders.contains(handle) {
@@ -806,7 +830,10 @@ impl PhysicsWorld {
                 continue;
             }
             self.query_bounds.mark_body(handle);
+            let before = BodyPresentationState::capture(body);
             body.set_translation(body.translation() - shift, false);
+            self.presentation_bodies
+                .mark_if_changed(handle, before, body);
         }
         for (handle, collider) in self.physics.colliders.iter_mut() {
             if collider.parent().is_none() {

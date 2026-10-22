@@ -1,4 +1,4 @@
-use super::PhysicsWorld;
+use super::{PhysicsWorld, presentation_bodies::BodyPresentationState};
 use rapier3d::control::{CharacterCollision, KinematicCharacterController};
 #[cfg(test)]
 use rapier3d::math::Vector;
@@ -20,7 +20,11 @@ impl PhysicsWorld {
             .get_mut(handle)
             .expect("Invalid rigid-body handle");
         self.query_bounds.mark_body(handle);
-        edit(body)
+        let before = BodyPresentationState::capture(body);
+        let result = edit(body);
+        self.presentation_bodies
+            .mark_if_changed(handle, before, body);
+        result
     }
     pub fn try_edit_body<R>(
         &mut self,
@@ -29,7 +33,11 @@ impl PhysicsWorld {
     ) -> Option<R> {
         let body = self.physics.bodies.get_mut(handle)?;
         self.query_bounds.mark_body(handle);
-        Some(edit(body))
+        let before = BodyPresentationState::capture(body);
+        let result = edit(body);
+        self.presentation_bodies
+            .mark_if_changed(handle, before, body);
+        Some(result)
     }
     pub fn edit_collider<R>(
         &mut self,
@@ -56,6 +64,7 @@ impl PhysicsWorld {
     pub fn insert_body(&mut self, body: impl Into<RigidBody>) -> RigidBodyHandle {
         let handle = self.physics.insert_body(body);
         self.query_bounds.mark_body(handle);
+        self.presentation_bodies.mark(handle);
         handle
     }
     pub fn insert(
@@ -112,6 +121,7 @@ impl PhysicsWorld {
             self.query_bounds.retire_collider(collider);
         }
         self.query_bounds.mark_body(body);
+        self.presentation_bodies.mark(body);
         if self
             .body_mass_override
             .as_ref()
@@ -136,7 +146,10 @@ impl PhysicsWorld {
     ) {
         for (handle, body) in self.physics.bodies.iter_mut() {
             self.query_bounds.mark_body(handle);
+            let before = BodyPresentationState::capture(body);
             edit(handle, body, &self.physics.colliders);
+            self.presentation_bodies
+                .mark_if_changed(handle, before, body);
         }
     }
     pub fn edit_colliders(&mut self, mut edit: impl FnMut(ColliderHandle, &mut Collider)) {

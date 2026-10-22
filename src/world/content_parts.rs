@@ -112,8 +112,7 @@ pub(super) fn bind(
                 super::placement::node_pose(prototype, pickup_node),
             );
             let item = items.insert_generated(key, prototype, pose)?;
-            let state = items.get_mut(item).unwrap();
-            state.body = Some(body);
+            let state = items.set_body(item, Some(body)).unwrap();
             state.local_pose = crate::vehicle::from_rapier(
                 &(physics.rapier().bodies[body].position().inverse()
                     * crate::vehicle::to_rapier(state.pose)),

@@ -201,8 +201,7 @@ fn auxiliary(
     key.children.push((source.clone(), 0));
     let body = items.get(owner).unwrap().body;
     let item = items.insert_generated(key, prototype, pose)?;
-    let state = items.get_mut(item).unwrap();
-    state.body = body;
+    let state = items.set_body(item, body).unwrap();
     state.location = ItemLocation::Attached(owner);
     if let Some(body) = body {
         state.local_pose = from_rapier(

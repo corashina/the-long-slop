@@ -407,8 +407,7 @@ impl GarageRuntime {
                 .retain(|collider| collider.body != body_id);
         }
         self.area.item_render_poses.retain(|(id, _, _)| *id != item);
-        let state = self.area.items.get_mut(item).unwrap();
-        state.body = None;
+        let state = self.area.items.set_body(item, None).unwrap();
         state.location = ItemLocation::World;
         state.removed = true;
         self.area.inventory.forget(item);

@@ -17,6 +17,7 @@ webgpu = ["bevy/webgpu"]
 members = ["crates/terrain", "crates/terrain-worker", "crates/road-mesh", "crates/road-worker", "crates/grass-mesh", "crates/grass-worker"]
 
 [dependencies]
+bevy_platform = "=0.19.1"
 rapier3d = "=0.36.0"
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "raw_value"] }
