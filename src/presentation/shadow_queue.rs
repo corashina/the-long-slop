@@ -131,7 +131,7 @@ fn base_pipeline(
             return Ok(Some((previous.base, indexed, cache_key)));
         }
     }
-    let index = match state
+    let mut index = match state
         .specializations
         .binary_search_by_key(&cache_key, |entry| entry.key)
     {
@@ -145,7 +145,23 @@ fn base_pipeline(
         Err(index) => index,
     };
     if state.specializations.len() == state.specializations.capacity() {
-        return Err("Source shadow specialization capacity was exceeded".into());
+        // Re-prepared materials get new pointer keys, so drop keys no queued item uses.
+        let ShadowQueues {
+            specializations,
+            queued,
+            ..
+        } = &mut *state;
+        specializations.retain(|entry| {
+            queued
+                .iter()
+                .any(|view| view.values().any(|item| item.specialization == entry.key))
+        });
+        if specializations.len() == specializations.capacity() {
+            specializations.reserve_exact(specializations.capacity().max(1));
+        }
+        index = specializations
+            .binary_search_by_key(&cache_key, |entry| entry.key)
+            .unwrap_err();
     }
     // Full immutable material key is passed on cache misses. No Arc clone occurs on steady hits.
     let properties = material.properties.clone();
