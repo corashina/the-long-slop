@@ -1344,13 +1344,16 @@ impl SourceInstances {
         let mut index = 0;
         while index < self.instances.len() {
             let id = &self.instances[index].placement.id;
-            let wanted = self.instances[index].session == stream.frame().request.session
-                && (stream.pending_structures().iter().any(|p| &p.id == id)
-                    || stream
-                        .frame()
-                        .structures
-                        .iter()
-                        .any(|s| &s.placement.id == id));
+            let frame = stream.frame();
+            // A valid cached structure index proves publication without a scan.
+            let published = frame
+                .structures
+                .get(self.instances[index].structure)
+                .is_some_and(|s| &s.placement.id == id);
+            let wanted = self.instances[index].session == frame.request.session
+                && (published
+                    || stream.pending_structures().iter().any(|p| &p.id == id)
+                    || frame.structures.iter().any(|s| &s.placement.id == id));
             if self.instances[index].retirement.keep(wanted) {
                 index += 1;
                 continue;
