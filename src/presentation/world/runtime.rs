@@ -7,10 +7,7 @@ use super::{
 use crate::{
     presentation::{
         lighting::SourceLighting,
-        materials::{
-            grass::{GrassView, writers::GrassWriters},
-            terrain::TerrainMaterial,
-        },
+        materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
     starting_area::StartingArea,
@@ -21,11 +18,13 @@ use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
     prelude::*,
 };
+use grass_mesh::GrassView;
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,
     pub(crate) fixed: crate::reference::fixed_reservation::FixedAllocation,
     pub(crate) lighting_cpu: usize,
+    instance_cache_cpu: usize,
     lamps: (usize, usize, usize),
     imported_writers: Vec<(Entity, Handle<Mesh>)>,
     writers_bound: bool,
@@ -49,10 +48,13 @@ impl SourcePresentationAllocation {
         }
     }
 }
+/// World object roots. The drive camera is excluded, so systems can also read its Transform.
+pub type WorldRoots<'w, 's> =
+    Query<'w, 's, &'static mut Transform, Without<crate::presentation::camera::DriveCamera>>;
 #[derive(SystemParam)]
 pub struct WorldPresentation<'w, 's> {
     pub commands: Commands<'w, 's>,
-    pub roots: Query<'w, 's, &'static mut Transform>,
+    pub roots: WorldRoots<'w, 's>,
     pub prototypes: ResMut<'w, SourcePrototypes>,
     pub pipelines: ResMut<'w, WorldPipelines>,
     pub surfaces: ResMut<'w, SourceWorldVisuals>,
@@ -139,6 +141,8 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        let _profile =
+            crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::RenderPreparation);
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
@@ -172,7 +176,7 @@ impl WorldPresentation<'_, '_> {
                 &mut self.grass,
                 &mut self.writers,
             )?;
-            self.grass.release_domains();
+            self.grass.release_domains(stream)?;
             self.materials.cache.begin_world_session();
             self.surfaces
                 .retire_session(&mut self.commands, &mut self.meshes);
@@ -469,6 +473,19 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
             &mut self.materials,
         )?;
+        let instance_cache_cpu = self.instances.cache_bytes();
+        if self.allocation.instance_cache_cpu != instance_cache_cpu {
+            let mut allocation = stream.presentation_allocation();
+            allocation.active_cpu = allocation
+                .active_cpu
+                .checked_sub(self.allocation.instance_cache_cpu)
+                .and_then(|bytes| bytes.checked_add(instance_cache_cpu))
+                .ok_or_else(|| ReferenceError("Generated presentation cache accounting".into()))?;
+            stream.set_presentation_allocation(allocation)?;
+            self.allocation.instance_cache_cpu = instance_cache_cpu;
+        }
+        physics.clear_presentation_bodies();
+        stream.clear_presentation_changes();
         timer.next(crate::world::stream_profile::Stage::LampSync);
         super::lamps::sync_source_lamps(
             &stream.frame(),

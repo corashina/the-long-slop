@@ -9,6 +9,25 @@ from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
 from .driving import recover_driving
+from .player_movement import recover_player_movement, recover_seat_view
+
+
+def fluid_entries(value: dict) -> list[dict]:
+    """Validate initial tank contents and retain source list order."""
+    capacity = value['maxC']
+    if not math.isfinite(capacity) or capacity <= 0:
+        raise ValueError('Invalid fluid capacity')
+    entries = []
+    seen = set()
+    for fluid in value['fluids']:
+        kind, amount = fluid['type'], fluid['amount']
+        if kind not in range(6) or kind in seen or not math.isfinite(amount) or amount < 0:
+            raise ValueError('Invalid initial fluid entry')
+        seen.add(kind)
+        entries.append({'fluid_type': kind, 'amount': amount})
+    if len(entries) > 6 or sum(entry['amount'] for entry in entries) > capacity:
+        raise ValueError('Initial fluid exceeds capacity')
+    return entries
 
 
 def build_manifest(source, roots, reports, hashes, library, cars, output):
@@ -149,14 +168,15 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 collider=candidates[0]
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
+    retained_colliders=detachable_colliders | getattr(source,'storage_collider_keys',set())
     for node,group in components.items():
         food_geometry=key(node_readers[node]) in source.food_geometry_nodes
-        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in detachable_colliders for readers in group.values() for reader in readers):continue
+        if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in retained_colliders for readers in group.values() for reader in readers):continue
         layer=source.read(objects[node]['game_object'])['m_Layer']
         for class_name in ('BoxCollider','SphereCollider','CapsuleCollider','MeshCollider'):
             for reader in group.get(class_name,[]):
                 value=source.read(reader)
-                if not value['m_Enabled'] and key(reader) not in detachable_colliders and key(reader) not in getattr(source,'storage_collider_keys',set()):continue
+                if not value['m_Enabled'] and key(reader) not in retained_colliders:continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
                     properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
@@ -168,10 +188,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('tankscript',[]):
-            full=source.read(reader);value=full['F'];quantities=[0.]*6
-            for fluid in value['fluids']:quantities[fluid['type']]+=fluid['amount']
+            full=source.read(reader);value=full['F']
             owner=body_for(node)
-            tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'quantities_liters':quantities,'openings':[],
+            tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'fluids':fluid_entries(value),'openings':[],
                 'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
                 'role':'vehicle' if owner in car_bodies else 'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
     for node,group in components.items():
@@ -229,7 +248,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight']})
+                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],**recover_seat_view(source,reader)})
     wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
     mount_links={}
     for group in components.values():
@@ -322,12 +341,10 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss']}
         return engine_record
     engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]
-    stand=source.resolve(player_reader,player['TStandHeadPos']);prone=source.resolve(player_reader,player['TProneHeadPos']);capsule=source.get('level1',58456);camera=source.get('level1',40241)
-    distance=math.dist(vector(source.read(stand)['m_LocalPosition']),vector(source.read(prone)['m_LocalPosition']))
-    player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'ctrl_duck_value':player['ctrlDuckValue'],'duck_lerp':player['FduckLerp'],'head_lerp':player['FHeadLerp'],'crouch_height':distance*player['ctrlDuckValue'],'capsule_radius':source.read(capsule)['m_Radius'],'capsule_height':source.read(capsule)['m_Height'],'camera_height':source.read(stand)['m_LocalPosition']['y'],'field_of_view_degrees':source.read(camera)['field of view'],'aim_reach':player['FrayRange']}
-    player_record.update(standing_radius=player['maxBodyRadius'],standing_height=distance,
-        crouch_radius=player['minBodyRadius']+(player['maxBodyRadius']-player['minBodyRadius'])*player['ctrlDuckValue'],
-        exit_distance=player['CanGetOutDist'],exit_step_vertical=player['GetOutStepV'],exit_steps_vertical=player['GetOutStepTimesV'],
+    capsule=source.get('level1',58456);camera=source.get('level1',40241)
+    player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'aim_reach':player['FrayRange']}
+    player_record.update(recover_player_movement(source))
+    player_record.update(exit_distance=player['CanGetOutDist'],exit_step_vertical=player['GetOutStepV'],exit_steps_vertical=player['GetOutStepTimesV'],
         exit_step_horizontal=player['GetOutStepH'],exit_steps_horizontal=player['GetOutStepTimesH'])
     head=source.resolve(player_reader,player['Th']);held=source.resolve(player_reader,player['TpickedUpPos'])
     held_offset=bake_points([(0.,0.,0.)],source.chain(held),world_pose(source,head))[0]
@@ -396,7 +413,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         return max(hits,key=lambda hit:hit[0])
     position=list(transform_point((-1.5,0.,0.),car_pose['translation'],car_pose['rotation'],[1.,1.,1.]))
     floor,_=floor_at(position[0],position[2],car_pose['translation'][1])
-    position[1]=floor+distance*0.5+source.read(physics)['m_DefaultContactOffset']
+    posture=player_record['posture']
+    lower=min(posture['prone_head']['translation'][1], posture['feet']['center'][1]-posture['maximum_radius'])
+    position[1]=floor-lower+source.read(physics)['m_DefaultContactOffset']
     spawn={'translation':position,'rotation':list(quaternion_product(car_pose['rotation'],[0.,-math.sqrt(.5),0.,math.sqrt(.5)])),'scale':[1.,1.,1.]}
     wheel_floors=[]
     for slot in wheel_slots[:4]:

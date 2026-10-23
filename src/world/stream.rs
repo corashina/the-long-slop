@@ -1,9 +1,10 @@
 //! Bounded source generation. Publication uses absolute geometry and the current physics origin.
+use super::road_worker::{RoadJobId, RoadLayout, RoadPoll, RoadWorker};
+use super::terrain::{CompletedTerrain, TerrainExecution, TerrainMetadata};
 use super::{
     AbsolutePose, Placement, PlacementIndex, RoadIndex, RoadSegment, RoadSequence, StartupTerrain,
-    TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob, TerrainPoll, TerrainRoadPoint,
-    TerrainTile, TerrainWorker, WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface,
-    deform_road,
+    TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob, TerrainRoadPoint, TerrainTile,
+    WorldBounds, WorldLayer, WorldMetrics, WorldOrigin, WorldSurface,
 };
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
@@ -42,6 +43,9 @@ pub struct WorldRequest {
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PresentationAllocation {
+    pub grass_worker_wasm_bytes: usize,
+    pub grass_worker_cache_bytes: usize,
+    pub grass_worker_reserved_bytes: usize,
     pub active_cpu: usize,
     pub active_gpu: usize,
     pub prototype_cpu: usize,
@@ -97,6 +101,7 @@ pub struct RecoveryPermit {
     vehicle: [f64; 3],
 }
 struct PreparedSurface {
+    road_claim: Option<(RoadJobId, u64)>,
     pending_bytes: usize,
     renderer_ready: bool,
     renderer_reserved: bool,
@@ -107,14 +112,15 @@ struct SelectedRoad {
     segment: RoadSegment,
     light: Option<super::WorldLight>,
 }
-struct TerrainWork {
+struct RoadWork {
     pending_bytes: usize,
+    surface_bytes: usize,
     request: WorldRequest,
-    key: SurfaceKey,
-    /// Encoded job input. It is kept until the result arrives.
-    input: Vec<u8>,
-    /// Worker job identity after submission.
-    id: Option<u32>,
+    identity: RoadJobId,
+    segment: RoadSegment,
+    source_revision: u64,
+    completed: bool,
+    canceled: bool,
 }
 #[derive(Clone, Copy)]
 struct PrototypeAllocation {
@@ -163,6 +169,11 @@ pub struct WorldStream {
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
+    road_prototypes: [Option<road_mesh::RoadPrototype>; 3],
+    road_source_revisions: [u64; 3],
+    road_worker: RoadWorker,
+    road_worker_reserved_bytes: usize,
+    road_work: Option<RoadWork>,
     placements: PlacementIndex,
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
@@ -189,6 +200,9 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    structure_revision: u64,
+    presentation_changes: Vec<content_index::ContentSlot>,
+    presentation_lamp_changes: Vec<usize>,
     saved_item_protection: Vec<super::ObjectKey>,
     change_dependencies: Vec<super::ObjectKey>,
     external_dependencies: HashSet<super::ObjectKey>,
@@ -206,8 +220,7 @@ pub struct WorldStream {
     startup_points: Vec<TerrainRoadPoint>,
     surfaces: Vec<PublishedSurface>,
     ready: Option<PreparedSurface>,
-    terrain_work: Option<TerrainWork>,
-    terrain_worker: TerrainWorker,
+    terrain_execution: TerrainExecution,
     admissions: HashMap<SourceId, PrototypeAllocation>,
     terrain_ready: [bool; 3],
     shared_cpu_bytes: Option<usize>,
@@ -690,7 +703,11 @@ impl WorldStream {
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
             request: WorldRequest {
-                session: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
+                session: NEXT_SESSION
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                        next.checked_add(1)
+                    })
+                    .map_err(|_| ReferenceError("World session identity exhausted".into()))?,
                 revision: 1,
                 player: [0.0; 3],
                 vehicle: [0.0; 3],
@@ -698,6 +715,11 @@ impl WorldStream {
             recovery: None,
             recovery_search: None,
             roads,
+            road_prototypes: [const { None }; 3],
+            road_source_revisions: [0; 3],
+            road_worker: RoadWorker::default(),
+            road_worker_reserved_bytes: 0,
+            road_work: None,
             placements: PlacementIndex::new(world, seed),
             props: super::prop_layers::PropLayers::new(world, seed)?,
             contents,
@@ -725,6 +747,9 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            structure_revision: 0,
+            presentation_changes: Vec::new(),
+            presentation_lamp_changes: Vec::new(),
             saved_item_protection: Vec::new(),
             change_dependencies: Vec::new(),
             external_dependencies: HashSet::new(),
@@ -742,8 +767,7 @@ impl WorldStream {
             startup_points: Vec::new(),
             surfaces: Vec::new(),
             ready: None,
-            terrain_work: None,
-            terrain_worker: TerrainWorker::default(),
+            terrain_execution: TerrainExecution::default(),
             admissions: HashMap::new(),
             terrain_ready: [false; 3],
             shared_cpu_bytes: Some(shared_cpu_bytes),
@@ -818,7 +842,8 @@ impl WorldStream {
             next.staging_bytes + self.generation_pending_bytes() + self.overlap.pending_bytes;
         let jobs = next.jobs
             + self.overlap.generation_jobs
-            + usize::from(self.terrain_work.is_some())
+            + usize::from(self.terrain_execution.has_pending())
+            + usize::from(self.road_work.is_some())
             + usize::from(self.contents.has_replay());
         [
             ResourceBudget {
@@ -887,7 +912,8 @@ impl WorldStream {
         self.binding_reserved
             + self.contents.pending_bytes()
             + self.props.pending_bytes()
-            + self.terrain_work.as_ref().map_or(0, |w| w.pending_bytes)
+            + self.terrain_execution.pending_bytes()
+            + self.road_work.as_ref().map_or(0, |w| w.pending_bytes)
             + self.ready.as_ref().map_or(0, |w| {
                 w.pending_bytes
                     + if w.renderer_reserved {
@@ -956,7 +982,8 @@ impl WorldStream {
             + self.props.pending_requests()
             + self.ready_structures.len()
             + usize::from(self.ready.is_some())
-            + usize::from(self.terrain_work.is_some())
+            + usize::from(self.terrain_execution.has_pending())
+            + usize::from(self.road_work.is_some())
             + self.presentation.pending
     }
     pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
@@ -972,7 +999,8 @@ impl WorldStream {
         2usize.saturating_sub(
             self.presentation.jobs
                 + self.overlap.generation_jobs
-                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.terrain_execution.has_pending())
+                + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
         )
     }
@@ -1002,11 +1030,12 @@ impl WorldStream {
                 "contents": self.contents.pending_requests(),
                 "props": self.props.pending_requests(),
                 "surface": self.ready.is_some(),
-                "terrain": self.terrain_work.is_some(),
+                "terrain": self.terrain_execution.has_pending(),
+                "road": self.road_work.is_some(),
                 "replays": self.replay_roots.len(),
                 "overlap": self.overlap.pending_work,
             },
-            "terrain": self.terrain_work.is_some(),
+            "terrain": self.terrain_execution.has_pending(),
             "contents": self.contents.has_replay(),
             "available": self.available_external_jobs(),
         })
@@ -1046,12 +1075,28 @@ impl WorldStream {
         if self.admissions.contains_key(&source) {
             return Ok(());
         }
+        let road_index = self
+            .reference
+            .road
+            .prototypes
+            .iter()
+            .position(|id| id == &source);
+        let road_input = road_index
+            .filter(|&index| self.road_prototypes[index].is_none())
+            .map(|_| {
+                self.reference
+                    .prototypes
+                    .iter()
+                    .find(|p| p.source == source)
+                    .expect("validated road prototype")
+            });
+        let road_bytes = road_input.map_or(0, super::road::road_prototype_bytes);
         let current = self.metrics();
         let owner_bytes =
             super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity();
         if current
             .prototype_cpu_bytes
-            .checked_add(cpu.saturating_add(owner_bytes))
+            .checked_add(cpu.saturating_add(owner_bytes).saturating_add(road_bytes))
             .is_none_or(|v| v > PROTOTYPE_CPU)
             || current
                 .prototype_gpu_bytes
@@ -1062,6 +1107,13 @@ impl WorldStream {
                 "Source prototype budget {}:{}",
                 source.file, source.path_id
             )));
+        }
+        if let Some(prototype) = road_input {
+            let index = road_index.unwrap();
+            self.road_source_revisions[index] = self.road_source_revisions[index]
+                .checked_add(1)
+                .ok_or_else(|| ReferenceError("Road source revision exhausted".into()))?;
+            self.road_prototypes[index] = Some(super::road::road_prototype(prototype));
         }
         self.admissions.insert(
             source,
@@ -1144,6 +1196,36 @@ impl WorldStream {
                 self.terrain_ready[tier] = false;
             }
         }
+        if let Some(index) = self
+            .reference
+            .road
+            .prototypes
+            .iter()
+            .position(|id| id == source)
+        {
+            if self
+                .ready
+                .as_ref()
+                .is_some_and(|w| w.published.prototype.as_ref() == Some(source))
+            {
+                if self.ready.as_ref().unwrap().renderer_reserved {
+                    return Err(ReferenceError(
+                        "Cannot release a reserved road prototype".into(),
+                    ));
+                }
+                self.discard_unreserved_surface();
+            }
+            // Terminate only this world's actor before releasing any source or job charge.
+            self.road_worker.dispose();
+            self.road_worker_reserved_bytes = 0;
+            if let Some(work) = self.road_work.take() {
+                self.rewind_road(SurfaceKey {
+                    layer: WorldLayer::Road,
+                    unit: [i64::from(work.segment.index), 0],
+                });
+            }
+            self.road_prototypes[index] = None;
+        }
         self.admissions.remove(source);
         self.recipes.remove(source);
         Ok(())
@@ -1210,8 +1292,12 @@ impl WorldStream {
         }
     }
     fn revise_selection(&mut self) {
-        self.request.revision = self.request.revision.wrapping_add(1);
-        self.failure = None;
+        if let Some(revision) = self.request.revision.checked_add(1) {
+            self.request.revision = revision;
+            self.failure = None;
+        } else {
+            self.failure = Some("World request identity exhausted".into());
+        }
     }
     fn rewind_road(&mut self, key: SurfaceKey) {
         if key.layer == WorldLayer::Road {
@@ -1227,6 +1313,9 @@ impl WorldStream {
     fn discard_unreserved_surface(&mut self) {
         if self.ready.as_ref().is_some_and(|w| !w.renderer_reserved) {
             let key = self.ready.take().unwrap().published.key;
+            if key.layer == WorldLayer::Road {
+                self.road_worker.publication_ended(false);
+            }
             self.rewind_road(key);
         }
     }
@@ -1343,13 +1432,25 @@ impl WorldStream {
     }
     /// Keep payload construction and renderer publication downstream from source selection.
     fn prepare_geometry(&mut self, should_yield: impl FnMut() -> bool) {
+        // Completion releases physical ownership even when dispatch and publication are gated.
+        self.poll_road_work();
         if self.failure.is_some()
-            || self.ready.is_some()
             || !self.initial_generation_ready
             || self.startup.is_none()
             || self.plan_revision != self.request.revision
             || self.next_road != self.road_candidates.len()
         {
+            return;
+        }
+        self.retarget_road_work();
+        if self
+            .ready
+            .as_ref()
+            .is_some_and(|work| !self.road_publication_valid(work))
+        {
+            self.discard_unreserved_surface();
+        }
+        if self.ready.is_some() {
             return;
         }
         if self
@@ -1380,6 +1481,7 @@ impl WorldStream {
         let limit_ms = if budget_ms == 0. { 1. } else { budget_ms };
         let mut timer =
             super::stream_profile::Timer::new(super::stream_profile::Stage::StreamDescriptors);
+        self.poll_road_work();
         self.prepare_descriptors(budget_ms);
         timer.next(super::stream_profile::Stage::StreamGeometry);
         self.prepare_geometry(|| {
@@ -2083,19 +2185,23 @@ impl WorldStream {
                 )));
             }
         }
-        if let Some(work) = &mut self.terrain_work {
-            if self.terrain_context_dirty || !self.wanted_tiles.contains(&work.key) {
-                self.terrain_work = None;
-                self.terrain_worker.discard();
-            } else {
-                work.request = self.request;
-            }
-        }
+        let retain_terrain = !self.terrain_context_dirty
+            && self
+                .terrain_execution
+                .key()
+                .is_some_and(|key| self.wanted_tiles.contains(&key));
+        self.terrain_execution
+            .reconcile(self.request, retain_terrain);
         if let Some(work) = &mut self.ready {
             if !work.renderer_reserved {
                 let valid = if work.published.key.layer == WorldLayer::Road {
-                    self.wanted_roads
-                        .contains(&(work.published.key.unit[0] as u32))
+                    work.published.road.is_some_and(|road| {
+                        self.selected_roads.iter().any(|r| r.segment == road)
+                            && self.road_focus.into_iter().any(|p| {
+                                source_distance_squared(p, road.position())
+                                    <= self.reference.distances["RoadGenDist"].powi(2)
+                            })
+                    })
                 } else {
                     !self.terrain_context_dirty && self.wanted_tiles.contains(&work.published.key)
                 };
@@ -2208,7 +2314,7 @@ impl WorldStream {
                     .map(|n| n.source.file.capacity())
                     .sum::<usize>();
             let bytes = (self.selected_roads.capacity() + 1) * std::mem::size_of::<SelectedRoad>()
-                + prototype.nodes.len() * std::mem::size_of::<super::road::RoadFrame>()
+                + prototype.nodes.len() * std::mem::size_of::<road_mesh::RoadFrame>()
                 + 2 * (std::mem::size_of::<super::WorldLight>() + light_heap)
                 + (self.wanted_structures.capacity() + 1) * std::mem::size_of::<Placement>()
                 + 2 * light_heap;
@@ -2256,8 +2362,106 @@ impl WorldStream {
         }
         self.next_road += 1;
     }
+    fn road_failure(&mut self, error: ReferenceError) {
+        self.road_worker.dispose();
+        self.road_worker_reserved_bytes = 0;
+        self.road_work = None;
+        self.failure = Some(error.0);
+    }
+    fn poll_road_work(&mut self) {
+        match self.road_worker.poll() {
+            Err(error) => self.road_failure(error),
+            Ok(RoadPoll::Idle) => {
+                if let Some(work) = self.road_work.take() {
+                    if !work.canceled {
+                        self.road_failure(ReferenceError("Road worker lost its owned job".into()));
+                    }
+                }
+            }
+            Ok(RoadPoll::Ready(id)) => {
+                if let Some(work) = self
+                    .road_work
+                    .as_mut()
+                    .filter(|w| w.identity == id && !w.canceled)
+                {
+                    work.completed = true;
+                } else {
+                    self.road_worker.discard();
+                }
+            }
+            Ok(RoadPoll::Busy) => {}
+        }
+    }
+    fn retarget_road_work(&mut self) {
+        let required_road_missing = self.required.roads.iter().any(|id| {
+            !self
+                .surfaces
+                .iter()
+                .any(|s| s.key.layer == WorldLayer::Road && s.key.unit[0] == i64::from(*id))
+        });
+        if let Some(work) = &mut self.road_work {
+            let valid = work.identity.session == self.request.session
+                && self.road_source_revisions[work.segment.biome as usize] == work.source_revision
+                && self.wanted_roads.contains(&work.segment.index)
+                && self
+                    .selected_roads
+                    .iter()
+                    .any(|r| r.segment == work.segment)
+                && !self.surfaces.iter().any(|s| {
+                    s.key.layer == WorldLayer::Road
+                        && s.key.unit[0] == i64::from(work.segment.index)
+                })
+                && (!required_road_missing || self.required.roads.contains(&work.segment.index));
+            if valid && !work.canceled {
+                // Keep the submitted identity immutable. Retarget only the main-thread claim.
+                work.request = self.request;
+            } else if !work.canceled {
+                work.canceled = true;
+                self.road_worker.discard();
+            }
+        }
+    }
     fn prepare_road(&mut self) {
         let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Road);
+        if let Some(work) = &self.road_work {
+            if !work.completed || work.canceled {
+                return;
+            }
+            if !same_request(work.request, self.request)
+                || !(self.required.roads.contains(&work.segment.index) || self.required_ready())
+            {
+                return;
+            }
+            let mut surface = WorldSurface::default();
+            if let Err(error) = self.road_worker.read(&mut surface) {
+                self.road_failure(error);
+                return;
+            }
+            let work = self.road_work.take().unwrap();
+            self.next_geometry += 1;
+            self.ready = Some(PreparedSurface {
+                road_claim: Some((work.identity, work.source_revision)),
+                pending_bytes: work.surface_bytes,
+                renderer_ready: false,
+                renderer_reserved: false,
+                request: self.request,
+                published: PublishedSurface {
+                    key: SurfaceKey {
+                        layer: WorldLayer::Road,
+                        unit: [i64::from(work.segment.index), 0],
+                    },
+                    bounds: surface_bounds(&surface),
+                    surface,
+                    prototype: Some(
+                        self.reference.road.prototypes[work.segment.biome as usize].clone(),
+                    ),
+                    collider: None,
+                    collision_bytes: 0,
+                    road: Some(work.segment),
+                },
+            });
+            return;
+        }
         if self.available_external_jobs() == 0 {
             return;
         }
@@ -2278,43 +2482,143 @@ impl WorldStream {
             .find(|r| r.segment.index == index)
             .unwrap()
             .segment;
-        let key = SurfaceKey {
-            layer: WorldLayer::Road,
-            unit: [index as i64, 0],
-        };
-        if self.surfaces.iter().any(|s| s.key == key) {
-            self.next_geometry += 1;
-            return;
-        }
+        let owner = segment.biome as usize;
         if !self
             .admissions
-            .get(&self.reference.road.prototypes[segment.biome as usize])
+            .get(&self.reference.road.prototypes[owner])
             .is_some_and(|a| a.ready)
         {
             return;
         }
-        let pending_bytes = super::road::road_surface_bound(&self.reference, segment.biome);
-        if !self.can_request_independent(1) || !self.admit_generation(pending_bytes) {
+        let prototype = self.road_prototypes[owner]
+            .as_ref()
+            .expect("admitted road prototype");
+        let source_revision = self.road_source_revisions[owner];
+        let install = !self
+            .road_worker
+            .installed(self.request.session, source_revision, owner);
+        let layout = RoadLayout::new(prototype);
+        let install_bytes = if install {
+            road_mesh::prototype_encoded_len(prototype)
+        } else {
+            0
+        };
+        // Old installed storage remains charged while the new source and all copies coexist.
+        let pending_bytes = layout.job_bytes() + install_bytes * 3;
+        let cache_bytes = if install { layout.cache_bytes } else { 0 };
+        if !self.can_request_independent(1) || !self.admit_generation(pending_bytes + cache_bytes) {
             return;
         }
-        let mut surface = WorldSurface::default();
-        deform_road(&self.reference, &segment, &mut surface);
-        self.next_geometry += 1;
-        self.ready = Some(PreparedSurface {
-            pending_bytes,
-            renderer_ready: false,
-            renderer_reserved: false,
+        let capacity = self
+            .road_worker
+            .cache_bytes()
+            .checked_add(cache_bytes)
+            .and_then(|v| v.checked_add(pending_bytes))
+            .and_then(|v| v.checked_mul(2))
+            .and_then(|v| v.checked_add(super::road_worker::INITIAL_WASM_BYTES))
+            .and_then(usize::checked_next_power_of_two);
+        let Some(capacity) = capacity else {
+            self.road_failure(ReferenceError("Road capacity overflow".into()));
+            return;
+        };
+        // This is an admission estimate, separate from the logical operation charge.
+        let capacity = capacity.max(self.road_worker_reserved_bytes);
+        let delta = capacity - self.road_worker_reserved_bytes;
+        if self
+            .metrics()
+            .active_cpu_bytes
+            .saturating_add(pending_bytes + cache_bytes)
+            .saturating_add(delta)
+            > ACTIVE_CPU
+        {
+            self.road_failure(ReferenceError(
+                "Road worker capacity exceeds CPU budget".into(),
+            ));
+            return;
+        }
+        // Retain actor capacity before creation. Wait for initialization before packing or sends.
+        self.road_worker_reserved_bytes = capacity;
+        match self.road_worker.initialize(capacity) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                self.road_failure(error);
+                return;
+            }
+        }
+        let identity =
+            match self
+                .road_worker
+                .next_id(self.request.session, self.request.revision, index)
+            {
+                Ok(id) => id,
+                Err(error) => {
+                    self.road_failure(error);
+                    return;
+                }
+            };
+        // Charge the complete operation before creating or dispatching the actor.
+        self.road_work = Some(RoadWork {
+            pending_bytes: pending_bytes + cache_bytes,
+            surface_bytes: layout.surface_bytes(),
             request: self.request,
-            published: PublishedSurface {
-                key,
-                bounds: surface_bounds(&surface),
-                surface,
-                prototype: Some(self.reference.road.prototypes[segment.biome as usize].clone()),
-                collider: None,
-                collision_bytes: 0,
-                road: Some(segment),
-            },
+            identity,
+            segment,
+            source_revision,
+            completed: false,
+            canceled: false,
         });
+        if let Err(error) = self.road_worker.packing_started() {
+            self.road_failure(error);
+            return;
+        }
+        if install {
+            let mut input = Vec::with_capacity(install_bytes);
+            {
+                let _packing =
+                    super::stream_profile::Timer::new(super::stream_profile::Stage::RoadPacking);
+                road_mesh::encode_prototype(
+                    self.road_prototypes[owner].as_ref().unwrap(),
+                    &mut input,
+                );
+            }
+            self.road_worker.packing_ended();
+            let source = RoadJobId {
+                session: self.request.session,
+                revision: source_revision,
+                owner: owner as u32,
+                sequence: identity.sequence,
+            };
+            if let Err(error) = self.road_worker.install(source, &input, layout) {
+                self.road_failure(error);
+                return;
+            }
+            // Installation now owns the retained cache charge. Keep transient copies reserved.
+            self.road_work.as_mut().unwrap().pending_bytes -= cache_bytes;
+            if let Err(error) = self.road_worker.packing_started() {
+                self.road_failure(error);
+                return;
+            }
+        }
+        let packing = super::stream_profile::Timer::new(super::stream_profile::Stage::RoadPacking);
+        let mut pose = Vec::with_capacity(144);
+        road_mesh::encode_pose(
+            &road_mesh::RoadPose {
+                origin: segment.position(),
+                rotations: segment.source_rotations,
+            },
+            &mut pose,
+        );
+        let mut input = [0; 156];
+        input[..4].copy_from_slice(&(owner as u32).to_le_bytes());
+        input[4..12].copy_from_slice(&source_revision.to_le_bytes());
+        input[12..].copy_from_slice(&pose);
+        drop(packing);
+        self.road_worker.packing_ended();
+        if let Err(error) = self.road_worker.submit(identity, &input) {
+            self.road_failure(error);
+            return;
+        }
     }
     fn local_collision_pending(&self, key: SurfaceKey) -> bool {
         if key.layer != WorldLayer::Terrain || self.surfaces.iter().any(|s| s.key == key) {
@@ -2334,32 +2638,22 @@ impl WorldStream {
                 && self.reference.road.prototypes[r.segment.biome as usize] == *source
         })
     }
-    fn prepare_terrain(&mut self, should_yield: impl FnMut() -> bool) {
+    fn prepare_terrain(&mut self, mut should_yield: impl FnMut() -> bool) {
         let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Terrain);
-        let mut poll = match self.terrain_worker.poll(should_yield) {
-            Ok(poll) => poll,
-            Err(error) => {
-                self.failure = Some(error.0);
-                return;
-            }
-        };
-        if let TerrainPoll::Ready(id) = poll {
-            let owner = self.terrain_work.as_ref().is_some_and(|w| w.id == Some(id));
-            if owner && same_request(self.terrain_work.as_ref().unwrap().request, self.request) {
-                let work = self.terrain_work.take().unwrap();
-                let mut surface = WorldSurface::default();
-                self.terrain_worker.read(
-                    work.key.unit,
-                    self.tiles[layer_tier(work.key.layer)],
-                    &mut surface,
-                );
+        let had_pending = self.terrain_execution.has_pending();
+        match self
+            .terrain_execution
+            .advance(self.request, &mut should_yield)
+        {
+            Ok(Some(CompletedTerrain { metadata, surface })) => {
                 self.ready = Some(PreparedSurface {
-                    pending_bytes: work.pending_bytes,
+                    road_claim: None,
+                    pending_bytes: metadata.pending_bytes,
                     renderer_ready: false,
                     renderer_reserved: false,
-                    request: work.request,
+                    request: metadata.request,
                     published: PublishedSurface {
-                        key: work.key,
+                        key: metadata.key,
                         bounds: surface_bounds(&surface),
                         surface,
                         prototype: None,
@@ -2370,19 +2664,21 @@ impl WorldStream {
                 });
                 return;
             }
-            // A cancelled job, or one from an earlier world, still returns its result.
-            self.terrain_worker.discard();
-            if owner {
-                self.terrain_work = None;
+            Ok(None) => {}
+            Err(error) => {
+                self.failure = Some(error.0);
+                return;
             }
-            poll = TerrainPoll::Idle;
         }
-        if self.terrain_work.is_none()
+        if had_pending {
+            return;
+        }
+        if !self.terrain_execution.has_pending()
             && (self.available_external_jobs() == 0 || !self.can_request_independent(1))
         {
             return;
         }
-        if self.terrain_work.is_none() {
+        if !self.terrain_execution.has_pending() {
             let required_ready = self.required_ready();
             let Some(key) = self
                 .wanted_tiles
@@ -2420,6 +2716,10 @@ impl WorldStream {
             if !self.admit_generation(pending_bytes) {
                 return;
             }
+            #[cfg(target_arch = "wasm32")]
+            let _profile = crate::app::cpu_profile::Timer::new(
+                crate::app::cpu_profile::Stage::TerrainInputPreparation,
+            );
             let mut foundations = Vec::new();
             let mut holes = Vec::new();
             if tier == 0 {
@@ -2488,28 +2788,46 @@ impl WorldStream {
                 holes: &holes,
             }
             .encode(&mut input);
-            self.terrain_work = Some(TerrainWork {
-                pending_bytes,
-                request: self.request,
-                key,
+            self.terrain_execution.enqueue(
+                TerrainMetadata {
+                    pending_bytes,
+                    request: self.request,
+                    key,
+                    tile,
+                },
                 input,
-                id: None,
-            });
+            );
+            if let Err(error) = self.terrain_execution.advance(self.request, should_yield) {
+                self.failure = Some(error.0);
+            }
         }
-        let work = self.terrain_work.as_mut().unwrap();
-        if !same_request(work.request, self.request) {
-            self.terrain_work = None;
-            self.terrain_worker.discard();
-            return;
-        }
-        if work.id.is_none() && poll == TerrainPoll::Idle {
-            work.id = Some(self.terrain_worker.submit(&work.input));
-        }
+    }
+    fn road_publication_valid(&self, work: &PreparedSurface) -> bool {
+        let Some(road) = work.published.road else {
+            return true;
+        };
+        work.road_claim.is_some_and(|(identity, source_revision)| {
+            identity.session == self.request.session
+                && identity.owner == road.index
+                && source_revision == self.road_source_revisions[road.biome as usize]
+        }) && self.plan_revision == self.request.revision
+            && self.next_road == self.road_candidates.len()
+            && work.published.key
+                == SurfaceKey {
+                    layer: WorldLayer::Road,
+                    unit: [i64::from(road.index), 0],
+                }
+            && self.wanted_roads.contains(&road.index)
+            && self.selected_roads.iter().any(|r| r.segment == road)
+            && !self.surfaces.iter().any(|s| s.key == work.published.key)
+            && (self.required.roads.contains(&road.index) || self.required_ready())
     }
     pub fn prepared_surface(&self) -> Option<(WorldRequest, &PublishedSurface)> {
         self.ready
             .as_ref()
-            .filter(|work| same_request(work.request, self.request))
+            .filter(|work| {
+                same_request(work.request, self.request) && self.road_publication_valid(work)
+            })
             .map(|work| (work.request, &work.published))
     }
     #[cfg(any(target_arch = "wasm32", test))]
@@ -2565,6 +2883,9 @@ impl WorldStream {
         }
         claim.release()?;
         self.ready = None;
+        if key.layer == WorldLayer::Road {
+            self.road_worker.publication_ended(false);
+        }
         self.rewind_road(key);
         Ok(())
     }
@@ -2655,7 +2976,7 @@ impl WorldStream {
             Some(source) => self.admissions.get(source).is_some_and(|v| v.ready),
             None => self.terrain_ready[layer_tier(work.published.key.layer)],
         };
-        if !admitted || !work.renderer_ready {
+        if !admitted || !work.renderer_ready || !self.road_publication_valid(work) {
             return Ok(());
         }
         let metrics = self.metrics();
@@ -2681,6 +3002,13 @@ impl WorldStream {
         }
         self.publication_available = false;
         let mut work = self.ready.take().unwrap();
+        let road = work.published.road.is_some();
+        let _publication = road.then(|| {
+            super::stream_profile::Timer::new(super::stream_profile::Stage::RoadPublication)
+        });
+        if road {
+            self.road_worker.publication_started();
+        }
         if matches!(
             work.published.key.layer,
             WorldLayer::Road | WorldLayer::Terrain
@@ -2703,11 +3031,17 @@ impl WorldStream {
                 }
                 Err(error) => {
                     self.failure = Some(error.0.clone());
+                    if road {
+                        self.road_worker.publication_ended(false);
+                    }
                     return Err(error);
                 }
             }
         }
         self.surfaces.push(work.published);
+        if road {
+            self.road_worker.publication_ended(true);
+        }
         Ok(())
     }
     fn retire_surfaces(&mut self, physics: &mut PhysicsWorld) {
@@ -3436,6 +3770,7 @@ impl WorldStream {
         }
         self.release_structure_renderer(&instance.placement.id);
         self.structures.push(instance);
+        self.structure_revision = self.structure_revision.wrapping_add(1);
         self.binding_reserved = binding_reservation;
         self.publication_available = false;
         Ok(())
@@ -3453,7 +3788,7 @@ impl WorldStream {
         let owned = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes();
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
         let baseline = *self.binding_baseline.get_or_insert(owned);
         self.binding_bytes = owned.saturating_sub(baseline);
         self.binding_owner_bytes = owned;
@@ -3465,7 +3800,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3474,7 +3809,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3483,7 +3818,7 @@ impl WorldStream {
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
                 + wheels.retained_binding_bytes()
-                + physics.query_storage_bytes();
+                + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
@@ -3492,7 +3827,7 @@ impl WorldStream {
         self.binding_bytes = (items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes())
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes()))
         .saturating_sub(baseline);
 
         for supply in &mut self.supplies {
@@ -3584,7 +3919,7 @@ impl WorldStream {
         self.binding_owner_bytes = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
             + wheels.retained_binding_bytes()
-            + physics.query_storage_bytes();
+            + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
         self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
         self.binding_objects = items.len();
         self.binding_reserved = 0;
@@ -3745,6 +4080,7 @@ impl WorldStream {
                 continue;
             }
             let instance = self.structures.swap_remove(index);
+            self.structure_revision = self.structure_revision.wrapping_add(1);
             self.change_dependencies.clear();
             for content in self
                 .static_controls
@@ -4023,7 +4359,8 @@ impl WorldStream {
                 + self.lights.len()
                 + self.presentation.objects,
             jobs: self.presentation.jobs
-                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.terrain_execution.has_pending())
+                + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
             pending: self.pending_work(),
             render_cpu_bytes: self.presentation.active_cpu + self.presentation.prototype_cpu,
@@ -4054,13 +4391,20 @@ impl WorldStream {
                 .sum::<usize>();
         let mut metrics = WorldMetrics {
             shared_input_cpu_bytes: self.shared_cpu_bytes.unwrap_or(0) + self.dependency_metadata,
+            road_worker_wasm_bytes: self.road_worker.wasm_bytes(),
+            road_worker_reserved_bytes: self.road_worker_reserved_bytes,
+            grass_worker_wasm_bytes: self.presentation.grass_worker_wasm_bytes,
+            grass_worker_cache_bytes: self.presentation.grass_worker_cache_bytes,
+            grass_worker_reserved_bytes: self.presentation.grass_worker_reserved_bytes,
+            road_worker_cache_bytes: self.road_worker.cache_bytes(),
             imported_snapshot_bytes,
             road_checkpoints: self.roads.checkpoint_count(),
             building_checkpoints: self.placements.checkpoint_count(),
             road_replay_ms: self.roads.replay_ms(),
             peak_road_replay_ms: self.roads.peak_replay_ms(),
             generation_jobs: self.presentation.jobs
-                + usize::from(self.terrain_work.is_some())
+                + usize::from(self.terrain_execution.has_pending())
+                + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
             pending_bytes: self.presentation.staging_bytes + self.generation_pending_bytes(),
             pending_work: self.pending_work(),
@@ -4087,6 +4431,12 @@ impl WorldStream {
                     .keys()
                     .map(|id| id.file.capacity())
                     .sum::<usize>()
+                + self
+                    .road_prototypes
+                    .iter()
+                    .flatten()
+                    .map(road_mesh::RoadPrototype::retained_bytes)
+                    .sum::<usize>()
                 + self.road_light.retained_bytes()
                 + self.contents.rules.retained_bytes()
                 + self.building_components.retained_bytes()
@@ -4103,6 +4453,8 @@ impl WorldStream {
             changed_record_bytes: self.changes.retained_bytes(),
             changed_objects: self.changes.len(),
             active_cpu_bytes: std::mem::size_of::<Self>()
+                + self.road_worker_reserved_bytes
+                + self.road_worker.cache_bytes()
                 + self.lamp_material_choices.capacity()
                     * std::mem::size_of::<(SourceId, SourceId, Vec<SourceId>)>()
                 + self
@@ -4144,6 +4496,9 @@ impl WorldStream {
                     .sum::<usize>()
                 + self.binding_reserved
                 + self.binding_bytes
+                + self.presentation_changes.capacity()
+                    * std::mem::size_of::<content_index::ContentSlot>()
+                + self.presentation_lamp_changes.capacity() * std::mem::size_of::<usize>()
                 + self.lamp_bindings.capacity() * std::mem::size_of::<content_lamps::LampBinding>()
                 + self
                     .lamp_bindings
@@ -4292,7 +4647,8 @@ impl WorldStream {
                 metrics.active_gpu_bytes += surface_render_bytes(&work.published.surface);
             }
         }
-        if let Some(work) = &self.terrain_work {
+        metrics.active_cpu_bytes += self.terrain_execution.pending_bytes();
+        if let Some(work) = &self.road_work {
             metrics.active_cpu_bytes += work.pending_bytes;
         }
         if let Some(startup) = &self.startup {
@@ -4311,6 +4667,12 @@ impl WorldStream {
             metrics.prototype_cpu_bytes += allocation.cpu;
             metrics.prototype_gpu_bytes += allocation.gpu;
         }
+        metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
+        metrics.road_worker_reserved_bytes += self.overlap.road_worker_reserved_bytes;
+        metrics.grass_worker_wasm_bytes += self.overlap.grass_worker_wasm_bytes;
+        metrics.grass_worker_cache_bytes += self.overlap.grass_worker_cache_bytes;
+        metrics.grass_worker_reserved_bytes += self.overlap.grass_worker_reserved_bytes;
+        metrics.road_worker_cache_bytes += self.overlap.road_worker_cache_bytes;
         metrics.active_cpu_bytes += self.overlap.active_cpu_bytes;
         metrics.active_gpu_bytes += self.overlap.active_gpu_bytes;
         metrics.prototype_cpu_bytes += self.overlap.prototype_cpu_bytes;
@@ -4439,4 +4801,11 @@ mod content_lamps;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]
-mod tests;
+pub(crate) mod tests;
+
+impl Drop for WorldStream {
+    fn drop(&mut self) {
+        // Terminate before Rust drops source caches, job storage, or reservation ownership.
+        self.road_worker.dispose();
+    }
+}

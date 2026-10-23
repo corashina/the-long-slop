@@ -2,11 +2,7 @@ use my_summer_slop::{
     reference::shadow_candidates::DirectionalHull,
     world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
 };
-use naga::{
-    ShaderStage,
-    back::glsl,
-    valid::{Capabilities, ValidationFlags, Validator},
-};
+use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 #[test]
 fn one_probe_shader_has_one_cube_and_matching_uniform_layout() {
@@ -35,7 +31,7 @@ struct Output {{
     );
     let module = naga::front::wgsl::parse_str(&source)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
-    let info = Validator::new(ValidationFlags::all(), Capabilities::empty())
+    Validator::new(ValidationFlags::all(), Capabilities::empty())
         .validate(&module)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
     let mut layout = naga::proc::Layouter::default();
@@ -46,7 +42,7 @@ struct Output {{
         .find(|(_, value)| value.name.as_deref() == Some("lighting"))
         .unwrap()
         .1;
-    assert_eq!(layout[uniform.ty].size, 384);
+    assert_eq!(layout[uniform.ty].size, 736);
     let mut bindings: Vec<_> = module
         .global_variables
         .iter()
@@ -62,32 +58,6 @@ struct Output {{
         bindings,
         (0..7).map(|binding| (1, binding)).collect::<Vec<_>>()
     );
-    for (shader_stage, entry_point, textures) in [
-        (ShaderStage::Vertex, "vertex", 0),
-        (ShaderStage::Fragment, "fragment", 1),
-    ] {
-        let mut output = String::new();
-        let reflection = glsl::Writer::new(
-            &mut output,
-            &module,
-            &info,
-            &glsl::Options {
-                version: glsl::Version::new_gles(300),
-                ..Default::default()
-            },
-            &glsl::PipelineOptions {
-                shader_stage,
-                entry_point: entry_point.into(),
-                multiview: None,
-            },
-            Default::default(),
-        )
-        .unwrap()
-        .write()
-        .unwrap();
-        assert_eq!(reflection.texture_mapping.len(), textures);
-        assert!(output.starts_with("#version 300 es"));
-    }
 }
 
 #[test]

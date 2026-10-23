@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod camera_projection;
 mod candidate_upload;
 pub mod conditions;
 pub mod consumables;
@@ -8,6 +9,7 @@ pub mod instruments;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+mod radio;
 pub mod reference;
 pub mod save;
 mod shadow_batch;
@@ -75,3 +77,5 @@ pub mod view_frame;
 mod pipeline_ownership;
 
 pub mod primary_image;
+
+pub(crate) mod readiness;

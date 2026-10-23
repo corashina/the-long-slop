@@ -1,9 +1,7 @@
 //! Source surface phases. AO and ordered glass capture join the explicit phase boundary.
 use super::{
-    materials::{MaterialLoading, RenderingState},
-    render_targets::SourceViewTargets,
-    source_lighting::{SourceLightingStatus, SourceViewLighting},
-    surface_pass::SurfacePasses,
+    materials::MaterialLoading, readiness::RendererStateHandle, render_targets::SourceViewTargets,
+    source_lighting::SourceViewLighting, surface_pass::SurfacePasses,
     transparent::SourceTransparentPasses,
 };
 use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
@@ -87,10 +85,7 @@ pub fn install(app: &mut SubApp) {
 }
 
 fn stop_failed_renderer(render: &mut World) -> bool {
-    let failed = matches!(
-        *render.resource::<SourceLightingStatus>().0.lock().unwrap(),
-        RenderingState::Failed(_)
-    );
+    let failed = render.resource::<RendererStateHandle>().failure().is_some();
     if failed {
         // Stop extraction and render schedules. Bevy still sends time to the main app.
         render
@@ -108,15 +103,16 @@ fn opaque(
     masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready()
-        || !pipelines.ready(&cache)
-        || !casters.ready(&cache)
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || !pipelines.ready(&cache, &owners)
+        || !casters.ready(&cache, &owners)
+        || status.failure().is_some()
     {
         return;
     }
@@ -157,8 +153,7 @@ fn opaque(
         .render(&mut pass, world, entity)
         .and_then(|_| masked.render(&mut pass, world, entity));
     if let Err(error) = result {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed(format!("Source opaque draw: {error:?}"));
+        status.fail(format!("Source opaque draw: {error:?}"));
     }
 }
 fn transparent(
@@ -175,15 +170,16 @@ fn transparent(
     phases: Res<ViewSortedRenderPhases<Transparent3d>>,
     pipelines: Res<SurfacePasses>,
     casters: Res<super::caster::CasterPasses>,
+    owners: Res<super::pipeline_ownership::PipelineOwners>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     loading: Res<MaterialLoading>,
     mut context: RenderContext,
 ) {
     if !loading.is_ready()
-        || !pipelines.ready(&cache)
-        || !casters.ready(&cache)
-        || matches!(*status.0.lock().unwrap(), RenderingState::Failed(_))
+        || !pipelines.ready(&cache, &owners)
+        || !casters.ready(&cache, &owners)
+        || status.failure().is_some()
     {
         return;
     }
@@ -209,7 +205,7 @@ fn transparent(
     while start < order.len() {
         if order.capture_at(start) {
             if let Err(error) = glass.capture(context.command_encoder(), &targets.colors) {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 glass.cleanup();
                 return;
             }
@@ -231,15 +227,14 @@ fn transparent(
             ..default()
         });
         if let Err(error) = order.render_range(start..end, phase, &mut pass, world, entity) {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed(format!("Source transparent draw: {error:?}"));
+            status.fail(format!("Source transparent draw: {error:?}"));
         }
         drop(pass);
         start = end;
     }
     let [epoch, base_attempts, base_done, add_attempts, add_done] = lighting.draws();
     if base_attempts != base_done || add_attempts != add_done {
-        *status.0.lock().unwrap() = RenderingState::Failed(format!(
+        status.fail(format!(
             "Source surface draw skipped in view {entity:?}, epoch {epoch}: base {base_done}/{base_attempts}, additive {add_done}/{add_attempts}"
         ));
     }
@@ -267,7 +262,7 @@ fn validate_source_cameras(
         Query<(&Camera, &bevy::render::camera::CameraRenderGraph), With<Camera3d>>,
     >,
     mut setup: ResMut<SourcePhaseSetup>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut active = false;
     for (camera, graph) in &cameras {
@@ -278,8 +273,7 @@ fn validate_source_cameras(
         if graph.0 != SourceSurface.intern()
             && graph.0 != super::frame_graph::SourceSkySurface.intern()
         {
-            *status.0.lock().unwrap() =
-                RenderingState::Failed("Active 3D camera does not use the source schedule".into());
+            status.fail("Active 3D camera does not use the source schedule".into());
             return;
         }
     }
@@ -315,8 +309,8 @@ fn remove_builtin_phases(world: &mut World) {
             requested: false,
         };
     } else {
-        *world.resource::<SourceLightingStatus>().0.lock().unwrap() = RenderingState::Failed(
-            format!("Source phase schedule setup: depth {depth:?}, sort {sort:?}"),
-        );
+        world.resource::<RendererStateHandle>().fail(format!(
+            "Source phase schedule setup: depth {depth:?}, sort {sort:?}"
+        ));
     }
 }

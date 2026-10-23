@@ -68,11 +68,11 @@ impl SaveSnapshot {
             )?;
             let tank = reference.tanks.iter().find(|tank| tank.item == id);
             match (&item.fluids, tank) {
-                (Some(quantities), Some(tank)) => data(
-                    quantities.iter().all(|v| v.is_finite() && *v >= 0.)
-                        && quantities.iter().map(|v| f64::from(*v)).sum::<f64>()
-                            <= f64::from(tank.capacity_liters) + 0.001,
-                    "Fluid capacity",
+                (Some(entries), Some(tank)) => data(
+                    crate::fluids::validate_fluid_entries(entries)
+                        && tank.capacity_liters.is_finite()
+                        && tank.capacity_liters > 0.,
+                    "Fluid entries",
                 )?,
                 (None, None) => (),
                 _ => {
@@ -169,6 +169,7 @@ impl SaveSnapshot {
                 "Vehicle gear",
             )?;
             let e = &vehicle.engine;
+            super::identity::unsigned(&e.start_draw)?;
             data(
                 finite(&[
                     e.rpm,
@@ -178,12 +179,16 @@ impl SaveSnapshot {
                     e.last_start_chance_time,
                     e.random_start,
                     e.supplied_fuel,
+                    e.oil_penalty,
                 ]) && e.elapsed >= 0.
                     && e.last_run_time >= -1.
                     && e.last_run_time <= e.elapsed
                     && e.last_start_chance_time >= 0.
                     && e.last_start_chance_time <= e.elapsed
                     && unit(e.random_start)
+                    && unit(e.fuel_suitability)
+                    && unit(e.heat_penalty)
+                    && unit(e.oil_penalty)
                     && e.supplied_fuel >= 0.,
                 "Engine state",
             )?;
@@ -457,6 +462,14 @@ impl SaveSnapshot {
         let p = &self.player;
         absolute(&p.pose)?;
         data(
+            p.posture.is_finite() && (0.0..=1.0).contains(&p.posture),
+            "Player posture",
+        )?;
+        data(
+            p.seat.is_none() || p.posture == 1.0,
+            "Seated player posture",
+        )?;
+        data(
             finite(&[p.yaw, p.pitch, p.vertical_velocity])
                 && (-89.0..=89.0).contains(&p.pitch)
                 && bounded_local(&p.recoil_velocity)
@@ -677,8 +690,7 @@ impl SaveSnapshot {
         if let Some(instance @ InstanceId::Generated { .. }) = &saved.equipped {
             let state = generated_state(instance)?;
             links(
-                saved.slots[saved.selected as usize].as_ref() == Some(instance)
-                    && !state.held
+                !state.held
                     && self
                         .player
                         .carry

@@ -68,6 +68,16 @@ test('escape_capture_failure_stays_paused_and_allows_retry',async t=>{
  assert.deepEqual(app.actions,[ACTIONS.CONTINUE]);
 });
 
+test('capture_loss_clears_horn',async t=>{
+ const app=setup(t);await app.start();app.key('Escape');await settle();
+ app.key('KeyH');assert.equal(app.input.takeFrame().held,131072);
+ app.document.exitPointerLock();await settle();
+ assert.equal(app.menu.model.state,'pause-menu');
+ assert.equal(app.input.takeFrame().held,0);
+ app.key('Escape');await settle();
+ const frame=app.input.takeFrame();assert.equal(frame.held,0);assert.equal(frame.pressed,0);
+});
+
 test('escape_ignores_repeat_and_cancels_a_late_capture',async t=>{
  const app=setup(t);await app.start();
  app.key('Escape',true);await settle();assert.equal(app.captures,0);

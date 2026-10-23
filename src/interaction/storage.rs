@@ -327,8 +327,7 @@ impl StorageLocks {
             let mass = physics.rapier().bodies[parent].mass() + light.mass;
             physics.set_vehicle_mass(vehicle, mass);
         }
-        let item = items.get_mut(light.item).unwrap();
-        item.body = Some(parent);
+        let item = items.set_body(light.item, Some(parent)).unwrap();
         item.location = ItemLocation::Attached(owner);
         item.local_pose = from_rapier(&(parent_pose.inverse() * item_pose));
         item.pose = from_rapier(&item_pose);
@@ -381,8 +380,7 @@ impl StorageLocks {
                 collider.user_data &= !VEHICLE_COLLIDER_FLAG;
             });
         }
-        let state = items.get_mut(item).unwrap();
-        state.body = Some(body);
+        let state = items.set_body(item, Some(body)).unwrap();
         state.location = ItemLocation::World;
         state.local_pose = from_rapier(&light.loose_local);
         state.pose = from_rapier(&item_pose);

@@ -1,6 +1,7 @@
 //! Source per-view lighting bindings. Scene and probe views never share writable uniforms.
 
-use super::materials::{RenderingState, SourceMaterial};
+use super::materials::SourceMaterial;
+use super::readiness::RendererStateHandle;
 use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::query::ROQueryItem;
@@ -25,7 +26,7 @@ use bevy::render::{
 use std::{
     any::TypeId,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU32, Ordering},
     },
 };
@@ -45,6 +46,7 @@ pub struct LightingUniform {
     pub source_time: Vec4,
     pub clip_from_world: Mat4,
     pub near_far: Vec4,
+    pub sun_shadow: super::shadow_collector::SunShadowUniform,
 }
 
 /// Layout specialization happens only when a pipeline is prepared.
@@ -60,8 +62,8 @@ pub fn surface_lighting_layout() -> BindGroupLayoutDescriptor {
                 sampler(SamplerBindingType::Filtering),
                 texture_cube(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                sampler(SamplerBindingType::Filtering),
+                texture_depth_2d(),
+                sampler(SamplerBindingType::Comparison),
             ),
         ),
     )
@@ -84,7 +86,7 @@ impl SourceViewLighting {
         value: LightingUniform,
         cookie: (&TextureView, &Sampler),
         probe: ([&TextureView; super::lighting_scene::PROBE_COUNT], &Sampler),
-        attenuation: (&TextureView, &Sampler),
+        shadow: (&TextureView, &Sampler),
     ) -> Self {
         let mut uniform = UniformBuffer::from(value);
         uniform.set_label(Some("source_view_lighting_uniform"));
@@ -98,8 +100,8 @@ impl SourceViewLighting {
                 cookie.1,
                 probe.0[0],
                 probe.1,
-                attenuation.0,
-                attenuation.1,
+                shadow.0,
+                shadow.1,
             )),
         );
         Self {
@@ -258,191 +260,12 @@ pub(crate) type DrawSourceAdd = (
     SourceDrawMark<true, true>,
 );
 
-/// Required stages keep Start closed until the complete source graph is usable.
-#[derive(Resource)]
-pub struct SourceLighting {
-    pub state: RenderingState,
-    pub resources_ready: bool,
-    pub surface_pipelines_ready: bool,
-    pub shadow_pipelines_ready: bool,
-    pub probe_pipelines_ready: bool,
-    pub postprocessing_pipelines_ready: bool,
-    pub first_probe_ready: bool,
-    pub first_submission_validated: bool,
-}
-impl Default for SourceLighting {
-    fn default() -> Self {
-        Self {
-            state: RenderingState::Loading,
-            resources_ready: false,
-            surface_pipelines_ready: false,
-            shadow_pipelines_ready: false,
-            probe_pipelines_ready: false,
-            postprocessing_pipelines_ready: false,
-            first_probe_ready: false,
-            first_submission_validated: false,
-        }
-    }
-}
-impl SourceLighting {
-    pub fn update_readiness(&mut self) {
-        if matches!(self.state, RenderingState::Failed(_)) {
-            return;
-        }
-        self.state = if self.resources_ready
-            && self.surface_pipelines_ready
-            && self.shadow_pipelines_ready
-            && self.probe_pipelines_ready
-            && self.postprocessing_pipelines_ready
-            && self.first_probe_ready
-            && self.first_submission_validated
-        {
-            RenderingState::Ready
-        } else {
-            RenderingState::Loading
-        };
-    }
-}
-
-#[derive(Resource)]
-pub struct SourceLightingStatus(pub Arc<Mutex<RenderingState>>);
-
-#[derive(Default)]
-struct ExecutionProgress {
-    requested: AtomicU32,
-    completed: AtomicU32,
-    validated: AtomicU32,
-}
-
-/// Startup and resize submissions need completion plus a later Bevy error poll.
-#[derive(Resource, Clone, Default)]
-pub struct SourceExecutionGate(Arc<ExecutionProgress>);
-impl SourceExecutionGate {
-    /// Call after submitting the complete required startup or resize work.
-    pub fn watch_submission(&self, queue: &RenderQueue) -> u32 {
-        let generation = self.0.requested.fetch_add(1, Ordering::AcqRel) + 1;
-        assert_ne!(generation, 0, "source execution generation overflow");
-        let progress = self.0.clone();
-        queue.on_submitted_work_done(move || {
-            progress.completed.fetch_max(generation, Ordering::AcqRel);
-        });
-        generation
-    }
-    pub fn validated_generation(&self) -> u32 {
-        self.0.validated.load(Ordering::Acquire)
-    }
-    pub fn submission_validated(&self, generation: u32) -> bool {
-        generation != 0 && self.validated_generation() >= generation
-    }
-    pub fn validated(&self) -> bool {
-        let requested = self.0.requested.load(Ordering::Acquire);
-        requested != 0 && self.0.validated.load(Ordering::Acquire) == requested
-    }
-}
-fn validate_completed_submissions(gate: Res<SourceExecutionGate>) {
-    // Render First only runs after Bevy polls its DeviceErrorHandler and remains Ready.
-    let requested = gate.0.requested.load(Ordering::Acquire);
-    let completed = gate.0.completed.load(Ordering::Acquire).min(requested);
-    if completed != 0 {
-        gate.0.validated.store(completed, Ordering::Release);
-    }
-}
-fn sync_lighting_readiness(
-    mut lighting: ResMut<SourceLighting>,
-    materials: Option<Res<super::materials::SourceMaterials>>,
-    master: Option<Res<super::lighting::SourceLighting>>,
-    status: Res<SourceLightingStatus>,
-    epoch: Res<super::view_frame::SourceSceneEpoch>,
-    graph: Option<Res<super::frame_graph::SourceGraphProgress>>,
-) {
-    let probe_readiness = graph.as_ref().map(|graph| graph.probe_readiness());
-    let mut shared = status.0.lock().expect("source lighting status lock");
-    if let RenderingState::Failed(error) = &lighting.state {
-        if !matches!(*shared, RenderingState::Failed(_)) {
-            *shared = RenderingState::Failed(error.clone());
-        }
-        return;
-    }
-    if let RenderingState::Failed(error) = &*shared {
-        lighting.state = RenderingState::Failed(error.clone());
-        return;
-    }
-    if let Some(master) = master {
-        let master_status = master.status.lock().expect("master lighting status lock");
-        let failure = match &*master_status {
-            super::lighting::RenderingState::Failed(error) => Some(error),
-            _ => match &master.state {
-                super::lighting::RenderingState::Failed(error) => Some(error),
-                _ => None,
-            },
-        };
-        if let Some(error) = failure {
-            lighting.state = RenderingState::Failed(error.clone());
-            *shared = lighting.state.clone();
-            return;
-        }
-    }
-    if let Some(materials) = materials {
-        if let RenderingState::Failed(error) = &materials.state {
-            lighting.state = RenderingState::Failed(error.clone());
-            *shared = lighting.state.clone();
-            return;
-        }
-    }
-    if let Some((pipelines, published)) = probe_readiness {
-        lighting.probe_pipelines_ready = pipelines;
-        lighting.first_probe_ready = published;
-    }
-    let [resources, surfaces, shadows, effects, complete] =
-        graph.as_ref().map_or([false; 5], |g| g.readiness(epoch.0));
-    lighting.resources_ready = resources;
-    lighting.surface_pipelines_ready = surfaces;
-    lighting.shadow_pipelines_ready = shadows;
-    lighting.postprocessing_pipelines_ready = effects;
-    lighting.first_submission_validated = complete;
-    lighting.update_readiness();
-    *shared = lighting.state.clone();
-}
-fn source_render_error(
-    error: &bevy::render::error_handler::RenderError,
-    main: &mut World,
-    _: &mut World,
-) -> bevy::render::error_handler::RenderErrorPolicy {
-    let failure = {
-        let mut shared = main
-            .resource::<SourceLightingStatus>()
-            .0
-            .lock()
-            .expect("source lighting status lock");
-        if !matches!(*shared, RenderingState::Failed(_)) {
-            *shared = RenderingState::Failed(format!(
-                "Source rendering {:?}: {}",
-                error.ty, error.description
-            ));
-        }
-        shared.clone()
-    };
-    main.resource_mut::<SourceLighting>().state = failure.clone();
-    if let Some(mut materials) = main.get_resource_mut::<super::materials::SourceMaterials>() {
-        materials.state = failure;
-    }
-    bevy::render::error_handler::RenderErrorPolicy::StopRendering
-}
-
 pub struct SourceLightingPlugin;
 impl Plugin for SourceLightingPlugin {
     fn build(&self, app: &mut App) {
-        let status = Arc::new(Mutex::new(RenderingState::Loading));
-        let gate = SourceExecutionGate::default();
         app.add_plugins(bevy::render::extract_component::ExtractComponentPlugin::<
             super::surface_views::SourceSurfaceView,
         >::default())
-            .init_resource::<SourceLighting>()
-            .insert_resource(SourceLightingStatus(status.clone()))
-            .insert_resource(gate.clone())
-            .insert_resource(bevy::render::error_handler::RenderErrorHandler(
-                source_render_error,
-            ))
             .init_resource::<super::lighting_scene::SourceSceneLighting>()
             .init_resource::<super::lighting_scene::SourceWorldOrigin>()
             .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
@@ -457,18 +280,10 @@ impl Plugin for SourceLightingPlugin {
             )
             .init_asset::<super::lighting_assets::CasterDitherBytes>()
             .init_asset_loader::<super::lighting_assets::CasterDitherLoader>()
-            .add_systems(
-                Update,
-                (
-                    super::lighting_assets::lighting_asset_readiness,
-                    sync_lighting_readiness,
-                )
-                    .chain(),
-            );
+            .add_systems(Update, super::lighting_assets::lighting_asset_readiness);
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             super::surface_graph::install(render_app);
             render_app
-                .insert_resource(SourceLightingStatus(status))
                 .init_resource::<SourceViewCamera>()
                 .add_systems(
                     Render,
@@ -488,8 +303,6 @@ impl Plugin for SourceLightingPlugin {
                     bevy::render::ExtractSchedule,
                     super::lighting_assets::extract_lighting_assets,
                 )
-                .insert_resource(gate)
-                .add_systems(First, validate_completed_submissions)
                 .add_systems(
                     Render,
                     (
@@ -545,7 +358,7 @@ impl Plugin for SourceLightingPlugin {
 
 fn prepare_source_draws(
     mut materials: ResMut<ErasedRenderAssets<PreparedMaterial>>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
     opaque: Res<DrawFunctions<Opaque3d>>,
     masked: Res<DrawFunctions<AlphaMask3d>>,
     transmissive: Res<DrawFunctions<Transmissive3d>>,
@@ -612,9 +425,7 @@ fn prepare_source_draws(
                 .any(|(key, current)| *key == label && *current != draw)
             {
                 let Some(properties) = Arc::get_mut(&mut material.properties) else {
-                    *status.0.lock().expect("source lighting status lock") = RenderingState::Failed(
-                        "Plate draw properties were shared before specialization".into(),
-                    );
+                    status.fail("Plate draw properties were shared before specialization".into());
                     return;
                 };
                 properties
@@ -642,8 +453,7 @@ fn prepare_source_draws(
         }
         // Preparation creates this Arc. Modify it before specialization can retain it.
         let Some(properties) = Arc::get_mut(&mut material.properties) else {
-            *status.0.lock().expect("source lighting status lock") = RenderingState::Failed(
-                "Source material draw setup failed: prepared properties were shared before specialization".into());
+            status.fail("Source material draw setup failed: prepared properties were shared before specialization".into());
             return;
         };
         for (label, draw) in draws {

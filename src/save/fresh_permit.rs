@@ -1,4 +1,4 @@
-//! First-start authorization and complete-scene presentation tracking.
+//! First-start authorization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FreshSessionPermit {
     pub request_id: u32,
@@ -51,29 +51,5 @@ impl FreshSessionPermit {
             session,
             generation,
         }
-    }
-}
-#[derive(Default)]
-pub struct PresentedFrames {
-    scene: Option<(u64, u32)>,
-    last: u32,
-    count: u8,
-}
-impl PresentedFrames {
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-    /// Start above every token issued before this complete scene became ready.
-    pub fn observe(&mut self, session: u64, generation: u32, issued: u32, submitted: u32) -> bool {
-        if self.scene != Some((session, generation)) {
-            self.scene = Some((session, generation));
-            self.last = issued;
-            self.count = 0;
-        }
-        if submitted > self.last {
-            self.last = submitted;
-            self.count = self.count.saturating_add(1);
-        }
-        self.count >= 2
     }
 }

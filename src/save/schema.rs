@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,7 +95,7 @@ pub struct PlayerSnapshot {
     pub yaw: f32,
     pub pitch: f32,
     pub seat: Option<SeatSnapshot>,
-    pub crouched: bool,
+    pub posture: f32,
     pub vertical_velocity: f32,
     pub recoil_velocity: [f32; 3],
     pub running: bool,
@@ -135,6 +135,7 @@ pub struct VehicleSnapshot {
     pub instance: InstanceId,
     pub body: BodySnapshot,
     pub engine: EngineSnapshot,
+    pub ignition: bool,
     pub gear: usize,
     pub handbrake: bool,
     pub trip_m: f64,
@@ -143,7 +144,6 @@ pub struct VehicleSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineSnapshot {
-    pub ignition: bool,
     pub rpm: f32,
     pub temperature: f32,
     pub elapsed: f32,
@@ -152,6 +152,10 @@ pub struct EngineSnapshot {
     pub random_start: f32,
     pub supplied_fuel: f32,
     pub fan_on: bool,
+    pub oil_penalty: f32,
+    pub fuel_suitability: f32,
+    pub heat_penalty: f32,
+    pub start_draw: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,7 +166,7 @@ pub struct ItemSnapshot {
     pub local_pose: LocalPose,
     pub location: ItemLocationSave,
     pub temperature: Option<f32>,
-    pub fluids: Option<[f32; 6]>,
+    pub fluids: Option<Vec<crate::fluids::FluidEntry>>,
     pub food: Option<FoodSnapshot>,
     pub removed: bool,
 }
@@ -330,4 +334,20 @@ pub struct ToolSnapshot {
     pub quantity: Option<f32>,
     pub color: Option<[f32; 4]>,
     pub disabled: bool,
+}
+
+#[cfg(test)]
+mod g04_ordered_state {
+    use super::*;
+
+    #[test]
+    fn older_schemas_are_rejected_before_payload_reconstruction() {
+        for version in [6, 7, 8] {
+            let payload = format!(r#"{{"schema_version":{version}}}"#);
+            assert!(matches!(
+                SaveSnapshot::from_json(payload.as_bytes()),
+                Err(SaveError::IncompatibleSources(_))
+            ));
+        }
+    }
 }

@@ -1,5 +1,7 @@
 use super::materials::{MaterialCache, SourceMaterial};
-use crate::reference::{MaterialLink, NodeId, ReferenceError, ReferenceManifest};
+use crate::reference::{
+    MaterialLink, MaterialSwitchReference, NodeId, ReferenceError, ReferenceManifest,
+};
 use crate::simulation::instruments::{InstrumentState, source_rotation};
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs as bevy_ecs;
@@ -34,7 +36,7 @@ fn source_material(m: &GltfMaterial) -> StandardMaterial {
         ..Default::default()
     }
 }
-struct MaterialVisual {
+pub(super) struct MaterialVisual {
     index: usize,
     entities: Vec<Entity>,
     on: Handle<StandardMaterial>,
@@ -52,7 +54,7 @@ struct Dashboard {
     needles: Vec<Entity>,
     digits: Vec<Entity>,
     lamps: Vec<MaterialVisual>,
-    digit_materials: Vec<MaterialVisual>,
+    backlights: Vec<MaterialVisual>,
     last_lamps: Option<u32>,
     last_digits_lit: Option<bool>,
 }
@@ -62,17 +64,38 @@ pub struct InstrumentVisuals {
     pub bound: bool,
     pub prepared: bool,
     dashboards: Vec<Dashboard>,
+    radio: Option<super::radio::RadioVisuals>,
 }
 impl InstrumentVisuals {
+    fn materials(&self) -> impl Iterator<Item = &MaterialVisual> {
+        self.dashboards
+            .iter()
+            .flat_map(|d| d.lamps.iter().chain(&d.backlights))
+            .chain(self.radio.iter().flat_map(|r| r.materials.iter()))
+    }
+
+    fn materials_mut(&mut self) -> impl Iterator<Item = &mut MaterialVisual> {
+        self.dashboards
+            .iter_mut()
+            .flat_map(|d| d.lamps.iter_mut().chain(&mut d.backlights))
+            .chain(self.radio.iter_mut().flat_map(|r| r.materials.iter_mut()))
+    }
+
     pub(crate) fn validate_assets(
         &self,
         materials: &Assets<SourceMaterial>,
     ) -> Result<(), crate::save::SaveError> {
-        for visual in self
-            .dashboards
-            .iter()
-            .flat_map(|dashboard| dashboard.lamps.iter().chain(&dashboard.digit_materials))
-        {
+        if !self.bound || !self.prepared {
+            return Err(crate::save::SaveError::MissingAssets(
+                "instrument preparation".into(),
+            ));
+        }
+        for visual in self.materials() {
+            if visual.entities.is_empty() || visual.choices.len() != visual.entities.len() {
+                return Err(crate::save::SaveError::MissingAssets(
+                    "instrument renderer choices".into(),
+                ));
+            }
             for choice in &visual.choices {
                 if !materials.contains(choice.on.id()) || !materials.contains(choice.off.id()) {
                     return Err(crate::save::SaveError::MissingAssets(
@@ -101,19 +124,46 @@ impl InstrumentVisuals {
         if gltfs.iter().any(|(_, h)| gltf_assets.get(h).is_none()) {
             return Ok(false);
         }
-        for link in reference.vehicles.iter().flat_map(|v| {
-            v.instruments
-                .lamps
-                .iter()
-                .flat_map(|l| [&l.on, &l.off])
-                .chain(
-                    v.instruments
-                        .odometer
-                        .digits
-                        .iter()
-                        .flat_map(|d| [&d.on, &d.off]),
-                )
-        }) {
+        let radio: crate::reference::RadioVisualReference =
+            serde_json::from_value(reference.audio["radio"]["visuals"].clone())
+                .map_err(|e| ReferenceError(format!("Radio visuals: {e}")))?;
+        for link in reference
+            .vehicles
+            .iter()
+            .flat_map(|v| {
+                v.instruments
+                    .lamps
+                    .iter()
+                    .flat_map(|l| [&l.on, &l.off])
+                    .chain(
+                        v.instruments
+                            .odometer
+                            .digits
+                            .iter()
+                            .flat_map(|d| [&d.on, &d.off]),
+                    )
+                    .chain(
+                        std::iter::once(&v.instruments.backlight)
+                            .chain(v.instruments.needles.iter().map(|n| &n.backlight))
+                            .filter_map(|backlight| match backlight {
+                                MaterialSwitchReference::Absent => None,
+                                MaterialSwitchReference::Renderer { on, off, .. } => {
+                                    Some([on, off])
+                                }
+                            })
+                            .flatten(),
+                    )
+            })
+            .chain(
+                [&radio.screen, &radio.indicator]
+                    .into_iter()
+                    .filter_map(|switch| match switch {
+                        MaterialSwitchReference::Renderer { on, off, .. } => Some([on, off]),
+                        MaterialSwitchReference::Absent => None,
+                    })
+                    .flatten(),
+            )
+        {
             let (_, handle) = gltfs
                 .iter()
                 .find(|(id, _)| *id == link.asset)
@@ -162,6 +212,27 @@ impl InstrumentVisuals {
             handles.insert(key, handle.clone());
             handle
         };
+        let mut bind_material = |index, id, on: &MaterialLink, off: &MaterialLink| {
+            let parent = node(id)?;
+            let entities: Vec<_> = primitives
+                .iter()
+                .filter_map(|(entity, child)| (child.parent() == parent).then_some(entity))
+                .collect();
+            if entities.is_empty() {
+                return Err(ReferenceError(format!(
+                    "Missing instrument renderer {}",
+                    id.0
+                )));
+            }
+            Ok(MaterialVisual {
+                index,
+                entities,
+                on: material(on),
+                off: material(off),
+                choices: Vec::new(),
+            })
+        };
+        let mut dashboards = Vec::with_capacity(reference.vehicles.len());
         for vehicle in &reference.vehicles {
             let instruments = &vehicle.instruments;
             let mut dashboard = Dashboard {
@@ -182,47 +253,40 @@ impl InstrumentVisuals {
                 if lamp.signal == "headlight2" {
                     continue;
                 }
-                let parent = node(lamp.node)?;
-                let entities: Vec<_> = primitives
-                    .iter()
-                    .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
-                    .collect();
-                if entities.is_empty() {
-                    return Err(ReferenceError(format!(
-                        "Missing instrument renderer {}",
-                        lamp.node.0
-                    )));
-                }
-                dashboard.lamps.push(MaterialVisual {
-                    index,
-                    entities,
-                    on: material(&lamp.on),
-                    off: material(&lamp.off),
-                    choices: Vec::new(),
-                });
+                dashboard
+                    .lamps
+                    .push(bind_material(index, lamp.node, &lamp.on, &lamp.off)?);
             }
             for digit in &instruments.odometer.digits {
-                let parent = node(digit.node)?;
-                let entities: Vec<_> = primitives
-                    .iter()
-                    .filter_map(|(e, p)| (p.parent() == parent).then_some(e))
-                    .collect();
-                if entities.is_empty() {
-                    return Err(ReferenceError(format!(
-                        "Missing instrument renderer {}",
-                        digit.node.0
-                    )));
-                }
-                dashboard.digit_materials.push(MaterialVisual {
-                    index: 0,
-                    entities,
-                    on: material(&digit.on),
-                    off: material(&digit.off),
-                    choices: Vec::new(),
-                });
+                dashboard
+                    .backlights
+                    .push(bind_material(0, digit.node, &digit.on, &digit.off)?);
             }
-            self.dashboards.push(dashboard);
+            for backlight in std::iter::once(&instruments.backlight)
+                .chain(instruments.needles.iter().map(|needle| &needle.backlight))
+            {
+                if let MaterialSwitchReference::Renderer { node, on, off } = backlight {
+                    dashboard.backlights.push(bind_material(0, *node, on, off)?);
+                }
+            }
+            dashboards.push(dashboard);
         }
+        let mut radio_material = |switch: &MaterialSwitchReference| match switch {
+            MaterialSwitchReference::Renderer { node, on, off } => bind_material(0, *node, on, off),
+            MaterialSwitchReference::Absent => {
+                Err(ReferenceError("Required radio renderer".into()))
+            }
+        };
+        self.radio = Some(super::radio::RadioVisuals::bind(
+            reference,
+            &radio,
+            nodes,
+            [
+                radio_material(&radio.screen)?,
+                radio_material(&radio.indicator)?,
+            ],
+        )?);
+        self.dashboards = dashboards;
         self.bound = true;
         Ok(true)
     }
@@ -244,6 +308,20 @@ impl InstrumentVisuals {
             .zip(states)
         {
             dashboard.update(&vehicle.instruments, state, transforms, materials);
+        }
+    }
+
+    pub fn update_radio(
+        &mut self,
+        power: bool,
+        tuning: f32,
+        transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
+        materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+    ) {
+        if self.prepared {
+            if let Some(radio) = &mut self.radio {
+                radio.update(power, tuning, transforms, materials);
+            }
         }
     }
 }
@@ -279,30 +357,32 @@ impl Dashboard {
             }
         }
         if self.last_digits_lit != Some(state.digits_lit) {
-            for digit in &self.digit_materials {
-                select_material(digit, state.digits_lit, materials);
+            for backlight in &self.backlights {
+                backlight.select(state.digits_lit, materials);
             }
             self.last_digits_lit = Some(state.digits_lit);
         }
         if self.last_lamps != Some(state.lamp_bits) {
             for lamp in &self.lamps {
-                select_material(lamp, state.lamp_bits & (1 << lamp.index) != 0, materials);
+                lamp.select(state.lamp_bits & (1 << lamp.index) != 0, materials);
             }
             self.last_lamps = Some(state.lamp_bits);
         }
     }
 }
 
-fn select_material(
-    visual: &MaterialVisual,
-    on: bool,
-    materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
-) {
-    for choice in &visual.choices {
-        if let Ok(mut material) = materials.get_mut(choice.entity) {
-            material.set_if_neq(MeshMaterial3d(
-                if on { &choice.on } else { &choice.off }.clone(),
-            ));
+impl MaterialVisual {
+    pub(super) fn select(
+        &self,
+        on: bool,
+        materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
+    ) {
+        for choice in &self.choices {
+            if let Ok(mut material) = materials.get_mut(choice.entity) {
+                material.set_if_neq(MeshMaterial3d(
+                    if on { &choice.on } else { &choice.off }.clone(),
+                ));
+            }
         }
     }
 }
@@ -323,29 +403,26 @@ pub(crate) fn prepare_instruments(
         &bevy::gltf::GltfExtras,
     )>,
 ) {
-    if !authored.textures_ready() || !visuals.bound || visuals.prepared || !source.bound {
+    if !authored.textures_ready()
+        || !visuals.bound
+        || visuals.prepared
+        || !source.bound
+        || matches!(source.state, super::lighting::RenderingState::Failed(_))
+    {
         return;
     }
-    if visuals
-        .dashboards
-        .iter()
-        .flat_map(|d| d.lamps.iter().chain(&d.digit_materials))
-        .any(|visual| {
-            visual
-                .entities
-                .iter()
-                .any(|entity| !receivers.contains(*entity))
+    if visuals.materials().any(|visual| {
+        visual.entities.iter().any(|entity| {
+            receivers.get(*entity).map_or(true, |(_, receiver, ..)| {
+                !materials.contains(receiver.0.id())
+            })
         })
-    {
+    }) {
         return;
     }
     let far = Transform::from_translation(Vec3::splat(1_000_000.));
     let visuals = &mut *visuals;
-    for visual in visuals
-        .dashboards
-        .iter_mut()
-        .flat_map(|d| d.lamps.iter_mut().chain(&mut d.digit_materials))
-    {
+    for visual in visuals.materials_mut() {
         for &entity in &visual.entities {
             let (mesh, receiver, global, renderer, primitive) = receivers.get(entity).unwrap();
             let mask = materials.get(&receiver.0).unwrap().extension.receiver_mask;

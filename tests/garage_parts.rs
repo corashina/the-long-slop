@@ -281,7 +281,7 @@ fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
     let front = bumper("frontbumper");
     remove(&mut run, rear);
     let pose = run.area.items.get(front).unwrap().pose;
-    let view = run.area.player.view_pose(&run.physics).position;
+    let view = run.area.player.view(&run.physics).camera_pose.position;
     run.area.player.rebase([
         view[0] - pose.position[0],
         view[1] - pose.position[1] - 0.5,
@@ -363,7 +363,7 @@ fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
         Default::default(),
         1.0,
     );
-    assert_eq!(action, Some(InteractionAction::Drop(rear)));
+    assert_eq!(action.action, Some(InteractionAction::Drop(rear)));
     assert_eq!(area.items.get(rear).unwrap().location, ItemLocation::World);
     assert_eq!(area.interaction.held(), None);
 }

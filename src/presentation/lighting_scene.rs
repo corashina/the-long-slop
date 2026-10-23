@@ -1,9 +1,7 @@
 //! Live master day-cycle values and rebased local probe poses.
 use super::{
-    lighting_assets::LightingAssets,
-    materials::RenderingState,
-    reference::ReferenceVisuals,
-    source_lighting::{LightingUniform, SourceLighting, SourceLightingStatus},
+    lighting_assets::LightingAssets, readiness::RendererStateHandle, reference::ReferenceVisuals,
+    source_lighting::LightingUniform,
 };
 use crate::{
     app::{Drive, RuntimeReference},
@@ -13,7 +11,7 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
 
-pub const PROBE_COUNT: usize = 1;
+pub const PROBE_COUNT: usize = crate::render_readiness::PROBE_COUNT;
 
 #[derive(Resource)]
 pub struct ProbeActivation {
@@ -62,6 +60,7 @@ impl SceneLighting {
         clip_from_world: Mat4,
         near: f32,
         far: f32,
+        sun_shadow: super::shadow_collector::SunShadowUniform,
     ) -> LightingUniform {
         LightingUniform {
             ambient_sh: self.ambient_sh,
@@ -76,6 +75,7 @@ impl SceneLighting {
             source_time: self.source_time,
             clip_from_world,
             near_far: Vec4::new(near, far, 0., 0.),
+            sun_shadow,
         }
     }
 }
@@ -94,11 +94,10 @@ pub(crate) fn sync_lighting(
     epoch: Res<super::view_frame::SourceSceneEpoch>,
     transforms: Query<&GlobalTransform>,
     mut scene: ResMut<SourceSceneLighting>,
-    mut lighting: ResMut<SourceLighting>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     scene.0 = None;
-    if matches!(lighting.state, RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     let (Some(assets), Some(visuals), Some(master), Some(drive), Some(reference)) =
@@ -144,9 +143,7 @@ pub(crate) fn sync_lighting(
             scene.0 = Some(value);
         }
         Err(error) => {
-            let failure = RenderingState::Failed(format!("Source lighting pose: {error}"));
-            lighting.state = failure.clone();
-            *status.0.lock().expect("source lighting status lock") = failure;
+            status.fail(format!("Source lighting pose: {error}"));
         }
     }
 }

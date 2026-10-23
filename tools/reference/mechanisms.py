@@ -1,6 +1,25 @@
 """Recover source rotation targets and window animation tracks."""
+import math
 from .source import key, source_id, vector
 from .gltf import convert_point
+
+
+def recover_endpoint_reaction(source, reader, fields, node):
+    axes = [bool(fields[f'{axis}force']) for axis in 'XYZ']
+    if not any(axes):
+        return {'kind': 'none'}
+    force = fields['force']
+    if not math.isfinite(force) or force < 0:
+        raise ValueError('Invalid endpoint reaction force')
+    events = []
+    for field in ('startPosEnd', 'endPosEnd', 'startPosStart', 'endPosStart'):
+        pointer = fields[field]
+        present = bool(pointer['m_PathID'])
+        if present and source.resolve(reader, pointer) is None:
+            raise ValueError(f'Missing endpoint clip: {field}')
+        events.append(present)
+    return dict(kind='rotation', node=node, axes=axes, inverted=bool(fields['invForce']),
+                force=force, events=events)
 
 
 def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
@@ -65,7 +84,8 @@ def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
                     'node2':pointer_node(reader,value['MouseT2']) if value['MouseT2']['m_PathID'] else node,
                     'axis':list(convert_point(vector(value['MouseAxis']))),
                     'axes2':[list(convert_point(vector(value[f'MouseAxis2{a}']))) for a in 'XY']},
-                'rotation':rotation,'slide':slide,'turn':turn})
+                'rotation':rotation,'slide':slide,'turn':turn,
+                'reaction':recover_endpoint_reaction(source,reader,value,node) if rotation else {'kind':'none'}})
     # fpscontroller calls flashlightscript.TURN directly on a hit ancestor.
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
@@ -74,7 +94,7 @@ def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
             result.append({'id':len(result)+1,'source':source_id(reader),'use_node':node,'driven_nodes':[],
                 'enabled':bool(fields['m_Enabled']),'child_source':None,'invert_child':False,'invert_value':False,
                 'drag':{'mode':'direct','node':node,'node2':node,'axis':[0.,0.,0.],'axes2':[[0.,0.,0.],[0.,0.,0.]]},
-                'rotation':None,'slide':None,'turn':{'action':{'kind':'toggle_home_light','source':source_id(reader)},'max_state':0,'initial_state':0}})
+                'rotation':None,'slide':None,'reaction':{'kind':'none'},'turn':{'action':{'kind':'toggle_home_light','source':source_id(reader)},'max_state':0,'initial_state':0}})
     return result
 
 

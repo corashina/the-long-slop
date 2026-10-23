@@ -62,10 +62,9 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
     let shininess=mix(plate.bump.z,plate.bump.w,blend)*128.;
     var light=diffuse*diffuse_sh(normal);
     let depth=max(-(view.view_from_world*i.world).z,0.);
-    let screen=i.position.xy/view.viewport.zw;
     let sun_direction=lighting.direction_to_sun.xyz;
     let sun_specular=pow(max(dot(normal,normalize(sun_direction+eye)),0.),shininess);
-    light+=(diffuse*max(dot(normal,sun_direction),0.)+plate.specular.rgb*sun_specular)*lighting.sun_radiance.rgb*direct_attenuation(i.world.xyz,screen,depth,true);
+    light+=(diffuse*max(dot(normal,sun_direction),0.)+plate.specular.rgb*sun_specular)*lighting.sun_radiance.rgb*direct_attenuation(i.world.xyz,depth,true);
     let world_dx=dpdx(i.world);let world_dy=dpdy(i.world);
     for(var n=0u;n<lamp_lighting.counts.x;n+=1u) {
         let lamp=lamp_lighting.lights[n];

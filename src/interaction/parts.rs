@@ -102,7 +102,7 @@ impl PartAttachments {
         for i in 0..self.parts.len() {
             let body = self.physical_body(i, items, physics);
             for &(id, _, _) in &self.parts[i].members {
-                items.get_mut(id).unwrap().body = Some(body);
+                items.set_body(id, Some(body)).unwrap();
             }
         }
         self.cache_assembly_mass(items);
@@ -946,9 +946,8 @@ impl PartAttachments {
                 continue;
             }
             for &(id, _, _) in &p.members {
-                let state = items.get_mut(id).unwrap();
+                let state = items.set_body(id, Some(body)).unwrap();
                 state.pose = from_rapier(&(delta * to_rapier(state.pose)));
-                state.body = Some(body);
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &p.shapes {
@@ -1057,8 +1056,7 @@ impl PartAttachments {
             let body = self.physical_body(i, items, physics);
             let inverse = physics.rapier().bodies[body].position().inverse();
             for &(id, _, _) in &self.parts[i].members {
-                let state = items.get_mut(id).unwrap();
-                state.body = Some(body);
+                let state = items.set_body(id, Some(body)).unwrap();
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &self.parts[i].shapes {
@@ -1196,14 +1194,12 @@ impl PartAttachments {
                             .fluid
                             .as_ref()
                             .unwrap()
-                            .mixture
-                            .total()
+                            .finite_total()
                     })
                     .sum::<f32>())
             .max(0.001);
             if self.parts[i].mass != mass {
-                physics.edit_body(body, |body| body.set_additional_mass(mass, true));
-                physics.recompute_body_mass(body);
+                physics.set_body_mass(body, mass);
                 self.parts[i].mass = mass;
             }
         }

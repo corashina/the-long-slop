@@ -1,11 +1,14 @@
 pub const FIXED_DT: f32 = 0.01999999955;
 pub mod drivetrain;
 pub mod engine;
+pub mod ignition;
 pub mod input;
 pub mod instruments;
 pub mod radio;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = FIXED_DT as f64;
+/// Steps per frame at time scale 1. Slow frames drop extra time, so step cost cannot grow frame time.
+const STEP_BUDGET: usize = 2;
 
 pub mod keys {
     pub const FORWARD: u32 = 1;
@@ -41,15 +44,31 @@ pub mod keys {
     pub const GEAR_6: u32 = 1 << 31;
 }
 
+pub mod player_keys {
+    pub const LEAN: u8 = 1;
+    pub const ZOOM: u8 = 2;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CarryDeltas {
+    pub owner: Option<crate::reference::ItemId>,
+    pub mouse: [f32; 2],
+    pub wheel: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
     pub released: u32,
+    pub player_held: u8,
+    pub player_pressed: u8,
+    pub player_released: u8,
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
     pub wheel: f32,
+    pub carry: CarryDeltas,
 }
 
 impl FrameInput {
@@ -57,6 +76,9 @@ impl FrameInput {
         self.held = frame.held;
         self.pressed |= frame.pressed;
         self.released |= frame.released;
+        self.player_held = frame.player_held;
+        self.player_pressed |= frame.player_pressed;
+        self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
         for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
@@ -67,12 +89,39 @@ impl FrameInput {
         if frame.wheel.is_finite() {
             self.wheel += frame.wheel;
         }
+        if self.carry.owner != frame.carry.owner {
+            self.carry = CarryDeltas {
+                owner: frame.carry.owner,
+                ..CarryDeltas::default()
+            };
+        }
+        for (pending, delta) in self.carry.mouse.iter_mut().zip(frame.carry.mouse) {
+            if delta.is_finite() {
+                *pending += delta;
+            }
+        }
+        if frame.carry.wheel.is_finite() {
+            self.carry.wheel += frame.carry.wheel;
+        }
+    }
+
+    /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub(crate) fn take_frame(&mut self, skip_elapsed: &mut bool, blocked: bool) -> Option<Self> {
+        if std::mem::take(skip_elapsed) {
+            if blocked {
+                self.clear();
+            }
+            return None;
+        }
+        Some(std::mem::take(self))
     }
 
     pub fn take_step(&mut self) -> Self {
         let step = *self;
         *self = Self {
             held: step.held,
+            player_held: step.player_held,
             inventory_held: step.inventory_held,
             ..Self::default()
         };
@@ -93,6 +142,7 @@ pub struct DriveInput {
 }
 
 /// Stores accepted real time. Each step spends its sampled scale once.
+/// Below 25 FPS the simulation runs slower than real time.
 #[derive(Default)]
 pub struct StepClock {
     accumulator: f64,
@@ -115,7 +165,11 @@ impl StepClock {
         }
         self.touched_sleep |= time_scale > 1.;
         let cost = STEP_SECONDS / f64::from(time_scale);
-        let budget = if self.touched_sleep { 12 } else { 5 };
+        let budget = if self.touched_sleep {
+            STEP_BUDGET * 2
+        } else {
+            STEP_BUDGET
+        };
         if self.steps >= budget {
             self.accumulator %= cost;
             return false;
@@ -142,13 +196,15 @@ mod step_clock_tests {
     use super::{FIXED_DT, StepClock};
 
     #[test]
-    fn normal_clock_advances_five_steps_per_tenth_second() {
+    fn slow_frame_runs_two_steps_and_drops_extra_time() {
         let mut clock = StepClock::default();
         clock.accept_frame(0.1);
 
-        for _ in 0..5 {
+        for _ in 0..2 {
             assert!(clock.take_step(1.));
         }
+        assert!(!clock.take_step(1.));
+        clock.accept_frame(0.);
         assert!(!clock.take_step(1.));
     }
 
@@ -157,7 +213,7 @@ mod step_clock_tests {
         let mut clock = StepClock::default();
         clock.accept_frame(0.1);
 
-        for _ in 0..10 {
+        for _ in 0..4 {
             assert!(clock.take_step(2.));
         }
         assert!(!clock.take_step(2.));

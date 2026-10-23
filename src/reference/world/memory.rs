@@ -109,7 +109,7 @@ impl WorldReference {
         size_of::<Self>() + 2 * size_of::<usize>() + self.heap_bytes()
     }
 }
-fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,settings_context,spawn_context,initialization,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,painting_materials,prototypes,records,receipts,exclusions,material_textures);
+fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,capture_library,settings_context,spawn_context,initialization,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,painting_materials,prototypes,records,receipts,exclusions,material_textures);
 fields!(WorldPrototypeReference:source,role,asset,nodes,controls,excluded_actions,deferred_materials,skins,bodies,colliders,prefab_pose);
 fields!(WorldPrototypeNode:source,name,parent,active,renderer_enabled,layer,transform,gltf_node);
 fields!(WorldSkinReference:source,mesh,node,bones,bind_poses,positions,normals,tangents,uv,joints,weights,triangles);

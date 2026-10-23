@@ -1,4 +1,6 @@
 const MAX_WORLD_STAGING=32*1024*1024;
+let cpuProfile;
+export function setAssetCpuProfile(profile){cpuProfile=profile;}
 let contentBase,files=new Map(),plans=new Map(),onFetched=()=>{};
 export const worldBootstrapMeasurements={dependencyWorkers:0,maxDependencyBytes:0,dependencyPayloadCopyBytes:0,inputMetadataBytes:0,dependencyStagingReserve:0};
 function canonical(path){return typeof path==='string'&&!/[^a-zA-Z0-9_.\/ -]/.test(path)&&!path.split('/').some(p=>!p||p==='.'||p==='..'||p.startsWith(' ')||p.endsWith(' '));}
@@ -58,9 +60,12 @@ export async function readAsset(base,receipt,signal){
   }
   if(length!==receipt.bytes)throw Error('Asset length differs: '+receipt.file);
   const digest=await crypto.subtle.digest('SHA-256',bytes);
+  cpuProfile?.begin('assetValidation');
+  try {
   const hash=Array.from(new Uint8Array(digest),v=>v.toString(16).padStart(2,'0')).join('');
   if(hash!==receipt.sha256)throw Error('Asset SHA-256 mismatch: '+receipt.file);
   if(receipt.file.endsWith('.png'))checkPngInput(bytes,{width:receipt.image_size[0],height:receipt.image_size[1]});
+  } finally {cpuProfile?.end('assetValidation');}
   return bytes;
  }finally{
   onFetched({path:url,requiredBytes:receipt.bytes,receivedBytes:received});

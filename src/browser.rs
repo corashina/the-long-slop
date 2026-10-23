@@ -1,6 +1,57 @@
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(js_namespace=window,js_name=gameGrassCreate,catch)]
+    pub fn game_grass_create() -> Result<GrassTransport, JsValue>;
+    #[wasm_bindgen(js_name = Object)]
+    pub type GrassTransport;
+    #[wasm_bindgen(method,structural,catch,js_name=initialized)]
+    pub fn grass_initialized(this: &GrassTransport) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=capacityLimit)]
+    pub fn grass_capacity_limit(this: &GrassTransport, bytes: f64) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,js_name=wasmBytes)]
+    pub fn grass_wasm_bytes(this: &GrassTransport) -> f64;
+    #[wasm_bindgen(method,structural,catch,js_name=installRaw)]
+    pub fn grass_install(
+        this: &GrassTransport,
+        id: &[u8],
+        input: &[u8],
+        scratch: u32,
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=installedRaw)]
+    pub fn grass_installed(this: &GrassTransport, entity: &[u8]) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=retireRaw)]
+    pub fn grass_retire(this: &GrassTransport, entity: &[u8]) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=submitRaw)]
+    pub fn grass_submit(this: &GrassTransport, id: &[u8], input: &[u8]) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=poll)]
+    pub fn grass_poll(this: &GrassTransport) -> Result<i32, JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=planRaw)]
+    pub fn grass_plan(this: &GrassTransport, out: &mut [u32]) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=approveRaw)]
+    pub fn grass_approve(this: &GrassTransport, id: &[u8], bytes: f64) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,catch,js_name=readRaw)]
+    pub fn grass_read(
+        this: &GrassTransport,
+        anchors: &mut [f32],
+        uvs: &mut [f32],
+        blades: &mut [f32],
+        patches: &mut [u32],
+        indices: &mut [u32],
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method,structural,js_name=packingStarted)]
+    pub fn grass_packing_started(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=packingEnded)]
+    pub fn grass_packing_ended(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=publicationStartedRaw)]
+    pub fn grass_publication_started(this: &GrassTransport, entity: &[u8]);
+    #[wasm_bindgen(method,structural,js_name=publicationEndedRaw)]
+    pub fn grass_publication_ended(this: &GrassTransport, entity: &[u8], accepted: bool);
+    #[wasm_bindgen(method,structural,js_name=discard)]
+    pub fn grass_discard(this: &GrassTransport);
+    #[wasm_bindgen(method,structural,js_name=dispose)]
+    pub fn grass_dispose(this: &GrassTransport);
+
     #[wasm_bindgen(js_namespace = window, js_name = gameSceneScale)]
     pub fn game_scene_scale() -> f32;
     #[wasm_bindgen(js_name = gameAudioError)]
@@ -120,6 +171,12 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameNow)]
     pub fn game_now() -> f64;
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuInputConsumed)]
+    pub fn game_cpu_input_consumed();
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuClearInput)]
+    pub fn game_cpu_clear_input();
+    #[wasm_bindgen(js_namespace = window, js_name = gameCpuSubmitted)]
+    pub fn game_cpu_submitted(token: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]
     pub fn game_performance_frame(physics_ms: f64, world_ms: f64) -> bool;
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceCounters)]
@@ -140,6 +197,53 @@ extern "C" {
     pub fn game_measure_requested() -> bool;
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasurements)]
     pub fn game_measurements(json: &str);
+
+    #[wasm_bindgen(js_name = Object)]
+    pub type RoadTransport;
+    #[wasm_bindgen(catch, js_namespace = window, js_name = gameRoadCreate)]
+    pub fn game_road_create() -> Result<RoadTransport, JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = initialized)]
+    pub fn road_initialized(this: &RoadTransport) -> Result<bool, JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = capacityLimit)]
+    pub fn road_capacity_limit(this: &RoadTransport, bytes: f64) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = installRaw)]
+    pub fn road_install(
+        this: &RoadTransport,
+        identity: &[u8],
+        input: &[u8],
+        layout: &[u32],
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = submitRaw)]
+    pub fn road_submit(this: &RoadTransport, identity: &[u8], input: &[u8]) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, structural, catch, js_name = poll)]
+    pub fn road_poll(this: &RoadTransport) -> Result<i32, JsValue>;
+    #[wasm_bindgen(method, structural, js_name = wasmBytes)]
+    pub fn road_wasm_bytes(this: &RoadTransport) -> f64;
+    #[wasm_bindgen(method, structural, js_name = sourceOwner)]
+    pub fn road_source_owner(this: &RoadTransport) -> u32;
+    #[wasm_bindgen(method, structural, catch, js_name = readRaw)]
+    pub fn road_read(
+        this: &RoadTransport,
+        origin: &mut [f64],
+        vertices: &mut [f32],
+        normals: &mut [f32],
+        tangents: &mut [f32],
+        uv: &mut [f32],
+        triangles: &mut [u32],
+        submeshes: &mut [u32],
+    ) -> Result<(), JsValue>;
+    #[wasm_bindgen(method, structural, js_name = discard)]
+    pub fn road_discard(this: &RoadTransport);
+    #[wasm_bindgen(method, structural, js_name = dispose)]
+    pub fn road_dispose(this: &RoadTransport);
+    #[wasm_bindgen(method, structural, js_name = packingStarted)]
+    pub fn road_packing_started(this: &RoadTransport);
+    #[wasm_bindgen(method, structural, js_name = packingEnded)]
+    pub fn road_packing_ended(this: &RoadTransport);
+    #[wasm_bindgen(method, structural, js_name = publicationStarted)]
+    pub fn road_publication_started(this: &RoadTransport);
+    #[wasm_bindgen(method, structural, js_name = publicationEnded)]
+    pub fn road_publication_ended(this: &RoadTransport, accepted: bool);
 
     #[wasm_bindgen(js_namespace = window, js_name = gameTerrainSubmit)]
     pub fn game_terrain_submit(input: &[u8]) -> u32;
@@ -168,6 +272,8 @@ extern "C" {
     pub fn game_failure(message: &str);
     #[wasm_bindgen(js_namespace = window, js_name = gameKeys)]
     pub fn game_keys() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gamePlayerKeys)]
+    pub fn game_player_keys() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gamePressed)]
     pub fn game_pressed() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameReleased)]

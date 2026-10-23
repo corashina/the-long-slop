@@ -36,6 +36,11 @@ pub(super) fn bind(
             0,
         )?;
     }
+    if let Some(index) = prototype.bodies.iter().position(|body| body.node == 0) {
+        interaction
+            .mechanisms
+            .set_part_root(content.nodes[0], Some(instance.bodies[index]));
+    }
     for row in reference
         .world
         .mechanisms
@@ -93,10 +98,10 @@ pub(super) fn bind(
             );
             instance.bodies.push(body);
             instance.cpu_bytes += 2048;
-            items.get_mut(root_item).unwrap().body = Some(body);
+            items.set_body(root_item, Some(body));
             body
         };
-        items.get_mut(item).unwrap().body = Some(body);
+        items.set_body(item, Some(body));
         interaction.register_generated_mechanism(item, body, &[])?;
     }
     for (source, handle) in &instance.colliders {
@@ -154,6 +159,9 @@ pub(super) fn bind(
         }
         recipe.drag.node = local(recipe.drag.node);
         recipe.drag.node2 = local(recipe.drag.node2);
+        if let EndpointReactionReference::Rotation { node, .. } = &mut recipe.reaction {
+            *node = local(*node);
+        }
         if let Some(r) = &mut recipe.rotation {
             for target in &mut r.targets {
                 target.node = local(target.node)
@@ -229,7 +237,11 @@ pub(super) fn sync(
         return;
     }
     for (node, pose) in content.nodes.iter().zip(&mut content.poses) {
-        *pose = interaction.mechanisms.node_pose(*node).unwrap();
+        let next = interaction.mechanisms.node_pose(*node).unwrap();
+        if *pose != next {
+            *pose = next;
+            content.visual_revision = content.visual_revision.wrapping_add(1);
+        }
     }
     for binding in &content.bindings {
         if binding.render_body.is_none() && interaction.mechanisms.contains(binding.item) {

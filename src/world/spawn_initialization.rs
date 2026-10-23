@@ -2,7 +2,7 @@
 use super::Placement;
 use super::spawn_contents::{SpawnEvaluation, SpawnedContent};
 use super::spawn_rules::*;
-use crate::fluids::{FluidContainer, FluidMixture};
+use crate::fluids::FluidContainer;
 use crate::reference::ReferenceError;
 impl SpawnEvaluation<'_> {
     pub(super) fn random_spawned(
@@ -137,10 +137,7 @@ impl SpawnEvaluation<'_> {
             empty = if default_empty { 1. } else { 0. };
             mix = 0.;
         }
-        let mut result = FluidContainer::new(
-            number(fields(value(f, "F")?)?, "maxC")?,
-            FluidMixture::default(),
-        );
+        let mut result = FluidContainer::new(number(fields(value(f, "F")?)?, "maxC")?, &[]);
         let mut total = 0.;
         for fluid in fluids {
             total += number(fields(fluid)?, "chance")?;
@@ -386,11 +383,11 @@ fn change_fluid(
     if !(0..6).contains(&kind) {
         return Err(ReferenceError("Unsupported source fluid type".into()));
     }
-    let current = container.mixture.quantities_liters[kind as usize];
+    let current = container.mixture().quantities_liters[kind as usize];
     let accepted = amount
         .max(-current)
-        .min((container.capacity_liters - container.mixture.total()).max(0.));
-    container.mixture.quantities_liters[kind as usize] += accepted;
+        .min((container.capacity_liters - container.total()).max(0.));
+    container.change_one(accepted, kind as usize);
     Ok(accepted)
 }
 

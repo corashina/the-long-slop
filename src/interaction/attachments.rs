@@ -319,9 +319,8 @@ impl PlateAttachments {
             .members
             .retain(|id| *id != item);
         p.target = None;
-        let s = items.get_mut(item).unwrap();
+        let s = items.set_body(item, Some(body)).unwrap();
         s.location = ItemLocation::World;
-        s.body = Some(body);
         s.pose = from_rapier(&pose);
         s.local_pose = from_rapier(&Pose::IDENTITY);
         Self::move_shapes(p, body, pose, physics);
@@ -373,9 +372,8 @@ impl PlateAttachments {
                     .ok_or_else(|| error("Missing plate target body"))?;
                 let pose = to_rapier(owner.pose) * t.local;
                 let local = physics.rapier().bodies[body].position().inverse() * pose;
-                let s = items.get_mut(p.reference.item).unwrap();
+                let s = items.set_body(p.reference.item, Some(body)).unwrap();
                 s.location = ItemLocation::Attached(t.reference.owner);
-                s.body = Some(body);
                 s.pose = from_rapier(&pose);
                 s.local_pose = from_rapier(&local);
                 Self::move_shapes(p, body, pose, physics);

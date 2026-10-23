@@ -2,9 +2,10 @@
 use super::{
     lighting_assets::LightingRenderAssets,
     lighting_scene::{PROBE_COUNT, SourceSceneLighting},
-    materials::{MaterialLoading, RenderingState},
+    materials::MaterialLoading,
+    readiness::RendererStateHandle,
     render_targets::{HDR_FORMAT, MSAA_SAMPLES, ProbeTargets, SurfaceTargets},
-    source_lighting::{SourceLightingStatus, SourceViewLighting},
+    source_lighting::SourceViewLighting,
     stained_glass::{GlassViewUniform, SourceGlassView},
     surface_graph::SurfaceViewTargets,
     transparent::SourceTransparentPasses,
@@ -24,7 +25,7 @@ pub const PROBE_START: usize = WORLD_VIEWS;
 pub const VIEW_COUNT: usize = PROBE_START + 6;
 
 /// The world view precedes six probe faces.
-/// Shadow values come from each view's source fit and collector preparation.
+/// Shadow values come from each view's source fit and sun shadow preparation.
 #[derive(Component, Clone, Copy)]
 pub struct SourceSurfaceView {
     pub index: usize,
@@ -52,7 +53,7 @@ pub struct SurfaceResources {
     pub targets: SurfaceTargets,
     pub probes: [ProbeTargets; PROBE_COUNT],
     probe_sampler: Sampler,
-    attenuation_sampler: Sampler,
+    shadow_compare: Sampler,
 }
 impl SurfaceResources {
     pub fn new(
@@ -72,8 +73,9 @@ impl SurfaceResources {
                 mipmap_filter: MipmapFilterMode::Linear,
                 ..default()
             }),
-            attenuation_sampler: device.create_sampler(&SamplerDescriptor {
-                label: Some("source_collector_sampler"),
+            shadow_compare: device.create_sampler(&SamplerDescriptor {
+                label: Some("source_shadow_linear_compare"),
+                compare: Some(CompareFunction::GreaterEqual),
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 ..default()
@@ -82,7 +84,7 @@ impl SurfaceResources {
     }
 }
 
-pub fn prepare_views(
+pub(crate) fn prepare_views(
     mut commands: Commands,
     frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<LightingRenderAssets>>,
@@ -98,17 +100,18 @@ pub fn prepare_views(
         Option<&SurfaceViewTargets>,
         Option<&mut SourceViewLighting>,
         Option<&mut SourceGlassView>,
+        Option<&super::shadow_collector::CollectorView>,
     )>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
-    status: Res<SourceLightingStatus>,
+    status: Res<RendererStateHandle>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Surface,
         &frame,
     );
-    if matches!(*status.0.lock().unwrap(), RenderingState::Failed(_)) {
+    if status.failure().is_some() {
         return;
     }
     let (Some(assets), Some(scene), Some(capacity)) = (
@@ -121,7 +124,7 @@ pub fn prepare_views(
         return;
     };
     let mut extents = [None; VIEW_COUNT];
-    for (_, source, view, msaa, _, _, _) in &mut views {
+    for (_, source, view, msaa, _, _, _, _) in &mut views {
         if source.index >= VIEW_COUNT
             || extents[source.index].is_some()
             || view.target_format != HDR_FORMAT
@@ -132,9 +135,7 @@ pub fn prepare_views(
                     1
                 }
         {
-            *status.0.lock().unwrap() = RenderingState::Failed(
-                "Source surface view identity, format, or sample count is invalid".into(),
-            );
+            status.fail("Source surface view identity, format, or sample count is invalid".into());
             return;
         }
         if view.viewport.z == 0 || view.viewport.w == 0 {
@@ -148,11 +149,12 @@ pub fn prepare_views(
         .flatten()
         .any(|size| *size != UVec2::splat(64))
     {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source surface view extents disagree".into());
+        status.fail("Source surface view extents disagree".into());
         return;
     }
-    if extents[PROBE_START..].iter().any(Option::is_none) {
+    if (PROBE_START..VIEW_COUNT)
+        .any(|index| !frame.skip_probe_preparation(index) && extents[index].is_none())
+    {
         return;
     }
     let Some(snapshot) = frame.views[0] else {
@@ -160,8 +162,7 @@ pub fn prepare_views(
     };
     let native = snapshot.native_extent;
     let Some(atlas) = crate::reference::shadows::source_atlas_size(native.x, native.y) else {
-        *status.0.lock().unwrap() =
-            RenderingState::Failed("Source world atlas extent is invalid".into());
+        status.fail("Source world atlas extent is invalid".into());
         return;
     };
     let needs_targets = existing.as_ref().is_none_or(|value| {
@@ -178,7 +179,7 @@ pub fn prepare_views(
             {
                 Ok(()) => {}
                 Err(error) => {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                    status.fail(error);
                     return;
                 }
             }
@@ -188,7 +189,7 @@ pub fn prepare_views(
                     commands.insert_resource(value);
                 }
                 Err(error) => {
-                    *status.0.lock().unwrap() = RenderingState::Failed(error);
+                    status.fail(error);
                 }
             }
             return;
@@ -206,7 +207,7 @@ pub fn prepare_views(
     else {
         return;
     };
-    for (entity, source, _, _, bound, binding, glass) in &mut views {
+    for (entity, source, _, _, bound, binding, glass, sun_shadow) in &mut views {
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
@@ -218,6 +219,7 @@ pub fn prepare_views(
             source.clip_from_world,
             source.near,
             source.far,
+            sun_shadow.map_or_else(Default::default, |collector| collector.value),
         );
         let glass_value = match GlassViewUniform::new(
             source.clip_from_world,
@@ -227,19 +229,17 @@ pub fn prepare_views(
         ) {
             Ok(value) => value,
             Err(error) => {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
         };
         if bound.is_some_and(|bound| std::sync::Arc::ptr_eq(&bound.0, target)) {
             let Some(mut binding) = binding else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source view lighting binding is missing".into());
+                status.fail("Source view lighting binding is missing".into());
                 return;
             };
             let Some(mut glass) = glass else {
-                *status.0.lock().unwrap() =
-                    RenderingState::Failed("Source glass view binding is missing".into());
+                status.fail("Source glass view binding is missing".into());
                 return;
             };
             if timing.enabled() {
@@ -255,7 +255,7 @@ pub fn prepare_views(
                 }
             }
             if let Err(error) = glass.write(glass_value, &device, &queue) {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
             binding.write(uniform, &device, &queue);
@@ -271,7 +271,7 @@ pub fn prepare_views(
         let glass = match SourceGlassView::new(&device, &queue, &cache, glass_value) {
             Ok(value) => value,
             Err(error) => {
-                *status.0.lock().unwrap() = RenderingState::Failed(error.into());
+                status.fail(error.into());
                 return;
             }
         };
@@ -286,8 +286,8 @@ pub fn prepare_views(
                 (&cookie.texture_view, &cookie.sampler),
                 (cubes, &resources.probe_sampler),
                 (
-                    target.collector.sampled.as_ref().unwrap(),
-                    &resources.attenuation_sampler,
+                    target.atlas.sampled.as_ref().unwrap(),
+                    &resources.shadow_compare,
                 ),
             ),
             SourceTransparentPasses::new(capacity),

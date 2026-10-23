@@ -136,6 +136,7 @@ fn process_request(
             Ok(String::new())
         }
         "Commit" => {
+            let _profile = cpu_profile::Timer::new(cpu_profile::Stage::SaveCommit);
             if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
                 let permit = *permit;
                 let generation = world
@@ -173,10 +174,6 @@ fn process_request(
                 world,
             )?;
             let mut candidate = requests.take_candidate().unwrap();
-            candidate
-                .runtime
-                .stream
-                .set_overlap(crate::world::WorldMetrics::default())?;
             // The prepared commands and stable bindings make this boundary infallible.
             world.resource_scope(
                 |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
@@ -196,17 +193,29 @@ fn process_request(
                 .audio
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
+            // Assignment drops the old stream and terminates its road actor first.
             drive.runtime = candidate.runtime;
+            drive
+                .runtime
+                .stream
+                .set_overlap(crate::world::WorldMetrics::default())
+                .expect("retired world overlap only removes charges");
             let runtime = &mut drive.runtime;
             if let Some(audio) = &mut runtime.audio {
                 audio.reset(session);
                 audio.sync_lamps(&reference.lighting, &runtime.lighting);
             }
             drive.camera = candidate.camera;
-            drive.current = drive.runtime.area.player.view_pose(&drive.runtime.physics);
+            drive.current = drive
+                .runtime
+                .area
+                .player
+                .view(&drive.runtime.physics)
+                .camera_pose;
             drive.previous = drive.current;
             drive.rendered = drive.current;
             drive.input.clear();
+            drive.frame_input.clear();
             drive.clock = StepClock::default();
             drive.frame_steps = 0;
             drive.render_delta_seconds = 0.;
@@ -215,16 +224,46 @@ fn process_request(
             drive.skip_elapsed = true;
             drive.last_feedback = None;
             for (index, vehicle) in reference.vehicles.iter().enumerate() {
-                let sample = super::instrument_sample(&reference, &drive.runtime, index);
+                let sample = drive.runtime.instrument_sample(&reference, index);
                 drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
             }
+            let camera = super::active_camera(&drive);
+            let fov = drive
+                .runtime
+                .area
+                .player
+                .view(&drive.runtime.physics)
+                .fov_degrees;
             drop(drive);
+            let mut cameras = world.query::<(
+                &mut Transform,
+                &mut Projection,
+                Option<&DriveCamera>,
+                Option<&crate::presentation::frame_graph::SourceSkyCamera>,
+            )>();
+            for (mut transform, mut projection, main, sky) in cameras.iter_mut(world) {
+                if main.is_some() {
+                    *transform = camera;
+                } else if sky.is_some() {
+                    *transform = Transform::from_rotation(camera.rotation);
+                }
+                crate::presentation::camera_projection::sync_player_projection(
+                    &mut projection,
+                    main.is_some() || sky.is_some(),
+                    fov,
+                );
+            }
             crate::browser::game_loading();
             crate::presentation::view_frame::restart_scene(world);
             crate::presentation::plates::reset_plate_text(world);
             Ok(String::new())
         }
         "Capture" | "Prepare" | "PrepareNewGame" => {
+            let _profile = cpu_profile::Timer::new(if request.kind == "Prepare" {
+                cpu_profile::Stage::LoadPrepare
+            } else {
+                cpu_profile::Stage::SavePrepare
+            });
             let drive = world.resource::<Drive>();
             if !drive.ready {
                 return Err(invalid("The garage is not ready"));
@@ -324,6 +363,7 @@ fn advance(world: &mut World) {
             return;
         }
         let reference = world.resource::<RuntimeReference>().0.clone();
+        let _profile = cpu_profile::Timer::new(cpu_profile::Stage::LoadPrepare);
         let result = (|| -> Result<bool, SaveError> {
             if candidate.presentation.is_none() {
                 if !PreparedPresentation::can_start(world) {

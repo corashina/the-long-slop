@@ -115,11 +115,23 @@ pub fn display_name<'a>(
                 return "Fuel tank";
             }
             if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {
-                if tank.quantities_liters[0] > 0.0 {
+                if tank
+                    .fluids
+                    .iter()
+                    .any(|entry| entry.fluid_type == 0 && entry.amount > 0.)
+                {
                     "Fuel can"
-                } else if tank.quantities_liters[1] > 0.0 {
+                } else if tank
+                    .fluids
+                    .iter()
+                    .any(|entry| entry.fluid_type == 1 && entry.amount > 0.)
+                {
                     "Oil can"
-                } else if tank.quantities_liters[3] > 0.0 {
+                } else if tank
+                    .fluids
+                    .iter()
+                    .any(|entry| entry.fluid_type == 3 && entry.amount > 0.)
+                {
                     "Water container"
                 } else {
                     "Container"

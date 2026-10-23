@@ -216,7 +216,8 @@ impl PreparedPresentation {
         candidate.stream.advance_generation();
         candidate.stream.set_overlap(self.overlap(world))?;
         candidate.initialize_storage_frame(FIXED_DT)?;
-        let pose = candidate.area.player.view_pose(&candidate.physics);
+        let player_view = candidate.area.player.view(&candidate.physics);
+        let pose = player_view.camera_pose;
         let camera = if let Some(sleep) = candidate.sleep_camera() {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
         } else if mode == super::camera::CameraMode::Chase && candidate.area.player.seat().is_some()
@@ -233,15 +234,14 @@ impl PreparedPresentation {
                 .absolute(local.to_array())
                 .map(|v| v as f32),
         );
-        let projection = PerspectiveProjection {
-            fov: reference.player.field_of_view_degrees.to_radians(),
-            aspect_ratio: self.aspect_ratio,
-            ..default()
-        };
+        let projection = super::camera_projection::player_perspective(
+            player_view.fov_degrees,
+            self.aspect_ratio,
+        );
         let clip = projection.get_clip_from_view()
             * Mat4::from_rotation_translation(camera.rotation, position).inverse();
         let rows = (clip * Mat4::from_scale(Vec3::new(1., 1., -1.))).transpose();
-        let view = materials::grass::GrassView {
+        let view = grass_mesh::GrassView {
             position: position * Vec3::new(1., 1., -1.),
             screen_height: self.screen_height,
             clip_planes: [
@@ -254,7 +254,7 @@ impl PreparedPresentation {
         };
         let lod = super::world::lod::LodView {
             position: local,
-            fov_degrees: reference.player.field_of_view_degrees,
+            fov_degrees: player_view.fov_degrees,
             ortho_size: None,
         };
         imported_updates(candidate, world, &mut self.updates)?;
@@ -436,6 +436,7 @@ impl PreparedPresentation {
         Ok(())
     }
     pub fn cancel(&mut self) {
+        self.grass.cancel();
         self.materials.preparation.cancel();
         self.materials.world_textures.cancel();
         self.prototypes.cancel();
@@ -660,9 +661,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
         return Err(fail("Material assets are not ready".into()));
     }
     let instruments = world.resource::<super::instruments::InstrumentVisuals>();
-    if !instruments.bound || !instruments.prepared {
-        return Err(fail("Instrument bindings are not ready".into()));
-    }
+    instruments.validate_assets(world.resource::<Assets<materials::SourceMaterial>>())?;
     for light in &source.lights {
         if world.get::<lighting::SourceLight>(light.entity).is_none()
             || light
@@ -693,7 +692,6 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
             choice.validate_assets(authored)?;
         }
     }
-    instruments.validate_assets(authored)?;
     for entity in world.iter_entities() {
         // Generated GPU-only surfaces are validated by their pipeline tickets.
         if entity
@@ -790,7 +788,9 @@ fn candidate_required_views(
         .map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     let forward = [forward.x, forward.y, -forward.z];
-    let first = super::camera::world_camera_settings(reference);
+    let first = super::camera::world_camera_settings(
+        candidate.area.player.view(&candidate.physics).fov_degrees,
+    );
     let first = required_view(
         &camera_snapshot(
             extent,

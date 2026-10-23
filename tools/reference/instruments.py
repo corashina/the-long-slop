@@ -1,6 +1,24 @@
 """Resolve the source instrument components of one selected car."""
 from .source import key,source_id,vector
 
+def recover_material_switch(source, owner, fields, node, asset, material_indices):
+    pointer = fields['R']
+    if not pointer['m_PathID']:
+        return {'kind': 'absent'}
+    if source.resolve(owner, pointer) is None:
+        raise ValueError('Missing instrument renderer')
+    def material(pointer):
+        reader = source.resolve(owner, pointer)
+        if reader is None:
+            raise ValueError('Missing instrument material')
+        identity = f'{reader.assets_file.name}:{reader.path_id}'
+        if identity not in material_indices:
+            raise ValueError(f'Missing instrument material: {identity}')
+        return {'source': source_id(reader), 'asset': asset,
+                'gltf_material': material_indices[identity]}
+    return {'kind': 'renderer', 'node': node(owner, pointer, True),
+            'on': material(fields['OnM']), 'off': material(fields['OffM'])}
+
 def recover_instruments(source,manifest,reports,name,root):
     nodes={(n['source']['file'],n['source']['path_id']):n['id'] for n in manifest['nodes']}
     material_indices=reports[name]['material_indices']
@@ -13,6 +31,7 @@ def recover_instruments(source,manifest,reports,name,root):
     meter=meters[0];md=source.read(meter)
     def node(owner,ptr,renderer=False):
         reader=source.resolve(owner,ptr)
+        if reader is None:raise ValueError('Missing instrument node pointer')
         if renderer:reader=source.transform_for(source.resolve(reader,source.read(reader)['m_GameObject']))
         if key(reader) not in nodes:raise ValueError(f'Missing instrument node: {key(reader)}')
         return nodes[key(reader)]
@@ -28,7 +47,8 @@ def recover_instruments(source,manifest,reports,name,root):
             'min_value':d['minValue'],'max_value':d['maxValue'],'min_angle':d['minAngle'],'max_angle':d['maxAngle'],
             'axis':axes.index(1),'rest':[d['x'],d['y'],d['z']],'offset':d['inputValueOffset'],'inv':bool(d['inv']),
             'value_smoothing':8*(d['lerpSpeedMultiplier'] or 1),'signal_smoothing':5 if entry['tipus'] in ('fuel','temp') else 0,
-            'no_value_lerp':bool(d['noValueLerp']),'lerp_angle':bool(d['lerpAngle'])})
+            'no_value_lerp':bool(d['noValueLerp']),'lerp_angle':bool(d['lerpAngle']),
+            'backlight':recover_material_switch(source,r,d,node,asset,material_indices)})
     lamps=[]
     for ptr in md['leds']:
         r=source.resolve(meter,ptr);d=source.read(r)
@@ -49,7 +69,8 @@ def recover_instruments(source,manifest,reports,name,root):
     else:
         e=source.read(electronic);maximum=e['overRideMaxJamValue'] if e['overRideMaxJamValue']>0 else 0.3
         electronic_output=e['maxOutput']*(1.-max(0.,min(1.,e['jamValue']/maximum)))
-    return {'electronics_output':electronic_output,'electronics_off_threshold':0.2,'needles':needles,'lamps':lamps,'odometer':{'source':source_id(r),'initial_value':count['value'],
+    return {'backlight':recover_material_switch(source,meter,md,node,asset,material_indices),
+        'electronics_output':electronic_output,'electronics_off_threshold':0.2,'needles':needles,'lamps':lamps,'odometer':{'source':source_id(r),'initial_value':count['value'],
         'base':d['szamrendszer'],'decimals':d['tizedesjegyek'],'use_multiplier':bool(d['useMultiplier']),
         'multiplier':d['multiplier'],'digits':digits},
         'low_fuel':cd['lowFuelValue'],'low_oil':cd['lowOilValue'],

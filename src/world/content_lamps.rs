@@ -14,6 +14,32 @@ pub(super) struct ButtonPose {
     moving: bool,
 }
 
+impl ButtonPose {
+    fn advance(&mut self, dt: f32) -> bool {
+        if !self.moving {
+            return false;
+        }
+        let previous = self.pose;
+        let t = self.progress.min(1.);
+        self.pose.translation = std::array::from_fn(|i| {
+            self.pose.translation[i] + (self.target.translation[i] - self.pose.translation[i]) * t
+        });
+        let a = rapier3d::math::Rotation::from_array(self.pose.rotation);
+        let b = rapier3d::math::Rotation::from_array(self.target.rotation);
+        self.pose.rotation = a.lerp(b, t).normalize().to_array();
+        if self.progress >= 1. {
+            self.pose = self.target;
+            self.moving = false;
+            self.progress = 0.;
+        } else {
+            self.progress += dt * 25.;
+        }
+        self.pose.translation != previous.translation
+            || self.pose.rotation != previous.rotation
+            || self.pose.scale != previous.scale
+    }
+}
+
 pub(super) struct LampBinding {
     pub(super) button: Option<ButtonPose>,
     collision_dirty: bool,
@@ -99,7 +125,7 @@ impl WorldStream {
                 condition: 1.,
                 food: None,
                 temperature: None,
-                fluid_quantities: None,
+                fluids: None,
                 valve: None,
                 lamp: Some(on),
                 linear_velocity: [0.; 3],
@@ -197,6 +223,8 @@ impl WorldStream {
                 }
                 interaction.bind_generated_light(control, id);
             }
+            self.presentation_lamp_changes
+                .push(self.lamp_bindings.len());
             self.lamp_bindings.push(LampBinding {
                 button,
                 collision_dirty: true,
@@ -286,11 +314,13 @@ impl WorldStream {
         }) {
             self.changes.set_replay(&object, origin, &binding.parent);
         }
-        let binding = self
+        let index = self
             .lamp_bindings
-            .iter_mut()
-            .find(|b| b.control == control)
+            .iter()
+            .position(|b| b.control == control)
             .unwrap();
+        self.presentation_lamp_changes.push(index);
+        let binding = &mut self.lamp_bindings[index];
         binding.collision_dirty = true;
         if let Some(button) = &mut binding.button {
             let f = self
@@ -346,27 +376,12 @@ impl WorldStream {
         if !dt.is_finite() || dt < 0. {
             return;
         }
-        for binding in &mut self.lamp_bindings {
+        for (index, binding) in self.lamp_bindings.iter_mut().enumerate() {
             let Some(button) = &mut binding.button else {
                 continue;
             };
-            if !button.moving {
-                continue;
-            }
-            let t = button.progress.min(1.);
-            button.pose.translation = std::array::from_fn(|i| {
-                button.pose.translation[i]
-                    + (button.target.translation[i] - button.pose.translation[i]) * t
-            });
-            let a = rapier3d::math::Rotation::from_array(button.pose.rotation);
-            let b = rapier3d::math::Rotation::from_array(button.target.rotation);
-            button.pose.rotation = a.lerp(b, t).normalize().to_array();
-            if button.progress >= 1. {
-                button.pose = button.target;
-                button.moving = false;
-                button.progress = 0.;
-            } else {
-                button.progress += dt * 25.;
+            if button.advance(dt) {
+                self.presentation_lamp_changes.push(index);
             }
         }
     }
@@ -437,7 +452,7 @@ mod tests {
                 condition: 1.,
                 food: None,
                 temperature: None,
-                fluid_quantities: None,
+                fluids: None,
                 valve: None,
                 lamp: Some(false),
                 linear_velocity: [0.; 3],
@@ -488,5 +503,32 @@ mod tests {
         assert_eq!(positions(&index, &lamps), [9., 3., 5.]);
         index.update_lamps((2, 1), &lamps);
         assert_eq!(index.rebuilds, [0, 3]);
+    }
+    #[test]
+    fn world_sync_lamp_final_pose_is_published_once() {
+        let mut button = ButtonPose {
+            node: SourceId {
+                file: "test".into(),
+                path_id: 1,
+            },
+            pose: Transform {
+                translation: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+                scale: [1.; 3],
+            },
+            target: Transform {
+                translation: [1., 2., 3.],
+                rotation: [0., 0., 0., 1.],
+                scale: [2.; 3],
+            },
+            progress: 0.,
+            moving: true,
+        };
+        assert!(!button.advance(1.));
+        assert!(button.advance(1.));
+        assert_eq!(button.pose.translation, button.target.translation);
+        assert_eq!(button.pose.scale, button.target.scale);
+        assert!(!button.moving);
+        assert!(!button.advance(1.));
     }
 }

@@ -409,7 +409,7 @@ impl WheelAssemblies {
                     .collect();
                 let initial_fluids: f32 = tanks
                     .iter()
-                    .map(|tank| tank.quantities_liters.iter().sum::<f32>())
+                    .map(|tank| tank.fluids.iter().map(|entry| entry.amount).sum::<f32>())
                     .sum();
                 let general_dry: f32 = general_mass
                     .iter()
@@ -975,9 +975,8 @@ impl WheelAssemblies {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         let state = items
-            .get_mut(self.parts[part].item)
+            .set_body(self.parts[part].item, Some(body))
             .ok_or_else(|| error("Missing wheel item"))?;
-        state.body = Some(body);
         state.local_pose = from_rapier(&local);
         state.pose = from_rapier(&(*physics.rapier().bodies[body].position() * local));
         let vehicle = physics.vehicle_of(body).is_some();
@@ -1018,12 +1017,11 @@ impl WheelAssemblies {
                 .filter_map(|(id, dry)| {
                     let item = items.get(*id)?;
                     (item.body == Some(body))
-                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.mixture.total()))
+                        .then(|| dry + item.fluid.as_ref().map_or(0., |f| f.finite_total()))
                 })
                 .sum::<f32>();
         if self.parts[rim].last_mass != mass {
-            physics.edit_body(body, |body| body.set_additional_mass(mass, true));
-            physics.recompute_body_mass(body);
+            physics.set_body_mass(body, mass);
             self.parts[rim].last_mass = mass;
         }
     }
@@ -1081,8 +1079,7 @@ impl WheelAssemblies {
                     .get(*id)
                     .and_then(|item| item.fluid.as_ref())
                     .ok_or_else(|| error("Missing vehicle tank"))?
-                    .mixture
-                    .total();
+                    .finite_total();
             }
             if !state.last_mass.is_finite() || (mass - state.last_mass).abs() > 0.0001 {
                 physics.set_vehicle_mass(vehicle, mass);
@@ -1113,9 +1110,8 @@ impl WheelAssemblies {
                     * slot.hub_to_mount
                     * Pose::from_rotation(part.rotation);
                 let state = items
-                    .get_mut(part.item)
+                    .set_body(part.item, Some(chassis))
                     .ok_or_else(|| error("Missing mounted rim"))?;
-                state.body = Some(chassis);
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
                 let (radius, quality) = if let Some(tire) = part.tire {
@@ -1126,9 +1122,8 @@ impl WheelAssemblies {
                             .ok_or_else(|| error("Missing rim tire mount"))?
                         * Pose::from_rotation(tire_part.rotation);
                     let tire_state = items
-                        .get_mut(tire_part.item)
+                        .set_body(tire_part.item, Some(chassis))
                         .ok_or_else(|| error("Missing mounted tire"))?;
-                    tire_state.body = Some(chassis);
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);

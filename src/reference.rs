@@ -1,10 +1,12 @@
 //! Validated installed-build data. Geometry uses converted body-local meters.
 
 pub mod fixed_reservation;
-pub mod loading_dispatch;
 pub mod package;
 pub mod prototype_plan;
 pub use package::{FileCatalog, FileReceipt, PlanReceipt};
+
+pub mod player;
+pub use player::*;
 
 pub mod driving;
 pub use driving::*;
@@ -255,6 +257,7 @@ pub struct MechanismReference {
     pub disable_on_uncraft: bool,
     pub drag: MechanismDrag,
     pub rotation: Option<RotationReference>,
+    pub reaction: EndpointReactionReference,
     pub slide: Option<SlideReference>,
     pub turn: Option<TurnReference>,
 }
@@ -264,6 +267,20 @@ pub struct TurnReference {
     pub action: TurnAction,
     pub max_state: u8,
     pub initial_state: u8,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EndpointReactionReference {
+    None,
+    Rotation {
+        node: NodeId,
+        /// Unity right, up, and forward flags. Binding reflects forward Z once.
+        axes: [bool; 3],
+        inverted: bool,
+        force: f32,
+        /// Enter minimum, enter maximum, leave minimum, leave maximum.
+        events: [bool; 4],
+    },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -461,8 +478,8 @@ pub struct TankReference {
     pub item: ItemId,
     pub source: SourceId,
     pub capacity_liters: f32,
-    /// Gasoline, oil, alcohol, water, blood, diesel.
-    pub quantities_liters: [f32; 6],
+    /// Entries retain source list order.
+    pub fluids: Vec<crate::fluids::FluidEntry>,
     pub openings: Vec<OpeningId>,
     pub no_drink: bool,
     pub no_fill_this: bool,
@@ -610,6 +627,12 @@ pub struct PushReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerReference {
+    pub posture: PlayerPostureReference,
+    pub view: PlayerViewReference,
+    pub prone_multiplier: f32,
+    pub duck_jump_multiplier: f32,
+    pub inverse_duck_multiplier: f32,
+    pub max_fall_speed: f32,
     pub source: SourceId,
     pub capsule_source: SourceId,
     pub camera_source: SourceId,
@@ -618,22 +641,11 @@ pub struct PlayerReference {
     pub jump_force: f32,
     pub mass_kg: f32,
     pub duck_multiplier: f32,
-    pub ctrl_duck_value: f32,
-    pub duck_lerp: f32,
-    pub head_lerp: f32,
-    pub crouch_height: f32,
-    pub capsule_radius: f32,
-    pub capsule_height: f32,
-    pub camera_height: f32,
-    pub field_of_view_degrees: f32,
     pub aim_reach: f32,
     pub action_masks: ActionMasks,
     pub get_out_layer_mask: u32,
     pub exit_capsule_half_height: f32,
     pub exit_capsule_radius: f32,
-    pub standing_radius: f32,
-    pub standing_height: f32,
-    pub crouch_radius: f32,
     pub exit_distance: f32,
     pub exit_step_vertical: f32,
     pub exit_steps_vertical: u32,
@@ -667,6 +679,8 @@ pub struct PlayerReference {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeatReference {
+    pub default_pitch_degrees: f32,
+    pub pitch_limits_degrees: [f32; 2],
     pub id: SeatId,
     pub source: SourceId,
     pub item: ItemId,
@@ -1451,6 +1465,15 @@ impl ReferenceManifest {
         )?;
         let mechanism_items: HashSet<_> = self.mechanisms.iter().map(|m| m.item).collect();
         for r in &self.mechanisms {
+            if let EndpointReactionReference::Rotation { node, force, .. } = &r.reaction {
+                require(
+                    r.rotation.is_some()
+                        && node_ids.contains(node)
+                        && force.is_finite()
+                        && *force >= 0.,
+                    "mechanism endpoint reaction",
+                )?;
+            }
             require(
                 item_ids.contains(&r.item)
                     && r.parent_item.is_none_or(|id| item_ids.contains(&id))
@@ -1630,13 +1653,15 @@ impl ReferenceManifest {
             require(
                 r.capacity_liters.is_finite()
                     && r.capacity_liters > 0.0
-                    && finite(&r.quantities_liters)
-                    && r.quantities_liters.iter().all(|v| *v >= 0.0)
-                    && r.quantities_liters.iter().sum::<f32>() <= r.capacity_liters + 0.001,
+                    && crate::fluids::validate_fluid_entries(&r.fluids)
+                    && r.fluids.iter().all(|v| v.amount >= 0.0)
+                    && r.fluids.iter().map(|v| f64::from(v.amount)).sum::<f64>()
+                        <= f64::from(r.capacity_liters),
                 "tank quantities",
             )?;
         }
         let p = &self.player;
+        p.validate_movement()?;
         require(p.camera_culling_mask != 0, "camera culling mask")?;
         require(
             p.scroll_sensitivity.is_finite() && p.scroll_sensitivity > 0.0,
@@ -1667,17 +1692,10 @@ impl ReferenceManifest {
         )?;
         require(
             finite(&[
-                p.standing_radius,
-                p.standing_height,
-                p.crouch_radius,
                 p.exit_distance,
                 p.exit_step_vertical,
                 p.exit_step_horizontal,
-            ]) && p.standing_radius > 0.0
-                && p.standing_height >= p.standing_radius * 2.0
-                && p.crouch_radius > 0.0
-                && p.crouch_height >= p.crouch_radius * 2.0
-                && p.exit_distance > 0.0
+            ]) && p.exit_distance > 0.0
                 && p.exit_steps_vertical <= 100
                 && p.exit_steps_horizontal <= 100,
             "effective player geometry/exit scan",
@@ -1806,14 +1824,7 @@ impl ReferenceManifest {
             "fluid rules",
         )?;
         require(
-            finite(&[
-                p.mass_kg,
-                p.duck_multiplier,
-                p.ctrl_duck_value,
-                p.duck_lerp,
-                p.head_lerp,
-            ]) && p.mass_kg > 0.0
-                && (0.0..=1.0).contains(&p.ctrl_duck_value),
+            finite(&[p.mass_kg, p.duck_multiplier]) && p.mass_kg == 72.0,
             "player movement",
         )?;
         require(
@@ -1821,19 +1832,10 @@ impl ReferenceManifest {
                 p.walk_speed,
                 p.run_multiplier,
                 p.jump_force,
-                p.crouch_height,
-                p.capsule_radius,
-                p.capsule_height,
-                p.camera_height,
-                p.field_of_view_degrees,
                 p.aim_reach,
                 p.exit_capsule_half_height,
                 p.exit_capsule_radius,
             ]) && p.walk_speed > 0.0
-                && p.capsule_radius > 0.0
-                && p.capsule_height >= p.capsule_radius * 2.0
-                && p.crouch_height >= p.capsule_radius * 2.0
-                && p.crouch_height < p.capsule_height
                 && p.aim_reach > 0.0
                 && p.action_masks.use_mask != 0
                 && p.action_masks.pickup_mask != 0
@@ -1909,6 +1911,7 @@ impl ReferenceManifest {
         )?;
         let mut seat_hit_nodes = HashSet::new();
         for r in &self.seats {
+            r.validate_view()?;
             require(
                 item_ids.contains(&r.item)
                     && anchor_ids.contains(&r.anchor)

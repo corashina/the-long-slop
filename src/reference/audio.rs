@@ -1,7 +1,7 @@
 //! Selected source audio. Validation has a separate gameplay failure boundary.
 use super::{
-    ColliderId, CurveKey, ItemId, LightControlId, MechanismId, NodeId, PartSlotId, ReferenceError,
-    ReferenceManifest, SourceId, hash, ids, require,
+    ColliderId, CurveKey, ItemId, LightControlId, MaterialSwitchReference, MechanismId, NodeId,
+    PartSlotId, ReferenceError, ReferenceManifest, SourceId, hash, ids, require,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -84,13 +84,63 @@ record!(RadioClockReference {
     multiplayer: AudioMethod
 });
 record!(RadioAudioReference {
-    source: SourceId, emitter: u32, voices: [u32; 3], controls: RadioControls,
+    source: SourceId, emitter: u32, voices: [u32; 3], controls: RadioControls, visuals: RadioVisualReference,
     constants: BTreeMap<String, f32>, initial_on: bool, initial_am: bool,
     initial_tuning: f32, initial_volume: f32, fm_tolerance: f32, am_tolerance: f32,
     electronics_cutoff: f32, time_correction_seconds: f32, late_seek_margin_seconds: f32,
     custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
     electronics_source: SourceId, electronics_output: f32, tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
 });
+record!(RadioVisualReference {
+    screen: MaterialSwitchReference,
+    indicator: MaterialSwitchReference,
+    needle: NodeId,
+    start: NodeId,
+    end: NodeId
+});
+impl RadioVisualReference {
+    fn validate(&self, game: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let mut asset = None;
+        for switch in [&self.screen, &self.indicator] {
+            let MaterialSwitchReference::Renderer { node, on, off } = switch else {
+                return Err(ReferenceError("Required radio renderer".into()));
+            };
+            let renderer = game
+                .nodes
+                .iter()
+                .find(|n| n.id == *node)
+                .ok_or_else(|| ReferenceError("Missing radio renderer node".into()))?;
+            require(
+                asset.is_none_or(|id| id == renderer.asset),
+                "radio renderer asset",
+            )?;
+            asset = Some(renderer.asset);
+            for material in [on, off] {
+                require(
+                    material.asset == renderer.asset
+                        && game.assets.iter().any(|a| {
+                            a.id == material.asset && material.gltf_material < a.material_count
+                        })
+                        && game.rendering.materials.iter().any(|m| {
+                            m.asset == material.asset
+                                && m.gltf_material == material.gltf_material
+                                && m.source == material.source
+                        }),
+                    "radio material",
+                )?;
+            }
+        }
+        for id in [self.needle, self.start, self.end] {
+            require(
+                game.nodes
+                    .iter()
+                    .any(|n| n.id == id && Some(n.asset) == asset),
+                "radio transform",
+            )?;
+        }
+        Ok(())
+    }
+}
 record!(MechanismAudioReference {
     source: SourceId, emitter: u32, movement_voice: Option<u32>, audio_multiplier: f32,
     slide_multiplier: f32, rotation_gain: f32, slide_gain: f32, gain_smoothing: f32,
@@ -432,6 +482,7 @@ impl AudioReference {
             "audio horn",
         )?;
         let r = &self.radio;
+        r.visuals.validate(game)?;
         require(
             r.clock.kind == "scaled"
                 && r.clock.selected.class == "mainscript"

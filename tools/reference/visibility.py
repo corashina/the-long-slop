@@ -6,13 +6,20 @@ def recover_startup_inactive_nodes(source, records):
     inactive = set()
     for record in records:
         for component in record['components']:
-            if component.type.name != 'MonoBehaviour' or source.class_name(component) != 'terrainHeightAlignToBuildingScript':
+            if component.type.name != 'MonoBehaviour':
                 continue
-            for pointer in source.read(component)['helpPosCoords']:
-                marker = source.resolve(component, pointer)
-                if marker is None:
-                    raise ValueError(f'Missing startup marker: {source_id(component)} helpPosCoords')
-                inactive.add(key(marker))
+            name = source.class_name(component)
+            if name == 'mountStuff':
+                fields = source.read(component)
+                if record['active'] and fields['m_Enabled'] and fields['visual']['m_PathID']:
+                    visual = source.resolve(component, fields['visual'])
+                    inactive.add(key(source.transform_for(visual)))
+            elif name == 'terrainHeightAlignToBuildingScript':
+                for pointer in source.read(component)['helpPosCoords']:
+                    marker = source.resolve(component, pointer)
+                    if marker is None:
+                        raise ValueError(f'Missing startup marker: {source_id(component)} helpPosCoords')
+                    inactive.add(key(marker))
     return inactive
 
 

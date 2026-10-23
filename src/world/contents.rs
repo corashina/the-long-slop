@@ -47,6 +47,11 @@ pub struct GeneratedCapVisual {
     pub visual: crate::reference::CapVisualReference,
 }
 pub(crate) struct ContentInstance {
+    pub visual_revision: u64,
+    pub visual_published: u64,
+    pub visual_ready: bool,
+    pub visual_caps: usize,
+    pub visual_food: Option<(crate::interaction::items::FoodState, bool)>,
     pub replay_only: bool,
     pub restored: bool,
     pub suspended_bodies: Vec<(rapier3d::prelude::RigidBodyHandle, bool)>,
@@ -66,8 +71,33 @@ pub(crate) struct ContentInstance {
     pub baseline: Option<super::ObjectSnapshot>,
 }
 impl ContentInstance {
+    pub(crate) fn take_visual_change(
+        &mut self,
+        food: Option<(crate::interaction::items::FoodState, bool)>,
+    ) -> bool {
+        let ready = self.item.is_none() || self.restored;
+        if self.visual_ready != ready
+            || self.visual_caps != self.caps.len()
+            || self.visual_food != food
+        {
+            self.visual_revision = self.visual_revision.wrapping_add(1);
+            self.visual_ready = ready;
+            self.visual_caps = self.caps.len();
+            self.visual_food = food;
+        }
+        if self.visual_revision == self.visual_published {
+            return false;
+        }
+        self.visual_published = self.visual_revision;
+        true
+    }
     pub fn for_structure(placement: Placement) -> Self {
         Self {
+            visual_revision: 0,
+            visual_published: u64::MAX,
+            visual_ready: true,
+            visual_caps: 0,
+            visual_food: None,
             replay_only: false,
             restored: false,
             suspended_bodies: Vec::new(),
@@ -508,6 +538,11 @@ impl SourceContents {
                     continue;
                 }
                 self.push_active(ContentInstance {
+                    visual_revision: 0,
+                    visual_published: u64::MAX,
+                    visual_ready: true,
+                    visual_caps: 0,
+                    visual_food: None,
                     replay_only: self.cursors[index].replay_only,
                     origin: self
                         .replay_origin(&content.placement.id)
@@ -676,6 +711,11 @@ impl SourceContents {
                     .any(|c| c.content.placement.id == content.placement.id)
                 {
                     self.push_active(ContentInstance {
+                        visual_revision: 0,
+                        visual_published: u64::MAX,
+                        visual_ready: true,
+                        visual_caps: 0,
+                        visual_food: None,
                         replay_only,
                         origin: self
                             .replay_origin(&content.placement.id)
@@ -801,6 +841,11 @@ impl SourceContents {
                 }
             } else {
                 self.push_active(ContentInstance {
+                    visual_revision: 0,
+                    visual_published: u64::MAX,
+                    visual_ready: true,
+                    visual_caps: 0,
+                    visual_food: None,
                     replay_only,
                     origin: self
                         .replay_origin(&content.placement.id)
@@ -876,6 +921,13 @@ impl SourceContents {
             .instances()
             .find(|c| &c.placement.id == parent)
             .ok_or_else(|| ReferenceError("Generated lamp instance missing".into()))?;
+        let lamp_changed = current
+            .inputs
+            .lamps
+            .iter()
+            .find(|(p, s, _)| p == parent && s == source)
+            .map(|(_, _, value)| *value)
+            != Some(on);
         let required = current.inputs.retained_bytes().saturating_mul(4)
             + current.appearance.capacity() * std::mem::size_of::<super::NodeAppearance>() * 2
             + current.lights.capacity() * std::mem::size_of::<super::WorldLight>() * 2
@@ -931,6 +983,9 @@ impl SourceContents {
             .find(|c| &c.content.placement.id == parent)
         {
             active.content = content;
+            if lamp_changed {
+                active.visual_revision = active.visual_revision.wrapping_add(1);
+            }
         } else {
             self.cursors
                 .iter_mut()

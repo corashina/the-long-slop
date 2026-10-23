@@ -1,11 +1,12 @@
 use crate::reference::WorldPrototypeReference;
 use crate::world::{AbsolutePose, GeneratedId, SupplyDefinition, WorldOrigin};
+use bevy_platform::collections::HashMap as BevyHashMap;
 use std::collections::{HashMap, HashSet};
 
 use rapier3d::math::{Rotation, Vector};
 use rapier3d::prelude::RigidBodyHandle;
 
-use crate::fluids::{FluidContainer, VehicleFluids};
+use crate::fluids::{FluidContainer, FluidEntry, VehicleFluids, validate_fluid_entries};
 use crate::reference::{
     BodyId, FoodReference, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest,
     WheelSlotId,
@@ -48,17 +49,54 @@ pub struct ItemState {
 pub struct ItemStore {
     dirty: HashSet<ItemId>,
     states: Vec<ItemState>,
-    indices: HashMap<ItemId, usize>,
+    indices: BevyHashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
     /// Fuel, sump, and coolant state indices per vehicle.
     vehicle_tanks: Vec<[usize; 3]>,
     names: Vec<String>,
     vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
-    generated: HashMap<GeneratedId, ItemId>,
+    generated: BevyHashMap<GeneratedId, ItemId>,
+    membership_revision: u64,
     initialized_supplies: HashSet<ItemId>,
     next_generated: u32,
     origin: WorldOrigin,
+}
+
+/// Physical membership changes less often than item poses.
+#[derive(Default)]
+pub(crate) struct ItemBodyIndex {
+    revision: Option<u64>,
+    by_body: BevyHashMap<RigidBodyHandle, Vec<ItemId>>,
+    #[cfg(test)]
+    visits: usize,
+}
+
+impl ItemBodyIndex {
+    pub(crate) fn refresh(&mut self, items: &ItemStore) -> bool {
+        if self.revision == Some(items.membership_revision()) {
+            return false;
+        }
+        for ids in self.by_body.values_mut() {
+            ids.clear();
+        }
+        for item in items.iter() {
+            #[cfg(test)]
+            {
+                self.visits += 1;
+            }
+            if let Some(body) = item.body {
+                self.by_body.entry(body).or_default().push(item.id);
+            }
+        }
+        self.by_body.retain(|_, ids| !ids.is_empty());
+        self.revision = Some(items.membership_revision());
+        true
+    }
+
+    pub(crate) fn items(&self, body: RigidBodyHandle) -> &[ItemId] {
+        self.by_body.get(&body).map_or(&[], Vec::as_slice)
+    }
 }
 
 impl ItemStore {
@@ -100,11 +138,18 @@ impl ItemStore {
             });
             state.removed = record.removed;
             state.temperature = record.temperature;
-            if let (Some(fluid), Some(quantities)) = (&mut state.fluid, record.fluids) {
-                fluid.mixture.quantities_liters = quantities;
+            if let (Some(fluid), Some(saved)) = (&mut state.fluid, &record.fluids) {
+                fluid.restore_entries(saved);
             }
         }
         Ok(())
+    }
+    pub(crate) fn cleanup_loaded_fluids(&mut self) {
+        for state in &mut self.states {
+            if let Some(fluid) = &mut state.fluid {
+                fluid.cleanup_one();
+            }
+        }
     }
     /// Stable generated identity and active physical state for change capture.
     pub fn mark_dirty(&mut self, id: ItemId) {
@@ -137,18 +182,21 @@ impl ItemStore {
             .iter()
             .filter_map(|(key, id)| self.get(*id).map(|state| (key, state)))
     }
+    pub fn generated_item_id(&self, id: &GeneratedId) -> Option<ItemId> {
+        self.generated.get(id).copied()
+    }
     pub fn generated_item(&self, id: &GeneratedId) -> Option<&ItemState> {
         self.generated.get(id).and_then(|item| self.get(*item))
     }
     pub(crate) fn retained_binding_bytes(&self) -> usize {
-        use super::memory::{map, set, strings, vector};
+        use super::memory::{map, platform_map, set, strings, vector};
         set(&self.dirty)
             + vector(&self.states)
-            + map(&self.indices)
+            + platform_map(&self.indices)
             + vector(&self.body_ids)
             + strings(&self.names)
             + map(&self.slot_owners)
-            + map(&self.generated)
+            + platform_map(&self.generated)
             + set(&self.initialized_supplies)
             + self
                 .generated
@@ -172,7 +220,7 @@ impl ItemStore {
             .position(|food| food.kind == crate::reference::FoodKind::Sausage)
             .ok_or_else(|| ReferenceError("Missing sausage prototype".into()))?;
         let mut states = Vec::with_capacity(reference.items.len());
-        let mut indices = HashMap::with_capacity(reference.items.len());
+        let mut indices = BevyHashMap::with_capacity(reference.items.len());
         let mut body_ids = Vec::with_capacity(reference.items.len());
         for item in &reference.items {
             let pose = node_pose(reference, item.node)?;
@@ -265,7 +313,8 @@ impl ItemStore {
         }
         Ok(Self {
             dirty: HashSet::new(),
-            generated: HashMap::new(),
+            generated: BevyHashMap::new(),
+            membership_revision: 0,
             initialized_supplies: HashSet::new(),
             next_generated: reference
                 .items
@@ -552,6 +601,7 @@ impl ItemStore {
             removed: false,
             pending_attachment: false,
         });
+        self.membership_revision += 1;
         self.generated.insert(key, id);
         self.next_generated = next;
         Ok(id)
@@ -594,6 +644,7 @@ impl ItemStore {
             removed: false,
             pending_attachment: false,
         });
+        self.membership_revision += 1;
         Ok(())
     }
 
@@ -612,20 +663,25 @@ impl ItemStore {
         if !self.generated.values().any(|value| *value == id) {
             return Err(ReferenceError("Supply is not a generated item".into()));
         }
-        let mut mixture = crate::fluids::FluidMixture::default();
+        let mut entries = Vec::with_capacity(source.fluids.len());
         for fluid in &source.fluids {
-            if !(0..6).contains(&fluid.fluid_type)
-                || !fluid.amount.is_finite()
-                || fluid.amount < 0.0
-            {
-                return Err(ReferenceError("Invalid generated source fluid".into()));
-            }
-            mixture.quantities_liters[fluid.fluid_type as usize] += fluid.amount;
+            let fluid_type = u8::try_from(fluid.fluid_type)
+                .map_err(|_| ReferenceError("Invalid generated source fluid".into()))?;
+            entries.push(FluidEntry {
+                fluid_type,
+                amount: fluid.amount,
+            });
         }
-        if !source.capacity.is_finite() || source.capacity < mixture.total() {
+        if !validate_fluid_entries(&entries) || entries.iter().any(|entry| entry.amount < 0.) {
+            return Err(ReferenceError("Invalid generated source fluid".into()));
+        }
+        if !source.capacity.is_finite()
+            || source.capacity <= 0.
+            || source.capacity < entries.iter().map(|entry| entry.amount).sum::<f32>()
+        {
             return Err(ReferenceError("Invalid generated source capacity".into()));
         }
-        self.get_mut(id).unwrap().fluid = Some(FluidContainer::new(source.capacity, mixture));
+        self.get_mut(id).unwrap().fluid = Some(FluidContainer::new(source.capacity, &entries));
         self.initialized_supplies.insert(id);
         Ok(())
     }
@@ -651,10 +707,7 @@ impl ItemStore {
             condition: state.generated_condition.unwrap_or(1.),
             food: None,
             temperature: state.temperature,
-            fluid_quantities: state
-                .fluid
-                .as_ref()
-                .map(|fluid| fluid.mixture.quantities_liters),
+            fluids: state.fluid.as_ref().map(crate::fluids::FluidSnapshot::from),
             valve,
         })
     }
@@ -677,8 +730,9 @@ impl ItemStore {
             })
             || snapshot.temperature.is_some_and(|v| !v.is_finite())
             || snapshot
-                .fluid_quantities
-                .is_some_and(|values| values.iter().any(|v| !v.is_finite() || *v < 0.))
+                .fluids
+                .as_ref()
+                .is_some_and(|entries| !validate_fluid_entries(entries.as_slice()))
         {
             return Err(ReferenceError("Invalid generated object snapshot".into()));
         }
@@ -694,19 +748,12 @@ impl ItemStore {
             *condition = snapshot.condition;
         }
         item.temperature = snapshot.temperature;
-        if let Some(quantities) = snapshot.fluid_quantities {
+        if let Some(entries) = &snapshot.fluids {
             let fluid = item
                 .fluid
                 .as_mut()
                 .ok_or_else(|| ReferenceError("Source snapshot has no container".into()))?;
-            if quantities.iter().map(|v| f64::from(*v)).sum::<f64>()
-                > f64::from(fluid.capacity_liters) + 0.001
-            {
-                return Err(ReferenceError(
-                    "Restored fluid exceeds source capacity".into(),
-                ));
-            }
-            fluid.mixture.quantities_liters = quantities;
+            fluid.restore_entries(entries.as_slice());
         }
         Ok(())
     }
@@ -728,6 +775,7 @@ impl ItemStore {
         if self.states[index].location != ItemLocation::World || self.states[index].body.is_some() {
             return false;
         }
+        self.membership_revision += 1;
         self.generated.retain(|_, value| *value != id);
         self.initialized_supplies.remove(&id);
         self.dirty.remove(&id);
@@ -764,6 +812,26 @@ impl ItemStore {
 
     pub fn get_mut(&mut self, id: ItemId) -> Option<&mut ItemState> {
         let index = *self.indices.get(&id)?;
+        self.dirty.insert(id);
+        self.states.get_mut(index)
+    }
+
+    /// Changes only when items enter, leave, or change physical bodies.
+    pub fn membership_revision(&self) -> u64 {
+        self.membership_revision
+    }
+
+    /// Set physical membership before editing the remaining item state.
+    pub fn set_body(
+        &mut self,
+        id: ItemId,
+        body: Option<RigidBodyHandle>,
+    ) -> Option<&mut ItemState> {
+        let index = *self.indices.get(&id)?;
+        if self.states[index].body != body {
+            self.states[index].body = body;
+            self.membership_revision += 1;
+        }
         self.dirty.insert(id);
         self.states.get_mut(index)
     }
@@ -807,7 +875,10 @@ impl ItemStore {
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
         for (state, body) in self.states.iter_mut().zip(&self.body_ids) {
             if *body == id {
-                state.body = Some(handle);
+                if state.body != Some(handle) {
+                    state.body = Some(handle);
+                    self.membership_revision += 1;
+                }
             }
         }
     }
@@ -845,38 +916,83 @@ impl ItemStore {
     }
 }
 
-/// Project source signed state into the nonnegative core save format without changing gameplay.
-fn capture_fluids(fluid: &FluidContainer) -> Result<[f32; 6], crate::save::SaveError> {
-    let mut quantities = fluid.mixture.quantities_liters;
+/// Capture exact signed entries in source order without changing gameplay.
+fn capture_fluids(fluid: &FluidContainer) -> Result<Vec<FluidEntry>, crate::save::SaveError> {
+    let entries: Vec<_> = fluid.entries().collect();
     if !fluid.capacity_liters.is_finite()
-        || fluid.capacity_liters < 0.
-        || quantities.iter().any(|amount| !amount.is_finite())
+        || fluid.capacity_liters <= 0.
+        || !validate_fluid_entries(&entries)
     {
         return Err(crate::save::SaveError::CorruptData(
             "Nonfinite fluid or invalid capacity".into(),
         ));
     }
-    for amount in &mut quantities {
-        *amount = amount.max(0.);
+    Ok(entries)
+}
+
+#[cfg(test)]
+mod g04_ordered_state {
+    use super::*;
+
+    #[test]
+    fn capture_preserves_signed_state_and_rejects_nonfinite_without_mutation() {
+        let entries = [
+            FluidEntry {
+                fluid_type: 3,
+                amount: 3.,
+            },
+            FluidEntry {
+                fluid_type: 0,
+                amount: 0.,
+            },
+            FluidEntry {
+                fluid_type: 1,
+                amount: -0.25,
+            },
+        ];
+        let mut tank = FluidContainer::new(2., &entries);
+        assert_eq!(capture_fluids(&tank).unwrap(), entries);
+        tank.restore_entries(&[FluidEntry {
+            fluid_type: 3,
+            amount: f32::INFINITY,
+        }]);
+        assert!(capture_fluids(&tank).is_err());
+        assert_eq!(tank.entries().next().unwrap().amount, f32::INFINITY);
     }
-    let total: f64 = quantities.iter().map(|amount| f64::from(*amount)).sum();
-    let capacity = f64::from(fluid.capacity_liters);
-    if total > capacity {
-        let scale = capacity / total;
-        let mut remaining = capacity;
-        for amount in &mut quantities {
-            let scaled = (f64::from(*amount) * scale).min(remaining);
-            let rounded = scaled as f32;
-            // Round toward zero so the saved positive sum stays within capacity.
-            *amount = if f64::from(rounded) > scaled {
-                rounded.next_down()
-            } else {
-                rounded
-            };
-            remaining = (remaining - f64::from(*amount)).max(0.);
-        }
+}
+
+#[cfg(test)]
+mod g04_nonfinite_capture {
+    use super::*;
+
+    #[test]
+    fn g04_nonfinite_capture() {
+        let mut tank = FluidContainer::new(
+            10.,
+            &[
+                FluidEntry {
+                    fluid_type: 0,
+                    amount: 1.,
+                },
+                FluidEntry {
+                    fluid_type: 1,
+                    amount: 0.,
+                },
+            ],
+        );
+        crate::fluids::spill(&mut tank, 1.);
+        assert!(tank.mixture().amount(1).is_nan());
+        let before: Vec<_> = tank
+            .entries()
+            .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+            .collect();
+        assert!(capture_fluids(&tank).is_err());
+        let after: Vec<_> = tank
+            .entries()
+            .map(|entry| (entry.fluid_type, entry.amount.to_bits()))
+            .collect();
+        assert_eq!(after, before);
     }
-    Ok(quantities)
 }
 
 pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePose, ReferenceError> {
@@ -909,4 +1025,145 @@ pub fn node_pose(reference: &ReferenceManifest, id: NodeId) -> Result<VehiclePos
         position: position.to_array(),
         rotation: rotation.to_array(),
     })
+}
+
+#[cfg(test)]
+mod world_sync_tests {
+    use super::*;
+    use crate::reference::{AssetId, SourceId, Transform, WorldPrototypeNode, WorldPrototypeRole};
+    use crate::world::WorldLayer;
+
+    fn empty_store() -> ItemStore {
+        ItemStore {
+            dirty: HashSet::new(),
+            states: Vec::new(),
+            indices: BevyHashMap::new(),
+            body_ids: Vec::new(),
+            vehicle_tanks: Vec::new(),
+            names: Vec::new(),
+            vehicle_items: Vec::new(),
+            slot_owners: HashMap::new(),
+            generated: BevyHashMap::new(),
+            membership_revision: 0,
+            initialized_supplies: HashSet::new(),
+            next_generated: 0,
+            origin: WorldOrigin::default(),
+        }
+    }
+    fn key(ordinal: u32) -> GeneratedId {
+        GeneratedId {
+            layer: WorldLayer::Prop,
+            generator: SourceId {
+                file: "test".into(),
+                path_id: 1,
+            },
+            unit: [0; 2],
+            ordinal,
+            children: Vec::new(),
+        }
+    }
+    fn prototype() -> WorldPrototypeReference {
+        let transform = Transform {
+            translation: [0.; 3],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        };
+        WorldPrototypeReference {
+            source: key(0).generator,
+            role: WorldPrototypeRole::Prop,
+            asset: AssetId(0),
+            nodes: vec![WorldPrototypeNode {
+                source: key(0).generator,
+                name: "item".into(),
+                parent: None,
+                active: true,
+                renderer_enabled: true,
+                layer: 0,
+                transform: transform.clone(),
+                gltf_node: 0,
+            }],
+            controls: Vec::new(),
+            excluded_actions: Vec::new(),
+            deferred_materials: Vec::new(),
+            skins: Vec::new(),
+            bodies: Vec::new(),
+            colliders: Vec::new(),
+            prefab_pose: transform,
+        }
+    }
+    fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {
+        store
+            .insert_generated(
+                key(ordinal),
+                &prototype(),
+                AbsolutePose {
+                    position: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn world_sync_item_index_tracks_rebind_removal_swap_order_and_body_reuse() {
+        let mut store = empty_store();
+        let a = insert(&mut store, 0);
+        let b = insert(&mut store, 1);
+        let c = insert(&mut store, 2);
+        let body = RigidBodyHandle::from_raw_parts(3, 0);
+        let rebound = RigidBodyHandle::from_raw_parts(4, 0);
+        let reused = RigidBodyHandle::from_raw_parts(3, 1);
+        store.set_body(a, Some(body)).unwrap();
+        store.set_body(b, Some(body)).unwrap();
+        store.set_body(c, Some(body)).unwrap();
+        let mut index = ItemBodyIndex::default();
+        assert!(index.refresh(&store));
+        assert_eq!(index.items(body), &[a, b, c]);
+        store.set_body(a, Some(rebound)).unwrap();
+        assert!(index.refresh(&store));
+        assert_eq!(index.items(body), &[b, c]);
+        assert_eq!(index.items(rebound), &[a]);
+        store.set_body(a, None).unwrap();
+        assert!(store.remove_generated(a));
+        assert!(index.refresh(&store));
+        assert_eq!(index.items(body), &[c, b]);
+        assert!(index.items(rebound).is_empty());
+        store.set_body(b, Some(reused)).unwrap();
+        store.set_body(c, Some(reused)).unwrap();
+        assert!(index.refresh(&store));
+        assert!(index.items(body).is_empty());
+        assert_eq!(index.items(reused), &[c, b]);
+        assert_eq!(store.generated_item_id(&key(0)), None);
+        assert_eq!(store.generated_item_id(&key(1)), Some(b));
+        let revision = store.membership_revision();
+        assert!(!store.remove_generated(a));
+        assert_eq!(store.membership_revision(), revision);
+    }
+
+    #[test]
+    fn world_sync_pose_and_repeated_binding_do_not_rebuild_item_index() {
+        let mut store = empty_store();
+        let item = insert(&mut store, 0);
+        let body = RigidBodyHandle::from_raw_parts(2, 0);
+        store.set_body(item, Some(body)).unwrap();
+        let mut index = ItemBodyIndex::default();
+        assert!(index.refresh(&store));
+        let revision = store.membership_revision();
+        let visits = index.visits;
+        for step in 0..100 {
+            store.get_mut(item).unwrap().pose.position[0] = step as f32;
+            store.set_body(item, Some(body)).unwrap();
+            store.iter_mut().next().unwrap().pending_attachment = step % 2 == 0;
+            assert!(!index.refresh(&store));
+        }
+        assert_eq!(store.membership_revision(), revision);
+        assert_eq!(index.visits, visits);
+        assert_eq!(index.items(body), &[item]);
+        let second = insert(&mut store, 1);
+        assert!(index.refresh(&store));
+        let revision = store.membership_revision();
+        assert_eq!(insert(&mut store, 1), second);
+        assert_eq!(store.membership_revision(), revision);
+        assert!(!index.refresh(&store));
+    }
 }

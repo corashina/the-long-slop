@@ -16,13 +16,11 @@ pub struct WorldCameraSettings {
     pub mask: u32,
 }
 
-pub fn world_camera_settings(
-    reference: &crate::reference::ReferenceManifest,
-) -> WorldCameraSettings {
+pub fn world_camera_settings(fov_degrees: f32) -> WorldCameraSettings {
     WorldCameraSettings {
         near: 0.05,
         far: 15000.0,
-        fov_degrees: reference.player.field_of_view_degrees,
+        fov_degrees,
         mask: 0x14DA8F33,
     }
 }

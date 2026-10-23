@@ -41,3 +41,29 @@ fn startup_and_reload_prepare_all_faces_without_advancing_capture() {
     assert_eq!(schedule.job(), ProbeJob::Face(0));
     assert!(!schedule.published());
 }
+
+#[test]
+fn probe_cameras_stop_after_publication_and_resume_for_pending_capture() {
+    let mut schedule = ProbeSchedule::default();
+    assert!(schedule.cameras_active(false, true));
+    assert!(!schedule.cameras_active(false, false));
+    assert!(schedule.cameras_active(true, false));
+    for job in (0..6)
+        .map(ProbeJob::Face)
+        .chain([ProbeJob::FirstMip, ProbeJob::RemainingMipsAndPublish])
+    {
+        assert!(schedule.cameras_active(true, false));
+        if job != ProbeJob::Face(0) {
+            assert!(schedule.cameras_active(false, false));
+        }
+        assert_eq!(schedule.pending_job(true), Some(job));
+        // Completion represents the acknowledgement, including validated publication.
+        schedule.complete(job).unwrap();
+    }
+    assert!(schedule.published());
+    assert!(!schedule.cameras_active(true, false));
+    assert!(!schedule.cameras_active(false, false));
+    assert!(schedule.cameras_active(true, true));
+    schedule = ProbeSchedule::default();
+    assert!(schedule.cameras_active(true, false));
+}
