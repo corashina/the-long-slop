@@ -141,7 +141,7 @@ A completed capture writes `receipt.json` only after all required native observa
 `reference_root` supplies the accepted source and library receipts. It is read-only.
 Use `load_snapshot`, `verify_snapshot`, `native_engine_evidence`, and the existing managed-source hash constants.
 
-- [ ] Write tests named `test_preflight_rejects_changed_source`, `test_incomplete_capture_never_accepts`, and `test_capture_requires_native_phases`.
+- [x] Write tests named `test_preflight_rejects_changed_source`, `test_incomplete_capture_never_accepts`, and `test_capture_requires_native_phases`.
   Assert that a changed archive hash fails.
 
   Assert that missing repeats, missing samples, nonfinite values, and missing completion markers fail.
@@ -154,9 +154,9 @@ with self.assertRaises(ValueError):
 self.assertFalse((failed_output / 'receipt.json').exists())
 ```
 
-- [ ] Run `& $g11Python -B -m unittest tools.reference.tests.test_driving_probe`.
+- [x] Run `& $g11Python -B -m unittest tools.reference.tests.test_driving_probe`.
   Expect failure because `driving_probe` or its required behavior is absent.
-- [ ] Implement `preflight` and scratch setup in the three capture files.
+- [x] Implement `preflight` and scratch setup in the three capture files.
   Verify the complete source manifest and retained Steam receipt, not only two DLL hashes.
   Check `TheLongDrive.exe`, `MonoBleedingEdge`, Roslyn, Cecil, and the shipped physics module.
   Compile original observer code against the shipped assemblies.
@@ -165,7 +165,7 @@ self.assertFalse((failed_output / 'receipt.json').exists())
   Record original hashes, patched hashes, changed methods, and observer revision.
   Keep physics, engine, gear, random, and world-generation formulas unchanged.
   Suppress Steam initialization only in the scratch copy and record that patch.
-- [ ] Implement native capture at the original car, engine, and physics callback boundaries.
+- [x] Implement native capture at the original car, engine, and physics callback boundaries.
   Use observation hooks with explicit entry and exit phases.
   Inject controls at the checked source input boundary without replacing its smoothing logic.
   Require the original menu and selected Lada initialization to finish.
@@ -175,16 +175,16 @@ self.assertFalse((failed_output / 'receipt.json').exists())
   Launch the scratch player hidden. Use a 180-second per-run timeout.
   On timeout, terminate only the exact process handle created for that run.
   Preserve partial samples and logs under the failed run directory.
-- [ ] Define the scenario JSON fields.
+- [x] Define the scenario JSON fields.
   Include scenario identity, probe kind, source object identities, setup, frame schedule, control schedule, and duration.
   Include initial body, wheel, engine, fluid, assist, and surface state.
   Include all scenario rows in the approved specification.
   Use source-recovered values. Do not fill missing measurements with estimates.
-- [ ] Run the Python tests again. Expect all named tests to pass.
+- [x] Run the Python tests again. Expect all named tests to pass.
   Run `& $g11Python -B -m tools.reference.driving_probe preflight --source-root $g11Source --reference-root $g11ReferenceProject`.
   Expect a verified receipt with app `1017180`, build `11140890`, Unity `2021.3.18f1`, and checked source hashes.
   Preflight does not launch the player.
-- [ ] Commit the capture tool, its tests, and scenario definitions as `feat: add checked G11 native driving capture`.
+- [x] Commit the capture tool, its tests, and scenario definitions as `feat: add checked G11 native driving capture`.
   Do not stage copied assemblies or raw runs.
 
 ### Task 2: Capture source behavior and freeze the measured model
@@ -634,3 +634,22 @@ Do not mark G11 accepted without the separately agreed normal-input browser mile
 
 This plan requires user review before implementation.
 The execution method remains subagent-driven, as the user requested.
+
+
+## Task 2 measurement coverage notes
+
+The current 39 cases do not complete the approved measurement requirement.
+The evidence audit is .superpowers/sdd/2026-10-20-g11-driving-physics/task-2-model-evidence-audit.md.
+Complete these bounded measurement layers before model publication:
+
+- [ ] Qualify explicit source events, actual free launch, separate braking, and native teardown.
+- [ ] Observe live support and condition transitions through original APIs.
+- [ ] Observe fresh source save/load through original scene startup, without new-game holds or canonical setters.
+- [ ] Identify airborne angular response through actual torque changes and torque-off coast, for each support.
+- [ ] Identify pure and combined contact response with separated force and moment observations.
+- [ ] Observe actual suspension endpoints and distinguish static load from dynamic damping.
+- [ ] Observe relative motion and reaction on a dynamic support body.
+- [ ] Freeze an explicit bounded model, its inference procedure, residuals, and confirmation envelopes.
+
+These notes refine Task2 measurements. They do not authorize guessed equations or a product scheduling rewrite.
+Task3 still requires the qualifying fixture and measured-model commit.

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "live-tire-support-transitions",
+      "probe_kind": "assembled_lada",
+      "source_objects": {
+        "car": { "file": "level1", "path_id": 77839 },
+        "engine": { "file": "level1", "path_id": 68282 },
+        "wheel_slots": [
+          { "file": "level1", "path_id": 77840 },
+          { "file": "level1", "path_id": 77847 },
+          { "file": "level1", "path_id": 77862 },
+          { "file": "level1", "path_id": 77858 }
+        ]
+      },
+      "setup": {
+        "seed": 1,
+        "removed_driven_rims": 0,
+        "auto_clutch": true,
+        "auto_shift": true,
+        "support": "full-tire",
+        "height": "source-startup",
+        "engine": "source-startup",
+        "fluids": "source-startup",
+        "surface": "measured-local-source-contact",
+        "velocity_mps": { "x": 0.0, "y": 0.0, "z": 0.0 },
+        "load_multiplier": 1.0
+      },
+      "frame_schedule": {
+        "unit": "original render frame",
+        "start": "after original menu and Lada initialization",
+        "sampling": "source callback entry and exit; FixedUpdate and WaitForFixedUpdate",
+        "render_timing": "unmodified; record Time.deltaTime",
+        "fixed_timing": "unmodified source Time.fixedDeltaTime",
+        "velocity_frame": "vehicle-local axes"
+      },
+      "controls": [
+        { "frame": 0, "throttle": 0.0, "brake": 0.0, "clutch": 0.0, "steer": 0.0, "ignition_button_held": true, "handbrake_press": false },
+        { "frame": 89, "throttle": 0.0, "brake": 0.0, "clutch": 0.0, "steer": 0.0, "ignition_button_held": true, "handbrake_press": true },
+        { "frame": 90, "throttle": 1.0, "brake": 0.0, "clutch": 0.0, "steer": 0.0, "ignition_button_held": false, "handbrake_press": false }
+      ],
+      "duration_frames": 1840,
+      "required_observations": [
+        "nonzero target-wheel RPM before every source API event",
+        "all four source wheel slots and original part identities",
+        "immediate API result and later source plus physics state",
+        "condition cache, rim data, native stiffness, radius, mass, pose, and contact"
+      ],
+      "input_mode": "keyboard-digital",
+      "parking_brake_intent": "release-before-acceleration",
+      "transitions": [
+        { "id": "condition", "action": "refresh_tire_condition", "target": "primary-driven", "source_context": "direct-component-api", "frame": 239, "condition_state": 4, "observe_frames": 100 },
+        { "id": "remove-tire", "action": "remove_tire", "target": "primary-driven", "source_context": "direct-component-api", "frame": 389, "observe_frames": 100 },
+        { "id": "remove-cover", "action": "remove_cover", "target": "primary-driven", "source_context": "direct-component-api", "frame": 539, "observe_frames": 100 },
+        { "id": "remove-primary-rim", "action": "remove_driven_rim", "target": "primary-driven", "source_context": "direct-component-api", "frame": 689, "observe_frames": 100 },
+        { "id": "remove-other-cover", "action": "remove_other_cover", "target": "other-driven", "source_context": "direct-component-api", "frame": 839, "observe_frames": 100 },
+        { "id": "remove-other-rim", "action": "remove_other_driven_rim", "target": "other-driven", "source_context": "direct-component-api", "frame": 989, "observe_frames": 100 },
+        { "id": "remount-primary-rim", "action": "remount_driven_rim", "target": "primary-driven", "source_context": "direct-component-api", "frame": 1139, "observe_frames": 100 },
+        { "id": "remount-other-rim", "action": "remount_other_driven_rim", "target": "other-driven", "source_context": "direct-component-api", "frame": 1289, "observe_frames": 100 },
+        { "id": "remount-tire", "action": "remount_tire", "target": "primary-driven", "source_context": "direct-component-api", "frame": 1439, "observe_frames": 100 },
+        { "id": "remount-cover", "action": "remount_cover", "target": "primary-driven", "source_context": "direct-component-api", "frame": 1589, "observe_frames": 100 },
+        { "id": "remount-other-cover", "action": "remount_other_cover", "target": "other-driven", "source_context": "direct-component-api", "frame": 1739, "observe_frames": 100 }
+      ]
+    }
+  ]
+}

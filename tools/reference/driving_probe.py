@@ -178,6 +178,266 @@ def validate_timing(samples, scenario):
     return {'initial_unlinked_physics_steps': [s['step'] for s in physics if not s['input_sequence']]}
 
 
+TRANSITION_ACTIONS = {
+    'refresh_tire_condition', 'remove_tire', 'remove_cover', 'remove_driven_rim',
+    'remove_other_cover', 'remove_other_driven_rim', 'remount_driven_rim',
+    'remount_other_driven_rim', 'remount_tire', 'remount_cover', 'remount_other_cover',
+}
+
+
+def validate_transition_schedule(scenario):
+    """Validate an explicit source transition sequence before native setup."""
+    events = scenario.get('transitions')
+    if scenario.get('probe_kind') != 'assembled_lada' or not isinstance(events, list) or not events:
+        raise ValueError('Source transitions require an assembled-Lada event list')
+    duration, _ = validate_schedule(scenario)
+    ids, last_frame, last_observation_frame = set(), -1, -1
+    for event in events:
+        if not isinstance(event, dict):
+            raise ValueError('Source transition event must be an object')
+        event_id, action, frame = event.get('id'), event.get('action'), event.get('frame')
+        if (not isinstance(event_id, str) or not event_id.replace('-', '').isalnum() or event_id in ids or
+            action not in TRANSITION_ACTIONS or type(frame) is not int or frame <= last_frame or
+            frame <= last_observation_frame or frame >= duration):
+            raise ValueError('Source transition identity, action, or frame is invalid')
+        if event.get('target') not in ('primary-driven', 'other-driven'):
+            raise ValueError('Source transition target must name a driven slot')
+        if event.get('source_context') != 'direct-component-api':
+            raise ValueError('Source transition must declare direct component API semantics')
+        if type(event.get('observe_frames')) is not int or event['observe_frames'] < 1:
+            raise ValueError('Source transition must declare a later observation window')
+        if frame + event['observe_frames'] >= duration:
+            raise ValueError('Source transition later observation exceeds the run')
+        if action == 'refresh_tire_condition' and (type(event.get('condition_state')) is not int or
+                not 0 <= event['condition_state'] <= 4):
+            raise ValueError('Tire condition state must be a source state from zero to four')
+        ids.add(event_id)
+        last_frame = frame
+        last_observation_frame = frame + event['observe_frames']
+    return events
+
+
+def _transition_number(value, name):
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError('Source transition channel must be finite numeric data: ' + name)
+
+
+def _transition_snapshot(snapshot):
+    if not isinstance(snapshot, dict):
+        raise ValueError('Source transition snapshot is missing')
+    for name in ('frame', 'physics_step', 'driven_wheels_num', 'installed_driven_rims',
+                 'source_lock_events', 'wheel_activation_events'):
+        if type(snapshot.get(name)) is not int or snapshot[name] < 0:
+            raise ValueError('Source transition snapshot count is invalid: ' + name)
+    if not isinstance(snapshot.get('phase'), str) or not snapshot['phase']:
+        raise ValueError('Source transition snapshot phase is missing')
+    slots = snapshot.get('slots')
+    if not isinstance(slots, list) or len(slots) != 4:
+        raise ValueError('Source transition snapshot must include all four wheel slots')
+    slot_keys = [slot.get('slot_key') for slot in slots if isinstance(slot, dict)]
+    if len(slot_keys) != 4 or any(not isinstance(key, str) or not key for key in slot_keys) or len(set(slot_keys)) != 4:
+        raise ValueError('Source transition snapshot has missing or duplicate wheel slots')
+    for slot in slots:
+        for name in ('retained_rim_key', 'retained_tire_key', 'retained_cover_key'):
+            if not isinstance(slot.get(name), str) or not slot[name]:
+                raise ValueError('Source transition slot identity is missing: ' + name)
+        for name in ('rim_key', 'tire_key', 'cover_key'):
+            if slot.get(name) is not None and not isinstance(slot[name], str):
+                raise ValueError('Source transition current slot key is invalid: ' + name)
+        for name in ('rim_instance_id', 'tire_instance_id', 'cover_instance_id'):
+            if type(slot.get(name)) is not int or slot[name] <= 0:
+                raise ValueError('Source transition part identity is invalid: ' + name)
+        if type(slot.get('condition_state')) is not int or slot['condition_state'] < -1:
+            raise ValueError('Source transition condition state is invalid')
+        if type(slot.get('native_wheel_index')) is not int or slot['native_wheel_index'] < -1:
+            raise ValueError('Source transition native wheel binding is invalid')
+        for name in ('driven', 'condition_available', 'rim_data_available', 'rim_present', 'tire_present',
+                     'cover_present', 'rim_active', 'tire_active', 'cover_active'):
+            if type(slot.get(name)) is not bool:
+                raise ValueError('Source transition slot flag is invalid: ' + name)
+        if not slot['condition_available'] or not slot['rim_data_available']:
+            raise ValueError('Source transition condition cache or rim data is unavailable')
+        for name in ('tire_slip1', 'tire_slip2', 'rim_felni_radius', 'rim_data_radius',
+                     'rim_data_slip1', 'rim_data_slip2', 'rim_data_mass'):
+            _transition_number(slot.get(name), name)
+        if slot['rim_present'] != bool(slot['rim_key']) or slot['tire_present'] != bool(slot['tire_key']) or slot['cover_present'] != bool(slot['cover_key']):
+            raise ValueError('Source transition current part key differs from slot presence')
+    driven_slots = [slot for slot in slots if slot['driven']]
+    if len(driven_slots) != 2:
+        raise ValueError('Source transition snapshot must include both driven slots')
+    if (any(slot['native_wheel_index'] < 0 for slot in driven_slots) or
+            any(slot['native_wheel_index'] != -1 for slot in slots if not slot['driven']) or
+            len({slot['native_wheel_index'] for slot in driven_slots}) != 2):
+        raise ValueError('Source transition driven wheel bindings are missing or duplicated')
+    installed = sum(slot['rim_present'] for slot in driven_slots)
+    if snapshot['installed_driven_rims'] != installed or snapshot['driven_wheels_num'] != max(installed, 1):
+        raise ValueError('Source driven-rim count or clamped divisor differs from observed slots')
+    native = snapshot.get('native_wheels')
+    if not isinstance(native, list) or len(native) < 4:
+        raise ValueError('Source transition native wheel channels are missing')
+    for index, wheel in enumerate(native):
+        if not isinstance(wheel, dict) or not isinstance(wheel.get('key'), str) or not wheel['key']:
+            raise ValueError('Source transition native wheel identity is missing')
+        for name in ('index', 'instance_id', 'body_instance_id'):
+            minimum = 0 if name in ('index', 'body_instance_id') else 1
+            if type(wheel.get(name)) is not int or wheel[name] < minimum:
+                raise ValueError('Source transition native wheel identity is invalid: ' + name)
+        if wheel['index'] != index:
+            raise ValueError('Source transition native wheel order changed')
+        if wheel.get('body_key') is not None and not isinstance(wheel['body_key'], str):
+            raise ValueError('Source transition native body key is invalid')
+        for name in ('enabled', 'active_self', 'active_hierarchy', 'contact'):
+            if type(wheel.get(name)) is not bool:
+                raise ValueError('Source transition native wheel flag is invalid: ' + name)
+        for name in ('rpm', 'radius', 'mass', 'damping', 'forward_stiffness', 'sideways_stiffness'):
+            _transition_number(wheel.get(name), name)
+        for name, components in (('pose', ('x', 'y', 'z')), ('rotation', ('x', 'y', 'z', 'w'))):
+            vector = wheel.get(name)
+            if not isinstance(vector, dict):
+                raise ValueError('Source transition native wheel pose is missing: ' + name)
+            for component in components:
+                _transition_number(vector.get(component), name + '.' + component)
+    if (len({wheel['key'] for wheel in native}) != len(native) or
+            len({wheel['instance_id'] for wheel in native}) != len(native) or
+            any(slot['native_wheel_index'] >= len(native) for slot in driven_slots)):
+        raise ValueError('Source transition native wheel bindings are not unique')
+def validate_transition_evidence(run, scenario):
+    expected = validate_transition_schedule(scenario)
+    observed = run.get('transitions')
+    if not isinstance(observed, list) or len(observed) != len(expected):
+        raise ValueError('Native source transition evidence is incomplete')
+    for index, (declaration, event) in enumerate(zip(expected, observed)):
+        methods = {
+            'refresh_tire_condition': 'partconditionscript.Refresh(int)',
+            'remove_tire': 'partslotscript.UnCraft(false)',
+            'remove_cover': 'partslotscript.UnCraft(false)',
+            'remove_other_cover': 'partslotscript.UnCraft(false)',
+            'remove_driven_rim': 'partslotscript.UnCraft(false)',
+            'remove_other_driven_rim': 'partslotscript.UnCraft(false)',
+            'remount_driven_rim': 'partslotscript.CanCraft(partscript)+Craft(partscript)',
+            'remount_other_driven_rim': 'partslotscript.CanCraft(partscript)+Craft(partscript)',
+            'remount_tire': 'partslotscript.CanCraft(partscript)+Craft(partscript)',
+            'remount_cover': 'partslotscript.CanCraft(partscript)+Craft(partscript)',
+            'remount_other_cover': 'partslotscript.CanCraft(partscript)+Craft(partscript)',
+        }
+        if (event.get('id'), event.get('action'), event.get('target'), event.get('scheduled_frame'),
+                event.get('source_context'), event.get('source_method')) != (
+            declaration['id'], declaration['action'], declaration['target'], declaration['frame'],
+            declaration['source_context'], methods[declaration['action']]):
+            raise ValueError('Native source transition identity or method differs')
+        if event.get('api_success') is not True:
+            raise ValueError('Original source transition API failed')
+        if (type(event.get('before_physics_step')) is not int or type(event.get('later_physics_step')) is not int or
+                event['later_physics_step'] <= event['before_physics_step']):
+            raise ValueError('Source transition lacks a later physics sample')
+        _transition_number(event.get('rpm_before'), 'rpm_before')
+        if event['rpm_before'] == 0:
+            raise ValueError('Source transition requires nonzero pre-event wheel RPM')
+        if (type(event.get('rpm_wheel_index')) is not int or event['rpm_wheel_index'] < 0 or
+                event.get('target_slot_key') is None or not event.get('api_result')):
+            raise ValueError('Source transition lacks target slot or immediate API result')
+        if declaration['action'].startswith('remount_') and event.get('can_craft') is not True:
+            raise ValueError('Source remount was not allowed by CanCraft')
+        snapshots = [event.get(key) for key in ('before', 'immediate', 'later')]
+        for snapshot in snapshots:
+            _transition_snapshot(snapshot)
+        if snapshots[0]['frame'] != declaration['frame'] or snapshots[1]['frame'] != declaration['frame']:
+            raise ValueError('Source transition before and immediate frames differ from the declaration')
+        expected_later_frame = declaration['frame'] + declaration['observe_frames']
+        if (event.get('later_after_frame') != expected_later_frame or
+                snapshots[2]['frame'] < expected_later_frame or snapshots[2]['frame'] <= snapshots[1]['frame']):
+            raise ValueError('Source transition later frame misses its declared observation window')
+        if (snapshots[0]['physics_step'] != event['before_physics_step'] or
+                snapshots[1]['physics_step'] != event['before_physics_step'] or
+                snapshots[2]['physics_step'] != event['later_physics_step'] or
+                event['later_physics_step'] <= event['before_physics_step']):
+            raise ValueError('Source transition later physics step is missing or stale')
+        if event.get('api_result') != ('void-return' if declaration['action'] == 'refresh_tire_condition' else 'True'):
+            raise ValueError('Source transition immediate API outcome differs')
+        before_slots = {slot['slot_key']: slot for slot in event['before']['slots']}
+        immediate_slots = {slot['slot_key']: slot for slot in event['immediate']['slots']}
+        later_slots = {slot['slot_key']: slot for slot in event['later']['slots']}
+        if set(before_slots) != set(immediate_slots) or set(before_slots) != set(later_slots):
+            raise ValueError('Source transition lost or changed a wheel slot identity')
+        target_before = before_slots.get(event['target_slot_key'])
+        target_immediate = immediate_slots.get(event['target_slot_key'])
+        if target_before is None or target_immediate is None:
+            raise ValueError('Source transition target slot is missing from its snapshots')
+        if target_before.get('native_wheel_index') != event['rpm_wheel_index']:
+            raise ValueError('Source transition RPM wheel differs from its target slot')
+        if event['rpm_wheel_index'] >= len(event['before']['native_wheels']):
+            raise ValueError('Source transition target native wheel is missing')
+        native = event['before']['native_wheels'][event['rpm_wheel_index']]
+        if native.get('rpm') != event['rpm_before'] or native.get('rpm', 0) == 0:
+            raise ValueError('Source transition RPM does not match the retained target wheel')
+        expected_presence = {
+            'remove_tire': ('tire_present', False), 'remove_cover': ('cover_present', False),
+            'remove_other_cover': ('cover_present', False),
+            'remove_driven_rim': ('rim_present', False), 'remove_other_driven_rim': ('rim_present', False),
+            'remount_tire': ('tire_present', True), 'remount_cover': ('cover_present', True),
+            'remount_other_cover': ('cover_present', True),
+            'remount_driven_rim': ('rim_present', True), 'remount_other_driven_rim': ('rim_present', True),
+        }.get(declaration['action'])
+        if expected_presence and target_immediate.get(expected_presence[0]) is not expected_presence[1]:
+            raise ValueError('Source transition immediate slot state differs from its source API action')
+        if declaration['action'] == 'refresh_tire_condition' and target_immediate.get('condition_state') != declaration['condition_state']:
+            raise ValueError('Source condition API did not apply the declared condition state')
+        for slot_key, original in before_slots.items():
+            for phase in ('immediate', 'later'):
+                observed_slot = {slot['slot_key']: slot for slot in event[phase]['slots']}[slot_key]
+                for identity, instance_id in (('retained_rim_key', 'rim_instance_id'),
+                                              ('retained_tire_key', 'tire_instance_id'),
+                                              ('retained_cover_key', 'cover_instance_id')):
+                    if (not original.get(identity) or original.get(identity) != observed_slot.get(identity) or
+                            type(original.get(instance_id)) is not int or original[instance_id] <= 0 or
+                            original.get(instance_id) != observed_slot.get(instance_id)):
+                        raise ValueError('Source transition changed an original part identity')
+        if expected_presence and target_before.get(expected_presence[0]) is expected_presence[1]:
+            raise ValueError('Source transition did not change the requested support state')
+        if expected_presence and later_slots[event['target_slot_key']].get(expected_presence[0]) is not expected_presence[1]:
+            raise ValueError('Later source slot state differs from the successful API result')
+        source_wheels = snapshots[0]['native_wheels']
+        for snapshot in snapshots:
+            wheels = snapshot['native_wheels']
+            if (len(wheels) != len(source_wheels) or
+                    any(not wheel.get('key') or type(wheel.get('instance_id')) is not int or wheel['instance_id'] <= 0
+                        for wheel in wheels) or
+                    [(wheel['key'], wheel['instance_id']) for wheel in wheels] !=
+                    [(wheel['key'], wheel['instance_id']) for wheel in source_wheels]):
+                raise ValueError('Source transition changed or lost a native wheel identity')
+        if (len({snapshot.get('source_lock_events') for snapshot in snapshots}) != 1 or
+                len({snapshot.get('wheel_activation_events') for snapshot in snapshots}) != 1):
+            raise ValueError('Source lock or wheel activation overlapped a transition')
+        if declaration['action'] == 'refresh_tire_condition':
+            if (event.get('condition_state') != declaration['condition_state'] or
+                    target_before.get('condition_state') == declaration['condition_state'] or
+                    target_immediate.get('condition_state') != declaration['condition_state'] or
+                    later_slots[event['target_slot_key']].get('condition_state') != declaration['condition_state']):
+                raise ValueError('Source condition API did not change to its declared condition state')
+        for slot in event['later']['slots']:
+            if not slot.get('slot_key') or not slot.get('retained_rim_key') or not slot.get('retained_tire_key') or not slot.get('retained_cover_key'):
+                raise ValueError('Later source transition sample lost a slot or original part identity')
+        expected_identities = sorted({identity for slot in event['before']['slots'] for identity in
+                                      (slot['slot_key'], slot['retained_rim_key'], slot['retained_tire_key'], slot['retained_cover_key'])})
+        if (not event.get('original_identities') or event.get('original_identities') != expected_identities or
+                event.get('identities_after') != expected_identities):
+            raise ValueError('Source transition lost an original part identity')
+        if index and event['scheduled_frame'] <= observed[index-1].get('later_after_frame', -1):
+            raise ValueError('Source transition events overlap a required later observation')
+
+        rim_counts = {
+            'remove_driven_rim': ((2, 2), (1, 1), (1, 1)),
+            'remove_other_driven_rim': ((1, 1), (0, 1), (0, 1)),
+            'remount_driven_rim': ((0, 1), (1, 1), (1, 1)),
+            'remount_other_driven_rim': ((1, 1), (2, 2), (2, 2)),
+        }.get(declaration['action'])
+        observed_counts = tuple((snapshot['installed_driven_rims'], snapshot['driven_wheels_num']) for snapshot in snapshots)
+        if rim_counts is not None and observed_counts != rim_counts:
+            raise ValueError('Driven-rim count or clamped divisor differs across the declared support transition')
+
+
+
+
 def validate_run(run, scenario):
     curve = validate_curve_run(run, scenario)
     finite(run)
@@ -233,6 +493,8 @@ def validate_run(run, scenario):
     checked_scenario = dict(scenario, duration_frames=samples[-1]['frame']) if scenario['probe_kind'] in ('wheel_angular','single_wheel_contact') else scenario
     timing = validate_timing(samples, checked_scenario)
     controls = validate_controls(run, checked_scenario)
+    if 'transitions' in scenario:
+        validate_transition_evidence(run, scenario)
     if scenario['probe_kind']=='wheel_angular':
         timing['angular'] = validate_angular(run, scenario)
     if scenario['probe_kind']=='single_wheel_contact':
@@ -402,6 +664,7 @@ def capture(source_root: Path, reference_root: Path,
         validate_schedule(row)
         if row['probe_kind']=='wheel_angular': validate_angular_schedule(row)
         if row['probe_kind']=='single_wheel_contact': validate_contact_schedule(row)
+        if 'transitions' in row: validate_transition_schedule(row)
     output.mkdir(parents=True)
     write_json(output / 'preflight.json', {k: v for k, v in pre.items() if k != 'source_geometry_map'})
     write_json(output / 'source-geometry-map.json', pre.get('source_geometry_map', {}))

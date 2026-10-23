@@ -54,6 +54,45 @@ public sealed class G11Capture : MonoBehaviour
         public G11AngularProbe.Input angular;
         public G11ContactProbe.Input contact;public G11AngularProbe.BodyInput contact_body_input;public bool contact_body_input_from_source;
         public float[] engine_torque_holdout_inputs;
+        public TransitionInput[] transitions;
+    }
+    [Serializable] public class TransitionInput
+    {
+        public string id,action,target,source_context; public int frame,condition_state,observe_frames;
+    }
+    [Serializable] public class TransitionSlotState
+    {
+        public string slot_key,rim_key,tire_key,cover_key,retained_rim_key,retained_tire_key,retained_cover_key;
+        public int rim_instance_id,tire_instance_id,cover_instance_id,condition_state,native_wheel_index;
+        public bool driven,condition_available,rim_data_available,rim_present,tire_present,cover_present,rim_active,tire_active,cover_active;
+        public float tire_slip1,tire_slip2,rim_felni_radius,rim_data_radius,rim_data_slip1,rim_data_slip2,rim_data_mass;
+    }
+    [Serializable] public class TransitionWheelState
+    {
+        public string key,body_key; public int instance_id,body_instance_id,index;
+        public bool enabled,active_self,active_hierarchy,contact;
+        public float rpm,radius,mass,damping,forward_stiffness,sideways_stiffness;
+        public Vector3 pose; public Quaternion rotation;
+    }
+    [Serializable] public class TransitionSnapshot
+    {
+        public string phase; public int frame,physics_step,driven_wheels_num,installed_driven_rims,source_lock_events,wheel_activation_events;
+        public TransitionSlotState[] slots; public TransitionWheelState[] native_wheels;
+        public G11Geometry.Snapshot geometry;
+    }
+    [Serializable] public class TransitionEvidence
+    {
+        public string id,action,target,source_context,source_method,api_result,target_slot_key;
+        public int scheduled_frame,before_physics_step,later_physics_step,rpm_wheel_index,later_after_frame,condition_state;
+        public float rpm_before; public bool api_success,can_craft;
+        public string[] original_identities,identities_after;
+        public TransitionSnapshot before,immediate,later;
+    }
+    sealed class RetainedWheelSlot
+    {
+        public partslotscript slot,tire_slot,cover_slot;
+        public partscript rim,tire,cover;
+        public int native_wheel_index;
     }
     [Serializable] public struct Wheel
     {
@@ -186,6 +225,7 @@ public sealed class G11Capture : MonoBehaviour
         public G11Lifecycle.Report lifecycle=G11Lifecycle.report;
         public G11BodyTrace.Report body_trace=G11BodyTrace.report;
         public G11Cargo.Report cargo_input=G11Cargo.report;
+        public List<TransitionEvidence> transitions=new List<TransitionEvidence>();
         public string[] unavailable={"WheelCollider internal angular inertia", "PhysX internal contact solver impulses", "Independent native engine, service, and parking brake torque decomposition"};
     }
     static readonly HashSet<partslotscript> completedMounts=new HashSet<partslotscript>();
@@ -210,6 +250,9 @@ public sealed class G11Capture : MonoBehaviour
     static WheelHit sourceContact;
     static readonly object bufferGate=new object();
     static readonly Dictionary<int,string> surfacePaths=new Dictionary<int,string>();
+    static RetainedWheelSlot[] retainedWheelSlots;
+    static int nextTransition;
+    static TransitionEvidence awaitingTransition;
     static Timer timeoutTimer;
     static string Output { get { return Environment.GetEnvironmentVariable("G11_RUN_ROOT"); } }
     public static string ProfilePath() { return Environment.GetEnvironmentVariable("G11_PROFILE_ROOT"); }
@@ -577,6 +620,146 @@ public sealed class G11Capture : MonoBehaviour
             tanks=target.GetComponentsInChildren<tankscript>(true).Select((tank,index)=>new Tank{
                 index=index,path=RelativePath(target.transform,tank.transform),fluid_json=JsonUtility.ToJson(tank.F)}).ToArray()};
     }
+    static void PrepareTransitionSlots()
+    {
+        var slots=car.GetComponentsInChildren<partslotscript>(true)
+            .Where(value=>value.part!=null && value.part.p!=null && value.part.p.wheel!=null)
+            .OrderBy(value=>G11Geometry.Key(value),StringComparer.Ordinal).ToArray();
+        if(slots.Length!=4 || car.DrivenWheelSlots==null || car.DrivenWheelSlots.Count!=2 || car.WHDriven==null || car.WHDriven.Count!=2)
+            throw new InvalidOperationException("Source transition requires four wheel slots and two driven wheel bindings");
+        retainedWheelSlots=slots.Select(slot=>
+        {
+            var rim=slot.part;
+            var tireSlot=rim.p.wheel.gumi;
+            var coverSlot=rim.cover_CantCraftIfCovered;
+            return new RetainedWheelSlot{slot=slot,rim=rim,tire_slot=tireSlot,tire=tireSlot==null?null:tireSlot.part,
+                cover_slot=coverSlot,cover=coverSlot==null?null:coverSlot.part,native_wheel_index=-1};
+        }).ToArray();
+        for(int driven=0;driven<2;driven++)
+        {
+            var entry=retainedWheelSlots.Single(value=>value.slot==car.DrivenWheelSlots[driven]);
+            entry.native_wheel_index=Array.IndexOf(sourceWheels,car.WHDriven[driven]);
+            if(entry.native_wheel_index<0 || entry.tire==null || entry.tire.p==null || entry.tire.p.gumi==null ||
+                entry.tire.p.gumi.pc==null || entry.cover_slot==null || entry.cover==null)
+                throw new InvalidOperationException("Source driven wheel lacks retained tire, condition, cover, or native wheel identity");
+        }
+        if(retainedWheelSlots.Any(value=>value.rim==null || value.rim.p.wheel==null || value.tire==null || value.cover==null))
+            throw new InvalidOperationException("Source transition requires four original rims, tires, and covers");
+    }
+    static TransitionSnapshot CaptureTransitionSnapshot(string phase)
+    {
+        var snapshot=new TransitionSnapshot{phase=phase,frame=Time.frameCount-startFrame,physics_step=observedPhysicsStep,
+            driven_wheels_num=car.DrivenWheelsNum(),installed_driven_rims=car.DrivenWheelSlots.Count(value=>value.part!=null),
+            source_lock_events=G11Geometry.snapshots.Count(value=>value.phase=="storage.lock.entry"),wheel_activation_events=G11Geometry.activation_count,
+            slots=retainedWheelSlots.Select((entry,index)=>
+            {
+                var currentRim=entry.slot.part;
+                var currentTire=entry.tire_slot==null?null:entry.tire_slot.part;
+                var currentCover=entry.cover_slot==null?null:entry.cover_slot.part;
+                var tire=entry.tire==null || entry.tire.p==null?null:entry.tire.p.gumi;
+                var pc=tire==null?null:tire.pc;
+                var wheel=entry.rim==null || entry.rim.p==null?null:entry.rim.p.wheel;
+                var data=wheel==null?null:wheel.data;
+                return new TransitionSlotState{slot_key=G11Geometry.Key(entry.slot),
+                    driven=car.DrivenWheelSlots.Contains(entry.slot),
+                    native_wheel_index=entry.native_wheel_index,
+                    rim_key=currentRim==null?null:G11Geometry.Key(currentRim.transform),
+                    tire_key=currentTire==null?null:G11Geometry.Key(currentTire.transform),
+                    cover_key=currentCover==null?null:G11Geometry.Key(currentCover.transform),
+                    retained_rim_key=entry.rim==null?null:G11Geometry.Key(entry.rim.transform),
+                    retained_tire_key=entry.tire==null?null:G11Geometry.Key(entry.tire.transform),
+                    retained_cover_key=entry.cover==null?null:G11Geometry.Key(entry.cover.transform),
+                    rim_instance_id=entry.rim==null?0:entry.rim.GetInstanceID(),
+                    tire_instance_id=entry.tire==null?0:entry.tire.GetInstanceID(),cover_instance_id=entry.cover==null?0:entry.cover.GetInstanceID(),
+                    condition_available=pc!=null,condition_state=pc==null?-1:pc.state,tire_slip1=tire==null?0f:tire.slip1,tire_slip2=tire==null?0f:tire.slip2,
+                    rim_data_available=data!=null,
+                    rim_present=currentRim!=null,tire_present=currentTire!=null,cover_present=currentCover!=null,
+                    rim_active=entry.rim!=null && entry.rim.gameObject.activeInHierarchy,
+                    tire_active=entry.tire!=null && entry.tire.gameObject.activeInHierarchy,
+                    cover_active=entry.cover!=null && entry.cover.gameObject.activeInHierarchy,
+                    rim_felni_radius=wheel==null?0f:wheel.felniRadius,
+                    rim_data_radius=data==null?0f:data.GetFloat("radius"),rim_data_slip1=data==null?0f:data.GetFloat("s1"),
+                    rim_data_slip2=data==null?0f:data.GetFloat("s2"),rim_data_mass=data==null?0f:data.GetFloat("mass")};
+            }).ToArray(),
+            native_wheels=sourceWheels.Select((wheel,index)=>
+            {
+                WheelHit hit; var contact=wheel.GetGroundHit(out hit); var position=new Vector3();var rotation=Quaternion.identity;wheel.GetWorldPose(out position,out rotation);
+                var bodyOwner=wheel.attachedRigidbody;
+                return new TransitionWheelState{index=index,key=G11Geometry.Key(wheel),instance_id=wheel.GetInstanceID(),
+                    body_key=bodyOwner==null?null:G11Geometry.Key(bodyOwner.transform),body_instance_id=bodyOwner==null?0:bodyOwner.GetInstanceID(),
+                    enabled=wheel.enabled,active_self=wheel.gameObject.activeSelf,active_hierarchy=wheel.gameObject.activeInHierarchy,
+                    contact=contact,rpm=wheel.rpm,radius=wheel.radius,mass=wheel.mass,damping=wheel.wheelDampingRate,
+                    forward_stiffness=wheel.forwardFriction.stiffness,sideways_stiffness=wheel.sidewaysFriction.stiffness,
+                    pose=position,rotation=rotation};
+            }).ToArray(),geometry=G11Geometry.Capture("transition."+phase,observedPhysicsStep,"observer.LateUpdate",completedStorage)};
+        return snapshot;
+    }
+    static RetainedWheelSlot TransitionTarget(string target)
+    {
+        var driven=target=="primary-driven"?0:target=="other-driven"?1:-1;
+        if(driven<0) throw new InvalidOperationException("Unknown source transition wheel target: "+target);
+        return retainedWheelSlots.Single(value=>value.slot==car.DrivenWheelSlots[driven]);
+    }
+    static string[] TransitionIdentities()
+    {
+        return retainedWheelSlots.SelectMany(value=>new[]{G11Geometry.Key(value.slot),
+            value.rim==null?null:G11Geometry.Key(value.rim.transform),value.tire==null?null:G11Geometry.Key(value.tire.transform),
+            value.cover==null?null:G11Geometry.Key(value.cover.transform)}).Where(value=>value!=null).Distinct().OrderBy(value=>value,StringComparer.Ordinal).ToArray();
+    }
+    static void RunSourceTransition(TransitionInput input)
+    {
+        if(awaitingTransition!=null) throw new InvalidOperationException("Previous source transition lacks its later physics observation");
+        if(input.source_context!="direct-component-api") throw new InvalidOperationException("Source transitions require direct component API semantics");
+        var target=TransitionTarget(input.target);
+        var driven=input.target=="primary-driven"?0:1;
+        var wheelIndex=Array.IndexOf(sourceWheels,car.WHDriven[driven]);
+        var rpm=wheelIndex<0?0f:sourceWheels[wheelIndex].rpm;
+        if(rpm==0f) throw new InvalidOperationException("Source transition requires nonzero target-wheel RPM");
+        if(input.action=="refresh_tire_condition" && target.tire.p.gumi.pc.state==input.condition_state)
+            throw new InvalidOperationException("Source condition transition must change the original component state");
+        var evidence=new TransitionEvidence{id=input.id,action=input.action,target=input.target,source_context=input.source_context,scheduled_frame=input.frame,
+            before_physics_step=observedPhysicsStep,rpm_wheel_index=wheelIndex,later_after_frame=input.frame+input.observe_frames,rpm_before=rpm,
+            original_identities=TransitionIdentities(),source_method="",target_slot_key=G11Geometry.Key(target.slot),condition_state=input.condition_state};
+        evidence.before=CaptureTransitionSnapshot(input.id+".before");
+        bool resultValue=false;
+        switch(input.action)
+        {
+            case "refresh_tire_condition":
+                evidence.source_method="partconditionscript.Refresh(int)";
+                target.tire.p.gumi.pc.Refresh(input.condition_state);evidence.api_result="void-return";resultValue=true;break;
+            case "remove_tire":
+                evidence.source_method="partslotscript.UnCraft(false)";
+                resultValue=target.tire_slot!=null && target.tire_slot.UnCraft(false);evidence.api_result=resultValue.ToString();break;
+            case "remove_cover": case "remove_other_cover":
+                evidence.source_method="partslotscript.UnCraft(false)";
+                resultValue=target.cover_slot!=null && target.cover_slot.UnCraft(false);evidence.api_result=resultValue.ToString();break;
+            case "remove_driven_rim": case "remove_other_driven_rim":
+                evidence.source_method="partslotscript.UnCraft(false)";
+                resultValue=target.slot.UnCraft(false);evidence.api_result=resultValue.ToString();break;
+            case "remount_driven_rim": case "remount_other_driven_rim":
+                evidence.source_method="partslotscript.CanCraft(partscript)+Craft(partscript)";
+                evidence.can_craft=target.slot.CanCraft(target.rim);if(evidence.can_craft)target.slot.Craft(target.rim);
+                resultValue=evidence.can_craft && target.slot.part==target.rim;evidence.api_result=resultValue.ToString();break;
+            case "remount_tire":
+                evidence.source_method="partslotscript.CanCraft(partscript)+Craft(partscript)";
+                evidence.can_craft=target.tire_slot.CanCraft(target.tire);if(evidence.can_craft)target.tire_slot.Craft(target.tire);
+                resultValue=evidence.can_craft && target.tire_slot.part==target.tire;evidence.api_result=resultValue.ToString();break;
+            case "remount_cover": case "remount_other_cover":
+                evidence.source_method="partslotscript.CanCraft(partscript)+Craft(partscript)";
+                evidence.can_craft=target.cover_slot.CanCraft(target.cover);if(evidence.can_craft)target.cover_slot.Craft(target.cover);
+                resultValue=evidence.can_craft && target.cover_slot.part==target.cover;evidence.api_result=resultValue.ToString();break;
+            default: throw new InvalidOperationException("Unknown source transition action: "+input.action);
+        }
+        evidence.api_success=resultValue;evidence.immediate=CaptureTransitionSnapshot(input.id+".immediate");
+        evidence.identities_after=TransitionIdentities();result.transitions.Add(evidence);awaitingTransition=evidence;
+    }
+    static void ObserveLaterTransition()
+    {
+        if(awaitingTransition==null || Time.frameCount-startFrame<awaitingTransition.later_after_frame ||
+            observedPhysicsStep<=awaitingTransition.before_physics_step) return;
+        awaitingTransition.later=CaptureTransitionSnapshot(awaitingTransition.id+".later");
+        awaitingTransition.later_physics_step=awaitingTransition.later.physics_step;awaitingTransition=null;
+    }
     static void ApplyConditions(carscript target,Condition[] recorded)
     {
         var conditions=target.GetComponentsInChildren<partconditionscript>(true);
@@ -937,6 +1120,7 @@ public sealed class G11Capture : MonoBehaviour
                 if(G11ContactProbe.Active) {Physics.SyncTransforms();G11ContactProbe.Arm();RecordSetupBoundary("contact-input-applied");G11ContactProbe.RetainInitial();}
                 if(G11AngularProbe.Active) G11AngularProbe.RetainInitial();
                 result.initial=InitialState();
+                if(scenario.transitions!=null && scenario.transitions.Length>0) PrepareTransitionSlots();
                 RecordSetupBoundary("armed-after-canonical");
                 G11Driver.Arm();
                 G11Controls.Initialize(scenario.controls);
@@ -946,13 +1130,33 @@ public sealed class G11Capture : MonoBehaviour
             }
             catch(Exception error) { Fail(error); }
         }
+        if(active && !finished && startFrame>=0 && scenario.transitions!=null && scenario.transitions.Length>0)
+        {
+            try
+            {
+                ObserveLaterTransition();
+                if(nextTransition<scenario.transitions.Length)
+                {
+                    var next=scenario.transitions[nextTransition];
+                    int frame=Time.frameCount-startFrame;
+                    if(frame>next.frame) throw new InvalidOperationException("Source transition frame was skipped");
+                    if(frame==next.frame) { RunSourceTransition(next);nextTransition++; }
+                }
+            }
+            catch(Exception error) { Fail(error); }
+        }
         if(active && !finished && G11ContactProbe.Active && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames && step<scenario.contact.duration_steps)
         { Fail(new InvalidOperationException("Contact render bound exceeded before required solves"));return; }
         if(active && !finished && G11AngularProbe.Active && startFrame>=0 && Time.frameCount-startFrame>=scenario.duration_frames && step<scenario.angular.duration_steps)
         { Fail(new InvalidOperationException("Angular declared render bound exceeded before required solves"));return; }
         if(active && !finished && startFrame>=0 && (G11ContactProbe.Active?step>=scenario.contact.duration_steps:G11AngularProbe.Active?step>=scenario.angular.duration_steps:Time.frameCount-startFrame>=scenario.duration_frames))
         {
-            try { G11Geometry.NativeOwnershipCheckpoint("measurement-complete",ObservedPhysicsStep);G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2); }
+            try
+            {
+                if(scenario.transitions!=null && scenario.transitions.Length>0 && (nextTransition!=scenario.transitions.Length || awaitingTransition!=null))
+                    throw new InvalidOperationException("Source transition sequence or later observations are incomplete");
+                G11Geometry.NativeOwnershipCheckpoint("measurement-complete",ObservedPhysicsStep);G11BodyTrace.End(); result.completed=String.IsNullOrEmpty(result.error); Flush(); Application.Quit(result.completed?0:2);
+            }
             catch(Exception error) { Fail(error); }
         }
     }
