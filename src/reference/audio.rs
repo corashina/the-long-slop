@@ -244,7 +244,7 @@ record!(AmbienceReference {
 fn values(v: impl IntoIterator<Item = f32>) -> bool {
     v.into_iter().all(f32::is_finite)
 }
-fn method(m: &AudioMethod) -> bool {
+pub(super) fn method(m: &AudioMethod) -> bool {
     !m.class.is_empty()
         && !m.method.is_empty()
         && m.file == "managed/Assembly-CSharp.cs"

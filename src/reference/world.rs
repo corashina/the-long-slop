@@ -124,6 +124,26 @@ pub struct WorldPrototypeReference {
     #[serde(deserialize_with = "compact_vec")]
     pub colliders: Vec<WorldColliderReference>,
     pub prefab_pose: Transform,
+    #[serde(default, deserialize_with = "compact_vec")]
+    pub interiors: Vec<WorldInteriorReference>,
+}
+
+/// Source `interiorscript` of a world building. Doors are `usablescript` world mechanisms.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldInteriorReference {
+    pub collider: SourceId,
+    /// Interior index in the same prototype.
+    pub parent: Option<u32>,
+    pub invert: bool,
+    pub minimum_doors_to_max: u32,
+    pub maximum_transmission: f32,
+    pub use_value: bool,
+    pub value: f32,
+    pub doors: Vec<SourceId>,
+    pub invert_doors: Vec<bool>,
+    pub parent_door: Option<SourceId>,
+    pub method: super::AudioMethod,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1577,8 +1597,45 @@ impl WorldReference {
                 require(collider_valid(shape), &f)?;
             }
         }
-        Ok(())
+        let doors: Vec<_> = self
+            .mechanisms
+            .iter()
+            .filter(|m| m.prototype == p.source)
+            .map(|m| &m.recipe.source)
+            .collect();
+        interiors_valid(p, &doors)
     }
+}
+/// Interior colliders, doors and parents resolve inside the prototype.
+fn interiors_valid(p: &WorldPrototypeReference, doors: &[&SourceId]) -> Result<(), ReferenceError> {
+    let door = |s: &SourceId| doors.contains(&s);
+    for (i, interior) in p.interiors.iter().enumerate() {
+        // A parent chain longer than the list has a cycle.
+        let mut parent = interior.parent;
+        let mut steps = 0;
+        while let Some(index) = parent
+            && steps <= p.interiors.len()
+        {
+            parent = p.interiors.get(index as usize).and_then(|r| r.parent);
+            steps += 1;
+        }
+        require(
+            p.colliders.iter().any(|c| c.source == interior.collider)
+                && interior
+                    .parent
+                    .is_none_or(|v| (v as usize) < p.interiors.len())
+                && steps <= p.interiors.len()
+                && interior.doors.iter().all(door)
+                && interior.parent_door.as_ref().is_none_or(door)
+                && interior.invert_doors.len() == interior.doors.len()
+                && finite(&[interior.maximum_transmission, interior.value])
+                && super::audio::method(&interior.method)
+                && interior.method.class == "interiorscript"
+                && interior.method.method == "GetValue",
+            &field(&p.source, &format!("interior {i}")),
+        )?;
+    }
+    Ok(())
 }
 fn collider_valid(g: &ColliderGeometry) -> bool {
     match g {
@@ -1783,5 +1840,48 @@ mod tests {
             assert_eq!(collider(false, role).role_valid(), value.is_none());
         }
         assert!(!collider(true, r#"{"ladder":{"speed":2.5,"up":[0.0,2.0,0.0]}}"#).role_valid());
+    }
+
+    #[test]
+    fn interiors_parse_and_resolve_inside_the_prototype() {
+        let s = |id: u32| format!(r#"{{"file":"a","path_id":{id}}}"#);
+        let method = format!(
+            r#"{{"class":"interiorscript","method":"GetValue","file":"managed/Assembly-CSharp.cs","line_start":1,"line_end":2,"sha256":"{}"}}"#,
+            "0".repeat(64)
+        );
+        let interior = |parent: &str, door: u32| {
+            format!(
+                r#"{{"collider":{},"parent":{parent},"invert":false,"minimum_doors_to_max":1,"maximum_transmission":1.0,"use_value":false,"value":0.0,"doors":[{}],"invert_doors":[false],"parent_door":null,"method":{method}}}"#,
+                s(1),
+                s(door)
+            )
+        };
+        let prototype = |interiors: &[String]| -> WorldPrototypeReference {
+            let collider = serde_json::to_string(&collider(true, "null")).unwrap();
+            serde_json::from_str(&format!(
+                r#"{{"source":{},"role":"structure","asset":1,"nodes":[],"controls":[],"excluded_actions":[],"deferred_materials":[],"skins":[],"bodies":[],"colliders":[{collider}],"prefab_pose":{{"translation":[0,0,0],"rotation":[0,0,0,1],"scale":[1,1,1]}},"interiors":[{}]}}"#,
+                s(9),
+                interiors.join(",")
+            ))
+            .unwrap()
+        };
+        let door = SourceId {
+            file: "a".into(),
+            path_id: 5,
+        };
+        let doors = [&door];
+        let valid = prototype(&[interior("null", 5), interior("0", 5)]);
+        assert_eq!(valid.interiors[1].parent, Some(0));
+        assert!(interiors_valid(&valid, &doors).is_ok());
+        for bad in [
+            prototype(&[interior("null", 6)]),
+            prototype(&[interior("1", 5)]),
+            prototype(&[interior("1", 5), interior("0", 5)]),
+            prototype(&[interior("null", 5).replace(&s(1), &s(2))]),
+            prototype(&[interior("null", 5).replace("[false]", "[]")]),
+            prototype(&[interior("null", 5).replace("GetValue", "Start")]),
+        ] {
+            assert!(interiors_valid(&bad, &doors).is_err());
+        }
     }
 }
