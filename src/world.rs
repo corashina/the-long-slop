@@ -33,7 +33,7 @@ pub use road::{
 };
 pub use road_worker::{RoadJobId, RoadPoll, RoadWorker};
 mod instances;
-pub use instances::{StructureInstance, StructureRecipe};
+pub use instances::{StructureInstance, StructureRecipe, TriggerRoles};
 pub(crate) mod metrics;
 pub use metrics::WorldMetrics;
 #[cfg(target_arch = "wasm32")]

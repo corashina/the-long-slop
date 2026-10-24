@@ -640,6 +640,11 @@ pub struct PlayerReference {
     pub camera_source: SourceId,
     pub walk_speed: f32,
     pub run_multiplier: f32,
+    pub ladder_speed: f32,
+    pub walk_bob_speed: f32,
+    pub walk_bob_speed_rb: f32,
+    pub max_walk_bob: f32,
+    pub walk_bob_sound_threshold: f32,
     pub jump_force: f32,
     pub mass_kg: f32,
     pub duck_multiplier: f32,
@@ -695,6 +700,7 @@ pub struct SeatReference {
     pub exit_distance: f32,
     pub min_exit_angle_degrees: f32,
     pub exit_height: f32,
+    pub show_sleep_text: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1850,6 +1856,19 @@ impl ReferenceManifest {
                 && p.exit_capsule_half_height > 0.0
                 && p.exit_capsule_radius > 0.0,
             "player parameters",
+        )?;
+        let bob = [
+            p.walk_bob_speed,
+            p.walk_bob_speed_rb,
+            p.max_walk_bob,
+            p.walk_bob_sound_threshold,
+        ];
+        require(
+            finite(&bob)
+                && bob.iter().all(|v| *v >= 0.0)
+                && p.ladder_speed.is_finite()
+                && p.ladder_speed > 0.0,
+            "ladder and head bob parameters",
         )?;
         require(
             finite(&[

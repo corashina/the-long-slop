@@ -1089,6 +1089,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     game_sleep(
         sleep.phase as u32,
         sleep.eligible,
+        sleep.show_hint,
         sleep.charge,
         sleep.cooldown_remaining,
         sleep.progress,

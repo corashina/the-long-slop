@@ -33,6 +33,8 @@ pub struct WorldReference {
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
     pub generation_frame: Transform,
+    /// Rotation of `mainscript.magneticField`; compasses point along its forward.
+    pub magnetic_field: [f32; 4],
     pub distances: BTreeMap<String, f32>,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,
@@ -176,10 +178,49 @@ pub struct WorldColliderReference {
     pub node: u32,
     pub enabled: bool,
     pub trigger: bool,
+    pub role: Option<TriggerRole>,
     pub material: Option<SourceId>,
     pub deformed_skin: Option<u32>,
     pub source_empty_mesh: Option<SourceId>,
     pub geometry: Option<ColliderGeometry>,
+}
+/// Gameplay role of a trigger collider.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum TriggerRole {
+    Ladder {
+        speed: f32,
+        up: [f32; 3],
+    },
+    Hazard {
+        damage_player: f32,
+        damage_breakable: f32,
+    },
+}
+impl WorldColliderReference {
+    fn role_valid(&self) -> bool {
+        self.role.is_none_or(|r| self.trigger && r.valid())
+    }
+}
+impl TriggerRole {
+    fn valid(&self) -> bool {
+        match *self {
+            Self::Ladder { speed, up } => {
+                finite(&up)
+                    && speed.is_finite()
+                    && speed > 0.0
+                    && ((up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt() - 1.0).abs() <= 1e-3
+            }
+            Self::Hazard {
+                damage_player,
+                damage_breakable,
+            } => {
+                finite(&[damage_player, damage_breakable])
+                    && damage_player >= 0.0
+                    && damage_breakable >= 0.0
+            }
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1477,7 +1518,8 @@ impl WorldReference {
                     && (c.node as usize) < p.nodes.len()
                     && ([c.deformed_skin.is_some(), c.geometry.is_some(), c.source_empty_mesh.is_some()].into_iter().filter(|v| *v).count() == 1)
                     && c.source_empty_mesh.as_ref().is_none_or(|s| self.records.iter().any(|r| &r.source == s && r.class_name == "Mesh" && matches!(r.fields.get("m_VertexData"), Some(WorldValue::Record(v)) if matches!(v.get("m_VertexCount"),Some(WorldValue::Integer(0))))))
-                    && c.deformed_skin.is_none_or(|i| (i as usize) < p.skins.len()),
+                    && c.deformed_skin.is_none_or(|i| (i as usize) < p.skins.len())
+                    && c.role_valid(),
                 &f,
             )?;
             let collider = checked_record(
@@ -1695,4 +1737,47 @@ fn validate_world_libraries(
             && capture.source_manifest_sha256 == current.source_manifest_sha256,
         "world capture library receipt",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn collider(trigger: bool, role: &str) -> WorldColliderReference {
+        serde_json::from_str(&format!(
+            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn trigger_roles_round_trip_and_need_a_trigger() {
+        for (role, value) in [
+            ("null", None),
+            (
+                r#"{"ladder":{"speed":2.5,"up":[0.0,1.0,0.0]}}"#,
+                Some(TriggerRole::Ladder {
+                    speed: 2.5,
+                    up: [0.0, 1.0, 0.0],
+                }),
+            ),
+            (
+                r#"{"hazard":{"damage_player":100.0,"damage_breakable":5.0}}"#,
+                Some(TriggerRole::Hazard {
+                    damage_player: 100.0,
+                    damage_breakable: 5.0,
+                }),
+            ),
+        ] {
+            let c = collider(true, role);
+            assert_eq!(c.role, value);
+            assert_eq!(
+                serde_json::to_value(c.role).unwrap(),
+                serde_json::from_str::<serde_json::Value>(role).unwrap()
+            );
+            assert!(c.role_valid());
+            assert_eq!(collider(false, role).role_valid(), value.is_none());
+        }
+        assert!(!collider(true, r#"{"ladder":{"speed":2.5,"up":[0.0,2.0,0.0]}}"#).role_valid());
+    }
 }
