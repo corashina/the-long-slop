@@ -1265,6 +1265,7 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            audio.hits(&self.area, &self.physics, FIXED_DT);
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
                     crate::interaction::InteractionSound::Action(action) => {

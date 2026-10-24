@@ -6,6 +6,8 @@ use crate::vehicle::{PhysicsWorld, to_rapier};
 use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
+pub mod impacts;
+
 #[derive(Clone, Copy, Debug)]
 pub struct AudioEvent {
     pub session: u32,
@@ -148,6 +150,7 @@ pub struct AudioState {
     outside_mixer: u32,
     car_mixer: u32,
     sphere: Option<Ball>,
+    impacts: impacts::ImpactState,
 }
 impl AudioState {
     pub fn new(reference: AudioReference, session: u32) -> Self {
@@ -271,6 +274,7 @@ impl AudioState {
             part_usables: HashMap::new(),
             control_items: HashMap::new(),
             sphere,
+            impacts: impacts::ImpactState::default(),
             reference,
         }
     }
@@ -446,6 +450,7 @@ impl AudioState {
             .collect();
         self.control_items = game.mechanisms.iter().map(|m| (m.id, m.item)).collect();
         self.collider_nodes = game.colliders.iter().map(|c| (c.id, c.node)).collect();
+        self.impacts.bind(game);
         self.sensor.hits.reserve(game.colliders.len());
         for (i, r) in self.reference.routes.iter().enumerate() {
             self.route_sensors[i].0 = game
@@ -877,6 +882,7 @@ impl AudioState {
         self.origin_shift = [0.; 3];
         self.random = session.wrapping_add(0x9e3779b9);
         self.removed.clear();
+        self.impacts.reset();
         for m in &mut self.mechanism_sounds {
             m.remaining = 0.;
         }
@@ -1303,6 +1309,9 @@ pub enum AudioKind {
     AmbientDay = 7,
     AmbientNight = 8,
     Shit = 9,
+    ItemHit = 10,
+    CarHit = 11,
+    RockHeat = 12,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
