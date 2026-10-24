@@ -227,7 +227,7 @@ def verify_reference(output: Path, library) -> None:
         checked(output, {'file':name, 'bytes':path.stat().st_size, 'sha256':sprite['sha256']})
         names.add(name)
     from .audio import validate_audio_export
-    validate_audio_export(manifest['audio'], output)
+    validate_audio_export(manifest['audio'], output, manifest['world']['pickup_hits'])
     names.update(c['path'].removeprefix('reference/') for c in manifest['audio']['clips'])
     from .lighting import validate_lighting_export
     validate_lighting_export(manifest, output)

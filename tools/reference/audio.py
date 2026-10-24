@@ -103,6 +103,14 @@ def collision_record(tiers, methods):
         'item_minimum': .075, 'car_multiplier': .3, 'method': methods}
 
 
+def pickup_hit_sources(records):
+    """Pickupable source, clip source, and gain of each world pickup with a hit clip."""
+    for r in records:
+        if r['class_name']!='pickupable':continue
+        f={x['name']:x['value'] for x in r['fields']}
+        if f['collideSound']['kind']=='link':yield r['source'],f['collideSound']['value'],f['collisionSoundM']['value']
+
+
 def ambience_record(prototype, d, clips, evidence):
     if d['SSource']['m_PathID']: raise ValueError('Rock ambience source needs a looping route')
     if not d['findNap']: raise ValueError('Rock ambience needs the day cycle phase')
@@ -343,6 +351,12 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if record['collision_clip']:item_clips.append(source.get(record['collision_clip']['file'],record['collision_clip']['path_id']))
     for item in manifest['items']:
         if item['collision_clip']:item['collision_clip']=clip(source.get(item['collision_clip']['file'],item['collision_clip']['path_id']))
+    hits=list(pickup_hit_sources(manifest['world']['records']))
+    world_clips=[source.get(c['file'],c['path_id']) for _,c,_ in hits]
+    if any(c.type.name!='AudioClip' for c in world_clips):raise ValueError('Invalid world pickup collision clip')
+    item_clips+=world_clips
+    # The runtime finds the hit sound of a generated item by its pickupable source.
+    manifest['world']['pickup_hits']=[{'source':s,'collision_clip':clip(c),'collision_gain':g} for (s,_,g),c in zip(hits,world_clips)]
     audio['ambience']=[];rocks=[]
     for prototype in manifest['world']['prototypes']:
         for node in source.hierarchy(source.get(prototype['source']['file'],prototype['source']['path_id']),activate_root=True):
@@ -491,13 +505,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
-    validate_audio_export(audio,output)
+    validate_audio_export(audio,output,manifest['world']['pickup_hits'])
     for identity in sorted(getattr(source, 'item_clips', set())):
         clip(source.get(*identity), 'effect')
     return audio
 
 
-def validate_audio_export(audio: dict, output: Path) -> None:
+def validate_audio_export(audio: dict, output: Path, pickup_hits: list) -> None:
     clock = audio['radio']['clock']
     if (clock['kind'] != 'scaled'
             or [(clock[name]['class'], clock[name]['method']) for name in
@@ -541,10 +555,10 @@ def validate_audio_export(audio: dict, output: Path) -> None:
                 or not 0<=key['weighted_mode']<=3 for key in keys)
                 or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
             raise ValueError(f'Invalid shared audio curve: {name}')
-    validate_hit_audio(audio, ids)
+    validate_hit_audio(audio, ids, pickup_hits)
 
 
-def validate_hit_audio(audio: dict, ids: set) -> None:
+def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
     tiers=audio['collisions']['car_tiers']
     if [t['threshold'] for t in tiers]!=TIER_THRESHOLDS or [t['fixed_gain'] for t in tiers]!=[1.,None,None,None]:
         raise ValueError('Car hit tiers differ from source')
@@ -557,6 +571,8 @@ def validate_hit_audio(audio: dict, ids: set) -> None:
             raise ValueError(f'Invalid one-shot audio: {role}')
         if role!='eat' and r['settings']['priority']!=PRIORITIES[7]:raise ValueError(f'Invalid hit priority: {role}')
     if not {c for t in tiers for c in t['clips']}<=set(roles['car_hit']['clips']):raise ValueError('Car hit record lacks tier clips')
+    if any(h['collision_clip'] not in roles['item_hit']['clips'] or not h['collision_gain']>=0 for h in pickup_hits):
+        raise ValueError('Invalid world pickup hit')
     if len(audio['ambience'])!=1:raise ValueError('Selected world needs one rock ambience')
     for a in audio['ambience']:
         if (not a['clips'] or set(a['clips'])-ids or not set(a['clips'])<=set(roles['rock_heat']['clips'])

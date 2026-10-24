@@ -276,9 +276,21 @@ class HitAudio(unittest.TestCase):
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
                 record('item_hit', 10, True, [6]), record('car_hit', 11, True, [1, 2, 3, 4]), record('rock_heat', 12, True, [5])]}
-        validate_hit_audio(audio, set(range(1, 7)))
+        validate_hit_audio(audio, set(range(1, 7)), [])
         for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 13)]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value
-            with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)))
+            with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)), [])
         changed = copy.deepcopy(audio); del changed['survival'][4]
-        with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)))
+        with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)), [])
+        validate_hit_audio(audio, set(range(1, 7)), [{'collision_clip': 6, 'collision_gain': .5}])
+        for hit in [{'collision_clip': 5, 'collision_gain': .5}, {'collision_clip': 6, 'collision_gain': float('nan')}]:
+            with self.assertRaises(ValueError): validate_hit_audio(audio, set(range(1, 7)), [hit])
+
+    def test_world_pickup_hit_sources(self):
+        from tools.reference.audio import pickup_hit_sources
+        def record(path_id, clip):
+            return {'source': {'file': 'f', 'path_id': path_id}, 'class_name': 'pickupable', 'fields': [
+                {'name': 'collideSound', 'value': {'kind': 'link', 'value': clip} if clip else {'kind': 'empty'}},
+                {'name': 'collisionSoundM', 'value': {'kind': 'number', 'value': .5}}]}
+        records = [record(1, {'file': 'f', 'path_id': 9}), record(2, None), {**record(3, {'file': 'f', 'path_id': 9}), 'class_name': 'massScript'}]
+        self.assertEqual(list(pickup_hit_sources(records)), [({'file': 'f', 'path_id': 1}, {'file': 'f', 'path_id': 9}, .5)])
