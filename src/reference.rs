@@ -45,6 +45,8 @@ pub mod conditions;
 pub use conditions::*;
 pub mod flashlights;
 pub use flashlights::*;
+pub mod small_items;
+pub use small_items::*;
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -885,6 +887,7 @@ pub struct ReferenceManifest {
     pub render_lighting: lighting_scene::LightingRecord,
     pub plates: PlateRecord,
     pub flashlights: FlashlightRecord,
+    pub small_items: SmallItemsReference,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -2109,6 +2112,7 @@ impl ReferenceManifest {
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
         self.flashlights.validate(self)?;
+        self.small_items.validate(self)?;
         self.conditions.validate(self)?;
         Ok(())
     }
