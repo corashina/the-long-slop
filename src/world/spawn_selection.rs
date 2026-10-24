@@ -94,19 +94,37 @@ pub(crate) fn select_pool(
         total += number(fields(row)?, "chance")?;
     }
     let draw = random.range(0., total);
+    let chances = pool
+        .iter()
+        .map(|row| fields(row).and_then(|f| number(f, "chance")).unwrap_or(0.));
+    let Some(index) = pick_weighted(chances, draw) else {
+        return Ok(None);
+    };
+    let row = fields(&pool[index])?;
+    select_named(
+        reference,
+        text(row, "category")?,
+        flag(row, "itemNameInsteadOfCategory")?,
+        random,
+        context,
+    )
+}
+/// Source cumulative chances: the first row whose running sum exceeds `draw`.
+pub(crate) fn pick_weighted(chances: impl Iterator<Item = f32>, draw: f32) -> Option<usize> {
     let mut cumulative = 0.;
-    for row in pool {
-        let row = fields(row)?;
-        cumulative += number(row, "chance")?;
+    for (index, chance) in chances.enumerate() {
+        cumulative += chance;
         if draw < cumulative {
-            return select_named(
-                reference,
-                text(row, "category")?,
-                flag(row, "itemNameInsteadOfCategory")?,
-                random,
-                context,
-            );
+            return Some(index);
         }
     }
-    Ok(None)
+    None
+}
+/// Source spawnInBoxScript.Spawn copy count from massScript.maxCountIfSpawnedInBox.
+pub(crate) fn box_count(max: i32, random: &mut UnityRandom) -> i32 {
+    if max > 0 {
+        random.range_int(1, max + 1)
+    } else {
+        1
+    }
 }

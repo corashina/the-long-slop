@@ -188,6 +188,7 @@ pub struct WorldStream {
     placements: PlacementIndex,
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
+    boxes: content_boxes::BoxRuntime,
     evaluator: TerrainEvaluator,
     color_foundations: Vec<super::FoundationPoint>,
     color_helpers: Vec<TerrainFoundation>,
@@ -371,7 +372,20 @@ impl WorldStream {
                     radius * radius,
                 )
         });
+        let boxes = self
+            .contents
+            .boxes
+            .released()
+            .iter()
+            .filter(|r| {
+                changes
+                    .get(super::ObjectKey::Generated(r.id.clone()))
+                    .is_some_and(|c| c.snapshot.is_none())
+            })
+            .cloned()
+            .collect();
         crate::save::WorldSnapshot {
+            boxes,
             generation: super::GenerationSnapshot {
                 generator_contract: super::GENERATOR_CONTRACT,
                 package_id: self.package_id.clone(),
@@ -425,6 +439,7 @@ impl WorldStream {
         self.generation_revision += 1;
         self.contents.state = history;
         self.changes = saved.changes.clone();
+        self.contents.boxes.restore(&saved.boxes);
         self.change_revision = u64::MAX;
         self.change_bounds = None;
         Ok(())
@@ -665,7 +680,9 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let contents = super::contents::SourceContents::new(world);
+        let mut contents = super::contents::SourceContents::new(world);
+        contents.boxes =
+            content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
@@ -742,6 +759,7 @@ impl WorldStream {
             placements: PlacementIndex::new(world, seed),
             props: super::prop_layers::PropLayers::new(world, seed)?,
             contents,
+            boxes: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
@@ -1876,6 +1894,9 @@ impl WorldStream {
             return;
         }
         for content in self.contents.instances() {
+            if self.box_content_withheld(&content.placement.id) {
+                continue;
+            }
             let key = super::ObjectKey::Generated(content.placement.id.clone());
             let selected = self.replay_indices.iter().any(|&index| {
                 let (_, c) = self.changes.get_indexed(index);
@@ -4905,6 +4926,9 @@ fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
 
 #[path = "content_bindings.rs"]
 pub(crate) mod content_bindings;
+
+#[path = "content_boxes.rs"]
+pub(crate) mod content_boxes;
 
 #[path = "content_index.rs"]
 pub(crate) mod content_index;

@@ -44,6 +44,7 @@ pub(crate) mod stream;
 pub use stream::content_index::ContentIndex;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
+pub use stream::content_boxes::BoxRelease;
 pub use stream::{
     PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
     WorldRequest, WorldStream,

@@ -1317,6 +1317,7 @@ impl GarageRuntime {
         self.area.sync_equipment(reference, &mut self.physics);
         self.sync_mouth();
         self.area.items.sync_poses(&self.physics);
+        self.break_boxes(reference);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
@@ -1693,6 +1694,46 @@ impl GarageRuntime {
                     Default::default()
                 },
             );
+        }
+    }
+
+    /// Source breakablescript on generated boxes: contacts and hazard triggers of this step.
+    fn break_boxes(&mut self, reference: &ReferenceManifest) {
+        self.stream
+            .step_boxes(reference, &self.area.items, &self.physics, FIXED_DT);
+        while let Some(id) = self.stream.take_broken_box() {
+            // Source Break calls pickupable.Drop2 first.
+            if self.area.interaction.held() == Some(id) {
+                self.area
+                    .interaction
+                    .drop_held(&mut self.area.items, &mut self.physics);
+            }
+            let Some(pose) = self.area.items.get(id).map(|s| s.pose) else {
+                continue;
+            };
+            if self
+                .stream
+                .break_box(id, &mut self.area.items, &mut self.physics)
+                .is_none()
+                || reference.acquisition.r#box.break_rules.no_gib
+            {
+                continue;
+            }
+            // Source Break spawns Gib at the box pose. No reduced-gibs setting exists here.
+            let debris = &reference.acquisition.r#box.debris;
+            let prototype = reference
+                .item_prototypes
+                .iter()
+                .position(|p| &p.id == debris)
+                .expect("validated box debris prototype");
+            spawned::spawn_prototype(
+                reference,
+                &mut self.area,
+                &mut self.physics,
+                prototype,
+                pose,
+            )
+            .expect("validated box debris prototype");
         }
     }
 
