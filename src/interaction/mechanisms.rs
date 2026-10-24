@@ -725,6 +725,15 @@ impl MechanismState {
             }
         }
     }
+    /// fpscontroller usable tuning shared by every tune knob: scroll, or use and look.
+    pub(crate) fn tune_direction(&mut self, input: &FrameInput) -> f32 {
+        tune_step(
+            self.radio_seconds,
+            &mut self.last_radio_tune,
+            self.radio_repeat,
+            input,
+        )
+    }
     pub fn step(&mut self, item: ItemId, input: FrameInput, view: VehiclePose, dt: f32) {
         if !dt.is_finite()
             || dt <= 0.0
@@ -741,19 +750,12 @@ impl MechanismState {
             if c.turnable && input.pressed & (keys::USE | keys::PRIMARY) != 0 {
                 self.control_action = Some(ControlAction::Radio(RadioControl::Band));
             } else if c.tune {
-                let look_y = -input.mouse[1];
-                let direction = if input.wheel != 0. {
-                    input.wheel
-                } else if input.held & (keys::USE | keys::PRIMARY) != 0
-                    && look_y != 0.
-                    && self.radio_seconds - self.last_radio_tune
-                        >= self.radio_repeat * (1. - look_y.abs().clamp(0., 1.))
-                {
-                    self.last_radio_tune = self.radio_seconds;
-                    look_y
-                } else {
-                    0.
-                };
+                let direction = tune_step(
+                    self.radio_seconds,
+                    &mut self.last_radio_tune,
+                    self.radio_repeat,
+                    &input,
+                );
                 if direction != 0. {
                     let control = match (*role, direction > 0.) {
                         (0, true) => RadioControl::VolumeUp,
@@ -1081,4 +1083,19 @@ pub enum ControlAction {
     CycleHeadlights,
     InteriorLight(u8),
     ToggleHomeLight(SourceId),
+}
+
+fn tune_step(seconds: f32, last: &mut f32, repeat: f32, input: &FrameInput) -> f32 {
+    let look_y = -input.mouse[1];
+    if input.wheel != 0. {
+        input.wheel
+    } else if input.held & (keys::USE | keys::PRIMARY) != 0
+        && look_y != 0.
+        && seconds - *last >= repeat * (1. - look_y.abs().clamp(0., 1.))
+    {
+        *last = seconds;
+        look_y
+    } else {
+        0.
+    }
 }

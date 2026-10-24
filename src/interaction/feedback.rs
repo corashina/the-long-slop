@@ -167,6 +167,10 @@ impl InteractionState {
             };
         }
         if let Some(t) = use_target {
+            if self.dial_knob(&t, physics).is_some() {
+                a.context = FeedbackContext::Mechanism;
+                a.actions.0 |= ActionMask::TUNE | ActionMask::SCROLL;
+            }
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;
                 if self.mechanisms.radio_tunable(t.item) {
