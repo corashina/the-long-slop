@@ -503,6 +503,22 @@ impl GarageRuntime {
                 &mut primary_reserved,
             );
         }
+        self.stream.advance_sprays(
+            frame,
+            reference,
+            &mut self.area.interaction.cleaning,
+            &mut self.area.conditions,
+            &mut self.area.items,
+            &self.physics,
+        );
+        self.stream.advance_genie_lamps(
+            frame.dt,
+            self.clock_factors(reference).fluid_scale,
+            reference,
+            &mut self.area.interaction.cleaning,
+            &mut self.area.items,
+        );
+        self.play_small_item_sounds();
         self.area.interaction.cleaning.finish_frame(
             frame,
             reference,
@@ -576,6 +592,35 @@ impl GarageRuntime {
             &self.physics,
             &self.area.interaction.parts,
         );
+        self.stream.press_spray(
+            owner,
+            frame,
+            reference,
+            &self.area.interaction.cleaning,
+            crate::interaction::cleaning::ToolWorld {
+                conditions: &self.area.conditions,
+                items: &self.area.items,
+                physics: &self.physics,
+                parts: &self.area.interaction.parts,
+            },
+        );
+    }
+    /// mainscript.PlayClipAtPoint for spray bottle clips.
+    fn play_small_item_sounds(&mut self) {
+        for (clip, gain, position) in self.stream.take_small_item_sounds() {
+            if let Some(audio) = &mut self.audio {
+                audio.survival_event(crate::audio::SurvivalAudioEvent {
+                    session: audio.session,
+                    emitter: 0,
+                    kind: crate::audio::AudioKind::ItemHit,
+                    action: crate::audio::AudioAction::Start,
+                    clip,
+                    gain,
+                    pitch: 1.,
+                    position,
+                });
+            }
+        }
     }
 }
 

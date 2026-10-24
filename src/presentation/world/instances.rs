@@ -1076,6 +1076,19 @@ impl SourceInstances {
                     }
                 }
             }
+            if let Some(pose) = stream.spray_trigger(&instance.placement.id)
+                && let Some(n) = prototype
+                    .nodes
+                    .iter()
+                    .find(|n| n.source == reference.small_items.spray_bottle.trigger)
+                && let Ok(mut transform) = transforms.get_mut(instance.nodes[n.gltf_node as usize])
+            {
+                transform.set_if_neq(Transform {
+                    translation: Vec3::from_array(pose.translation),
+                    rotation: Quat::from_array(pose.rotation),
+                    scale: Vec3::from_array(pose.scale),
+                });
+            }
             if let Some(level) = stream.level(&instance.placement.id) {
                 for b in level.bubbles() {
                     let node = prototype.nodes[b.node].gltf_node as usize;

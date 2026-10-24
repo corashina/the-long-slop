@@ -1,9 +1,12 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 13;
-/// Schema 11 and 12 saves load with empty later additions.
-const PREVIOUS_SCHEMA_VERSIONS: &[u32] = &[11, 12];
+pub const SAVE_SCHEMA_VERSION: u32 = 14;
+/// Older saves load with empty later additions; spray ammo and lamp values load at their spawn values.
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 11;
+pub fn schema_supported(version: u32) -> bool {
+    (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,9 +90,7 @@ impl SaveSnapshot {
         }
         let version: Version =
             serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
-        if version.schema_version != SAVE_SCHEMA_VERSION
-            && !PREVIOUS_SCHEMA_VERSIONS.contains(&version.schema_version)
-        {
+        if !schema_supported(version.schema_version) {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
         let mut snapshot: Self =
@@ -408,7 +409,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8, 9, 10, 14] {
+        for version in [6, 7, 8, 9, 10, 15] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),

@@ -57,6 +57,12 @@ impl ParticleState {
     pub fn particles(&self) -> &[ParticleOutput] {
         &self.particles
     }
+    /// A new Instantiate of the system: its burst and duration start again.
+    pub fn restart(&mut self) {
+        self.burst_started = false;
+        self.elapsed = 0.;
+        self.remainder = 0.;
+    }
     pub fn reset_emitter(&mut self) {
         self.last_emitter = None;
     }

@@ -29,7 +29,7 @@ Finish the home, garage, Lada, and nearby driving first.
 | --- | --- | --- | --- |
 | P07 | Add player sounds. [Audio](../web/audio.js) | M | Footsteps by surface, interior muffling for world buildings and the Skoda. [L01, L06] |
 | P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Music box. [F08] |
-| P10 | Add small item actions. [Items](../src/interaction/items.rs) | M | Spray bottle, genie lamp. [F13, F14] |
+| P10 | Finish small item actions. [Items](../src/interaction/items.rs) | S | Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [E05, F13, F14] |
 | P11 | Accept the starting area | M | Repair the Lada, fill it, start it, drive out, return, save, reload, and continue with normal input. [A11] |
 
 ## 2. Car parts and repair
