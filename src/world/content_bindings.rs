@@ -52,6 +52,13 @@ impl WorldStream {
                 .find(|c| c.item == Some(id))
                 .and_then(|c| c.content.portable_lamp());
             let key = items.object_key(id);
+            // An unbound dial keeps its saved value.
+            snapshot.dial = self.dial_value(id).unwrap_or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.dial)
+            });
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
                     == rapier3d::prelude::RigidBodyType::KinematicPositionBased

@@ -1,5 +1,5 @@
 //! Source needle (`mutatoscript`), digit wheel (`forgoszamlap`), compass and clock maths.
-use rapier3d::math::Vector;
+use rapier3d::math::{Rotation, Vector};
 
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0., 1.)
@@ -49,10 +49,18 @@ pub fn signed_angle(from: Vector, to: Vector, axis: Vector) -> f32 {
     }
 }
 
-/// `compassscript.GetNorthValue`: heading of the compass forward against magnetic north.
+/// `compassscript.GetNorthValue` from converted vectors. The mirrored Z flips the source sign.
 pub fn compass_north(forward: Vector, north: Vector) -> f32 {
     let flat = Vector::new(forward.x, 0., forward.z);
-    signed_angle(flat, Vector::new(north.x, 0., north.z), Vector::Y)
+    -signed_angle(flat, Vector::new(north.x, 0., north.z), Vector::Y)
+}
+
+/// Source `localEulerAngles` in degrees as a converted rotation.
+pub fn unity_euler(degrees: [f32; 3]) -> [f32; 4] {
+    let [x, y, z] = degrees.map(f32::to_radians);
+    let q =
+        Rotation::from_rotation_y(y) * Rotation::from_rotation_x(x) * Rotation::from_rotation_z(z);
+    [-q.x, -q.y, q.z, q.w]
 }
 
 /// `clockscript`: dial turn in degrees for an offset and the cycle fraction.
@@ -68,10 +76,21 @@ mod tests {
 
     #[test]
     fn compass_reads_the_signed_heading() {
-        let north = Vector::Z;
-        assert_eq!(compass_north(Vector::Z, north), 0.);
+        // Source forward and north are converted -Z. Facing source +X reads -90.
+        let north = Vector::NEG_Z;
+        assert_eq!(compass_north(Vector::NEG_Z, north), 0.);
         assert!((compass_north(Vector::X, north) + 90.).abs() < 1e-4);
         assert!((compass_north(Vector::new(-1., 0.3, 0.), north) - 90.).abs() < 1e-3);
+    }
+
+    #[test]
+    fn euler_angles_convert_like_source_nodes() {
+        // Source Y and X turns mirror; Z turns keep their sign.
+        let y = unity_euler([0., 90., 0.]);
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((y[1] + half).abs() < 1e-6 && (y[3] - half).abs() < 1e-6);
+        let z = unity_euler([0., 0., 90.]);
+        assert!((z[2] - half).abs() < 1e-6);
     }
 
     #[test]

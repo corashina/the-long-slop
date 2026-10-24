@@ -33,6 +33,8 @@ pub struct WorldReference {
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
     pub generation_frame: Transform,
+    /// Rotation of `mainscript.magneticField`; compasses point along its forward.
+    pub magnetic_field: [f32; 4],
     pub distances: BTreeMap<String, f32>,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,

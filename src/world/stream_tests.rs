@@ -1201,6 +1201,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         fluids: None,
         valve: None,
         lamp: None,
+        dial: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,

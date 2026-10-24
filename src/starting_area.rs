@@ -894,6 +894,13 @@ impl GarageRuntime {
 
     fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
         self.stream.advance_generated_lamps(dt);
+        let cycle = &reference.lighting.cycle;
+        self.stream.advance_dials(
+            dt,
+            (self.lighting.cycle.output().cycle_seconds
+                / f64::from(cycle.day_seconds + cycle.night_seconds)) as f32,
+            &self.area.items,
+        );
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -1084,6 +1091,9 @@ impl GarageRuntime {
             }
             Some(InteractionAction::LightControl(control)) => {
                 self.use_light_control(reference, control)
+            }
+            Some(InteractionAction::DialTune(knob, direction)) => {
+                self.stream.tune_dial(knob, direction, &mut self.area.items);
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(

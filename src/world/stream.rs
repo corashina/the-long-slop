@@ -142,6 +142,9 @@ pub struct WorldStream {
     binding_objects: usize,
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
+    dial_bindings: Vec<content_dials::DialBinding>,
+    /// Session and active revision whose dial items are all bound.
+    dial_scan: Option<(u64, u64)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -678,6 +681,8 @@ impl WorldStream {
             binding_objects: reference.items.len(),
             binding_reserved: 0,
             lamp_bindings: Vec::new(),
+            dial_bindings: Vec::new(),
+            dial_scan: None,
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -3822,6 +3827,10 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
+        if let Err(error) = self.sync_dial_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4505,6 +4514,12 @@ impl WorldStream {
                     .iter()
                     .map(content_lamps::LampBinding::heap_bytes)
                     .sum::<usize>()
+                + self.dial_bindings.capacity() * std::mem::size_of::<content_dials::DialBinding>()
+                + self
+                    .dial_bindings
+                    .iter()
+                    .map(content_dials::DialBinding::heap_bytes)
+                    .sum::<usize>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4795,6 +4810,9 @@ pub(crate) mod content_bindings;
 
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
+
+#[path = "content_dials.rs"]
+mod content_dials;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;

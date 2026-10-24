@@ -78,6 +78,7 @@ impl GarageRuntime {
                     .map(crate::fluids::FluidSnapshot::from),
                 valve: None,
                 lamp: None,
+                dial: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
