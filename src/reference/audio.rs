@@ -397,7 +397,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=12)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=13)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -734,7 +734,9 @@ impl AudioReference {
         let range = |v: [f32; 2]| values(v) && v[0] >= 0. && v[1] >= v[0];
         let c = &self.collisions;
         require(
-            c.car_tiers.windows(2).all(|t| t[0].threshold < t[1].threshold)
+            c.car_tiers
+                .windows(2)
+                .all(|t| t[0].threshold < t[1].threshold)
                 && c.car_tiers.iter().all(|t| {
                     t.threshold.is_finite()
                         && t.threshold >= 0.
@@ -776,13 +778,21 @@ impl AudioReference {
         )?;
         for a in &self.ambience {
             require(
-                game.world.prototypes.iter().any(|p| p.source == a.prototype)
+                game.world
+                    .prototypes
+                    .iter()
+                    .any(|p| p.source == a.prototype)
                     && !a.clips.is_empty()
                     && a.clips.iter().all(|id| clips.contains(id))
-                    && [a.phases.dusk, a.phases.night, a.phases.morning, a.phases.day]
-                        .into_iter()
-                        .flatten()
-                        .all(range)
+                    && [
+                        a.phases.dusk,
+                        a.phases.night,
+                        a.phases.morning,
+                        a.phases.day,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .all(range)
                     && range(a.interval)
                     && range(a.gain)
                     && range(a.pitch)
@@ -878,9 +888,10 @@ impl AudioGameplayReference {
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
-            (10, "item_hit"),
-            (11, "car_hit"),
-            (12, "rock_heat"),
+            (10, "eat_crunchy"),
+            (11, "item_hit"),
+            (12, "car_hit"),
+            (13, "rock_heat"),
         ] {
             require(
                 r.bindings
@@ -893,7 +904,7 @@ impl AudioGameplayReference {
             let b = r.binding(kind);
             // Hit and ambience records take clips from their own sources.
             require(
-                (kind >= 10 || !b.clips.is_empty())
+                (kind >= 11 || !b.clips.is_empty())
                     && b.clips.iter().all(|id| clips.contains(id))
                     && values(b.pitch)
                     && b.pitch[0] > 0.
@@ -901,7 +912,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 11, "required audio roles")?;
+        require(r.bindings.len() == 12, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {

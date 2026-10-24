@@ -775,10 +775,15 @@ impl InteractionState {
         self.light_nodes.insert(collider, NodeId(collider.0));
         self.usable_light_controls.insert(control);
     }
+    /// Portable source flashlights switch while held or equipped.
+    pub fn bind_held_light(&mut self, item: ItemId, control: LightControlId) {
+        self.held_controls.insert(item, control);
+    }
     pub fn remove_generated_light(&mut self, control: LightControlId) {
         self.light_nodes
             .retain(|id, _| self.light_controls.get(id) != Some(&control));
         self.light_controls.retain(|_, id| *id != control);
+        self.held_controls.retain(|_, id| *id != control);
         self.usable_light_controls.remove(&control);
     }
     pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {

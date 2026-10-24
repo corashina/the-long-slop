@@ -275,9 +275,9 @@ class HitAudio(unittest.TestCase):
         audio = {'collisions': collision_record([[1], [2], [3], [4]], []),
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
-                record('item_hit', 10, True, [6]), record('car_hit', 11, True, [1, 2, 3, 4]), record('rock_heat', 12, True, [5])]}
+                record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70)]}
         validate_hit_audio(audio, set(range(1, 7)), [])
-        for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 13)]:
+        for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14)]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value
             with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)), [])
         changed = copy.deepcopy(audio); del changed['survival'][4]

@@ -3813,7 +3813,7 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
-        if let Err(error) = self.sync_lamp_bindings(interaction, physics) {
+        if let Err(error) = self.sync_lamp_bindings(items, interaction, physics) {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()

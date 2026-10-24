@@ -817,6 +817,8 @@ pub struct VehicleReference {
     pub brake_torque_nm: f32,
     pub handbrake_torque_nm: f32,
     pub wheel_slip: [f32; 4],
+    /// Bare rim forward and sideways stiffness (source WheelSlip1, WheelSlip2).
+    pub rim_slip: [f32; 2],
     pub auto_shift_stop_speed: f32,
     pub auto_shift_min_rpm: f32,
     pub auto_shift_max_rpm: f32,
@@ -2065,6 +2067,9 @@ impl ReferenceManifest {
                     v.brake_torque_nm,
                     v.handbrake_torque_nm,
                 ]) && finite(&v.gear_ratios)
+                    && finite(&v.wheel_slip)
+                    && finite(&v.rim_slip)
+                    && v.wheel_slip.iter().chain(&v.rim_slip).all(|s| *s >= 0.0)
                     && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
                     && v.gear_free_run.len() == v.gear_ratios.len()
                     && v.mass_kg > 0.0

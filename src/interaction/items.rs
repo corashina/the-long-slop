@@ -637,10 +637,7 @@ impl ItemStore {
         }
         self.indices.insert(id, self.states.len());
         self.body_ids.push(BodyId(u32::MAX));
-        self.names.push(match reference.kind {
-            crate::reference::FoodKind::Sausage => "Sausage".into(),
-            crate::reference::FoodKind::Turd => "Turd".into(),
-        });
+        self.names.push(reference.kind.name().into());
         self.states.push(ItemState {
             id,
             body: Some(body),

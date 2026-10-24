@@ -10,10 +10,10 @@ const record=(kind,one_shot,priority,mixer=1)=>({kind,one_shot,settings:{...sett
 const raw={emitters:[{id:1}],voices:[],radio:{voices:[]},clips:[{id:1,source_duration_seconds:.5}],mixers:[{id:1,pitch:1},{id:2,pitch:1},{id:3,pitch:1}],
  engine:{starter_binding:-1,stop_binding:-1,constants:{}},shared:{mixer:1,settings,audio_manager:{real_voices:2,doppler_factor:1}},
  bindings:[80,55].map(priority=>({id:priority,clips:[1],priority,gain:1,mixer:1,emitter:1,trigger:'test'})),
- survival:[record(1,false,55),record(10,true,100),record(11,true,100,3)]};
+ survival:[record(1,false,55),record(11,true,100),record(12,true,100,3)]};
 function bank(){const b=new VoiceBank(new Context(),raw,{effect:async()=>({duration:.5})},new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});b.begin();b.emitter(1,[0,0,0],[0,0,0,1],true);return b;}
 const tick=()=>new Promise(r=>setTimeout(r,0));
-const hit=(b,gain=.5,instance=0,kind=10)=>b.survival(kind,instance,0,1,gain,1,0,0,0);
+const hit=(b,gain=.5,instance=0,kind=11)=>b.survival(kind,instance,0,1,gain,1,0,0,0);
 
 test('one_shot_survival_plays_once_beside_its_channel',async()=>{
  const b=bank();b.survival(1,0,0,1,1,1,0,0,0);hit(b,1.6);await tick();
@@ -21,7 +21,7 @@ test('one_shot_survival_plays_once_beside_its_channel',async()=>{
  assert.ok(burp.playing&&one.playing,'a one-shot keeps other voices on its channel');
  assert.equal(one.source.loop,false);assert.equal(one.source.stopAt,.5);
  assert.equal(one.volume,1);assert.ok(Math.abs(one.distanceScale-.6)<1e-6);
- const car=bank();car.route(0x50000000+2,2);hit(car,.5,2,11);hit(car,.5,0,11);
+ const car=bank();car.route(0x50000000+2,2);hit(car,.5,2,12);hit(car,.5,0,12);
  assert.deepEqual(car.effects.map(s=>s.mixer),[2,3],'a car hit uses its vehicle route or the car mixer');
 });
 

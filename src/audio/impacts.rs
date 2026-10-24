@@ -269,7 +269,10 @@ mod tests {
             "removed items lose their flag"
         );
         state.refresh(0.02, 10., loose(), |_| true, |_| false);
-        assert!(state.interior(ItemId(1), false), "test waits for the period");
+        assert!(
+            state.interior(ItemId(1), false),
+            "test waits for the period"
+        );
     }
 
     #[test]

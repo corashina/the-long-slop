@@ -14,7 +14,7 @@ ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 PRIORITIES = [10, 25, 40, 55, 70, 80, 85, 100]
 # These survival roles play once through the shared prefab.
-ONE_SHOT = {'eat': 0, 'item_hit': 10, 'car_hit': 11, 'rock_heat': 12}
+ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13}
 TIER_THRESHOLDS = [0.05, 0.2, 0.5, 0.7]
 PHASES = (('morning', 'reggeledik', 'Reggel'), ('day', 'nappal', 'Nappal'),
           ('dusk', 'esteledik', 'Esteledik'), ('night', 'este', 'Este'))
@@ -334,7 +334,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     if source.class_name(sounds)!='soundMainScript':raise ValueError('Toilet source differs')
     def readers(owner,pointers):return [source.resolve(owner,p) for p in pointers]
     def unique(values):return list({key(r):r for r in values}.values())
-    survival_groups=[('eat',0,main,readers(main,md['soundEat']),prefab,[md['eatVolume']]*2,[1.,1.])]
+    survival_groups=[('eat',0,main,readers(main,md['soundEat']),prefab,[md['eatVolume']]*2,[1.,1.]),
+        ('eat_crunchy',10,main,readers(main,md['soundEatCrunchy']),prefab,[md['eatCrunchyVolume']]*2,[1.,1.])]
     for role,kind,field,group in zip(('burp','fart','shit'),(1,2,9),('SBurp','SFart','SFart'),source.read(sounds)['clips'],strict=True):
         prefix='Burp' if role=='burp' else 'Fart'
         survival_groups.append((role,kind,sounds,readers(sounds,group['clips']),source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
@@ -368,9 +369,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
     if car_route is None:raise ValueError('Car hit audio needs the car route')
     rock=audio['ambience'][0]
-    survival_groups+=[('item_hit',10,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
-        ('car_hit',11,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
-        ('rock_heat',12,rocks[0],readers(rocks[0],source.read(rocks[0])['clipsReggel']),prefab,rock['gain'],rock['pitch'])]
+    survival_groups+=[('item_hit',11,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
+        ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
+        ('rock_heat',13,rocks[0],readers(rocks[0],source.read(rocks[0])['clipsReggel']),prefab,rock['gain'],rock['pitch'])]
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'rock_heat':default_route,
         'car_hit':source.resolve(car_route,source.read(car_route)['GCarSounds'])}
@@ -385,13 +386,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
-        settings={'priority':70 if role=='eat' else PRIORITIES[7] if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
+        settings={'priority':70 if role in ('eat','eat_crunchy') else PRIORITIES[7] if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
             'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
             'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if one_shot else d['panLevelCustomCurve']['m_Curve'][0]['value'],
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
-        cls,name={'eat':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
             'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
@@ -569,7 +570,7 @@ def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
         r=roles.get(role)
         if r is None or r['kind']!=kind or not r['clips'] or set(r['clips'])-ids or r['settings']['spatial_blend']!=1:
             raise ValueError(f'Invalid one-shot audio: {role}')
-        if role!='eat' and r['settings']['priority']!=PRIORITIES[7]:raise ValueError(f'Invalid hit priority: {role}')
+        if role not in ('eat','eat_crunchy') and r['settings']['priority']!=PRIORITIES[7]:raise ValueError(f'Invalid hit priority: {role}')
     if not {c for t in tiers for c in t['clips']}<=set(roles['car_hit']['clips']):raise ValueError('Car hit record lacks tier clips')
     if any(h['collision_clip'] not in roles['item_hit']['clips'] or not h['collision_gain']>=0 for h in pickup_hits):
         raise ValueError('Invalid world pickup hit')
