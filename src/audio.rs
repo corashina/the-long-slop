@@ -88,6 +88,19 @@ fn xorshift(state: &mut u32) -> f32 {
     *state ^= *state << 5;
     *state as f32 / u32::MAX as f32
 }
+/// A full queue drops its last event with the highest priority number for a lower one.
+fn insert_event(queue: &mut [Option<AudioEvent>; 64], length: &mut usize, event: AudioEvent) {
+    if *length == 64 {
+        let worst = (0..64).max_by_key(|&i| queue[i].unwrap().priority).unwrap();
+        if event.priority >= queue[worst].unwrap().priority {
+            return;
+        }
+        queue.copy_within(worst + 1.., worst);
+        *length -= 1;
+    }
+    queue[*length] = Some(event);
+    *length += 1;
+}
 fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     ((value - a) / (b - a)).clamp(0., 1.)
 }
@@ -860,20 +873,7 @@ impl AudioState {
         if event.session != self.session || self.removed.contains(&event.emitter) {
             return;
         }
-        if self.length == 64 {
-            let worst = (0..64)
-                .max_by_key(|&i| self.queue[i].unwrap().priority)
-                .unwrap();
-            if event.priority >= self.queue[worst].unwrap().priority {
-                return;
-            }
-            for i in worst..63 {
-                self.queue[i] = self.queue[i + 1];
-            }
-            self.length -= 1;
-        }
-        self.queue[self.length] = Some(event);
-        self.length += 1;
+        insert_event(&mut self.queue, &mut self.length, event);
     }
     pub fn pop_event(&mut self) -> Option<AudioEvent> {
         if self.length == 0 {
@@ -1441,6 +1441,33 @@ mod tests {
     use crate::simulation::FIXED_DT;
     use crate::simulation::engine::EngineInput;
     use crate::starting_area::GarageRuntime;
+
+    #[test]
+    fn full_queue_drops_hits_for_engine_and_living_sounds() {
+        let event = |priority, sequence| AudioEvent {
+            session: 1,
+            sequence,
+            binding: 0,
+            emitter: 0,
+            position: [0.; 3],
+            gain: 1.,
+            pitch: 1.,
+            time_seconds: 0.,
+            priority,
+        };
+        let mut queue = [None; 64];
+        let mut length = 0;
+        for i in 0..64 {
+            insert_event(&mut queue, &mut length, event(100, i));
+        }
+        insert_event(&mut queue, &mut length, event(80, 64));
+        insert_event(&mut queue, &mut length, event(55, 65));
+        insert_event(&mut queue, &mut length, event(100, 66));
+        let count = |p| queue.iter().flatten().filter(|e| e.priority == p).count();
+        assert_eq!((length, count(100), count(80), count(55)), (64, 62, 1, 1));
+        assert_eq!(queue[61].unwrap().sequence, 61, "the last hits leave");
+        assert!(queue.iter().flatten().all(|e| e.sequence != 66));
+    }
 
     fn installed_source() -> (ReferenceManifest, SourceStamp) {
         let path = "web/assets/reference/manifest.json";

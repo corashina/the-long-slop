@@ -24,3 +24,13 @@ test('one_shot_survival_plays_once_beside_its_channel',async()=>{
  const car=bank();car.route(0x50000000+2,2);hit(car,.5,2,11);hit(car,.5,0,11);
  assert.deepEqual(car.effects.map(s=>s.mixer),[2,3],'a car hit uses its vehicle route or the car mixer');
 });
+
+test('hit_priority_loses_voices',()=>{
+ const b=bank();
+ for(let i=0;i<2;i++)b.event(raw.bindings[0],1,0,0,0,1,1);
+ hit(b);assert.deepEqual(b.effects.map(s=>s.binding),[80,80],'a hit does not take an engine voice');
+ b.reset();b.emitter(1,[0,0,0],[0,0,0,1],true);hit(b,.5,0);hit(b,.5,1);
+ assert.deepEqual(b.effects.map(s=>s.priority),[100,100]);
+ b.event(raw.bindings[1],1,0,0,0,1,1);
+ assert.deepEqual(b.effects.map(s=>s.priority).sort(),[100,55].sort(),'a living sound takes a hit voice');
+});
