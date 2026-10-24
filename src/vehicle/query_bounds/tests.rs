@@ -710,10 +710,9 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         AnchorId, ItemId, SourceId, WheelFrictionCurve, WheelHubReference, WheelSlotId,
         WheelSlotReference,
     };
-    use crate::vehicle::{DriveTorques, InstalledWheel, VehicleBody};
-    use rapier3d::control::{
-        DynamicRayCastVehicleController, KinematicCharacterController, WheelTuning,
-    };
+    use crate::vehicle::wheel::{WheelSlip, WheelState, resolve_profile};
+    use crate::vehicle::{DriveTorques, VehicleBody, WheelAssembly};
+    use rapier3d::control::KinematicCharacterController;
     let mut world = empty_world();
     world.set_gravity(Vector::ZERO);
     world.insert(
@@ -724,17 +723,6 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         RigidBodyBuilder::dynamic().translation(Vector::Y * 0.75),
         ColliderBuilder::cuboid(0.25, 0.1, 0.25),
     );
-    let mut controller = DynamicRayCastVehicleController::new(chassis);
-    controller.index_forward_axis = 2;
-    controller.add_wheel(
-        Vector::ZERO,
-        -Vector::Y,
-        Vector::X,
-        0.75,
-        0.25,
-        &WheelTuning::default(),
-    );
-    let resting_wheel = controller.wheels()[0];
     let friction = WheelFrictionCurve {
         extremum_slip: 1.0,
         extremum_value: 1.0,
@@ -758,7 +746,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         center: [0.0; 3],
         spring: 100.0,
         damper: 1.0,
-        target_position: 0.5,
+        target_position: 0.75,
         steer: false,
         drive: false,
         brake: false,
@@ -780,23 +768,30 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         rim_main_types: Vec::new(),
         rim_types: Vec::new(),
     };
+    let slip = WheelSlip {
+        tire: [1.0; 4],
+        rim: [1.0; 2],
+    };
+    let assembly = WheelAssembly::Tire {
+        radius_m: 0.25,
+        mass_kg: 1.0,
+        quality: 1.0,
+    };
+    let wheel = WheelState::new(
+        Vector::ZERO,
+        resolve_profile(&reference, &slip, assembly),
+        0.5,
+    );
     world.chassis.push(chassis);
     world.vehicles.push(VehicleBody {
         chassis,
-        controller,
-        resting_wheels: [resting_wheel; 4],
+        slip,
+        wheels: [wheel; 4],
         wheel_references: std::array::from_fn(|_| reference.clone()),
-        suspension_lengths: [0.75; 4],
         max_steer: 0.0,
         brake_torque: 0.0,
         handbrake_torque: 0.0,
-        active_slots: vec![0],
-        installed: [Some(InstalledWheel {
-            radius: 0.25,
-            condition: 1.0,
-        }); 4],
-        wheel_rotations: [0.0; 4],
-        wheel_rpm: [0.0; 4],
+        assemblies: [assembly; 4],
         last_handbrake: 0.0,
     });
     let mut scan = super::reference::ScanBounds::default();
@@ -808,11 +803,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         DriveTorques::default(),
     );
     assert_ne!(world.rapier().bodies[chassis].linvel(), before);
-    assert!(
-        world.vehicles[0].controller.wheels()[0]
-            .raycast_info()
-            .is_in_contact
-    );
+    assert!(world.vehicles[0].wheels[0].contact.is_some());
     world.step_physics();
     let point = world.rapier().bodies[chassis].translation();
     assert_eq!(ray_hit(&world, point.x, point.z), Some(chassis_collider));
@@ -822,11 +813,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         crate::simulation::DriveInput::default(),
         DriveTorques::default(),
     );
-    assert!(
-        world.vehicles[0].controller.wheels()[0]
-            .raycast_info()
-            .is_in_contact
-    );
+    assert!(world.vehicles[0].wheels[0].contact.is_some());
 
     let mut character_world = empty_world();
     character_world.set_gravity(Vector::ZERO);

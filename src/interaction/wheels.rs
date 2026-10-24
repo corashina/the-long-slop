@@ -6,8 +6,8 @@ use crate::reference::{
     Transform, WheelSlotId,
 };
 use crate::vehicle::{
-    InstalledWheel, PhysicsWorld, SLOT_SENSOR_FLAG, VEHICLE_COLLIDER_FLAG, VehiclePose,
-    from_rapier, to_rapier,
+    PhysicsWorld, SLOT_SENSOR_FLAG, VEHICLE_COLLIDER_FLAG, VehiclePose, WheelAssembly, from_rapier,
+    to_rapier,
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderHandle, RigidBodyBuilder, RigidBodyHandle};
@@ -35,7 +35,7 @@ struct Slot {
     original_rim: ItemId,
     hub_to_mount: Pose,
     compatible: HashSet<ItemId>,
-    last_support: Option<(f32, f32)>,
+    last_support: Option<WheelAssembly>,
     sensor: Option<ColliderHandle>,
 }
 /// Chassis mass terms that this module owns for one vehicle.
@@ -1114,7 +1114,7 @@ impl WheelAssemblies {
                     .ok_or_else(|| error("Missing mounted rim"))?;
                 state.local_pose = from_rapier(&(inverse * rim_pose));
                 state.pose = from_rapier(&rim_pose);
-                let (radius, quality) = if let Some(tire) = part.tire {
+                if let Some(tire) = part.tire {
                     let tire_part = &self.parts[tire];
                     let tire_pose = rim_pose
                         * part
@@ -1127,20 +1127,24 @@ impl WheelAssemblies {
                     tire_state.local_pose = from_rapier(&(inverse * tire_pose));
                     tire_state.pose = from_rapier(&tire_pose);
                     tire_state.location = ItemLocation::Attached(part.item);
-                    (tire_part.radius, tire_part.quality)
+                    // Source wheelscript mass includes the mounted tire.
+                    WheelAssembly::Tire {
+                        radius_m: tire_part.radius,
+                        mass_kg: part.mass + tire_part.mass,
+                        quality: tire_part.quality,
+                    }
                 } else {
-                    (part.radius, 1.0)
-                };
-                Some((radius, quality))
+                    WheelAssembly::Rim {
+                        radius_m: part.radius,
+                        mass_kg: part.mass,
+                    }
+                }
             } else {
-                None
+                WheelAssembly::Hub
             };
-            if slot.last_support != support {
-                physics.set_wheel(
-                    slot.id,
-                    support.map(|(radius, condition)| InstalledWheel { radius, condition }),
-                )?;
-                slot.last_support = support;
+            if slot.last_support != Some(support) {
+                physics.set_wheel(slot.id, support)?;
+                slot.last_support = Some(support);
             }
             if let Some(handle) = slot.sensor {
                 let world = to_rapier(snapshot.wheels[slot.index]) * slot.hub_to_mount;
