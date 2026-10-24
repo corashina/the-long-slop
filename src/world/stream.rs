@@ -4174,6 +4174,24 @@ impl WorldStream {
                 }))
     }
 
+    /// Height of published terrain or road at a local point, cast from far above.
+    pub fn ground_height(&self, physics: &PhysicsWorld, point: [f32; 3]) -> Option<f32> {
+        use rapier3d::math::Vector;
+        use rapier3d::prelude::{QueryFilter, Ray};
+        let ray = Ray::new(
+            Vector::new(point[0], point[1] + 1000., point[2]),
+            -Vector::Y,
+        );
+        let ground = |handle: ColliderHandle, _: &rapier3d::prelude::Collider| {
+            self.surfaces
+                .iter()
+                .any(|surface| surface.collider == Some(handle))
+        };
+        physics
+            .queries(QueryFilter::default().predicate(&ground))
+            .cast_ray(&ray, 2000., true)
+            .map(|(_, distance)| ray.origin.y - distance)
+    }
     /// Search eight published road controls per update. No source index replay occurs here.
     pub fn prepare_recovery_pose(
         &mut self,
