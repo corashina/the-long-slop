@@ -1297,6 +1297,13 @@ impl GarageRuntime {
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
             audio.hits(&self.area, &self.physics, FIXED_DT);
+            let stream = &mut self.stream;
+            audio.footsteps(
+                &self.area,
+                &self.physics,
+                walking_input.held & keys::RUN != 0,
+                |position| crate::world::biome(stream.terrain_color(position), None),
+            );
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
                     crate::interaction::InteractionSound::Action(action) => {
