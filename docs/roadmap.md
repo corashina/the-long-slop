@@ -27,7 +27,6 @@ Finish the home, garage, Lada, and nearby driving first.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| P04 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | M | Verify nearby collision, ground seams, re-entry, and loose-object stability. [A08] |
 | P07 | Add player sounds. [Audio](../web/audio.js) | M | Footsteps by surface, interior muffling for world buildings and the Skoda. [L01, L06] |
 | P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Music box. [F08] |
 | P10 | Add small item actions. [Items](../src/interaction/items.rs) | M | Spirit level, spray bottle, genie lamp, cigarettes, box contents, fluid containers. [F09, F11, F13-F15, E05] |
