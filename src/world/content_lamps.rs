@@ -43,6 +43,8 @@ impl ButtonPose {
 pub(super) struct LampBinding {
     pub(super) button: Option<ButtonPose>,
     collision_dirty: bool,
+    /// A held source flashlight. Its item change records the switch state.
+    portable: bool,
     pub parent: GeneratedId,
     pub source: SourceId,
     pub control: LightControlId,
@@ -58,15 +60,15 @@ impl LampBinding {
 impl WorldStream {
     pub(super) fn sync_lamp_bindings(
         &mut self,
+        items: &crate::interaction::items::ItemStore,
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         let mut i = 0;
         while i < self.lamp_bindings.len() {
-            if self
-                .structures
-                .iter()
-                .any(|s| s.placement.id == self.lamp_bindings[i].parent)
+            let parent = &self.lamp_bindings[i].parent;
+            if self.structures.iter().any(|s| &s.placement.id == parent)
+                || self.portable_lamp_item(parent).is_some()
             {
                 i += 1;
                 continue;
@@ -74,6 +76,10 @@ impl WorldStream {
             let binding = self.lamp_bindings.swap_remove(i);
             interaction.remove_generated_light(binding.control);
             self.lamp_binding_revision += 1;
+            if binding.portable {
+                // The item change owns portable lamp state.
+                continue;
+            }
             let mut key = binding.parent;
             key.children.push((binding.source, 0));
             if self.changes.forget(&ObjectKey::Generated(key)) {
@@ -90,7 +96,8 @@ impl WorldStream {
                         .lamp_bindings
                         .iter()
                         .any(|b| &b.parent == parent && &b.source == source)
-                        && self.structures.iter().any(|s| &s.placement.id == parent)
+                        && (self.structures.iter().any(|s| &s.placement.id == parent)
+                            || self.portable_lamp_item(parent).is_some())
                         && self.bindings_ready(parent)
                 })
                 .next()
@@ -103,6 +110,10 @@ impl WorldStream {
                 .iter()
                 .any(|b| b.parent == parent && b.source == source)
             {
+                continue;
+            }
+            if let Some(item) = self.portable_lamp_item(&parent) {
+                self.bind_portable_lamp(items, interaction, physics, item, parent, source)?;
                 continue;
             }
             let Some(instance) = self.structures.iter().find(|s| s.placement.id == parent) else {
@@ -151,32 +162,7 @@ impl WorldStream {
                     self.available_staging_bytes(),
                 )?;
             }
-            let f = self.contents.rules.get(&self.reference, &source)?.fields;
-            let button = if let Some(node) = optional(f, "GButton")? {
-                let selected_on = self
-                    .contents
-                    .lamp_states()
-                    .find(|(p, s, _)| p == &parent && s == &source)
-                    .unwrap()
-                    .2;
-                let target = link(
-                    f,
-                    if selected_on ^ flag(f, "reverseSwitch")? {
-                        "GButtonOn"
-                    } else {
-                        "GButtonOff"
-                    },
-                )?;
-                Some(ButtonPose {
-                    node: node.clone(),
-                    pose: self.contents.rules.node(&self.reference, node)?.pose,
-                    target: self.contents.rules.node(&self.reference, target)?.pose,
-                    progress: 0.,
-                    moving: true,
-                })
-            } else {
-                None
-            };
+            let button = self.lamp_button(&parent, &source)?;
             let instance = self
                 .structures
                 .iter()
@@ -228,6 +214,7 @@ impl WorldStream {
             self.lamp_bindings.push(LampBinding {
                 button,
                 collision_dirty: true,
+                portable: false,
                 parent,
                 source,
                 control,
@@ -282,7 +269,119 @@ impl WorldStream {
         self.refresh_lamp_outputs();
         Ok(())
     }
-    pub fn use_generated_light(&mut self, control: LightControlId) -> Result<bool, ReferenceError> {
+    fn lamp_button(
+        &self,
+        parent: &GeneratedId,
+        source: &SourceId,
+    ) -> Result<Option<ButtonPose>, ReferenceError> {
+        let f = self.contents.rules.get(&self.reference, source)?.fields;
+        let Some(node) = optional(f, "GButton")? else {
+            return Ok(None);
+        };
+        let selected_on = self
+            .contents
+            .lamp_states()
+            .find(|(p, s, _)| p == parent && s == source)
+            .ok_or_else(|| ReferenceError("Generated lamp state missing".into()))?
+            .2;
+        let target = link(
+            f,
+            if selected_on ^ flag(f, "reverseSwitch")? {
+                "GButtonOn"
+            } else {
+                "GButtonOff"
+            },
+        )?;
+        Ok(Some(ButtonPose {
+            node: node.clone(),
+            pose: self.contents.rules.node(&self.reference, node)?.pose,
+            target: self.contents.rules.node(&self.reference, target)?.pose,
+            progress: 0.,
+            moving: true,
+        }))
+    }
+    /// The bound item of an active portable lamp instance.
+    fn portable_lamp_item(&self, parent: &GeneratedId) -> Option<crate::reference::ItemId> {
+        self.contents
+            .active
+            .iter()
+            .find(|c| &c.content.placement.id == parent)
+            .and_then(|c| c.item)
+    }
+    fn bind_portable_lamp(
+        &mut self,
+        items: &crate::interaction::items::ItemStore,
+        interaction: &mut InteractionState,
+        physics: &mut PhysicsWorld,
+        item: crate::reference::ItemId,
+        parent: GeneratedId,
+        source: SourceId,
+    ) -> Result<(), ReferenceError> {
+        if let Some(saved) = self
+            .changes
+            .get(ObjectKey::Generated(parent.clone()))
+            .and_then(|r| r.snapshot.as_ref())
+            .and_then(|s| s.lamp)
+        {
+            self.contents.set_lamp(
+                &self.reference,
+                &parent,
+                &source,
+                saved,
+                self.available_staging_bytes(),
+            )?;
+        }
+        let button = self.lamp_button(&parent, &source)?;
+        let baseline = self
+            .contents
+            .active
+            .iter()
+            .find(|c| c.content.placement.id == parent)
+            .and_then(|c| c.baseline.clone())
+            .ok_or_else(|| ReferenceError("Portable lamp baseline missing".into()))?;
+        let control = interaction.allocate_generated_light()?;
+        interaction.bind_held_light(item, control);
+        // Source flashlightscript owns every collider below its item root.
+        if let Some(body) = items.get(item).and_then(|i| i.body) {
+            let handles: Vec<_> = physics.rapier().bodies[body].colliders().to_vec();
+            for handle in handles {
+                let mut id =
+                    ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+                if id.0 == 0 {
+                    id = match interaction.allocate_generated_collider() {
+                        Ok(id) => id,
+                        Err(error) => {
+                            interaction.remove_generated_light(control);
+                            return Err(error);
+                        }
+                    };
+                    physics.edit_collider(handle, |collider| {
+                        collider.user_data |= (id.0 as u128) << 64;
+                    });
+                }
+                interaction.bind_generated_light(control, id);
+            }
+        }
+        self.presentation_lamp_changes
+            .push(self.lamp_bindings.len());
+        self.lamp_bindings.push(LampBinding {
+            button,
+            collision_dirty: false,
+            portable: true,
+            parent,
+            source,
+            control,
+            baseline,
+        });
+        self.lamp_binding_revision += 1;
+        self.refresh_lamp_outputs();
+        Ok(())
+    }
+    pub fn use_generated_light(
+        &mut self,
+        control: LightControlId,
+        items: &mut crate::interaction::items::ItemStore,
+    ) -> Result<bool, ReferenceError> {
         let Some(binding) = self.lamp_bindings.iter().find(|b| b.control == control) else {
             return Ok(false);
         };
@@ -299,20 +398,26 @@ impl WorldStream {
             !on,
             self.available_staging_bytes(),
         )?;
-        let mut key = binding.parent.clone();
-        key.children.push((binding.source.clone(), 0));
-        let mut snapshot = binding.baseline.clone();
-        snapshot.lamp = Some(!on);
-        let object = ObjectKey::Generated(key);
-        self.changes
-            .record(object.clone(), snapshot, &binding.baseline);
-        if let Some(origin) = self.contents.replay_origin(&binding.parent).or_else(|| {
-            self.structures
-                .iter()
-                .find(|s| s.placement.id == binding.parent)
-                .map(|s| &s.placement)
-        }) {
-            self.changes.set_replay(&object, origin, &binding.parent);
+        if binding.portable {
+            if let Some(item) = self.portable_lamp_item(&binding.parent) {
+                items.mark_dirty(item);
+            }
+        } else {
+            let mut key = binding.parent.clone();
+            key.children.push((binding.source.clone(), 0));
+            let mut snapshot = binding.baseline.clone();
+            snapshot.lamp = Some(!on);
+            let object = ObjectKey::Generated(key);
+            self.changes
+                .record(object.clone(), snapshot, &binding.baseline);
+            if let Some(origin) = self.contents.replay_origin(&binding.parent).or_else(|| {
+                self.structures
+                    .iter()
+                    .find(|s| s.placement.id == binding.parent)
+                    .map(|s| &s.placement)
+            }) {
+                self.changes.set_replay(&object, origin, &binding.parent);
+            }
         }
         let index = self
             .lamp_bindings
@@ -437,6 +542,7 @@ mod tests {
             source: node.clone(),
             control: LightControlId(x as u32),
             collision_dirty: false,
+            portable: false,
             button: Some(ButtonPose {
                 node: node.clone(),
                 pose: pose(x),

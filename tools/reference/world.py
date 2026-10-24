@@ -23,7 +23,9 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     'pickupable','usablescript','pushablescript','massScript','layerScript','tosaveitemscript',
     'enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript',
     'craftscript','partscript','capsscript','kozlampa','electronicsscript','headlightscript','rearlights','flashlightscript',
-    'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript'}
+    'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript',
+    # Portable electronics (P09): compass, clock, radios, music box and their dials.
+    'compassscript','simplecompassscript','clockscript','radioscript','musicboxscript','meterscript','mutatoscript','forgoszamlap'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):

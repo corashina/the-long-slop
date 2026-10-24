@@ -824,7 +824,10 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         control: crate::reference::LightControlId,
     ) {
-        match self.stream.use_generated_light(control) {
+        match self
+            .stream
+            .use_generated_light(control, &mut self.area.items)
+        {
             Ok(false) => self.lighting.use_control(&reference.lighting, control),
             Ok(true) => {}
             Err(error) => self.stream.fail(error),
