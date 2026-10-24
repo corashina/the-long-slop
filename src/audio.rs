@@ -6,6 +6,7 @@ use crate::vehicle::{PhysicsWorld, to_rapier};
 use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
+pub mod ambience;
 pub mod impacts;
 
 #[derive(Clone, Copy, Debug)]
@@ -81,6 +82,12 @@ pub struct VehicleAudioInput {
     pub ambient_temperature: f32,
     pub electronics_output: f32,
 }
+fn xorshift(state: &mut u32) -> f32 {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    *state as f32 / u32::MAX as f32
+}
 fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     ((value - a) / (b - a)).clamp(0., 1.)
 }
@@ -151,6 +158,7 @@ pub struct AudioState {
     car_mixer: u32,
     sphere: Option<Ball>,
     impacts: impacts::ImpactState,
+    rocks: ambience::RockAmbience,
 }
 impl AudioState {
     pub fn new(reference: AudioReference, session: u32) -> Self {
@@ -275,6 +283,7 @@ impl AudioState {
             control_items: HashMap::new(),
             sphere,
             impacts: impacts::ImpactState::default(),
+            rocks: ambience::RockAmbience::default(),
             reference,
         }
     }
@@ -496,10 +505,7 @@ impl AudioState {
         }
     }
     fn sample(&mut self) -> f32 {
-        self.random ^= self.random << 13;
-        self.random ^= self.random >> 17;
-        self.random ^= self.random << 5;
-        self.random as f32 / u32::MAX as f32
+        xorshift(&mut self.random)
     }
     fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
         let Some(&index) = self.bindings.get(&id) else {
@@ -883,6 +889,7 @@ impl AudioState {
         self.random = session.wrapping_add(0x9e3779b9);
         self.removed.clear();
         self.impacts.reset();
+        self.rocks.reset();
         for m in &mut self.mechanism_sounds {
             m.remaining = 0.;
         }

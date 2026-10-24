@@ -4312,6 +4312,10 @@ impl WorldStream {
     pub fn focus_distance_squared(&self, position: [f64; 3]) -> f32 {
         focus_distance_squared(self.request, position)
     }
+    /// Changes when a structure is published or retired.
+    pub fn structure_revision(&self) -> u64 {
+        self.structure_revision
+    }
     pub fn pending_structures(&self) -> &[Placement] {
         &self.wanted_structures
     }

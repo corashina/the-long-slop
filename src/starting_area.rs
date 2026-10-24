@@ -897,6 +897,11 @@ impl GarageRuntime {
                 .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+            audio.sync_rocks(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            audio.rock_step(self.lighting.cycle.output(), position);
         }
     }
 
