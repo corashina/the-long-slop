@@ -23,6 +23,14 @@ pub struct ToolFrame {
     pub view: VehiclePose,
     pub origin: [f64; 3],
 }
+/// The world state a tool ray reads.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolWorld<'a> {
+    pub conditions: &'a ConditionStore,
+    pub items: &'a ItemStore,
+    pub physics: &'a PhysicsWorld,
+    pub parts: &'a PartAttachments,
+}
 #[derive(Clone, Copy, Debug)]
 pub enum ToolOwner {
     Equipped(ItemId),
@@ -40,10 +48,20 @@ pub struct ToolSignals {
     pub color: [f32; 4],
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Surface(ConditionId),
     Wash(WashId),
+    /// The washtriggerscript on a generated item, by its owner item.
+    Generated(ItemId),
     Solid(ColliderHandle),
+}
+/// A washtriggerscript on a generated item, such as the genie lamp.
+struct GeneratedWash {
+    owner: ItemId,
+    permission: u8,
+    never_repair: bool,
+    repair: f32,
+    colliders: Vec<(ColliderId, ColliderHandle)>,
 }
 struct WashEffect {
     particles: Vec<ParticleState>,
@@ -101,6 +119,9 @@ pub struct CleaningTools {
     wash_indices: HashMap<WashId, usize>,
     wash_colliders: Vec<(ColliderHandle, WashId, bool)>,
     collider_enabled: HashMap<ColliderId, bool>,
+    generated_washes: Vec<GeneratedWash>,
+    /// Generated items that reserve LMB while equipped, with their LMB text.
+    lmb_items: HashMap<ItemId, u32>,
 }
 impl CleaningTools {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
@@ -189,6 +210,8 @@ impl CleaningTools {
             contacts,
             sprays,
             signals,
+            generated_washes: Vec::new(),
+            lmb_items: HashMap::new(),
             wash_colliders: Vec::with_capacity(
                 reference
                     .conditions
@@ -296,15 +319,194 @@ impl CleaningTools {
     }
     pub fn reserves_lmb(&self, equipped: Option<ItemId>, _carried: Option<ItemId>) -> bool {
         equipped.is_some_and(|item| {
-            self.signals[..self.contacts.len()]
-                .iter()
-                .any(|s| s.item == item)
+            self.lmb_items.contains_key(&item)
+                || self.signals[..self.contacts.len()]
+                    .iter()
+                    .any(|s| s.item == item)
         })
     }
     pub fn prompt(&self, item: ItemId) -> Option<u32> {
+        if let Some(text) = self.lmb_items.get(&item) {
+            return Some(*text);
+        }
         self.get(item)
             .filter(|t| !t.disabled)
             .and_then(|_| self.texts.get(&item).copied())
+    }
+    /// A generated tool that uses LMB in the hand and shows `text`.
+    pub(crate) fn reserve_lmb(&mut self, item: ItemId, text: Option<u32>) {
+        match text {
+            Some(text) => {
+                self.lmb_items.insert(item, text);
+            }
+            None => {
+                self.lmb_items.remove(&item);
+            }
+        }
+    }
+    pub(crate) fn register_generated_wash(
+        &mut self,
+        owner: ItemId,
+        permission: u8,
+        never_repair: bool,
+        colliders: Vec<(ColliderId, ColliderHandle)>,
+    ) {
+        self.remove_generated_wash(owner);
+        self.generated_washes.push(GeneratedWash {
+            owner,
+            permission,
+            never_repair,
+            repair: 0.,
+            colliders,
+        });
+    }
+    pub(crate) fn remove_generated_wash(&mut self, owner: ItemId) {
+        self.generated_washes.retain(|w| w.owner != owner);
+    }
+    /// ginlampscript reads a positive repairValue as a rub and resets it to 0.
+    pub(crate) fn take_generated_rub(&mut self, owner: ItemId) -> bool {
+        let Some(w) = self.generated_washes.iter_mut().find(|w| w.owner == owner) else {
+            return false;
+        };
+        let rubbed = w.repair > 0.;
+        if rubbed {
+            w.repair = 0.;
+        }
+        rubbed
+    }
+    /// washtriggerscript.Wash on a generated trigger. Returns true when it is clean.
+    fn wash_generated(
+        &mut self,
+        owner: ItemId,
+        tool: u8,
+        gain: f32,
+        reference: &ReferenceManifest,
+    ) -> Option<bool> {
+        let w = self
+            .generated_washes
+            .iter_mut()
+            .find(|w| w.owner == owner)?;
+        if !reference.conditions.clean_tables[w.permission as usize][tool as usize] {
+            return None;
+        }
+        w.repair += gain;
+        // GotClean also disables the trigger object. Generated trigger objects stay active.
+        let clean = w.repair > 1. && !w.never_repair;
+        if clean {
+            w.repair = 0.;
+        }
+        Some(clean)
+    }
+    /// washtriggerscript.Wash on a checked trigger. Returns true when it is clean.
+    fn wash_fixed(
+        &mut self,
+        id: WashId,
+        tool: u8,
+        gain: f32,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+    ) -> Option<bool> {
+        let wi = self.wash_indices[&id];
+        let w = &reference.conditions.washes[wi];
+        if !reference.conditions.clean_tables[w.permission_index as usize][tool as usize] {
+            return None;
+        }
+        let state = &mut conditions.washes[wi];
+        state.repair_progress += gain;
+        if state.repair_progress > 1. && !w.never_repair {
+            state.repair_progress = 0.;
+            state.active = false;
+            state.on = false;
+            state.destroyed = w.destroy_on_repair;
+            if w.destroy_on_repair {
+                self.washes[wi].elapsed = Some(0.);
+            }
+            return Some(true);
+        }
+        Some(false)
+    }
+    /// Physics.OverlapSphere at `point` for the first active wash trigger on `mask`.
+    fn nearby_wash(
+        &self,
+        point: Vector,
+        mask: u32,
+        radius: f32,
+        conditions: &ConditionStore,
+        physics: &PhysicsWorld,
+    ) -> Option<Target> {
+        let near = |handle: ColliderHandle| {
+            let collider = &physics.rapier().colliders[handle];
+            if !collider.is_enabled() || collider.collision_groups().memberships.bits() & mask == 0
+            {
+                return false;
+            }
+            let projected = collider
+                .shape()
+                .project_point(collider.position(), point, true);
+            projected.is_inside || projected.point.distance_squared(point) <= radius * radius
+        };
+        // Only checked wash collider links can participate in the nearby trigger search.
+        for &(handle, wash, _) in &self.wash_colliders {
+            if conditions.wash(wash).visible() && near(handle) {
+                return Some(Target::Wash(wash));
+            }
+        }
+        self.generated_washes
+            .iter()
+            .find(|w| {
+                w.colliders
+                    .iter()
+                    .any(|&(_, h)| physics.rapier().colliders.get(h).is_some() && near(h))
+            })
+            .map(|w| Target::Generated(w.owner))
+    }
+    /// spricniscript.Pressing target order: hit trigger, nearby trigger, slot part, condition.
+    pub(crate) fn spray_target(
+        &self,
+        (handle, point): (ColliderHandle, Vector),
+        reference: &ReferenceManifest,
+        world: ToolWorld<'_>,
+    ) -> Option<Target> {
+        let ToolWorld {
+            conditions,
+            items,
+            physics,
+            parts,
+        } = world;
+        let r = &reference.small_items.spray_bottle;
+        let collider = ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+        let selected = self.target(
+            collider,
+            r.cleaning_type,
+            reference,
+            conditions,
+            items,
+            parts,
+        );
+        spray_order(selected, || {
+            self.nearby_wash(point, r.wash_mask, r.wash_radius, conditions, physics)
+        })
+    }
+    /// spricniscript.Fire on a target. Returns true when the splash spawns.
+    pub(crate) fn spray(
+        &mut self,
+        target: Target,
+        tool: u8,
+        gain: f32,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+    ) -> bool {
+        match target {
+            Target::Wash(id) => self
+                .wash_fixed(id, tool, gain, reference, conditions)
+                .is_some(),
+            Target::Generated(owner) => self.wash_generated(owner, tool, gain, reference).is_some(),
+            Target::Surface(id) if conditions.can_repair(id, tool) => {
+                conditions.repair(id, tool, gain);
+                true
+            }
+            Target::Surface(_) | Target::Solid(_) => false,
+        }
     }
     pub fn signals(&self) -> &[ToolSignals] {
         &self.signals
@@ -378,6 +580,13 @@ impl CleaningTools {
         items: &ItemStore,
         parts: &PartAttachments,
     ) -> Option<Target> {
+        if let Some(w) = self
+            .generated_washes
+            .iter()
+            .find(|w| w.colliders.iter().any(|&(id, _)| id == collider))
+        {
+            return Some(Target::Generated(w.owner));
+        }
         let b = self.bindings.get(&collider)?;
         if let Some(id) = b.wash.filter(|id| conditions.wash(*id).visible()) {
             return Some(Target::Wash(id));
@@ -556,30 +765,18 @@ impl CleaningTools {
                 parts,
             )
         });
-        if let Some((_, hit)) = hit {
-            if !matches!(selected, Some(Target::Wash(_))) && !self.states[index].disabled {
-                let point = ray.point_at(hit.time_of_impact);
-                // Only checked wash collider links can participate in the nearby trigger search.
-                for &(handle, wash, _) in &self.wash_colliders {
-                    let collider = &physics.rapier().colliders[handle];
-                    if !collider.is_enabled()
-                        || collider.collision_groups().memberships.bits() & b.wash_mask == 0
-                        || !conditions.wash(wash).visible()
-                    {
-                        continue;
-                    }
-                    let projected =
-                        collider
-                            .shape()
-                            .project_point(collider.position(), point, true);
-                    if projected.is_inside
-                        || projected.point.distance_squared(point) <= b.wash_radius * b.wash_radius
-                    {
-                        selected = Some(Target::Wash(wash));
-                        break;
-                    }
-                }
-            }
+        if let Some((_, hit)) = hit
+            && !matches!(selected, Some(Target::Wash(_) | Target::Generated(_)))
+            && !self.states[index].disabled
+            && let Some(wash) = self.nearby_wash(
+                ray.point_at(hit.time_of_impact),
+                b.wash_mask,
+                b.wash_radius,
+                conditions,
+                physics,
+            )
+        {
+            selected = Some(wash);
         }
         hit.map(|(handle, hit)| (handle, hit, selected.unwrap_or(Target::Solid(handle))))
     }
@@ -594,7 +791,7 @@ impl CleaningTools {
             return;
         };
         let c = &self.contacts[index];
-        let s = &mut self.signals[index];
+        let s = &self.signals[index];
         let b = &reference.conditions.brushes[index];
         // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
         if c.origin == frame.origin
@@ -605,32 +802,23 @@ impl CleaningTools {
             && !self.states[index].disabled
         {
             let gain = b.repair_modifier * reference.conditions.repair_rate * frame.dt;
+            let tool = b.cleaning_type;
             let mut completed = false;
             match target {
                 Target::Surface(id) => {
-                    s.doing_work = conditions.can_repair(id, b.cleaning_type);
-                    completed = conditions.repair(id, b.cleaning_type, gain) != RepairResult::None;
+                    self.signals[index].doing_work = conditions.can_repair(id, tool);
+                    completed = conditions.repair(id, tool, gain) != RepairResult::None;
                 }
                 Target::Wash(id) => {
-                    let wi = self.wash_indices[&id];
-                    let w = &reference.conditions.washes[wi];
-                    if reference.conditions.clean_tables[w.permission_index as usize]
-                        [b.cleaning_type as usize]
-                    {
-                        s.doing_work = true;
-                        let state = &mut conditions.washes[wi];
-                        state.repair_progress += gain;
-                        if state.repair_progress > 1. && !w.never_repair {
-                            state.repair_progress = 0.;
-                            state.active = false;
-                            state.on = false;
-                            state.destroyed = w.destroy_on_repair;
-                            completed = true;
-                            if w.destroy_on_repair {
-                                let effect = &mut self.washes[wi];
-                                effect.elapsed = Some(0.);
-                            }
-                        }
+                    if let Some(clean) = self.wash_fixed(id, tool, gain, reference, conditions) {
+                        self.signals[index].doing_work = true;
+                        completed = clean;
+                    }
+                }
+                Target::Generated(owner) => {
+                    if let Some(clean) = self.wash_generated(owner, tool, gain, reference) {
+                        self.signals[index].doing_work = true;
+                        completed = clean;
                     }
                 }
                 Target::Solid(_) => {}
@@ -1027,6 +1215,13 @@ impl CleaningTools {
         Ok(())
     }
 }
+/// The hit trigger wins, then a nearby trigger, then the hit part or condition.
+fn spray_order(hit: Option<Target>, nearby: impl FnOnce() -> Option<Target>) -> Option<Target> {
+    if matches!(hit, Some(Target::Wash(_) | Target::Generated(_))) {
+        return hit;
+    }
+    nearby().or(hit)
+}
 pub(crate) fn validate_tools(
     reference: &ReferenceManifest,
     saved: &[ToolSnapshot],
@@ -1059,4 +1254,25 @@ pub(crate) fn validate_tools(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod spray_tests {
+    use super::*;
+
+    #[test]
+    fn spray_target_order() {
+        let wash = Some(Target::Wash(WashId(1)));
+        let lamp = Some(Target::Generated(ItemId(9)));
+        let part = Some(Target::Surface(ConditionId(3)));
+        assert_eq!(spray_order(wash, || lamp), wash, "hit trigger first");
+        assert_eq!(spray_order(lamp, || wash), lamp);
+        assert_eq!(
+            spray_order(part, || lamp),
+            lamp,
+            "nearby trigger before the part"
+        );
+        assert_eq!(spray_order(part, || None), part);
+        assert_eq!(spray_order(None, || None), None);
+    }
 }

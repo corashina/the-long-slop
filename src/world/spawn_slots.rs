@@ -92,6 +92,7 @@ impl SpawnEvaluation<'_> {
                         condition: 1.,
                         buried: flag(save.fields, "buried")?,
                         distance_offset: self.distance_offset(&child, save)?,
+                        ammo: None,
                     })?;
                 }
             } else {

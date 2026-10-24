@@ -1066,6 +1066,19 @@ impl SourceInstances {
                     }
                 }
             }
+            if let Some(pose) = stream.spray_trigger(&instance.placement.id)
+                && let Some(n) = prototype
+                    .nodes
+                    .iter()
+                    .find(|n| n.source == reference.small_items.spray_bottle.trigger)
+                && let Ok(mut transform) = transforms.get_mut(instance.nodes[n.gltf_node as usize])
+            {
+                transform.set_if_neq(Transform {
+                    translation: Vec3::from_array(pose.translation),
+                    rotation: Quat::from_array(pose.rotation),
+                    scale: Vec3::from_array(pose.scale),
+                });
+            }
             for (i, node) in prototype.nodes.iter().enumerate() {
                 if let Some((_, pose)) = instance
                     .lamp_buttons

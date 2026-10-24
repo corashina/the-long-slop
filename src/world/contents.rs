@@ -121,6 +121,7 @@ impl ContentInstance {
                 condition: 1.,
                 buried: false,
                 distance_offset: [0.; 3],
+                ammo: None,
             },
         }
     }
@@ -502,6 +503,7 @@ impl SourceContents {
                         condition: 1.,
                         buried: false,
                         distance_offset: [0.; 3],
+                        ammo: None,
                     });
                     e.queue_start(parent.clone(), None);
                     e.finish_starts()?;

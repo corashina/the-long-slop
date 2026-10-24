@@ -354,6 +354,8 @@ pub(crate) fn sync_source_lamps(
             if let Some(light) = light {
                 bound.output.enabled = light.enabled && (light.biome.is_none() || enabled);
                 bound.output.intensity = light.intensity;
+                // ginlampscript drives the generated light range.
+                bound.record.range_meters = light.range;
             } else {
                 // Source retirement can precede the deferred membership replacement.
                 bound.output.enabled = false;

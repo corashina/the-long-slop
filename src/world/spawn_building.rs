@@ -150,6 +150,7 @@ impl SpawnEvaluation<'_> {
                         condition: 1.,
                         buried: true,
                         distance_offset: self.distance_offset(&child, save)?,
+                        ammo: None,
                     })?;
                 }
             }

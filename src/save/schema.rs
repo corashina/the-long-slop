@@ -1,7 +1,12 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 11;
+pub const SAVE_SCHEMA_VERSION: u32 = 12;
+/// Schema 11 saves have no spray ammo or lamp value. These load at their spawn values.
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 11;
+pub fn schema_supported(version: u32) -> bool {
+    (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +53,7 @@ impl SaveSnapshot {
         }
         let version: Version =
             serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
-        if version.schema_version != SAVE_SCHEMA_VERSION {
+        if !schema_supported(version.schema_version) {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
         serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))

@@ -14,6 +14,8 @@ pub(crate) struct SpawnedContent {
     pub condition: f32,
     pub buried: bool,
     pub distance_offset: [f32; 3],
+    /// RandomSpawned ammoscript count; None keeps the prefab count.
+    pub ammo: Option<f32>,
 }
 impl SpawnedContent {
     /// Switch state of a flashlight that is its own item.
@@ -271,8 +273,9 @@ impl<'a> SpawnEvaluation<'a> {
             {
                 let mut fluid = None;
                 let mut tanks = Vec::new();
+                let mut ammo = None;
                 if !flag(row, "disableRandom")? {
-                    (fluid, tanks) = self.random_spawned(save, &row)?;
+                    (fluid, tanks, ammo) = self.random_spawned(save, &row)?;
                 }
                 self.start_save(&child, save, 0)?;
                 if self
@@ -296,6 +299,7 @@ impl<'a> SpawnEvaluation<'a> {
                         condition: 1.,
                         buried: flag(save.fields, "buried")?,
                         distance_offset: self.distance_offset(&child, save)?,
+                        ammo,
                     });
                 }
             }

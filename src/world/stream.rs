@@ -143,6 +143,7 @@ pub struct WorldStream {
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
     dial_bindings: Vec<content_dials::DialBinding>,
+    pub(crate) small_items: content_small_items::SmallItems,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
     // Membership and order only, independent of button animation.
@@ -683,6 +684,7 @@ impl WorldStream {
             binding_reserved: 0,
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
+            small_items: content_small_items::SmallItems::new(reference),
             dial_scan: None,
             lamp_binding_revision: 0,
             seed,
@@ -3839,6 +3841,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_small_items(reference, items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4536,6 +4542,7 @@ impl WorldStream {
                     .iter()
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
+                + self.small_items.heap_bytes()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4829,6 +4836,9 @@ pub(crate) mod content_index;
 
 #[path = "content_dials.rs"]
 mod content_dials;
+
+#[path = "content_small_items.rs"]
+mod content_small_items;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;

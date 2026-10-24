@@ -8,7 +8,7 @@ impl SaveSnapshot {
         reference: &ReferenceManifest,
         expected: &SourceStamp,
     ) -> Result<(), SaveError> {
-        if self.schema_version != SAVE_SCHEMA_VERSION {
+        if !schema_supported(self.schema_version) {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
         data(

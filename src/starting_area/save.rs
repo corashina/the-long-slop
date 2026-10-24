@@ -79,6 +79,8 @@ impl GarageRuntime {
                 valve: None,
                 lamp: None,
                 dial: None,
+                ammo: None,
+                glow: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,

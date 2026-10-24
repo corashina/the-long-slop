@@ -244,6 +244,8 @@ enum Owner {
     Spray(usize),
     Wash(usize),
     Outlet(u32),
+    /// Spray bottle spray (0) and splash (1).
+    SprayBottle(usize),
 }
 struct Group {
     owner: Owner,
@@ -515,6 +517,18 @@ fn sync_particles(
                 );
             }
         }
+        let bottle = &reference.0.small_items.spray_bottle;
+        for (index, p) in [&bottle.spray, &bottle.splash].into_iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::SprayBottle(index),
+                0,
+                p,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
         for (tool, b) in reference.0.conditions.sprays.iter().enumerate() {
             for (particle, p) in b.particles.iter().enumerate() {
                 add_group(
@@ -542,6 +556,8 @@ fn sync_particles(
             Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
             Owner::Brush(tool) => &reference.0.conditions.brushes[tool].particles[g.source],
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
+            Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
+            Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -553,10 +569,12 @@ fn sync_particles(
                 .fluid_particles()
                 .find(|(key, _)| key.0 == id)
                 .map(|(_, p)| p),
-            Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) => None,
+            Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) | Owner::SprayBottle(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
-        let particles = if let Owner::Wash(wash) = g.owner {
+        let particles = if let Owner::SprayBottle(index) = g.owner {
+            Some(drive.runtime.stream.small_item_particles(index))
+        } else if let Owner::Wash(wash) = g.owner {
             Some(
                 drive
                     .runtime

@@ -37,6 +37,10 @@ pub struct ObjectSnapshot {
     pub lamp: Option<bool>,
     /// Tuned compass bearing or clock offset (meterscript szamlap value).
     pub dial: Option<f32>,
+    /// Spray bottle ammoscript count; None at its spawn count.
+    pub ammo: Option<f32>,
+    /// Genie lamp ginlampscript value; None at its startup value.
+    pub glow: Option<f32>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,
