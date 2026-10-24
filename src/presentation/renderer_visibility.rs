@@ -25,6 +25,8 @@ pub struct SourceSortData {
     pub queue: i16,
     pub additive: bool,
     pub glass: bool,
+    /// Source named `_GrabTexture` user. Only distortion particles set it.
+    pub grab: bool,
 }
 
 #[derive(Resource, Default)]

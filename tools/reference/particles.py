@@ -52,11 +52,6 @@ def particle(source,reader,role,rate,output,owner=None):
         visit(rd[k],'renderer.'+k)
     if result['module_flags']['CollisionModule']:
         result['limits'].append({'source':source_id(reader),'module':'CollisionModule','visible_effect':'Retained ParticleState spray pools and FluidContact outlet pools cast masked non-sensor Rapier swept spheres, apply bounce, dampen and lifetime loss, and remove initial penetration. Native collision cache, collision messages and world tank-fill callbacks remain outside this route. Native particle trigger membership remains unproved; ray queriesHitTriggers does not govern this adaptation.'})
-    for m in result['materials']:
-        if m['shader']['name']=='Legacy Shaders/Particles/Alpha Blended':
-            result['limits'].append({'source':source_id(reader),'module':'material.soft_particles','visible_effect':'Source Ultra enables soft particles. ParticleMaterial has no sampled scene-depth binding; particle intersections keep hard depth edges.'})
-        if m['floats'].get('_DistortionEnabled')==1:
-            result['limits'].append({'source':source_id(reader),'module':'material.distortion','visible_effect':'Material sharedassets1.assets:481 uses EFFECT_BUMP with distortion strength 50. ParticleMaterial has no scene-color binding; fluid sprites do not refract the background.'})
     return result
 
 def recover_particles(source, output):

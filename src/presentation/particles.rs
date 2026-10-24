@@ -33,6 +33,8 @@ pub struct ParticleUniform {
     st: Vec4,
     fog: Vec4,
     settings: Vec4,
+    /// x: soft-particle InvFade (0 off), y: distortion strength scaled (0 off), z: distortion blend, w: bump scale.
+    effect: Vec4,
 }
 impl Default for ParticleUniform {
     fn default() -> Self {
@@ -44,6 +46,7 @@ impl Default for ParticleUniform {
             st: Vec4::new(1., 1., 0., 0.),
             fog: Vec4::ZERO,
             settings: Vec4::ZERO,
+            effect: Vec4::ZERO,
         }
     }
 }
@@ -51,8 +54,51 @@ impl Default for ParticleUniform {
 pub struct ParticleMaterial {
     batch: usize,
     texture: Handle<Image>,
+    /// Distortion `_BumpMap`; the main texture when the material has none.
+    bump: Handle<Image>,
+    additive: bool,
     order: f32,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParticleKey {
+    additive: bool,
+}
+/// Source particle shader families selected by the exported material.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParticleShader {
+    /// Legacy Shaders/Particles/Alpha Blended.
+    AlphaBlended,
+    /// Legacy Shaders/Particles/Additive.
+    Additive,
+    /// Mobile/Particles/Additive: no tint, no soft particles.
+    MobileAdditive,
+    /// Particles/Standard Unlit and other `_Color` alpha-blended particles.
+    Unlit,
+}
+impl ParticleShader {
+    fn new(name: &str) -> Self {
+        match name {
+            "Legacy Shaders/Particles/Alpha Blended" => Self::AlphaBlended,
+            "Legacy Shaders/Particles/Additive" => Self::Additive,
+            "Mobile/Particles/Additive" => Self::MobileAdditive,
+            _ => Self::Unlit,
+        }
+    }
+    fn legacy(self) -> bool {
+        matches!(self, Self::AlphaBlended | Self::Additive)
+    }
+    fn additive(self) -> bool {
+        matches!(self, Self::Additive | Self::MobileAdditive)
+    }
+}
+pub(crate) type DrawSourceParticle = (
+    bevy::render::render_phase::SetItemPipeline,
+    bevy::pbr::SetMeshViewBindGroup<0>,
+    super::stained_glass::SetSourceParticleView,
+    bevy::pbr::SetMeshBindGroup<2>,
+    bevy::pbr::SetMaterialBindGroup<3>,
+    bevy::pbr::DrawMesh,
+);
 impl Material for ParticleMaterial {
     fn vertex_shader() -> ShaderRef {
         "shaders/source_particles.wgsl".into()
@@ -76,8 +122,28 @@ impl Material for ParticleMaterial {
         _: &MaterialPipeline,
         d: &mut RenderPipelineDescriptor,
         l: &MeshVertexBufferLayoutRef,
-        _: MaterialPipelineKey<Self>,
+        key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        d.layout[1] = super::stained_glass::particle_view_layout();
+        if key.bind_group_data.additive {
+            // Source Blend SrcAlpha One, ColorMask RGB.
+            if let Some(target) = d
+                .fragment
+                .as_mut()
+                .and_then(|f| f.targets.first_mut())
+                .and_then(|t| t.as_mut())
+            {
+                target.blend = Some(BlendState {
+                    color: BlendComponent {
+                        src_factor: BlendFactor::SrcAlpha,
+                        dst_factor: BlendFactor::One,
+                        operation: BlendOperation::Add,
+                    },
+                    alpha: BlendComponent::OVER,
+                });
+                target.write_mask = ColorWrites::COLOR;
+            }
+        }
         d.vertex.buffers = vec![l.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
@@ -94,12 +160,16 @@ pub struct ParticleGpu {
     buffers: Vec<UniformBuffer<ParticleUniform>>,
 }
 impl AsBindGroup for ParticleMaterial {
-    type Data = ();
+    type Data = ParticleKey;
     type Param = (SRes<ParticleGpu>, SRes<RenderAssets<GpuImage>>);
     fn label() -> &'static str {
         "source particles"
     }
-    fn bind_group_data(&self) {}
+    fn bind_group_data(&self) -> ParticleKey {
+        ParticleKey {
+            additive: self.additive,
+        }
+    }
     fn unprepared_bind_group(
         &self,
         _: &BindGroupLayout,
@@ -114,6 +184,9 @@ impl AsBindGroup for ParticleMaterial {
                 .ok_or(AsBindGroupError::RetryNextUpdate)?;
         let image =
             p.1.get(self.texture.id())
+                .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        let bump =
+            p.1.get(self.bump.id())
                 .ok_or(AsBindGroupError::RetryNextUpdate)?;
         Ok(UnpreparedBindGroup {
             bindings: BindingResources(vec![
@@ -132,6 +205,20 @@ impl AsBindGroup for ParticleMaterial {
                         image.sampler.clone(),
                     ),
                 ),
+                (
+                    3,
+                    OwnedBindingResource::TextureView(
+                        TextureViewDimension::D2,
+                        bump.texture_view.clone(),
+                    ),
+                ),
+                (
+                    4,
+                    OwnedBindingResource::Sampler(
+                        SamplerBindingType::Filtering,
+                        bump.sampler.clone(),
+                    ),
+                ),
             ]),
         })
     }
@@ -141,6 +228,8 @@ impl AsBindGroup for ParticleMaterial {
             ShaderStages::VERTEX_FRAGMENT,
             (
                 uniform_buffer::<ParticleUniform>(false),
+                texture_2d(TextureSampleType::Float { filterable: true }),
+                sampler(SamplerBindingType::Filtering),
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
             ),
@@ -163,6 +252,8 @@ struct Group {
     count: usize,
     order: Vec<usize>,
     entities: Vec<Entity>,
+    /// Additive source particles fog toward black.
+    black_fog: bool,
 }
 #[derive(Resource, Default)]
 pub(crate) struct ParticleRender {
@@ -196,6 +287,10 @@ impl Plugin for SourceParticlePlugin {
             .init_resource::<ExtractedParticles>()
             .add_systems(ExtractSchedule, extract)
             .add_systems(Render, upload.in_set(RenderSystems::PrepareResources));
+        bevy::render::render_phase::AddRenderCommand::add_render_command::<
+            bevy::core_pipeline::core_3d::Transparent3d,
+            DrawSourceParticle,
+        >(app.sub_app_mut(RenderApp));
     }
 }
 fn extract(state: Extract<Res<ParticleRender>>, mut extracted: ResMut<ExtractedParticles>) {
@@ -262,15 +357,28 @@ fn add_group(
         .iter()
         .find(|t| t.property == "_MainTex")
         .unwrap();
-    let texture = lighting
-        .textures
-        .iter()
-        .find(|(id, _, _)| *id == t.texture)
-        .unwrap()
-        .2
-        .clone();
-    let legacy = m.shader.name == "Legacy Shaders/Particles/Alpha Blended";
-    let tint = m.colors[if legacy { "_TintColor" } else { "_Color" }];
+    let image = |id: u32| {
+        lighting
+            .textures
+            .iter()
+            .find(|(texture, _, _)| *texture == id)
+            .unwrap()
+            .2
+            .clone()
+    };
+    let texture = image(t.texture);
+    let shader = ParticleShader::new(&m.shader.name);
+    let legacy = shader.legacy();
+    let float = |name: &str| m.floats.get(name).copied().unwrap_or(0.);
+    // Particles/Standard Unlit EFFECT_BUMP reads `_GrabTexture` through `_BumpMap`.
+    let bump = (float("_DistortionEnabled") == 1.)
+        .then(|| m.textures.iter().find(|t| t.property == "_BumpMap"))
+        .flatten();
+    let tint = match shader {
+        ParticleShader::MobileAdditive => [1.; 4],
+        _ if legacy => m.colors["_TintColor"],
+        _ => m.colors["_Color"],
+    };
     let mut uniform = ParticleUniform::default();
     uniform.tint = Vec4::from_array(linear(tint));
     uniform.st = Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1]);
@@ -280,12 +388,26 @@ fn add_group(
         r.scalars["renderer.m_MaxParticleSize"],
         0.,
     );
+    // Source Ultra enables SOFTPARTICLES_ON. Only the legacy shaders compile the fade.
+    uniform.effect = Vec4::new(
+        if legacy { float("_InvFade") } else { 0. },
+        if bump.is_some() {
+            float("_DistortionStrengthScaled")
+        } else {
+            0.
+        },
+        float("_DistortionBlend"),
+        float("_BumpScale"),
+    );
+    let bump = bump.map_or_else(|| texture.clone(), |b| image(b.texture));
     let mut entities = Vec::with_capacity(count);
     for i in 0..count {
         state.uniforms.push(uniform);
         let material = materials.add(ParticleMaterial {
             batch: start + i,
             texture: texture.clone(),
+            bump: bump.clone(),
+            additive: shader.additive(),
             order: -r.scalars["renderer.m_SortingFudge"],
         });
         entities.push(
@@ -301,6 +423,7 @@ fn add_group(
                         queue: 3000,
                         additive: false,
                         glass: false,
+                        grab: uniform.effect.y != 0.,
                     },
                     Mesh3d(state.mesh.as_ref().unwrap().clone()),
                     MeshMaterial3d(material),
@@ -326,6 +449,7 @@ fn add_group(
         count,
         order: Vec::with_capacity(r.capacity as usize),
         entities,
+        black_fog: shader.additive(),
     });
 }
 #[allow(clippy::too_many_arguments)]
@@ -489,7 +613,11 @@ fn sync_particles(
         }
         for batch in 0..g.count {
             let u = &mut state.uniforms[g.start + batch];
-            u.fog = Vec4::new(fog[0], fog[1], fog[2], cycle.fog_density);
+            u.fog = if g.black_fog {
+                Vec4::new(0., 0., 0., cycle.fog_density)
+            } else {
+                Vec4::new(fog[0], fog[1], fog[2], cycle.fog_density)
+            };
             let n = count.saturating_sub(batch * BATCH).min(BATCH);
             u.settings.w = n as f32;
             if let Ok((mut v, mut transform)) = visibility.get_mut(g.entities[batch]) {

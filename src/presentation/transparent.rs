@@ -40,6 +40,8 @@ struct OrderedPass {
     cache_key: super::stained_glass::GrabPassKey,
     capture: bool,
     glass_source: i64,
+    /// Named `_GrabTexture` user, or its capture when `draw` is None.
+    grab: bool,
 }
 /// Allocate during view loading. The fixed scene cannot exceed this capacity.
 #[derive(Component)]
@@ -64,6 +66,9 @@ impl SourceTransparentPasses {
     pub fn capture_at(&self, index: usize) -> bool {
         self.entries[index].capture
     }
+    pub fn named_at(&self, index: usize) -> bool {
+        self.entries[index].grab
+    }
     pub fn next_capture(&self, start: usize) -> usize {
         (start..self.entries.len())
             .find(|&i| self.entries[i].capture)
@@ -72,7 +77,9 @@ impl SourceTransparentPasses {
     pub fn glass_counts(&self) -> [u32; 4] {
         let mut counts = [0; 4];
         for entry in &self.entries {
-            if entry.draw.is_none() {
+            if entry.draw.is_none() && entry.grab {
+                continue;
+            } else if entry.draw.is_none() {
                 counts[usize::from(!entry.capture)] += 1;
             } else if entry.glass_source == 47 {
                 counts[2] += 1;
@@ -146,13 +153,16 @@ pub(crate) fn prepare_pass_order(
     let base = functions.id::<DrawSourceBase>();
     let add = functions.id::<DrawSourceAdd>();
     let glass = functions.id::<DrawSourceGlass>();
+    let particle_draw = functions.id::<super::particles::DrawSourceParticle>();
     for (view, mut order, source) in &mut views {
         order.entries.clear();
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
         timing.face(source.index);
-        let capacity = loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len();
+        // One named grab capture precedes the first distortion particle.
+        let capacity =
+            loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len() + 1;
         if order.entries.capacity() < capacity {
             order.entries.reserve_exact(capacity);
         }
@@ -255,6 +265,7 @@ pub(crate) fn prepare_pass_order(
                     cache_key,
                     capture: false,
                     glass_source: data.glass_source,
+                    grab: false,
                 });
             }
             order.entries.push(OrderedPass {
@@ -267,30 +278,29 @@ pub(crate) fn prepare_pass_order(
                     key
                 },
                 item: index,
-                draw: Some(
-                    if materials
-                        .instances
-                        .get(&item.main_entity())
-                        .is_some_and(|m| {
-                            m.asset_id.type_id()
-                                == std::any::TypeId::of::<super::particles::ParticleMaterial>()
-                                || m.asset_id.type_id()
-                                    == std::any::TypeId::of::<super::plates::PlateTextMaterial>()
-                        })
-                    {
-                        item.draw_function()
-                    } else if data.glass {
-                        glass
-                    } else {
-                        base
-                    },
-                ),
+                draw: Some(if particle {
+                    particle_draw
+                } else if materials
+                    .instances
+                    .get(&item.main_entity())
+                    .is_some_and(|m| {
+                        m.asset_id.type_id()
+                            == std::any::TypeId::of::<super::plates::PlateTextMaterial>()
+                    })
+                {
+                    item.draw_function()
+                } else if data.glass {
+                    glass
+                } else {
+                    base
+                }),
                 cache_key: super::stained_glass::GrabPassKey {
                     pass: pass_identity + u64::from(data.glass),
                     ..cache_key
                 },
                 capture: false,
                 glass_source: data.glass_source,
+                grab: data.grab,
             });
             if data.additive {
                 order.entries.push(OrderedPass {
@@ -306,6 +316,7 @@ pub(crate) fn prepare_pass_order(
                     },
                     capture: false,
                     glass_source: 0,
+                    grab: false,
                 });
             }
         }
@@ -316,5 +327,18 @@ pub(crate) fn prepare_pass_order(
             entry.capture = applied && entry.draw.is_none();
         }
         cache.cleanup();
+        // The source named GrabPass refreshes only at its first use in each camera render.
+        if let Some(first) = order.entries.iter().position(|entry| entry.grab) {
+            if order.entries.len() == order.entries.capacity() {
+                status.fail("Source transparent pass capacity was exceeded".into());
+                return;
+            }
+            let capture = OrderedPass {
+                draw: None,
+                capture: true,
+                ..order.entries[first]
+            };
+            order.entries.insert(first, capture);
+        }
     }
 }

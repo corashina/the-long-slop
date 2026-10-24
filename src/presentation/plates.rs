@@ -326,6 +326,7 @@ fn bind(world: &mut World) -> Result<(), String> {
                 },
                 additive: false,
                 glass: false,
+                grab: false,
             };
             let layer = flags["layer"]
                 .as_u64()

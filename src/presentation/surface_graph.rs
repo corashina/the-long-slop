@@ -204,7 +204,12 @@ fn transparent(
     let mut start = 0;
     while start < order.len() {
         if order.capture_at(start) {
-            if let Err(error) = glass.capture(context.command_encoder(), &targets.colors) {
+            let captured = if order.named_at(start) {
+                glass.capture_named(context.command_encoder(), &targets.colors)
+            } else {
+                glass.capture(context.command_encoder(), &targets.colors)
+            };
+            if let Err(error) = captured {
                 status.fail(error.into());
                 glass.cleanup();
                 return;

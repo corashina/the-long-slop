@@ -268,7 +268,13 @@ pub(crate) fn prepare_views(
                 &resources.probes[index].capture_sample_view
             }
         });
-        let glass = match SourceGlassView::new(&device, &queue, &cache, glass_value) {
+        // Only MSAA views keep camera depth free of the transparent attachment.
+        let camera_depth = target
+            .multisample_depth
+            .is_some()
+            .then(|| target.depth.sampled.as_ref())
+            .flatten();
+        let glass = match SourceGlassView::new(&device, &queue, &cache, glass_value, camera_depth) {
             Ok(value) => value,
             Err(error) => {
                 status.fail(error.into());
