@@ -200,6 +200,7 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    trigger_roles: super::TriggerRoles,
     structure_revision: u64,
     presentation_changes: Vec<content_index::ContentSlot>,
     presentation_lamp_changes: Vec<usize>,
@@ -747,6 +748,7 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            trigger_roles: super::TriggerRoles::default(),
             structure_revision: 0,
             presentation_changes: Vec::new(),
             presentation_lamp_changes: Vec::new(),
@@ -3705,6 +3707,7 @@ impl WorldStream {
                 self.origin,
                 fixed_decoration,
                 physics,
+                &mut self.trigger_roles,
             )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
@@ -3721,8 +3724,13 @@ impl WorldStream {
                 placement.scale,
                 appearance,
             )?;
-            let mut instance =
-                recipe.publish(placement.clone(), self.origin, fixed_decoration, physics)?;
+            let mut instance = recipe.publish(
+                placement.clone(),
+                self.origin,
+                fixed_decoration,
+                physics,
+                &mut self.trigger_roles,
+            )?;
             instance.cpu_bytes += extra;
             instance
         };
@@ -4137,7 +4145,7 @@ impl WorldStream {
                     }
                 }
             }
-            instance.retire(physics);
+            instance.retire(physics, &mut self.trigger_roles);
             let revision = self.changes.revision();
             for key in self.change_dependencies.drain(..) {
                 self.changes.forget(&key);
@@ -4329,6 +4337,10 @@ impl WorldStream {
         physics.rebase(shift);
         self.origin.shift(shift);
         Some(shift)
+    }
+
+    pub fn trigger_roles(&self) -> &super::TriggerRoles {
+        &self.trigger_roles
     }
 
     pub fn frame(&self) -> WorldFrame<'_> {

@@ -275,7 +275,9 @@ impl WorldStream {
                 physics,
             ) {
                 rollback(&mut content, instance, items, interaction, physics, wheels);
-                self.structures.swap_remove(index).retire(physics);
+                self.structures
+                    .swap_remove(index)
+                    .retire(physics, &mut self.trigger_roles);
                 self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }
@@ -598,7 +600,9 @@ impl WorldStream {
                     .iter()
                     .position(|s| s.placement.id == placement.id)
                     .unwrap();
-                self.structures.swap_remove(index).retire(physics);
+                self.structures
+                    .swap_remove(index)
+                    .retire(physics, &mut self.trigger_roles);
                 self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }

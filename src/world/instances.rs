@@ -1,10 +1,10 @@
 //! Checked prototype collision recipes, shared by source instances.
 use super::{Placement, WorldOrigin};
 use crate::reference::{
-    ReferenceError, SourceId, WorldPrototypeReference, WorldReference, WorldValue,
+    ReferenceError, SourceId, TriggerRole, WorldPrototypeReference, WorldReference, WorldValue,
 };
 use crate::vehicle::{ColliderHandle, PhysicsWorld, VehiclePose, collider_builder, to_rapier};
-use rapier3d::math::Pose;
+use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{
     Collider, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
 };
@@ -17,6 +17,32 @@ struct ColliderRecipe {
     source: SourceId,
     body: Option<usize>,
     collider: Collider,
+    /// Ladder up is in the collider frame.
+    role: Option<TriggerRole>,
+}
+
+/// Roles of published trigger colliders. Ladder up is in the collider frame.
+#[derive(Default)]
+pub struct TriggerRoles(std::collections::HashMap<ColliderHandle, TriggerRole>);
+impl TriggerRoles {
+    /// Returns the role with ladder up in world space.
+    pub fn get(&self, handle: ColliderHandle, collider: &Collider) -> Option<TriggerRole> {
+        let mut role = *self.0.get(&handle)?;
+        if let TriggerRole::Ladder { up, .. } = &mut role {
+            *up = (collider.rotation() * Vector::from_array(*up)).to_array();
+        }
+        Some(role)
+    }
+    #[cfg(test)]
+    pub(crate) fn insert(&mut self, handle: ColliderHandle, role: TriggerRole) {
+        self.0.insert(handle, role);
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 pub struct StructureRecipe {
@@ -207,10 +233,18 @@ impl StructureRecipe {
                     InteractionTestMode::And,
                 ))
                 .build();
+            // Exported ladder up is in the body frame, or in prototype space without a body.
+            let role = record.role.map(|mut role| {
+                if let TriggerRole::Ladder { up, .. } = &mut role {
+                    *up = (collider.rotation().inverse() * Vector::from_array(*up)).to_array();
+                }
+                role
+            });
             colliders.push(ColliderRecipe {
                 source: record.source.clone(),
                 body: record.body.map(|i| i as usize),
                 collider,
+                role,
             });
         }
         Ok(Self {
@@ -229,6 +263,7 @@ impl StructureRecipe {
         origin: WorldOrigin,
         fixed_decoration: bool,
         physics: &mut PhysicsWorld,
+        roles: &mut TriggerRoles,
     ) -> Result<StructureInstance, ReferenceError> {
         if placement.prototype != self.source {
             return Err(ReferenceError(
@@ -262,6 +297,9 @@ impl StructureRecipe {
                 collider.set_position(root * *collider.position());
                 physics.insert_collider(collider)
             };
+            if let Some(role) = source.role {
+                roles.0.insert(handle, role);
+            }
             colliders.push((source.source.clone(), handle));
         }
         physics.refresh_queries();
@@ -276,8 +314,9 @@ impl StructureRecipe {
 }
 impl StructureInstance {
     /// The caller removes item and interaction bindings before retiring this instance.
-    pub fn retire(self, physics: &mut PhysicsWorld) {
+    pub fn retire(self, physics: &mut PhysicsWorld, roles: &mut TriggerRoles) {
         for (_, collider) in self.colliders {
+            roles.0.remove(&collider);
             physics.remove_collider(collider);
         }
         for body in self.bodies {

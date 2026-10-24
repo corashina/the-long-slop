@@ -133,9 +133,9 @@ const needs={hp:0,food:0,water:0,bowel:0,bladder:0,opacity:0,dead:false,lookScal
 window.gameSurvival=(hp,food,water,bowel,bladder,opacity,isDead,lookScale,menuDue)=>{
  needs.hp=hp;needs.food=food;needs.water=water;needs.bowel=bowel;needs.bladder=bladder;needs.opacity=opacity;needs.dead=isDead;needs.lookScale=lookScale;needs.menuDue=menuDue;dead=isDead;survival?.update(needs);menu?.survival(isDead,menuDue);
 };
-const sleep={phase:0,eligible:false,charge:0,cooldownRemaining:0,progress:0,held:false,dead:false};
-window.gameSleep=(phase,eligible,charge,cooldownRemaining,progress)=>{
- sleep.phase=phase;sleep.eligible=eligible;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
+const sleep={phase:0,eligible:false,showHint:false,charge:0,cooldownRemaining:0,progress:0,held:false,dead:false};
+window.gameSleep=(phase,eligible,showHint,charge,cooldownRemaining,progress)=>{
+ sleep.phase=phase;sleep.eligible=eligible;sleep.showHint=showHint;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
 function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.finish({inputReady:true});startupDone=true;}

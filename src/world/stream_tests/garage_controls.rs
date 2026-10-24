@@ -93,6 +93,7 @@ fn aim_handbrake(reference: &ReferenceManifest, run: &mut GarageRuntime) -> Item
         view_rotation * Vector::from_array(reference.player.posture.standing_head.translation);
     run.area.player = PlayerState::new(
         &reference.player,
+        &reference.clothing.pose,
         VehiclePose {
             position: (Vector::from_array(view.position) - head_offset).to_array(),
             rotation: view_rotation.to_array(),

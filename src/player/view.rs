@@ -1,7 +1,10 @@
 //! Source lean, independent look, zoom, and head tracking.
 use crate::{
-    player::PlayerStepContext,
-    reference::{PlayerPostureReference, PlayerViewReference},
+    player::{
+        PlayerStepContext,
+        head_bob::{CarHeadBob, WalkBob},
+    },
+    reference::{PlayerPoseReference, PlayerReference, PlayerViewReference},
     simulation::{FrameInput, keys, player_keys},
     vehicle::VehiclePose,
 };
@@ -32,19 +35,19 @@ pub(super) struct ViewState {
     head: Vector,
     height: f32,
     zoom: f32,
+    walk_bob: WalkBob,
+    car_bob: CarHeadBob,
+    car_offset: Vector,
 }
 impl ViewState {
-    pub(super) fn new(
-        posture: &PlayerPostureReference,
-        reference: &PlayerViewReference,
-        scroll_sensitivity: f32,
-    ) -> Self {
+    pub(super) fn new(player: &PlayerReference, pose: &PlayerPoseReference) -> Self {
+        let posture = &player.posture;
         let standing = Vector::from_array(posture.standing_head.translation);
         Self {
-            reference: reference.clone(),
+            reference: player.view.clone(),
             standing,
             prone: Vector::from_array(posture.prone_head.translation),
-            scroll_sensitivity,
+            scroll_sensitivity: player.scroll_sensitivity,
             charge: None,
             independent: [0.; 2],
             camera_rotation: Rotation::IDENTITY,
@@ -57,10 +60,26 @@ impl ViewState {
             head: standing,
             height: 0.,
             zoom: 1.,
+            walk_bob: WalkBob::new(player),
+            car_bob: CarHeadBob::new(pose),
+            car_offset: Vector::ZERO,
         }
     }
     fn neutral_head(&self, posture: f32) -> Vector {
-        self.prone.lerp(self.standing, posture)
+        self.prone
+            .lerp(self.standing + Vector::Y * self.walk_bob.offset, posture)
+    }
+    pub(super) fn step_walk_bob(&mut self, active: bool, speed: f32, dt: f32) {
+        self.car_bob.reset();
+        self.car_offset = Vector::ZERO;
+        self.walk_bob.step(active, speed, dt);
+    }
+    pub(super) fn step_car_bob(&mut self, dt: f32, velocity: Vector, dead: bool, head: Rotation) {
+        self.walk_bob.beat = false;
+        self.car_offset = self.car_bob.step(dt, velocity, dead, head);
+    }
+    pub(super) fn footstep_beat(&self) -> bool {
+        self.walk_bob.beat
     }
     pub(super) fn source_anchor_midpoint(&self, posture: f32, seated: bool) -> Vector {
         let direction_anchor = if seated {
@@ -213,6 +232,8 @@ impl ViewState {
     }
     pub(super) fn enter(&mut self, head_in_seat: Pose) {
         self.cancel(1.);
+        self.car_bob.reset();
+        self.car_offset = Vector::ZERO;
         self.head = head_in_seat.translation;
         self.seat_entry_rotation = Some(head_in_seat.rotation);
     }
@@ -231,7 +252,12 @@ impl ViewState {
     ) -> PlayerView {
         let head = Pose::from_parts(
             body.translation
-                + body.rotation * neutral_posture.map_or(self.head, |p| self.neutral_head(p)),
+                + body.rotation * neutral_posture.map_or(self.head, |p| self.neutral_head(p))
+                + if neutral_posture.is_none() {
+                    self.car_offset
+                } else {
+                    Vector::ZERO
+                },
             body.rotation
                 * if neutral_posture.is_none() {
                     self.seat_entry_rotation.unwrap_or(head_rotation)

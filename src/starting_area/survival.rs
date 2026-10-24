@@ -523,6 +523,15 @@ impl GarageRuntime {
             self.emit_survival_audio(crate::audio::AudioKind::Death);
         }
     }
+    /// Source `playerdeathtriggerscript`. Cardboard boxes have no break runtime yet.
+    pub(super) fn apply_hazards(&mut self, reference: &ReferenceManifest) {
+        let damage = self.area.player.hazard_damage();
+        if damage > 0. {
+            self.survival
+                .damage_instant(&reference.survival, damage * super::FIXED_DT);
+            self.announce_death(reference);
+        }
+    }
     pub(super) fn sample_survival_speed(&mut self, reference: &ReferenceManifest) {
         // Kinematic controller velocity comes from Rapier's completed fixed step.
         // Seat entry and exit are placement operations, not source acceleration.
