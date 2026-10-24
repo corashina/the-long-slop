@@ -2,16 +2,18 @@ mod mass;
 mod mutations;
 mod presentation_bodies;
 mod query_bounds;
+mod wheel;
 
 use presentation_bodies::{BodyPresentationState, PresentationBodies};
 use query_bounds::QueryBounds;
-use rapier3d::control::{DynamicRayCastVehicleController, Wheel, WheelTuning};
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
     ColliderBuilder, Group, InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline,
-    QueryPipelineMut, RigidBodyBuilder, RigidBodyHandle,
+    Ray, RigidBodyBuilder, RigidBodyHandle,
 };
+pub use wheel::WheelAssembly;
+use wheel::{WheelContact, WheelFrame, WheelSlip, WheelState, WheelTorques};
 
 use crate::reference::{
     ColliderGeometry, ReferenceError, ReferenceManifest, VehicleReference, WheelSlotId,
@@ -26,11 +28,6 @@ pub struct DriveTorques {
     pub engine_brake_nm: f32,
 }
 
-#[derive(Clone, Copy)]
-pub struct InstalledWheel {
-    pub radius: f32,
-    pub condition: f32,
-}
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
 
 /// Rapier 0.36 CCD sweeps disabled colliders too. A disabled collider below the
@@ -77,20 +74,16 @@ impl VehicleSnapshot {
     }
 }
 
-/// One rigid chassis with its ray-cast wheels.
+/// One rigid chassis with its four source wheel slots.
 struct VehicleBody {
     chassis: RigidBodyHandle,
-    controller: DynamicRayCastVehicleController,
-    resting_wheels: [Wheel; 4],
+    slip: WheelSlip,
+    wheels: [WheelState; 4],
     wheel_references: [WheelSlotReference; 4],
-    suspension_lengths: [f32; 4],
     max_steer: f32,
     brake_torque: f32,
     handbrake_torque: f32,
-    active_slots: Vec<usize>,
-    installed: [Option<InstalledWheel>; 4],
-    wheel_rotations: [f32; 4],
-    wheel_rpm: [f32; 4],
+    assemblies: [WheelAssembly; 4],
     last_handbrake: f32,
 }
 
@@ -131,25 +124,6 @@ impl PhysicsWorld {
             physics.vehicles.push(vehicle);
         }
         physics.refresh_queries();
-        for vehicle in &mut physics.vehicles {
-            // Reserve Rapier's four-wheel scratch buffers before the frame loop.
-            vehicle.controller.update_vehicle(
-                FIXED_DT,
-                QueryPipelineMut {
-                    dispatcher: physics.physics.narrow_phase.query_dispatcher(),
-                    bvh: &physics.query_bounds.bvh,
-                    bodies: &mut physics.physics.bodies,
-                    colliders: &mut physics.physics.colliders,
-                    filter: QueryFilter::default()
-                        .exclude_sensors()
-                        .exclude_rigid_body(vehicle.chassis),
-                },
-            );
-            vehicle
-                .controller
-                .wheels_mut()
-                .copy_from_slice(&vehicle.resting_wheels);
-        }
         Ok(physics)
     }
 }
@@ -205,10 +179,13 @@ impl VehicleBody {
             body.set_additional_mass(vehicle.mass_kg - geometry_mass, true)
         });
         physics.recompute_body_mass(chassis);
-        let mut controller = DynamicRayCastVehicleController::new(chassis);
-        controller.index_forward_axis = 2;
+        let slip = WheelSlip {
+            tire: vehicle.wheel_slip,
+            rim: vehicle.rim_slip,
+        };
         let mut wheel_records = Vec::with_capacity(4);
-        let mut suspension_lengths = [0.0; 4];
+        let mut wheels = Vec::with_capacity(4);
+        let mut assemblies = [WheelAssembly::Hub; 4];
         for (index, id) in vehicle.wheel_slots.iter().enumerate() {
             let wheel = reference
                 .wheel_slots
@@ -230,53 +207,32 @@ impl VehicleBody {
             );
             let connection = Vector::from_array(anchor.transform.translation)
                 + rotation * Vector::from_array(wheel.center);
-            let rest_length = wheel.suspension_distance * (1.0 - wheel.target_position);
-            suspension_lengths[index] = rest_length;
-            let tuning = WheelTuning {
-                suspension_stiffness: wheel.spring / vehicle.mass_kg,
-                suspension_compression: wheel.damper / vehicle.mass_kg,
-                suspension_damping: wheel.damper / vehicle.mass_kg,
-                max_suspension_travel: rest_length.min(wheel.suspension_distance - rest_length),
-                friction_slip: wheel.sideways_friction.stiffness,
-                max_suspension_force: wheel.spring * wheel.suspension_distance,
-                ..Default::default()
+            // Wheel assembly sync replaces this before the first drive step.
+            assemblies[index] = WheelAssembly::Tire {
+                radius_m: wheel.radius,
+                mass_kg: wheel.wheel_mass_kg,
+                quality: 1.0,
             };
-            controller.add_wheel(
+            wheels.push(WheelState::new(
                 connection,
-                -Vector::Y,
-                Vector::X,
-                rest_length,
-                wheel.radius,
-                &tuning,
-            );
+                wheel::resolve_profile(wheel, &slip, assemblies[index]),
+                wheel.suspension_distance * wheel.target_position,
+            ));
             wheel_records.push(wheel.clone());
         }
-        let resting_wheels = std::array::from_fn(|i| controller.wheels()[i]);
         Ok(Self {
             chassis,
-            controller,
-            resting_wheels,
+            slip,
+            wheels: wheels
+                .try_into()
+                .map_err(|_| ReferenceError("Expected four wheels".into()))?,
             wheel_references: wheel_records
                 .try_into()
                 .map_err(|_| ReferenceError("Expected four wheels".into()))?,
-            suspension_lengths,
             max_steer: vehicle.max_steer_degrees.to_radians(),
             brake_torque: vehicle.brake_torque_nm,
             handbrake_torque: vehicle.handbrake_torque_nm,
-            active_slots: (0..4).collect(),
-            installed: std::array::from_fn(|index| {
-                Some(InstalledWheel {
-                    radius: reference
-                        .wheel_slots
-                        .iter()
-                        .find(|wheel| wheel.id == vehicle.wheel_slots[index])
-                        .unwrap()
-                        .radius,
-                    condition: 1.0,
-                })
-            }),
-            wheel_rotations: [0.0; 4],
-            wheel_rpm: [0.0; 4],
+            assemblies,
             last_handbrake: vehicle.handbrake as u8 as f32,
         })
     }
@@ -346,31 +302,23 @@ impl PhysicsWorld {
         } else {
             0.0
         };
-        for (i, wheel) in vehicle.controller.wheels_mut().iter_mut().enumerate() {
-            let slot = vehicle.active_slots[i];
+        // Source carscript.SetWheel: driven wheels take motor torque and engine brake.
+        // Service brake and handbrake add to the wheels in their source lists.
+        let wheel_torques: [WheelTorques; 4] = std::array::from_fn(|slot| {
             let reference = &vehicle.wheel_references[slot];
-            wheel.steering = if reference.steer { steering } else { 0.0 };
-            wheel.engine_force = if reference.drive {
-                motor_nm / (drive_count * wheel.radius)
-            } else {
-                0.0
-            };
-            let mut brake_nm = if reference.drive {
-                engine_brake_nm / drive_count
-            } else {
-                0.0
-            };
+            let mut torques = WheelTorques::default();
+            if reference.drive {
+                torques.motor_nm = motor_nm / drive_count;
+                torques.brake_nm = engine_brake_nm / drive_count;
+            }
             if reference.brake {
-                brake_nm += vehicle.brake_torque * brake;
+                torques.brake_nm += vehicle.brake_torque * brake;
             }
             if reference.handbrake {
-                brake_nm += vehicle.handbrake_torque * handbrake;
+                torques.brake_nm += vehicle.handbrake_torque * handbrake;
             }
-            // Rapier 0.36 uses this impulse only when engine_force is zero.
-            wheel.brake = brake_nm / wheel.radius * FIXED_DT;
-            wheel.friction_slip =
-                0.75 + 0.5 * vehicle.installed[slot].unwrap().condition.clamp(0.0, 1.0);
-        }
+            torques
+        });
         let own = vehicle.chassis;
         let chassis = &self.chassis;
         // Wheels hit other vehicles' bodies but never their own vehicle.
@@ -380,29 +328,78 @@ impl PhysicsWorld {
                 && (collider.user_data & VEHICLE_COLLIDER_FLAG == 0
                     || parent.is_some_and(|parent| chassis.contains(&parent)))
         };
-        vehicle.controller.update_vehicle(
-            FIXED_DT,
-            QueryPipelineMut {
+        let pose = *self.physics.bodies[own].position();
+        let up = pose.rotation * Vector::Y;
+        {
+            let queries = QueryPipeline {
                 dispatcher: self.physics.narrow_phase.query_dispatcher(),
                 bvh: &self.query_bounds.bvh,
-                bodies: &mut self.physics.bodies,
-                colliders: &mut self.physics.colliders,
+                bodies: &self.physics.bodies,
+                colliders: &self.physics.colliders,
                 filter: QueryFilter::default()
                     .exclude_sensors()
                     .exclude_rigid_body(own)
                     .predicate(&not_own),
-            },
-        );
-        for (wheel, &slot) in vehicle
-            .controller
-            .wheels()
-            .iter()
-            .zip(&vehicle.active_slots)
-        {
-            vehicle.wheel_rpm[slot] = (wheel.rotation - vehicle.wheel_rotations[slot]) / FIXED_DT
-                * 60.0
-                / std::f32::consts::TAU;
-            vehicle.wheel_rotations[slot] = wheel.rotation;
+            };
+            for (wheel, reference) in vehicle.wheels.iter_mut().zip(&vehicle.wheel_references) {
+                let travel = reference.suspension_distance;
+                let radius = wheel.profile.radius;
+                let origin = pose * wheel.connection;
+                let hit =
+                    queries.cast_ray_and_get_normal(&Ray::new(origin, -up), travel + radius, true);
+                wheel.steering = if reference.steer { steering } else { 0.0 };
+                wheel.previous_angle = wheel.angle;
+                wheel.contact = hit.map(|(collider, hit)| WheelContact {
+                    collider,
+                    point: origin - up * hit.time_of_impact,
+                    normal: if hit.time_of_impact > 0.0 && hit.normal != Vector::ZERO {
+                        hit.normal
+                    } else {
+                        up
+                    },
+                });
+                wheel.suspension_length = hit.map_or(travel, |(_, hit)| {
+                    (hit.time_of_impact - radius).clamp(0.0, travel)
+                });
+            }
+        }
+        let gravity = self.physics.gravity.length();
+        let sprung_mass = self.physics.bodies[own].mass() / 4.0;
+        for (slot, wheel) in vehicle.wheels.iter_mut().enumerate() {
+            let reference = &vehicle.wheel_references[slot];
+            let ground = wheel.contact.and_then(|contact| {
+                self.physics.colliders[contact.collider]
+                    .parent()
+                    .filter(|parent| self.physics.bodies[*parent].is_dynamic())
+            });
+            let point = wheel.contact.map_or(Vector::ZERO, |contact| {
+                contact.point + up * reference.force_application_distance_m
+            });
+            let mut velocity = self.physics.bodies[own].velocity_at_point(point);
+            if let Some(ground) = ground {
+                velocity -= self.physics.bodies[ground].velocity_at_point(point);
+            }
+            let frame = WheelFrame {
+                up,
+                axle: pose.rotation * Rotation::from_rotation_y(wheel.steering) * Vector::X,
+                velocity,
+                sprung_mass,
+                gravity,
+            };
+            let force = wheel::solve(wheel, reference, frame, wheel_torques[slot], FIXED_DT);
+            if force == Vector::ZERO {
+                continue;
+            }
+            let impulse = force * FIXED_DT;
+            self.physics.bodies[own].apply_impulse_at_point(impulse, point, false);
+            if let Some(ground) = ground {
+                self.query_bounds.mark_body(ground);
+                let body = &mut self.physics.bodies[ground];
+                let before = BodyPresentationState::capture(body);
+                body.apply_impulse_at_point(-impulse, point, true);
+                self.presentation_bodies
+                    .mark_if_changed(ground, before, body);
+            }
         }
     }
 
@@ -443,53 +440,37 @@ impl PhysicsWorld {
         index: usize,
         saved: &crate::save::WheelAttachment,
     ) {
-        let state = &mut self.vehicles[vehicle];
-        state.resting_wheels[index].rotation = saved.rotation;
-        if let Some(active) = state.active_slots.iter().position(|slot| *slot == index) {
-            state.controller.wheels_mut()[active].rotation = saved.rotation;
-        }
-        state.wheel_rpm[index] = saved.rpm;
-        state.wheel_rotations[index] = saved.previous_rotation;
+        let wheel = &mut self.vehicles[vehicle].wheels[index];
+        wheel.angle = saved.rotation;
+        wheel.omega = saved.rpm * std::f32::consts::TAU / 60.0;
+        wheel.previous_angle = saved.previous_rotation;
     }
     pub(crate) fn wheel_save_state(&self, vehicle: usize, index: usize) -> (f32, f32, f32) {
-        let state = &self.vehicles[vehicle];
-        let wheel = state
-            .active_slots
-            .iter()
-            .position(|slot| *slot == index)
-            .map_or(&state.resting_wheels[index], |active| {
-                &state.controller.wheels()[active]
-            });
-        (
-            wheel.rotation,
-            state.wheel_rpm[index],
-            state.wheel_rotations[index],
-        )
+        let wheel = &self.vehicles[vehicle].wheels[index];
+        (wheel.angle, wheel.rpm(), wheel.previous_angle)
     }
 
-    pub fn wheel_support_count(&self, index: usize) -> usize {
-        self.vehicles[index].active_slots.len()
-    }
-
+    /// Source carscript avgRpm: all driven slots over the driven rim count.
     pub fn driven_wheel_rpm(&self, index: usize) -> f32 {
         let vehicle = &self.vehicles[index];
-        let mut sum = 0.0;
-        let mut count = 0;
-        for &slot in &vehicle.active_slots {
-            if vehicle.wheel_references[slot].drive {
-                sum += vehicle.wheel_rpm[slot];
-                count += 1;
-            }
-        }
-        sum / count.max(1) as f32
+        let sum: f32 = vehicle
+            .wheels
+            .iter()
+            .zip(&vehicle.wheel_references)
+            .filter(|(_, reference)| reference.drive)
+            .map(|(wheel, _)| wheel.rpm())
+            .sum();
+        sum / self.driven_wheel_count(index).max(1) as f32
     }
 
+    /// Source carscript.DrivenWheelsNum2: driven slots with a mounted rim.
     pub fn driven_wheel_count(&self, index: usize) -> usize {
         let vehicle = &self.vehicles[index];
         vehicle
-            .active_slots
+            .assemblies
             .iter()
-            .filter(|&&slot| vehicle.wheel_references[slot].drive)
+            .zip(&vehicle.wheel_references)
+            .filter(|(assembly, reference)| reference.drive && assembly.has_rim())
             .count()
     }
 
@@ -507,33 +488,12 @@ impl PhysicsWorld {
         body.recompute_mass_properties_from_colliders(&self.physics.colliders);
         self.presentation_bodies
             .mark_if_changed(vehicle.chassis, before, body);
-        let mass = body.mass();
-        for (wheel, reference) in vehicle
-            .resting_wheels
-            .iter_mut()
-            .zip(&vehicle.wheel_references)
-        {
-            wheel.suspension_stiffness = reference.spring / mass;
-            wheel.damping_compression = reference.damper / mass;
-            wheel.damping_relaxation = reference.damper / mass;
-        }
-        for (wheel, &slot) in vehicle
-            .controller
-            .wheels_mut()
-            .iter_mut()
-            .zip(&vehicle.active_slots)
-        {
-            let source = &vehicle.resting_wheels[slot];
-            wheel.suspension_stiffness = source.suspension_stiffness;
-            wheel.damping_compression = source.damping_compression;
-            wheel.damping_relaxation = source.damping_relaxation;
-        }
     }
 
     pub fn set_wheel(
         &mut self,
         slot: WheelSlotId,
-        installed: Option<InstalledWheel>,
+        assembly: WheelAssembly,
     ) -> Result<(), ReferenceError> {
         let vehicle = self
             .slot_vehicle(slot)
@@ -544,37 +504,9 @@ impl PhysicsWorld {
             .iter()
             .position(|reference| reference.id == slot)
             .unwrap();
-        let mut saved = vehicle.resting_wheels;
-        for (wheel, &slot) in vehicle
-            .controller
-            .wheels()
-            .iter()
-            .zip(&vehicle.active_slots)
-        {
-            saved[slot] = *wheel;
-        }
-        vehicle.installed[index] = installed;
-        vehicle.wheel_rpm[index] = 0.0;
-        let mut controller = DynamicRayCastVehicleController::new(vehicle.chassis);
-        controller.index_forward_axis = 2;
-        vehicle.active_slots.clear();
-        for (slot, installed) in vehicle.installed.iter().enumerate() {
-            let Some(installed) = installed else { continue };
-            let wheel = &saved[slot];
-            let added = controller.add_wheel(
-                wheel.chassis_connection_point_cs,
-                wheel.direction_cs,
-                wheel.axle_cs,
-                wheel.suspension_rest_length,
-                installed.radius,
-                &WheelTuning::default(),
-            );
-            *added = *wheel;
-            added.radius = installed.radius;
-            added.friction_slip = 0.75 + 0.5 * installed.condition.clamp(0.0, 1.0);
-            vehicle.active_slots.push(slot);
-        }
-        vehicle.controller = controller;
+        vehicle.assemblies[index] = assembly;
+        vehicle.wheels[index].profile =
+            wheel::resolve_profile(&vehicle.wheel_references[index], &vehicle.slip, assembly);
         self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
         let before = BodyPresentationState::capture(body);
@@ -623,24 +555,13 @@ impl PhysicsWorld {
         let body = &self.physics.bodies[vehicle.chassis];
         let pose = body.position();
         let wheels = std::array::from_fn(|i| {
-            let wheel = vehicle
-                .active_slots
-                .iter()
-                .position(|slot| *slot == i)
-                .map_or(&vehicle.resting_wheels[i], |index| {
-                    &vehicle.controller.wheels()[index]
-                });
-            let length = if wheel.raycast_info().is_in_contact {
-                wheel.raycast_info().suspension_length
-            } else {
-                vehicle.suspension_lengths[i]
-            };
-            let local = wheel.chassis_connection_point_cs + wheel.direction_cs * length;
+            let wheel = &vehicle.wheels[i];
+            let local = wheel.connection - Vector::Y * wheel.suspension_length;
             VehiclePose {
                 position: (pose * local).to_array(),
                 rotation: (pose.rotation
                     * Rotation::from_rotation_y(wheel.steering)
-                    * Rotation::from_rotation_x(-wheel.rotation))
+                    * Rotation::from_rotation_x(-wheel.angle))
                 .to_array(),
             }
         });
@@ -650,44 +571,18 @@ impl PhysicsWorld {
             speed_mps: body.linvel().dot(pose.rotation * -Vector::Z),
             linear_velocity: body.linvel().to_array(),
             angular_velocity: body.angvel().to_array(),
-            wheels_contact: std::array::from_fn(|i| {
-                vehicle
-                    .active_slots
-                    .iter()
-                    .position(|slot| *slot == i)
-                    .is_some_and(|index| {
-                        vehicle.controller.wheels()[index]
-                            .raycast_info()
-                            .is_in_contact
-                    })
-            }),
+            wheels_contact: std::array::from_fn(|i| vehicle.wheels[i].contact.is_some()),
         }
     }
 
+    /// Moves the car and stops it. Wheel angles and spin stay unchanged.
     pub fn reset_preserving_wheels(&mut self, vehicle: usize, pose: VehiclePose) {
-        let rotations =
-            std::array::from_fn::<_, 4, _>(|index| self.wheel_save_state(vehicle, index).0);
-        let previous = self.vehicles[vehicle].wheel_rotations;
-        let rpm = self.vehicles[vehicle].wheel_rpm;
+        let wheels = self.vehicles[vehicle].wheels;
         self.reset(vehicle, pose);
-        let state = &mut self.vehicles[vehicle];
-        for (wheel, &slot) in state
-            .controller
-            .wheels_mut()
-            .iter_mut()
-            .zip(&state.active_slots)
-        {
-            wheel.rotation = rotations[slot];
+        self.vehicles[vehicle].wheels = wheels;
+        for wheel in &mut self.vehicles[vehicle].wheels {
+            wheel.contact = None;
         }
-        for (wheel, rotation) in self.vehicles[vehicle]
-            .resting_wheels
-            .iter_mut()
-            .zip(rotations)
-        {
-            wheel.rotation = rotation;
-        }
-        self.vehicles[vehicle].wheel_rotations = previous;
-        self.vehicles[vehicle].wheel_rpm = rpm;
     }
 
     pub fn reset(&mut self, index: usize, pose: VehiclePose) {
@@ -703,20 +598,12 @@ impl PhysicsWorld {
         body.reset_torques(true);
         self.presentation_bodies
             .mark_if_changed(vehicle.chassis, before, body);
-        for (wheel, &slot) in vehicle
-            .controller
-            .wheels_mut()
-            .iter_mut()
-            .zip(&vehicle.active_slots)
-        {
-            *wheel = vehicle.resting_wheels[slot];
-            if let Some(installed) = vehicle.installed[slot] {
-                wheel.radius = installed.radius;
-            }
+        for (wheel, reference) in vehicle.wheels.iter_mut().zip(&vehicle.wheel_references) {
+            wheel.omega = 0.0;
+            wheel.previous_angle = wheel.angle;
+            wheel.contact = None;
+            wheel.suspension_length = reference.suspension_distance * reference.target_position;
         }
-        vehicle.controller.current_vehicle_speed = 0.0;
-        vehicle.wheel_rotations = [0.0; 4];
-        vehicle.wheel_rpm = [0.0; 4];
         self.refresh_queries();
     }
 
@@ -802,12 +689,11 @@ impl PhysicsWorld {
 
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
         for vehicle in &self.vehicles {
-            if vehicle
-                .controller
-                .wheels()
-                .iter()
-                .any(|wheel| wheel.raycast_info().ground_object == Some(handle))
-            {
+            if vehicle.wheels.iter().any(|wheel| {
+                wheel
+                    .contact
+                    .is_some_and(|contact| contact.collider == handle)
+            }) {
                 self.query_bounds.mark_body(vehicle.chassis);
                 let body = &mut self.physics.bodies[vehicle.chassis];
                 let before = BodyPresentationState::capture(body);
