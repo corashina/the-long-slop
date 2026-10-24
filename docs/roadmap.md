@@ -27,7 +27,6 @@ Finish the home, garage, Lada, and nearby driving first.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| P07 | Add player sounds. [Audio](../web/audio.js) | M | Interior muffling for world buildings and the Skoda. [L06] |
 | P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Music box. [F08] |
 | P10 | Finish small item actions. [Items](../src/interaction/items.rs) | S | Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [E05, F13, F14] |
 | P11 | Accept the starting area | M | Repair the Lada, fill it, start it, drive out, return, save, reload, and continue with normal input. [A11] |
@@ -60,7 +59,7 @@ Finish the home, garage, Lada, and nearby driving first.
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V01 | Add a general vehicle loader. [Vehicles](vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
-| V02 | Add the other cars. | L | Skoda, Lada wagon, two-stroke cars, Car07 automatic, Car08. [B02-B04, B06, B07] |
+| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. [B02-B04, B06, B07, L06] |
 | V03 | Add buses. | XL | Diesel rules, three buses, doors, door lamps, bus trailer. [B05, B08-B11] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle, sled. [B12-B14] |
 | V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
