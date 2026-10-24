@@ -62,6 +62,7 @@ struct FeedbackStamp {
     empty: bool,
     capacity: f32,
     percents: [u32; 6],
+    order: u32,
     condition: u32,
     held: Option<ItemId>,
     throw_charge: u32,
@@ -904,8 +905,9 @@ pub(crate) fn sync_imported(
         ),
         Without<BodyVisual>,
     >,
+    time: Res<Time<Real>>,
     mut caps: Query<
-        (&CapVisual, &mut Transform),
+        (&mut CapVisual, &mut Transform),
         (
             Without<BodyVisual>,
             Without<ItemVisual>,
@@ -936,7 +938,13 @@ pub(crate) fn sync_imported(
             .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
         &mut items,
     );
-    presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+    // Source DoMove advances by scaled Time.deltaTime.
+    let dt = if drive.runtime.paused {
+        0.
+    } else {
+        time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale
+    };
+    presentation::reference::sync_caps(&drive.runtime.area, dt, &mut caps, &mut visibility);
 }
 fn sync_instruments(
     reference: Res<RuntimeReference>,
@@ -1145,14 +1153,15 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .area
         .interaction
         .feedback(&available, &runtime.area.items, &reference.0);
-    let (mut amount, mut capacity, quantities, fluid_name, has_name, mut no_text) = info
+    let (mut amount, mut capacity, quantities, order, fluid_name, has_name, mut no_text) = info
         .fluid
         .as_ref()
-        .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+        .map_or((0., 0., [0.; 6], 0, info.name, false, true), |f| {
             (
                 f.amount,
                 f.capacity,
                 f.quantities,
+                f.order,
                 f.presentation.name.as_str(),
                 f.presentation.has_name,
                 f.presentation.no_text,
@@ -1236,6 +1245,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             };
             if p >= 1. { p.round() as u32 } else { u32::MAX }
         }),
+        order,
     };
     if drive.last_feedback != Some(stamp) {
         game_feedback(
@@ -1266,6 +1276,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             quantities[3],
             quantities[4],
             quantities[5],
+            stamp.order,
             stamp.light_control,
             stamp.lmb_use,
         );

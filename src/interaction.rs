@@ -28,9 +28,9 @@ use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
     ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderGeometry, ColliderId,
-    FluidParticleReference, ItemId, ItemKind, LightControlId, LightControllerKind, NodeId,
-    OpeningId, OpeningRecord, PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole,
-    WheelSlotId,
+    FluidParticleReference, FluidPresentation, ItemId, ItemKind, LightControlId,
+    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
+    ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
@@ -139,6 +139,7 @@ struct OpeningRules {
     can_toggle: bool,
     can_tune: bool,
     tune_rate: f32,
+    presentation: FluidPresentation,
 }
 impl From<&OpeningRecord> for OpeningRules {
     fn from(opening: &OpeningRecord) -> Self {
@@ -155,6 +156,7 @@ impl From<&OpeningRecord> for OpeningRules {
             can_toggle: opening.can_toggle,
             can_tune: opening.can_tune,
             tune_rate: opening.tune_rate,
+            presentation: opening.presentation.clone(),
         }
     }
 }
@@ -1123,6 +1125,12 @@ impl InteractionState {
             can_toggle,
             can_tune,
             tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
+            presentation: generated_presentation(
+                number(cap_record, "hasName")? != 0.0,
+                number(cap_record, "nameText")?,
+                number(cap_record, "noText")? != 0.0,
+                &reference.fluid_rules.words,
+            )?,
         };
         let tank_rules = TankRules {
             no_drink: number(tank_record, "noDrink")? != 0.0,
@@ -1822,9 +1830,7 @@ impl InteractionState {
                         && destination_total > 0.05
                         && destination_state.mixture().amount(1) / destination_total < 1.0
                     {
-                        amount = (amount * destination_total * self.slow_oil_modifier)
-                            .max(0.0001)
-                            .min(amount);
+                        amount = slow_oil_amount(amount, destination_total, self.slow_oil_modifier);
                     }
                     let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
@@ -2042,5 +2048,74 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
         0.0
     } else {
         ((value - start) / (end - start)).clamp(0.0, 1.0)
+    }
+}
+
+/// Source `GetCapString` reads `ls.l.g(nameText)`, not the serialized `nameString`.
+fn generated_presentation(
+    has_name: bool,
+    name_text: f32,
+    no_text: bool,
+    words: &[String],
+) -> Result<FluidPresentation, ReferenceError> {
+    let name = if has_name {
+        words
+            .get(name_text as usize)
+            .filter(|_| name_text >= 0.0)
+            .ok_or_else(|| ReferenceError("Cap name word outside language table".into()))?
+            .clone()
+    } else {
+        String::new()
+    };
+    Ok(FluidPresentation {
+        has_name,
+        name,
+        no_text,
+    })
+}
+
+/// Source `DrinkFill` slow oil: `Mathf.Clamp(num * amount * slowOilModifier, 0.0001f, num)`.
+/// Unity tests the minimum first, so a result below 0.0001 stays 0.0001 even above `num`.
+fn slow_oil_amount(amount: f32, destination_total: f32, modifier: f32) -> f32 {
+    let value = amount * destination_total * modifier;
+    if value < 0.0001 {
+        0.0001
+    } else if value > amount {
+        amount
+    } else {
+        value
+    }
+}
+
+#[cfg(test)]
+mod f15_fluid_containers {
+    use super::*;
+
+    #[test]
+    fn f15_generated_cap_name_uses_name_text_word() {
+        // Source record: hasName=1, nameString="Coolant Tank", nameText=167 (ls.w.coolant).
+        let mut words = vec![String::new(); 169];
+        words[166] = "Oil Tank".into();
+        words[167] = "Coolant".into();
+        words[168] = "Fuel Tank".into();
+        let named = generated_presentation(true, 167., false, &words).unwrap();
+        assert!(named.has_name && !named.no_text);
+        assert_eq!(named.name, "Coolant");
+        assert_eq!(
+            generated_presentation(false, 168., true, &words)
+                .unwrap()
+                .name,
+            ""
+        );
+        assert!(generated_presentation(true, 453., false, &words).is_err());
+    }
+
+    #[test]
+    fn f15_slow_oil_clamp_tests_minimum_first() {
+        // mainscript.slowOilModifier = 0.02.
+        let modifier = 0.019_999_999_552_965_164_f32;
+        assert_eq!(slow_oil_amount(0.01, 2., modifier), 0.01 * 2. * modifier);
+        assert_eq!(slow_oil_amount(0.00005, 2., modifier), 0.0001);
+        assert_eq!(slow_oil_amount(0.01, 100., modifier), 0.01);
     }
 }

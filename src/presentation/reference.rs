@@ -43,6 +43,8 @@ pub struct CapVisual {
     pub(crate) euler: bool,
     pub(crate) closed_euler: Vec3,
     pub(crate) open_euler: Vec3,
+    /// Source `capLerp` while `DoMove` runs.
+    pub(crate) motion: Option<f32>,
 }
 
 #[derive(Resource, Default)]
@@ -359,6 +361,7 @@ pub fn bind(
                 euler: links.euler_rotation,
                 closed_euler: Vec3::from_array(links.closed_euler_degrees),
                 open_euler: Vec3::from_array(links.open_euler_degrees),
+                motion: None,
             });
         }
     }
@@ -402,14 +405,16 @@ pub(crate) fn bind_generated_cap(
             euler: links.euler_rotation,
             closed_euler: Vec3::from_array(links.closed_euler_degrees),
             open_euler: Vec3::from_array(links.open_euler_degrees),
+            motion: None,
         });
     }
 }
 
 pub fn sync_caps(
     area: &StartingArea,
+    dt: f32,
     caps: &mut Query<
-        (&CapVisual, &mut Transform),
+        (&mut CapVisual, &mut Transform),
         (
             Without<BodyVisual>,
             Without<ItemVisual>,
@@ -425,7 +430,7 @@ pub fn sync_caps(
         ),
     >,
 ) {
-    for (cap, mut transform) in caps {
+    for (mut cap, mut transform) in caps {
         let valve = area.interaction.opening_valve(cap.opening);
         let mut pose = cap.closed;
         if cap.euler {
@@ -442,6 +447,7 @@ pub fn sync_caps(
                 .rotation
                 .lerp(cap.opened.rotation, valve)
                 .normalize();
+            pose = super::cap_motion::cap_motion(*transform, pose, &mut cap.motion, dt);
         }
         transform.set_if_neq(pose);
     }

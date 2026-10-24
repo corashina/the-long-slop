@@ -71,6 +71,8 @@ pub struct FluidFeedback<'a> {
     pub amount: f32,
     pub capacity: f32,
     pub quantities: [f32; 6],
+    /// Source list order: fluid type + 1 per 4 bits, low bits first, 0 ends.
+    pub order: u32,
     pub presentation: &'a FluidPresentation,
 }
 pub struct InteractionFeedback<'a> {
@@ -463,7 +465,7 @@ impl InteractionState {
         Some((self.cleaning.get(item)?.quantity?, tool.maximum_quantity))
     }
     pub fn feedback<'a>(
-        &self,
+        &'a self,
         a: &ActionAvailability,
         items: &'a ItemStore,
         reference: &'a ReferenceManifest,
@@ -471,18 +473,20 @@ impl InteractionState {
         let name = a
             .item
             .map_or("", |id| labels::display_name(reference, items, id));
+        // Generated world caps have no manifest opening record, so read the live opening.
         let fluid = a
             .opening
-            .and_then(|id| reference.openings.iter().find(|o| o.id == id))
+            .and_then(|id| self.openings.iter().find(|o| o.reference.id == id))
             .and_then(|o| {
                 items
-                    .get(o.tank)
+                    .get(o.reference.tank)
                     .and_then(|i| i.fluid.as_ref())
                     .map(|f| FluidFeedback {
                         amount: f.total(),
                         capacity: f.capacity_liters,
                         quantities: f.mixture().quantities_liters,
-                        presentation: &o.presentation,
+                        order: fluid_order(f),
+                        presentation: &o.reference.presentation,
                     })
             });
         InteractionFeedback {
@@ -500,4 +504,14 @@ impl InteractionState {
             fluid,
         }
     }
+}
+
+/// Source `GetCapString` lists percentages in the tank's fluid list order.
+fn fluid_order(fluid: &crate::fluids::FluidContainer) -> u32 {
+    fluid
+        .entries()
+        .enumerate()
+        .fold(0, |order, (position, entry)| {
+            order | (u32::from(entry.fluid_type) + 1) << (4 * position)
+        })
 }

@@ -11,7 +11,8 @@ export function formatTank(r) {
  if(r.amount<=Math.fround(.05))return prefix+'empty';
  const amount=volume(r.amount),capacity=volume(r.capacity);
  let result=prefix+(amount===capacity?amount+' L (full)':amount+' / '+capacity+' L');
- for(let i=0;i<6;i++){const percent=Math.fround(Math.fround(r.quantities[i]/r.amount)*100);if(percent>=1)result+='\n'+Math.round(percent)+'% '+FLUIDS[i];}
+ // Source GetCapString follows the tank's fluid list order: type + 1 per 4 bits, 0 ends.
+ for(let order=r.fluidOrder??0;order;order>>>=4){const i=(order&15)-1,percent=Math.fround(Math.fround(r.quantities[i]/r.amount)*100);if(percent>=1)result+='\n'+Math.round(percent)+'% '+FLUIDS[i];}
  return result;
 }
 export function selectIcon(mask,context,carrying) {
@@ -36,10 +37,10 @@ export class FeedbackState {
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
   const amountKey=Math.round(r.amount*(r.context===14?1:10)),empty=r.amount<=Math.fround(.05);
-  let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty;
+  let changed=r.context!==this.context||amountKey!==this.amountKey||r.capacity!==this.capacity||r.fluidName!==this.fluidName||r.hasName!==this.hasName||r.noText!==this.noText||empty!==this.empty||r.fluidOrder!==this.fluidOrder;
   for(let i=0;i<6;i++){const percent=r.amount>0?Math.fround(Math.fround(r.quantities[i]/r.amount)*100):0;const key=percent>=1?Math.round(percent):-1;if(this.percentKeys[i]!==key){changed=true;this.percentKeys[i]=key;}}
   const radioChanged=r.radioAm!==this.radioAm||r.radioFrequency!==this.radioFrequency||r.radioVolume!==this.radioVolume;
-  if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r):formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;}
+  if(changed||radioChanged){this.fluidText=r.context===11||r.context===12?formatRadio(r):formatTank(r);this.amountKey=amountKey;this.empty=empty;this.capacity=r.capacity;this.fluidName=r.fluidName;this.hasName=r.hasName;this.noText=r.noText;this.fluidOrder=r.fluidOrder;}
   this.radioAm=r.radioAm;this.radioFrequency=r.radioFrequency;this.radioVolume=r.radioVolume;
   const targetName=r.context===11?'Volume +/-':r.context===12?'Tune':r.name;
   const detailChanged=targetName!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
