@@ -554,20 +554,29 @@ impl CarryState {
                 .position_wrt_parent()
                 .copied()
                 .unwrap_or(Pose::IDENTITY);
-            let velocity = desired.translation - current.translation;
-            if let Some((_, hit)) = queries.cast_shape(
-                &(current * local),
-                velocity,
-                collider.shape(),
-                ShapeCastOptions {
-                    max_time_of_impact: 1.0,
-                    stop_at_penetration: false,
-                    ..Default::default()
-                },
-            ) {
-                desired.translation =
-                    current.translation + velocity * (hit.time_of_impact - 0.01).max(0.0);
+            // Slide the rest of the motion along each contact, as a pulled rigidbody does.
+            let mut start = current.translation;
+            let mut motion = desired.translation - current.translation;
+            for _ in 0..3 {
+                let Some((_, hit)) = queries.cast_shape(
+                    &(Pose::from_parts(start, current.rotation) * local),
+                    motion,
+                    collider.shape(),
+                    ShapeCastOptions {
+                        max_time_of_impact: 1.0,
+                        stop_at_penetration: false,
+                        ..Default::default()
+                    },
+                ) else {
+                    start += motion;
+                    break;
+                };
+                let advance = (hit.time_of_impact - 0.01).max(0.0);
+                start += motion * advance;
+                let rest = motion * (1.0 - advance);
+                motion = rest - hit.normal1 * rest.dot(hit.normal1).min(0.0);
             }
+            desired.translation = start;
             if queries
                 .intersect_shape(desired * local, collider.shape())
                 .next()

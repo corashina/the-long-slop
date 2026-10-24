@@ -370,6 +370,9 @@ impl InteractionState {
     }
 
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        let mut mechanisms = mechanisms::MechanismState::new(reference)?;
+        let parts = parts::PartAttachments::new(reference)?;
+        parts.mount_initial(&mut mechanisms);
         let mut openings = Vec::with_capacity(reference.openings.len());
         for opening in &reference.openings {
             let anchor = reference
@@ -624,8 +627,8 @@ impl InteractionState {
                 .map(|item| (item.id, item.kind.clone()))
                 .collect(),
             bodies: HashMap::with_capacity(reference.bodies.len()),
-            mechanisms: mechanisms::MechanismState::new(reference)?,
-            parts: parts::PartAttachments::new(reference)?,
+            mechanisms,
+            parts,
             attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             receipt_tanks: fluid_receipts::tank_nodes(reference),

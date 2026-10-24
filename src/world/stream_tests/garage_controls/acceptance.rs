@@ -10,6 +10,7 @@ struct Play {
     reference: ReferenceManifest,
     run: GarageRuntime,
     claim: Option<PipelineContinuation>,
+    pending: FrameInput,
 }
 
 fn wrap_degrees(angle: f32) -> f32 {
@@ -21,8 +22,14 @@ fn heading_degrees(direction: Vector) -> f32 {
 }
 
 impl Play {
+    /// Routes input as the app does: inventory frame first, then one fixed step.
     fn frame(&mut self, input: FrameInput) {
-        self.run.step(&self.reference, input);
+        let view = self.run.area.player.view(&self.run.physics).head_pose;
+        self.run
+            .advance_inventory_frame(&self.reference, input, FIXED_DT, view)
+            .merge_fixed_input(&mut self.pending);
+        let step = self.pending.take_step();
+        self.run.step(&self.reference, step);
         super::super::prepare_step(&mut self.run, &self.reference, &mut self.claim);
     }
 
@@ -159,18 +166,23 @@ impl Play {
     /// The garage leaves no room behind the car.
     fn walk_around_car_to(&mut self, point: Vector, reach: f32) {
         let (center, front, side) = self.car_frame();
-        let mine = (Vector::from_array(self.camera().position).with_y(0.) - center).dot(side);
+        let me = Vector::from_array(self.camera().position).with_y(0.) - center;
+        let mine = me.dot(side);
         let offset = point.with_y(0.) - center;
         let theirs = offset.dot(side);
         if mine.signum() != theirs.signum() {
             for sign in [mine.signum(), theirs.signum()] {
                 self.walk_to(center + front * 2.55 + side * sign * 1.15, 0.25);
             }
+        } else if me.dot(front).abs() > 2.2 && mine.abs() < 1.2 {
+            // Step out past the corner before walking along the side.
+            let end = me.dot(front).signum() * 2.55;
+            self.walk_to(center + front * end + side * theirs.signum() * 1.4, 0.25);
         }
         let along = offset.dot(front);
         if along.abs() < 2.2 {
             // Stand beside the car, clear of the body.
-            self.walk_to(center + front * along + side * theirs.signum() * 1.2, 0.2);
+            self.walk_to(center + front * along + side * theirs.signum() * 1.4, 0.2);
         } else {
             self.walk_to(point, reach);
         }
@@ -212,32 +224,41 @@ impl Play {
         false
     }
 
-    /// Holds use and drags the mouse until the mechanism opens past the angle.
-    fn drag_open(&mut self, item: ItemId, mouse: [f32; 2], angle: f32) -> f32 {
-        let degrees = |play: &Self| {
-            let d = play
-                .run
-                .area
-                .interaction
-                .mechanisms
-                .snapshot(item)
-                .unwrap()
-                .degrees;
-            d[0].abs().max(d[1].abs())
-        };
+    fn degrees(&self, item: ItemId) -> f32 {
+        let d = self
+            .run
+            .area
+            .interaction
+            .mechanisms
+            .snapshot(item)
+            .unwrap()
+            .degrees;
+        d[0].abs().max(d[1].abs())
+    }
+
+    /// Holds use and drags the mouse until the mechanism is near the angle.
+    /// A relative drag follows the part's own axis, so turn the mouse when it stops.
+    fn drag(&mut self, item: ItemId, first: [f32; 2], angle: f32) -> f32 {
+        let [x, y] = first;
+        let directions = [[x, y], [-y, x], [-x, -y], [y, -x]];
+        let mut direction = 0;
         self.frame(FrameInput {
             held: keys::USE,
             pressed: keys::USE,
             ..FrameInput::default()
         });
-        for _ in 0..80 {
+        for _ in 0..240 {
+            let before = self.degrees(item);
+            if (angle - before).abs() < 1. {
+                break;
+            }
             self.frame(FrameInput {
                 held: keys::USE,
-                mouse,
+                mouse: directions[direction],
                 ..FrameInput::default()
             });
-            if degrees(self) > angle {
-                break;
+            if (self.degrees(item) - before) * (angle - before).signum() < 0.1 {
+                direction = (direction + 1) % directions.len();
             }
         }
         self.frame(FrameInput {
@@ -245,7 +266,7 @@ impl Play {
             ..FrameInput::default()
         });
         self.idle(20);
-        degrees(self)
+        self.degrees(item)
     }
 
     fn bound(&self, item: ItemId, owner: fn(&ActionBinding) -> Option<ItemId>) -> Vec<u32> {
@@ -287,7 +308,23 @@ impl Play {
     /// Steers with held keys toward an absolute XZ point until the car is within reach.
     fn drive_to(&mut self, target: [f64; 3], reach: f64, max_speed: f32) {
         self.release_handbrake();
+        let mut stuck = 0;
+        let mut steer = 0;
         for _ in 0..(90. / FIXED_DT) as u32 {
+            // A driver backs off an obstacle with the wheel turned the other way, then tries again.
+            stuck = if self.car_speed() < 0.3 { stuck + 1 } else { 0 };
+            if stuck > 150 {
+                let back_steer = if steer == keys::LEFT {
+                    keys::RIGHT
+                } else {
+                    keys::LEFT
+                };
+                for _ in 0..150 {
+                    self.hold(keys::BACK | back_steer, 1);
+                }
+                self.brake();
+                stuck = 0;
+            }
             let position = self.car_absolute();
             let delta = Vector::new(
                 (target[0] - position[0]) as f32,
@@ -299,7 +336,10 @@ impl Play {
             }
             let forward = self.car_frame().1;
             let error = wrap_degrees(heading_degrees(delta) - heading_degrees(forward));
-            let steer = if error > 3. {
+            // Keep the turn direction through a U-turn.
+            steer = if error.abs() > 150. && steer != 0 {
+                steer
+            } else if error > 3. {
                 keys::RIGHT
             } else if error < -3. {
                 keys::LEFT
@@ -463,9 +503,10 @@ fn p11_starting_area_loop() {
         reference,
         run,
         claim: None,
+        pending: FrameInput::default(),
     };
     play.idle(50);
-    let mut failures: Vec<String> = Vec::new();
+    let mut failures = Failures::default();
     let spawn = play.car_absolute();
     println!(
         "car {spawn:?}, player {:?}",
@@ -548,16 +589,32 @@ fn p11_starting_area_loop() {
             failures.push(format!("petrol can {can:?} could not be picked up"));
             continue;
         }
-        // Scroll the can toward the view, then raise it to chest height.
-        for _ in 0..40 {
-            play.frame(FrameInput {
-                wheel: -0.05,
-                ..FrameInput::default()
-            });
+        // Step back with the view low so a can under a table slides out first.
+        let start = Vector::from_array(play.camera().position).with_y(0.);
+        for _ in 0..200 {
+            if Vector::from_array(play.camera().position)
+                .with_y(0.)
+                .distance(start)
+                > 1.
+                || play.run.area.interaction.held() != Some(can)
+            {
+                break;
+            }
+            play.hold(keys::BACK, 1);
+            play.idle(3);
         }
         let ahead = Vector::from_array(play.camera().position)
             + play.view_forward().with_y(0.).normalize() * 2.;
         assert!(play.look_at(ahead), "view did not level");
+        play.idle(25);
+        // Scroll the can close so it does not push the parked car on the way.
+        for _ in 0..60 {
+            play.frame(FrameInput {
+                held: keys::TRANSLATE,
+                wheel: -0.05,
+                ..FrameInput::default()
+            });
+        }
         play.idle(25);
         let colliders = play.bound(opening.cap, |b| b.use_owner);
         play.approach(opening.cap, &colliders, |aim| aim.use_target);
@@ -613,10 +670,7 @@ fn p11_starting_area_loop() {
     for door in [5, 7].map(ItemId) {
         let colliders = play.bound(door, |b| b.use_owner);
         play.approach(door, &colliders, |aim| aim.use_target);
-        let mut open = play.drag_open(door, [0., 4.], 85.);
-        if open < 60. {
-            open = play.drag_open(door, [0., -4.], 85.);
-        }
+        let open = play.drag(door, [0., 4.], 85.);
         println!("garage door {door:?} open {open} degrees");
         if open < 60. {
             failures.push(format!("garage door {door:?} opened only {open} degrees"));
@@ -653,7 +707,7 @@ fn p11_starting_area_loop() {
         let handle = play.collider_centers(&play.bound(door, |b| b.use_owner));
         assert!(play.look_at(handle[0]), "view did not reach the door");
         play.idle(2);
-        let open = play.drag_open(door, [4., 0.], 55.);
+        let open = play.drag(door, [4., 0.], 55.);
         println!("door {door:?} open {open} degrees");
         let seat_point = play.collider_centers(&colliders)[0];
         assert!(play.look_at(seat_point), "view did not reach the seat");
@@ -670,48 +724,11 @@ fn p11_starting_area_loop() {
         // Pull the door closed from the seat.
         let colliders = play.bound(door, |b| b.use_owner);
         for _ in 0..4 {
-            if play
-                .run
-                .area
-                .interaction
-                .mechanisms
-                .snapshot(door)
-                .unwrap()
-                .degrees[1]
-                < 1.
-            {
+            if play.degrees(door) < 1. {
                 break;
             }
             if play.aim_at(door, &colliders, |aim| aim.use_target) {
-                play.frame(FrameInput {
-                    held: keys::USE,
-                    pressed: keys::USE,
-                    ..FrameInput::default()
-                });
-                for _ in 0..160 {
-                    if play
-                        .run
-                        .area
-                        .interaction
-                        .mechanisms
-                        .snapshot(door)
-                        .unwrap()
-                        .degrees[1]
-                        < 1.
-                    {
-                        break;
-                    }
-                    play.frame(FrameInput {
-                        held: keys::USE,
-                        mouse: [-4., 0.],
-                        ..FrameInput::default()
-                    });
-                }
-                play.frame(FrameInput {
-                    released: keys::USE,
-                    ..FrameInput::default()
-                });
-                play.idle(20);
+                play.drag(door, [-4., 0.], 0.);
             }
         }
         let open = play
@@ -746,6 +763,11 @@ fn p11_starting_area_loop() {
     play.reverse_out(spawn, front, 12., 3.);
     play.drive_to(ahead(-400.), 8., 15.);
     let furthest = play.car_absolute();
+    println!(
+        "far point: engine running {}, fuel {} L",
+        play.run.vehicles[0].engine_output.running,
+        play.tank(fuel_tank)
+    );
     println!(
         "furthest {furthest:?}, {} m from the garage",
         distance(furthest, spawn)
@@ -816,6 +838,7 @@ fn p11_starting_area_loop() {
         reference: play.reference,
         run: restored,
         claim,
+        pending: FrameInput::default(),
     };
     assert_eq!(play.run.area.player.seat(), Some(seat.id), "seat lost");
     assert!(play.run.area.interaction.parts.installed(hood), "hood lost");
@@ -832,10 +855,21 @@ fn p11_starting_area_loop() {
     let moved = distance(play.car_absolute(), start);
     println!("moved {moved} m after reload");
     assert!(
-        failures.is_empty(),
+        failures.0.is_empty(),
         "acceptance failures:\n{}",
-        failures.join("\n")
+        failures.0.join("\n")
     );
+}
+
+/// Collects failures that do not block later steps, and prints each one.
+#[derive(Default)]
+struct Failures(Vec<String>);
+
+impl Failures {
+    fn push(&mut self, failure: String) {
+        println!("failure: {failure}");
+        self.0.push(failure);
+    }
 }
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
