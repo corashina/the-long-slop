@@ -14,8 +14,8 @@ ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 PRIORITIES = [10, 25, 40, 55, 70, 80, 85, 100]
 # These survival roles play once through the shared prefab.
-ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'footstep': 14}
-# Other one-shots use AudioPriorities[7].
+ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'music_box': 14, 'footstep': 15}
+# Other one-shots use AudioPriorities[7]. The music box keeps its source priority.
 ONE_SHOT_PRIORITY = {'eat': 70, 'eat_crunchy': 70, 'footstep': PRIORITIES[3]}
 TIER_THRESHOLDS = [0.05, 0.2, 0.5, 0.7]
 PHASES = (('morning', 'reggeledik', 'Reggel'), ('day', 'nappal', 'Nappal'),
@@ -414,7 +414,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     walk=[readers(main,s['clips']) for s in md['walkSounds']]
     audio['footsteps']=footstep_record(md,source.read(step),bake_points([(0.,0.,0.)],source.chain(step_transform),body)[0],
         lambda pointers:[clip(r) for r in readers(main,pointers)],footstep_methods)
-    survival_groups.append(('footstep',14,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
+    survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'rock_heat':default_route,'footstep':default_route,
         'car_hit':source.resolve(car_route,source.read(car_route)['GCarSounds'])}
@@ -439,6 +439,20 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
+    # musicboxscript.PlayNote adds a default AudioSource for each note.
+    boxes=[r['source'] for r in manifest['world']['records'] if r['class_name']=='musicboxscript']
+    notes=[]
+    for identity in boxes:
+        r=source.get(identity['file'],identity['path_id']);d=source.read(r)
+        notes.append((clip(source.resolve(r,d['clip'])),d['volume'],mixer(source.resolve(r,d['group']))))
+    if not notes or any(n!=notes[0] for n in notes):raise ValueError('Music box notes differ or are missing')
+    flat={'keys':[{'time':0.,'value':1.,'in_tangent':0.,'out_tangent':0.,'in_weight':1/3,'out_weight':1/3,'weighted_mode':0}],
+        'pre_wrap_mode':2,'post_wrap_mode':2,'rotation_order':4}
+    audio['survival'].append({'role':'music_box','kind':14,'one_shot':True,'source':boxes[0],'audio_source':boxes[0],
+        'clips':[notes[0][0]],'gain':[notes[0][1]]*2,'pitch':[1.,1.],'offset':[0.,0.,0.],
+        'settings':{'priority':128,'loop':False,'gain':1.,'pitch':1.,'min_distance':1.,'max_distance':500.,'rolloff_mode':0,
+            'spatial_blend':1.,'spatial_blend_curve':flat,'rolloff_curve':flat},
+        'mixer':notes[0][2],'doppler':1.,'pan':0.,'method':method('musicboxscript','PlayNote')})
     def control_reader(reader):
         if reader is None: return None
         eid = emitter(reader); node = audio['emitters'][eid-1]['node']
@@ -627,7 +641,7 @@ def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
         r=roles.get(role)
         if r is None or r['kind']!=kind or not r['clips'] or set(r['clips'])-ids or r['settings']['spatial_blend']!=1:
             raise ValueError(f'Invalid one-shot audio: {role}')
-        if r['settings']['priority']!=ONE_SHOT_PRIORITY.get(role,PRIORITIES[7]):raise ValueError(f'Invalid one-shot priority: {role}')
+        if role!='music_box' and r['settings']['priority']!=ONE_SHOT_PRIORITY.get(role,PRIORITIES[7]):raise ValueError(f'Invalid one-shot priority: {role}')
     if not {c for t in tiers for c in t['clips']}<=set(roles['car_hit']['clips']):raise ValueError('Car hit record lacks tier clips')
     if any(h['collision_clip'] not in roles['item_hit']['clips'] or not h['collision_gain']>=0 for h in pickup_hits):
         raise ValueError('Invalid world pickup hit')

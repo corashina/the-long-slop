@@ -95,6 +95,8 @@ pub enum InteractionAction {
     /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
     /// radio band switch.
     DialTune(ColliderId, f32),
+    /// Look input (source X right, Y up) on a generated music box crank while used.
+    Crank(ColliderId, [f32; 2]),
 }
 
 /// A generated usablescript knob bound to a dial or a portable radio.
@@ -105,6 +107,8 @@ pub enum Knob {
     Tuning,
     /// BChangeAMFM: turned with use.
     Band,
+    /// musicboxscript use: rotateAble, turned with the mouse.
+    Crank,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1639,7 +1643,17 @@ impl InteractionState {
                         }
                     }
                 }
-                if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
+                if let Some((knob, Knob::Crank)) = self.dial_knob(&target, physics) {
+                    if use_input.held & keys::USE != 0
+                        || (primary_use && use_input.held & keys::PRIMARY != 0)
+                    {
+                        // Browser movementY points down. Source Mouse Y points up.
+                        let look = [use_input.mouse[0], -use_input.mouse[1]];
+                        if look.iter().all(|v| v.is_finite()) {
+                            action = Some(InteractionAction::Crank(knob, look));
+                        }
+                    }
+                } else if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
                     if use_input.pressed & keys::USE != 0
                         || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
                     {

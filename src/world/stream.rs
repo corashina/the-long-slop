@@ -154,6 +154,9 @@ pub struct WorldStream {
     radio_scan: Option<(u64, u64)>,
     /// Prototype radioscript lookups.
     radio_scripts: Vec<(SourceId, Option<SourceId>)>,
+    music_box_bindings: Vec<content_musicboxes::MusicBoxBinding>,
+    /// Session and active revision whose music box items are all bound.
+    music_box_scan: Option<(u64, u64)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -716,6 +719,8 @@ impl WorldStream {
             radio_bindings: Vec::new(),
             radio_scan: None,
             radio_scripts: Vec::new(),
+            music_box_bindings: Vec::new(),
+            music_box_scan: None,
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -3914,6 +3919,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_music_box_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4648,6 +4657,13 @@ impl WorldStream {
                     .sum::<usize>()
                 + self.radio_scripts.capacity()
                     * std::mem::size_of::<(SourceId, Option<SourceId>)>()
+                + self.music_box_bindings.capacity()
+                    * std::mem::size_of::<content_musicboxes::MusicBoxBinding>()
+                + self
+                    .music_box_bindings
+                    .iter()
+                    .map(content_musicboxes::MusicBoxBinding::heap_bytes)
+                    .sum::<usize>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4944,6 +4960,8 @@ pub(crate) mod content_index;
 
 #[path = "content_dials.rs"]
 mod content_dials;
+#[path = "content_musicboxes.rs"]
+mod content_musicboxes;
 #[path = "content_radios.rs"]
 mod content_radios;
 

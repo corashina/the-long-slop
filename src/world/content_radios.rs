@@ -336,7 +336,7 @@ impl WorldStream {
             (Knob::Tuning, true) => RadioControl::TuneUp,
             (Knob::Tuning, false) => RadioControl::TuneDown,
             (Knob::Band, _) => RadioControl::Band,
-            (Knob::Dial, _) => return None,
+            (Knob::Dial | Knob::Crank, _) => return None,
         };
         let (on, am) = (b.state.on, b.state.am);
         b.state.control(control);

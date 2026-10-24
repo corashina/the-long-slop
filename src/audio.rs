@@ -1406,7 +1406,8 @@ pub enum AudioKind {
     ItemHit = 11,
     CarHit = 12,
     RockHeat = 13,
-    Footstep = 14,
+    MusicBox = 14,
+    Footstep = 15,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1460,6 +1461,31 @@ impl AudioState {
         } else if self.survival_loops.len() < self.survival_loops.capacity() {
             self.survival_loops.push(event);
         }
+    }
+    /// musicboxscript.PlayNote: one note with the source random pitch difference.
+    pub fn music_note(&mut self, position: [f64; 3], pitch: f32, detune: f32, chance: f32) {
+        let b = self
+            .reference
+            .survival
+            .iter()
+            .find(|b| b.kind == AudioKind::MusicBox as u32)
+            .expect("validated survival playback");
+        let (clip, gain) = (b.clips[0], b.gain[0]);
+        let pitch = if self.sample() < chance {
+            pitch + (self.sample() - 0.5) * detune
+        } else {
+            pitch
+        };
+        self.survival_event(SurvivalAudioEvent {
+            session: self.session,
+            emitter: 0,
+            kind: AudioKind::MusicBox,
+            action: AudioAction::Start,
+            clip,
+            gain,
+            pitch,
+            position,
+        });
     }
     pub fn stop_survival_loop(&mut self, kind: AudioKind, emitter: u32) {
         self.survival_loops
