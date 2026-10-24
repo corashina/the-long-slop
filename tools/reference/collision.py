@@ -65,3 +65,24 @@ def geometry(source, exporter, reader, transform, body_pose, dynamic):
         a,b=bake(points)
         return {'kind':'capsule','a':a,'b':b,'radius':radius}
     raise ValueError(f'Unsupported collider: {reader.type.name}')
+
+
+STEP_TIPS = ('road', 'desert', 'winter', 'grass', 'wood')
+
+
+def step_surface(source, game_object):
+    """Footstep surface of a hit collider GameObject, as stepSoundScript.Step reads it."""
+    data = source.read(game_object)
+    # The source looks for otherStepSoundScript on the collider's own GameObject only.
+    for part in data['m_Component']:
+        component = source.resolve(game_object, part['component'])
+        if component.type.name == 'MonoBehaviour' and source.class_name(component) == 'otherStepSoundScript':
+            return STEP_TIPS[source.read(component)['tip']]
+    # Player builds store a custom tag as 20000 plus its TagManager index.
+    if data['m_Tag'] < 20000: return None
+    if getattr(source, 'tag_names', None) is None:
+        managers = [o for o in source.objects.values() if o.type.name == 'TagManager']
+        if len(managers) != 1: raise ValueError('Source needs one TagManager')
+        source.tag_names = source.read(managers[0])['tags']
+    # The source checks sand before the Wood tag, so a Wood tag is not tip wood.
+    return {'Wood': 'wood_tag', 'Sand': 'sand'}.get(source.tag_names[data['m_Tag'] - 20000])

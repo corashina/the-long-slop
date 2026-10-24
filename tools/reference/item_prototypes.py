@@ -1,7 +1,7 @@
 """Checked physical templates. All body and collider IDs are prototype-local."""
 from .source import key, source_id
 from .actions import recover_pickup
-from .collision import world_pose, bake_points, quaternion_product, geometry
+from .collision import world_pose, bake_points, quaternion_product, geometry, step_surface
 from .gltf import GltfExporter
 from .survival import component, managed_evidence, finite_record
 
@@ -69,7 +69,8 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
                 colliders.append({'id':len(colliders)+1,'source':source_id(c),'node':node,'body':owner,
                     'sensor':bool(d['m_IsTrigger']),'enabled':bool(d['m_Enabled']), 'membership':1<<layer,'filter':matrix[layer],
                     'friction':properties['m_DynamicFriction'],'restitution':properties['m_Bounciness'],
-                    'geometry':geometry(source,exporter,c,record['reader'],poses[body['node']],body['dynamic'])})
+                    'geometry':geometry(source,exporter,c,record['reader'],poses[body['node']],body['dynamic']),
+                    'step_surface':step_surface(source,record['game_object'])})
             if 'pickupable' in group:
                 c=group['pickupable'];d=source.read(c)
                 clip=source.resolve(c,d['collideSound'])

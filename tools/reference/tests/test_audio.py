@@ -218,6 +218,42 @@ public class soundplayscript
         if (!(UnityEngine.Random.Range(0f, 1f) > chance)) { mainscript.PlayClipAtPoint(c, p, v, mainscript.AudioPriorities[7]); }
     }
 }
+public class stepSoundScript
+{
+    public void Step(float _modifier)
+    {
+        if (Physics.Raycast(transform.position, -transform.up, out hit, rayDist, mainscript.M.floorLayerMask)) {
+        otherStep = hit.collider.GetComponent<otherStepSoundScript>();
+        if (hit.collider.gameObject.layer == mainscript.sandLayer || hit.collider.gameObject.layer == mainscript.sandLayer2 || hit.collider.CompareTag("Sand")) { }
+        else if (hit.collider.CompareTag("Wood")) { }
+        mainscript.PlayClipAtPoint(StepSoundClip, transform.position, StepSoundVolume * _modifier * stepSound, randomPitch: true, mainscript.AudioPriorities[3]); }
+    }
+}
+public class steps
+{
+    public static int sandLayer = 17;
+    public static int sandLayer2 = 19;
+    public enum walkSoundType
+    {
+        road,
+        desert,
+        winter,
+        grass,
+        wood
+    }
+}
+public class fpscontroller
+{
+\tprivate void FixedUpdate()
+\t{
+\t\tif (ws <= 0f - walkbobSoundF) { stepScript.Step(duckValue + (input.run ? 0.15f : 0f)); }
+\t}
+
+\tprivate void Grounded(bool a)
+\t{
+\t\tif (grounded) { stepScript.Step(duckValue + (input.run ? 0.15f : 0f)); }
+\t}
+}
 '''
 
 ROCK = {'SSource': {'m_PathID': 0}, 'findNap': 1, 'same': 1, 'clipsReggel': ['a', 'b'],
@@ -243,9 +279,46 @@ class HitAudio(unittest.TestCase):
             return managed_evidence(library)
 
     def test_hit_source_statements_are_required(self):
-        self.evidence(HIT_SOURCE_TEXT)
-        for old, new in [('num - 0.075f', 'num - 0.08f'), ('> 10f', '> 5f'), ('> 0.5f', '> 0.4f'), ('> chance', '>= chance')]:
+        _, _, footsteps = self.evidence(HIT_SOURCE_TEXT)
+        self.assertEqual([(m['class'], m['method']) for m in footsteps],
+            [('stepSoundScript', 'Step'), ('fpscontroller', 'FixedUpdate'), ('fpscontroller', 'Grounded')])
+        for old, new in [('num - 0.075f', 'num - 0.08f'), ('> 10f', '> 5f'), ('> 0.5f', '> 0.4f'), ('> chance', '>= chance'),
+                ('AudioPriorities[3]', 'AudioPriorities[4]'), ('CompareTag("Wood")', 'CompareTag("Plank")'), ('sandLayer2 = 19', 'sandLayer2 = 18'),
+                ('winter,\n        grass', 'grass,\n        winter'), ('if (grounded) { stepScript.Step', 'if (grounded) { stepScript.Jump')]:
             with self.assertRaises(ValueError): self.evidence(HIT_SOURCE_TEXT.replace(old, new))
+
+    def test_footstep_record_and_errors(self):
+        from tools.reference.audio import footstep_record, validate_footsteps
+        main = {'walkSounds': [{'volume': v, 'clips': [i]} for i, v in enumerate([.2, .2, .2, .2, 2.])], 'floorLayerMask': {'m_Bits': 164353}}
+        step = {'feetSens': [], 'stepSound': 1., 'rayDist': .25}
+        record = footstep_record(main, step, [0., -.8343, 0.], lambda pointers: [p + 1 for p in pointers], ['m'])
+        self.assertEqual(record, {'surfaces': [{'name': n, 'volume': v, 'clips': [i + 1]} for i, (n, v) in
+            enumerate(zip(['road', 'desert', 'winter', 'grass', 'wood'], [.2, .2, .2, .2, 2.]))],
+            'step_gain': 1., 'ray_distance': .25, 'ray_mask': 164353, 'local_position': [0., -.8343, 0.], 'sand_layers': [17, 19], 'method': ['m']})
+        with self.assertRaises(ValueError): footstep_record(main, {**step, 'feetSens': [{}]}, [0., 0., 0.], lambda p: p, [])
+        with self.assertRaises(ValueError): footstep_record({**main, 'walkSounds': main['walkSounds'][:4]}, step, [0., 0., 0.], lambda p: p, [])
+        manifest = {'colliders': [{'step_surface': 'sand'}], 'item_prototypes': [{'colliders': [{'step_surface': None}]}],
+            'world': {'prototypes': [{'colliders': [{'step_surface': 'wood'}]}]}, 'survival': {'foods': [{'colliders': [{'step_surface': 'wood_tag'}]}]}}
+        audio = {'footsteps': record, 'survival': [{'role': 'footstep', 'clips': [1, 2, 3, 4, 5]}]}
+        validate_footsteps(audio, set(range(1, 6)), manifest)
+        for change in [lambda a, m: a['survival'][0]['clips'].pop(), lambda a, m: a['footsteps']['surfaces'].reverse(),
+                lambda a, m: a['footsteps'].update(ray_distance=0.), lambda a, m: m['survival']['foods'][0]['colliders'][0].update(step_surface='mud'), lambda a, m: a['footsteps'].update(method={})]:
+            a, m = copy.deepcopy(audio), copy.deepcopy(manifest); change(a, m)
+            with self.assertRaises(ValueError): validate_footsteps(a, set(range(1, 6)), m)
+
+    def test_collider_step_surface(self):
+        from tools.reference.collision import step_surface
+        objects = {}
+        def add(path_id, type_name, data, cls=None):
+            objects['f', path_id] = NS(assets_file=NS(source_container_path='f'), path_id=path_id, type=NS(name=type_name), data=data, cls=cls)
+            return {'m_FileID': 0, 'm_PathID': path_id}
+        add(1, 'TagManager', {'tags': ['Sand', 'Wood']})
+        other = add(2, 'MonoBehaviour', {'tip': 3}, 'otherStepSoundScript')
+        box = add(3, 'BoxCollider', {})
+        source = NS(objects=objects, read=lambda o: o.data, class_name=lambda o: o.cls, resolve=lambda _, p: objects['f', p['m_PathID']])
+        def surface(tag, parts=(box,)):
+            return step_surface(source, NS(data={'m_Tag': tag, 'm_Component': [{'component': p} for p in parts]}))
+        self.assertEqual([surface(20001, (box, other)), surface(20001), surface(20000), surface(0)], ['grass', 'wood_tag', 'sand', None])
 
     def test_car_tiers_follow_source(self):
         from tools.reference.audio import collision_record
@@ -275,9 +348,10 @@ class HitAudio(unittest.TestCase):
         audio = {'collisions': collision_record([[1], [2], [3], [4]], []),
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
-                record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70)]}
+                record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70),
+                record('footstep', 14, True, [6], 55)]}
         validate_hit_audio(audio, set(range(1, 7)), [])
-        for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14)]:
+        for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14), (6, 'settings', {'priority': 100, 'spatial_blend': 1.})]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value
             with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)), [])
         changed = copy.deepcopy(audio); del changed['survival'][4]
