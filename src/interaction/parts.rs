@@ -985,6 +985,18 @@ impl PartAttachments {
         }
         m.set_mounted(item, false);
     }
+    /// Source partslotscript.SpawnPart crafts scene parts at start, so they take the mount rotation.
+    pub fn mount_initial(&self, m: &mut MechanismState) {
+        for p in &self.parts {
+            if let Some(slot) = p.slot {
+                m.mount_part(
+                    p.reference.node,
+                    self.slots[slot].mount_node,
+                    p.reference.local_rotation_after_mount,
+                );
+            }
+        }
+    }
     pub fn mount_mechanism(&self, item: ItemId, m: &mut MechanismState) {
         let p = &self.parts[self.indices[&item]];
         let s = &self.slots[p.slot.unwrap()];

@@ -20,6 +20,9 @@ mod radio;
 #[path = "garage_controls/restore.rs"]
 mod restore;
 
+#[path = "garage_controls/acceptance.rs"]
+mod acceptance;
+
 pub(super) fn load_garage() -> (ReferenceManifest, GarageRuntime) {
     let reference = super::reference();
     assert_eq!(reference.build_id, 11140890);
