@@ -62,7 +62,9 @@ pub(super) fn bind(
                 super::placement::node_pose(prototype, node_index),
             );
             let item = items.insert_generated(key, prototype, pose)?;
+            let hit = super::stream::content_bindings::hit_sound(&reference.world, pickup.source);
             let state = items.set_body(item, Some(body)).unwrap();
+            state.hit_sound = hit;
             state.local_pose = crate::vehicle::from_rapier(
                 &(physics.rapier().bodies[body].position().inverse()
                     * crate::vehicle::to_rapier(state.pose)),
@@ -88,6 +90,7 @@ pub(super) fn bind(
                 let id = interaction.allocate_generated_collider()?;
                 physics.edit_collider(*handle, |collider| {
                     collider.user_data = ((id.0 as u128) << 64) | (item.0 as u128 + 1);
+                    collider.set_active_events(super::stream::content_bindings::hit_events(hit));
                 });
                 interaction.bind_surface(
                     *handle,

@@ -766,7 +766,12 @@ impl AudioReference {
             }) && game
                 .vehicles
                 .iter()
-                .all(|v| v.collision_gain.is_finite() && v.collision_gain >= 0.),
+                .all(|v| v.collision_gain.is_finite() && v.collision_gain >= 0.)
+                && game.world.pickup_hits.iter().all(|h| {
+                    clips.contains(&h.collision_clip)
+                        && h.collision_gain.is_finite()
+                        && h.collision_gain >= 0.
+                }),
             "audio collision gains",
         )?;
         for a in &self.ambience {

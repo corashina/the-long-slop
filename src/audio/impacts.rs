@@ -1,11 +1,11 @@
 //! Source hit sounds: `pickupable.OnCollisionEnter` and `carscript.OnCollisionEnter`.
 use super::{AudioAction, AudioKind, AudioState, SurvivalAudioEvent};
-use crate::interaction::items::ItemLocation;
+use crate::interaction::items::{ItemLocation, ItemState};
 use crate::reference::{ColliderId, CollisionAudioReference, ItemId, ReferenceManifest};
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::prelude::{Ball, QueryFilter};
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// Played item hit gain. `None` below the source minimum or for a loose item in an interior.
 pub fn item_hit_gain(
@@ -35,16 +35,24 @@ pub fn car_hit(
     Some((tier.clips[index], tier.fixed_gain.unwrap_or(m)))
 }
 
-struct ItemSound {
-    clip: Option<u32>,
-    gain: f32,
+/// Clip and gain of an item hit. Items keep their source hit sound in the item store.
+fn item_hit(
+    state: &ItemState,
+    speed: f32,
     interior: bool,
+    rules: &CollisionAudioReference,
+) -> Option<(u32, f32)> {
+    let sound = state.hit_sound?;
+    let held = state.location == ItemLocation::Held;
+    let gain = item_hit_gain(speed, sound.gain, held, interior, rules)?;
+    Some((sound.clip, gain))
 }
 
-/// Hit sound data per pickup item and car, with source interior flags.
+/// Car hit gains and the source interior flags of pickup items.
 #[derive(Default)]
 pub struct ImpactState {
-    items: HashMap<ItemId, ItemSound>,
+    /// Items that the last interior test found in an interior.
+    interior: HashSet<ItemId>,
     vehicle_gains: Vec<f32>,
     wait: f32,
 }
@@ -58,34 +66,21 @@ enum Side {
 
 impl ImpactState {
     pub fn bind(&mut self, game: &ReferenceManifest) {
-        self.items = game
-            .items
-            .iter()
-            .filter(|i| i.pickup.is_some())
-            .map(|i| {
-                let sound = ItemSound {
-                    clip: i.collision_clip,
-                    gain: i.collision_gain,
-                    interior: false,
-                };
-                (i.id, sound)
-            })
-            .collect();
+        self.interior = HashSet::with_capacity(256);
         self.vehicle_gains = game.vehicles.iter().map(|v| v.collision_gain).collect();
         self.reset();
     }
     pub fn reset(&mut self) {
         self.wait = 0.;
-        for sound in self.items.values_mut() {
-            sound.interior = false;
-        }
+        self.interior.clear();
     }
-    /// Every `period` seconds, test each loose item. Held and stored items keep their flag.
+    /// Every `period` seconds, test each loose pickup. Held and stored items keep their flag.
     fn refresh(
         &mut self,
         dt: f32,
         period: f32,
-        mut loose: impl FnMut(ItemId) -> Option<[f32; 3]>,
+        loose: impl Iterator<Item = (ItemId, [f32; 3])>,
+        exists: impl Fn(ItemId) -> bool,
         mut inside: impl FnMut([f32; 3]) -> bool,
     ) {
         self.wait -= dt;
@@ -93,14 +88,17 @@ impl ImpactState {
             return;
         }
         self.wait += period;
-        for (&id, sound) in &mut self.items {
-            if let Some(position) = loose(id) {
-                sound.interior = inside(position);
+        self.interior.retain(|&id| exists(id));
+        for (id, position) in loose {
+            if inside(position) {
+                self.interior.insert(id);
+            } else {
+                self.interior.remove(&id);
             }
         }
     }
     fn interior(&self, id: ItemId, held: bool) -> bool {
-        !held && self.items.get(&id).is_some_and(|s| s.interior)
+        !held && self.interior.contains(&id)
     }
 }
 
@@ -126,12 +124,15 @@ impl AudioState {
         self.impacts.refresh(
             dt,
             rules.interior_check_seconds,
-            |id| {
-                area.items
-                    .get(id)
-                    .filter(|s| s.location == ItemLocation::World && !s.removed)
-                    .map(|s| s.pose.position)
-            },
+            area.items
+                .iter()
+                .filter(|s| {
+                    s.location == ItemLocation::World
+                        && !s.removed
+                        && area.interaction.pickup_rule(s.id).is_some()
+                })
+                .map(|s| (s.id, s.pose.position)),
+            |id| area.items.get(id).is_some(),
             |position| {
                 let pose = to_rapier(VehiclePose {
                     position,
@@ -154,17 +155,12 @@ impl AudioState {
             for (this, other) in [(sides[0], sides[1]), (sides[1], sides[0])] {
                 let (kind, emitter, clip, gain, pitch) = match this {
                     Side::Item(id) => {
-                        let Some(sound) = self.impacts.items.get(&id) else {
+                        let Some(state) = area.items.get(id) else {
                             continue;
                         };
-                        let Some(clip) = sound.clip else {
-                            continue;
-                        };
-                        let held = held(id);
-                        let interior = self.impacts.interior(id, held);
+                        let interior = self.impacts.interior.contains(&id);
                         let rules = &self.reference.collisions;
-                        let Some(gain) = item_hit_gain(hit.speed, sound.gain, held, interior, rules)
-                        else {
+                        let Some((clip, gain)) = item_hit(state, hit.speed, interior, rules) else {
                             continue;
                         };
                         (AudioKind::ItemHit, 0, clip, gain, 1.)
@@ -261,21 +257,53 @@ mod tests {
     #[test]
     fn held_items_skip_interior_test() {
         let mut state = ImpactState::default();
-        for id in [1, 2] {
-            let sound = ItemSound {
-                clip: Some(1),
-                gain: 1.,
-                interior: false,
-            };
-            state.items.insert(ItemId(id), sound);
-        }
         // Item 2 is held: no loose position, so its flag stays.
-        let loose = |id: ItemId| (id.0 == 1).then_some([0.; 3]);
-        state.refresh(0.02, 10., loose, |_| true);
+        let loose = || [(ItemId(1), [0.; 3])].into_iter();
+        state.interior.insert(ItemId(3));
+        state.refresh(0.02, 10., loose(), |id| id.0 != 3, |_| true);
         assert!(state.interior(ItemId(1), false));
         assert!(!state.interior(ItemId(2), false));
         assert!(!state.interior(ItemId(1), true));
-        state.refresh(0.02, 10., loose, |_| false);
+        assert!(
+            !state.interior(ItemId(3), false),
+            "removed items lose their flag"
+        );
+        state.refresh(0.02, 10., loose(), |_| true, |_| false);
         assert!(state.interior(ItemId(1), false), "test waits for the period");
+    }
+
+    #[test]
+    fn generated_item_hit_uses_its_sound() {
+        use crate::interaction::items::HitSound;
+        let mut item = ItemState {
+            id: ItemId(900),
+            body: None,
+            inactive_pose: None,
+            location: ItemLocation::World,
+            pose: VehiclePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            local_pose: VehiclePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            generated_condition: Some(1.),
+            temperature: None,
+            fluid: None,
+            food: None,
+            hit_sound: Some(HitSound { clip: 7, gain: 0.5 }),
+            removed: false,
+            pending_attachment: false,
+        };
+        let r = rules();
+        let (clip, gain) = item_hit(&item, 2., false, &r).unwrap();
+        assert_eq!(clip, 7);
+        assert!((gain - 0.225).abs() < 1e-6);
+        assert_eq!(item_hit(&item, 2., true, &r), None);
+        item.location = ItemLocation::Held;
+        assert!(item_hit(&item, 2., true, &r).is_some());
+        item.hit_sound = None;
+        assert_eq!(item_hit(&item, 2., false, &r), None);
     }
 }

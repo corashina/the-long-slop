@@ -30,6 +30,13 @@ pub struct FoodState {
     pub bite: u8,
 }
 
+/// Source `pickupable` hit sound: `collideSound` and `collisionSoundM`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HitSound {
+    pub clip: u32,
+    pub gain: f32,
+}
+
 #[derive(Clone, Debug)]
 pub struct ItemState {
     pub id: ItemId,
@@ -42,6 +49,7 @@ pub struct ItemState {
     pub temperature: Option<f32>,
     pub fluid: Option<FluidContainer>,
     pub food: Option<FoodState>,
+    pub hit_sound: Option<HitSound>,
     pub removed: bool,
     pub pending_attachment: bool,
 }
@@ -263,6 +271,14 @@ impl ItemStore {
                     prototype_index: sausage,
                     bite: reference.survival.foods[sausage].index,
                 }),
+                hit_sound: item
+                    .pickup
+                    .as_ref()
+                    .and(item.collision_clip)
+                    .map(|clip| HitSound {
+                        clip,
+                        gain: item.collision_gain,
+                    }),
                 removed: false,
                 pending_attachment: false,
             });
@@ -598,6 +614,7 @@ impl ItemStore {
             temperature: None,
             fluid: None,
             food: None,
+            hit_sound: None,
             removed: false,
             pending_attachment: false,
         });
@@ -641,6 +658,7 @@ impl ItemStore {
                 prototype_index,
                 bite: reference.index,
             }),
+            hit_sound: None,
             removed: false,
             pending_attachment: false,
         });
