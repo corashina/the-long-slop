@@ -9,7 +9,7 @@ import {createStaticServer} from './serve.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const compressionRoot = resolve(root, '.cache/http-compression');
 const index = JSON.parse(await readFile(resolve(compressionRoot, 'index.json'), 'utf8'));
-const resources = ['/pkg/my_summer_slop_bg.wasm', '/assets/reference/manifest.json'];
+const resources = ['/pkg/the_long_slop_bg.wasm', '/assets/reference/manifest.json'];
 const plan = Object.keys(index.files).find(name => name.startsWith('/assets/runtime/') && name.endsWith('.plan.json'));
 if (plan) resources.push(plan);
 

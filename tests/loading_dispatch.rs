@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     reference::{ReferenceManifest, fixed_reservation::*},
     world::WorldStream,
 };
@@ -19,7 +19,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     );
     assert!(!allocated);
     let before = stream.presentation_allocation();
-    let shared = 4096 + std::mem::size_of::<Option<my_summer_slop::world::RequiredViews>>();
+    let shared = 4096 + std::mem::size_of::<Option<the_long_slop::world::RequiredViews>>();
     let (bootstrap, ()) = admit_control(&mut stream, shared, || {
         allocated = true;
     })
@@ -73,7 +73,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     );
     // Candidate setup bytes survive fixed accounting and overlap reconciliation.
     let mut setup = candidate.presentation_allocation();
-    setup.active_cpu += std::mem::size_of::<my_summer_slop::world::RequiredViews>();
+    setup.active_cpu += std::mem::size_of::<the_long_slop::world::RequiredViews>();
     candidate.set_presentation_allocation(setup).unwrap();
     candidate.set_overlap(overlap).unwrap();
     let replaced = fixed
@@ -89,18 +89,18 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
         stream.presentation_allocation().prototype_cpu,
         before.prototype_cpu + fixed.cpu
     );
-    let mut runtime = my_summer_slop::starting_area::GarageRuntime::new(&reference).unwrap();
+    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(&reference).unwrap();
     admit_control(&mut runtime.stream, shared, || ()).unwrap();
     let retained = runtime.stream.presentation_allocation();
     let discarded =
-        my_summer_slop::save::fresh_permit::FreshSessionPermit::prepare(7, &runtime, 1).unwrap();
+        the_long_slop::save::fresh_permit::FreshSessionPermit::prepare(7, &runtime, 1).unwrap();
     assert!(discarded.commit(8, &mut runtime, 1).is_err());
     assert_eq!(
         runtime.stream.presentation_allocation().prototype_cpu,
         retained.prototype_cpu
     );
     let permit =
-        my_summer_slop::save::fresh_permit::FreshSessionPermit::prepare(8, &runtime, 1).unwrap();
+        the_long_slop::save::fresh_permit::FreshSessionPermit::prepare(8, &runtime, 1).unwrap();
     permit.commit(8, &mut runtime, 1).unwrap();
     assert_eq!(
         runtime.stream.presentation_allocation().prototype_cpu,

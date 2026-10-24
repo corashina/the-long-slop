@@ -31,7 +31,7 @@ export function createReflectionTestInput() {
 }
 
 export async function sampleReflection({seconds = 10, preparation = false} = {}) {
-  const wasm = await import('./pkg/my_summer_slop.js');
+  const wasm = await import('./pkg/the_long_slop.js');
   const audit = () => JSON.parse(wasm.source_render_audit());
   const startup = window.gameStartupTrace();
   if (!startup.completed || !startup.inputReady) throw new Error('Wait for complete startup and input readiness.');

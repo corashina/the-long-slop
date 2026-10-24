@@ -1,4 +1,4 @@
-use my_summer_slop::reference::{
+use the_long_slop::reference::{
     FileCatalog, NativeBcFormat, ReferenceManifest, TextureRecord, TextureStorage,
     fixed_reservation::*,
 };
@@ -135,7 +135,7 @@ fn installed_native_primary_bytes_and_shared_job_limits() {
     );
     let largest = texture();
     let staging = primary_staging(&largest, &catalog(&largest)).unwrap();
-    let mut stream = my_summer_slop::world::WorldStream::new(&reference, 42).unwrap();
+    let mut stream = the_long_slop::world::WorldStream::new(&reference, 42).unwrap();
     while !stream.initial_generation_ready() {
         stream.prepare(100.);
         assert!(stream.frame().failure.is_none());

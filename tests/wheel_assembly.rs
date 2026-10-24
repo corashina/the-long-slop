@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     interaction::items::ItemLocation,
     reference::{ItemId, ReferenceManifest},
     starting_area::GarageRuntime,
@@ -42,7 +42,7 @@ fn wheel_colliders(
             .1;
         collider.parent() == body
             && collider.is_enabled() == enabled
-            && collider.solver_groups() == my_summer_slop::vehicle::solver_groups(enabled)
+            && collider.solver_groups() == the_long_slop::vehicle::solver_groups(enabled)
     })
 }
 
@@ -52,7 +52,7 @@ fn shape_offsets(
     item: ItemId,
 ) -> Vec<(rapier3d::prelude::ColliderHandle, rapier3d::math::Pose)> {
     let inverse =
-        my_summer_slop::vehicle::to_rapier(run.area.items.get(item).unwrap().pose).inverse();
+        the_long_slop::vehicle::to_rapier(run.area.items.get(item).unwrap().pose).inverse();
     reference
         .wheel_parts
         .iter()
@@ -78,7 +78,7 @@ fn assert_shape_poses(
     item: ItemId,
     shapes: &[(rapier3d::prelude::ColliderHandle, rapier3d::math::Pose)],
 ) {
-    let local = my_summer_slop::vehicle::to_rapier(run.area.items.get(item).unwrap().local_pose);
+    let local = the_long_slop::vehicle::to_rapier(run.area.items.get(item).unwrap().local_pose);
     for (handle, offset) in shapes {
         let expected = local * *offset;
         let actual = run.physics.rapier().colliders[*handle]

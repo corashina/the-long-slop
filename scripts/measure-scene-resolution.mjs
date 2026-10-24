@@ -6,7 +6,7 @@ export async function measureSceneResolution({scale=1,durationMs=15000,instrumen
  if(!window.gameState.started)throw Error('Start New game and verify real input before measuring');
  const control=document.querySelector('#scene-resolution');
  control.value=String(scale);control.dispatchEvent(new Event('change'));
- const {source_render_audit}=await import('/pkg/my_summer_slop.js');
+ const {source_render_audit}=await import('/pkg/the_long_slop.js');
  const canvas=document.querySelector('#game');
  const expected=[canvas.width,canvas.height].map(side=>Math.max(1,Math.floor(side*scale)));
  const start=performance.now();

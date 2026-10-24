@@ -1,4 +1,4 @@
-use my_summer_slop::reference::{
+use the_long_slop::reference::{
     fixed_reservation::FixedReservation, prototype_plan::PrototypePlan,
 };
 

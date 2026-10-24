@@ -150,7 +150,7 @@ async function load(){
  if(!await navigator.gpu?.requestAdapter())throw Error('This browser cannot use WebGPU.');
  startup.end('graphics');startup.begin('manifest');
  // Download and compile the game code while the manifest downloads.
- const code=Promise.all([import('./pkg/my_summer_slop.js'),fetch('./pkg/my_summer_slop_bg.wasm').then(response=>{
+ const code=Promise.all([import('./pkg/the_long_slop.js'),fetch('./pkg/the_long_slop_bg.wasm').then(response=>{
   if(!response.ok)throw Error('Cannot load game code (HTTP '+response.status+').');
   return WebAssembly.compileStreaming(response);
  })]);

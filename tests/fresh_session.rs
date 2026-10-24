@@ -1,4 +1,4 @@
-use my_summer_slop::save::fresh_permit::FreshSessionPermit;
+use the_long_slop::save::fresh_permit::FreshSessionPermit;
 
 #[test]
 fn fresh_permit_is_bound_to_request_session_and_generation() {
@@ -16,7 +16,7 @@ fn fresh_permit_is_bound_to_request_session_and_generation() {
 #[test]
 #[ignore = "requires the installed source export"]
 fn first_permit_retains_runtime_and_commits_once_paused() {
-    use my_summer_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
+    use the_long_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
     let mut runtime = GarageRuntime::new(&reference).unwrap();

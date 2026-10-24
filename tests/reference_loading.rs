@@ -1,4 +1,4 @@
-use my_summer_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
+use the_long_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 
 #[test]
 #[ignore = "requires the installed source export"]
@@ -72,12 +72,12 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
         .records
         .push(root);
     let evaluator =
-        my_summer_slop::world::terrain_evaluator(&reference.world, reference.world.terrain.seed);
-    my_summer_slop::world::StartupTerrain::new(&reference.world, &evaluator, &[])
+        the_long_slop::world::terrain_evaluator(&reference.world, reference.world.terrain.seed);
+    the_long_slop::world::StartupTerrain::new(&reference.world, &evaluator, &[])
         .expect("installed startup frames initialize");
-    let mut runtime = my_summer_slop::starting_area::GarageRuntime::new(&reference)
+    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(&reference)
         .expect("installed world initializes");
-    use my_summer_slop::world::PresentationAllocation;
+    use the_long_slop::world::PresentationAllocation;
     let allocation = runtime.stream.presentation_allocation();
     let mib = 1024 * 1024;
     for (name, next) in [
@@ -166,11 +166,11 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     }
     runtime.stream.prepare(0.);
     assert_eq!(runtime.stream.metrics().prepared_roads, 256);
-    use my_summer_slop::world::{ROAD_SEGMENTS, RoadIndex, RoadSequence};
+    use the_long_slop::world::{ROAD_SEGMENTS, RoadIndex, RoadSequence};
     let seed = reference.world.terrain.seed;
     let mut small = RoadIndex::new(
         RoadSequence::new(&reference.world, seed).unwrap(),
-        my_summer_slop::world::terrain_evaluator(&reference.world, seed),
+        the_long_slop::world::terrain_evaluator(&reference.world, seed),
     );
     let mut large = RoadIndex::new(
         RoadSequence::new(&reference.world, seed).unwrap(),

@@ -1,5 +1,5 @@
 //! Validate runtime manifests with the same contract as the game.
-use my_summer_slop::reference::{AudioReference, MAX_MANIFEST_BYTES, ReferenceManifest};
+use the_long_slop::reference::{AudioReference, MAX_MANIFEST_BYTES, ReferenceManifest};
 use std::io::{self, Read};
 
 fn validate() -> Result<(), Box<dyn std::error::Error>> {

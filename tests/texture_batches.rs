@@ -1,4 +1,4 @@
-use my_summer_slop::reference::texture_batch::{MAX_BATCH_BYTES, TextureBatchDescriptor};
+use the_long_slop::reference::texture_batch::{MAX_BATCH_BYTES, TextureBatchDescriptor};
 fn descriptor() -> TextureBatchDescriptor {
     serde_json::from_value(serde_json::json!({
         "source":{"file":"test","path_id":1},"width":2,"height":2,"mip_count":2,"decoded_bytes":20,
@@ -120,7 +120,7 @@ fn accepts_exact_payload_and_entry_limits() {
 #[test]
 #[ignore = "requires staged installed texture package"]
 fn installed_package_reconstructs_every_source_texture() {
-    use my_summer_slop::reference::{FileCatalog, LightingTextureRecord, ReferenceManifest};
+    use the_long_slop::reference::{FileCatalog, LightingTextureRecord, ReferenceManifest};
     let root = std::path::PathBuf::from(std::env::var("TEXTURE_BATCH_PACKAGE").unwrap());
     let metadata = std::fs::read(root.join("reference/manifest.json")).unwrap();
     ReferenceManifest::from_runtime_json(&metadata).unwrap();

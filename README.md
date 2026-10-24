@@ -1,4 +1,4 @@
-# My Summer Slop
+# The Long Slop
 
 Prepare a fixed Lada 2101 in the starting garage. Drive onto the desert road.
 Read [vehicles](docs/vehicles.md) for the selected car and source records.
@@ -15,7 +15,7 @@ Build the toolchain image, then export the complete library and selected runtime
 ```powershell
 python -m venv tools/reference/.venv
 ./tools/reference/.venv/Scripts/python.exe -m pip install -r tools/reference/requirements.txt
-docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .
+docker build --tag the-long-slop-toolchain --file tools/Dockerfile .
 ./tools/reference/.venv/Scripts/python.exe -m tools.reference.export --steam-root 'C:/Program Files (x86)/Steam/steamapps/common/The Long Drive'
 ./scripts/build.ps1
 node scripts/serve.mjs

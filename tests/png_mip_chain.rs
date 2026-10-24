@@ -1,4 +1,4 @@
-use my_summer_slop::reference::{
+use the_long_slop::reference::{
     FileCatalog, FileReceipt, ReferenceManifest, TextureMip, fixed_reservation::*,
 };
 #[test]

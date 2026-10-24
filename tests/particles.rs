@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     particles::ParticleState,
     reference::ReferenceManifest,
     vehicle::{PhysicsWorld, VehiclePose},

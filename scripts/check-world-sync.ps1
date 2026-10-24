@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 . "$PSScriptRoot/cargo-target.ps1"
 $cargoTarget = Get-CargoTargetDirectory $root
-$image = 'my-summer-slop-toolchain'
+$image = 'the-long-slop-toolchain'
 $checks = @(
     'cargo fmt --all -- --check'
     'cargo test --locked --lib world_sync'
@@ -26,7 +26,7 @@ if ($SourceExport) {
 }
 $checks += @(
     'cargo check --locked --target wasm32-unknown-unknown --workspace --lib'
-    'cargo check --locked --target wasm32-unknown-unknown --lib -p my-summer-slop --no-default-features --features webgpu'
+    'cargo check --locked --target wasm32-unknown-unknown --lib -p the-long-slop --no-default-features --features webgpu'
 )
 & docker build --tag $image --file "$root/tools/Dockerfile" $root
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

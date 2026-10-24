@@ -26,7 +26,7 @@ export async function measureShadowCache({durationMs=10000,instrument=false,labe
  const snapshot=()=>({...window.gameState,fluidVolumes:undefined,inventory:undefined});
  const before=await window.measureWorld();
  const stateBefore=snapshot();
- const {source_render_audit}=await import('/pkg/my_summer_slop.js');
+ const {source_render_audit}=await import('/pkg/the_long_slop.js');
  const auditBefore=JSON.parse(source_render_audit());
  const started=performance.now();
  hiddenDuringSample=document.hidden;document.addEventListener("visibilitychange",visibilityChanged);

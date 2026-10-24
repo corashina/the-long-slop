@@ -1,5 +1,5 @@
 //! Critical ownership check against the installed export, without test asset fixtures.
-use my_summer_slop::{
+use the_long_slop::{
     inventory::InventoryCommand,
     reference::ReferenceManifest,
     save::{SourceHash, SourceStamp},
@@ -35,7 +35,7 @@ fn fixture() -> (ReferenceManifest, SourceStamp, GarageRuntime) {
     (reference, stamp, runtime)
 }
 
-fn pickup(runtime: &mut GarageRuntime, item: my_summer_slop::reference::ItemId) {
+fn pickup(runtime: &mut GarageRuntime, item: the_long_slop::reference::ItemId) {
     let point = runtime.area.items.get(item).unwrap().pose.position;
     if runtime.area.interaction.storage.stored(item) {
         runtime
@@ -77,7 +77,7 @@ struct OwnershipSnapshot {
 
 fn capture_ownership(
     runtime: &GarageRuntime,
-    item: my_summer_slop::reference::ItemId,
+    item: the_long_slop::reference::ItemId,
 ) -> OwnershipSnapshot {
     let state = runtime.area.items.get(item).unwrap();
     let body = state
@@ -116,7 +116,7 @@ fn capture_ownership(
     }
 }
 
-fn contents(runtime: &GarageRuntime, item: my_summer_slop::reference::ItemId) -> String {
+fn contents(runtime: &GarageRuntime, item: the_long_slop::reference::ItemId) -> String {
     let state = runtime.area.items.get(item).unwrap();
     format!(
         "{:?}",
@@ -140,7 +140,7 @@ fn contents(runtime: &GarageRuntime, item: my_summer_slop::reference::ItemId) ->
 #[test]
 #[ignore = "Requires the installed runtime export"]
 fn g08_transfer_cycles_and_atomic_rejection() {
-    use my_summer_slop::{interaction::items::ItemLocation, reference::ItemId};
+    use the_long_slop::{interaction::items::ItemLocation, reference::ItemId};
     let (reference, _, mut game) = fixture();
     let tools: Vec<_> = reference
         .items
@@ -316,7 +316,7 @@ fn g08_transfer_cycles_and_atomic_rejection() {
 #[test]
 #[ignore = "Requires the installed runtime export"]
 fn g08_transfer_hand_pose_is_frame_timed() {
-    use my_summer_slop::{
+    use the_long_slop::{
         reference::ItemId,
         vehicle::{VehiclePose, to_rapier},
     };
@@ -466,9 +466,9 @@ fn g08_transfer_hand_pose_is_frame_timed() {
 
 fn tool_frame(
     _game: &GarageRuntime,
-    view: my_summer_slop::vehicle::VehiclePose,
-) -> my_summer_slop::interaction::cleaning::ToolFrame {
-    my_summer_slop::interaction::cleaning::ToolFrame {
+    view: the_long_slop::vehicle::VehiclePose,
+) -> the_long_slop::interaction::cleaning::ToolFrame {
+    the_long_slop::interaction::cleaning::ToolFrame {
         lmb: true,
         active: true,
         dt: 0.04,
@@ -480,11 +480,11 @@ fn tool_frame(
 fn tool_surface(
     game: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    exclude: Option<my_summer_slop::reference::ConditionId>,
+    exclude: Option<the_long_slop::reference::ConditionId>,
     tool: u8,
 ) -> (
-    my_summer_slop::reference::ConditionId,
-    my_summer_slop::vehicle::VehiclePose,
+    the_long_slop::reference::ConditionId,
+    the_long_slop::vehicle::VehiclePose,
     rapier3d::prelude::ColliderHandle,
 ) {
     use rapier3d::math::{Rotation, Vector};
@@ -494,7 +494,7 @@ fn tool_surface(
         .colliders
         .iter()
         .filter_map(|(handle, collider)| {
-            let id = my_summer_slop::reference::ColliderId((collider.user_data >> 64) as u32);
+            let id = the_long_slop::reference::ColliderId((collider.user_data >> 64) as u32);
             let binding = reference
                 .conditions
                 .collider_bindings
@@ -537,7 +537,7 @@ fn tool_surface(
     game.physics.refresh_queries();
     (
         target,
-        my_summer_slop::vehicle::VehiclePose {
+        the_long_slop::vehicle::VehiclePose {
             position: [center.x, bounds.maxs.y + 0.5, center.z],
             rotation: Rotation::from_rotation_arc(-Vector::Z, -Vector::Y).to_array(),
         },
@@ -548,7 +548,7 @@ fn tool_surface(
 #[test]
 #[ignore = "Requires the installed runtime export"]
 fn g08_tools_require_the_correct_owner() {
-    use my_summer_slop::{
+    use the_long_slop::{
         reference::ItemId,
         vehicle::{from_rapier, to_rapier},
     };
@@ -591,7 +591,7 @@ fn g08_tools_require_the_correct_owner() {
         "equipped brush repairs after rubbing"
     );
     // Owner phases consume retained contact force. The model and audio update only in the tail.
-    use my_summer_slop::interaction::cleaning::ToolOwner;
+    use the_long_slop::interaction::cleaning::ToolOwner;
     let frame = tool_frame(&game, view);
     let model_before = to_rapier(
         game.area
@@ -649,7 +649,7 @@ fn g08_tools_require_the_correct_owner() {
     );
     let rule = &reference.conditions.brushes[0];
     let original_root = to_rapier(
-        my_summer_slop::interaction::items::node_pose(
+        the_long_slop::interaction::items::node_pose(
             &reference,
             reference.items.iter().find(|i| i.id == brush).unwrap().node,
         )
@@ -657,11 +657,11 @@ fn g08_tools_require_the_correct_owner() {
     );
     let equip = original_root.inverse()
         * to_rapier(
-            my_summer_slop::interaction::items::node_pose(&reference, rule.model_equip).unwrap(),
+            the_long_slop::interaction::items::node_pose(&reference, rule.model_equip).unwrap(),
         );
     let default = original_root.inverse()
         * to_rapier(
-            my_summer_slop::interaction::items::node_pose(&reference, rule.model_default).unwrap(),
+            the_long_slop::interaction::items::node_pose(&reference, rule.model_default).unwrap(),
         );
     let root = to_rapier(game.area.items.get(brush).unwrap().pose);
     let expected_position = model_before.translation.lerp(
@@ -797,7 +797,7 @@ fn g08_tools_require_the_correct_owner() {
     game.physics.refresh_queries();
     // The nozzle transform is relative to the exported item root.
     let root = to_rapier(
-        my_summer_slop::interaction::items::node_pose(
+        the_long_slop::interaction::items::node_pose(
             &reference,
             reference.items.iter().find(|i| i.id == spray).unwrap().node,
         )
@@ -805,7 +805,7 @@ fn g08_tools_require_the_correct_owner() {
     );
     let nozzle = root.inverse()
         * to_rapier(
-            my_summer_slop::interaction::items::node_pose(
+            the_long_slop::interaction::items::node_pose(
                 &reference,
                 reference.conditions.sprays[0].nozzle,
             )
@@ -906,7 +906,7 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
         .unwrap();
     assert!((signal.emission[0] - open_valve).abs() < 0.00001);
     // A release can expose one spray to both use phases. Each Fire call consumes paint.
-    use my_summer_slop::interaction::cleaning::ToolOwner;
+    use the_long_slop::interaction::cleaning::ToolOwner;
     let before_quantity = tool.quantity.unwrap();
     let mut expected_valve = tool.valve;
     let previous_age = game.area.interaction.cleaning.spray_particles(0, 0)[0].age;
@@ -997,9 +997,9 @@ fn g08_tools_two_sprays_and_one_shared_tail() {
 fn advance_tool_owners(
     game: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    mut frame: my_summer_slop::interaction::cleaning::ToolFrame,
+    mut frame: the_long_slop::interaction::cleaning::ToolFrame,
 ) {
-    use my_summer_slop::interaction::cleaning::ToolOwner;
+    use the_long_slop::interaction::cleaning::ToolOwner;
     frame.active &= game.started && !game.paused && !game.needs_output().dead && !game.sleeping();
     game.area
         .interaction
@@ -1044,7 +1044,7 @@ fn advance_tool_owners(
 #[test]
 #[ignore = "Requires the installed runtime export"]
 fn g08_frame_context_hints_match_available_actions() {
-    use my_summer_slop::{interaction::targets::ResolvedAim, reference::ItemId};
+    use the_long_slop::{interaction::targets::ResolvedAim, reference::ItemId};
     const EQUIP: u32 = 1 << 24;
     const RECENTER: u32 = 1 << 25;
     const RELEASE: u32 = 1 << 26;
@@ -1126,7 +1126,7 @@ fn g08_frame_context_hints_match_available_actions() {
         .unwrap();
     assert!(game.area.player.enter(
         seat.id,
-        my_summer_slop::vehicle::VehiclePose {
+        the_long_slop::vehicle::VehiclePose {
             position: anchor.transform.translation,
             rotation: anchor.transform.rotation,
         },

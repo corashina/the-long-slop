@@ -158,7 +158,7 @@ def validate_runtime_manifest(content: bytes) -> None:
         '--mount', 'type=volume,source=tld-wasm-target,target=/target',
         '--env', f'CARGO_TARGET_DIR=/target/{namespace}',
         '--env', 'CARGO_BUILD_JOBS=2',
-        'my-summer-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
+        'the-long-slop-toolchain', 'cargo', 'run', '--quiet', '--locked',
         '--bin', 'validate-reference']
     try:
         result = subprocess.run(command, input=content, capture_output=True, check=False)
