@@ -21,3 +21,16 @@ class FluidManifestTests(unittest.TestCase):
         ]:
             with self.subTest(source=source), self.assertRaises(ValueError):
                 fluid_entries(source)
+
+
+class CapPresentationTests(unittest.TestCase):
+    def test_f15_cap_name_reads_name_text_word(self):
+        from tools.reference.caps import cap_presentation, parse_default_words
+        code = ('\tprivate void FillDefWW()\r\n\t{\r\n\t\tdefww = new string[3];\r\n'
+            '\t\tdefww[0] = "Continue";\r\n\t\tdefww[1] = "Oil Tank";\r\n\t\tdefww[2] = "Coolant";\r\n\t}\r\n')
+        words = parse_default_words(code)
+        # Source cap record: hasName=1, nameString="Coolant Tank", nameText=coolant.
+        cap = {'hasName': 1, 'nameString': 'Coolant Tank', 'nameText': 2, 'noText': 0}
+        self.assertEqual(cap_presentation(cap, words), {'has_name': True, 'name': 'Coolant', 'no_text': False})
+        with self.assertRaises(ValueError):
+            parse_default_words(code.replace('\t\tdefww[1] = "Oil Tank";\r\n', ''))

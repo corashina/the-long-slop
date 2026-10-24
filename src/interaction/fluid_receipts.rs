@@ -492,6 +492,7 @@ mod tests {
                 can_toggle: true,
                 can_tune: false,
                 tune_rate: 0.,
+                presentation: state.openings[first].reference.presentation.clone(),
             },
             local_pose: state.openings[first].local_pose,
             tilt_axis: Vector::Y,

@@ -199,9 +199,12 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
                 if value not in audio['voices'][voices[identity]-1]['methods']:
                     audio['voices'][voices[identity]-1]['methods'].append(value)
             return voices[identity]
-        d = source.read(reader); cid = source.resolve(reader, d['m_audioClip'])
         v = {'id': len(audio['voices']) + 1, 'source': source_id(reader), 'emitter': emitter(reader),
-            'clip': clip(cid) if cid else None, 'authored_clip':clip(cid) if cid else None,
+            **voice_settings(reader), 'methods': evidence or []}
+        voices[identity] = v['id']; audio['voices'].append(v); return v['id']
+    def voice_settings(reader):
+        d = source.read(reader); cid = source.resolve(reader, d['m_audioClip'])
+        return {'clip': clip(cid) if cid else None, 'authored_clip':clip(cid) if cid else None,
             'authored_priority':d['Priority'],'authored_loop':bool(d['Loop']), 'mixer': mixer(source.resolve(reader, d['OutputAudioMixerGroup'])),
             'priority': d['Priority'], 'loop': bool(d['Loop']), 'gain': d['m_Volume'], 'pitch': d['m_Pitch'],
             'spatial_blend': d['panLevelCustomCurve']['m_Curve'][0]['value'], 'pan': d['Pan2D'],
@@ -210,9 +213,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'mute': bool(d['Mute']), 'enabled': bool(d['m_Enabled']),
             'curves': {name: curve(d[field]) for name, field in [('rolloff', 'rolloffCustomCurve'),
                 ('spatial_blend', 'panLevelCustomCurve'), ('spread', 'spreadCustomCurve'),
-                ('reverb_mix', 'reverbZoneMixCustomCurve')]},
-            'methods': evidence or []}
-        voices[identity] = v['id']; audio['voices'].append(v); return v['id']
+                ('reverb_mix', 'reverbZoneMixCustomCurve')]}}
     for c in components:
         if c.type.name == 'AudioSource': voice(c)
     audio['shared']['settings'] = {'priority':prefab_data['Priority'],'loop':bool(prefab_data['Loop']),
@@ -463,6 +464,20 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'initial_outside':bool(d['outSide']),'initial_player_inside':bool(d['playerInside']),
             'methods':[method(cls,'Update'),method(cls,'SetSources')]})
 
+    # World radios share one checked voice template; the browser keeps a fixed slot pool.
+    portable=[r['source'] for r in manifest['world']['records']
+        if r['class_name']=='radioscript' and r['source']!=audio['radio']['source']]
+    templates=[]
+    for identity in portable:
+        r=source.get(identity['file'],identity['path_id']);d=source.read(r)
+        templates.append([{'id':0,'source':source_id(source.resolve(r,d[f])),'emitter':0,
+            **voice_settings(source.resolve(r,d[f])),'methods':[method('radioscript','Start'),method('radioscript','SetRadio')]}
+            for f in ['SS','SC','SC2']])
+        for v in templates[-1][:2]:v['priority']=PRIORITIES[5]
+    if not templates:raise ValueError('Missing portable radio prefabs')
+    strip=lambda t:[{k:v for k,v in voice.items() if k!='source'} for voice in t]
+    if any(strip(t)!=strip(templates[0]) for t in templates):raise ValueError('Portable radio voices differ')
+    audio['portable_radio']={'sources':portable,'voices':templates[0]}
     # Preserve the compiled group graph, snapshot parameters, and native effect identity.
     mixer_sources = {key(source.resolve(source.get(*identity),source.read(source.get(*identity))['m_AudioMixer'])) for identity in groups}
     if len(mixer_sources)!=1:raise ValueError('Selected voices must resolve one source mixer')
@@ -502,7 +517,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
-    for field in ['engine','horn','radio']:
+    for field in ['engine','horn','radio','portable_radio']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")

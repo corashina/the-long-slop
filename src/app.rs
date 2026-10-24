@@ -62,6 +62,7 @@ struct FeedbackStamp {
     empty: bool,
     capacity: f32,
     percents: [u32; 6],
+    order: u32,
     condition: u32,
     held: Option<ItemId>,
     throw_charge: u32,
@@ -669,7 +670,7 @@ fn advance_physics(
     if let Some(audio) = &mut drive.runtime.audio {
         let calendar = game_audio_calendar();
         audio
-            .radio
+            .broadcasts
             .calendar((calendar / 100) as u8, (calendar % 100) as u8);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
@@ -906,8 +907,9 @@ pub(crate) fn sync_imported(
         ),
         Without<BodyVisual>,
     >,
+    time: Res<Time<Real>>,
     mut caps: Query<
-        (&CapVisual, &mut Transform),
+        (&mut CapVisual, &mut Transform),
         (
             Without<BodyVisual>,
             Without<ItemVisual>,
@@ -938,7 +940,13 @@ pub(crate) fn sync_imported(
             .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
         &mut items,
     );
-    presentation::reference::sync_caps(&drive.runtime.area, &mut caps, &mut visibility);
+    // Source DoMove advances by scaled Time.deltaTime.
+    let dt = if drive.runtime.paused {
+        0.
+    } else {
+        time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale
+    };
+    presentation::reference::sync_caps(&drive.runtime.area, dt, &mut caps, &mut visibility);
 }
 fn sync_instruments(
     reference: Res<RuntimeReference>,
@@ -1147,14 +1155,15 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .area
         .interaction
         .feedback(&available, &runtime.area.items, &reference.0);
-    let (mut amount, mut capacity, quantities, fluid_name, has_name, mut no_text) = info
+    let (mut amount, mut capacity, quantities, order, fluid_name, has_name, mut no_text) = info
         .fluid
         .as_ref()
-        .map_or((0., 0., [0.; 6], info.name, false, true), |f| {
+        .map_or((0., 0., [0.; 6], 0, info.name, false, true), |f| {
             (
                 f.amount,
                 f.capacity,
                 f.quantities,
+                f.order,
                 f.presentation.name.as_str(),
                 f.presentation.has_name,
                 f.presentation.no_text,
@@ -1250,6 +1259,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             };
             if p >= 1. { p.round() as u32 } else { u32::MAX }
         }),
+        order,
     };
     if drive.last_feedback != Some(stamp) {
         game_feedback(
@@ -1280,6 +1290,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             quantities[3],
             quantities[4],
             quantities[5],
+            stamp.order,
             stamp.light_control,
             stamp.lmb_use,
         );
@@ -1323,8 +1334,10 @@ fn publish_audio(
     if shift != [0.; 3] {
         game_audio_origin_shift(shift[0], shift[1], shift[2]);
     }
+    let mut listener = None;
     if let Ok(camera) = camera.single() {
         let (_, q, p) = camera.to_scale_rotation_translation();
+        listener = Some(p.to_array());
         game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
     }
     let body = crate::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
@@ -1436,21 +1449,57 @@ fn publish_audio(
             event.time_seconds,
         );
     }
-    let radio = audio.radio_frame;
-    game_audio_radio(
-        radio.power,
-        radio.am,
-        radio.frequency,
-        radio.volume,
-        radio.static_gain,
-        radio.primary.clip.unwrap_or(0),
-        radio.primary.offset_seconds,
-        radio.primary.gain,
-        radio.primary.next_clip.unwrap_or(0),
-        radio.secondary.clip.unwrap_or(0),
-        radio.secondary.offset_seconds,
-        radio.secondary.gain,
-        radio.secondary.next_clip.unwrap_or(0),
-    );
+    let send = |emitter: u32, radio: crate::simulation::radio::RadioFrame| {
+        game_audio_radio(
+            emitter,
+            radio.power,
+            radio.am,
+            radio.frequency,
+            radio.volume,
+            radio.static_gain,
+            radio.primary.clip.unwrap_or(0),
+            radio.primary.offset_seconds,
+            radio.primary.gain,
+            radio.primary.next_clip.unwrap_or(0),
+            radio.secondary.clip.unwrap_or(0),
+            radio.secondary.offset_seconds,
+            radio.secondary.gain,
+            radio.secondary.next_clip.unwrap_or(0),
+        )
+    };
+    send(audio.reference.radio.emitter, audio.radio_frame);
+    let cutoff = audio.reference.radio.electronics_cutoff;
+    let items = &runtime.area.items;
+    let radios = runtime
+        .stream
+        .portable_radios()
+        .filter_map(|(id, state, output)| {
+            items
+                .get(id)
+                .filter(|item| item.inactive_pose.is_none())
+                .map(|item| (id, item.pose.position, state.on && output > cutoff))
+        });
+    if let Some(listener) = listener {
+        audio.assign_portable_radios(listener, radios);
+    }
+    for (slot, id) in audio.portable_radio_slots.iter().enumerate() {
+        let Some((item, (_, state, output))) = id.and_then(|id| {
+            items
+                .get(id)
+                .zip(runtime.stream.portable_radios().find(|r| r.0 == id))
+        }) else {
+            continue;
+        };
+        let emitter = crate::audio::PORTABLE_RADIO_EMITTER + slot as u32;
+        let [x, y, z] = item.pose.position;
+        let [qx, qy, qz, qw] = item.pose.rotation;
+        game_audio_emitter(emitter, x, y, z, qx, qy, qz, qw, true);
+        send(
+            emitter,
+            audio
+                .broadcasts
+                .frame(state, audio.game_seconds, output, cutoff),
+        );
+    }
     game_audio_end();
 }
