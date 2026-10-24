@@ -145,6 +145,9 @@ pub struct WorldStream {
     dial_bindings: Vec<content_dials::DialBinding>,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
+    level_bindings: Vec<content_levels::LevelBinding>,
+    /// Session and active revision whose spirit levels are all bound.
+    level_scan: Option<(u64, u64)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -684,6 +687,8 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             dial_scan: None,
+            level_bindings: Vec::new(),
+            level_scan: None,
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -3839,6 +3844,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_level_bindings(&reference.small_items.spirit_level, items) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4536,6 +4545,13 @@ impl WorldStream {
                     .iter()
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
+                + self.level_bindings.capacity()
+                    * std::mem::size_of::<content_levels::LevelBinding>()
+                + self
+                    .level_bindings
+                    .iter()
+                    .map(content_levels::LevelBinding::heap_bytes)
+                    .sum::<usize>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4832,6 +4848,9 @@ mod content_dials;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[path = "content_levels.rs"]
+mod content_levels;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]

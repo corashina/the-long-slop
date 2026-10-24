@@ -11,6 +11,7 @@ mod input;
 pub use input::InteractionOutcome;
 pub mod items;
 pub mod labels;
+pub(crate) mod level;
 pub mod mechanisms;
 pub(crate) mod memory;
 pub mod parts;

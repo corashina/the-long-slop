@@ -1066,6 +1066,18 @@ impl SourceInstances {
                     }
                 }
             }
+            if let Some(level) = stream.level(&instance.placement.id) {
+                for b in level.bubbles() {
+                    let node = prototype.nodes[b.node].gltf_node as usize;
+                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
+                        transform.set_if_neq(Transform {
+                            translation: Vec3::from_array(b.pose.translation),
+                            rotation: Quat::from_array(b.pose.rotation),
+                            scale: Vec3::from_array(b.pose.scale),
+                        });
+                    }
+                }
+            }
             for (i, node) in prototype.nodes.iter().enumerate() {
                 if let Some((_, pose)) = instance
                     .lamp_buttons
