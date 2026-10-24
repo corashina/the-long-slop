@@ -142,6 +142,9 @@ pub struct WorldStream {
     binding_objects: usize,
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
+    dial_bindings: Vec<content_dials::DialBinding>,
+    /// Session and active revision whose dial items are all bound.
+    dial_scan: Option<(u64, u64)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -200,6 +203,7 @@ pub struct WorldStream {
     wanted_tiles: Vec<SurfaceKey>,
     road_points: Vec<TerrainRoadPoint>,
     structures: Vec<super::StructureInstance>,
+    trigger_roles: super::TriggerRoles,
     structure_revision: u64,
     presentation_changes: Vec<content_index::ContentSlot>,
     presentation_lamp_changes: Vec<usize>,
@@ -678,6 +682,8 @@ impl WorldStream {
             binding_objects: reference.items.len(),
             binding_reserved: 0,
             lamp_bindings: Vec::new(),
+            dial_bindings: Vec::new(),
+            dial_scan: None,
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -747,6 +753,7 @@ impl WorldStream {
             wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
             road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
             structures: Vec::new(),
+            trigger_roles: super::TriggerRoles::default(),
             structure_revision: 0,
             presentation_changes: Vec::new(),
             presentation_lamp_changes: Vec::new(),
@@ -3705,6 +3712,7 @@ impl WorldStream {
                 self.origin,
                 fixed_decoration,
                 physics,
+                &mut self.trigger_roles,
             )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
@@ -3721,8 +3729,13 @@ impl WorldStream {
                 placement.scale,
                 appearance,
             )?;
-            let mut instance =
-                recipe.publish(placement.clone(), self.origin, fixed_decoration, physics)?;
+            let mut instance = recipe.publish(
+                placement.clone(),
+                self.origin,
+                fixed_decoration,
+                physics,
+                &mut self.trigger_roles,
+            )?;
             instance.cpu_bytes += extra;
             instance
         };
@@ -3820,6 +3833,10 @@ impl WorldStream {
                 + wheels.retained_binding_bytes()
                 + (physics.query_storage_bytes() + physics.presentation_retained_bytes());
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
+            return Err(error);
+        }
+        if let Err(error) = self.sync_dial_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
             return Err(error);
         }
         self.sync_moving_lamps(items);
@@ -4137,7 +4154,7 @@ impl WorldStream {
                     }
                 }
             }
-            instance.retire(physics);
+            instance.retire(physics, &mut self.trigger_roles);
             let revision = self.changes.revision();
             for key in self.change_dependencies.drain(..) {
                 self.changes.forget(&key);
@@ -4331,6 +4348,10 @@ impl WorldStream {
         Some(shift)
     }
 
+    pub fn trigger_roles(&self) -> &super::TriggerRoles {
+        &self.trigger_roles
+    }
+
     pub fn frame(&self) -> WorldFrame<'_> {
         WorldFrame {
             request: self.request,
@@ -4504,6 +4525,12 @@ impl WorldStream {
                     .lamp_bindings
                     .iter()
                     .map(content_lamps::LampBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.dial_bindings.capacity() * std::mem::size_of::<content_dials::DialBinding>()
+                + self
+                    .dial_bindings
+                    .iter()
+                    .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
@@ -4795,6 +4822,9 @@ pub(crate) mod content_bindings;
 
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
+
+#[path = "content_dials.rs"]
+mod content_dials;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;

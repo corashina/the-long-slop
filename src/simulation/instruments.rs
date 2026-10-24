@@ -1,3 +1,4 @@
+use super::dials::{digit_angle, lerp, lerp_angle};
 use crate::reference::{InstrumentReference, NeedleReference};
 use rapier3d::math::Rotation;
 #[derive(Clone, Copy, Default)]
@@ -20,16 +21,6 @@ pub struct InstrumentState {
     pub lamp_bits: u32,
     pub digits_lit: bool,
     pub distance_km: f32,
-}
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0., 1.)
-}
-fn lerp_angle(a: f32, b: f32, t: f32) -> f32 {
-    let mut delta = (b - a).rem_euclid(360.);
-    if delta > 180. {
-        delta -= 360.;
-    }
-    a + delta * t.clamp(0., 1.)
 }
 pub fn needle_angle(r: &NeedleReference, value: f32) -> f32 {
     let mut t = ((value + r.offset - r.min_value) / (r.max_value - r.min_value)).clamp(0., 1.);
@@ -149,18 +140,7 @@ impl InstrumentState {
             }
         }
         for (i, d) in o.digits.iter().enumerate() {
-            let angle = if i == 0 || d.continuous {
-                self.digit_values[i] * 360. / base
-            } else if self.digit_values[..i].iter().all(|v| *v >= base - 1.) {
-                let floor = self.digit_values[i].trunc();
-                lerp_angle(
-                    floor * 360. / base,
-                    (floor + 1.) * 360. / base,
-                    ((self.digit_values[0] - (base - 1.)) / (1.)).clamp(0., 1.),
-                )
-            } else {
-                self.digit_values[i].trunc() * 360. / base
-            };
+            let angle = digit_angle(&self.digit_values, i, d.continuous, base);
             self.digit_angles[i] = if initialize {
                 angle
             } else {

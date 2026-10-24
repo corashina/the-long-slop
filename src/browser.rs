@@ -165,6 +165,7 @@ extern "C" {
     pub fn game_sleep(
         phase: u32,
         eligible: bool,
+        show_hint: bool,
         charge: f32,
         cooldown_remaining: f64,
         progress: f32,

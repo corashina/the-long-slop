@@ -248,7 +248,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],**recover_seat_view(source,reader)})
+                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],'show_sleep_text':bool(value['showSleepText']),**recover_seat_view(source,reader)})
     wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
     mount_links={}
     for group in components.values():
