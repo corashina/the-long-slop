@@ -12,15 +12,15 @@ pub struct RecoveryTransport {
     pub held_delta: Pose,
 }
 impl GarageRuntime {
-    pub fn collect_recovery_ownership(&mut self, reference: &ReferenceManifest) {
+    pub fn collect_recovery_ownership(&mut self, reference: &ReferenceManifest, vehicle: usize) {
         self.recovery_bodies.clear();
         self.recovery_held_bodies.clear();
-        let chassis = self.physics.chassis_handle(self.vehicle);
+        let chassis = self.physics.chassis_handle(vehicle);
         self.recovery_bodies.push(chassis);
         let inverse = self.physics.rapier().bodies[chassis].position().inverse();
         let held = self.area.interaction.held();
         for (&id, &handle) in &self.area.bodies {
-            if body_vehicle(reference, id) == Some(self.vehicle)
+            if body_vehicle(reference, id) == Some(vehicle)
                 && !self.recovery_bodies.contains(&handle)
             {
                 self.recovery_bodies.push(handle);
@@ -42,14 +42,14 @@ impl GarageRuntime {
             let cargo = body.is_enabled()
                 && body.is_dynamic()
                 && (0..3).all(|axis| {
-                    point[axis] >= self.vehicles[self.vehicle].recovery_bounds.min[axis]
-                        && point[axis] <= self.vehicles[self.vehicle].recovery_bounds.max[axis]
+                    point[axis] >= self.vehicles[vehicle].recovery_bounds.min[axis]
+                        && point[axis] <= self.vehicles[vehicle].recovery_bounds.max[axis]
                 });
             let dormant_cargo = self.persistent_world.recovery_cargo(
                 &self.physics,
                 handle,
-                self.vehicle,
-                &self.vehicles[self.vehicle].recovery_bounds,
+                vehicle,
+                &self.vehicles[vehicle].recovery_bounds,
             );
             if item.body == Some(chassis) || cargo || dormant_cargo {
                 self.recovery_bodies.push(handle);
@@ -74,7 +74,7 @@ impl GarageRuntime {
         if !self.recovering {
             return Ok(false);
         }
-        self.collect_recovery_ownership(reference);
+        self.collect_recovery_ownership(reference, self.vehicle);
         let origin = self.stream.origin;
         let vehicle = self.vehicle;
         let area = &self.area;
@@ -145,7 +145,7 @@ impl GarageRuntime {
         Ok(true)
     }
 }
-fn transport_prepared(
+pub(super) fn transport_prepared(
     area: &mut StartingArea,
     physics: &mut PhysicsWorld,
     wheels: &mut crate::interaction::wheels::WheelAssemblies,

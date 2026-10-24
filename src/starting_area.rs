@@ -1,5 +1,6 @@
 //! Persistent imported home bodies and preparation state.
 pub mod recovery;
+mod under_map;
 use crate::interaction::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
@@ -692,6 +693,8 @@ pub struct GarageRuntime {
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     driving_input: crate::simulation::input::KeyboardDriving,
     recovery_bodies: Vec<RigidBodyHandle>,
+    /// Simulation time of the next under-map check.
+    under_map_check: f64,
     light_owners: Vec<Option<ItemId>>,
 }
 
@@ -808,6 +811,7 @@ impl GarageRuntime {
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
+            under_map_check: 0.,
             light_owners: reference
                 .lighting
                 .controllers
@@ -1116,7 +1120,14 @@ impl GarageRuntime {
                 self.use_light_control(reference, control)
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
-                self.stream.tune_dial(knob, direction, &mut self.area.items);
+                if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                    && let Some((item, true)) =
+                        self.stream
+                            .radio_control(knob, direction, &mut self.area.items)
+                    && let (Some(audio), Some(item)) = (&mut self.audio, self.area.items.get(item))
+                {
+                    audio.radio_click_at(item.pose.position);
+                }
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(
@@ -1351,6 +1362,7 @@ impl GarageRuntime {
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
         }
 
+        self.advance_under_map(reference);
         let focus = if self.area.player.seat().is_some() {
             self.physics.snapshot(self.vehicle).pose.position
         } else {
