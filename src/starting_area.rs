@@ -934,6 +934,13 @@ impl GarageRuntime {
             &self.area.items,
             &self.physics,
         );
+        let (items, origin, audio) = (&self.area.items, self.stream.origin, &mut self.audio);
+        self.stream
+            .advance_music_boxes(dt, |item, pitch, detune, chance| {
+                if let (Some(audio), Some(item)) = (audio.as_mut(), items.get(item)) {
+                    audio.music_note(origin.absolute(item.pose.position), pitch, detune, chance);
+                }
+            });
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -954,6 +961,9 @@ impl GarageRuntime {
             && self.area.interaction.dragging_mechanism().is_some())
             || (input.held & keys::USE != 0
                 && availability.actions.0 & crate::interaction::feedback::ActionMask::TUNE != 0)
+            || ((input.held & keys::USE != 0
+                || (input.held & keys::PRIMARY != 0 && availability.lmb_use))
+                && availability.actions.0 & crate::interaction::feedback::ActionMask::CRANK != 0)
             || (input.held & keys::PRIMARY != 0
                 && availability.lmb_use
                 && availability
@@ -1135,6 +1145,9 @@ impl GarageRuntime {
                 {
                     audio.radio_click_at(item.pose.position);
                 }
+            }
+            Some(InteractionAction::Crank(knob, look)) => {
+                self.stream.crank_music_box(knob, look);
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(

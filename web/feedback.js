@@ -1,6 +1,6 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
-export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728,TAKE_ONE:268435456,SMOKE:536870912,PUT_ON:1073741824};
+export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728,TAKE_ONE:268435456,SMOKE:536870912,PUT_ON:1073741824,CRANK:2147483648};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
 function volume(value){return (Math.round(value*10)/10).toFixed(1).replace(/\.0$/,'');}
@@ -23,7 +23,7 @@ export function selectIcon(mask,context,carrying) {
  if(mask&(ACTION.CONSUME|ACTION.DRINK|ACTION.SMOKE|ACTION.TAKE_ONE))return 'carrying';
  if(mask&ACTION.EXIT)return 'exit';
  if(mask&ACTION.ENTER)return 'enter';
- if(mask&ACTION.DOOR)return 'door';
+ if(mask&(ACTION.DOOR|ACTION.CRANK))return 'door';
  if(mask&(ACTION.SWITCH|ACTION.PRIMARY_SWITCH))return 'cap';
  if(mask&(ACTION.PUSH|ACTION.GRIP|ACTION.RELEASE_GRIP))return 'pickup';
  if(mask&(ACTION.USE|ACTION.TUNE))return 'cap';
@@ -82,13 +82,15 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.EQUIP,'equip','Tap Tab: equip'],
   [ACTION.RECENTER,'recenter','Hold Tab: recenter'],
   [ACTION.RELEASE_EQUIPMENT,'releaseEquipment','Tab or MMB: release'],
-  [ACTION.RELEASE_EQUIPMENT_SEATED,'releaseEquipmentSeated','MMB: release']
+  [ACTION.RELEASE_EQUIPMENT_SEATED,'releaseEquipmentSeated','MMB: release'],
+  [ACTION.CRANK,'crank','[E]+[Mouse]: Crank']
  ].map(([bit,role,text])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,role,n,family:0,top:0,line:0,offset:-1};});
- let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='';
+ const named=Object.fromEntries(rows.map(r=>[r.role,r.n]));
+ let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
@@ -111,16 +113,18 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   root.hidden=!state.visible;
   for(const r of rows)r.n.hidden=!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH));
   const doorText=state.context===7?'[LMB]+[Mouse]: Move':'[LMB]+[Mouse]: Open/Close';
-  if(doorText!==lastDoor){rows[1].n.textContent=doorText;lastDoor=doorText;}
+  if(doorText!==lastDoor){named.door.textContent=doorText;lastDoor=doorText;}
   const useText=state.context===10?(state.lmbUse&&!(state.actions&ACTION.HELD_SWITCH)?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';
-  if(useText!==lastUse){rows[0].n.textContent=useText;lastUse=useText;}
+  if(useText!==lastUse){named.use.textContent=useText;lastUse=useText;}
   const radio=state.context===11||state.context===12;
   const tuneText=radio?(state.lmbUse?'[E] / [LMB]+[Mouse]: Tune':'[E]+[Mouse]: Tune'):'[E]+[Mouse] / [Scroll]: Open/Close';
-  if(tuneText!==lastTune){rows[9].n.textContent=tuneText;lastTune=tuneText;}
+  if(tuneText!==lastTune){named.tune.textContent=tuneText;lastTune=tuneText;}
   const scrollText=radio?'[Scroll]: Tune':'[Scroll]: Open/Close';
-  if(scrollText!==lastScroll){rows[18].n.textContent=scrollText;lastScroll=scrollText;}
+  if(scrollText!==lastScroll){named.scroll.textContent=scrollText;lastScroll=scrollText;}
   const primaryText=state.actions&ACTION.HELD_SWITCH?'[E]: Switch':'[E] / [LMB]: Switch';
-  if(primaryText!==lastPrimary){rows[13].n.textContent=primaryText;lastPrimary=primaryText;}
+  if(primaryText!==lastPrimary){named.primary.textContent=primaryText;lastPrimary=primaryText;}
+  const crankText=state.lmbUse?'[E] / [LMB]+[Mouse]: Crank':'[E]+[Mouse]: Crank';
+  if(crankText!==lastCrank){named.crank.textContent=crankText;lastCrank=crankText;}
   placeRows();
   if(state.targetName!==lastName){target.textContent=state.targetName;lastName=state.targetName;}target.hidden=!state.targetName;
   const detail=state.condition>=0?'Condition '+Math.round(state.condition*100)+'%':'';
