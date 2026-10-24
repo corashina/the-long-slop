@@ -153,6 +153,7 @@ impl StartingArea {
                 ))
                 .user_data(
                     flag | ((record.id.0 as u128) << 64)
+                        | crate::vehicle::step_surface_bits(record.step_surface)
                         | item.map_or(0, |item| item.0 as u128 + 1),
                 );
             let owner = bodies[&record.body];

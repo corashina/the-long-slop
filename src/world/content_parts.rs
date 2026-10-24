@@ -3,7 +3,7 @@ use super::contents::ContentInstance;
 use super::spawn_rules::*;
 use crate::interaction::{InteractionState, items::ItemStore};
 use crate::reference::*;
-use crate::vehicle::PhysicsWorld;
+use crate::vehicle::{PhysicsWorld, STEP_SURFACE_MASK};
 pub(super) fn bind(
     content: &mut ContentInstance,
     instance: &super::StructureInstance,
@@ -139,7 +139,9 @@ pub(super) fn bind(
                 layers |= 1 << prototype.nodes[c.node as usize].layer;
                 let id = interaction.allocate_generated_collider()?;
                 physics.edit_collider(*handle, |collider| {
-                    collider.user_data = ((id.0 as u128) << 64) | (item.0 as u128 + 1);
+                    collider.user_data = (collider.user_data & STEP_SURFACE_MASK)
+                        | ((id.0 as u128) << 64)
+                        | (item.0 as u128 + 1);
                     collider.set_active_events(super::stream::content_bindings::hit_events(hit));
                 });
                 interaction.bind_surface(

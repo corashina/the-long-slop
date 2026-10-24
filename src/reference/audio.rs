@@ -219,7 +219,7 @@ record!(CollisionAudioReference {
     loose_multiplier: f32, item_minimum: f32, car_multiplier: f32, method: Vec<AudioMethod>
 });
 record!(FootstepSurfaceReference { name: String, volume: f32, clips: Vec<u32> });
-/// Source `stepSoundScript`. Surfaces are in source order: road, desert, winter, grass, wood.
+// Source `stepSoundScript`. Surfaces are in source order: road, desert, winter, grass, wood.
 record!(FootstepAudioReference {
     surfaces: [FootstepSurfaceReference; 5], step_gain: f32, ray_distance: f32, ray_mask: u32,
     local_position: [f32; 3], sand_layers: Vec<u32>, method: Vec<AudioMethod>

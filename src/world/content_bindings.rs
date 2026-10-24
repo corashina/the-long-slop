@@ -5,7 +5,7 @@ use crate::interaction::{
     items::{HitSound, ItemStore},
 };
 use crate::reference::{ActionBinding, PickupReference, ReferenceError, ReferenceManifest};
-use crate::vehicle::{PhysicsWorld, from_rapier, to_rapier};
+use crate::vehicle::{PhysicsWorld, STEP_SURFACE_MASK, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
 use crate::world::{ObjectKey, changes};
 use rapier3d::prelude::ActiveEvents;
@@ -470,7 +470,9 @@ impl WorldStream {
                     layers |= 1u32 << prototype.nodes[collider.node as usize].layer;
                     let collider_id = interaction.allocate_generated_collider()?;
                     physics.edit_collider(*handle, |collider| {
-                        collider.user_data = ((collider_id.0 as u128) << 64) | (id.0 as u128 + 1);
+                        collider.user_data = (collider.user_data & STEP_SURFACE_MASK)
+                            | ((collider_id.0 as u128) << 64)
+                            | (id.0 as u128 + 1);
                         collider.set_active_events(hit_events(hit));
                     });
                     interaction.bind_surface(
@@ -1180,7 +1182,7 @@ pub(super) fn rollback(
     }
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
-            collider.user_data = 0;
+            collider.user_data &= STEP_SURFACE_MASK;
             collider.set_active_events(ActiveEvents::empty());
         });
     }

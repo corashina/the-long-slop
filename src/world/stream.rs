@@ -3916,7 +3916,9 @@ impl WorldStream {
                 if matches!(record.fields.get("m_GameObject"), Some(crate::reference::WorldValue::Link(value)) if value == owner)
                 {
                     physics.edit_collider(*handle, |collider| {
-                        collider.user_data = cap.0 as u128 + 1;
+                        collider.user_data = (collider.user_data
+                            & crate::vehicle::STEP_SURFACE_MASK)
+                            | (cap.0 as u128 + 1);
                     });
                     interaction.bind_surface(
                         *handle,

@@ -47,6 +47,12 @@ pub fn set_collider_enabled(collider: &mut rapier3d::prelude::Collider, enabled:
     collider.set_solver_groups(solver_groups(enabled));
 }
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
+/// Collider user data bits 32 to 34 hold the `StepSurface` code. 0 is none.
+pub const STEP_SURFACE_SHIFT: u32 = 32;
+pub const STEP_SURFACE_MASK: u128 = 0b111 << STEP_SURFACE_SHIFT;
+pub fn step_surface_bits(surface: Option<crate::reference::StepSurface>) -> u128 {
+    surface.map_or(0, |s| (s as u128) << STEP_SURFACE_SHIFT)
+}
 
 /// One started contact. `speed` is the relative speed at `point` before the solver.
 #[derive(Clone, Copy, Debug)]
@@ -253,7 +259,11 @@ impl VehicleBody {
                 ))
                 .density(if collider.sensor { 0.0 } else { 1.0 })
                 .active_events(ActiveEvents::COLLISION_EVENTS)
-                .user_data(VEHICLE_COLLIDER_FLAG | ((id.0 as u128) << 64));
+                .user_data(
+                    VEHICLE_COLLIDER_FLAG
+                        | ((id.0 as u128) << 64)
+                        | step_surface_bits(collider.step_surface),
+                );
             physics.insert_collider_with_parent(builder, chassis);
         }
         physics.recompute_body_mass(chassis);
