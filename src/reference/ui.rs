@@ -137,6 +137,7 @@ impl UiReference {
             "foot",
             "driving",
             "can-sleep",
+            "sleep-hint",
             "cannot-sleep",
             "need-sleep",
             "need-sleep-background",
