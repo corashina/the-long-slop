@@ -1,9 +1,9 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 12;
-/// Schema 11 saves load with empty schema 12 additions.
-const PREVIOUS_SCHEMA_VERSION: u32 = 11;
+pub const SAVE_SCHEMA_VERSION: u32 = 13;
+/// Schema 11 and 12 saves load with empty later additions.
+const PREVIOUS_SCHEMA_VERSIONS: &[u32] = &[11, 12];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,7 +63,7 @@ impl SaveSnapshot {
         let version: Version =
             serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
         if version.schema_version != SAVE_SCHEMA_VERSION
-            && version.schema_version != PREVIOUS_SCHEMA_VERSION
+            && !PREVIOUS_SCHEMA_VERSIONS.contains(&version.schema_version)
         {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
@@ -109,6 +109,9 @@ pub struct WorldSnapshot {
     pub changes: crate::world::ChangeRecords,
     #[serde(with = "super::identity::lossless")]
     pub spawn: crate::world::spawn_state::SpawnHistory,
+    /// Broken generated boxes. Their removal is in `changes`. Absent before schema 13.
+    #[serde(default, with = "super::identity::lossless")]
+    pub boxes: Vec<crate::world::BoxRelease>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -380,7 +383,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8, 9, 10, 13] {
+        for version in [6, 7, 8, 9, 10, 14] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),

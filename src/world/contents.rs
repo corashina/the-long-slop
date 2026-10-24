@@ -172,6 +172,8 @@ pub(crate) struct SourceContents {
     selection: Option<(u64, u64)>,
     input_revision: u64,
     deferred: Vec<DeferredBatch>,
+    /// Broken boxes whose content may publish.
+    pub boxes: super::stream::content_boxes::BoxReleases,
 }
 impl SourceContents {
     pub fn discard_replay_siblings(&mut self, wanted: &[Placement]) {
@@ -251,6 +253,7 @@ impl SourceContents {
             selection: None,
             input_revision: 0,
             next: 0,
+            boxes: Default::default(),
         }
     }
     pub fn eligibility_changed(
@@ -278,7 +281,8 @@ impl SourceContents {
     pub fn active_revision(&self) -> u64 {
         self.active_revision
     }
-    fn push_active(&mut self, content: ContentInstance) {
+    fn push_active(&mut self, mut content: ContentInstance) {
+        self.boxes.place(&mut content.content.placement);
         self.active.push(content);
         self.active_revision += 1;
     }

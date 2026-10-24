@@ -1295,6 +1295,7 @@ impl GarageRuntime {
         self.area.sync_inventory();
         self.area.sync_equipment(reference, &mut self.physics);
         self.area.items.sync_poses(&self.physics);
+        self.break_boxes(reference);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
@@ -1669,6 +1670,22 @@ impl GarageRuntime {
                     Default::default()
                 },
             );
+        }
+    }
+
+    /// Source breakablescript on generated boxes: contacts and hazard triggers of this step.
+    fn break_boxes(&mut self, reference: &ReferenceManifest) {
+        self.stream
+            .step_boxes(reference, &self.area.items, &self.physics, FIXED_DT);
+        while let Some(id) = self.stream.take_broken_box() {
+            // Source Break calls pickupable.Drop2 first.
+            if self.area.interaction.held() == Some(id) {
+                self.area
+                    .interaction
+                    .drop_held(&mut self.area.items, &mut self.physics);
+            }
+            self.stream
+                .break_box(id, &mut self.area.items, &mut self.physics);
         }
     }
 

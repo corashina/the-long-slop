@@ -1552,6 +1552,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
         seed: 42,
         changes: ChangeRecords::default(),
         spawn: candidate.contents.state.capture_history(),
+        boxes: Vec::new(),
     };
     saved
         .changes
