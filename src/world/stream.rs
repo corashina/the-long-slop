@@ -145,6 +145,11 @@ pub struct WorldStream {
     dial_bindings: Vec<content_dials::DialBinding>,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
+    radio_bindings: Vec<content_radios::RadioBinding>,
+    /// Session and active revision whose radio items are all bound.
+    radio_scan: Option<(u64, u64)>,
+    /// Prototype radioscript lookups.
+    radio_scripts: Vec<(SourceId, Option<SourceId>)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -684,6 +689,9 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             dial_scan: None,
+            radio_bindings: Vec::new(),
+            radio_scan: None,
+            radio_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -2086,6 +2094,33 @@ impl WorldStream {
                         if !output.contains(material) {
                             output.push(material.clone());
                         }
+                    }
+                }
+            }
+        }
+        let mut radios = Vec::new();
+        self.contents.rules.children(
+            &self.reference,
+            prototype,
+            "radioscript",
+            true,
+            &mut radios,
+        )?;
+        for source in radios {
+            let f = self.contents.rules.get(&self.reference, source)?.fields;
+            for (renderer, on, off) in [("RS", "SOn", "SOff"), ("RMutato", "MutatoOn", "MutatoOff")]
+            {
+                if self
+                    .contents
+                    .rules
+                    .root(&self.reference, link(f, renderer)?)?
+                    != node
+                {
+                    continue;
+                }
+                for material in [link(f, on)?, link(f, off)?] {
+                    if !output.contains(material) {
+                        output.push(material.clone());
                     }
                 }
             }
@@ -3839,6 +3874,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_radio_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4536,6 +4575,15 @@ impl WorldStream {
                     .iter()
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
+                + self.radio_bindings.capacity()
+                    * std::mem::size_of::<content_radios::RadioBinding>()
+                + self
+                    .radio_bindings
+                    .iter()
+                    .map(content_radios::RadioBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.radio_scripts.capacity()
+                    * std::mem::size_of::<(SourceId, Option<SourceId>)>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4829,6 +4877,8 @@ pub(crate) mod content_index;
 
 #[path = "content_dials.rs"]
 mod content_dials;
+#[path = "content_radios.rs"]
+mod content_radios;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;

@@ -88,8 +88,19 @@ pub enum InteractionAction {
     PlateRemove(ItemId),
     PlateMount(ItemId),
     PartInstall(ItemId),
-    /// One source tune step (+1 or -1) on a generated dial knob.
+    /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
+    /// radio band switch.
     DialTune(ColliderId, f32),
+}
+
+/// A generated usablescript knob bound to a dial or a portable radio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Knob {
+    Dial,
+    Volume,
+    Tuning,
+    /// BChangeAMFM: turned with use.
+    Band,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -210,7 +221,7 @@ pub struct InteractionState {
     cancelled_input: u32,
     usable_light_controls: HashSet<LightControlId>,
     /// Generated source dial knobs (meterscript tune usables).
-    dial_knobs: HashSet<ColliderId>,
+    dial_knobs: HashMap<ColliderId, Knob>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
     slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
@@ -325,7 +336,7 @@ impl InteractionState {
         map(&self.light_controls)
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
-            + set(&self.dial_knobs)
+            + map(&self.dial_knobs)
             + map(&self.kinds)
             + map(&self.slot_fits)
             + self.slot_fits.values().map(set).sum::<usize>()
@@ -575,7 +586,7 @@ impl InteractionState {
                 .unwrap_or(0)
                 + 1,
             fill_opening: None,
-            dial_knobs: HashSet::new(),
+            dial_knobs: HashMap::new(),
             usable_light_controls: reference
                 .lighting
                 .controllers
@@ -792,8 +803,8 @@ impl InteractionState {
         self.held_controls.retain(|_, id| *id != control);
         self.usable_light_controls.remove(&control);
     }
-    pub fn bind_dial_knob(&mut self, collider: ColliderId) {
-        self.dial_knobs.insert(collider);
+    pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
+        self.dial_knobs.insert(collider, kind);
     }
     pub fn remove_dial_knob(&mut self, collider: ColliderId) {
         self.dial_knobs.remove(&collider);
@@ -802,10 +813,10 @@ impl InteractionState {
         &self,
         target: &AimTarget,
         physics: &PhysicsWorld,
-    ) -> Option<ColliderId> {
+    ) -> Option<(ColliderId, Knob)> {
         let id =
             ColliderId((physics.rapier().colliders.get(target.collider)?.user_data >> 64) as u32);
-        self.dial_knobs.contains(&id).then_some(id)
+        self.dial_knobs.get(&id).map(|kind| (id, *kind))
     }
     pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {
         let id = self.next_generated_collider;
@@ -1616,7 +1627,13 @@ impl InteractionState {
                         }
                     }
                 }
-                if let Some(knob) = self.dial_knob(&target, physics) {
+                if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
+                    if use_input.pressed & keys::USE != 0
+                        || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+                    {
+                        action = Some(InteractionAction::DialTune(knob, 0.));
+                    }
+                } else if let Some((knob, _)) = self.dial_knob(&target, physics) {
                     let mut knob_input = use_input;
                     if !availability.lmb_use {
                         knob_input.held &= !keys::PRIMARY;

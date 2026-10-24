@@ -48,6 +48,9 @@ impl SensorLatch {
         self.count = 3;
     }
 }
+/// Browser emitter ids of portable radio voice slots: base + slot.
+pub const PORTABLE_RADIO_EMITTER: u32 = 0x5000_0000;
+pub const PORTABLE_RADIO_SLOTS: usize = 4;
 pub fn source_gain_db(gain: f32) -> f32 {
     gain.clamp(0.001, 1.).ln() * 20.
 }
@@ -156,7 +159,11 @@ pub struct AudioState {
     /// Vehicle index of each car route, for car hit sounds.
     pub route_vehicles: Vec<Option<u32>>,
     pub engine_constants: BTreeMap<String, f32>,
+    /// The Lada radio's controls.
     pub radio: crate::simulation::radio::RadioState,
+    pub broadcasts: crate::simulation::radio::RadioBroadcasts,
+    /// Portable radios holding the browser's voice slots.
+    pub portable_radio_slots: [Option<ItemId>; PORTABLE_RADIO_SLOTS],
     pub radio_frame: crate::simulation::radio::RadioFrame,
     queue: [Option<AudioEvent>; 64],
     length: usize,
@@ -277,12 +284,14 @@ impl AudioState {
                 .find(|m| m.name == "CarSounds")
                 .map_or(0, |m| m.id),
             engine_constants: reference.engine.constants.clone(),
-            radio: crate::simulation::radio::RadioState::new(
+            radio: crate::simulation::radio::RadioState::lada(&reference.radio),
+            broadcasts: crate::simulation::radio::RadioBroadcasts::new(
                 &reference.radio,
                 &reference.clips,
                 [0, 0],
             ),
             radio_frame: crate::simulation::radio::RadioFrame::default(),
+            portable_radio_slots: [None; PORTABLE_RADIO_SLOTS],
             collider_nodes: HashMap::new(),
             route_sensors: reference
                 .routes
@@ -538,6 +547,9 @@ impl AudioState {
         xorshift(&mut self.random)
     }
     fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
+        self.emit_at(id, gain, simulation_seconds, None);
+    }
+    fn emit_at(&mut self, id: u32, gain: f32, simulation_seconds: f64, at: Option<[f32; 3]>) {
         let Some(&index) = self.bindings.get(&id) else {
             return;
         };
@@ -548,7 +560,9 @@ impl AudioState {
             return;
         }
         self.sequence = self.sequence.wrapping_add(1);
-        let position = if b.trigger == "radio_power_band" {
+        let position = if let Some(at) = at {
+            at
+        } else if b.trigger == "radio_power_band" {
             let voice = &self.reference.voices[self.voice_indices[&self.reference.radio.voices[0]]];
             self.positions
                 .get(&voice.emitter)
@@ -892,16 +906,13 @@ impl AudioState {
         self.survival_loops.clear();
         self.sleep_radio_advanced = false;
         // Controls belong to the committed session (fresh or restored); playlists restart.
-        let controls = self.radio.capture_save();
-        self.radio = crate::simulation::radio::RadioState::new(
+        self.broadcasts = crate::simulation::radio::RadioBroadcasts::new(
             &self.reference.radio,
             &self.reference.clips,
             [0, 0],
         );
-        self.radio
-            .restore_save(&controls)
-            .expect("committed radio controls were validated");
         self.radio_frame = crate::simulation::radio::RadioFrame::default();
+        self.portable_radio_slots = [None; PORTABLE_RADIO_SLOTS];
         self.session = session;
         self.queue.fill(None);
         self.length = 0;
@@ -1007,9 +1018,13 @@ impl AudioState {
     }
     pub fn fixed_step(&mut self, area: &StartingArea, physics: &PhysicsWorld, dt: f32) {
         self.game_seconds += f64::from(dt);
-        self.radio_frame = self
-            .radio
-            .advance(self.game_seconds, self.reference.radio.electronics_output);
+        self.broadcasts.advance(self.game_seconds);
+        self.radio_frame = self.broadcasts.frame(
+            &self.radio,
+            self.game_seconds,
+            self.reference.radio.electronics_output,
+            self.reference.radio.electronics_cutoff,
+        );
         for (&id, &(anchor, local)) in &self.emitter_anchors {
             let mut world = anchor
                 .and_then(|node| area.interaction.mechanisms.node_pose(node))
@@ -1158,6 +1173,51 @@ impl AudioState {
             && let Some(id) = self.reference.radio.click_binding
         {
             self.emit(id, 1., self.game_seconds);
+        }
+    }
+    /// Keeps each playing portable radio in its slot and gives free slots to the nearest
+    /// playing radios within the voices' maximum distance.
+    pub fn assign_portable_radios(
+        &mut self,
+        listener: [f32; 3],
+        radios: impl Iterator<Item = (ItemId, [f32; 3], bool)> + Clone,
+    ) {
+        let range = self
+            .reference
+            .portable_radio
+            .voices
+            .iter()
+            .fold(0_f32, |m, v| m.max(v.max_distance));
+        let audible = |position: [f32; 3]| {
+            let d: f32 = (0..3).map(|i| (position[i] - listener[i]).powi(2)).sum();
+            (d <= range * range).then_some(d)
+        };
+        for slot in &mut self.portable_radio_slots {
+            if let Some(id) = *slot
+                && !radios
+                    .clone()
+                    .any(|(item, p, on)| item == id && on && audible(p).is_some())
+            {
+                *slot = None;
+            }
+        }
+        for i in 0..PORTABLE_RADIO_SLOTS {
+            if self.portable_radio_slots[i].is_some() {
+                continue;
+            }
+            let slots = self.portable_radio_slots;
+            self.portable_radio_slots[i] = radios
+                .clone()
+                .filter(|(item, _, on)| *on && !slots.contains(&Some(*item)))
+                .filter_map(|(item, p, _)| audible(p).map(|d| (item, d)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(item, _)| item);
+        }
+    }
+    /// radioscript.TurnRadio and the band switch on a portable radio share Cturned.
+    pub fn radio_click_at(&mut self, position: [f32; 3]) {
+        if let Some(id) = self.reference.radio.click_binding {
+            self.emit_at(id, 1., self.game_seconds, Some(position));
         }
     }
     fn slot(&self, slot: crate::reference::PartSlotId, area: &StartingArea) -> f32 {
