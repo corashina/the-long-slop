@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 10;
+pub const SAVE_SCHEMA_VERSION: u32 = 11;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,6 +26,7 @@ pub struct SaveSnapshot {
     pub source: SourceStamp,
     pub world: WorldSnapshot,
     pub player: PlayerSnapshot,
+    pub needs: NeedsSnapshot,
     pub inventory: InventorySnapshot,
     pub vehicles: Vec<VehicleSnapshot>,
     pub bodies: Vec<BodySnapshot>,
@@ -102,6 +103,14 @@ pub struct PlayerSnapshot {
     pub recoil_velocity: [f32; 3],
     pub running: bool,
     pub carry: Option<CarrySnapshot>,
+}
+/// Source save_player hp, food, water, shit, to* queue, and bladder fluids.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NeedsSnapshot {
+    pub needs: crate::reference::NeedValues,
+    pub pending: crate::reference::ConsumptionEffect,
+    pub bladder: crate::fluids::FluidSnapshot,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -352,7 +361,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8, 9] {
+        for version in [6, 7, 8, 9, 10] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),

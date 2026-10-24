@@ -321,6 +321,7 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &mut candidate.physics,
         )?;
+        candidate.survival.restore_save(&saved.needs);
         if let Some(carry) = saved
             .player
             .carry
@@ -483,6 +484,11 @@ impl GarageRuntime {
                 "Save restore is pending".into(),
             ));
         }
+        if self.needs_output().dead {
+            return Err(SaveError::ReconstructionFailure(
+                "The player is dead".into(),
+            ));
+        }
         let mut ids = IdentityMap::new(reference)?;
         ids.bind_generated(&self.area.items);
         let origin = &self.stream.origin;
@@ -537,6 +543,7 @@ impl GarageRuntime {
                 &self.physics,
                 self.area.interaction.capture_carry_save(&ids)?,
             )?,
+            needs: self.survival.capture_save(),
             vehicles: self
                 .vehicles
                 .iter()
