@@ -197,7 +197,7 @@ impl PhysicsWorld {
         controller.solve_character_collision_impulses(
             dt,
             &mut QueryPipelineMut {
-                dispatcher: self.physics.narrow_phase.query_dispatcher(),
+                dispatcher: &crate::player::normals::CharacterQueryDispatcher,
                 bvh: &self.query_bounds.bvh,
                 bodies: &mut self.physics.bodies,
                 colliders: &mut self.physics.colliders,

@@ -1,4 +1,5 @@
 pub mod collision;
+pub(crate) mod normals;
 pub mod pose;
 mod posture;
 mod view;
@@ -437,7 +438,7 @@ impl PlayerState {
         let rapier = physics.rapier();
         let movement = self.controller.move_shape(
             dt,
-            &physics.queries(filter),
+            &physics.character_queries(filter),
             shape,
             &self.pose,
             desired,

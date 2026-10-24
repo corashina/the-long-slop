@@ -610,6 +610,14 @@ impl PhysicsWorld {
         }
     }
 
+    /// Player movement queries. Shape-cast normals come from contact manifolds.
+    pub fn character_queries<'a>(&'a self, filter: QueryFilter<'a>) -> QueryPipeline<'a> {
+        QueryPipeline {
+            dispatcher: &crate::player::normals::CharacterQueryDispatcher,
+            ..self.queries(filter)
+        }
+    }
+
     pub fn snapshot(&self, index: usize) -> VehicleSnapshot {
         let vehicle = &self.vehicles[index];
         let body = &self.physics.bodies[vehicle.chassis];
