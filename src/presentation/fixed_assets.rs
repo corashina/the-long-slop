@@ -124,6 +124,7 @@ impl SourceFixedAssets {
                     AssetUsage::UniqueScene
                         | AssetUsage::RoadLampPrototype
                         | AssetUsage::SkyPrototype
+                        | AssetUsage::ItemPrototype
                 )
             })
             .map(|a| Root {
