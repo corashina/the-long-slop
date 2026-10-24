@@ -181,3 +181,104 @@ class SelectedAudio(unittest.TestCase):
             self.assertTrue(hasattr(reader, 'audio'), 'missing selected WAV interface')
             path.write_bytes(path.read_bytes()[:-2] + b'xx')
             with self.assertRaises(ValueError): reader.audio(identity)
+
+
+
+HIT_SOURCE_TEXT = '''public class mainscript
+{
+    public static byte[] AudioPriorities = new byte[8] { 10, 25, 40, 55, 70, 80, 85, 100 };
+    public int maxAudioCount;
+    private void RADIO() { startTime = Time.time; cTime = Time.time - _radio[j].startTime; cTime = Time.unscaledTime - _radio[i].startTime; }
+}
+public class pickupable
+{
+    private void OnCollisionEnter(Collision c)
+    {
+        float num = c.relativeVelocity.magnitude * collisionSoundM * ((!pickedUp) ? 0.3f : 1f);
+        if (num > 0.075f) { mainscript.PlayClipAtPoint(collideSound, p, num - 0.075f, mainscript.AudioPriorities[7]); }
+    }
+    private void FixedUpdate()
+    {
+        if (Time.time - lastInteriorSensed > 10f && !pickedUp) { Physics.OverlapSphere(transform.position, 0.1f, m.interiorLayer); }
+    }
+}
+public class carscript
+{
+    private void OnCollisionEnter(Collision c)
+    {
+        magnitude *= collisionSoundM * 0.3f;
+        if (magnitude > 0.7f) { } else if (magnitude > 0.5f) { } else if (magnitude > 0.2f) { }
+        else { if (!(magnitude > 0.05f)) { return; } magnitude = 1f; }
+    }
+}
+public class soundplayscript
+{
+    public void PlaySound()
+    {
+        if (!(UnityEngine.Random.Range(0f, 1f) > chance)) { mainscript.PlayClipAtPoint(c, p, v, mainscript.AudioPriorities[7]); }
+    }
+}
+'''
+
+ROCK = {'SSource': {'m_PathID': 0}, 'findNap': 1, 'same': 1, 'clipsReggel': ['a', 'b'],
+    'reggeledik': 0, 'nappal': 0, 'esteledik': 1, 'este': 1, 'minLerpReggel': 0., 'maxLerpReggel': 0.,
+    'minLerpNappal': 0., 'maxLerpNappal': 0., 'minLerpEsteledik': .5, 'maxLerpEsteledik': 1.,
+    'minLerpEste': .5, 'maxLerpEste': 1., 'minTime': 10., 'maxTime': 30., 'chance': .5,
+    'minVolume': .5, 'maxVolume': 1.}
+
+
+class HitAudio(unittest.TestCase):
+    def evidence(self, text):
+        from tools.reference.audio import ASSEMBLY_HASH, managed_evidence
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / 'managed').mkdir()
+            content = text.encode()
+            receipt = json.dumps({'complete': True, 'mode': 'whole_module', 'input': {'file': 'a.dll', 'sha256': ASSEMBLY_HASH},
+                'output': {'sha256': hashlib.sha256(content).hexdigest()}, 'decompiler': {'version': '11.1.0.9782'}}).encode()
+            files = []
+            for name, data in [('managed/decompilation.json', receipt), ('managed/Assembly-CSharp.cs', content)]:
+                (root / name).write_bytes(data)
+                files.append({'file': name, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+            library = NS(records_root=root, manifest={'managed_analysis': {'files': files}})
+            return managed_evidence(library)
+
+    def test_hit_source_statements_are_required(self):
+        self.evidence(HIT_SOURCE_TEXT)
+        for old, new in [('num - 0.075f', 'num - 0.08f'), ('> 10f', '> 5f'), ('> 0.5f', '> 0.4f'), ('> chance', '>= chance')]:
+            with self.assertRaises(ValueError): self.evidence(HIT_SOURCE_TEXT.replace(old, new))
+
+    def test_car_tiers_follow_source(self):
+        from tools.reference.audio import collision_record
+        record = collision_record([[1], [2, 3], [4], [5]], ['m'])
+        self.assertEqual(record['car_tiers'], [{'threshold': .05, 'clips': [1], 'fixed_gain': 1.},
+            {'threshold': .2, 'clips': [2, 3], 'fixed_gain': None}, {'threshold': .5, 'clips': [4], 'fixed_gain': None},
+            {'threshold': .7, 'clips': [5], 'fixed_gain': None}])
+        self.assertEqual([record[k] for k in ('interior_check_seconds', 'interior_radius', 'loose_multiplier', 'item_minimum', 'car_multiplier')],
+            [10., .1, .3, .075, .3])
+        with self.assertRaises(ValueError): collision_record([[1], [2], [3]], [])
+
+    def test_rock_ambience_record_and_errors(self):
+        from tools.reference.audio import ambience_record
+        prototype = {'file': 'sharedassets1.assets', 'path_id': 149742}
+        clips = lambda pointers: [{'a': 7, 'b': 8}[p] for p in pointers]
+        record = ambience_record(prototype, ROCK, clips, 'm')
+        self.assertEqual(record, {'prototype': prototype, 'clips': [7, 8], 'phases': {'dusk': [.5, 1.], 'night': [.5, 1.]},
+            'interval': [10., 30.], 'chance': .5, 'gain': [.5, 1.], 'pitch': [1., 1.], 'priority': 100, 'method': 'm'})
+        for change in [{'SSource': {'m_PathID': 5}}, {'findNap': 0}, {'same': 0}]:
+            with self.assertRaises(ValueError): ambience_record(prototype, {**ROCK, **change}, clips, 'm')
+
+    def test_one_shot_flags(self):
+        from tools.reference.audio import ambience_record, collision_record, validate_hit_audio
+        def record(role, kind, one_shot, clips, priority=100):
+            return {'role': role, 'kind': kind, 'one_shot': one_shot, 'clips': clips,
+                'settings': {'priority': priority, 'spatial_blend': 1.}}
+        audio = {'collisions': collision_record([[1], [2], [3], [4]], []),
+            'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
+            'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
+                record('item_hit', 10, True, [6]), record('car_hit', 11, True, [1, 2, 3, 4]), record('rock_heat', 12, True, [5])]}
+        validate_hit_audio(audio, set(range(1, 7)))
+        for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 13)]:
+            changed = copy.deepcopy(audio); changed['survival'][index][field] = value
+            with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)))
+        changed = copy.deepcopy(audio); del changed['survival'][4]
+        with self.assertRaises(ValueError): validate_hit_audio(changed, set(range(1, 7)))
