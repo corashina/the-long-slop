@@ -34,6 +34,9 @@ HIT_SOURCE = (
         'hit.collider.gameObject.layer == mainscript.sandLayer || hit.collider.gameObject.layer == mainscript.sandLayer2 || hit.collider.CompareTag("Sand")',
         'hit.collider.CompareTag("Wood")',
         'mainscript.PlayClipAtPoint(StepSoundClip, transform.position, StepSoundVolume * _modifier * stepSound, randomPitch: true, mainscript.AudioPriorities[3]);')))
+# interiorscript.Start uses the GameObject collider when `col` is empty.
+INTERIOR_START = ('if (col == null)', 'col = GetComponent<Collider>();')
+COLLIDER_TYPES = ('BoxCollider', 'SphereCollider', 'CapsuleCollider', 'MeshCollider')
 # The footstep rule uses these source values. fpscontroller calls Step on a walk bob beat and on a grounded change.
 STEP_CALL = 'stepScript.Step(duckValue + (input.run ? 0.15f : 0f));'
 STEP_STATEMENTS = ('public static int sandLayer = 17;', 'public static int sandLayer2 = 19;')
@@ -106,6 +109,9 @@ def managed_evidence(library):
         _, match, closing, region = locate(cls, method)
         if any(s not in region[match.start():closing] for s in statements):
             raise ValueError(f'Source hit audio needs a new audit: {cls}.{method}')
+    _, match, closing, region = locate('interiorscript', 'Start')
+    if any(s not in region[match.start():closing] for s in INTERIOR_START):
+        raise ValueError('Source interior collider needs a new audit')
     if (any(s not in text for s in STEP_STATEMENTS)
             or not re.search(r'enum walkSoundType\s*\{\s*' + r',\s*'.join(STEP_SURFACES) + r'\s*\}', text)):
         raise ValueError('Source footstep surfaces need a new audit')
@@ -118,6 +124,48 @@ def managed_evidence(library):
     if None in callers: raise ValueError('Source footstep callers need a new audit')
     footsteps = [evidence('stepSoundScript', 'Step'), *(evidence('fpscontroller', name) for name in callers)]
     return receipt, evidence, footsteps
+
+
+def interior_collider(source, reader, data):
+    """Source interiorscript.Start: `col`, else the first collider on the GameObject."""
+    collider = source.resolve(reader, data['col'])
+    if collider is None:
+        _, parts = source.components(source.transform_for(source.resolve(reader, data['m_GameObject'])))
+        collider = next((c for c in parts if c.type.name in COLLIDER_TYPES), None)
+    return collider
+
+
+def world_interiors(source, prototype, readers, mechanisms, evidence):
+    """interiorscript records of one world prototype, in component order. Doors are world mechanisms."""
+    index = {key(r): i for i, r in enumerate(readers)}
+    colliders = [c['source'] for c in prototype['colliders']]
+    doors = {(m['recipe']['source']['file'], m['recipe']['source']['path_id'])
+        for m in mechanisms if m['prototype'] == prototype['source']}
+    def door(reader, pointer):
+        target = source.resolve(reader, pointer)
+        if target is None or key(target) not in doors:
+            raise ValueError(f'World interior door outside prototype mechanisms: {key(reader)}')
+        return source_id(target)
+    result = []
+    for r in readers:
+        d = source.read(r)
+        if d['removableDoor'] or d['doorSlots'] or d['parentDoorSlot']['m_PathID']:
+            raise ValueError(f'World interior door slots need a source route: {key(r)}')
+        collider = interior_collider(source, r, d)
+        if collider is None or source_id(collider) not in colliders:
+            raise ValueError(f'World interior collider outside prototype: {key(r)}')
+        parent = source.resolve(r, d['parent'])
+        if parent is not None and key(parent) not in index:
+            raise ValueError(f'World interior parent outside prototype: {key(r)}')
+        door_ids = [door(r, p) for p in d['doors']]
+        invert = [bool(x) for x in d['invertindividual2']] or [False] * len(door_ids)
+        if len(invert) != len(door_ids): raise ValueError(f'World interior door inversion differs: {key(r)}')
+        result.append({'collider': source_id(collider), 'parent': index[key(parent)] if parent else None,
+            'invert': bool(d['invert']), 'minimum_doors_to_max': d['minDoorToMax'],
+            'maximum_transmission': d['maxAtengedes'], 'use_value': bool(d['useValue']), 'value': d['value'],
+            'doors': door_ids, 'invert_doors': invert,
+            'parent_door': door(r, d['parentDoor']) if d['parentDoor']['m_PathID'] else None, 'method': evidence})
+    return result
 
 
 def collision_record(tiers, methods):
@@ -393,12 +441,16 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     manifest['world']['pickup_hits']=[{'source':s,'collision_clip':clip(c),'collision_gain':g} for (s,_,g),c in zip(hits,world_clips)]
     audio['ambience']=[];rocks=[]
     for prototype in manifest['world']['prototypes']:
+        interiors=[]
         for node in source.hierarchy(source.get(prototype['source']['file'],prototype['source']['path_id']),activate_root=True):
             for c in node['components']:
-                if c.type.name!='MonoBehaviour' or source.class_name(c)!='soundplayscript':continue
+                if c.type.name!='MonoBehaviour':continue
+                if source.class_name(c)=='interiorscript':interiors.append(c)
+                if source.class_name(c)!='soundplayscript':continue
                 rocks.append(c)
                 audio['ambience'].append(ambience_record(prototype['source'],source.read(c),
                     lambda pointers,c=c:[clip(r) for r in readers(c,pointers)],method('soundplayscript','PlaySound')))
+        prototype['interiors']=world_interiors(source,prototype,interiors,manifest['world']['mechanisms'],method('interiorscript','GetValue'))
     if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
     if car_route is None:raise ValueError('Car hit audio needs the car route')
     rock=audio['ambience'][0]
@@ -475,10 +527,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     interior_ids={key(r):i+1 for i,r in enumerate(interior_readers)}
     for r in interior_readers:
         d=source.read(r);eid=emitter(r);node=audio['emitters'][eid-1]['node']
-        collider=source.resolve(r,d['col'])
-        if collider is None:
-            go=source.resolve(r,d['m_GameObject']);_,parts=source.components(source.transform_for(go))
-            collider=next((c for c in parts if c.type.name in ['BoxCollider','SphereCollider','CapsuleCollider','MeshCollider']),None)
+        collider=interior_collider(source,r,d)
         collider_id=next((c['id'] for c in manifest['colliders'] if c['source']==source_id(collider)),None) if collider else None
         if collider_id is None:raise ValueError(f'Interior sensor collider outside selected gameplay: {key(r)}')
         parent=source.resolve(r,d['parent'])
