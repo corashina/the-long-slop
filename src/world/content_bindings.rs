@@ -63,6 +63,12 @@ impl WorldStream {
                     .and_then(|c| c.snapshot.as_ref())
                     .and_then(|s| s.dial)
             });
+            snapshot.radio = self.radio_value(id).or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.radio)
+            });
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
                     == rapier3d::prelude::RigidBodyType::KinematicPositionBased

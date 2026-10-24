@@ -51,7 +51,7 @@ function vehicleFrame(bank,t=1){bank.begin();for(const id of [raw.engine.emitter
 function radioSamples(id){const clip=raw.clips.find(c=>c.id===id),bytes=readFileSync(new URL('../../web/assets/'+clip.path,import.meta.url));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);}
 function radioSetup(Context=Fake){const a=setup(Context);globalThis.fetch=async url=>{const clip=raw.clips.find(c=>manifest.content_base+c.path===url);return new Response(radioSamples(clip.id));};return a;}
 const recording=raw.radio.stations[0].music[0];
-function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],true);for(const id of raw.radio.voices)a.emitter(raw.voices.find(v=>v.id===id).emitter,[0,0,0],[0,0,0,1],true);a.radio({power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
+function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],true);for(const id of raw.radio.voices)a.emitter(raw.voices.find(v=>v.id===id).emitter,[0,0,0],[0,0,0,1],true);a.radio(raw.radio.emitter,{power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
 async function radioLoaded(a){await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));await loaded(a);}
 test('radio_resume_reuses_playback',async()=>{
  class Wav extends Fake {decodeAudioData(bytes){const v=new DataView(bytes),channels=v.getUint16(22,true),rate=v.getUint32(24,true),bits=v.getUint16(34,true);let data=0;for(let i=12;i+8<=bytes.byteLength;){const n=v.getUint32(i+4,true);if(v.getUint32(i,true)===0x61746164)data=n;i+=8+n+(n&1);}return Promise.resolve({duration:data/(rate*channels*bits/8),numberOfChannels:channels});}}
@@ -69,13 +69,13 @@ test('radio_resume_reuses_playback',async()=>{
 test('radio_cache_is_bounded',async()=>{
  const waiting=[],ids=raw.radio.stations.flatMap(s=>s.music).filter((id,i,a)=>a.indexOf(id)===i);
  class Slow extends Fake{decodeAudioData(bytes){return new Promise(resolve=>waiting.push({resolve,bytes}));}}
- const a=radioSetup(Slow);a.unlock();await settle();a.cache.radio(ids.slice(0,2),ids.slice(2,4),1);await decoding(()=>waiting.length===4);
+ const a=radioSetup(Slow);a.unlock();await settle();a.cache.radio(ids.slice(0,4),1);await decoding(()=>waiting.length===4);
  assert.equal(a.cache.radioPending.size,4);
- for(let i=4;i<30;i++){a.cache.radio([ids[i],ids[i+1]],[ids[i+2],ids[i+3]],1);assert.ok(a.cache.radioPending.size+a.cache.radioBuffers.size<=4);}
- a.restart(2);a.cache.radio([ids[31],ids[32]],[ids[33],ids[34]],2);assert.equal(waiting.length,4,'stale decodes still occupy slots');
- a.cache.radio([ids[0],ids[1]],[null,null],1);assert.ok(a.cache.radioWanted.has(ids[31]));assert.ok(!a.cache.radioWanted.has(ids[0]),'old demand cannot replace current demand');
+ for(let i=4;i<30;i++){a.cache.radio([ids[i],ids[i+1],ids[i+2],ids[i+3]],1);assert.ok(a.cache.radioPending.size+a.cache.radioBuffers.size<=4);}
+ a.restart(2);a.cache.radio([ids[31],ids[32],ids[33],ids[34]],2);assert.equal(waiting.length,4,'stale decodes still occupy slots');
+ a.cache.radio([ids[0],ids[1],null,null],1);assert.ok(a.cache.radioWanted.has(ids[31]));assert.ok(!a.cache.radioWanted.has(ids[0]),'old demand cannot replace current demand');
  for(const pending of waiting)pending.resolve({duration:1,numberOfChannels:1});await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));
  assert.equal(a.cache.radioBuffers.size,0,'stale requests cannot return buffers');assert.equal(a.cache.radioPending.size,0);
- a.cache.radio([ids[31],ids[31]],[null,null],2);await decoding(()=>waiting.length===5);assert.equal(a.cache.radioPending.size,1,'duplicate recording uses one slot');
+ a.cache.radio([ids[31],ids[31],null,null],2);await decoding(()=>waiting.length===5);assert.equal(a.cache.radioPending.size,1,'duplicate recording uses one slot');
  a.dispose();waiting[4].resolve({duration:1,numberOfChannels:1});await settle();assert.equal(a.cache.radioBuffers.size,0);
 });

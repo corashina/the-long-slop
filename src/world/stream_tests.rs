@@ -1,4 +1,6 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
+#[path = "stream_tests/drive_out.rs"]
+mod drive_out;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
 
@@ -1202,6 +1204,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         valve: None,
         lamp: None,
         dial: None,
+        radio: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,

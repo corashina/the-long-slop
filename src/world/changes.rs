@@ -37,6 +37,8 @@ pub struct ObjectSnapshot {
     pub lamp: Option<bool>,
     /// Tuned compass bearing or clock offset (meterscript szamlap value).
     pub dial: Option<f32>,
+    /// save_radioscript controls of a portable radio.
+    pub radio: Option<crate::save::RadioSnapshot>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,
