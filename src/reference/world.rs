@@ -183,6 +183,7 @@ pub struct WorldColliderReference {
     pub deformed_skin: Option<u32>,
     pub source_empty_mesh: Option<SourceId>,
     pub geometry: Option<ColliderGeometry>,
+    pub step_surface: Option<super::StepSurface>,
 }
 /// Gameplay role of a trigger collider.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1745,7 +1746,7 @@ mod tests {
 
     fn collider(trigger: bool, role: &str) -> WorldColliderReference {
         serde_json::from_str(&format!(
-            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null}}"#
+            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null,"step_surface":"sand"}}"#
         ))
         .unwrap()
     }
@@ -1771,6 +1772,7 @@ mod tests {
         ] {
             let c = collider(true, role);
             assert_eq!(c.role, value);
+            assert_eq!(c.step_surface, Some(crate::reference::StepSurface::Sand));
             assert_eq!(
                 serde_json::to_value(c.role).unwrap(),
                 serde_json::from_str::<serde_json::Value>(role).unwrap()

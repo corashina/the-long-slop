@@ -211,12 +211,18 @@ record!(AudioReference {
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
     shared: AudioSharedReference, mixer_controls: AudioMixerControls,
     survival: Vec<SurvivalAudioReference>, collisions: CollisionAudioReference,
-    ambience: Vec<AmbienceReference>
+    ambience: Vec<AmbienceReference>, footsteps: FootstepAudioReference
 });
 record!(CarTierReference { threshold: f32, clips: Vec<u32>, fixed_gain: Option<f32> });
 record!(CollisionAudioReference {
     car_tiers: [CarTierReference; 4], interior_check_seconds: f32, interior_radius: f32,
     loose_multiplier: f32, item_minimum: f32, car_multiplier: f32, method: Vec<AudioMethod>
+});
+record!(FootstepSurfaceReference { name: String, volume: f32, clips: Vec<u32> });
+/// Source `stepSoundScript`. Surfaces are in source order: road, desert, winter, grass, wood.
+record!(FootstepAudioReference {
+    surfaces: [FootstepSurfaceReference; 5], step_gain: f32, ray_distance: f32, ray_mask: u32,
+    local_position: [f32; 3], sand_layers: Vec<u32>, method: Vec<AudioMethod>
 });
 /// Lerp windows per cycle phase. A missing phase never plays.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -397,7 +403,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=13)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=14)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -802,6 +808,27 @@ impl AudioReference {
                 "audio ambience",
             )?;
         }
+        let f = &self.footsteps;
+        require(
+            f.surfaces
+                .iter()
+                .zip(["road", "desert", "winter", "grass", "wood"])
+                .all(|(s, name)| {
+                    s.name == name
+                        && s.volume.is_finite()
+                        && s.volume >= 0.
+                        && !s.clips.is_empty()
+                        && s.clips.iter().all(|id| clips.contains(id))
+                })
+                && values(f.local_position)
+                && values([f.step_gain, f.ray_distance])
+                && f.step_gain >= 0.
+                && f.ray_distance > 0.
+                && f.sand_layers.iter().all(|l| *l < 32)
+                && !f.method.is_empty()
+                && f.method.iter().all(method),
+            "audio footsteps",
+        )?;
         let settings = &self.shared.settings;
         require(
             values([
@@ -892,6 +919,7 @@ impl AudioGameplayReference {
             (11, "item_hit"),
             (12, "car_hit"),
             (13, "rock_heat"),
+            (14, "footstep"),
         ] {
             require(
                 r.bindings
@@ -904,7 +932,7 @@ impl AudioGameplayReference {
             let b = r.binding(kind);
             // Hit and ambience records take clips from their own sources.
             require(
-                (kind >= 11 || !b.clips.is_empty())
+                (matches!(kind, 11..=13) || !b.clips.is_empty())
                     && b.clips.iter().all(|id| clips.contains(id))
                     && values(b.pitch)
                     && b.pitch[0] > 0.
@@ -912,7 +940,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 12, "required audio roles")?;
+        require(r.bindings.len() == 13, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
@@ -982,5 +1010,15 @@ mod tests {
             serde_json::from_str::<AmbiencePhases>(r#"{"evening":[0,1]}"#).is_err(),
             "unknown phase"
         );
+        let surface = |name| format!(r#"{{"name":"{name}","volume":0.2,"clips":[1]}}"#);
+        let surfaces = ["road", "desert", "winter", "grass", "wood"].map(surface);
+        let footsteps: FootstepAudioReference = serde_json::from_str(&format!(
+            r#"{{"surfaces":[{}],"step_gain":1,"ray_distance":0.25,"ray_mask":164353,
+            "local_position":[0,-0.8343,0],"sand_layers":[17,19],"method":[{method}]}}"#,
+            surfaces.join(",")
+        ))
+        .unwrap();
+        assert_eq!(footsteps.surfaces[4].name, "wood");
+        assert_eq!(footsteps.sand_layers, [17, 19]);
     }
 }

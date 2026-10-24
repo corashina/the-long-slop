@@ -212,6 +212,19 @@ pub struct ColliderRecord {
     pub friction: f32,
     pub restitution: f32,
     pub geometry: ColliderGeometry,
+    pub step_surface: Option<StepSurface>,
+}
+
+/// Source footstep surface of a collider: `otherStepSoundScript.tip` or tag `Wood` or `Sand`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StepSurface {
+    Road,
+    Desert,
+    Winter,
+    Grass,
+    Wood,
+    Sand,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

@@ -1342,6 +1342,7 @@ pub enum AudioKind {
     ItemHit = 11,
     CarHit = 12,
     RockHeat = 13,
+    Footstep = 14,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
