@@ -1,4 +1,4 @@
-use my_summer_slop::reference::{
+use the_long_slop::reference::{
     shadow_bounds::{BoundsKey, WorldBoundsCache},
     shadow_candidates::{Bounds, CandidateState},
     shadow_frame::{CasterInput, ShadowFrame, ShadowViewCache, prepare_frame, validate_casters},

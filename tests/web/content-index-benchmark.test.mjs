@@ -99,7 +99,7 @@ test('the real sampler rejects a false-profile request before measuring or writi
  const previous={window:globalThis.window,document:globalThis.document,fetch:globalThis.fetch,fixture:globalThis.cpuReceiptFixture};
  t.after(()=>{globalThis.window=previous.window;globalThis.document=previous.document;globalThis.fetch=previous.fetch;globalThis.cpuReceiptFixture=previous.fixture;});
  const wasm='data:text/javascript,'+encodeURIComponent('export const cpu_profile_audit=()=>JSON.stringify({enabled:globalThis.cpuReceiptFixture.rustEnabled}); export const streaming_profile_audit=()=>JSON.stringify({enabled:globalThis.cpuReceiptFixture.streamingEnabled});');
- const hooks=registerHooks({resolve(specifier,context,next){return specifier==='/pkg/my_summer_slop.js'?{url:wasm,shortCircuit:true}:next(specifier,context);}});t.after(()=>hooks.deregister());
+ const hooks=registerHooks({resolve(specifier,context,next){return specifier==='/pkg/the_long_slop.js'?{url:wasm,shortCircuit:true}:next(specifier,context);}});t.after(()=>hooks.deregister());
  const profile=createCpuProfile(()=>10,1000);profile.enable(true);
  let measurements=0,writes=0;
  globalThis.cpuReceiptFixture={rustEnabled:true,streamingEnabled:true};
@@ -127,14 +127,14 @@ test('server selects frozen inputs, confines paths, and preserves separate recei
  const webRoot=resolve(root,'web'),scriptsRoot=resolve(root,'scripts'),assetRoot=resolve(root,'assets'),packageRoot=resolve(root,'pkg'),resultsRoot=resolve(root,'results'),commit='a'.repeat(40);
  await Promise.all([mkdir(webRoot),mkdir(scriptsRoot),mkdir(resolve(assetRoot,'reference'),{recursive:true}),mkdir(packageRoot)]);
  await Promise.all([writeFile(resolve(webRoot,'index.html'),'game'),writeFile(resolve(assetRoot,'reference/manifest.json'),'{}'),
-  writeFile(resolve(packageRoot,'my_summer_slop.js'),'frozen-package'),writeFile(resolve(packageRoot,'my_summer_slop_bg.wasm'),'wasm'),
+  writeFile(resolve(packageRoot,'the_long_slop.js'),'frozen-package'),writeFile(resolve(packageRoot,'the_long_slop_bg.wasm'),'wasm'),
   writeFile(resolve(root,'private.txt'),'private'),writeFile(resolve(webRoot,'main.js'),'frozen-main'),writeFile(resolve(scriptsRoot,'measure-content-index.mjs'),'frozen measureContentIndex'),writeFile(resolve(packageRoot,'terrain_worker.js'),'frozen-worker'),writeFile(resolve(packageRoot,'terrain_worker_bg.wasm'),'worker-wasm')]);
  await assert.rejects(createContentIndexBenchmarkServer({webRoot,scriptsRoot,commit,assetRoot,packageRoot,resultsRoot:resolve(webRoot,'receipts'),variant:'candidate'}),/outside served directories/);
  const server=await createContentIndexBenchmarkServer({webRoot,scriptsRoot,commit,assetRoot,packageRoot,resultsRoot,variant:'baseline-recheck'});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  t.after(()=>new Promise((resolve,reject)=>{server.closeAllConnections();server.close(error=>error?reject(error):resolve());}));
  const base=`http://127.0.0.1:${server.address().port}`;
- assert.equal(await(await fetch(base+'/pkg/my_summer_slop.js')).text(),'frozen-package');
+ assert.equal(await(await fetch(base+'/pkg/the_long_slop.js')).text(),'frozen-package');
  assert.equal(await(await fetch(base+'/assets/reference/manifest.json')).text(),'{}');
  assert.match(await(await fetch(base+'/__measure.mjs')).text(),/measureContentIndex/);
  assert.match(await(await fetch(base+'/__scene-measure.mjs')).text(),/measureSceneResolution/);
@@ -142,7 +142,7 @@ test('server selects frozen inputs, confines paths, and preserves separate recei
  assert.equal((await fetch(base+'/assets/%2e%2e%5cprivate.txt')).status,400);
  assert.equal((await fetch(base+'/pkg/%2e%2e%5cprivate.txt')).status,400);
  const configuration=await(await fetch(base+'/__benchmark-config')).json();
- assert.equal(configuration.variant,'baseline-recheck');assert.match(configuration.identity.packages['my_summer_slop_bg.wasm'],/^[a-f0-9]{64}$/);
+ assert.equal(configuration.variant,'baseline-recheck');assert.match(configuration.identity.packages['the_long_slop_bg.wasm'],/^[a-f0-9]{64}$/);
  assert.match(configuration.identity.packages['terrain_worker_bg.wasm'],/^[a-f0-9]{64}$/);assert.match(configuration.identity.web['main.js'],/^[a-f0-9]{64}$/);assert.match(configuration.identity.scripts['measure-content-index.mjs'],/^[a-f0-9]{64}$/);
  const body=JSON.stringify({schemaVersion:2,label:'garage-fps',scenario:'garage',instrument:false,profileCpu:false,profileStreaming:false,cacheState:'warm',configuration,valid:false});
  const post=()=>fetch(base+'/__benchmark-result/garage-fps',{method:'POST',body});

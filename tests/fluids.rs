@@ -1,4 +1,4 @@
-use my_summer_slop::fluids::{FluidContainer, FluidEntry, spill, transfer};
+use the_long_slop::fluids::{FluidContainer, FluidEntry, spill, transfer};
 
 fn tank(capacity: f32, entries: &[(u8, f32)]) -> FluidContainer {
     let entries: Vec<_> = entries

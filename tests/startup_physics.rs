@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     reference::{ReferenceManifest, fixed_reservation::fixed_room},
     simulation::{DriveInput, FIXED_DT, FrameInput},
     starting_area::GarageRuntime,
@@ -12,7 +12,7 @@ fn installed_spawn_alignment_and_settling() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
     let mut run = GarageRuntime::new(&reference).unwrap();
-    use my_summer_slop::world::{RequiredView, WorldStream};
+    use the_long_slop::world::{RequiredView, WorldStream};
     let camera = [
         [1., 0., 0., 1e8],
         [-1., 0., 0., 1e8],
@@ -23,7 +23,7 @@ fn installed_spawn_alignment_and_settling() {
     ];
     let views = [RequiredView {
         camera,
-        shadow: my_summer_slop::reference::shadow_candidates::DirectionalHull::new(
+        shadow: the_long_slop::reference::shadow_candidates::DirectionalHull::new(
             camera,
             [1., 0., 0.],
         )
@@ -65,7 +65,7 @@ fn installed_spawn_alignment_and_settling() {
     assert!(run.stream.recovery_target([0.; 3], true).unwrap().is_none());
     assert_eq!(run.physics.snapshot(0).pose, start_pose);
     assert!(run.stream.frame().failure.is_none());
-    assert!(!run.stream.supports(my_summer_slop::world::WorldBounds {
+    assert!(!run.stream.supports(the_long_slop::world::WorldBounds {
         min: [-8.; 3],
         max: [8.; 3]
     }));
@@ -159,9 +159,9 @@ fn installed_spawn_alignment_and_settling() {
     allocation.prototype_gpu = 600 * 1024 * 1024;
     run.stream.set_presentation_allocation(allocation).unwrap();
     assert!(fixed_room(&run.stream, 1024, 0, 1024, true).unwrap());
-    let mut roads = my_summer_slop::world::RoadIndex::new(
-        my_summer_slop::world::RoadSequence::new(&reference.world, 42).unwrap(),
-        my_summer_slop::world::terrain_evaluator(&reference.world, 42),
+    let mut roads = the_long_slop::world::RoadIndex::new(
+        the_long_slop::world::RoadSequence::new(&reference.world, 42).unwrap(),
+        the_long_slop::world::terrain_evaluator(&reference.world, 42),
     );
     roads.prepare(102);
     let frontier = roads.segment(101).unwrap().position();

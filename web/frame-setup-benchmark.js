@@ -2,7 +2,7 @@
 // Keep instrumented setup counts separate from release frame-time samples.
 export async function measureFrameSetup({instrument = false, label = 'frame-setup', ...options} = {}) {
   const {measureContentIndex} = await import('/__measure.mjs');
-  const wasm = await import('/pkg/my_summer_slop.js');
+  const wasm = await import('/pkg/the_long_slop.js');
   const state = window.gameState;
   if (JSON.parse(wasm.source_render_audit()).state !== 'Ready' || !state?.started || state.paused) {
     throw Error('Frame setup measurement requires active gameplay and a ready renderer.');

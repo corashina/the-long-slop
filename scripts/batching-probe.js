@@ -2,7 +2,7 @@
 // FPS samples run without WebGL wrappers. Capture draws in a separate sample.
 import {saveRuntime} from '/main.js';
 import {ACTIONS} from '/menu.js';
-import {source_render_audit} from '/pkg/my_summer_slop.js';
+import {source_render_audit} from '/pkg/the_long_slop.js';
 const next=()=>new Promise(resolve=>requestAnimationFrame(resolve));
 const audit=()=>JSON.parse(source_render_audit());
 const read=()=>structuredClone(window.gameState);

@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     reference::shadow_candidates::DirectionalHull,
     world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
 };

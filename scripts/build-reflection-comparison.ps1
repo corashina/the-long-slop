@@ -16,7 +16,7 @@ $output = Join-Path $root ".cache/reflection-comparison/$($source.Substring(0,12
 New-Item -ItemType Directory -Path $output | Out-Null
 $archive = Join-Path $output 'source.tar'
 Invoke-Checked -File git -Arguments @('-C', $root, 'archive', '--format=tar', "--output=$archive", $source)
-$image = 'my-summer-slop-toolchain'
+$image = 'the-long-slop-toolchain'
 $imageId = & docker image inspect --format '{{.Id}}' $image
 if ($LASTEXITCODE -ne 0) { throw 'Build tools/Dockerfile before creating the comparison.' }
 $manifest = Join-Path $root 'web/assets/reference/manifest.json'
@@ -67,13 +67,13 @@ foreach ($variant in @('candidate', 'baseline')) {
         '--mount', 'type=volume,source=tld-wasm-cargo,target=/cargo',
         '--mount', 'type=volume,source=tld-wasm-target,target=/target',
         '--env', "CARGO_TARGET_DIR=$target", '--env', 'CARGO_BUILD_JOBS=2', $imageId.Trim(), 'sh', '-c',
-        'cargo clean --package my-summer-slop --release --target wasm32-unknown-unknown && cargo build --locked --release --target wasm32-unknown-unknown --lib && wasm-bindgen --target web --out-dir web/pkg --out-name my_summer_slop "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/my_summer_slop.wasm"')
+        'cargo clean --package the-long-slop --release --target wasm32-unknown-unknown && cargo build --locked --release --target wasm32-unknown-unknown --lib && wasm-bindgen --target web --out-dir web/pkg --out-name the_long_slop "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/the_long_slop.wasm"')
     Invoke-Checked -File docker -Arguments $arguments
-    $wasm = Join-Path $directory 'web/pkg/my_summer_slop_bg.wasm'
+    $wasm = Join-Path $directory 'web/pkg/the_long_slop_bg.wasm'
     $receipt.packages[$variant] = [ordered]@{
         root = $directory
         wasm_sha256 = (Get-FileHash -LiteralPath $wasm -Algorithm SHA256).Hash
-        javascript_sha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'web/pkg/my_summer_slop.js') -Algorithm SHA256).Hash
+        javascript_sha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'web/pkg/the_long_slop.js') -Algorithm SHA256).Hash
         bytes = (Get-Item -LiteralPath $wasm).Length
     }
     $receipt.cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'Cargo.lock') -Algorithm SHA256).Hash

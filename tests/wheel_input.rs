@@ -1,4 +1,4 @@
-use my_summer_slop::{
+use the_long_slop::{
     interaction::{
         AimTarget, InteractionAction, ResolvedAim, SlotTarget, WheelAction, feedback::ActionMask,
         items::ItemLocation,
@@ -76,7 +76,7 @@ fn installed_source_tire_input_order_and_rejection() {
         .items
         .iter()
         .find(|item| {
-            matches!(item.kind, my_summer_slop::reference::ItemKind::Rim)
+            matches!(item.kind, the_long_slop::reference::ItemKind::Rim)
                 && item.attached_to.is_none()
         })
         .unwrap()
@@ -86,7 +86,7 @@ fn installed_source_tire_input_order_and_rejection() {
         .iter()
         .find(|item| {
             item.attached_to == Some(spare)
-                && matches!(item.kind, my_summer_slop::reference::ItemKind::Tire)
+                && matches!(item.kind, the_long_slop::reference::ItemKind::Tire)
         })
         .unwrap()
         .id;

@@ -17,7 +17,7 @@ test('preparation compresses current WASM and JSON outside checked packages and 
   ]}};
   const originals = new Map([
     ['assets/reference/manifest.json', Buffer.from(JSON.stringify(manifest))],
-    ['pkg/my_summer_slop_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],
+    ['pkg/the_long_slop_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],
     ['pkg/terrain_worker_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],
     ['pkg/road_worker_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],
     ['pkg/grass_worker_bg.wasm', Buffer.from([0, 97, 115, 109, 1, 0, 0, 0])],

@@ -1,5 +1,5 @@
-use my_summer_slop::reference::WorldReference;
-use my_summer_slop::world::*;
+use the_long_slop::reference::WorldReference;
+use the_long_slop::world::*;
 fn reference() -> &'static WorldReference {
     static REFERENCE: std::sync::OnceLock<WorldReference> = std::sync::OnceLock::new();
     REFERENCE.get_or_init(|| {
@@ -131,8 +131,8 @@ fn invalid_frontier_is_rejected() {
 fn schema_five_is_rejected_before_payload_decode() {
     let bytes = br#"{"schema_version":5}"#;
     assert!(matches!(
-        my_summer_slop::save::SaveSnapshot::from_json(bytes),
-        Err(my_summer_slop::save::SaveError::IncompatibleSources(_))
+        the_long_slop::save::SaveSnapshot::from_json(bytes),
+        Err(the_long_slop::save::SaveError::IncompatibleSources(_))
     ));
     assert_eq!(bytes, br#"{"schema_version":5}"#);
 }
@@ -258,7 +258,7 @@ fn checkpoint_order_and_helper_coverage_are_checked() {
 
 #[test]
 fn required_views_include_casters_and_use_their_own_origin() {
-    use my_summer_slop::reference::shadow_candidates::DirectionalHull;
+    use the_long_slop::reference::shadow_candidates::DirectionalHull;
     let camera = [
         [1., 0., 0., 1.],
         [-1., 0., 0., 1.],
@@ -305,7 +305,7 @@ fn required_views_include_casters_and_use_their_own_origin() {
 
 #[test]
 fn required_source_planes_reflect_z_after_nonzero_rebase() {
-    use my_summer_slop::reference::{
+    use the_long_slop::reference::{
         shadow_candidates::DirectionalHull, shadow_planes::implicit_cull_planes,
         view_math::source_culling_view,
     };

@@ -187,7 +187,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 })
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "My Summer Slop".into(),
+                        title: "The Long Slop".into(),
                         canvas: Some("#game".into()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: true,

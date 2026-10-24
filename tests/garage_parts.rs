@@ -1,5 +1,5 @@
 //! Critical G02 transactions against the installed build 11140890 export.
-use my_summer_slop::{
+use the_long_slop::{
     interaction::{InteractionAction, InteractionBlock, ResolvedAim, items::ItemLocation},
     reference::{ItemId, PartSlotId, ReferenceManifest},
     simulation::{FIXED_DT, FrameInput, keys},
@@ -289,11 +289,11 @@ fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
     ]);
     let player_pose = run.area.player.body_pose(&run.physics);
     run.physics.edit_body(run.area.player.body_handle(), |b| {
-        b.set_position(my_summer_slop::vehicle::to_rapier(player_pose), true)
+        b.set_position(the_long_slop::vehicle::to_rapier(player_pose), true)
     });
     let body = run.area.items.get(rear).unwrap().body.unwrap();
     run.physics.edit_body(body, |b| {
-        b.set_position(my_summer_slop::vehicle::to_rapier(pose), true)
+        b.set_position(the_long_slop::vehicle::to_rapier(pose), true)
     });
     run.area.items.sync_poses(&run.physics);
     sync(&mut run);

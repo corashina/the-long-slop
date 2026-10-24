@@ -43,7 +43,7 @@ try {
   result.configuration = await page.evaluate(async () => (await fetch('/__benchmark-config')).json());
   if (values.profile) {
     await poll(() => page.evaluate(async () => {
-      const wasm = await import('/pkg/my_summer_slop.js');
+      const wasm = await import('/pkg/the_long_slop.js');
       try {
         wasm.reflection_preparation_profile(true);
         wasm.shadow_preparation_profile?.(true);
@@ -92,7 +92,7 @@ try {
   if (values.scenario === 'driving') await page.keyboard.down('KeyW');
   stage = values.profile ? 'profile' : 'fps';
   result.sample = await page.evaluate(async ({seconds, profile, scenario}) => {
-    const wasm = await import('/pkg/my_summer_slop.js');
+    const wasm = await import('/pkg/the_long_slop.js');
     const {measureContentIndex} = await import('/__measure.mjs');
     const shadowProfile = wasm.shadow_preparation_profile;
     if (profile && shadowProfile) shadowProfile(true);
@@ -126,7 +126,7 @@ try {
           status:document.querySelector('#status')?.textContent,
           captureError:document.querySelector('#capture-error')?.textContent};
         try {
-          const wasm = await import('/pkg/my_summer_slop.js');
+          const wasm = await import('/pkg/the_long_slop.js');
           observed.audit = JSON.parse(wasm.source_render_audit());
           if (wasm.shadow_preparation_audit) observed.shadowProfile = JSON.parse(wasm.shadow_preparation_audit());
           observed.preparationProfile = JSON.parse(wasm.reflection_preparation_audit());

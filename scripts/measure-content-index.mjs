@@ -51,7 +51,7 @@ export async function measureContentIndex({durationMs=10000,instrument=false,pro
  const configuration=await configResponse.json();
  const canvas=document.querySelector('#game'),gl=canvas?.getContext('webgl2');
  if(!gl||typeof window.gamePerformanceFrame!=='function'||typeof window.measureWorld!=='function')throw Error('The game is unavailable');
- const {source_render_audit,streaming_profile,streaming_profile_audit,cpu_profile_audit}=await import('/pkg/my_summer_slop.js');
+ const {source_render_audit,streaming_profile,streaming_profile_audit,cpu_profile_audit}=await import('/pkg/the_long_slop.js');
  const startupScenario=scenario.startsWith('startup-');
  if(!window.gameCpuInstrumentationState||!cpu_profile_audit||!streaming_profile_audit)throw Error('Instrumentation state is unavailable');
  const assertActiveMode=()=>assertCpuProfileMode(profileCpu,profileStreaming,{...window.gameCpuInstrumentationState(),rustEnabled:JSON.parse(cpu_profile_audit()).enabled,streamingEnabled:JSON.parse(streaming_profile_audit()).enabled});

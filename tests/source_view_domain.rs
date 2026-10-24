@@ -1,4 +1,4 @@
-use my_summer_slop::reference::view_math::source_culling_view;
+use the_long_slop::reference::view_math::source_culling_view;
 use rapier3d::na::{Matrix4, UnitQuaternion, Vector3, Vector4};
 
 #[test]
@@ -26,7 +26,7 @@ fn source_culling_inverse_and_positions_share_source_world() {
 
 #[test]
 fn candidate_views_use_private_pose_and_origin() {
-    use my_summer_slop::{
+    use the_long_slop::{
         reference::{shadow_candidates::DirectionalHull, shadow_planes::implicit_cull_planes},
         world::{RequiredView, WorldBounds},
     };

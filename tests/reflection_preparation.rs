@@ -1,4 +1,4 @@
-use my_summer_slop::reference::reflections::{ProbeJob, ProbeSchedule, prepare_probe_face};
+use the_long_slop::reference::reflections::{ProbeJob, ProbeSchedule, prepare_probe_face};
 
 #[test]
 fn runtime_prepares_one_face_and_no_faces_for_mips() {

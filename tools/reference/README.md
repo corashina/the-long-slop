@@ -6,7 +6,7 @@ Prepare the host tools below before export.
 ```powershell
 python -m venv tools/reference/.venv
 tools/reference/.venv/Scripts/python.exe -m pip install -r tools/reference/requirements.txt
-docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .
+docker build --tag the-long-slop-toolchain --file tools/Dockerfile .
 tools/reference/.venv/Scripts/python.exe -m tools.reference.export --steam-root "C:/Program Files (x86)/Steam/steamapps/common/The Long Drive"
 tools/reference/.venv/Scripts/python.exe -m unittest discover -s tools/reference/tests
 ./scripts/check.ps1 -Test reference
@@ -46,7 +46,7 @@ The preflight loads tool assemblies and checks package, assembly, and dependency
 It does not read game assemblies or write analysis output.
 
 Runtime derivation and `--stage runtime --verify` require Docker and the project toolchain image.
-Build the image with `docker build --tag my-summer-slop-toolchain --file tools/Dockerfile .`.
+Build the image with `docker build --tag the-long-slop-toolchain --file tools/Dockerfile .`.
 Runtime verification sends manifest bytes to the native `validate-reference` command through stdin.
 It uses the game's `ReferenceManifest` contract, the existing Cargo volumes, and a read-only checkout mount.
 Missing Docker, failed validation, or an unavailable image stops acceptance before promotion.
@@ -239,8 +239,8 @@ Keep source recovery, analysis, scenario patches, and captures outside Git.
 Use an accepted library from another checkout without changing its files:
 
 ```powershell
-$referencePython = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/tools/reference/.venv/Scripts/python.exe'
-$libraryRoot = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm/web/assets/library'
+$referencePython = 'C:/Users/Corashina/Documents/Projects/the-long-slop/tools/reference/.venv/Scripts/python.exe'
+$libraryRoot = 'C:/Users/Corashina/Documents/Projects/the-long-slop/web/assets/library'
 & $referencePython -B -m tools.reference.export --library-root $libraryRoot
 & $referencePython -B -m tools.reference.export --library-root $libraryRoot --verify
 ```

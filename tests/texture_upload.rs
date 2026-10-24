@@ -17,7 +17,7 @@ fn texture_cpu_reservation_lasts_until_gpu_completion_across_forks() {
     assert!(!receipt.register());
 }
 
-use my_summer_slop::world::texture_batch_ownership::*;
+use the_long_slop::world::texture_batch_ownership::*;
 fn id(request: u64) -> BatchIdentity {
     BatchIdentity {
         session: 1,
@@ -110,7 +110,7 @@ fn shared_storage_survives_cancelled_session_until_last_owner() {
 #[test]
 #[ignore = "requires installed texture package"]
 fn installed_pairs_fit_unchanged_staging_limit() {
-    use my_summer_slop::reference::LightingTextureRecord;
+    use the_long_slop::reference::LightingTextureRecord;
     let root = std::path::PathBuf::from(std::env::var("TEXTURE_BATCH_PACKAGE").unwrap());
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("reference/manifest.json")).unwrap())
@@ -191,7 +191,7 @@ fn refill_checks_combined_staging_before_launch() {
 #[test]
 #[ignore = "requires installed texture package"]
 fn installed_terrain_banks_preserve_source_bindings_without_duplicate_layers() {
-    use my_summer_slop::reference::{
+    use the_long_slop::reference::{
         LightingTextureRecord, WorldSourceMaterial,
         texture_batch::{TextureArrayKey, texture_bank_groups},
     };

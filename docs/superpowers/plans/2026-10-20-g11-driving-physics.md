@@ -43,7 +43,7 @@ These risks require explicit tests in the owning tasks.
 
 Use the existing worktree:
 
-`C:/Users/Corashina/.codex/worktrees/g11-driving-physics/the-long-drive-wasm`
+`C:/Users/Corashina/.codex/worktrees/g11-driving-physics/the-long-slop`
 
 Use branch `codex/g11-driving-physics`.
 Start from the committed specification. Do not merge newer primary-checkout work implicitly.
@@ -102,7 +102,7 @@ Run commands from the G11 worktree in PowerShell.
 These variables identify existing read-only dependencies:
 
 ```powershell
-$g11ReferenceProject = 'C:/Users/Corashina/Documents/Projects/the-long-drive-wasm'
+$g11ReferenceProject = 'C:/Users/Corashina/Documents/Projects/the-long-slop'
 $g11Python = "$g11ReferenceProject/tools/reference/.venv/Scripts/python.exe"
 $g11Source = "$g11ReferenceProject/.cache/reference-library/source"
 $g11Raw = '.cache/driving-source/capture-001'
@@ -583,7 +583,7 @@ $g11DockerArgs = @(
     '--env', "G11_TESTED_REVISION=$g11Revision",
     '--env', "G11_ASSET_MANIFEST=$g11AssetManifest",
 
-    '--workdir', '/workspace', 'my-summer-slop-toolchain'
+    '--workdir', '/workspace', 'the-long-slop-toolchain'
 )
 & docker @g11DockerArgs cargo test --locked --lib g11_native
 if ($LASTEXITCODE -ne 0) { throw 'G11 component replay failed' }

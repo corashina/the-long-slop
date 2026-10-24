@@ -1,5 +1,5 @@
 //! Engine save boundaries checked against the installed build 11140890 export.
-use my_summer_slop::{
+use the_long_slop::{
     fluids::{FluidContainer, FluidEntry, transfer},
     reference::ReferenceManifest,
     save::{CameraSave, IdentityMap, SaveError, SaveSnapshot, SourceHash, SourceStamp},
@@ -283,7 +283,7 @@ fn fluid_save_order_and_validation() {
         Err(SaveError::IncompatibleSources(_))
     ));
     assert!(
-        serde_json::from_str::<my_summer_slop::fluids::FluidSnapshot>(
+        serde_json::from_str::<the_long_slop::fluids::FluidSnapshot>(
             r#"[{"fluid_type":3,"amount":0,"extra":true}]"#
         )
         .is_err()
@@ -293,7 +293,7 @@ fn fluid_save_order_and_validation() {
 #[test]
 #[ignore = "requires the installed build 11140890 export"]
 fn ignition_save_ownership_and_cancellation() {
-    use my_summer_slop::simulation::ignition::IgnitionInput;
+    use the_long_slop::simulation::ignition::IgnitionInput;
     let (reference, stamp) = installed_source();
     let mut game = GarageRuntime::new(&reference).unwrap();
     let delay = reference.vehicles[0].engine.starter_delay_seconds;
@@ -345,7 +345,7 @@ fn ignition_save_ownership_and_cancellation() {
     }
 }
 
-use my_summer_slop::{
+use the_long_slop::{
     fluids::VehicleFluids,
     reference::EngineReference,
     simulation::engine::{EngineInput, EngineOutput, EngineState, InstalledEngineInput},
@@ -403,7 +403,7 @@ fn installed() -> EngineInput {
     }
 }
 
-fn primed(rig: &EngineRig) -> my_summer_slop::save::EngineSnapshot {
+fn primed(rig: &EngineRig) -> the_long_slop::save::EngineSnapshot {
     let mut state = rig.engine.capture_save();
     state.elapsed = 1.;
     state.last_run_time = 1.;

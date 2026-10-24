@@ -1,4 +1,4 @@
-pub use my_summer_slop::reference;
+pub use the_long_slop::reference;
 
 #[path = "../src/presentation/renderer_visibility.rs"]
 #[allow(dead_code)]

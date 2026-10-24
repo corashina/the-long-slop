@@ -1,5 +1,5 @@
 //! Critical G04 fluid checks against the installed single-Lada export.
-use my_summer_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
+use the_long_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -60,7 +60,7 @@ fn g04_ordered_snapshot_capture_and_copy_do_not_allocate() {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_portable_mass_bounds_signed_depletion() {
-    use my_summer_slop::{
+    use the_long_slop::{
         fluids::{FluidContainer, FluidEntry, FluidSnapshot, spill},
         reference::ItemId,
         simulation::FIXED_DT,
@@ -135,9 +135,9 @@ fn g04_portable_mass_bounds_signed_depletion() {
 fn cap_aim(
     run: &GarageRuntime,
     r: &ReferenceManifest,
-    cap: my_summer_slop::reference::ItemId,
-) -> my_summer_slop::interaction::ResolvedAim {
-    use my_summer_slop::interaction::{AimTarget, ResolvedAim};
+    cap: the_long_slop::reference::ItemId,
+) -> the_long_slop::interaction::ResolvedAim {
+    use the_long_slop::interaction::{AimTarget, ResolvedAim};
     let binding = r
         .action_bindings
         .iter()
@@ -167,9 +167,9 @@ fn cap_aim(
 
 fn fluid_step(
     run: &mut GarageRuntime,
-    input: my_summer_slop::simulation::FrameInput,
-    aim: my_summer_slop::interaction::ResolvedAim,
-) -> Option<my_summer_slop::interaction::InteractionAction> {
+    input: the_long_slop::simulation::FrameInput,
+    aim: the_long_slop::interaction::ResolvedAim,
+) -> Option<the_long_slop::interaction::InteractionAction> {
     run.area
         .interaction
         .step(
@@ -178,15 +178,15 @@ fn fluid_step(
             &mut run.area.player,
             &mut run.area.items,
             &mut run.physics,
-            my_summer_slop::simulation::FIXED_DT,
+            the_long_slop::simulation::FIXED_DT,
             run.survival.output(),
             1.,
         )
         .action
 }
 
-fn hold_tank(run: &mut GarageRuntime, tank: my_summer_slop::reference::ItemId) {
-    use my_summer_slop::vehicle::to_rapier;
+fn hold_tank(run: &mut GarageRuntime, tank: the_long_slop::reference::ItemId) {
+    use the_long_slop::vehicle::to_rapier;
     use rapier3d::math::Vector;
     let body = run.area.items.get(tank).unwrap().body.unwrap();
     let view = to_rapier(run.area.player.view(&run.physics).head_pose);
@@ -209,10 +209,10 @@ fn hold_tank(run: &mut GarageRuntime, tank: my_summer_slop::reference::ItemId) {
 fn set_cap(
     run: &mut GarageRuntime,
     r: &ReferenceManifest,
-    id: my_summer_slop::reference::OpeningId,
+    id: the_long_slop::reference::OpeningId,
     open: bool,
 ) {
-    use my_summer_slop::{
+    use the_long_slop::{
         interaction::{InteractionAction, InteractionSound},
         simulation::{FrameInput, keys},
     };
@@ -247,9 +247,9 @@ fn set_cap(
 fn fill_step(
     run: &mut GarageRuntime,
     r: &ReferenceManifest,
-    cap: my_summer_slop::reference::ItemId,
-) -> Option<my_summer_slop::interaction::InteractionAction> {
-    use my_summer_slop::{
+    cap: the_long_slop::reference::ItemId,
+) -> Option<the_long_slop::interaction::InteractionAction> {
+    use the_long_slop::{
         interaction::{InteractionAction, feedback::ActionMask},
         simulation::{FrameInput, keys},
     };
@@ -291,7 +291,7 @@ fn fill_step(
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_caps_and_direct_fill() {
-    use my_summer_slop::{
+    use the_long_slop::{
         fluids::{FluidContainer, FluidEntry},
         interaction::{InteractionAction, feedback::ActionMask},
         reference::{ItemId, TankRole},
@@ -376,7 +376,7 @@ fn g04_caps_and_direct_fill() {
         .total();
     assert!(source_after < source_before);
     assert!(receiver_after > receiver_before);
-    let expected = receiver_cap.flow_liters_per_second * my_summer_slop::simulation::FIXED_DT;
+    let expected = receiver_cap.flow_liters_per_second * the_long_slop::simulation::FIXED_DT;
     assert!((source_before - source_after - expected).abs() < 1e-6);
     assert!((receiver_after - receiver_before - expected).abs() < 1e-6);
     assert_eq!(
@@ -473,7 +473,7 @@ fn g04_caps_and_direct_fill() {
     };
     let expected = supply_cap.flow_liters_per_second
         * run.area.interaction.opening_valve(supply_cap.id)
-        * my_summer_slop::simulation::FIXED_DT;
+        * the_long_slop::simulation::FIXED_DT;
     assert!((liters - expected).abs() < 1e-6);
     assert!(run.area.interaction.opening_audio_flags(supply_cap.id).0);
     run.area.items.get_mut(supply).unwrap().fluid = Some(FluidContainer::new(1000., &[]));
@@ -536,7 +536,7 @@ fn g04_caps_and_direct_fill() {
     };
     assert_eq!(oil, ItemId(120));
     assert_eq!(destination, receiver);
-    let requested = receiver_cap.flow_liters_per_second * my_summer_slop::simulation::FIXED_DT;
+    let requested = receiver_cap.flow_liters_per_second * the_long_slop::simulation::FIXED_DT;
     let expected = (requested * 0.5 * r.fluid_rules.slow_oil_modifier)
         .max(0.0001)
         .min(requested);
@@ -566,7 +566,7 @@ fn g04_caps_and_direct_fill() {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_particle_receipt() {
-    use my_summer_slop::{
+    use the_long_slop::{
         fluids::{FluidContainer, FluidEntry, spill},
         interaction::ResolvedAim,
         reference::ItemId,
@@ -609,8 +609,8 @@ fn g04_particle_receipt() {
         .iter()
         .find(|a| a.id == source_cap.anchor)
         .unwrap();
-    let pose = |t: &my_summer_slop::reference::Transform| {
-        to_rapier(my_summer_slop::vehicle::VehiclePose {
+    let pose = |t: &the_long_slop::reference::Transform| {
+        to_rapier(the_long_slop::vehicle::VehiclePose {
             position: t.translation,
             rotation: t.rotation,
         })
@@ -721,7 +721,7 @@ fn sync_fluid_mass(run: &mut GarageRuntime) {
     run.area.sync_portable_mass(&mut run.physics);
 }
 
-fn tank_total(run: &GarageRuntime, tank: my_summer_slop::reference::ItemId) -> f32 {
+fn tank_total(run: &GarageRuntime, tank: the_long_slop::reference::ItemId) -> f32 {
     run.area
         .items
         .get(tank)
@@ -742,7 +742,7 @@ fn mass_near(actual: f32, expected: f32) {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_detached_tanks_and_save() {
-    use my_summer_slop::{
+    use the_long_slop::{
         interaction::{InteractionAction, ResolvedAim, items::ItemLocation},
         reference::ItemId,
         simulation::FrameInput,
