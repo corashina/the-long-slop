@@ -863,11 +863,16 @@ impl AudioState {
         self.survival_events.clear();
         self.survival_loops.clear();
         self.sleep_radio_advanced = false;
+        // Controls belong to the committed session (fresh or restored); playlists restart.
+        let controls = self.radio.capture_save();
         self.radio = crate::simulation::radio::RadioState::new(
             &self.reference.radio,
             &self.reference.clips,
             [0, 0],
         );
+        self.radio
+            .restore_save(&controls)
+            .expect("committed radio controls were validated");
         self.radio_frame = crate::simulation::radio::RadioFrame::default();
         self.session = session;
         self.queue.fill(None);

@@ -42,6 +42,13 @@ fn g10_control_restore_has_no_side_effects() {
     engine.temperature = 65.;
     vehicle.engine_output = vehicle.engine.restore_save(&engine).unwrap();
     vehicle.trip_m = 321.;
+    vehicle
+        .drivetrain
+        .restore_gear(reference.vehicles[0].gear_ratios.len() - 1);
+    run.driving_assists = crate::reference::DrivingAssists {
+        automatic_clutch: true,
+        automatic_gears: false,
+    };
     let radio = &mut run.audio.as_mut().unwrap().radio;
     radio.on = true;
     radio.am = true;
@@ -74,6 +81,10 @@ fn g10_control_restore_has_no_side_effects() {
     );
     assert_eq!(recaptured.vehicles[0].engine, saved.vehicles[0].engine);
     assert_eq!(recaptured.vehicles[0].trip_m, saved.vehicles[0].trip_m);
+    assert!(recaptured.vehicles[0].ignition);
+    assert_eq!(recaptured.vehicles[0].gear, saved.vehicles[0].gear);
+    assert_eq!(recaptured.driving_assists, saved.driving_assists);
+    assert_eq!(recaptured.radio, saved.radio);
     for expected in saved
         .bodies
         .iter()
@@ -124,22 +135,26 @@ fn g10_control_restore_has_no_side_effects() {
             "restore replayed an endpoint sound"
         );
     }
-    // G13 does not persist radio controls. Its actual restored state owns visuals.
-    let initial = run.audio.as_ref().unwrap().reference.radio.clone();
-    let defaults = crate::simulation::radio::RadioState::new(
-        &initial,
-        &run.audio.as_ref().unwrap().reference.clips,
-        [10, 20],
-    );
-    assert_eq!(
+    // A09: save_radioscript controls survive the load and the session audio reset.
+    let controls = (true, true, 0.83, 0.65);
+    let restored_controls = |audio: &crate::audio::AudioState| {
         (
             audio.radio.on,
             audio.radio.am,
             audio.radio.tuning,
-            audio.radio.volume
-        ),
-        (defaults.on, defaults.am, defaults.tuning, defaults.volume)
+            audio.radio.volume,
+        )
+    };
+    assert_eq!(saved.radio, Some(audio.radio.capture_save()));
+    assert_eq!(restored_controls(audio), controls);
+    audio.reset(audio.session.wrapping_add(1));
+    assert_eq!(restored_controls(audio), controls);
+    audio.fixed_step(
+        &restored.area,
+        &restored.physics,
+        crate::simulation::FIXED_DT,
     );
+    let initial = run.audio.as_ref().unwrap().reference.radio.clone();
     assert_eq!(
         audio.radio_frame.power,
         audio.radio.on && initial.electronics_output > initial.electronics_cutoff

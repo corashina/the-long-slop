@@ -1,7 +1,7 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 9;
+pub const SAVE_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +34,8 @@ pub struct SaveSnapshot {
     pub mechanisms: MechanismsSnapshot,
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
+    /// save_radioscript controls; absent only when the audio export is unavailable.
+    pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
 }
@@ -285,6 +287,14 @@ pub enum SwitchMotionSave {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RadioSnapshot {
+    pub on: bool,
+    pub am: bool,
+    pub tuning: f32,
+    pub volume: f32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ViewSnapshot {
     pub camera: CameraSave,
 }
@@ -342,7 +352,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8] {
+        for version in [6, 7, 8, 9] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),

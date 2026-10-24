@@ -30,7 +30,6 @@ Finish the home, garage, Lada, and nearby driving first.
 | P01 | Fix player slope normals. [Player](../src/player.rs) | M | Fix Rapier slope normals over flat floors near 2000 units from origin. [A03] |
 | P03 | Finish Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | L | Launch, tire grip, bare rims, empty hubs, suspension, wheel spin, combined braking. Verify gears, clutch, and assists. [A04-A07, M15] |
 | P04 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | M | Verify nearby collision, ground seams, re-entry, and loose-object stability. [A08] |
-| P05 | Save garage progress. [Save](../src/save/schema.rs), [restore](../src/starting_area/save.rs) | S | Save radio controls. Keep all garage and car state through save, reload, and load. [A09] |
 | P06 | Complete player movement. [Player](../src/player) | M | Ladders, head bob on foot and in cars, sleep eligibility, hazard triggers. [D04, D07, D08, E06] |
 | P07 | Add player sounds. [Audio](../web/audio.js) | M | Footsteps by surface, prop hit sounds, time-of-day ambience, interior muffling, audio priority limits. [L01, L03, L04, L06, L08] |
 | P08 | Complete survival. [Survival](../src/survival.rs) | M | Verify needs, healing, death, alcohol, car-fluid damage, all food values. Save player needs. [E01-E03, E07, F16] |
