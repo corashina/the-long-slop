@@ -347,6 +347,7 @@ extern "C" {
         water: f32,
         blood: f32,
         diesel: f32,
+        fluid_order: u32,
         control: u32,
         lmb_use: bool,
     );
