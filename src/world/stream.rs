@@ -143,8 +143,17 @@ pub struct WorldStream {
     binding_reserved: usize,
     lamp_bindings: Vec<content_lamps::LampBinding>,
     dial_bindings: Vec<content_dials::DialBinding>,
+    pub(crate) small_items: content_small_items::SmallItems,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
+    level_bindings: Vec<content_levels::LevelBinding>,
+    /// Session and active revision whose spirit levels are all bound.
+    level_scan: Option<(u64, u64)>,
+    radio_bindings: Vec<content_radios::RadioBinding>,
+    /// Session and active revision whose radio items are all bound.
+    radio_scan: Option<(u64, u64)>,
+    /// Prototype radioscript lookups.
+    radio_scripts: Vec<(SourceId, Option<SourceId>)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -180,6 +189,7 @@ pub struct WorldStream {
     placements: PlacementIndex,
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
+    boxes: content_boxes::BoxRuntime,
     evaluator: TerrainEvaluator,
     color_foundations: Vec<super::FoundationPoint>,
     color_helpers: Vec<TerrainFoundation>,
@@ -363,7 +373,20 @@ impl WorldStream {
                     radius * radius,
                 )
         });
+        let boxes = self
+            .contents
+            .boxes
+            .released()
+            .iter()
+            .filter(|r| {
+                changes
+                    .get(super::ObjectKey::Generated(r.id.clone()))
+                    .is_some_and(|c| c.snapshot.is_none())
+            })
+            .cloned()
+            .collect();
         crate::save::WorldSnapshot {
+            boxes,
             generation: super::GenerationSnapshot {
                 generator_contract: super::GENERATOR_CONTRACT,
                 package_id: self.package_id.clone(),
@@ -417,6 +440,7 @@ impl WorldStream {
         self.generation_revision += 1;
         self.contents.state = history;
         self.changes = saved.changes.clone();
+        self.contents.boxes.restore(&saved.boxes);
         self.change_revision = u64::MAX;
         self.change_bounds = None;
         Ok(())
@@ -657,7 +681,9 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let contents = super::contents::SourceContents::new(world);
+        let mut contents = super::contents::SourceContents::new(world);
+        contents.boxes =
+            content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
@@ -683,7 +709,13 @@ impl WorldStream {
             binding_reserved: 0,
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
+            small_items: content_small_items::SmallItems::new(reference),
             dial_scan: None,
+            level_bindings: Vec::new(),
+            level_scan: None,
+            radio_bindings: Vec::new(),
+            radio_scan: None,
+            radio_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
             structure_helpers,
@@ -729,6 +761,7 @@ impl WorldStream {
             placements: PlacementIndex::new(world, seed),
             props: super::prop_layers::PropLayers::new(world, seed)?,
             contents,
+            boxes: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
@@ -1863,6 +1896,9 @@ impl WorldStream {
             return;
         }
         for content in self.contents.instances() {
+            if self.box_content_withheld(&content.placement.id) {
+                continue;
+            }
             let key = super::ObjectKey::Generated(content.placement.id.clone());
             let selected = self.replay_indices.iter().any(|&index| {
                 let (_, c) = self.changes.get_indexed(index);
@@ -2086,6 +2122,33 @@ impl WorldStream {
                         if !output.contains(material) {
                             output.push(material.clone());
                         }
+                    }
+                }
+            }
+        }
+        let mut radios = Vec::new();
+        self.contents.rules.children(
+            &self.reference,
+            prototype,
+            "radioscript",
+            true,
+            &mut radios,
+        )?;
+        for source in radios {
+            let f = self.contents.rules.get(&self.reference, source)?.fields;
+            for (renderer, on, off) in [("RS", "SOn", "SOff"), ("RMutato", "MutatoOn", "MutatoOff")]
+            {
+                if self
+                    .contents
+                    .rules
+                    .root(&self.reference, link(f, renderer)?)?
+                    != node
+                {
+                    continue;
+                }
+                for material in [link(f, on)?, link(f, off)?] {
+                    if !output.contains(material) {
+                        output.push(material.clone());
                     }
                 }
             }
@@ -3839,6 +3902,18 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_small_items(reference, items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
+        if let Err(error) = self.sync_level_bindings(&reference.small_items.spirit_level, items) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
+        if let Err(error) = self.sync_radio_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4193,6 +4268,24 @@ impl WorldStream {
                 }))
     }
 
+    /// Height of published terrain or road at a local point, cast from far above.
+    pub fn ground_height(&self, physics: &PhysicsWorld, point: [f32; 3]) -> Option<f32> {
+        use rapier3d::math::Vector;
+        use rapier3d::prelude::{QueryFilter, Ray};
+        let ray = Ray::new(
+            Vector::new(point[0], point[1] + 1000., point[2]),
+            -Vector::Y,
+        );
+        let ground = |handle: ColliderHandle, _: &rapier3d::prelude::Collider| {
+            self.surfaces
+                .iter()
+                .any(|surface| surface.collider == Some(handle))
+        };
+        physics
+            .queries(QueryFilter::default().predicate(&ground))
+            .cast_ray(&ray, 2000., true)
+            .map(|(_, distance)| ray.origin.y - distance)
+    }
     /// Search eight published road controls per update. No source index replay occurs here.
     pub fn prepare_recovery_pose(
         &mut self,
@@ -4538,6 +4631,23 @@ impl WorldStream {
                     .iter()
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
+                + self.small_items.heap_bytes()
+                + self.level_bindings.capacity()
+                    * std::mem::size_of::<content_levels::LevelBinding>()
+                + self
+                    .level_bindings
+                    .iter()
+                    .map(content_levels::LevelBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.radio_bindings.capacity()
+                    * std::mem::size_of::<content_radios::RadioBinding>()
+                + self
+                    .radio_bindings
+                    .iter()
+                    .map(content_radios::RadioBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.radio_scripts.capacity()
+                    * std::mem::size_of::<(SourceId, Option<SourceId>)>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -4826,14 +4936,25 @@ fn source_distance_squared(a: [f64; 3], b: [f64; 3]) -> f32 {
 #[path = "content_bindings.rs"]
 pub(crate) mod content_bindings;
 
+#[path = "content_boxes.rs"]
+pub(crate) mod content_boxes;
+
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
 
 #[path = "content_dials.rs"]
 mod content_dials;
+#[path = "content_radios.rs"]
+mod content_radios;
+
+#[path = "content_small_items.rs"]
+mod content_small_items;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[path = "content_levels.rs"]
+mod content_levels;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]

@@ -44,12 +44,13 @@ pub(crate) mod stream;
 pub use stream::content_index::ContentIndex;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
+pub use stream::content_boxes::BoxRelease;
 pub use stream::{
     PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
     WorldRequest, WorldStream,
 };
 mod startup;
-pub use startup::StartupTerrain;
+pub use startup::{StartupTerrain, source_world_pose};
 mod terrain;
 pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,

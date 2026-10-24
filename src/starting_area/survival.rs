@@ -749,7 +749,7 @@ impl GarageRuntime {
             playback.source_loop(kind, 0, gain, position);
             if gain > 0.5 && !playback.sleep_radio_advanced {
                 playback.sleep_radio_advanced = true;
-                playback.radio.advance_sleep(playback.game_seconds);
+                playback.broadcasts.advance_sleep(playback.game_seconds);
             }
         }
     }

@@ -50,13 +50,27 @@ struct Station {
     start: f64,
     random: u32,
 }
+/// One radioscript's controls: the Lada radio or a portable radio.
+#[derive(Clone, Copy, Debug)]
 pub struct RadioState {
-    rules: RadioAudioReference,
-    stations: Vec<Station>,
     pub on: bool,
     pub am: bool,
     pub tuning: f32,
     pub volume: f32,
+    /// AMmin, AMmax and AMStep.
+    am_range: [f32; 3],
+    /// FMmin, FMmax and FMStep.
+    fm_range: [f32; 3],
+    volume_step: f32,
+    band: bool,
+}
+/// mainscript radioChs and radioChsAM, shared by every radio.
+pub struct RadioBroadcasts {
+    stations: Vec<Station>,
+    fm_tolerance: f32,
+    am_tolerance: f32,
+    custom_gain: f32,
+    holiday_ranges: [[u8; 4]; 2],
     calendar: [u8; 2],
 }
 impl Station {
@@ -159,12 +173,115 @@ fn holiday(value: u8, [month, day]: [u8; 2], ranges: &[[u8; 4]; 2]) -> bool {
 }
 impl RadioState {
     pub fn new(
+        am_range: [f32; 3],
+        fm_range: [f32; 3],
+        volume_step: f32,
+        band: bool,
+        initial: crate::save::RadioSnapshot,
+    ) -> Self {
+        Self {
+            on: initial.on,
+            am: initial.am,
+            tuning: initial.tuning,
+            volume: initial.volume,
+            am_range,
+            fm_range,
+            volume_step,
+            band,
+        }
+    }
+    pub fn lada(reference: &RadioAudioReference) -> Self {
+        let c = &reference.constants;
+        Self::new(
+            [c["AMmin"], c["AMmax"], c["AMStep"]],
+            [c["FMmin"], c["FMmax"], c["FMStep"]],
+            c["vSpeed"],
+            reference.controls.band.is_some(),
+            crate::save::RadioSnapshot {
+                on: reference.initial_on,
+                am: reference.initial_am,
+                tuning: reference.initial_tuning,
+                volume: reference.initial_volume,
+            },
+        )
+    }
+    fn range(&self) -> [f32; 3] {
+        if self.am {
+            self.am_range
+        } else {
+            self.fm_range
+        }
+    }
+    /// radioscript.UpdValues FR.
+    pub fn frequency(&self) -> f32 {
+        let [min, max, step] = self.range();
+        ((min + (max - min) * self.tuning.clamp(0., 1.)) / step).round_ties_even() * step
+    }
+    pub fn control(&mut self, control: RadioControl) {
+        match control {
+            RadioControl::VolumeUp => {
+                self.volume = (self.volume + self.volume_step).clamp(0., 1.);
+                if self.volume > 0. {
+                    self.on = true;
+                }
+            }
+            RadioControl::VolumeDown => {
+                self.volume = (self.volume - self.volume_step).clamp(0., 1.);
+                if self.volume == 0. {
+                    self.on = false;
+                }
+            }
+            RadioControl::Band => {
+                if self.band {
+                    self.am = !self.am;
+                }
+            }
+            RadioControl::TuneUp | RadioControl::TuneDown => {
+                let [min, max, step] = self.range();
+                let delta = 1. / ((max - min) / step);
+                let sign = if control == RadioControl::TuneUp {
+                    1.
+                } else {
+                    -1.
+                };
+                self.tuning =
+                    ((self.tuning + delta * sign).clamp(0., 1.) / delta).round_ties_even() * delta;
+            }
+        }
+    }
+    pub fn capture_save(&self) -> crate::save::RadioSnapshot {
+        crate::save::RadioSnapshot {
+            on: self.on,
+            am: self.am,
+            tuning: self.tuning,
+            volume: self.volume,
+        }
+    }
+    /// save_radioscript restores controls only; stations pick fresh recordings.
+    pub fn restore_save(
+        &mut self,
+        saved: &crate::save::RadioSnapshot,
+    ) -> Result<(), crate::save::SaveError> {
+        if saved.am && !self.band {
+            return Err(crate::save::SaveError::CorruptData(
+                "Radio band without band control".into(),
+            ));
+        }
+        self.on = saved.on;
+        self.am = saved.am;
+        self.tuning = saved.tuning;
+        self.volume = saved.volume;
+        Ok(())
+    }
+}
+
+impl RadioBroadcasts {
+    pub fn new(
         reference: &RadioAudioReference,
         clips: &[AudioClipReference],
         calendar: [u8; 2],
     ) -> Self {
-        let rules = reference.clone();
-        let stations = rules
+        let stations = reference
             .stations
             .iter()
             .map(|s| {
@@ -199,72 +316,39 @@ impl RadioState {
             })
             .collect();
         Self {
-            on: rules.initial_on,
-            am: rules.initial_am,
-            tuning: rules.initial_tuning,
-            volume: rules.initial_volume,
-            rules,
             stations,
+            fm_tolerance: reference.fm_tolerance,
+            am_tolerance: reference.am_tolerance,
+            custom_gain: reference.custom_gain,
+            holiday_ranges: reference.holiday_ranges,
             calendar,
         }
     }
     pub fn calendar(&mut self, month: u8, day: u8) {
         self.calendar = [month, day];
     }
-    fn range(&self) -> (f32, f32, f32) {
-        let c = &self.rules.constants;
-        if self.am {
-            (c["AMmin"], c["AMmax"], c["AMStep"])
-        } else {
-            (c["FMmin"], c["FMmax"], c["FMStep"])
-        }
-    }
-    pub fn control(&mut self, control: RadioControl) {
-        match control {
-            RadioControl::VolumeUp => {
-                self.volume = (self.volume + self.rules.constants["vSpeed"]).clamp(0., 1.);
-                if self.volume > 0. {
-                    self.on = true;
-                }
-            }
-            RadioControl::VolumeDown => {
-                self.volume = (self.volume - self.rules.constants["vSpeed"]).clamp(0., 1.);
-                if self.volume == 0. {
-                    self.on = false;
-                }
-            }
-            RadioControl::Band => {
-                if self.rules.controls.band.is_some() {
-                    self.am = !self.am;
-                }
-            }
-            RadioControl::TuneUp | RadioControl::TuneDown => {
-                let (min, max, step) = self.range();
-                let delta = 1. / ((max - min) / step);
-                let sign = if control == RadioControl::TuneUp {
-                    1.
-                } else {
-                    -1.
-                };
-                self.tuning =
-                    ((self.tuning + delta * sign).clamp(0., 1.) / delta).round_ties_even() * delta;
-            }
-        }
-    }
-    pub fn advance(&mut self, game_seconds: f64, electronics_output: f32) -> RadioFrame {
+    /// mainscript.RADIO: every station advances once per step, heard or not.
+    pub fn advance(&mut self, game_seconds: f64) {
         for s in &mut self.stations {
-            s.advance(game_seconds, self.calendar, &self.rules.holiday_ranges);
+            s.advance(game_seconds, self.calendar, &self.holiday_ranges);
         }
-        let (min, max, step) = self.range();
-        let frequency =
-            ((min + (max - min) * self.tuning.clamp(0., 1.)) / step).round_ties_even() * step;
-        let power = self.on && electronics_output > self.rules.electronics_cutoff;
+    }
+    /// radioscript.SetRadio gains for one radio.
+    pub fn frame(
+        &self,
+        radio: &RadioState,
+        game_seconds: f64,
+        electronics_output: f32,
+        electronics_cutoff: f32,
+    ) -> RadioFrame {
+        let frequency = radio.frequency();
+        let power = radio.on && electronics_output > electronics_cutoff;
         let mut nearest = f32::MAX;
         let mut secondary_distance = f32::MAX;
         let mut primary = None;
         let mut secondary = None;
         for (i, s) in self.stations.iter().enumerate() {
-            if (s.source.band == "am") != self.am {
+            if (s.source.band == "am") != radio.am {
                 continue;
             }
             let d = (s.source.frequency - frequency).abs();
@@ -277,25 +361,25 @@ impl RadioState {
                 nearest = d;
             }
         }
-        let tolerance = if self.am {
-            self.rules.am_tolerance
+        let tolerance = if radio.am {
+            self.am_tolerance
         } else {
-            self.rules.fm_tolerance
+            self.fm_tolerance
         };
         let signal = |d: f32| (1. - d / tolerance).clamp(0., 1.) * electronics_output;
-        let gain = if power { self.volume } else { 0. };
+        let gain = if power { radio.volume } else { 0. };
         RadioFrame {
             power,
-            am: self.am,
+            am: radio.am,
             frequency,
-            volume: self.volume,
+            volume: radio.volume,
             static_gain: (1. - signal(nearest)) * gain,
             primary: primary.map_or(RadioPlayback::default(), |i| {
                 self.stations[i].playback(
                     game_seconds,
                     signal(nearest) * gain,
                     true,
-                    self.rules.custom_gain,
+                    self.custom_gain,
                 )
             }),
             secondary: secondary.map_or(RadioPlayback::default(), |i| {
@@ -303,41 +387,11 @@ impl RadioState {
                     game_seconds,
                     signal(secondary_distance) * gain,
                     false,
-                    self.rules.custom_gain,
+                    self.custom_gain,
                 )
             }),
         }
     }
-}
-
-impl RadioState {
-    pub fn capture_save(&self) -> crate::save::RadioSnapshot {
-        crate::save::RadioSnapshot {
-            on: self.on,
-            am: self.am,
-            tuning: self.tuning,
-            volume: self.volume,
-        }
-    }
-    /// save_radioscript restores controls only; stations pick fresh recordings.
-    pub fn restore_save(
-        &mut self,
-        saved: &crate::save::RadioSnapshot,
-    ) -> Result<(), crate::save::SaveError> {
-        if saved.am && self.rules.controls.band.is_none() {
-            return Err(crate::save::SaveError::CorruptData(
-                "Radio band without band control".into(),
-            ));
-        }
-        self.on = saved.on;
-        self.am = saved.am;
-        self.tuning = saved.tuning;
-        self.volume = saved.volume;
-        Ok(())
-    }
-}
-
-impl RadioState {
     /// mainscript.Update advances FM stations while the sleep loop gain exceeds 0.5.
     pub fn advance_sleep(&mut self, seconds: f64) {
         let mut iteration = 0;
@@ -360,12 +414,12 @@ impl RadioState {
                 let music = station
                     .current
                     .map_or(station.source.initial_music, |s| s.music);
-                station.current = station.next.or_else(|| {
-                    station.select(music, self.calendar, &self.rules.holiday_ranges, true)
-                });
+                station.current = station
+                    .next
+                    .or_else(|| station.select(music, self.calendar, &self.holiday_ranges, true));
                 station.start = seconds;
                 station.next = station.current.and_then(|s| {
-                    station.select(s.music, self.calendar, &self.rules.holiday_ranges, false)
+                    station.select(s.music, self.calendar, &self.holiday_ranges, false)
                 });
             }
             iteration += 1;
@@ -378,7 +432,7 @@ mod a09_save {
     use super::*;
     use crate::save::{RadioSnapshot, SaveError};
 
-    fn radio(band: bool) -> RadioState {
+    fn reference(band: bool) -> RadioAudioReference {
         let source = serde_json::json!({"file": "level1", "path_id": 1});
         let method = serde_json::json!({
             "class": "radioscript", "method": "Update", "file": "", "line_start": 0,
@@ -388,7 +442,7 @@ mod a09_save {
             "source": source, "node": 1, "item": 1, "enabled": true, "tune": false,
             "turnable": true
         });
-        let reference: RadioAudioReference = serde_json::from_value(serde_json::json!({
+        serde_json::from_value(serde_json::json!({
             "source": source, "emitter": 0, "voices": [1, 2, 3],
             "controls": {"volume": control, "tuning": null, "band": if band { control.clone() } else { serde_json::Value::Null }},
             "visuals": {
@@ -410,8 +464,10 @@ mod a09_save {
             "electronics_output": 1., "tuning_repeat_seconds": 0.1,
             "holiday_ranges": [[0, 0, 0, 0], [0, 0, 0, 0]]
         }))
-        .unwrap();
-        RadioState::new(&reference, &[], [10, 24])
+        .unwrap()
+    }
+    fn radio(band: bool) -> RadioState {
+        RadioState::lada(&reference(band))
     }
 
     #[test]
@@ -444,5 +500,32 @@ mod a09_save {
             Err(SaveError::CorruptData(_))
         ));
         assert_eq!(loaded.capture_save(), fresh);
+    }
+
+    #[test]
+    fn set_radio_gains_follow_distance_and_output() {
+        let mut reference = reference(false);
+        reference.stations = vec![
+            serde_json::from_value(serde_json::json!({
+                "id": 1, "band": "fm", "frequency": 100., "name": "", "custom": true,
+                "content": "external", "initial_music": false, "start_time": 0.,
+                "initial_time": 0., "initial_max_time": 0., "initial_gain": 1., "music": [],
+                "talk": [], "music_gains": [], "talk_gains": [], "music_holidays": [],
+                "talk_holidays": []
+            }))
+            .unwrap(),
+        ];
+        let broadcasts = RadioBroadcasts::new(&reference, &[], [10, 24]);
+        let mut radio = RadioState::lada(&reference);
+        radio.on = true;
+        radio.volume = 0.5;
+        // FR 100.0 is exact; 100.5 sits at the FM tolerance.
+        for (tuning, channel) in [(0.6, 1.), (0.625, 0.)] {
+            radio.tuning = tuning;
+            let frame = broadcasts.frame(&radio, 0., 1., 0.1);
+            assert!((frame.primary.gain - 0.5 * channel * reference.custom_gain).abs() < 1e-4);
+            assert!((frame.static_gain - 0.5 * (1. - channel)).abs() < 1e-4);
+        }
+        assert!(!broadcasts.frame(&radio, 0., 0.1, 0.2).power);
     }
 }

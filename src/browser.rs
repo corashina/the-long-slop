@@ -114,6 +114,7 @@ extern "C" {
     pub fn game_audio_route(id: u32, mixer: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioRadio)]
     pub fn game_audio_radio(
+        emitter: u32,
         power: bool,
         am: bool,
         frequency: f32,
@@ -347,6 +348,7 @@ extern "C" {
         water: f32,
         blood: f32,
         diesel: f32,
+        fluid_order: u32,
         control: u32,
         lmb_use: bool,
     );

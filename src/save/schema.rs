@@ -1,7 +1,12 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 11;
+pub const SAVE_SCHEMA_VERSION: u32 = 14;
+/// Older saves load with empty later additions; spray ammo and lamp values load at their spawn values.
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 11;
+pub fn schema_supported(version: u32) -> bool {
+    (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +44,43 @@ pub struct SaveSnapshot {
     pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
+    /// Runtime item prototype copies. Absent in schema 11.
+    #[serde(default)]
+    pub spawned: Vec<SpawnedItemSnapshot>,
+    /// Pack counts, cigarette burn state, and the mouth slot. Absent in schema 11.
+    #[serde(default)]
+    pub cigarettes: CigarettesSnapshot,
+}
+/// Spawned items are named by their spawn serial.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigarettesSnapshot {
+    pub packs: Vec<PackSnapshot>,
+    pub cigarettes: Vec<CigaretteSnapshot>,
+    pub mouth: Option<u32>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackSnapshot {
+    pub serial: u32,
+    pub count: u32,
+}
+/// Source `ediblescript` hp and ateOnce.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigaretteSnapshot {
+    pub serial: u32,
+    pub hp: f32,
+    pub ate_once: bool,
+}
+/// One spawned prototype pickup body, saved in the world at its pose.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnedItemSnapshot {
+    pub serial: u32,
+    pub prototype: SourceKey,
+    pub pickup: u32,
+    pub pose: AbsolutePose,
 }
 impl SaveSnapshot {
     pub fn from_json(bytes: &[u8]) -> Result<Self, SaveError> {
@@ -48,10 +90,13 @@ impl SaveSnapshot {
         }
         let version: Version =
             serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
-        if version.schema_version != SAVE_SCHEMA_VERSION {
+        if !schema_supported(version.schema_version) {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
-        serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))
+        let mut snapshot: Self =
+            serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
+        snapshot.schema_version = SAVE_SCHEMA_VERSION;
+        Ok(snapshot)
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -90,6 +135,9 @@ pub struct WorldSnapshot {
     pub changes: crate::world::ChangeRecords,
     #[serde(with = "super::identity::lossless")]
     pub spawn: crate::world::spawn_state::SpawnHistory,
+    /// Broken generated boxes. Their removal is in `changes`. Absent before schema 13.
+    #[serde(default, with = "super::identity::lossless")]
+    pub boxes: Vec<crate::world::BoxRelease>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -361,12 +409,21 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8, 9, 10] {
+        for version in [6, 7, 8, 9, 10, 15] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
                 Err(SaveError::IncompatibleSources(_))
             ));
         }
+    }
+
+    #[test]
+    fn previous_schema_passes_the_version_gate() {
+        // Schema 11 reaches payload parsing; the empty payload then fails as corrupt data.
+        assert!(matches!(
+            SaveSnapshot::from_json(br#"{"schema_version":11}"#),
+            Err(SaveError::CorruptData(_))
+        ));
     }
 }

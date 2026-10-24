@@ -13,10 +13,12 @@ impl SpawnEvaluation<'_> {
         (
             Option<FluidContainer>,
             Vec<(crate::reference::SourceId, FluidContainer)>,
+            Option<f32>,
         ),
         ReferenceError,
     > {
         let f = &save.fields;
+        let mut count = None;
         if let Some(ammo) = optional(f, "ammo")? {
             if self
                 .rules
@@ -28,15 +30,15 @@ impl SpawnEvaluation<'_> {
                 let high = number(item, "fr2")?;
                 let n = self.random.range_int(low as i32, high as i32);
                 // SetIntAmmo writes ammo; GetAmmo selects its int or float field.
-                let actual = if flag(a, "floatOrInt")? {
-                    number(a, "fammo")?
-                } else {
-                    n as f32
-                };
+                let float = flag(a, "floatOrInt")?;
+                let mut actual = if float { number(a, "fammo")? } else { n as f32 };
                 if actual > number(a, "max")? || low == high {
-                    self.random
+                    let v = self
+                        .random
                         .range(number(a, "ammoRmin")?, number(a, "ammoRmax")?);
+                    actual = if float { v } else { v.trunc() };
                 }
+                count = Some(actual);
             }
         }
         let mut primary = None;
@@ -64,7 +66,7 @@ impl SpawnEvaluation<'_> {
             self.random
                 .range_int(0, array(f, "parts")?.len() as i32 - 2);
         }
-        Ok((primary, tanks))
+        Ok((primary, tanks, count))
     }
     pub(super) fn random_default(
         &mut self,
@@ -278,10 +280,10 @@ impl SpawnEvaluation<'_> {
                                 if let Some(mass) =
                                     self.rules.component(self.reference, &root, "massScript")?
                                 {
-                                    let max = integer(&mass.fields, "maxCountIfSpawnedInBox")?;
-                                    if max > 0 {
-                                        count = self.random.range_int(1, max + 1);
-                                    }
+                                    count = super::spawn_selection::box_count(
+                                        integer(mass.fields, "maxCountIfSpawnedInBox")?,
+                                        self.random,
+                                    );
                                 }
                             }
                             let mut id = parent.id.clone();
@@ -308,6 +310,7 @@ impl SpawnEvaluation<'_> {
                                         condition: 1.,
                                         buried: flag(save.fields, "buried")?,
                                         distance_offset: self.distance_offset(&child, save)?,
+                                        ammo: None,
                                     })?;
                                 }
                             }

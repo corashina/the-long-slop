@@ -35,6 +35,8 @@ pub struct WorldReference {
     pub generation_frame: Transform,
     /// Rotation of `mainscript.magneticField`; compasses point along its forward.
     pub magnetic_field: [f32; 4],
+    /// mainscript.lightTurnOffValue: electronics output that powers radios and lamps.
+    pub electronics_cutoff: f32,
     pub distances: BTreeMap<String, f32>,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,

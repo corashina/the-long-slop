@@ -91,6 +91,8 @@ record!(RadioAudioReference {
     custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
     electronics_source: SourceId, electronics_output: f32, tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
 });
+// radioscript SS, SC and SC2 settings shared by every portable radio's voice slot.
+record!(PortableRadioAudioReference { sources: Vec<SourceId>, voices: [AudioVoiceReference; 3] });
 record!(RadioVisualReference {
     screen: MaterialSwitchReference,
     indicator: MaterialSwitchReference,
@@ -206,6 +208,7 @@ record!(AudioReference {
     schema_version: u32, clips: Vec<AudioClipReference>, emitters: Vec<AudioEmitterReference>,
     voices: Vec<AudioVoiceReference>, mixers: Vec<AudioMixerReference>, bindings: Vec<AudioEventBinding>,
     engine: EngineAudioReference, horn: HornAudioReference, radio: RadioAudioReference,
+    portable_radio: PortableRadioAudioReference,
     mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
@@ -330,10 +333,14 @@ impl AudioReference {
                 })
                 && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time)
         };
-        for v in &self.voices {
+        let portable = self.portable_radio.voices.iter().map(|v| (true, v));
+        for (portable, v) in self.voices.iter().map(|v| (false, v)).chain(portable) {
             require(
-                emitters.contains(&v.emitter)
-                    && mixers.contains(&v.mixer)
+                (if portable {
+                    v.id == 0 && v.emitter == 0
+                } else {
+                    emitters.contains(&v.emitter)
+                }) && mixers.contains(&v.mixer)
                     && v.clip.is_none_or(|c| clips.contains(&c))
                     && values([
                         v.gain,

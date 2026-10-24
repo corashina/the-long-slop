@@ -121,6 +121,8 @@ class GltfExporter(GltfBuilder):
                         if field in data: add(component, data[field])
                     for row in data['Lamps']:
                         for field in ('mON','mOFF'): add(component,row[field])
+                elif name == 'radioscript':
+                    for field in ('SOn','SOff','MutatoOn','MutatoOff'): add(component, data[field])
         for material in materials.values():
             shader = self.source.resolve(material, self.source.read(material)['m_Shader'])
             if self.source.read(shader)['m_ParsedForm']['m_Name'] in FAMILIES:

@@ -619,6 +619,8 @@ pub struct FluidRulesReference {
     pub pour_speed: f32,
     pub slow_oil_modifier: f32,
     pub fluid_tune_speed: f32,
+    /// Source `ls.FillDefWW` default English text, indexed by `ls.w`.
+    pub words: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1851,7 +1853,8 @@ impl ReferenceManifest {
                 self.fluid_rules.pour_speed,
                 self.fluid_rules.slow_oil_modifier,
                 self.fluid_rules.fluid_tune_speed,
-            ]) && self.fluid_rules.pour_speed > 0.0,
+            ]) && self.fluid_rules.pour_speed > 0.0
+                && !self.fluid_rules.words.is_empty(),
             "fluid rules",
         )?;
         require(
