@@ -278,7 +278,7 @@ impl WorldStream {
                     collider.user_data |= (id.0 as u128) << 64;
                 });
             }
-            interaction.bind_dial_knob(id);
+            interaction.bind_dial_knob(id, crate::interaction::Knob::Dial);
             knobs.push(id);
         }
         let value = self

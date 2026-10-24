@@ -167,9 +167,18 @@ impl InteractionState {
             };
         }
         if let Some(t) = use_target {
-            if self.dial_knob(&t, physics).is_some() {
-                a.context = FeedbackContext::Mechanism;
-                a.actions.0 |= ActionMask::TUNE | ActionMask::SCROLL;
+            if let Some((_, kind)) = self.dial_knob(&t, physics) {
+                use super::Knob;
+                a.context = match kind {
+                    Knob::Volume => FeedbackContext::RadioVolume,
+                    Knob::Tuning => FeedbackContext::RadioTuning,
+                    Knob::Dial | Knob::Band => FeedbackContext::Mechanism,
+                };
+                a.actions.0 |= if kind == Knob::Band {
+                    ActionMask::SWITCH
+                } else {
+                    ActionMask::TUNE | ActionMask::SCROLL
+                };
             }
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;

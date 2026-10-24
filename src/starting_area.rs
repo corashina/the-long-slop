@@ -1110,7 +1110,14 @@ impl GarageRuntime {
                 self.use_light_control(reference, control)
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
-                self.stream.tune_dial(knob, direction, &mut self.area.items);
+                if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                    && let Some((item, true)) =
+                        self.stream
+                            .radio_control(knob, direction, &mut self.area.items)
+                    && let (Some(audio), Some(item)) = (&mut self.audio, self.area.items.get(item))
+                {
+                    audio.radio_click_at(item.pose.position);
+                }
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(
