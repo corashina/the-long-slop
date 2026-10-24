@@ -1,5 +1,5 @@
-use rapier3d::na::{Matrix4, UnitQuaternion, Vector3, Vector4};
 use the_long_slop::reference::view_math::source_culling_view;
+use rapier3d::na::{Matrix4, UnitQuaternion, Vector3, Vector4};
 
 #[test]
 fn source_culling_inverse_and_positions_share_source_world() {

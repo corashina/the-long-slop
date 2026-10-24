@@ -1,8 +1,8 @@
-use naga::valid::{Capabilities, ValidationFlags, Validator};
 use the_long_slop::{
     reference::shadow_candidates::DirectionalHull,
     world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
 };
+use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 #[test]
 fn one_probe_shader_has_one_cube_and_matching_uniform_layout() {

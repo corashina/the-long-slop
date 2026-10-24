@@ -1,4 +1,3 @@
-use rapier3d::math::{Rotation, Vector};
 use the_long_slop::{
     interaction::{
         AimTarget, InteractionAction, ResolvedAim, SlotTarget, WheelAction, feedback::ActionMask,
@@ -9,6 +8,7 @@ use the_long_slop::{
     starting_area::GarageRuntime,
     vehicle::VehiclePose,
 };
+use rapier3d::math::{Rotation, Vector};
 
 fn input(
     run: &mut GarageRuntime,

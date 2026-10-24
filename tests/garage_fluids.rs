@@ -186,8 +186,8 @@ fn fluid_step(
 }
 
 fn hold_tank(run: &mut GarageRuntime, tank: the_long_slop::reference::ItemId) {
-    use rapier3d::math::Vector;
     use the_long_slop::vehicle::to_rapier;
+    use rapier3d::math::Vector;
     let body = run.area.items.get(tank).unwrap().body.unwrap();
     let view = to_rapier(run.area.player.view(&run.physics).head_pose);
     let point = view.translation + view.rotation * Vector::NEG_Z;
@@ -566,7 +566,6 @@ fn g04_caps_and_direct_fill() {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_particle_receipt() {
-    use rapier3d::math::{Pose, Vector};
     use the_long_slop::{
         fluids::{FluidContainer, FluidEntry, spill},
         interaction::ResolvedAim,
@@ -574,6 +573,7 @@ fn g04_particle_receipt() {
         simulation::{FIXED_DT, FrameInput},
         vehicle::to_rapier,
     };
+    use rapier3d::math::{Pose, Vector};
     let mut r = ReferenceManifest::from_runtime_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
@@ -742,13 +742,13 @@ fn mass_near(actual: f32, expected: f32) {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_detached_tanks_and_save() {
-    use rapier3d::math::{Rotation, Vector};
     use the_long_slop::{
         interaction::{InteractionAction, ResolvedAim, items::ItemLocation},
         reference::ItemId,
         simulation::FrameInput,
         vehicle::to_rapier,
     };
+    use rapier3d::math::{Rotation, Vector};
     let r = ReferenceManifest::from_runtime_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
