@@ -140,6 +140,8 @@ pub struct AudioState {
     pub current_interior: Option<usize>,
     pub sensor: SensorLatch,
     pub route_mixers: Vec<u32>,
+    /// Vehicle index of each car route, for car hit sounds.
+    pub route_vehicles: Vec<Option<u32>>,
     pub engine_constants: BTreeMap<String, f32>,
     pub radio: crate::simulation::radio::RadioState,
     pub radio_frame: crate::simulation::radio::RadioFrame,
@@ -250,6 +252,7 @@ impl AudioState {
                 .map(|(i, v)| (v.collider, i))
                 .collect(),
             route_mixers: reference.routes.iter().map(|r| r.main_mixer).collect(),
+            route_vehicles: vec![None; reference.routes.len()],
             outside_mixer: reference
                 .mixers
                 .iter()
@@ -460,6 +463,20 @@ impl AudioState {
         self.control_items = game.mechanisms.iter().map(|m| (m.id, m.item)).collect();
         self.collider_nodes = game.colliders.iter().map(|c| (c.id, c.node)).collect();
         self.impacts.bind(game);
+        for (route, vehicle) in self.reference.routes.iter().zip(&mut self.route_vehicles) {
+            let inside = |root| {
+                route.interiors.iter().any(|id| {
+                    self.reference.interiors.iter().any(|i| {
+                        i.id == *id && crate::reference::clothing::descendant(game, i.node, root)
+                    })
+                })
+            };
+            *vehicle = route
+                .has_car
+                .then(|| game.vehicles.iter().position(|v| inside(v.root)))
+                .flatten()
+                .map(|v| v as u32);
+        }
         self.sensor.hits.reserve(game.colliders.len());
         for (i, r) in self.reference.routes.iter().enumerate() {
             self.route_sensors[i].0 = game
