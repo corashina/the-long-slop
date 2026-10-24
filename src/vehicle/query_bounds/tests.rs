@@ -723,7 +723,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
     );
     let (chassis, chassis_collider) = world.insert(
         RigidBodyBuilder::dynamic().translation(Vector::Y * 0.75),
-        ColliderBuilder::cuboid(0.25, 0.1, 0.25),
+        ColliderBuilder::cuboid(0.25, 0.1, 0.25).mass(10.0),
     );
     let friction = WheelFrictionCurve {
         extremum_slip: 1.0,

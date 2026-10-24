@@ -300,3 +300,26 @@ fn sideways_slide_stops_on_tires() {
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
     assert!(world.physics.bodies[chassis].linvel().x.abs() < 0.3);
 }
+
+#[test]
+fn handbrake_holds_a_parked_car_against_a_walking_push() {
+    for push in [Vector::Z * 60.0, Vector::X * 60.0] {
+        let mut world = lada(TIRE);
+        let parked = DriveInput {
+            handbrake: 1.0,
+            ..Default::default()
+        };
+        drive(&mut world, 2.0, parked, 0.0);
+        let chassis = world.chassis[0];
+        let start = world.physics.bodies[chassis].translation();
+        // The player pushes before the car step, as in the garage frame.
+        for _ in 0..(2.0 / FIXED_DT) as usize {
+            let body = &mut world.physics.bodies[chassis];
+            let point = body.translation();
+            body.apply_impulse_at_point(push, point, true);
+            drive(&mut world, FIXED_DT, parked, 0.0);
+        }
+        let moved = (world.physics.bodies[chassis].translation() - start).length();
+        assert!(moved < 0.02, "{push:?} moved {moved}");
+    }
+}

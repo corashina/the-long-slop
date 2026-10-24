@@ -14,7 +14,10 @@ use rapier3d::prelude::{
     RigidBodyHandle, RigidBodySet,
 };
 pub use wheel::WheelAssembly;
-use wheel::{WheelContact, WheelFrame, WheelSlip, WheelState, WheelTorques};
+use wheel::{WheelContact, WheelForce, WheelFrame, WheelSlip, WheelState, WheelTorques};
+
+/// Tire impulse solver passes per physics step.
+const TIRE_ITERATIONS: usize = 4;
 
 use crate::reference::{
     ColliderGeometry, ReferenceError, ReferenceManifest, VehicleReference, WheelSlotId,
@@ -453,6 +456,7 @@ impl PhysicsWorld {
         }
         let gravity = self.physics.gravity.length();
         let sprung_mass = self.physics.bodies[own].mass() / 4.0;
+        let mut contacts: [Option<(WheelForce, Vector, Option<RigidBodyHandle>)>; 4] = [None; 4];
         for (slot, wheel) in vehicle.wheels.iter_mut().enumerate() {
             let reference = &vehicle.wheel_references[slot];
             let ground = wheel.contact.and_then(|contact| {
@@ -463,30 +467,69 @@ impl PhysicsWorld {
             let point = wheel.contact.map_or(Vector::ZERO, |contact| {
                 contact.point + up * reference.force_application_distance_m
             });
-            let mut velocity = self.physics.bodies[own].velocity_at_point(point);
-            if let Some(ground) = ground {
-                velocity -= self.physics.bodies[ground].velocity_at_point(point);
-            }
             let frame = WheelFrame {
                 up,
                 axle: pose.rotation * Rotation::from_rotation_y(wheel.steering) * Vector::X,
-                velocity,
+                velocity: relative_velocity(&self.physics.bodies, own, ground, point),
                 sprung_mass,
                 gravity,
             };
-            let force = wheel::solve(wheel, reference, frame, wheel_torques[slot], FIXED_DT);
-            if force == Vector::ZERO {
-                continue;
-            }
-            let impulse = force * FIXED_DT;
-            self.physics.bodies[own].apply_impulse_at_point(impulse, point, false);
-            if let Some(ground) = ground {
-                self.query_bounds.mark_body(ground);
-                let body = &mut self.physics.bodies[ground];
-                let before = BodyPresentationState::capture(body);
-                body.apply_impulse_at_point(-impulse, point, true);
-                self.presentation_bodies
-                    .mark_if_changed(ground, before, body);
+            contacts[slot] = wheel::solve(wheel, reference, frame, wheel_torques[slot], FIXED_DT)
+                .map(|force| (force, point, ground));
+        }
+        // All wheels see the same pre-impulse state.
+        for (force, point, ground) in contacts.iter().flatten() {
+            apply_wheel_impulse(
+                &mut self.physics.bodies,
+                &mut self.query_bounds,
+                &mut self.presentation_bodies,
+                own,
+                *ground,
+                *point,
+                force.up * (force.load * FIXED_DT),
+            );
+        }
+        // Tire impulses: a few projected Gauss-Seidel passes over the contacts.
+        let mut accumulated = [[0.0f32; 2]; 4];
+        for _ in 0..TIRE_ITERATIONS {
+            for (slot, contact) in contacts.iter().enumerate() {
+                let Some((force, point, ground)) = contact else {
+                    continue;
+                };
+                let velocity = relative_velocity(&self.physics.bodies, own, *ground, *point);
+                let mut inverse = [
+                    inverse_mass_at(&self.physics.bodies[own], *point, force.forward),
+                    inverse_mass_at(&self.physics.bodies[own], *point, force.side),
+                ];
+                if let Some(ground) = ground {
+                    let body = &self.physics.bodies[*ground];
+                    inverse[0] += inverse_mass_at(body, *point, force.forward);
+                    inverse[1] += inverse_mass_at(body, *point, force.side);
+                }
+                let needed = [
+                    (force.surface_speed - velocity.dot(force.forward)) / inverse[0],
+                    -velocity.dot(force.side) / inverse[1],
+                ];
+                let limits = force.limits(FIXED_DT);
+                let previous = accumulated[slot];
+                let next = force.ellipse(
+                    std::array::from_fn(|axis| {
+                        (previous[axis] + needed[axis]).clamp(limits[axis].0, limits[axis].1)
+                    }),
+                    FIXED_DT,
+                );
+                accumulated[slot] = next;
+                let delta =
+                    force.forward * (next[0] - previous[0]) + force.side * (next[1] - previous[1]);
+                apply_wheel_impulse(
+                    &mut self.physics.bodies,
+                    &mut self.query_bounds,
+                    &mut self.presentation_bodies,
+                    own,
+                    *ground,
+                    *point,
+                    delta,
+                );
             }
         }
     }
@@ -847,6 +890,47 @@ impl PhysicsWorld {
     pub fn collider_count(&self) -> usize {
         self.physics.colliders.len()
     }
+}
+
+/// Applies a wheel impulse to the chassis and its reaction to a dynamic ground body.
+fn apply_wheel_impulse(
+    bodies: &mut rapier3d::prelude::RigidBodySet,
+    query_bounds: &mut QueryBounds,
+    presentation_bodies: &mut PresentationBodies,
+    chassis: RigidBodyHandle,
+    ground: Option<RigidBodyHandle>,
+    point: Vector,
+    impulse: Vector,
+) {
+    bodies[chassis].apply_impulse_at_point(impulse, point, false);
+    if let Some(ground) = ground {
+        query_bounds.mark_body(ground);
+        let body = &mut bodies[ground];
+        let before = BodyPresentationState::capture(body);
+        body.apply_impulse_at_point(-impulse, point, true);
+        presentation_bodies.mark_if_changed(ground, before, body);
+    }
+}
+
+/// Chassis velocity minus ground body velocity at `point`.
+fn relative_velocity(
+    bodies: &rapier3d::prelude::RigidBodySet,
+    chassis: RigidBodyHandle,
+    ground: Option<RigidBodyHandle>,
+    point: Vector,
+) -> Vector {
+    let velocity = bodies[chassis].velocity_at_point(point);
+    ground.map_or(velocity, |ground| {
+        velocity - bodies[ground].velocity_at_point(point)
+    })
+}
+
+/// Inverse effective mass of `body` for an impulse at `point` along `direction`.
+fn inverse_mass_at(body: &rapier3d::prelude::RigidBody, point: Vector, direction: Vector) -> f32 {
+    let props = body.mass_properties();
+    let arm = (point - props.world_com).cross(direction);
+    (props.effective_inv_mass * direction * direction).element_sum()
+        + arm.dot(props.effective_world_inv_inertia * arm)
 }
 
 pub(crate) fn capture_body_save(

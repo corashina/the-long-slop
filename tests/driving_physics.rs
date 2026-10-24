@@ -54,4 +54,21 @@ fn installed_lada_launches_and_brakes() {
     };
     drive(physics, 4.0, brake, 0.0);
     assert!(physics.snapshot(0).speed_mps.abs() < 0.5);
+    // A parked car holds against a walking player's push.
+    let parked = DriveInput {
+        handbrake: 1.0,
+        ..Default::default()
+    };
+    drive(physics, 2.0, parked, 0.0);
+    let start = physics.snapshot(0).pose.position;
+    for _ in 0..(2.0 / FIXED_DT) as usize {
+        physics.edit_body(physics.chassis_handle(0), |body| {
+            let point = body.translation();
+            body.apply_impulse_at_point(rapier3d::math::Vector::X * 60.0, point, true);
+        });
+        drive(physics, FIXED_DT, parked, 0.0);
+    }
+    let end = physics.snapshot(0).pose.position;
+    let moved = ((end[0] - start[0]).powi(2) + (end[2] - start[2]).powi(2)).sqrt();
+    assert!(moved < 0.05, "parked car moved {moved}");
 }
