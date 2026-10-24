@@ -98,6 +98,22 @@ pub fn glass_view_layout() -> BindGroupLayoutDescriptor {
     )
 }
 
+/// Particle view: glass uniform, single-sample camera depth, named `_GrabTexture`, grab sampler.
+pub fn particle_view_layout() -> BindGroupLayoutDescriptor {
+    BindGroupLayoutDescriptor::new(
+        "source_particle_view",
+        &BindGroupLayoutEntries::sequential(
+            ShaderStages::VERTEX_FRAGMENT,
+            (
+                uniform_buffer::<GlassViewUniform>(false),
+                texture_depth_2d(),
+                texture_2d(TextureSampleType::Float { filterable: true }),
+                sampler(SamplerBindingType::Filtering),
+            ),
+        ),
+    )
+}
+
 #[derive(Clone, Copy, Default, serde::Serialize)]
 pub struct GlassAudit {
     pub frame: u32,
@@ -117,6 +133,12 @@ pub struct SourceGlassView {
     _sampler: Sampler,
     uniform: UniformBuffer<GlassViewUniform>,
     bind_group: BindGroup,
+    /// Source named `_GrabTexture`: captured once per view frame before the first distortion particle.
+    named: Texture,
+    _named_sampled: TextureView,
+    /// Placeholder camera depth for views whose depth is the transparent attachment.
+    _depth_placeholder: Option<Texture>,
+    particle_group: BindGroup,
     extent: UVec2,
     valid: AtomicBool,
     captures: AtomicU32,
@@ -128,6 +150,7 @@ impl SourceGlassView {
         queue: &RenderQueue,
         cache: &PipelineCache,
         value: GlassViewUniform,
+        camera_depth: Option<&TextureView>,
     ) -> Result<Self, &'static str> {
         let extent = UVec2::new(
             value.grab_texel_size.z as u32,
@@ -137,21 +160,46 @@ impl SourceGlassView {
         if extent.x == 0 || extent.y == 0 || extent.x > limit || extent.y > limit {
             return Err("Source grab physical extent is unsupported");
         }
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("source_unnamed_grab"),
-            size: Extent3d {
-                width: extent.x,
-                height: extent.y,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: HDR_FORMAT,
-            usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let grab = |label| {
+            device.create_texture(&TextureDescriptor {
+                label: Some(label),
+                size: Extent3d {
+                    width: extent.x,
+                    height: extent.y,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: HDR_FORMAT,
+                usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let texture = grab("source_unnamed_grab");
         let sampled = texture.create_view(&TextureViewDescriptor::default());
+        let named = grab("source_named_grab");
+        let named_sampled = named.create_view(&TextureViewDescriptor::default());
+        // Zero-initialized reverse-Z depth is the far plane: soft particles keep full alpha.
+        let depth_placeholder = camera_depth.is_none().then(|| {
+            device.create_texture(&TextureDescriptor {
+                label: Some("source_particle_depth_placeholder"),
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        });
+        let placeholder_view = depth_placeholder
+            .as_ref()
+            .map(|texture| texture.create_view(&TextureViewDescriptor::default()));
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("source_grab_bilinear_clamp"),
             address_mode_u: AddressMode::ClampToEdge,
@@ -170,12 +218,26 @@ impl SourceGlassView {
             &cache.get_bind_group_layout(&glass_view_layout()),
             &BindGroupEntries::sequential((uniform.binding().unwrap(), &sampled, &sampler)),
         );
+        let particle_group = device.create_bind_group(
+            "source_particle_view",
+            &cache.get_bind_group_layout(&particle_view_layout()),
+            &BindGroupEntries::sequential((
+                uniform.binding().unwrap(),
+                camera_depth.or(placeholder_view.as_ref()).unwrap(),
+                &named_sampled,
+                &sampler,
+            )),
+        );
         Ok(Self {
             texture,
             _sampled: sampled,
             _sampler: sampler,
             uniform,
             bind_group,
+            named,
+            _named_sampled: named_sampled,
+            _depth_placeholder: depth_placeholder,
+            particle_group,
             extent,
             valid: AtomicBool::new(false),
             captures: AtomicU32::new(0),
@@ -201,8 +263,9 @@ impl SourceGlassView {
     pub fn extent(&self) -> UVec2 {
         self.extent
     }
+    /// Unnamed and named grab textures.
     pub fn logical_bytes(&self) -> u64 {
-        u64::from(self.extent.x) * u64::from(self.extent.y) * 8
+        u64::from(self.extent.x) * u64::from(self.extent.y) * 16
     }
     pub fn valid(&self) -> bool {
         self.valid.load(Ordering::Acquire)
@@ -237,6 +300,25 @@ impl SourceGlassView {
         &self,
         encoder: &mut CommandEncoder,
         colors: &SourceColorTargets,
+    ) -> Result<(), &'static str> {
+        self.copy_current(encoder, colors, &self.texture)?;
+        self.valid.store(true, Ordering::Release);
+        self.captures.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+    /// End preceding draws before calling. Source named grabs refresh once per view frame.
+    pub fn capture_named(
+        &self,
+        encoder: &mut CommandEncoder,
+        colors: &SourceColorTargets,
+    ) -> Result<(), &'static str> {
+        self.copy_current(encoder, colors, &self.named)
+    }
+    fn copy_current(
+        &self,
+        encoder: &mut CommandEncoder,
+        colors: &SourceColorTargets,
+        target: &Texture,
     ) -> Result<(), &'static str> {
         if self.extent != UVec2::new(colors.width, colors.height)
             || !matches!(colors.samples, 1 | MSAA_SAMPLES)
@@ -273,7 +355,7 @@ impl SourceGlassView {
                 aspect: TextureAspect::All,
             },
             TexelCopyTextureInfo {
-                texture: &self.texture,
+                texture: target,
                 mip_level: 0,
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
@@ -284,8 +366,6 @@ impl SourceGlassView {
                 depth_or_array_layers: 1,
             },
         );
-        self.valid.store(true, Ordering::Release);
-        self.captures.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
     /// Release image validity at the source cleanup boundary; retain allocation.
@@ -310,6 +390,23 @@ impl<P: PhaseItem> RenderCommand<P> for SetSourceGlassView {
             return RenderCommandResult::Skip;
         }
         pass.set_bind_group(1, &view.bind_group, &[]);
+        RenderCommandResult::Success
+    }
+}
+
+pub struct SetSourceParticleView;
+impl<P: PhaseItem> RenderCommand<P> for SetSourceParticleView {
+    type Param = ();
+    type ViewQuery = &'static SourceGlassView;
+    type ItemQuery = ();
+    fn render<'w>(
+        _: &P,
+        view: ROQueryItem<'w, '_, Self::ViewQuery>,
+        _: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+        _: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        pass.set_bind_group(1, &view.particle_group, &[]);
         RenderCommandResult::Success
     }
 }

@@ -430,6 +430,7 @@ pub fn load_materials(
                 },
                 additive: record.shader_family == ShaderFamily::Standard,
                 glass: record.shader_family == ShaderFamily::StainedGlass,
+                grab: false,
             },
         );
     }
