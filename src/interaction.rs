@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod carry;
+pub mod cigarettes;
 pub mod cleaning;
 pub mod consumption;
 pub mod equipment;

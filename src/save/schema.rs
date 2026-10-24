@@ -44,6 +44,31 @@ pub struct SaveSnapshot {
     /// Runtime item prototype copies. Absent in schema 11.
     #[serde(default)]
     pub spawned: Vec<SpawnedItemSnapshot>,
+    /// Pack counts, cigarette burn state, and the mouth slot. Absent in schema 11.
+    #[serde(default)]
+    pub cigarettes: CigarettesSnapshot,
+}
+/// Spawned items are named by their spawn serial.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigarettesSnapshot {
+    pub packs: Vec<PackSnapshot>,
+    pub cigarettes: Vec<CigaretteSnapshot>,
+    pub mouth: Option<u32>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackSnapshot {
+    pub serial: u32,
+    pub count: u32,
+}
+/// Source `ediblescript` hp and ateOnce.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CigaretteSnapshot {
+    pub serial: u32,
+    pub hp: f32,
+    pub ate_once: bool,
 }
 /// One spawned prototype pickup body, saved in the world at its pose.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

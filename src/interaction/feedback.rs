@@ -31,6 +31,9 @@ impl ActionMask {
     pub const RECENTER: u32 = 1 << 25;
     pub const RELEASE_EQUIPMENT: u32 = 1 << 26;
     pub const RELEASE_EQUIPMENT_SEATED: u32 = 1 << 27;
+    pub const TAKE_ONE: u32 = 1 << 28;
+    pub const SMOKE: u32 = 1 << 29;
+    pub const PUT_ON: u32 = 1 << 30;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]

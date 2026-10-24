@@ -288,3 +288,95 @@ impl StartupTerrain {
         Ok(result)
     }
 }
+
+/// Pose of a source Transform after startup alignment, in converted world space.
+/// `local` is an extra converted local transform below that Transform.
+pub fn source_world_pose(
+    reference: &WorldReference,
+    startup: &StartupTerrain,
+    transform: &crate::reference::SourceId,
+    local: &[crate::reference::Transform],
+) -> Result<crate::vehicle::VehiclePose, ReferenceError> {
+    use rapier3d::math::Rotation;
+    fn number(value: Option<&WorldValue>) -> Result<f32, ReferenceError> {
+        match value {
+            Some(WorldValue::Number(n)) => Ok(*n as f32),
+            Some(WorldValue::Integer(n)) => Ok(*n as f32),
+            _ => Err(ReferenceError("Startup Transform scalar".into())),
+        }
+    }
+    fn fields(
+        value: Option<&WorldValue>,
+    ) -> Result<&crate::reference::WorldFields, ReferenceError> {
+        match value {
+            Some(WorldValue::Record(fields)) => Ok(fields),
+            _ => Err(ReferenceError("Startup Transform vector".into())),
+        }
+    }
+    let mut chain = Vec::new();
+    let mut current = Some(transform.clone());
+    while let Some(source) = current {
+        let record = reference
+            .records
+            .iter()
+            .find(|r| r.source == source && r.class_name == "Transform")
+            .ok_or_else(|| {
+                ReferenceError(format!(
+                    "{}:{} startup Transform",
+                    source.file, source.path_id
+                ))
+            })?;
+        let p = fields(record.fields.get("m_LocalPosition"))?;
+        let q = fields(record.fields.get("m_LocalRotation"))?;
+        let s = fields(record.fields.get("m_LocalScale"))?;
+        // Source left-handed values become converted values: z negates, rotation x and y negate.
+        chain.push((
+            Vector::new(
+                number(p.get("x"))?,
+                number(p.get("y"))?,
+                -number(p.get("z"))?,
+            ),
+            Rotation::from_xyzw(
+                -number(q.get("x"))?,
+                -number(q.get("y"))?,
+                number(q.get("z"))?,
+                number(q.get("w"))?,
+            ),
+            Vector::new(
+                number(s.get("x"))?,
+                number(s.get("y"))?,
+                number(s.get("z"))?,
+            ),
+            startup
+                .root_offsets
+                .iter()
+                .filter(|(id, _)| *id == source)
+                .map(|(_, v)| *v)
+                .sum::<f32>(),
+        ));
+        current = match record.fields.get("m_Father") {
+            Some(WorldValue::Link(parent)) => Some(parent.clone()),
+            _ => None,
+        };
+    }
+    let mut position = Vector::ZERO;
+    let mut rotation = Rotation::IDENTITY;
+    let mut scale = Vector::ONE;
+    let mut offset = 0.;
+    for (p, q, s, o) in chain.iter().rev() {
+        position += rotation * (scale * *p);
+        rotation *= *q;
+        scale *= *s;
+        offset += o;
+    }
+    for t in local {
+        position += rotation * (scale * Vector::from_array(t.translation));
+        rotation *= Rotation::from_array(t.rotation);
+        scale *= Vector::from_array(t.scale);
+    }
+    position.y += offset;
+    Ok(crate::vehicle::VehiclePose {
+        position: position.to_array(),
+        rotation: rotation.normalize().to_array(),
+    })
+}

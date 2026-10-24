@@ -1,5 +1,5 @@
 const BITS={KeyW:1,KeyS:2,KeyA:4,KeyD:8,Space:16,KeyE:32,ShiftLeft:64,ShiftRight:64,ControlLeft:128,ControlRight:128,KeyF:256,Mouse0:512,KeyI:1024,KeyC:2048,Mouse1:4096,Mouse2:16384,Tab:32768,KeyL:65536,KeyH:131072,Numpad8:131072,KeyV:262144,KeyP:524288,KeyB:1048576};
-const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2};
+const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2,CapsLock:4,KeyX:8};
 const DRIVING_BITS={clutch:2**21,shift_up:2**22,shift_down:2**23,reverse:2**24,neutral:2**25,gear1:2**26,gear2:2**27,gear3:2**28,gear4:2**29,gear5:2**30,gear6:2**31};
 export class InputState {
  constructor(bindings){this.inventoryBits={Digit1:1,Digit2:2,Digit3:4,Digit4:8};this.bits={...BITS};for(const {action,codes} of bindings){if(!(action in DRIVING_BITS))throw Error('Unknown driving action: '+action);for(const code of codes)this.bits[code]=((this.bits[code]??0)|DRIVING_BITS[action])>>>0;}this.codes=new Set();this.frame={held:0,pressed:0,released:0,mouseX:0,mouseY:0,wheel:0,inventoryHeld:0,inventoryReleased:0,playerHeld:0,playerPressed:0,playerReleased:0};this.clear();}

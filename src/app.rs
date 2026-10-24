@@ -560,9 +560,9 @@ fn read_input(
     let player = game_player_keys();
     let frame = FrameInput {
         held,
-        player_held: player as u8 & 3,
-        player_pressed: (player >> 2) as u8 & 3,
-        player_released: (player >> 4) as u8 & 3,
+        player_held: player as u8 & 15,
+        player_pressed: (player >> 4) as u8 & 15,
+        player_released: (player >> 8) as u8 & 15,
         pressed: game_pressed(),
         released: game_released(),
         inventory_held: game_inventory_keys() as u8 & 15,
@@ -1211,7 +1211,19 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             runtime.area.player.seat().is_some(),
             current.handbrake,
         ],
-        actions: info.actions.0,
+        actions: info.actions.0
+            | if runtime.needs_output().dead || runtime.sleeping() {
+                0
+            } else {
+                runtime.area.cigarettes.actions(
+                    runtime
+                        .area
+                        .interaction
+                        .equipment
+                        .item()
+                        .or(runtime.area.interaction.held()),
+                )
+            },
         context: if paint.is_some() {
             crate::interaction::feedback::FeedbackContext::Paint as u32
         } else {

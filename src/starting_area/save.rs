@@ -306,6 +306,7 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &saved.spawned,
         )?;
+        candidate.restore_cigarettes(&saved.cigarettes);
         let vehicle = saved
             .vehicles
             .iter()
@@ -619,6 +620,7 @@ impl GarageRuntime {
                 .area
                 .spawned
                 .capture_save(reference, &self.area.items, origin),
+            cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {

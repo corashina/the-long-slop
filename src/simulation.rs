@@ -48,6 +48,10 @@ pub mod keys {
 pub mod player_keys {
     pub const LEAN: u8 = 1;
     pub const ZOOM: u8 = 2;
+    /// Source `input.smoke` (Caps Lock).
+    pub const SMOKE: u8 = 4;
+    /// Source `input.removeSunglasses` (X).
+    pub const TAKE_OFF: u8 = 8;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
