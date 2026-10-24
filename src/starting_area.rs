@@ -1,5 +1,6 @@
 //! Persistent imported home bodies and preparation state.
 pub mod recovery;
+mod under_map;
 use crate::interaction::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemStore, node_pose},
@@ -21,6 +22,7 @@ use rapier3d::prelude::{
 };
 use std::collections::HashMap;
 
+pub mod cigarettes;
 pub mod spawned;
 mod survival;
 pub use survival::DrinkResult;
@@ -61,6 +63,7 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    pub cigarettes: cigarettes::CigaretteRuntime,
     compound_colliders: Vec<CompoundCollider>,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
@@ -398,6 +401,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             plates,
             _plate_draw: plate_draw,
             compound_colliders,
@@ -695,6 +699,8 @@ pub struct GarageRuntime {
     pub wheels: crate::interaction::wheels::WheelAssemblies,
     driving_input: crate::simulation::input::KeyboardDriving,
     recovery_bodies: Vec<RigidBodyHandle>,
+    /// Simulation time of the next under-map check.
+    under_map_check: f64,
     light_owners: Vec<Option<ItemId>>,
 }
 
@@ -811,6 +817,7 @@ impl GarageRuntime {
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
+            under_map_check: 0.,
             light_owners: reference
                 .lighting
                 .controllers
@@ -921,6 +928,12 @@ impl GarageRuntime {
                 / f64::from(cycle.day_seconds + cycle.night_seconds)) as f32,
             &self.area.items,
         );
+        self.stream.advance_levels(
+            &reference.small_items.spirit_level,
+            dt,
+            &self.area.items,
+            &self.physics,
+        );
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -1025,6 +1038,7 @@ impl GarageRuntime {
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
+        self.step_cigarettes(reference, &mut input);
         for (index, vehicle) in self.vehicles.iter_mut().enumerate() {
             vehicle.previous = self.persistent_world.absolute_vehicle_position(
                 &self.physics,
@@ -1113,7 +1127,14 @@ impl GarageRuntime {
                 self.use_light_control(reference, control)
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
-                self.stream.tune_dial(knob, direction, &mut self.area.items);
+                if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                    && let Some((item, true)) =
+                        self.stream
+                            .radio_control(knob, direction, &mut self.area.items)
+                    && let (Some(audio), Some(item)) = (&mut self.audio, self.area.items.get(item))
+                {
+                    audio.radio_click_at(item.pose.position);
+                }
             }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(
@@ -1294,6 +1315,7 @@ impl GarageRuntime {
         }
         self.area.sync_inventory();
         self.area.sync_equipment(reference, &mut self.physics);
+        self.sync_mouth();
         self.area.items.sync_poses(&self.physics);
         self.break_boxes(reference);
         self.area.commit_poses(&self.physics, false);
@@ -1349,6 +1371,7 @@ impl GarageRuntime {
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
         }
 
+        self.advance_under_map(reference);
         let focus = if self.area.player.seat().is_some() {
             self.physics.snapshot(self.vehicle).pose.position
         } else {
@@ -1405,6 +1428,7 @@ impl GarageRuntime {
             )
             .expect("persistent world bindings");
         self.advance_light_fades(reference, FIXED_DT);
+        self.advance_cigarettes();
         self.advance_needs(reference, FIXED_DT, factors.need_scale);
         let was_sleeping = self.sleeping();
         let output = self.sleep.step(
@@ -1847,6 +1871,11 @@ impl GarageRuntime {
         self.area
             .player
             .align_startup(startup.player_offset, &mut self.physics);
+        let packs =
+            cigarettes::start_pack_poses(reference, startup, self.area.origin, self.vehicle)?;
+        for (pose, count) in packs {
+            self.spawn_pack(reference, pose, count)?;
+        }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
         self.area.commit_poses(&self.physics, true);

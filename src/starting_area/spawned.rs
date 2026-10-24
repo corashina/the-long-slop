@@ -38,7 +38,7 @@ impl SpawnedItems {
         self.items.is_empty()
     }
     /// Restored serials stay unique: later spawns start after the largest one.
-    fn record(&mut self, item: SpawnedItem) {
+    pub(super) fn record(&mut self, item: SpawnedItem) {
         self.next_serial = self.next_serial.max(item.serial.saturating_add(1));
         self.items.push(item);
     }

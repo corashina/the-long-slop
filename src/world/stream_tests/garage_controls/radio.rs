@@ -58,7 +58,12 @@ fn g10_radio_power_and_tuning() {
                         (1., if am { "AMmax" } else { "FMmax" }),
                     ] {
                         audio.radio.tuning = tuning;
-                        let frame = audio.radio.advance(0., electronics);
+                        let frame = audio.broadcasts.frame(
+                            &audio.radio,
+                            0.,
+                            electronics,
+                            r.electronics_cutoff,
+                        );
                         assert_eq!(frame.power, on && electronics > r.electronics_cutoff);
                         assert!((frame.frequency - r.constants[key]).abs() < 0.001);
                         assert_eq!(audio.radio.tuning, tuning);
@@ -71,7 +76,12 @@ fn g10_radio_power_and_tuning() {
     audio.radio.tuning = 0.5;
     audio.radio.control(RadioControl::TuneUp);
     assert!(audio.radio.tuning > 0.5);
-    assert!(!audio.radio.advance(0., r.electronics_output).power);
+    assert!(
+        !audio
+            .broadcasts
+            .frame(&audio.radio, 0., r.electronics_output, r.electronics_cutoff)
+            .power
+    );
     assert_eq!(reference.build_id, 11140890);
 }
 

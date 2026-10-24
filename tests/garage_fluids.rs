@@ -537,9 +537,13 @@ fn g04_caps_and_direct_fill() {
     assert_eq!(oil, ItemId(120));
     assert_eq!(destination, receiver);
     let requested = receiver_cap.flow_liters_per_second * the_long_slop::simulation::FIXED_DT;
-    let expected = (requested * 0.5 * r.fluid_rules.slow_oil_modifier)
-        .max(0.0001)
-        .min(requested);
+    // Unity Mathf.Clamp tests the 0.0001 minimum first.
+    let slowed = requested * 0.5 * r.fluid_rules.slow_oil_modifier;
+    let expected = if slowed < 0.0001 {
+        0.0001
+    } else {
+        slowed.min(requested)
+    };
     assert!((liters - expected).abs() < 1e-6);
     set_cap(&mut run, &r, supply_cap.id, false);
 

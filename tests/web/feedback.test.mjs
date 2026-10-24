@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createFeedback} from '../../web/feedback.js';
+import {createFeedback,formatTank} from '../../web/feedback.js';
 
 function setup(t){
  const originals=new Map(['window','document','innerWidth','innerHeight'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
@@ -35,4 +35,9 @@ test('G08 HUD rows preserve tool and carry controls',t=>{
  assert.match(app.nodes.get('#carry-help').textContent,/Rotate/);
  assert.match(app.nodes.get('#carry-help').textContent,/Roll/);
  assert.doesNotMatch(app.nodes.get('#carry-help').textContent,/Tab|Center/);
+});
+test('F15 cap text lists fluids in the tank list order',()=>{
+ // Water (3) entered first, then gas (0): order nibbles are type + 1.
+ const r={noText:false,context:0,hasName:true,fluidName:'Coolant',amount:2,capacity:5,quantities:[0.5,0,0,1.5,0,0],fluidOrder:4|(1<<4)};
+ assert.equal(formatTank(r),'Coolant:\n2 / 5 L\n75% Water\n25% Gas');
 });

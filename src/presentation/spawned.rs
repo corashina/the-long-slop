@@ -6,6 +6,7 @@ use crate::interaction::items::ItemLocation;
 use crate::reference::{AssetUsage, ItemId, NodeId, ReferenceManifest, SourceId};
 use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
 use bevy::ecs as bevy_ecs;
+use bevy::ecs::system::SystemParam;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
@@ -69,6 +70,17 @@ fn owning_body(
     None
 }
 
+/// Scene graph queries that bind a prototype instance.
+#[derive(SystemParam)]
+pub(crate) struct SceneQueries<'w, 's> {
+    extras: Query<'w, 's, (Entity, &'static GltfExtras)>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    primitives: Query<'w, 's, (Entity, &'static ChildOf), With<Mesh3d>>,
+    source_materials: Query<'w, 's, (), With<MeshMaterial3d<SourceMaterial>>>,
+    transforms: Query<'w, 's, &'static mut Transform, With<SpawnedScene>>,
+    visibility: Query<'w, 's, &'static mut Visibility>,
+}
+
 pub(crate) fn sync(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
@@ -76,13 +88,16 @@ pub(crate) fn sync(
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut spawned: ResMut<SpawnedVisuals>,
-    extras: Query<(Entity, &GltfExtras)>,
-    parents: Query<&ChildOf>,
-    primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    source_materials: Query<(), With<MeshMaterial3d<SourceMaterial>>>,
-    mut transforms: Query<&mut Transform, With<SpawnedScene>>,
-    mut visibility: Query<&mut Visibility>,
+    scene: SceneQueries,
 ) {
+    let SceneQueries {
+        extras,
+        parents,
+        primitives,
+        source_materials,
+        mut transforms,
+        mut visibility,
+    } = scene;
     if !visuals.bound {
         return;
     }

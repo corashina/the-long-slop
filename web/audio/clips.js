@@ -1,7 +1,7 @@
 import {readPackageAsset} from '../world-assets.js';
 // Accepted WAV bytes are checked before browser decoding.
 export class ClipCache {
- constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.failed=new Set();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();this.radioDemand=[null,null,null,null];this.radioDirty=true;}
+ constructor(context,raw,current,fail){this.context=context;this.clips=new Map(raw.clips.map(c=>[c.id,c]));this.current=current;this.fail=fail;this.buffers=new Map();this.pending=new Map();this.failed=new Set();this.controllers=new Set();this.generation=0;this.radioBuffers=new Map();this.radioPending=new Map();this.radioWanted=new Set();this.radioDemand=[];this.radioDirty=true;}
  async effect(id,session){
   if(this.failed.has(id))return null;
   if(this.buffers.has(id))return this.buffers.get(id);
@@ -27,16 +27,24 @@ export class ClipCache {
    if(Math.abs(buffer.duration-clip.duration_seconds)>.02||buffer.numberOfChannels!==clip.channels)throw Error('Audio decoded samples');
    return buffer;
  }
- radio(current,next,session){
+ radio(demand,session){
   if(session!==this.current())return;
-  const demand=this.radioDemand;const changed=demand[0]!==current[0]||demand[1]!==current[1]||demand[2]!==next[0]||demand[3]!==next[1];
+  const last=this.radioDemand;let changed=last.length!==demand.length;
+  for(let i=0;!changed&&i<demand.length;i++)changed=last[i]!==demand[i];
   if(!changed&&!this.radioDirty)return;this.radioDirty=false;
-  if(changed){demand[0]=current[0];demand[1]=current[1];demand[2]=next[0];demand[3]=next[1];this.radioWanted.clear();for(const id of current)if(id!==null)this.radioWanted.add(id);for(const id of next)if(id!==null)this.radioWanted.add(id);}
+  if(changed){if(last.length!==demand.length)this.radioDemand=demand.slice();else for(let i=0;i<demand.length;i++)last[i]=demand[i];this.radioWanted.clear();for(const id of demand)if(id!==null)this.radioWanted.add(id);}
   for(const id of this.radioBuffers.keys())if(!this.radioWanted.has(id))this.radioBuffers.delete(id);
   for(const entry of this.radioPending.values())if(!this.radioWanted.has(entry.id)){entry.stale=true;entry.abort.abort();}
   for(const id of this.radioWanted){
    if(this.failed.has(id)||this.radioBuffers.has(id)||this.radioPending.has(id))continue;
-   if(this.radioBuffers.size+this.radioPending.size>=4)break;
+   if(this.radioBuffers.size+this.radioPending.size>=4){
+    // A full cache gives way only to a clip earlier in demand order.
+    let victim=null,worst=demand.indexOf(id);
+    for(const other of this.radioBuffers.keys()){const rank=demand.indexOf(other);if(rank>worst){worst=rank;victim=other;}}
+    for(const other of this.radioPending.values()){const rank=demand.indexOf(other.id);if(rank>worst){worst=rank;victim=other;}}
+    if(victim===null)break;
+    if(typeof victim==='object'){victim.stale=true;victim.abort.abort();this.radioPending.delete(victim.id);}else this.radioBuffers.delete(victim);
+   }
    const generation=this.generation,abort=new AbortController(),entry={id,abort,stale:false,task:null};
    this.radioPending.set(id,entry);
    entry.task=this.decode(id,session,'radio',generation,abort).then(buffer=>{

@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod carry;
+pub mod cigarettes;
 pub mod cleaning;
 pub mod consumption;
 pub mod equipment;
@@ -11,6 +12,7 @@ mod input;
 pub use input::InteractionOutcome;
 pub mod items;
 pub mod labels;
+pub(crate) mod level;
 pub mod mechanisms;
 pub(crate) mod memory;
 pub mod parts;
@@ -27,9 +29,9 @@ use crate::fluids::{spill, transfer};
 use crate::player::{ExitReference, PlayerState};
 use crate::reference::{
     ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderGeometry, ColliderId,
-    FluidParticleReference, ItemId, ItemKind, LightControlId, LightControllerKind, NodeId,
-    OpeningId, OpeningRecord, PartSlotId, ReferenceError, ReferenceManifest, SeatId, TankRole,
-    WheelSlotId,
+    FluidParticleReference, FluidPresentation, ItemId, ItemKind, LightControlId,
+    LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
+    ReferenceManifest, SeatId, TankRole, WheelSlotId,
 };
 use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
@@ -88,8 +90,19 @@ pub enum InteractionAction {
     PlateRemove(ItemId),
     PlateMount(ItemId),
     PartInstall(ItemId),
-    /// One source tune step (+1 or -1) on a generated dial knob.
+    /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
+    /// radio band switch.
     DialTune(ColliderId, f32),
+}
+
+/// A generated usablescript knob bound to a dial or a portable radio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Knob {
+    Dial,
+    Volume,
+    Tuning,
+    /// BChangeAMFM: turned with use.
+    Band,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -127,6 +140,7 @@ struct OpeningRules {
     can_toggle: bool,
     can_tune: bool,
     tune_rate: f32,
+    presentation: FluidPresentation,
 }
 impl From<&OpeningRecord> for OpeningRules {
     fn from(opening: &OpeningRecord) -> Self {
@@ -143,6 +157,7 @@ impl From<&OpeningRecord> for OpeningRules {
             can_toggle: opening.can_toggle,
             can_tune: opening.can_tune,
             tune_rate: opening.tune_rate,
+            presentation: opening.presentation.clone(),
         }
     }
 }
@@ -210,7 +225,7 @@ pub struct InteractionState {
     cancelled_input: u32,
     usable_light_controls: HashSet<LightControlId>,
     /// Generated source dial knobs (meterscript tune usables).
-    dial_knobs: HashSet<ColliderId>,
+    dial_knobs: HashMap<ColliderId, Knob>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
     slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
@@ -325,7 +340,7 @@ impl InteractionState {
         map(&self.light_controls)
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
-            + set(&self.dial_knobs)
+            + map(&self.dial_knobs)
             + map(&self.kinds)
             + map(&self.slot_fits)
             + self.slot_fits.values().map(set).sum::<usize>()
@@ -575,7 +590,7 @@ impl InteractionState {
                 .unwrap_or(0)
                 + 1,
             fill_opening: None,
-            dial_knobs: HashSet::new(),
+            dial_knobs: HashMap::new(),
             usable_light_controls: reference
                 .lighting
                 .controllers
@@ -792,8 +807,8 @@ impl InteractionState {
         self.held_controls.retain(|_, id| *id != control);
         self.usable_light_controls.remove(&control);
     }
-    pub fn bind_dial_knob(&mut self, collider: ColliderId) {
-        self.dial_knobs.insert(collider);
+    pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
+        self.dial_knobs.insert(collider, kind);
     }
     pub fn remove_dial_knob(&mut self, collider: ColliderId) {
         self.dial_knobs.remove(&collider);
@@ -802,10 +817,10 @@ impl InteractionState {
         &self,
         target: &AimTarget,
         physics: &PhysicsWorld,
-    ) -> Option<ColliderId> {
+    ) -> Option<(ColliderId, Knob)> {
         let id =
             ColliderId((physics.rapier().colliders.get(target.collider)?.user_data >> 64) as u32);
-        self.dial_knobs.contains(&id).then_some(id)
+        self.dial_knobs.get(&id).map(|kind| (id, *kind))
     }
     pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {
         let id = self.next_generated_collider;
@@ -1111,6 +1126,12 @@ impl InteractionState {
             can_toggle,
             can_tune,
             tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
+            presentation: generated_presentation(
+                number(cap_record, "hasName")? != 0.0,
+                number(cap_record, "nameText")?,
+                number(cap_record, "noText")? != 0.0,
+                &reference.fluid_rules.words,
+            )?,
         };
         let tank_rules = TankRules {
             no_drink: number(tank_record, "noDrink")? != 0.0,
@@ -1616,7 +1637,13 @@ impl InteractionState {
                         }
                     }
                 }
-                if let Some(knob) = self.dial_knob(&target, physics) {
+                if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
+                    if use_input.pressed & keys::USE != 0
+                        || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
+                    {
+                        action = Some(InteractionAction::DialTune(knob, 0.));
+                    }
+                } else if let Some((knob, _)) = self.dial_knob(&target, physics) {
                     let mut knob_input = use_input;
                     if !availability.lmb_use {
                         knob_input.held &= !keys::PRIMARY;
@@ -1804,9 +1831,7 @@ impl InteractionState {
                         && destination_total > 0.05
                         && destination_state.mixture().amount(1) / destination_total < 1.0
                     {
-                        amount = (amount * destination_total * self.slow_oil_modifier)
-                            .max(0.0001)
-                            .min(amount);
+                        amount = slow_oil_amount(amount, destination_total, self.slow_oil_modifier);
                     }
                     let liters = transfer(source, destination_state, amount * fluid_scale);
                     if liters > 0.0 {
@@ -2024,5 +2049,74 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
         0.0
     } else {
         ((value - start) / (end - start)).clamp(0.0, 1.0)
+    }
+}
+
+/// Source `GetCapString` reads `ls.l.g(nameText)`, not the serialized `nameString`.
+fn generated_presentation(
+    has_name: bool,
+    name_text: f32,
+    no_text: bool,
+    words: &[String],
+) -> Result<FluidPresentation, ReferenceError> {
+    let name = if has_name {
+        words
+            .get(name_text as usize)
+            .filter(|_| name_text >= 0.0)
+            .ok_or_else(|| ReferenceError("Cap name word outside language table".into()))?
+            .clone()
+    } else {
+        String::new()
+    };
+    Ok(FluidPresentation {
+        has_name,
+        name,
+        no_text,
+    })
+}
+
+/// Source `DrinkFill` slow oil: `Mathf.Clamp(num * amount * slowOilModifier, 0.0001f, num)`.
+/// Unity tests the minimum first, so a result below 0.0001 stays 0.0001 even above `num`.
+fn slow_oil_amount(amount: f32, destination_total: f32, modifier: f32) -> f32 {
+    let value = amount * destination_total * modifier;
+    if value < 0.0001 {
+        0.0001
+    } else if value > amount {
+        amount
+    } else {
+        value
+    }
+}
+
+#[cfg(test)]
+mod f15_fluid_containers {
+    use super::*;
+
+    #[test]
+    fn f15_generated_cap_name_uses_name_text_word() {
+        // Source record: hasName=1, nameString="Coolant Tank", nameText=167 (ls.w.coolant).
+        let mut words = vec![String::new(); 169];
+        words[166] = "Oil Tank".into();
+        words[167] = "Coolant".into();
+        words[168] = "Fuel Tank".into();
+        let named = generated_presentation(true, 167., false, &words).unwrap();
+        assert!(named.has_name && !named.no_text);
+        assert_eq!(named.name, "Coolant");
+        assert_eq!(
+            generated_presentation(false, 168., true, &words)
+                .unwrap()
+                .name,
+            ""
+        );
+        assert!(generated_presentation(true, 453., false, &words).is_err());
+    }
+
+    #[test]
+    fn f15_slow_oil_clamp_tests_minimum_first() {
+        // mainscript.slowOilModifier = 0.02.
+        let modifier = 0.019_999_999_552_965_164_f32;
+        assert_eq!(slow_oil_amount(0.01, 2., modifier), 0.01 * 2. * modifier);
+        assert_eq!(slow_oil_amount(0.00005, 2., modifier), 0.0001);
+        assert_eq!(slow_oil_amount(0.01, 100., modifier), 0.01);
     }
 }

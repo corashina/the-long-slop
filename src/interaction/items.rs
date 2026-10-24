@@ -747,6 +747,7 @@ impl ItemStore {
         Some(crate::world::ObjectSnapshot {
             lamp: None,
             dial: None,
+            radio: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,

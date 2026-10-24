@@ -50,7 +50,7 @@ pub use stream::{
     WorldRequest, WorldStream,
 };
 mod startup;
-pub use startup::StartupTerrain;
+pub use startup::{StartupTerrain, source_world_pose};
 mod terrain;
 pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,

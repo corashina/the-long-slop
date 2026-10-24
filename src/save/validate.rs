@@ -92,6 +92,11 @@ impl SaveSnapshot {
                 "Duplicate spawned item",
             )?;
         }
+        crate::starting_area::cigarettes::validate_save(
+            reference,
+            &self.spawned,
+            &self.cigarettes,
+        )?;
         let parents = self.validate_attachments(reference, &ids, &items)?;
         self.validate_player(reference, &ids, &items, &parents)?;
         self.validate_needs(reference)?;
