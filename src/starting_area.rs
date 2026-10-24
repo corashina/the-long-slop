@@ -922,6 +922,12 @@ impl GarageRuntime {
                 / f64::from(cycle.day_seconds + cycle.night_seconds)) as f32,
             &self.area.items,
         );
+        self.stream.advance_levels(
+            &reference.small_items.spirit_level,
+            dt,
+            &self.area.items,
+            &self.physics,
+        );
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,

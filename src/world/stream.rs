@@ -145,6 +145,9 @@ pub struct WorldStream {
     dial_bindings: Vec<content_dials::DialBinding>,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
+    level_bindings: Vec<content_levels::LevelBinding>,
+    /// Session and active revision whose spirit levels are all bound.
+    level_scan: Option<(u64, u64)>,
     radio_bindings: Vec<content_radios::RadioBinding>,
     /// Session and active revision whose radio items are all bound.
     radio_scan: Option<(u64, u64)>,
@@ -689,6 +692,8 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             dial_scan: None,
+            level_bindings: Vec::new(),
+            level_scan: None,
             radio_bindings: Vec::new(),
             radio_scan: None,
             radio_scripts: Vec::new(),
@@ -3874,6 +3879,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_level_bindings(&reference.small_items.spirit_level, items) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_radio_bindings(items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
@@ -4593,6 +4602,13 @@ impl WorldStream {
                     .iter()
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
+                + self.level_bindings.capacity()
+                    * std::mem::size_of::<content_levels::LevelBinding>()
+                + self
+                    .level_bindings
+                    .iter()
+                    .map(content_levels::LevelBinding::heap_bytes)
+                    .sum::<usize>()
                 + self.radio_bindings.capacity()
                     * std::mem::size_of::<content_radios::RadioBinding>()
                 + self
@@ -4900,6 +4916,9 @@ mod content_radios;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[path = "content_levels.rs"]
+mod content_levels;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]
