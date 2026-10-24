@@ -311,6 +311,33 @@ impl RadioState {
 }
 
 impl RadioState {
+    pub fn capture_save(&self) -> crate::save::RadioSnapshot {
+        crate::save::RadioSnapshot {
+            on: self.on,
+            am: self.am,
+            tuning: self.tuning,
+            volume: self.volume,
+        }
+    }
+    /// save_radioscript restores controls only; stations pick fresh recordings.
+    pub fn restore_save(
+        &mut self,
+        saved: &crate::save::RadioSnapshot,
+    ) -> Result<(), crate::save::SaveError> {
+        if saved.am && self.rules.controls.band.is_none() {
+            return Err(crate::save::SaveError::CorruptData(
+                "Radio band without band control".into(),
+            ));
+        }
+        self.on = saved.on;
+        self.am = saved.am;
+        self.tuning = saved.tuning;
+        self.volume = saved.volume;
+        Ok(())
+    }
+}
+
+impl RadioState {
     /// mainscript.Update advances FM stations while the sleep loop gain exceeds 0.5.
     pub fn advance_sleep(&mut self, seconds: f64) {
         let mut iteration = 0;
@@ -343,5 +370,79 @@ impl RadioState {
             }
             iteration += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod a09_save {
+    use super::*;
+    use crate::save::{RadioSnapshot, SaveError};
+
+    fn radio(band: bool) -> RadioState {
+        let source = serde_json::json!({"file": "level1", "path_id": 1});
+        let method = serde_json::json!({
+            "class": "radioscript", "method": "Update", "file": "", "line_start": 0,
+            "line_end": 0, "sha256": ""
+        });
+        let control = serde_json::json!({
+            "source": source, "node": 1, "item": 1, "enabled": true, "tune": false,
+            "turnable": true
+        });
+        let reference: RadioAudioReference = serde_json::from_value(serde_json::json!({
+            "source": source, "emitter": 0, "voices": [1, 2, 3],
+            "controls": {"volume": control, "tuning": null, "band": if band { control.clone() } else { serde_json::Value::Null }},
+            "visuals": {
+                "screen": {"kind": "absent"}, "indicator": {"kind": "absent"},
+                "needle": 1, "start": 1, "end": 1
+            },
+            "constants": {
+                "AMmin": 530., "AMmax": 1600., "AMStep": 10., "FMmin": 88., "FMmax": 108.,
+                "FMStep": 0.1, "vSpeed": 0.05
+            },
+            "initial_on": false, "initial_am": false, "initial_tuning": 0.2, "initial_volume": 0.5,
+            "fm_tolerance": 0.5, "am_tolerance": 10., "electronics_cutoff": 0.1,
+            "time_correction_seconds": 0., "late_seek_margin_seconds": 0., "custom_gain": 1.,
+            "clock": {
+                "kind": "game", "selected": method, "music_start": method, "talk_start": method,
+                "multiplayer": method
+            },
+            "click_binding": null, "stations": [], "methods": [], "electronics_source": source,
+            "electronics_output": 1., "tuning_repeat_seconds": 0.1,
+            "holiday_ranges": [[0, 0, 0, 0], [0, 0, 0, 0]]
+        }))
+        .unwrap();
+        RadioState::new(&reference, &[], [10, 24])
+    }
+
+    #[test]
+    fn controls_round_trip_without_playlists() {
+        let mut saved = radio(true);
+        saved.control(RadioControl::VolumeUp);
+        saved.control(RadioControl::Band);
+        saved.control(RadioControl::TuneUp);
+        let snapshot = saved.capture_save();
+        assert_eq!(
+            snapshot,
+            RadioSnapshot {
+                on: true,
+                am: true,
+                tuning: saved.tuning,
+                volume: saved.volume,
+            }
+        );
+        let mut loaded = radio(true);
+        loaded.restore_save(&snapshot).unwrap();
+        assert_eq!(loaded.capture_save(), snapshot);
+    }
+
+    #[test]
+    fn am_needs_a_band_control() {
+        let mut loaded = radio(false);
+        let fresh = loaded.capture_save();
+        assert!(matches!(
+            loaded.restore_save(&RadioSnapshot { am: true, ..fresh }),
+            Err(SaveError::CorruptData(_))
+        ));
+        assert_eq!(loaded.capture_save(), fresh);
     }
 }

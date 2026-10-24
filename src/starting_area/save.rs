@@ -429,6 +429,11 @@ impl GarageRuntime {
             &headlights,
         )?;
         candidate.area.commit_poses(&candidate.physics, true);
+        match (&mut candidate.audio, &saved.radio) {
+            (Some(audio), Some(radio)) => audio.radio.restore_save(radio)?,
+            (None, None) => (),
+            _ => return Err(SaveError::InvalidLinks("Radio owner".into())),
+        }
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
             audio.restore_engine(
@@ -583,6 +588,7 @@ impl GarageRuntime {
                 start_attempts: self.attempts.to_string(),
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
+            radio: self.audio.as_ref().map(|audio| audio.radio.capture_save()),
             view: ViewSnapshot { camera: view },
         };
         if let Some(pending) = &self.pending_restore {

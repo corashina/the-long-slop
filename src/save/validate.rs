@@ -89,6 +89,9 @@ impl SaveSnapshot {
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
+        if let Some(radio) = &self.radio {
+            data(unit(radio.tuning) && unit(radio.volume), "Radio controls")?;
+        }
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
         for brush in &reference.conditions.brushes {
