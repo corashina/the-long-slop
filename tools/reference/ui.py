@@ -140,7 +140,7 @@ def export_ui(source, output, library):
                 if data['m_Enabled'] and key(component)!=key(fill_image):background.append(component)
     if len(background)!=1:raise ValueError('Sleep slider must have one active background')
     layout(background[0],'need-sleep-background')
-    for role,field in [('can-sleep','GCanSleep'),('cannot-sleep','GCantSleep')]:
+    for role,field in [('can-sleep','GCanSleep'),('cannot-sleep','GCantSleep'),('sleep-hint','GV')]:
         go=source.resolve(menu,md[field])
         for c in components(go):
             if c.type.name=='MonoBehaviour' and source.class_name(c) in ('Text','TextMeshProUGUI','Image'):

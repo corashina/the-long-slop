@@ -541,6 +541,7 @@ fn g10_generated_endpoint_root() {
                 WorldOrigin::default(),
                 false,
                 &mut run.physics,
+                &mut crate::world::TriggerRoles::default(),
             )
             .unwrap();
         let root_body = instance.bodies[0];

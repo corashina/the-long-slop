@@ -20,7 +20,8 @@ inline!(
     f64,
     AssetId,
     Transform,
-    WorldPrototypeRole
+    WorldPrototypeRole,
+    TriggerRole
 );
 impl ImmutableInputBytes for String {
     fn heap_bytes(&self) -> usize {
@@ -113,7 +114,7 @@ fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,c
 fields!(WorldPrototypeReference:source,role,asset,nodes,controls,excluded_actions,deferred_materials,skins,bodies,colliders,prefab_pose);
 fields!(WorldPrototypeNode:source,name,parent,active,renderer_enabled,layer,transform,gltf_node);
 fields!(WorldSkinReference:source,mesh,node,bones,bind_poses,positions,normals,tangents,uv,joints,weights,triangles);
-fields!(WorldColliderReference:body,source,node,enabled,trigger,material,deformed_skin,source_empty_mesh,geometry);
+fields!(WorldColliderReference:body,source,node,enabled,trigger,role,material,deformed_skin,source_empty_mesh,geometry);
 fields!(WorldSourceReceipt:source,sha256);
 fields!(WorldSourceRecord:source,class_name,fields);
 impl ImmutableInputBytes for WorldFields {

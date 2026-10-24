@@ -17,7 +17,7 @@ use crate::vehicle::{
 };
 use crate::world::{DEFAULT_SEED, WorldStream};
 use rapier3d::prelude::{
-    Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
+    ActiveEvents, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
 };
 use std::collections::HashMap;
 
@@ -128,11 +128,22 @@ impl StartingArea {
             } else {
                 0
             };
+            let hit_sound = item.is_some_and(|id| {
+                reference
+                    .items
+                    .iter()
+                    .any(|i| i.id == id && i.collision_clip.is_some())
+            });
             let builder = collider_builder(&record.geometry)?
                 .friction(record.friction)
                 .restitution(record.restitution)
                 .sensor(record.sensor)
                 .enabled(record.enabled)
+                .active_events(if hit_sound {
+                    ActiveEvents::COLLISION_EVENTS
+                } else {
+                    ActiveEvents::empty()
+                })
                 .solver_groups(crate::vehicle::solver_groups(record.enabled))
                 .density(0.0)
                 .collision_groups(InteractionGroups::new(
@@ -278,6 +289,7 @@ impl StartingArea {
         let spawn = &reference.area.player_spawn;
         let mut player = PlayerState::new(
             &reference.player,
+            &reference.clothing.pose,
             VehiclePose {
                 position: std::array::from_fn(|i| spawn.translation[i] - origin[i] as f32),
                 rotation: spawn.rotation,
@@ -824,7 +836,10 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         control: crate::reference::LightControlId,
     ) {
-        match self.stream.use_generated_light(control) {
+        match self
+            .stream
+            .use_generated_light(control, &mut self.area.items)
+        {
             Ok(false) => self.lighting.use_control(&reference.lighting, control),
             Ok(true) => {}
             Err(error) => self.stream.fail(error),
@@ -886,11 +901,23 @@ impl GarageRuntime {
                 .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+            audio.sync_rocks(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            audio.rock_step(self.lighting.cycle.output(), position);
         }
     }
 
     fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
         self.stream.advance_generated_lamps(dt);
+        let cycle = &reference.lighting.cycle;
+        self.stream.advance_dials(
+            dt,
+            (self.lighting.cycle.output().cycle_seconds
+                / f64::from(cycle.day_seconds + cycle.night_seconds)) as f32,
+            &self.area.items,
+        );
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -1082,6 +1109,9 @@ impl GarageRuntime {
             Some(InteractionAction::LightControl(control)) => {
                 self.use_light_control(reference, control)
             }
+            Some(InteractionAction::DialTune(knob, direction)) => {
+                self.stream.tune_dial(knob, direction, &mut self.area.items);
+            }
             Some(InteractionAction::Wheel(action)) => {
                 if let Some(notice) = self.area.interaction.complete_wheel_action(
                     action,
@@ -1161,9 +1191,17 @@ impl GarageRuntime {
             self.survival.output(),
         );
         let context = self.player_step_context(walking_input, final_availability, reference);
+        if needs.dead {
+            self.area.player.clear_triggers();
+        } else {
+            self.area
+                .player
+                .scan_triggers(&self.physics, self.stream.trigger_roles());
+        }
         self.area
             .player
             .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        self.apply_hazards(reference);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
         self.area
@@ -1219,6 +1257,9 @@ impl GarageRuntime {
             .mechanisms
             .apply_reactions(&mut self.physics);
         self.physics.step_physics();
+        self.area
+            .player
+            .step_head_bob(walking_input, needs.dead, &self.physics, FIXED_DT);
         self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
@@ -1254,6 +1295,7 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            audio.hits(&self.area, &self.physics, FIXED_DT);
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
                     crate::interaction::InteractionSound::Action(action) => {
@@ -1368,6 +1410,7 @@ impl GarageRuntime {
                 active: !self.paused,
                 camera_allowed: self.sleep_camera_allowed || self.area.player.seat().is_none(),
                 dead: self.needs_output().dead,
+                show_text: crate::sleep::show_text(&reference.seats, self.area.player.seat()),
             },
             self.simulation_seconds,
             FIXED_DT,

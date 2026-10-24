@@ -15,6 +15,8 @@ fn empty_world() -> PhysicsWorld {
         presentation_bodies: Default::default(),
         chassis: Vec::new(),
         vehicles: Vec::new(),
+        hit_collector: Default::default(),
+        hits: Vec::new(),
     }
 }
 

@@ -15,6 +15,16 @@ pub(crate) struct SpawnedContent {
     pub buried: bool,
     pub distance_offset: [f32; 3],
 }
+impl SpawnedContent {
+    /// Switch state of a flashlight that is its own item.
+    pub fn portable_lamp(&self) -> Option<bool> {
+        self.inputs
+            .lamps
+            .iter()
+            .find(|(parent, _, _)| parent == &self.placement.id)
+            .map(|(_, _, on)| *on)
+    }
+}
 pub(crate) struct SpawnEvaluation<'a> {
     pub reference: &'a WorldReference,
     pub rules: &'a SourceRules,

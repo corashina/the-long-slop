@@ -1,10 +1,14 @@
 //! Generated item bindings belong to their published source instance.
 use super::WorldStream;
-use crate::interaction::{InteractionState, items::ItemStore};
+use crate::interaction::{
+    InteractionState,
+    items::{HitSound, ItemStore},
+};
 use crate::reference::{ActionBinding, PickupReference, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
 use crate::world::{ObjectKey, changes};
+use rapier3d::prelude::ActiveEvents;
 impl WorldStream {
     pub fn initialize_imported_changes(
         &mut self,
@@ -45,7 +49,20 @@ impl WorldStream {
             else {
                 continue;
             };
+            snapshot.lamp = self
+                .contents
+                .active
+                .iter()
+                .find(|c| c.item == Some(id))
+                .and_then(|c| c.content.portable_lamp());
             let key = items.object_key(id);
+            // An unbound dial keeps its saved value.
+            snapshot.dial = self.dial_value(id).unwrap_or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.dial)
+            });
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
                     == rapier3d::prelude::RigidBodyType::KinematicPositionBased
@@ -269,7 +286,9 @@ impl WorldStream {
                 physics,
             ) {
                 rollback(&mut content, instance, items, interaction, physics, wheels);
-                self.structures.swap_remove(index).retire(physics);
+                self.structures
+                    .swap_remove(index)
+                    .retire(physics, &mut self.trigger_roles);
                 self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }
@@ -281,6 +300,9 @@ impl WorldStream {
                 physics,
                 reference,
             );
+            if let Some(baseline) = &mut content.baseline {
+                baseline.lamp = content.content.portable_lamp();
+            }
             for binding in &mut content.bindings {
                 binding.baseline = crate::world::changes::capture(
                     binding.item,
@@ -424,7 +446,9 @@ impl WorldStream {
                 );
                 let id = items.insert_generated(placement.id.clone(), prototype, pickup_pose)?;
                 content.item = Some(id);
+                let hit = hit_sound(&self.reference, pickup.source);
                 let state = items.set_body(id, Some(body)).unwrap();
+                state.hit_sound = hit;
                 state.fluid = content.content.fluid.clone();
                 state.generated_condition = Some(content.content.condition);
                 state.local_pose = from_rapier(
@@ -447,6 +471,7 @@ impl WorldStream {
                     let collider_id = interaction.allocate_generated_collider()?;
                     physics.edit_collider(*handle, |collider| {
                         collider.user_data = ((collider_id.0 as u128) << 64) | (id.0 as u128 + 1);
+                        collider.set_active_events(hit_events(hit));
                     });
                     interaction.bind_surface(
                         *handle,
@@ -560,6 +585,9 @@ impl WorldStream {
                 content.suspended_bodies.reserve(instance.bodies.len());
                 content.baseline =
                     crate::world::changes::capture(id, items, interaction, physics, reference);
+                if let Some(baseline) = &mut content.baseline {
+                    baseline.lamp = content.content.portable_lamp();
+                }
                 for binding in &mut content.bindings {
                     binding.baseline = crate::world::changes::capture(
                         binding.item,
@@ -586,7 +614,9 @@ impl WorldStream {
                     .iter()
                     .position(|s| s.placement.id == placement.id)
                     .unwrap();
-                self.structures.swap_remove(index).retire(physics);
+                self.structures
+                    .swap_remove(index)
+                    .retire(physics, &mut self.trigger_roles);
                 self.structure_revision = self.structure_revision.wrapping_add(1);
                 return Err(error);
             }
@@ -645,11 +675,12 @@ impl WorldStream {
                     interaction
                         .parts
                         .mount_mechanism(item, &mut interaction.mechanisms);
-                    if let Some(snapshot) =
+                    if let Some(mut snapshot) =
                         crate::world::changes::capture(item, items, interaction, physics, reference)
                     {
                         for owner in &mut self.contents.active {
                             if owner.item == Some(item) {
+                                snapshot.lamp = owner.content.portable_lamp();
                                 owner.baseline = Some(snapshot);
                                 for binding in &mut owner.bindings {
                                     binding.baseline = crate::world::changes::capture(
@@ -1095,6 +1126,29 @@ pub(crate) fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, R
     })
 }
 
+/// Source hit sound of a generated pickup.
+pub(crate) fn hit_sound(
+    world: &crate::reference::WorldReference,
+    pickup: &crate::reference::SourceId,
+) -> Option<HitSound> {
+    world
+        .pickup_hits
+        .iter()
+        .find(|h| &h.source == pickup)
+        .map(|h| HitSound {
+            clip: h.collision_clip,
+            gain: h.collision_gain,
+        })
+}
+/// Only pickups with a hit sound report contacts.
+pub(crate) fn hit_events(sound: Option<HitSound>) -> ActiveEvents {
+    if sound.is_some() {
+        ActiveEvents::COLLISION_EVENTS
+    } else {
+        ActiveEvents::empty()
+    }
+}
+
 // Failed unpublished bindings cannot leave item identities or attachment owners behind.
 pub(super) fn rollback(
     content: &mut super::super::contents::ContentInstance,
@@ -1127,6 +1181,7 @@ pub(super) fn rollback(
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
             collider.user_data = 0;
+            collider.set_active_events(ActiveEvents::empty());
         });
     }
     content.item = None;

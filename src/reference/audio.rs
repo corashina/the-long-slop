@@ -210,7 +210,26 @@ record!(AudioReference {
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
     shared: AudioSharedReference, mixer_controls: AudioMixerControls,
-    survival: Vec<SurvivalAudioReference>
+    survival: Vec<SurvivalAudioReference>, collisions: CollisionAudioReference,
+    ambience: Vec<AmbienceReference>
+});
+record!(CarTierReference { threshold: f32, clips: Vec<u32>, fixed_gain: Option<f32> });
+record!(CollisionAudioReference {
+    car_tiers: [CarTierReference; 4], interior_check_seconds: f32, interior_radius: f32,
+    loose_multiplier: f32, item_minimum: f32, car_multiplier: f32, method: Vec<AudioMethod>
+});
+/// Lerp windows per cycle phase. A missing phase never plays.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AmbiencePhases {
+    pub dusk: Option<[f32; 2]>,
+    pub night: Option<[f32; 2]>,
+    pub morning: Option<[f32; 2]>,
+    pub day: Option<[f32; 2]>,
+}
+record!(AmbienceReference {
+    prototype: SourceId, clips: Vec<u32>, phases: AmbiencePhases, interval: [f32; 2],
+    chance: f32, gain: [f32; 2], pitch: [f32; 2], priority: u8, method: AudioMethod
 });
 
 fn values(v: impl IntoIterator<Item = f32>) -> bool {
@@ -378,6 +397,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=13)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -711,6 +731,77 @@ impl AudioReference {
                 && outside.methods.iter().all(method),
             "audio outside mixer",
         )?;
+        let range = |v: [f32; 2]| values(v) && v[0] >= 0. && v[1] >= v[0];
+        let c = &self.collisions;
+        require(
+            c.car_tiers
+                .windows(2)
+                .all(|t| t[0].threshold < t[1].threshold)
+                && c.car_tiers.iter().all(|t| {
+                    t.threshold.is_finite()
+                        && t.threshold >= 0.
+                        && !t.clips.is_empty()
+                        && t.clips.iter().all(|id| clips.contains(id))
+                        && t.fixed_gain.is_none_or(|g| g.is_finite() && g >= 0.)
+                })
+                && values([
+                    c.interior_check_seconds,
+                    c.interior_radius,
+                    c.loose_multiplier,
+                    c.item_minimum,
+                    c.car_multiplier,
+                ])
+                && c.interior_check_seconds > 0.
+                && c.interior_radius > 0.
+                && c.loose_multiplier >= 0.
+                && c.item_minimum >= 0.
+                && c.car_multiplier >= 0.
+                && !c.method.is_empty()
+                && c.method.iter().all(method),
+            "audio collisions",
+        )?;
+        require(
+            game.items.iter().all(|i| {
+                i.collision_clip.is_none_or(|id| clips.contains(&id))
+                    && i.collision_gain.is_finite()
+                    && i.collision_gain >= 0.
+            }) && game
+                .vehicles
+                .iter()
+                .all(|v| v.collision_gain.is_finite() && v.collision_gain >= 0.)
+                && game.world.pickup_hits.iter().all(|h| {
+                    clips.contains(&h.collision_clip)
+                        && h.collision_gain.is_finite()
+                        && h.collision_gain >= 0.
+                }),
+            "audio collision gains",
+        )?;
+        for a in &self.ambience {
+            require(
+                game.world
+                    .prototypes
+                    .iter()
+                    .any(|p| p.source == a.prototype)
+                    && !a.clips.is_empty()
+                    && a.clips.iter().all(|id| clips.contains(id))
+                    && [
+                        a.phases.dusk,
+                        a.phases.night,
+                        a.phases.morning,
+                        a.phases.day,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .all(range)
+                    && range(a.interval)
+                    && range(a.gain)
+                    && range(a.pitch)
+                    && a.pitch[0] > 0.
+                    && (0. ..=1.).contains(&a.chance)
+                    && method(&a.method),
+                "audio ambience",
+            )?;
+        }
         let settings = &self.shared.settings;
         require(
             values([
@@ -746,7 +837,7 @@ impl AudioReference {
 }
 
 record!(SurvivalAudioReference {
-    role: String, kind: u32, source: SourceId, audio_source: SourceId,
+    role: String, kind: u32, one_shot: bool, source: SourceId, audio_source: SourceId,
     clips: Vec<u32>, gain: [f32; 2], pitch: [f32; 2], offset: [f32; 3],
     settings: AudioSourceSettings, mixer: u32, doppler: f32, pan: f32, method: AudioMethod
 });
@@ -797,6 +888,10 @@ impl AudioGameplayReference {
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
+            (10, "eat_crunchy"),
+            (11, "item_hit"),
+            (12, "car_hit"),
+            (13, "rock_heat"),
         ] {
             require(
                 r.bindings
@@ -807,8 +902,9 @@ impl AudioGameplayReference {
                 "required audio role",
             )?;
             let b = r.binding(kind);
+            // Hit and ambience records take clips from their own sources.
             require(
-                !b.clips.is_empty()
+                (kind >= 11 || !b.clips.is_empty())
                     && b.clips.iter().all(|id| clips.contains(id))
                     && values(b.pitch)
                     && b.pitch[0] > 0.
@@ -816,7 +912,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 8, "required audio roles")?;
+        require(r.bindings.len() == 12, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
@@ -854,5 +950,37 @@ impl AmbientReference {
             "ambient",
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambience_and_collisions_parse() {
+        let method = r#"{"class":"c","method":"m","file":"managed/Assembly-CSharp.cs","line_start":1,"line_end":2,"sha256":""}"#;
+        let ambience: AmbienceReference = serde_json::from_str(&format!(
+            r#"{{"prototype":{{"file":"sharedassets1.assets","path_id":149742}},"clips":[1],
+            "phases":{{"dusk":[0.5,1.0]}},"interval":[10,30],"chance":0.5,"gain":[0.5,1],
+            "pitch":[1,1],"priority":100,"method":{method}}}"#
+        ))
+        .unwrap();
+        assert_eq!(ambience.phases.dusk, Some([0.5, 1.]));
+        assert!(ambience.phases.night.is_none() && ambience.phases.day.is_none());
+        let tier = r#"{"threshold":0.05,"clips":[1],"fixed_gain":1.0}"#;
+        let collisions: CollisionAudioReference = serde_json::from_str(&format!(
+            r#"{{"car_tiers":[{tier},{tier},{tier},{tier}],"interior_check_seconds":10,
+            "interior_radius":0.1,"loose_multiplier":0.3,"item_minimum":0.075,
+            "car_multiplier":0.3,"method":[{method}]}}"#
+        ))
+        .unwrap();
+        assert_eq!(collisions.car_tiers[0].fixed_gain, Some(1.));
+        let value = serde_json::to_value(&collisions).unwrap();
+        assert!(serde_json::from_value::<CollisionAudioReference>(value).is_ok());
+        assert!(
+            serde_json::from_str::<AmbiencePhases>(r#"{"evening":[0,1]}"#).is_err(),
+            "unknown phase"
+        );
     }
 }

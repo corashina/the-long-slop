@@ -88,6 +88,8 @@ pub enum InteractionAction {
     PlateRemove(ItemId),
     PlateMount(ItemId),
     PartInstall(ItemId),
+    /// One source tune step (+1 or -1) on a generated dial knob.
+    DialTune(ColliderId, f32),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -207,6 +209,8 @@ pub struct InteractionState {
     seat_action_latched: bool,
     cancelled_input: u32,
     usable_light_controls: HashSet<LightControlId>,
+    /// Generated source dial knobs (meterscript tune usables).
+    dial_knobs: HashSet<ColliderId>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
     slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
@@ -321,6 +325,7 @@ impl InteractionState {
         map(&self.light_controls)
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
+            + set(&self.dial_knobs)
             + map(&self.kinds)
             + map(&self.slot_fits)
             + self.slot_fits.values().map(set).sum::<usize>()
@@ -570,6 +575,7 @@ impl InteractionState {
                 .unwrap_or(0)
                 + 1,
             fill_opening: None,
+            dial_knobs: HashSet::new(),
             usable_light_controls: reference
                 .lighting
                 .controllers
@@ -775,11 +781,31 @@ impl InteractionState {
         self.light_nodes.insert(collider, NodeId(collider.0));
         self.usable_light_controls.insert(control);
     }
+    /// Portable source flashlights switch while held or equipped.
+    pub fn bind_held_light(&mut self, item: ItemId, control: LightControlId) {
+        self.held_controls.insert(item, control);
+    }
     pub fn remove_generated_light(&mut self, control: LightControlId) {
         self.light_nodes
             .retain(|id, _| self.light_controls.get(id) != Some(&control));
         self.light_controls.retain(|_, id| *id != control);
+        self.held_controls.retain(|_, id| *id != control);
         self.usable_light_controls.remove(&control);
+    }
+    pub fn bind_dial_knob(&mut self, collider: ColliderId) {
+        self.dial_knobs.insert(collider);
+    }
+    pub fn remove_dial_knob(&mut self, collider: ColliderId) {
+        self.dial_knobs.remove(&collider);
+    }
+    pub(crate) fn dial_knob(
+        &self,
+        target: &AimTarget,
+        physics: &PhysicsWorld,
+    ) -> Option<ColliderId> {
+        let id =
+            ColliderId((physics.rapier().colliders.get(target.collider)?.user_data >> 64) as u32);
+        self.dial_knobs.contains(&id).then_some(id)
     }
     pub fn allocate_generated_collider(&mut self) -> Result<ColliderId, ReferenceError> {
         let id = self.next_generated_collider;
@@ -1541,7 +1567,8 @@ impl InteractionState {
         self.tuning_opening = None;
         let can_use_target = availability.light_control.is_some()
             || use_target.is_some_and(|target| {
-                self.mechanisms.contains(target.item)
+                self.dial_knob(&target, physics).is_some()
+                    || self.mechanisms.contains(target.item)
                     || self.openings.iter().any(|opening| {
                         opening.reference.cap == target.item
                             && (opening.reference.can_toggle || opening.reference.can_tune)
@@ -1587,6 +1614,16 @@ impl InteractionState {
                             action = Some(InteractionAction::Cap(opening.reference.id));
                             break;
                         }
+                    }
+                }
+                if let Some(knob) = self.dial_knob(&target, physics) {
+                    let mut knob_input = use_input;
+                    if !availability.lmb_use {
+                        knob_input.held &= !keys::PRIMARY;
+                    }
+                    let direction = self.mechanisms.tune_direction(&knob_input);
+                    if direction.is_finite() && direction != 0. {
+                        action = Some(InteractionAction::DialTune(knob, direction.signum()));
                     }
                 }
                 if let Some(opening) = self.openings.iter_mut().find(|opening| {

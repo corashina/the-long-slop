@@ -894,7 +894,11 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
         })
         .collect();
     assert_eq!(lamps.len(), 3);
-    assert!(run.stream.use_generated_light(lamps[0].1).unwrap());
+    assert!(
+        run.stream
+            .use_generated_light(lamps[0].1, &mut run.area.items)
+            .unwrap()
+    );
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
     run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
@@ -943,7 +947,7 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
             .any(|s| s.placement.id == site.id)
     );
     run.stream
-        .sync_lamp_bindings(&mut run.area.interaction, &mut run.physics)
+        .sync_lamp_bindings(&run.area.items, &mut run.area.interaction, &mut run.physics)
         .unwrap();
     assert!(!run.stream.lamp_bindings.iter().any(|b| b.parent == site.id));
     for (key, _) in lamps {
@@ -1197,6 +1201,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         fluids: None,
         valve: None,
         lamp: None,
+        dial: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,
@@ -2070,7 +2075,7 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
         .structures
         .pop()
         .unwrap()
-        .retire(&mut run.physics);
+        .retire(&mut run.physics, &mut run.stream.trigger_roles);
     assert!(
         handles
             .iter()
@@ -2348,7 +2353,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
     run.stream
         .structures
         .swap_remove(index)
-        .retire(&mut run.physics);
+        .retire(&mut run.physics, &mut run.stream.trigger_roles);
     publish_decoration_fixture(&mut run, placements[5].clone());
     sync_decoration_fixture(&mut run, &reference);
     assert!(
@@ -2705,7 +2710,7 @@ fn roadside_retirement_batch_sweeps_changes_once() {
     let mut run = GarageRuntime::new(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     for structure in std::mem::take(&mut run.stream.structures) {
-        structure.retire(&mut run.physics);
+        structure.retire(&mut run.physics, &mut run.stream.trigger_roles);
     }
     for ordinal in [817, 818] {
         run.stream.structures.push(super::super::StructureInstance {
@@ -4312,6 +4317,7 @@ fn g08_frame_blocked_states_do_not_mutate() {
                     active: true,
                     camera_allowed: true,
                     dead: false,
+                    show_text: false,
                 };
                 run.sleep
                     .step(&reference.sleep, input, 1., 1. / reference.sleep.hold_gain);
@@ -5389,4 +5395,98 @@ fn g08_app_input_blocked_skip_cancels_stale_edges() {
     assert!(result.actions_blocked);
     assert_eq!(result.fixed_input.mouse, [0.4, 0.5]);
     assert_eq!(pending, FrameInput::default());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn trigger_roles_follow_publish_and_retire() {
+    let reference = reference();
+    let mut prototype = reference
+        .world
+        .prototypes
+        .iter()
+        .find(|p| {
+            p.colliders
+                .iter()
+                .any(|c| c.trigger && c.geometry.is_some())
+        })
+        .unwrap()
+        .clone();
+    let collider = prototype
+        .colliders
+        .iter_mut()
+        .find(|c| c.trigger && c.geometry.is_some())
+        .unwrap();
+    collider.role = Some(crate::reference::TriggerRole::Ladder {
+        speed: 1.,
+        up: [0., 1., 0.],
+    });
+    let body = collider.body;
+    let body = body.map(|b| prototype.bodies[b as usize].pose.rotation);
+    let recipe = crate::world::StructureRecipe::new(&reference.world, &prototype).unwrap();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut roles = crate::world::TriggerRoles::default();
+    let mut placement = replay_placement(&prototype.source, 9823, [50.; 3]);
+    placement.scale = prototype.prefab_pose.scale;
+    placement.pose.rotation = rapier3d::math::Rotation::from_rotation_y(1.).to_array();
+    let instance = recipe
+        .publish(
+            placement.clone(),
+            WorldOrigin::default(),
+            false,
+            &mut run.physics,
+            &mut roles,
+        )
+        .unwrap();
+    assert_eq!(roles.len(), 1);
+    let (handle, collider) = instance
+        .colliders
+        .iter()
+        .map(|(_, h)| (*h, &run.physics.rapier().colliders[*h]))
+        .find(|(_, c)| c.is_sensor())
+        .unwrap();
+    let Some(crate::reference::TriggerRole::Ladder { up, .. }) = roles.get(handle, collider) else {
+        panic!("ladder role");
+    };
+    let frame = rapier3d::math::Rotation::from_array(placement.pose.rotation)
+        * body.map_or(
+            rapier3d::math::Rotation::IDENTITY,
+            rapier3d::math::Rotation::from_array,
+        );
+    let expected = frame * rapier3d::math::Vector::Y;
+    assert!((rapier3d::math::Vector::from_array(up) - expected).length() < 1e-4);
+    instance.retire(&mut run.physics, &mut roles);
+    assert!(roles.is_empty());
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn hazard_trigger_damages_player_until_death() {
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    let position = run.area.player.body_pose(&run.physics).position;
+    let handle = run.physics.insert_collider(
+        rapier3d::prelude::ColliderBuilder::cuboid(5., 5., 5.)
+            .translation(rapier3d::math::Vector::from_array(position))
+            .sensor(true)
+            .build(),
+    );
+    run.physics.refresh_queries();
+    let damage = 50.;
+    run.stream.trigger_roles.insert(
+        handle,
+        crate::reference::TriggerRole::Hazard {
+            damage_player: damage,
+            damage_breakable: 0.,
+        },
+    );
+    let steps = (run.needs_output().needs.hp / (damage * crate::simulation::FIXED_DT)) as usize;
+    for _ in 0..steps / 2 {
+        run.step(&reference, crate::simulation::FrameInput::default());
+    }
+    assert!(!run.needs_output().dead);
+    for _ in 0..steps {
+        run.step(&reference, crate::simulation::FrameInput::default());
+    }
+    assert!(run.needs_output().dead);
 }

@@ -19,7 +19,25 @@ pub struct ConsumptionEffect {
 #[serde(rename_all = "snake_case")]
 pub enum FoodKind {
     Sausage,
+    Bacon,
+    BreadRoll,
+    Kifli,
+    Linzer,
+    Chocolate,
     Turd,
+}
+impl FoodKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sausage => "Sausage",
+            Self::Bacon => "Bacon",
+            Self::BreadRoll => "Bread roll",
+            Self::Kifli => "Kifli",
+            Self::Linzer => "Linzer",
+            Self::Chocolate => "Chocolate",
+            Self::Turd => "Turd",
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -223,8 +241,8 @@ impl SurvivalReference {
             .ok_or_else(|| ReferenceError("Invalid starter food source".into()))?;
         require(transform(&self.starter_pose), "starter pose")?;
         require(
-            self.foods.len() == 2
-                && ids(self.foods.iter().map(|f| f.kind), "food kinds")?.len() == 2,
+            self.foods.len() == 7
+                && ids(self.foods.iter().map(|f| f.kind), "food kinds")?.len() == 7,
             "food prototypes",
         )?;
         for f in &self.foods {
@@ -233,6 +251,7 @@ impl SurvivalReference {
                     && f.index < f.bites
                     && f.parts.len() == f.bites as usize
                     && f.destroy_on_end
+                    && f.sound <= 1
                     && f.effect.valid(),
                 "food consumption",
             )?;

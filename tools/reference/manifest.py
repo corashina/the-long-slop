@@ -131,7 +131,12 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         raw=source.conditions[key(group['partconditionscript'][0])]['state'] if condition else 0
         mass=data(node,'massScript')
         value={'id':len(items)+1,'source':source_id(node_readers[node]),'node':node,'body':body_for(node),'name':name,'kind':kind,
-            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None,'pickup':recover_pickup(source,group['pickupable'][0]) if 'pickupable' in group else None}
+            'condition':1.-raw*0.25,'mass_kg':mass['mass'] if mass else 0.,'attached_to':None,'pickup':recover_pickup(source,group['pickupable'][0]) if 'pickupable' in group else None,'collision_clip':None,'collision_gain':0.}
+        if 'pickupable' in group:
+            pickup=source.read(group['pickupable'][0]);clip=source.resolve(group['pickupable'][0],pickup['collideSound'])
+            if clip and clip.type.name!='AudioClip':raise ValueError('Invalid pickup collision clip')
+            # Audio export changes this source ID to the clip ID.
+            value['collision_clip']=source_id(clip) if clip else None;value['collision_gain']=pickup['collisionSoundM']
         items.append(value);item_nodes[node]=value['id']
         for readers in group.values():
             for reader in readers:item_components[key(reader)]=value['id']
@@ -248,7 +253,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
                 'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],**recover_seat_view(source,reader)})
+                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],'show_sleep_text':bool(value['showSleepText']),**recover_seat_view(source,reader)})
     wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
     mount_links={}
     for group in components.values():
@@ -427,9 +432,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
     result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'player':player_record,'seats':seats,
-        'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],
+        'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
-            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3}
+            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM']}
             for engine,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)

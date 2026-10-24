@@ -35,6 +35,8 @@ pub struct ObjectSnapshot {
     pub fluids: Option<crate::fluids::FluidSnapshot>,
     pub valve: Option<f32>,
     pub lamp: Option<bool>,
+    /// Tuned compass bearing or clock offset (meterscript szamlap value).
+    pub dial: Option<f32>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,

@@ -192,7 +192,12 @@ impl GarageRuntime {
             hp: prototype.effect.hp / divisor,
         });
         self.survival.show_stats();
-        self.emit_survival_audio(crate::audio::AudioKind::Eat);
+        // ediblescript.soundType: 0 eat, 1 crunchy.
+        self.emit_survival_audio(if prototype.sound == 1 {
+            crate::audio::AudioKind::EatCrunchy
+        } else {
+            crate::audio::AudioKind::Eat
+        });
         let bite = {
             let state = self.area.items.get_mut(item).unwrap();
             state.food.as_mut().unwrap().bite += 1;
@@ -482,7 +487,10 @@ impl GarageRuntime {
             .iter()
             .find(|b| b.kind == kind as u32)
             .unwrap();
-        let pose = if kind == crate::audio::AudioKind::Eat {
+        let pose = if matches!(
+            kind,
+            crate::audio::AudioKind::Eat | crate::audio::AudioKind::EatCrunchy
+        ) {
             self.area.player.view(&self.physics).head_pose
         } else {
             self.area.player.body_pose(&self.physics)
@@ -513,6 +521,15 @@ impl GarageRuntime {
                 .interaction
                 .drop_held(&mut self.area.items, &mut self.physics);
             self.emit_survival_audio(crate::audio::AudioKind::Death);
+        }
+    }
+    /// Source `playerdeathtriggerscript`. Cardboard boxes have no break runtime yet.
+    pub(super) fn apply_hazards(&mut self, reference: &ReferenceManifest) {
+        let damage = self.area.player.hazard_damage();
+        if damage > 0. {
+            self.survival
+                .damage_instant(&reference.survival, damage * super::FIXED_DT);
+            self.announce_death(reference);
         }
     }
     pub(super) fn sample_survival_speed(&mut self, reference: &ReferenceManifest) {
