@@ -17,7 +17,7 @@ use crate::vehicle::{
 };
 use crate::world::{DEFAULT_SEED, WorldStream};
 use rapier3d::prelude::{
-    Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
+    ActiveEvents, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
 };
 use std::collections::HashMap;
 
@@ -128,11 +128,22 @@ impl StartingArea {
             } else {
                 0
             };
+            let hit_sound = item.is_some_and(|id| {
+                reference
+                    .items
+                    .iter()
+                    .any(|i| i.id == id && i.collision_clip.is_some())
+            });
             let builder = collider_builder(&record.geometry)?
                 .friction(record.friction)
                 .restitution(record.restitution)
                 .sensor(record.sensor)
                 .enabled(record.enabled)
+                .active_events(if hit_sound {
+                    ActiveEvents::COLLISION_EVENTS
+                } else {
+                    ActiveEvents::empty()
+                })
                 .solver_groups(crate::vehicle::solver_groups(record.enabled))
                 .density(0.0)
                 .collision_groups(InteractionGroups::new(
