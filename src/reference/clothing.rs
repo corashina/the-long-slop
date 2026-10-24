@@ -558,7 +558,7 @@ fn validate_selected_glasses(
     Ok(())
 }
 
-fn descendant(m: &ReferenceManifest, mut node: NodeId, root: NodeId) -> bool {
+pub(crate) fn descendant(m: &ReferenceManifest, mut node: NodeId, root: NodeId) -> bool {
     for _ in 0..m.nodes.len() {
         if node == root {
             return true;

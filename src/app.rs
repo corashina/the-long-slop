@@ -1089,6 +1089,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     game_sleep(
         sleep.phase as u32,
         sleep.eligible,
+        sleep.show_hint,
         sleep.charge,
         sleep.cooldown_remaining,
         sleep.progress,
@@ -1384,6 +1385,10 @@ fn publish_audio(
     for (index, route) in audio.reference.routes.iter().enumerate() {
         for &id in &route.voices {
             game_audio_route(id, audio.route_mixers[index]);
+        }
+        // Car hit sounds use the route of their vehicle.
+        if let Some(vehicle) = audio.route_vehicles[index] {
+            game_audio_route(0x5000_0000 + vehicle, audio.route_mixers[index]);
         }
     }
     for signal in &audio.signals {

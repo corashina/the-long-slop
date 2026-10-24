@@ -28,6 +28,10 @@ def recover_player_movement(source):
         'public class sens : MonoBehaviour\n{\n\tpublic Collider selfCol;\n\n\tpublic int v;',
         'if (v > 0)\n\t\t{\n\t\t\tv--;\n\t\t\treturn;\n\t\t}',
         'private void OnTriggerStay(Collider c)\n\t{\n\t\tT = c.transform;\n\t\tsensed = true;\n\t\tv = 3;\n\t}',
+        'RB.velocity = zero * FladderSpeed * TLadder.speed * (input.run ? FrunM : 1f);',
+        'currentAdd = dt * walkBobSpeed + tempRBfloat * walkBobSpeedRB * dt;',
+        'ws = Mathf.Sin(walkBobState) * maxWalkBob;',
+        'if (ws <= 0f - walkbobSoundF)',
     ])
     standing = source.resolve(reader, data['TStandHeadPos'])
     prone = source.resolve(reader, data['TProneHeadPos'])
@@ -88,7 +92,9 @@ def recover_player_movement(source):
             lean_distance=data['FleanDist'], height_limits=[-data['FminLook'], data['FmaxLook']],
             foot_fov_degrees=fov(1), car_fov_degrees=fov(2), **VIEW_LITERALS),
         prone_multiplier=data['FProneM'], duck_jump_multiplier=data['FduckJumpM'],
-        inverse_duck_multiplier=data['FinverseDuck'], max_fall_speed=data['FmaxFall'])
+        inverse_duck_multiplier=data['FinverseDuck'], max_fall_speed=data['FmaxFall'],
+        ladder_speed=data['FladderSpeed'], walk_bob_speed=data['walkBobSpeed'], walk_bob_speed_rb=data['walkBobSpeedRB'],
+        max_walk_bob=data['maxWalkBob'], walk_bob_sound_threshold=data['walkbobSoundF'])
     validate_player_movement(result)
     return result
 
@@ -135,6 +141,9 @@ def validate_player_movement(value):
     for field, expected in dict(prone_multiplier=0.3, duck_jump_multiplier=1.25,
                                 inverse_duck_multiplier=0.5, max_fall_speed=30.0).items():
         same(value[field], expected)
+    for field in ('ladder_speed', 'walk_bob_speed', 'walk_bob_speed_rb', 'max_walk_bob', 'walk_bob_sound_threshold'):
+        if not isinstance(value[field], (int, float)) or not math.isfinite(value[field]) or value[field] < 0:
+            raise ValueError(f'Player {field} differs')
     posture = value['posture']
     for name in ('standing_head', 'prone_head'):
         pose(posture[name])

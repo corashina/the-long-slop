@@ -78,6 +78,7 @@ impl GarageRuntime {
                     .map(crate::fluids::FluidSnapshot::from),
                 valve: None,
                 lamp: None,
+                dial: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
@@ -321,6 +322,7 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &mut candidate.physics,
         )?;
+        candidate.survival.restore_save(&saved.needs);
         if let Some(carry) = saved
             .player
             .carry
@@ -429,6 +431,11 @@ impl GarageRuntime {
             &headlights,
         )?;
         candidate.area.commit_poses(&candidate.physics, true);
+        match (&mut candidate.audio, &saved.radio) {
+            (Some(audio), Some(radio)) => audio.radio.restore_save(radio)?,
+            (None, None) => (),
+            _ => return Err(SaveError::InvalidLinks("Radio owner".into())),
+        }
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
             audio.restore_engine(
@@ -476,6 +483,11 @@ impl GarageRuntime {
         if self.restore_pending() {
             return Err(SaveError::ReconstructionFailure(
                 "Save restore is pending".into(),
+            ));
+        }
+        if self.needs_output().dead {
+            return Err(SaveError::ReconstructionFailure(
+                "The player is dead".into(),
             ));
         }
         let mut ids = IdentityMap::new(reference)?;
@@ -532,6 +544,7 @@ impl GarageRuntime {
                 &self.physics,
                 self.area.interaction.capture_carry_save(&ids)?,
             )?,
+            needs: self.survival.capture_save(),
             vehicles: self
                 .vehicles
                 .iter()
@@ -583,6 +596,7 @@ impl GarageRuntime {
                 start_attempts: self.attempts.to_string(),
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
+            radio: self.audio.as_ref().map(|audio| audio.radio.capture_save()),
             view: ViewSnapshot { camera: view },
         };
         if let Some(pending) = &self.pending_restore {
