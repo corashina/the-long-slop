@@ -9,8 +9,9 @@ use query_bounds::QueryBounds;
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
-    ColliderBuilder, Group, InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline,
-    Ray, RigidBodyBuilder, RigidBodyHandle,
+    ActiveEvents, ColliderBuilder, ColliderSet, CollisionEvent, ContactPair, EventHandler, Group,
+    InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline, Ray, RigidBodyBuilder,
+    RigidBodyHandle, RigidBodySet,
 };
 pub use wheel::WheelAssembly;
 use wheel::{WheelContact, WheelFrame, WheelSlip, WheelState, WheelTorques};
@@ -46,6 +47,88 @@ pub fn set_collider_enabled(collider: &mut rapier3d::prelude::Collider, enabled:
     collider.set_solver_groups(solver_groups(enabled));
 }
 pub const SLOT_SENSOR_FLAG: u128 = 1 << 126;
+
+/// One started contact. `speed` is the relative speed at `point` before the solver.
+#[derive(Clone, Copy, Debug)]
+pub struct HitContact {
+    pub colliders: [ColliderHandle; 2],
+    pub point: [f32; 3],
+    pub speed: f32,
+}
+const HIT_CAPACITY: usize = 64;
+
+/// Records started contacts of colliders with `ActiveEvents::COLLISION_EVENTS`.
+/// A full buffer drops new hits.
+pub struct HitCollector(std::sync::Mutex<Vec<HitContact>>);
+impl Default for HitCollector {
+    fn default() -> Self {
+        Self(std::sync::Mutex::new(Vec::with_capacity(HIT_CAPACITY)))
+    }
+}
+impl HitCollector {
+    /// Moves the recorded hits into `out` without allocation.
+    pub fn take(&self, out: &mut Vec<HitContact>) {
+        let mut hits = self.0.lock().unwrap();
+        out.clear();
+        std::mem::swap(out, &mut *hits);
+    }
+}
+impl EventHandler for HitCollector {
+    fn handle_collision_event(
+        &self,
+        bodies: &RigidBodySet,
+        colliders: &ColliderSet,
+        event: CollisionEvent,
+        pair: Option<&ContactPair>,
+    ) {
+        let (CollisionEvent::Started(a, b, _), Some(pair)) = (event, pair) else {
+            return;
+        };
+        let (Some(first), Some(second)) = (colliders.get(a), colliders.get(b)) else {
+            return;
+        };
+        let Some(point) = pair.manifolds().iter().find_map(|m| {
+            let contact = m.points.first()?;
+            let pose = colliders.get(pair.collider1)?.position();
+            let pose = match m.subshape_poses.as_ref().and_then(|s| s.pos1) {
+                Some(sub) => *pose * sub,
+                None => *pose,
+            };
+            Some(pose * contact.local_p1)
+        }) else {
+            return;
+        };
+        let velocity = |collider: &rapier3d::prelude::Collider| {
+            collider
+                .parent()
+                .and_then(|h| bodies.get(h))
+                .map_or(Vector::ZERO, |body| body.velocity_at_point(point))
+        };
+        let mut hits = self.0.lock().unwrap();
+        if hits.len() < HIT_CAPACITY {
+            hits.push(HitContact {
+                colliders: [a, b],
+                point: point.to_array(),
+                speed: (velocity(first) - velocity(second)).length(),
+            });
+        }
+    }
+    fn handle_contact_force_event(
+        &self,
+        _: f32,
+        _: &RigidBodySet,
+        _: &ColliderSet,
+        _: &ContactPair,
+        _: f32,
+    ) {
+    }
+    fn handle_soft_body_tear_event(
+        &self,
+        _: &rapier3d::prelude::SoftBodySet,
+        _: &rapier3d::prelude::SoftBodyTearEvent,
+    ) {
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehiclePose {
@@ -95,6 +178,8 @@ pub struct PhysicsWorld {
     presentation_bodies: PresentationBodies,
     chassis: Vec<RigidBodyHandle>,
     vehicles: Vec<VehicleBody>,
+    hit_collector: HitCollector,
+    hits: Vec<HitContact>,
 }
 
 impl PhysicsWorld {
@@ -113,6 +198,8 @@ impl PhysicsWorld {
             presentation_bodies: PresentationBodies::default(),
             chassis: Vec::with_capacity(poses.len()),
             vehicles: Vec::with_capacity(poses.len()),
+            hit_collector: HitCollector::default(),
+            hits: Vec::with_capacity(HIT_CAPACITY),
             inactive_bodies: std::collections::HashSet::with_capacity(
                 reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
             ),
@@ -165,6 +252,7 @@ impl VehicleBody {
                     InteractionTestMode::And,
                 ))
                 .density(if collider.sensor { 0.0 } else { 1.0 })
+                .active_events(ActiveEvents::COLLISION_EVENTS)
                 .user_data(VEHICLE_COLLIDER_FLAG | ((id.0 as u128) << 64));
             physics.insert_collider_with_parent(builder, chassis);
         }
@@ -403,6 +491,11 @@ impl PhysicsWorld {
         }
     }
 
+    /// Started contacts of the last step.
+    pub fn hits(&self) -> &[HitContact] {
+        &self.hits
+    }
+
     pub fn body_active(&self, handle: RigidBodyHandle) -> bool {
         !self.inactive_bodies.contains(&handle)
     }
@@ -412,7 +505,8 @@ impl PhysicsWorld {
             self.query_bounds.mark_simulated_body(body);
             self.presentation_bodies.mark(body);
         }
-        self.physics.step();
+        self.physics.step_with_events(&(), &self.hit_collector);
+        self.hit_collector.take(&mut self.hits);
         for body in self.physics.islands.active_bodies() {
             self.query_bounds.mark_simulated_body(body);
             self.presentation_bodies.mark(body);
@@ -819,5 +913,39 @@ pub fn from_rapier(pose: &Pose) -> VehiclePose {
     VehiclePose {
         position: pose.translation.to_array(),
         rotation: pose.rotation.to_array(),
+    }
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::*;
+
+    fn drop_box(events: ActiveEvents) -> Vec<HitContact> {
+        let mut world = rapier3d::prelude::PhysicsWorld::new();
+        world.integration_parameters.dt = FIXED_DT;
+        world.insert_collider(ColliderBuilder::cuboid(5., 0.1, 5.), None);
+        world.insert(
+            RigidBodyBuilder::dynamic().translation(Vector::new(0., 1.1, 0.)),
+            ColliderBuilder::cuboid(0.1, 0.1, 0.1).active_events(events),
+        );
+        let collector = HitCollector::default();
+        let mut hits = Vec::new();
+        let mut step = Vec::with_capacity(HIT_CAPACITY);
+        for _ in 0..120 {
+            world.step_with_events(&(), &collector);
+            collector.take(&mut step);
+            hits.extend_from_slice(&step);
+        }
+        hits
+    }
+
+    #[test]
+    fn dropped_box_reports_one_hit() {
+        let hits = drop_box(ActiveEvents::COLLISION_EVENTS);
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        // A 0.8 m fall gives sqrt(2 g h) = 3.96 m/s. The 50 Hz steps detect it up to 0.04 s late.
+        assert!((3.9..4.8).contains(&hits[0].speed), "{hits:?}");
+        assert!(hits[0].point[1].abs() < 0.2, "{hits:?}");
+        assert!(drop_box(ActiveEvents::empty()).is_empty());
     }
 }

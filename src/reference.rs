@@ -390,6 +390,8 @@ pub struct ItemRecord {
     pub mass_kg: f32,
     pub attached_to: Option<ItemId>,
     pub pickup: Option<PickupReference>,
+    pub collision_clip: Option<u32>,
+    pub collision_gain: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -831,6 +833,7 @@ pub struct VehicleReference {
     pub gear_free_run: Vec<bool>,
     pub dont_ignite_with_throttle_in_automatic: bool,
     pub auto_move_min: f32,
+    pub collision_gain: f32,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

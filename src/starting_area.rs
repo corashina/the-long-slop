@@ -17,7 +17,7 @@ use crate::vehicle::{
 };
 use crate::world::{DEFAULT_SEED, WorldStream};
 use rapier3d::prelude::{
-    Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
+    ActiveEvents, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
 };
 use std::collections::HashMap;
 
@@ -128,11 +128,22 @@ impl StartingArea {
             } else {
                 0
             };
+            let hit_sound = item.is_some_and(|id| {
+                reference
+                    .items
+                    .iter()
+                    .any(|i| i.id == id && i.collision_clip.is_some())
+            });
             let builder = collider_builder(&record.geometry)?
                 .friction(record.friction)
                 .restitution(record.restitution)
                 .sensor(record.sensor)
                 .enabled(record.enabled)
+                .active_events(if hit_sound {
+                    ActiveEvents::COLLISION_EVENTS
+                } else {
+                    ActiveEvents::empty()
+                })
                 .solver_groups(crate::vehicle::solver_groups(record.enabled))
                 .density(0.0)
                 .collision_groups(InteractionGroups::new(
@@ -890,6 +901,11 @@ impl GarageRuntime {
                 .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+            audio.sync_rocks(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            audio.rock_step(self.lighting.cycle.output(), position);
         }
     }
 
@@ -1279,6 +1295,7 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            audio.hits(&self.area, &self.physics, FIXED_DT);
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
                     crate::interaction::InteractionSound::Action(action) => {

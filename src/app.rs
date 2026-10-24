@@ -1386,6 +1386,10 @@ fn publish_audio(
         for &id in &route.voices {
             game_audio_route(id, audio.route_mixers[index]);
         }
+        // Car hit sounds use the route of their vehicle.
+        if let Some(vehicle) = audio.route_vehicles[index] {
+            game_audio_route(0x5000_0000 + vehicle, audio.route_mixers[index]);
+        }
     }
     for signal in &audio.signals {
         if audio.reference.radio.voices.contains(&signal.id) {

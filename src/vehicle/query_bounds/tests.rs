@@ -199,6 +199,8 @@ pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
         presentation_bodies: Default::default(),
         chassis: Vec::new(),
         vehicles: Vec::new(),
+        hit_collector: Default::default(),
+        hits: Vec::new(),
     }
 }
 

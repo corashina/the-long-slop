@@ -6,6 +6,9 @@ use crate::vehicle::{PhysicsWorld, to_rapier};
 use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
+pub mod ambience;
+pub mod impacts;
+
 #[derive(Clone, Copy, Debug)]
 pub struct AudioEvent {
     pub session: u32,
@@ -79,6 +82,25 @@ pub struct VehicleAudioInput {
     pub ambient_temperature: f32,
     pub electronics_output: f32,
 }
+fn xorshift(state: &mut u32) -> f32 {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    *state as f32 / u32::MAX as f32
+}
+/// A full queue drops its last event with the highest priority number for a lower one.
+fn insert_event(queue: &mut [Option<AudioEvent>; 64], length: &mut usize, event: AudioEvent) {
+    if *length == 64 {
+        let worst = (0..64).max_by_key(|&i| queue[i].unwrap().priority).unwrap();
+        if event.priority >= queue[worst].unwrap().priority {
+            return;
+        }
+        queue.copy_within(worst + 1.., worst);
+        *length -= 1;
+    }
+    queue[*length] = Some(event);
+    *length += 1;
+}
 fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
     ((value - a) / (b - a)).clamp(0., 1.)
 }
@@ -131,6 +153,8 @@ pub struct AudioState {
     pub current_interior: Option<usize>,
     pub sensor: SensorLatch,
     pub route_mixers: Vec<u32>,
+    /// Vehicle index of each car route, for car hit sounds.
+    pub route_vehicles: Vec<Option<u32>>,
     pub engine_constants: BTreeMap<String, f32>,
     pub radio: crate::simulation::radio::RadioState,
     pub radio_frame: crate::simulation::radio::RadioFrame,
@@ -148,6 +172,8 @@ pub struct AudioState {
     outside_mixer: u32,
     car_mixer: u32,
     sphere: Option<Ball>,
+    impacts: impacts::ImpactState,
+    rocks: ambience::RockAmbience,
 }
 impl AudioState {
     pub fn new(reference: AudioReference, session: u32) -> Self {
@@ -239,6 +265,7 @@ impl AudioState {
                 .map(|(i, v)| (v.collider, i))
                 .collect(),
             route_mixers: reference.routes.iter().map(|r| r.main_mixer).collect(),
+            route_vehicles: vec![None; reference.routes.len()],
             outside_mixer: reference
                 .mixers
                 .iter()
@@ -271,6 +298,8 @@ impl AudioState {
             part_usables: HashMap::new(),
             control_items: HashMap::new(),
             sphere,
+            impacts: impacts::ImpactState::default(),
+            rocks: ambience::RockAmbience::default(),
             reference,
         }
     }
@@ -446,6 +475,21 @@ impl AudioState {
             .collect();
         self.control_items = game.mechanisms.iter().map(|m| (m.id, m.item)).collect();
         self.collider_nodes = game.colliders.iter().map(|c| (c.id, c.node)).collect();
+        self.impacts.bind(game);
+        for (route, vehicle) in self.reference.routes.iter().zip(&mut self.route_vehicles) {
+            let inside = |root| {
+                route.interiors.iter().any(|id| {
+                    self.reference.interiors.iter().any(|i| {
+                        i.id == *id && crate::reference::clothing::descendant(game, i.node, root)
+                    })
+                })
+            };
+            *vehicle = route
+                .has_car
+                .then(|| game.vehicles.iter().position(|v| inside(v.root)))
+                .flatten()
+                .map(|v| v as u32);
+        }
         self.sensor.hits.reserve(game.colliders.len());
         for (i, r) in self.reference.routes.iter().enumerate() {
             self.route_sensors[i].0 = game
@@ -491,10 +535,7 @@ impl AudioState {
         }
     }
     fn sample(&mut self) -> f32 {
-        self.random ^= self.random << 13;
-        self.random ^= self.random >> 17;
-        self.random ^= self.random << 5;
-        self.random as f32 / u32::MAX as f32
+        xorshift(&mut self.random)
     }
     fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
         let Some(&index) = self.bindings.get(&id) else {
@@ -832,20 +873,7 @@ impl AudioState {
         if event.session != self.session || self.removed.contains(&event.emitter) {
             return;
         }
-        if self.length == 64 {
-            let worst = (0..64)
-                .max_by_key(|&i| self.queue[i].unwrap().priority)
-                .unwrap();
-            if event.priority >= self.queue[worst].unwrap().priority {
-                return;
-            }
-            for i in worst..63 {
-                self.queue[i] = self.queue[i + 1];
-            }
-            self.length -= 1;
-        }
-        self.queue[self.length] = Some(event);
-        self.length += 1;
+        insert_event(&mut self.queue, &mut self.length, event);
     }
     pub fn pop_event(&mut self) -> Option<AudioEvent> {
         if self.length == 0 {
@@ -882,6 +910,8 @@ impl AudioState {
         self.origin_shift = [0.; 3];
         self.random = session.wrapping_add(0x9e3779b9);
         self.removed.clear();
+        self.impacts.reset();
+        self.rocks.reset();
         for m in &mut self.mechanism_sounds {
             m.remaining = 0.;
         }
@@ -1309,6 +1339,9 @@ pub enum AudioKind {
     AmbientNight = 8,
     Shit = 9,
     EatCrunchy = 10,
+    ItemHit = 11,
+    CarHit = 12,
+    RockHeat = 13,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1414,6 +1447,33 @@ mod tests {
     use crate::simulation::FIXED_DT;
     use crate::simulation::engine::EngineInput;
     use crate::starting_area::GarageRuntime;
+
+    #[test]
+    fn full_queue_drops_hits_for_engine_and_living_sounds() {
+        let event = |priority, sequence| AudioEvent {
+            session: 1,
+            sequence,
+            binding: 0,
+            emitter: 0,
+            position: [0.; 3],
+            gain: 1.,
+            pitch: 1.,
+            time_seconds: 0.,
+            priority,
+        };
+        let mut queue = [None; 64];
+        let mut length = 0;
+        for i in 0..64 {
+            insert_event(&mut queue, &mut length, event(100, i));
+        }
+        insert_event(&mut queue, &mut length, event(80, 64));
+        insert_event(&mut queue, &mut length, event(55, 65));
+        insert_event(&mut queue, &mut length, event(100, 66));
+        let count = |p| queue.iter().flatten().filter(|e| e.priority == p).count();
+        assert_eq!((length, count(100), count(80), count(55)), (64, 62, 1, 1));
+        assert_eq!(queue[61].unwrap().sequence, 61, "the last hits leave");
+        assert!(queue.iter().flatten().all(|e| e.sequence != 66));
+    }
 
     fn installed_source() -> (ReferenceManifest, SourceStamp) {
         let path = "web/assets/reference/manifest.json";

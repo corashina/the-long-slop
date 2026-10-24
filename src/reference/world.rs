@@ -69,6 +69,16 @@ pub struct WorldReference {
     pub exclusions: Vec<WorldExclusion>,
     #[serde(deserialize_with = "compact_vec")]
     pub material_textures: Vec<super::rendering::LightingTextureRecord>,
+    pub pickup_hits: Vec<WorldPickupHit>,
+}
+
+/// Source hit sound of a world `pickupable` record with a `collideSound`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPickupHit {
+    pub source: SourceId,
+    pub collision_clip: u32,
+    pub collision_gain: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

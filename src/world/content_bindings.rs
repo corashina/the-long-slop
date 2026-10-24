@@ -1,10 +1,14 @@
 //! Generated item bindings belong to their published source instance.
 use super::WorldStream;
-use crate::interaction::{InteractionState, items::ItemStore};
+use crate::interaction::{
+    InteractionState,
+    items::{HitSound, ItemStore},
+};
 use crate::reference::{ActionBinding, PickupReference, ReferenceError, ReferenceManifest};
 use crate::vehicle::{PhysicsWorld, from_rapier, to_rapier};
 use crate::world::spawn_rules::*;
 use crate::world::{ObjectKey, changes};
+use rapier3d::prelude::ActiveEvents;
 impl WorldStream {
     pub fn initialize_imported_changes(
         &mut self,
@@ -442,7 +446,9 @@ impl WorldStream {
                 );
                 let id = items.insert_generated(placement.id.clone(), prototype, pickup_pose)?;
                 content.item = Some(id);
+                let hit = hit_sound(&self.reference, pickup.source);
                 let state = items.set_body(id, Some(body)).unwrap();
+                state.hit_sound = hit;
                 state.fluid = content.content.fluid.clone();
                 state.generated_condition = Some(content.content.condition);
                 state.local_pose = from_rapier(
@@ -465,6 +471,7 @@ impl WorldStream {
                     let collider_id = interaction.allocate_generated_collider()?;
                     physics.edit_collider(*handle, |collider| {
                         collider.user_data = ((collider_id.0 as u128) << 64) | (id.0 as u128 + 1);
+                        collider.set_active_events(hit_events(hit));
                     });
                     interaction.bind_surface(
                         *handle,
@@ -1119,6 +1126,29 @@ pub(crate) fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, R
     })
 }
 
+/// Source hit sound of a generated pickup.
+pub(crate) fn hit_sound(
+    world: &crate::reference::WorldReference,
+    pickup: &crate::reference::SourceId,
+) -> Option<HitSound> {
+    world
+        .pickup_hits
+        .iter()
+        .find(|h| &h.source == pickup)
+        .map(|h| HitSound {
+            clip: h.collision_clip,
+            gain: h.collision_gain,
+        })
+}
+/// Only pickups with a hit sound report contacts.
+pub(crate) fn hit_events(sound: Option<HitSound>) -> ActiveEvents {
+    if sound.is_some() {
+        ActiveEvents::COLLISION_EVENTS
+    } else {
+        ActiveEvents::empty()
+    }
+}
+
 // Failed unpublished bindings cannot leave item identities or attachment owners behind.
 pub(super) fn rollback(
     content: &mut super::super::contents::ContentInstance,
@@ -1151,6 +1181,7 @@ pub(super) fn rollback(
     for (_, collider) in &instance.colliders {
         physics.edit_collider(*collider, |collider| {
             collider.user_data = 0;
+            collider.set_active_events(ActiveEvents::empty());
         });
     }
     content.item = None;

@@ -13,6 +13,20 @@ from .radio import recover_radio_visuals
 ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 PRIORITIES = [10, 25, 40, 55, 70, 80, 85, 100]
+# These survival roles play once through the shared prefab.
+ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13}
+TIER_THRESHOLDS = [0.05, 0.2, 0.5, 0.7]
+PHASES = (('morning', 'reggeledik', 'Reggel'), ('day', 'nappal', 'Nappal'),
+          ('dusk', 'esteledik', 'Esteledik'), ('night', 'este', 'Este'))
+# The hit and rock rules use these source statements as literal values.
+HIT_SOURCE = (
+    ('pickupable', 'OnCollisionEnter', ('c.relativeVelocity.magnitude * collisionSoundM * ((!pickedUp) ? 0.3f : 1f)',
+        'if (num > 0.075f)', 'num - 0.075f', 'mainscript.AudioPriorities[7]')),
+    ('pickupable', 'FixedUpdate', ('if (Time.time - lastInteriorSensed > 10f && !pickedUp)',
+        'Physics.OverlapSphere(transform.position, 0.1f, m.interiorLayer)')),
+    ('carscript', 'OnCollisionEnter', ('magnitude *= collisionSoundM * 0.3f;', 'if (magnitude > 0.7f)',
+        'else if (magnitude > 0.5f)', 'else if (magnitude > 0.2f)', 'if (!(magnitude > 0.05f))', 'magnitude = 1f;')),
+    ('soundplayscript', 'PlaySound', ('if (!(UnityEngine.Random.Range(0f, 1f) > chance))', 'mainscript.AudioPriorities[7]')))
 
 
 def station_records(source, owner, data, clip):
@@ -45,13 +59,13 @@ def managed_evidence(library):
             or receipt['decompiler']['version'] != '11.1.0.9782'):
         raise ValueError('Audio requires the accepted complete managed analysis')
     text = content.decode('utf-8-sig')
-    def evidence(cls, method):
+    def locate(cls, method):
         declaration = re.search(r'\bpublic class ' + re.escape(cls) + r'\b', text)
         if declaration is None: raise ValueError(f'Missing audio class: {cls}')
         start = declaration.start()
         end = text.find('\npublic class ', start + 1)
         region = text[start:end if end >= 0 else len(text)]
-        matches = list(re.finditer(r'\b(?:void|float|bool|GameObject)\s+' + re.escape(method) + r'\(', region))
+        matches = list(re.finditer(r'\b(?:void|float|bool|GameObject|IEnumerator)\s+' + re.escape(method) + r'\(', region))
         if not matches: raise ValueError(f'Missing audio method: {cls}.{method}')
         match = matches[0]
         opening = region.index('{', matches[-1].end())
@@ -59,6 +73,9 @@ def managed_evidence(library):
         while depth:
             depth += (region[closing] == '{') - (region[closing] == '}')
             closing += 1
+        return start, match, closing, region
+    def evidence(cls, method):
+        start, match, closing, _ = locate(cls, method)
         return {'class': cls, 'method': method, 'file': 'managed/Assembly-CSharp.cs',
             'line_start': text[:start + match.start()].count('\n') + 1,
             'line_end': text[:start + closing].count('\n') + 1,
@@ -72,7 +89,36 @@ def managed_evidence(library):
                       'cTime = Time.unscaledTime - _radio[i].startTime;'):
         if statement not in text:
             raise ValueError('Source radio clock needs a new audit')
+    for cls, method, statements in HIT_SOURCE:
+        _, match, closing, region = locate(cls, method)
+        if any(s not in region[match.start():closing] for s in statements):
+            raise ValueError(f'Source hit audio needs a new audit: {cls}.{method}')
     return receipt, evidence
+
+
+def collision_record(tiers, methods):
+    return {'car_tiers': [{'threshold': t, 'clips': c, 'fixed_gain': 1. if i == 0 else None}
+            for i, (t, c) in enumerate(zip(TIER_THRESHOLDS, tiers, strict=True))],
+        'interior_check_seconds': 10., 'interior_radius': .1, 'loose_multiplier': .3,
+        'item_minimum': .075, 'car_multiplier': .3, 'method': methods}
+
+
+def pickup_hit_sources(records):
+    """Pickupable source, clip source, and gain of each world pickup with a hit clip."""
+    for r in records:
+        if r['class_name']!='pickupable':continue
+        f={x['name']:x['value'] for x in r['fields']}
+        if f['collideSound']['kind']=='link':yield r['source'],f['collideSound']['value'],f['collisionSoundM']['value']
+
+
+def ambience_record(prototype, d, clips, evidence):
+    if d['SSource']['m_PathID']: raise ValueError('Rock ambience source needs a looping route')
+    if not d['findNap']: raise ValueError('Rock ambience needs the day cycle phase')
+    if not d['same']: raise ValueError('Rock ambience needs one clip set')
+    return {'prototype': prototype, 'clips': clips(d['clipsReggel']),
+        'phases': {name: [d['minLerp' + suffix], d['maxLerp' + suffix]] for name, flag, suffix in PHASES if d[flag]},
+        'interval': [d['minTime'], d['maxTime']], 'chance': d['chance'], 'gain': [d['minVolume'], d['maxVolume']],
+        'pitch': [1., 1.], 'priority': PRIORITIES[7], 'method': evidence}
 
 
 def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: str) -> dict:
@@ -184,6 +230,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'priority': priority, 'mixer': route or audio['shared']['mixer'], 'voice': voice_id, 'method': evidence}
         audio['bindings'].append(record); return record['id']
     mono = [(c, source.class_name(c), source.read(c)) for c in components if c.type.name == 'MonoBehaviour']
+    car_route = None
     for c, cls, d in mono:
         if cls == 'enginescript':
             idle = voice(source.resolve(c, d['SAlap']), [method(cls, 'Start'), method(cls, 'Update')])
@@ -198,6 +245,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
                     'maxRpm','engineStartTimeModifier','SStartVolume','SStopVolume']}, 'method': method(cls, 'Update')}
         elif cls == 'carscript':
             horn = voice(source.resolve(c, d['SHornSound']), [method(cls, 'Update')])
+            car_route = source.resolve(c, d['groupScript'])
             cycle_r = source.resolve(main_r, main['napszak']); cycle = source.read(cycle_r)
             audio['horn'] = {'source': source_id(c), 'voice': horn, 'attack_release_rate': 10,
                 'pitch_min': d['HornPitchMin'], 'pitch_max': d['HornPitchMax'],
@@ -284,37 +332,70 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     prefab=next(c for c in source.components(source.transform_for(source.resolve(main,md['Audio'])))[1] if c.type.name=='AudioSource')
     sounds=source.get('level1',70770)
     if source.class_name(sounds)!='soundMainScript':raise ValueError('Toilet source differs')
-    survival_groups=[('eat',0,main,md['soundEat'],prefab,[md['eatVolume']]*2,[1.,1.]),
-        ('eat_crunchy',10,main,md['soundEatCrunchy'],prefab,[md['eatCrunchyVolume']]*2,[1.,1.])]
+    def readers(owner,pointers):return [source.resolve(owner,p) for p in pointers]
+    def unique(values):return list({key(r):r for r in values}.values())
+    survival_groups=[('eat',0,main,readers(main,md['soundEat']),prefab,[md['eatVolume']]*2,[1.,1.]),
+        ('eat_crunchy',10,main,readers(main,md['soundEatCrunchy']),prefab,[md['eatCrunchyVolume']]*2,[1.,1.])]
     for role,kind,field,group in zip(('burp','fart','shit'),(1,2,9),('SBurp','SFart','SFart'),source.read(sounds)['clips'],strict=True):
         prefix='Burp' if role=='burp' else 'Fart'
-        survival_groups.append((role,kind,sounds,group['clips'],source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
-    survival_groups.append(('death',5,main,[md['SdeathBell']],source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
+        survival_groups.append((role,kind,sounds,readers(sounds,group['clips']),source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
+    survival_groups.append(('death',5,main,readers(main,[md['SdeathBell']]),source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
     cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
     for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
         selected_source=source.resolve(owner,pointer);ad=source.read(selected_source)
-        survival_groups.append((role,kind,selected_source,[ad['m_audioClip']],selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
+        survival_groups.append((role,kind,selected_source,readers(selected_source,[ad['m_audioClip']]),selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
+    tiers=[readers(main,md[f'collide{i}']) for i in range(4)]
+    audio['collisions']=collision_record([[clip(r) for r in tier] for tier in tiers],
+        [method('pickupable','OnCollisionEnter'),method('carscript','OnCollisionEnter'),method('pickupable','FixedUpdate')])
+    item_clips=[]
+    for record in [*manifest['items'],*(x for p in manifest['item_prototypes'] for x in p['pickups'])]:
+        if record['collision_clip']:item_clips.append(source.get(record['collision_clip']['file'],record['collision_clip']['path_id']))
+    for item in manifest['items']:
+        if item['collision_clip']:item['collision_clip']=clip(source.get(item['collision_clip']['file'],item['collision_clip']['path_id']))
+    hits=list(pickup_hit_sources(manifest['world']['records']))
+    world_clips=[source.get(c['file'],c['path_id']) for _,c,_ in hits]
+    if any(c.type.name!='AudioClip' for c in world_clips):raise ValueError('Invalid world pickup collision clip')
+    item_clips+=world_clips
+    # The runtime finds the hit sound of a generated item by its pickupable source.
+    manifest['world']['pickup_hits']=[{'source':s,'collision_clip':clip(c),'collision_gain':g} for (s,_,g),c in zip(hits,world_clips)]
+    audio['ambience']=[];rocks=[]
+    for prototype in manifest['world']['prototypes']:
+        for node in source.hierarchy(source.get(prototype['source']['file'],prototype['source']['path_id']),activate_root=True):
+            for c in node['components']:
+                if c.type.name!='MonoBehaviour' or source.class_name(c)!='soundplayscript':continue
+                rocks.append(c)
+                audio['ambience'].append(ambience_record(prototype['source'],source.read(c),
+                    lambda pointers,c=c:[clip(r) for r in readers(c,pointers)],method('soundplayscript','PlaySound')))
+    if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
+    if car_route is None:raise ValueError('Car hit audio needs the car route')
+    rock=audio['ambience'][0]
+    survival_groups+=[('item_hit',11,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
+        ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
+        ('rock_heat',13,rocks[0],readers(rocks[0],source.read(rocks[0])['clipsReggel']),prefab,rock['gain'],rock['pitch'])]
+    default_route=source.resolve(main,md['defGroup'])
+    routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'rock_heat':default_route,
+        'car_hit':source.resolve(car_route,source.read(car_route)['GCarSounds'])}
 
     from .collision import world_pose
     audio['survival']=[]
-    for role,kind,owner,pointers,reader,gain,pitch in survival_groups:
-        d=source.read(reader)
-        route=source.resolve(player,pd['deathbellGroup']) if role=='death' else source.resolve(reader,d['OutputAudioMixerGroup'])
+    for role,kind,owner,clip_readers,reader,gain,pitch in survival_groups:
+        d=source.read(reader);one_shot=role in ONE_SHOT
+        route=routes[role] if role in routes else source.resolve(reader,d['OutputAudioMixerGroup'])
         transform=source.transform_for(source.resolve(reader,d['m_GameObject']))
         if any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
-        eat=role in ('eat','eat_crunchy')
-        settings={'priority':70 if eat else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
+        settings={'priority':70 if role in ('eat','eat_crunchy') else PRIORITIES[7] if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
             'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
-            'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if eat else d['panLevelCustomCurve']['m_Curve'][0]['value'],
+            'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if one_shot else d['panLevelCustomCurve']['m_Curve'][0]['value'],
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
-        if eat:
+        if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
-        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
-        audio['survival'].append({'role':role,'kind':kind,'source':source_id(owner),'audio_source':source_id(reader),
-            'clips':[clip(source.resolve(owner,p)) for p in pointers], 'gain':gain,'pitch':pitch,'offset':offset,
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound')}.get(role,('napszakvaltakozas','FixedUpdate'))
+        audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
+            'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
     def control_reader(reader):
         if reader is None: return None
@@ -425,13 +506,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
-    validate_audio_export(audio,output)
+    validate_audio_export(audio,output,manifest['world']['pickup_hits'])
     for identity in sorted(getattr(source, 'item_clips', set())):
         clip(source.get(*identity), 'effect')
     return audio
 
 
-def validate_audio_export(audio: dict, output: Path) -> None:
+def validate_audio_export(audio: dict, output: Path, pickup_hits: list) -> None:
     clock = audio['radio']['clock']
     if (clock['kind'] != 'scaled'
             or [(clock[name]['class'], clock[name]['method']) for name in
@@ -475,6 +556,32 @@ def validate_audio_export(audio: dict, output: Path) -> None:
                 or not 0<=key['weighted_mode']<=3 for key in keys)
                 or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
             raise ValueError(f'Invalid shared audio curve: {name}')
+    validate_hit_audio(audio, ids, pickup_hits)
+
+
+def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
+    tiers=audio['collisions']['car_tiers']
+    if [t['threshold'] for t in tiers]!=TIER_THRESHOLDS or [t['fixed_gain'] for t in tiers]!=[1.,None,None,None]:
+        raise ValueError('Car hit tiers differ from source')
+    if any(not t['clips'] or set(t['clips'])-ids for t in tiers):raise ValueError('Unresolved car hit clip')
+    roles={r['role']:r for r in audio['survival']}
+    if any(r['one_shot']!=(r['role'] in ONE_SHOT) for r in audio['survival']):raise ValueError('Survival one-shot flag differs')
+    for role,kind in ONE_SHOT.items():
+        r=roles.get(role)
+        if r is None or r['kind']!=kind or not r['clips'] or set(r['clips'])-ids or r['settings']['spatial_blend']!=1:
+            raise ValueError(f'Invalid one-shot audio: {role}')
+        if role not in ('eat','eat_crunchy') and r['settings']['priority']!=PRIORITIES[7]:raise ValueError(f'Invalid hit priority: {role}')
+    if not {c for t in tiers for c in t['clips']}<=set(roles['car_hit']['clips']):raise ValueError('Car hit record lacks tier clips')
+    if any(h['collision_clip'] not in roles['item_hit']['clips'] or not h['collision_gain']>=0 for h in pickup_hits):
+        raise ValueError('Invalid world pickup hit')
+    if len(audio['ambience'])!=1:raise ValueError('Selected world needs one rock ambience')
+    for a in audio['ambience']:
+        if (not a['clips'] or set(a['clips'])-ids or not set(a['clips'])<=set(roles['rock_heat']['clips'])
+                or not a['phases'] or set(a['phases'])-{name for name,_,_ in PHASES}
+                or any(not 0<=low<=high<=1 for low,high in a['phases'].values())
+                or not 0<=a['interval'][0]<=a['interval'][1] or not 0<=a['chance']<=1
+                or not 0<=a['gain'][0]<=a['gain'][1] or a['priority']!=PRIORITIES[7]):
+            raise ValueError('Invalid rock ambience')
 
 
 def recover_ambient(source):
