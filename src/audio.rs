@@ -7,6 +7,7 @@ use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
 pub mod ambience;
+pub mod footsteps;
 pub mod impacts;
 
 #[derive(Clone, Copy, Debug)]
@@ -181,6 +182,7 @@ pub struct AudioState {
     sphere: Option<Ball>,
     impacts: impacts::ImpactState,
     rocks: ambience::RockAmbience,
+    footsteps: footsteps::FootstepState,
 }
 impl AudioState {
     pub fn new(reference: AudioReference, session: u32) -> Self {
@@ -309,6 +311,7 @@ impl AudioState {
             sphere,
             impacts: impacts::ImpactState::default(),
             rocks: ambience::RockAmbience::default(),
+            footsteps: footsteps::FootstepState::default(),
             reference,
         }
     }
@@ -923,6 +926,7 @@ impl AudioState {
         self.removed.clear();
         self.impacts.reset();
         self.rocks.reset();
+        self.footsteps = footsteps::FootstepState::default();
         for m in &mut self.mechanism_sounds {
             m.remaining = 0.;
         }
@@ -1403,6 +1407,7 @@ pub enum AudioKind {
     CarHit = 12,
     RockHeat = 13,
     MusicBox = 14,
+    Footstep = 15,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]

@@ -45,7 +45,7 @@ pub(crate) fn spawn_consumable(
                 Group::from_bits_truncate(record.filter),
                 InteractionTestMode::And,
             ))
-            .user_data(id.0 as u128 + 1)
+            .user_data(crate::vehicle::step_surface_bits(record.step_surface) | (id.0 as u128 + 1))
             .build();
         collider.set_position(root.inverse() * node * *collider.position());
 

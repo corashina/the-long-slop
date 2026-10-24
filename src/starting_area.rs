@@ -158,6 +158,7 @@ impl StartingArea {
                 ))
                 .user_data(
                     flag | ((record.id.0 as u128) << 64)
+                        | crate::vehicle::step_surface_bits(record.step_surface)
                         | item.map_or(0, |item| item.0 as u128 + 1),
                 );
             let owner = bodies[&record.body];
@@ -1335,6 +1336,13 @@ impl GarageRuntime {
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, FIXED_DT);
             audio.hits(&self.area, &self.physics, FIXED_DT);
+            let stream = &mut self.stream;
+            audio.footsteps(
+                &self.area,
+                &self.physics,
+                walking_input.held & keys::RUN != 0,
+                |position| crate::world::biome(stream.terrain_color(position), None),
+            );
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
                     crate::interaction::InteractionSound::Action(action) => {

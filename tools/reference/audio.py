@@ -14,7 +14,9 @@ ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 PRIORITIES = [10, 25, 40, 55, 70, 80, 85, 100]
 # These survival roles play once through the shared prefab.
-ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'music_box': 14}
+ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'music_box': 14, 'footstep': 15}
+# Other one-shots use AudioPriorities[7]. The music box keeps its source priority.
+ONE_SHOT_PRIORITY = {'eat': 70, 'eat_crunchy': 70, 'footstep': PRIORITIES[3]}
 TIER_THRESHOLDS = [0.05, 0.2, 0.5, 0.7]
 PHASES = (('morning', 'reggeledik', 'Reggel'), ('day', 'nappal', 'Nappal'),
           ('dusk', 'esteledik', 'Esteledik'), ('night', 'este', 'Este'))
@@ -26,7 +28,16 @@ HIT_SOURCE = (
         'Physics.OverlapSphere(transform.position, 0.1f, m.interiorLayer)')),
     ('carscript', 'OnCollisionEnter', ('magnitude *= collisionSoundM * 0.3f;', 'if (magnitude > 0.7f)',
         'else if (magnitude > 0.5f)', 'else if (magnitude > 0.2f)', 'if (!(magnitude > 0.05f))', 'magnitude = 1f;')),
-    ('soundplayscript', 'PlaySound', ('if (!(UnityEngine.Random.Range(0f, 1f) > chance))', 'mainscript.AudioPriorities[7]')))
+    ('soundplayscript', 'PlaySound', ('if (!(UnityEngine.Random.Range(0f, 1f) > chance))', 'mainscript.AudioPriorities[7]')),
+    ('stepSoundScript', 'Step', ('Physics.Raycast(transform.position, -transform.up, out hit, rayDist, mainscript.M.floorLayerMask)',
+        'otherStep = hit.collider.GetComponent<otherStepSoundScript>();',
+        'hit.collider.gameObject.layer == mainscript.sandLayer || hit.collider.gameObject.layer == mainscript.sandLayer2 || hit.collider.CompareTag("Sand")',
+        'hit.collider.CompareTag("Wood")',
+        'mainscript.PlayClipAtPoint(StepSoundClip, transform.position, StepSoundVolume * _modifier * stepSound, randomPitch: true, mainscript.AudioPriorities[3]);')))
+# The footstep rule uses these source values. fpscontroller calls Step on a walk bob beat and on a grounded change.
+STEP_CALL = 'stepScript.Step(duckValue + (input.run ? 0.15f : 0f));'
+STEP_STATEMENTS = ('public static int sandLayer = 17;', 'public static int sandLayer2 = 19;')
+STEP_SURFACES = ('road', 'desert', 'winter', 'grass', 'wood')
 
 
 def station_records(source, owner, data, clip):
@@ -59,12 +70,14 @@ def managed_evidence(library):
             or receipt['decompiler']['version'] != '11.1.0.9782'):
         raise ValueError('Audio requires the accepted complete managed analysis')
     text = content.decode('utf-8-sig')
-    def locate(cls, method):
+    def scope(cls):
         declaration = re.search(r'\bpublic class ' + re.escape(cls) + r'\b', text)
         if declaration is None: raise ValueError(f'Missing audio class: {cls}')
         start = declaration.start()
         end = text.find('\npublic class ', start + 1)
-        region = text[start:end if end >= 0 else len(text)]
+        return start, text[start:end if end >= 0 else len(text)]
+    def locate(cls, method):
+        start, region = scope(cls)
         matches = list(re.finditer(r'\b(?:void|float|bool|GameObject|IEnumerator)\s+' + re.escape(method) + r'\(', region))
         if not matches: raise ValueError(f'Missing audio method: {cls}.{method}')
         match = matches[0]
@@ -93,7 +106,18 @@ def managed_evidence(library):
         _, match, closing, region = locate(cls, method)
         if any(s not in region[match.start():closing] for s in statements):
             raise ValueError(f'Source hit audio needs a new audit: {cls}.{method}')
-    return receipt, evidence
+    if (any(s not in text for s in STEP_STATEMENTS)
+            or not re.search(r'enum walkSoundType\s*\{\s*' + r',\s*'.join(STEP_SURFACES) + r'\s*\}', text)):
+        raise ValueError('Source footstep surfaces need a new audit')
+    _, region = scope('fpscontroller')
+    calls = [m.start() for m in re.finditer(re.escape(STEP_CALL), region)]
+    if len(calls) != 2: raise ValueError('Source footstep callers need a new audit')
+    # A caller is the last member declaration before the call.
+    members = [(m.start(), m.group(1)) for m in re.finditer(r'\n\t[^\s][^\n]*?\b(\w+)\([^\n]*\)\n\t\{', region)]
+    callers = list(dict.fromkeys(max((m for m in members if m[0] < c), default=(0, None))[1] for c in calls))
+    if None in callers: raise ValueError('Source footstep callers need a new audit')
+    footsteps = [evidence('stepSoundScript', 'Step'), *(evidence('fpscontroller', name) for name in callers)]
+    return receipt, evidence, footsteps
 
 
 def collision_record(tiers, methods):
@@ -109,6 +133,14 @@ def pickup_hit_sources(records):
         if r['class_name']!='pickupable':continue
         f={x['name']:x['value'] for x in r['fields']}
         if f['collideSound']['kind']=='link':yield r['source'],f['collideSound']['value'],f['collisionSoundM']['value']
+
+
+def footstep_record(main, step, local_position, clips, methods):
+    if step['feetSens']: raise ValueError('Player foot sensors need a source route')
+    return {'surfaces': [{'name': n, 'volume': s['volume'], 'clips': clips(s['clips'])}
+            for n, s in zip(STEP_SURFACES, main['walkSounds'], strict=True)],
+        'step_gain': step['stepSound'], 'ray_distance': step['rayDist'], 'ray_mask': main['floorLayerMask']['m_Bits'],
+        'local_position': local_position, 'sand_layers': [17, 19], 'method': methods}
 
 
 def ambience_record(prototype, d, clips, evidence):
@@ -130,7 +162,7 @@ def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: s
 
 
 def recover_audio(source, roots: dict, manifest: dict, library, output: Path, reports: dict) -> dict:
-    receipt, method = managed_evidence(library)
+    receipt, method, footstep_methods = managed_evidence(library)
     audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'mixers': [],
         'bindings': [], 'mechanisms': [], 'fluids': [], 'interiors': [], 'routes': [], 'lamps': [], 'silent_actions': ['pickup', 'detach', 'handbrake'],
         'managed': {'file': receipt['input']['file'], 'sha256': receipt['input']['sha256'],
@@ -373,11 +405,20 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     survival_groups+=[('item_hit',11,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
         ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
         ('rock_heat',13,rocks[0],readers(rocks[0],source.read(rocks[0])['clipsReggel']),prefab,rock['gain'],rock['pitch'])]
+    step=source.resolve(player,pd['stepScript'])
+    if source.class_name(step)!='stepSoundScript':raise ValueError('Player step source differs')
+    from .collision import world_pose,bake_points
+    # The step point is in the player body frame, like the player sphere colliders.
+    step_transform=source.transform_for(source.resolve(step,source.read(step)['m_GameObject']))
+    body=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
+    walk=[readers(main,s['clips']) for s in md['walkSounds']]
+    audio['footsteps']=footstep_record(md,source.read(step),bake_points([(0.,0.,0.)],source.chain(step_transform),body)[0],
+        lambda pointers:[clip(r) for r in readers(main,pointers)],footstep_methods)
+    survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
-    routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'rock_heat':default_route,
+    routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'rock_heat':default_route,'footstep':default_route,
         'car_hit':source.resolve(car_route,source.read(car_route)['GCarSounds'])}
 
-    from .collision import world_pose
     audio['survival']=[]
     for role,kind,owner,clip_readers,reader,gain,pitch in survival_groups:
         d=source.read(reader);one_shot=role in ONE_SHOT
@@ -387,14 +428,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
-        settings={'priority':70 if role in ('eat','eat_crunchy') else PRIORITIES[7] if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
+        settings={'priority':ONE_SHOT_PRIORITY.get(role,PRIORITIES[7]) if one_shot else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
             'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
             'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if one_shot else d['panLevelCustomCurve']['m_Curve'][0]['value'],
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -535,13 +576,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
-    validate_audio_export(audio,output,manifest['world']['pickup_hits'])
+    validate_audio_export(audio,output,manifest)
     for identity in sorted(getattr(source, 'item_clips', set())):
         clip(source.get(*identity), 'effect')
     return audio
 
 
-def validate_audio_export(audio: dict, output: Path, pickup_hits: list) -> None:
+def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
     clock = audio['radio']['clock']
     if (clock['kind'] != 'scaled'
             or [(clock[name]['class'], clock[name]['method']) for name in
@@ -585,7 +626,8 @@ def validate_audio_export(audio: dict, output: Path, pickup_hits: list) -> None:
                 or not 0<=key['weighted_mode']<=3 for key in keys)
                 or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
             raise ValueError(f'Invalid shared audio curve: {name}')
-    validate_hit_audio(audio, ids, pickup_hits)
+    validate_hit_audio(audio, ids, manifest['world']['pickup_hits'])
+    validate_footsteps(audio, ids, manifest)
 
 
 def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
@@ -599,7 +641,7 @@ def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
         r=roles.get(role)
         if r is None or r['kind']!=kind or not r['clips'] or set(r['clips'])-ids or r['settings']['spatial_blend']!=1:
             raise ValueError(f'Invalid one-shot audio: {role}')
-        if role not in ('eat','eat_crunchy','music_box') and r['settings']['priority']!=PRIORITIES[7]:raise ValueError(f'Invalid hit priority: {role}')
+        if role!='music_box' and r['settings']['priority']!=ONE_SHOT_PRIORITY.get(role,PRIORITIES[7]):raise ValueError(f'Invalid one-shot priority: {role}')
     if not {c for t in tiers for c in t['clips']}<=set(roles['car_hit']['clips']):raise ValueError('Car hit record lacks tier clips')
     if any(h['collision_clip'] not in roles['item_hit']['clips'] or not h['collision_gain']>=0 for h in pickup_hits):
         raise ValueError('Invalid world pickup hit')
@@ -611,6 +653,19 @@ def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
                 or not 0<=a['interval'][0]<=a['interval'][1] or not 0<=a['chance']<=1
                 or not 0<=a['gain'][0]<=a['gain'][1] or a['priority']!=PRIORITIES[7]):
             raise ValueError('Invalid rock ambience')
+
+
+def validate_footsteps(audio: dict, ids: set, manifest: dict) -> None:
+    f=audio['footsteps'];played=set(next(r['clips'] for r in audio['survival'] if r['role']=='footstep'))
+    if ([s['name'] for s in f['surfaces']]!=list(STEP_SURFACES)
+            or any(not s['clips'] or not set(s['clips'])<=ids&played or not s['volume']>=0 for s in f['surfaces'])
+            or not f['step_gain']>=0 or not f['ray_distance']>0 or not isinstance(f['ray_mask'],int)
+            or len(f['local_position'])!=3 or not all(map(math.isfinite,f['local_position']))
+            or f['sand_layers']!=[17,19] or not isinstance(f['method'],list) or not f['method']):
+        raise ValueError('Invalid footstep audio')
+    owners=[*manifest['item_prototypes'],*manifest['world']['prototypes'],*manifest['survival']['foods']]
+    colliders=[*manifest['colliders'],*(c for p in owners for c in p['colliders'])]
+    if any(c['step_surface'] not in (*STEP_SURFACES,'sand','wood_tag',None) for c in colliders):raise ValueError('Invalid collider step surface')
 
 
 def recover_ambient(source):

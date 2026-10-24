@@ -8,7 +8,7 @@ from .source import LibrarySource, key, source_id, vector
 from .library.reader import LibraryReader
 from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
-from .collision import geometry, world_pose
+from .collision import geometry, step_surface, world_pose
 from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
@@ -638,7 +638,8 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                     shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],body_pose,body is not None and not bodies[body]['kinematic'])
                     role=recover_trigger_role(local,n['reader'],root,body_pose) if data['m_IsTrigger'] else None
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
-                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role})
+                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
+                        'step_surface':step_surface(source,n['game_object'])})
         for node in hierarchy:
             for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,

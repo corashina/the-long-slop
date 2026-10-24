@@ -153,7 +153,11 @@ pub fn spawn_body(
                 Group::from_bits_truncate(c.filter),
                 InteractionTestMode::And,
             ))
-            .user_data(((collider_id.0 as u128) << 64) | (id.0 as u128 + 1))
+            .user_data(
+                ((collider_id.0 as u128) << 64)
+                    | crate::vehicle::step_surface_bits(c.step_surface)
+                    | (id.0 as u128 + 1),
+            )
             .build();
         colliders.push((
             physics.insert_collider_with_parent(collider, handle),

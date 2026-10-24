@@ -173,7 +173,7 @@ pub(super) fn bind(
                 let user_data = physics.rapier().colliders[*handle].user_data;
                 physics.edit_collider(*handle, |collider| {
                     collider.user_data =
-                        (user_data & !0xffff_ffff_ffff_ffff) | (cap_item.0 as u128 + 1);
+                        (user_data & !(u32::MAX as u128)) | (cap_item.0 as u128 + 1);
                 });
             }
         }
