@@ -278,6 +278,7 @@ impl StartingArea {
         let spawn = &reference.area.player_spawn;
         let mut player = PlayerState::new(
             &reference.player,
+            &reference.clothing.pose,
             VehiclePose {
                 position: std::array::from_fn(|i| spawn.translation[i] - origin[i] as f32),
                 rotation: spawn.rotation,
@@ -1164,9 +1165,17 @@ impl GarageRuntime {
             self.survival.output(),
         );
         let context = self.player_step_context(walking_input, final_availability, reference);
+        if needs.dead {
+            self.area.player.clear_triggers();
+        } else {
+            self.area
+                .player
+                .scan_triggers(&self.physics, self.stream.trigger_roles());
+        }
         self.area
             .player
             .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        self.apply_hazards(reference);
         self.area.sync_attachments(&mut self.physics, true);
         self.area.sync_compound(&mut self.physics);
         self.area
@@ -1222,6 +1231,9 @@ impl GarageRuntime {
             .mechanisms
             .apply_reactions(&mut self.physics);
         self.physics.step_physics();
+        self.area
+            .player
+            .step_head_bob(walking_input, needs.dead, &self.physics, FIXED_DT);
         self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
@@ -1371,6 +1383,7 @@ impl GarageRuntime {
                 active: !self.paused,
                 camera_allowed: self.sleep_camera_allowed || self.area.player.seat().is_none(),
                 dead: self.needs_output().dead,
+                show_text: crate::sleep::show_text(&reference.seats, self.area.player.seat()),
             },
             self.simulation_seconds,
             FIXED_DT,

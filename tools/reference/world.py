@@ -9,6 +9,7 @@ from .library.reader import LibraryReader
 from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
 from .collision import geometry, world_pose
+from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
 
@@ -629,9 +630,11 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                     while key(owner_node) not in body_nodes and key(owner_node)!=key(root):
                         owner_node=source.resolve(owner_node,source.read(owner_node)['m_Father'])
                     body=body_nodes.get(key(owner_node))
-                    shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],bodies[body]['pose'] if body is not None else IDENTITY,body is not None and not bodies[body]['kinematic'])
+                    body_pose=bodies[body]['pose'] if body is not None else IDENTITY
+                    shape=None if skin_collider or empty_mesh else geometry(local,exporter,component,n['reader'],body_pose,body is not None and not bodies[body]['kinematic'])
+                    role=recover_trigger_role(local,n['reader'],root,body_pose) if data['m_IsTrigger'] else None
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
-                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape})
+                        'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role})
         for node in hierarchy:
             for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,

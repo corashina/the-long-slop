@@ -1,4 +1,6 @@
 pub mod collision;
+mod head_bob;
+mod ladder;
 pub(crate) mod normals;
 pub mod pose;
 mod posture;
@@ -16,7 +18,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
-use crate::reference::{PlayerReference, SeatId, SeatReference};
+use crate::reference::{PlayerPoseReference, PlayerReference, SeatId, SeatReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 
@@ -120,6 +122,8 @@ pub struct PlayerState {
     recoil_velocity: Vector,
     push_gripping: bool,
     running: bool,
+    ladder: ladder::LadderState,
+    hazard_damage: f32,
 }
 
 impl PlayerState {
@@ -166,6 +170,7 @@ impl PlayerState {
                 * seat.local_pose;
         }
         self.cancel_view_input();
+        self.clear_triggers();
         self.push_gripping = false;
         self.collisions.clear();
         self.grounded = false;
@@ -189,7 +194,12 @@ impl PlayerState {
         Ok(())
     }
     /// Poses place the source body root. World up is +Y. View forward is -Z.
-    pub fn new(reference: &PlayerReference, pose: VehiclePose, physics: &mut PhysicsWorld) -> Self {
+    pub fn new(
+        reference: &PlayerReference,
+        pose_reference: &PlayerPoseReference,
+        pose: VehiclePose,
+        physics: &mut PhysicsWorld,
+    ) -> Self {
         let sweep = PlayerSweepShape::new(reference);
         let exit_capsule = SharedShape::capsule_y(
             reference.exit_capsule_half_height,
@@ -227,11 +237,7 @@ impl PlayerState {
             sweep,
             posture: PostureState::new(1.0),
             movement_speed: MovementSpeed::default(),
-            view_state: ViewState::new(
-                &reference.posture,
-                &reference.view,
-                reference.scroll_sensitivity,
-            ),
+            view_state: ViewState::new(reference, pose_reference),
             exit_capsule,
             body,
             collider,
@@ -251,6 +257,8 @@ impl PlayerState {
             recoil_velocity: Vector::ZERO,
             push_gripping: false,
             running: false,
+            ladder: ladder::LadderState::default(),
+            hazard_damage: 0.0,
         }
     }
 
@@ -371,6 +379,7 @@ impl PlayerState {
         }
         let was_grounded = self.grounded;
         let vertical_before_jump = self.vertical_velocity;
+        self.ladder.tick(input);
         let jump_force = self.update_posture(input, context, physics, dt);
         if self.push_gripping {
             let filter = self.movement_filter();
@@ -397,7 +406,7 @@ impl PlayerState {
             }
             return;
         }
-        if self.grounded {
+        if self.grounded || self.ladder.ladder().is_some() {
             self.running = input.held & keys::RUN != 0;
         }
         if jump_force != 0.0 {
@@ -408,8 +417,23 @@ impl PlayerState {
                 self.grounded = false;
             }
         }
-        self.vertical_velocity = (self.vertical_velocity + physics.rapier().gravity.y * dt)
-            .max(-self.reference.max_fall_speed);
+        let head = self.pose.rotation * self.head_rotation();
+        let climb = self.ladder.climb_velocity(
+            input,
+            head * -Vector::Z,
+            head * Vector::X,
+            self.grounded,
+            self.reference.ladder_speed,
+            self.running.then_some(self.reference.run_multiplier),
+        );
+        if climb.is_some() {
+            // Source LadderMove replaces the body velocity.
+            self.vertical_velocity = 0.0;
+            self.recoil_velocity = Vector::ZERO;
+        } else if self.ladder.gravity() {
+            self.vertical_velocity = (self.vertical_velocity + physics.rapier().gravity.y * dt)
+                .max(-self.reference.max_fall_speed);
+        }
         let x = ((input.held & keys::RIGHT != 0) as u8 as f32)
             - ((input.held & keys::LEFT != 0) as u8 as f32);
         let z = ((input.held & keys::BACK != 0) as u8 as f32)
@@ -429,9 +453,12 @@ impl PlayerState {
             )
             * context.movement_multiplier;
         let speed = self.movement_speed.limit(was_grounded, requested_speed);
-        let desired = self.pose.rotation * direction * speed * dt
-            + self.recoil_velocity * dt
-            + Vector::Y * self.vertical_velocity * dt;
+        let desired = climb.map_or(
+            self.pose.rotation * direction * speed * dt
+                + self.recoil_velocity * dt
+                + Vector::Y * self.vertical_velocity * dt,
+            |velocity| velocity * dt,
+        );
         self.collisions.clear();
         let shape = &self.sweep;
         let filter = self.movement_filter();
@@ -499,6 +526,45 @@ impl PlayerState {
         });
     }
 
+    /// Source trigger stays. Run before `step_movement`. Seated, only hazards count.
+    pub fn scan_triggers(&mut self, physics: &PhysicsWorld, roles: &crate::world::TriggerRoles) {
+        use crate::reference::TriggerRole;
+        self.hazard_damage = 0.0;
+        if roles.is_empty() {
+            return;
+        }
+        let seated = self.occupancy.is_some();
+        let filter = QueryFilter::default()
+            .exclude_solids()
+            .exclude_rigid_body(self.body)
+            .groups(self.collision_groups());
+        for (handle, collider) in physics
+            .queries(filter)
+            .intersect_shape(self.pose, &self.sweep)
+        {
+            match roles.get(handle, collider) {
+                Some(TriggerRole::Ladder { speed, up }) if !seated => {
+                    self.ladder.touch(ladder::LadderContact {
+                        collider: handle,
+                        speed,
+                        up: Vector::from_array(up),
+                    })
+                }
+                Some(TriggerRole::Hazard { damage_player, .. }) => {
+                    self.hazard_damage += damage_player
+                }
+                _ => {}
+            }
+        }
+    }
+    /// Sum of touched hazard damage per second.
+    pub fn hazard_damage(&self) -> f32 {
+        self.hazard_damage
+    }
+    pub fn clear_triggers(&mut self) {
+        self.ladder = ladder::LadderState::default();
+        self.hazard_damage = 0.0;
+    }
     pub(crate) fn collision_groups(&self) -> InteractionGroups {
         groups(
             self.reference.posture.capsule_membership,
@@ -536,10 +602,11 @@ impl PlayerState {
         let before = self.posture.value();
         let mut posture_input = input;
         posture_input.wheel *= self.reference.scroll_sensitivity;
+        // Source climbing sets BcanJump.
         let force = self.posture.step(
             posture_input,
             context.wheel_posture_allowed,
-            self.grounded,
+            self.grounded || self.ladder.climbed(),
             &self.reference.posture,
             dt,
             self.reference.duck_jump_multiplier,
@@ -602,6 +669,7 @@ impl PlayerState {
         });
         self.pose = seated_pose;
         self.posture.restore(1.0);
+        self.clear_triggers();
         self.view_state.enter(head_in_seat);
         self.grounded = false;
         self.running = false;
@@ -707,6 +775,41 @@ impl PlayerState {
     pub fn support_body(&self) -> Option<RigidBodyHandle> {
         self.support_body
     }
+    /// Run after the physics step, so body velocities hold this step's motion.
+    pub fn step_head_bob(
+        &mut self,
+        input: FrameInput,
+        dead: bool,
+        physics: &PhysicsWorld,
+        dt: f32,
+    ) {
+        if !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        let bodies = &physics.rapier().bodies;
+        if let Some(seat) = self.occupancy {
+            let head = to_rapier(self.view(physics).head_pose).rotation;
+            let velocity = bodies[physics.chassis_handle(seat.vehicle)].linvel();
+            self.view_state.step_car_bob(dt, velocity, dead, head);
+            return;
+        }
+        let axis =
+            |positive, negative| (input.held & positive != 0) != (input.held & negative != 0);
+        let moving = axis(keys::RIGHT, keys::LEFT) || axis(keys::BACK, keys::FORWARD);
+        let speed = bodies[self.body].linvel().length()
+            - self
+                .support_body
+                .map_or(0.0, |body| bodies[body].linvel().length());
+        self.view_state.step_walk_bob(
+            (self.grounded || self.ladder.climbed()) && !self.push_gripping && moving,
+            speed,
+            dt,
+        );
+    }
+    /// True on the step a source footstep fires.
+    pub fn footstep_beat(&self) -> bool {
+        self.view_state.footstep_beat()
+    }
     pub fn apply_recoil(&mut self, impulse: Vector) {
         self.recoil_velocity += impulse / self.reference.mass_kg;
     }
@@ -810,6 +913,7 @@ impl PlayerState {
         self.yaw = yaw_from_rotation(self.pose.rotation);
         self.posture.restore(self.posture.value());
         self.cancel_view_input();
+        self.clear_triggers();
         self.movement_speed = MovementSpeed::default();
         self.vertical_velocity = 0.0;
         self.recoil_velocity = Vector::ZERO;

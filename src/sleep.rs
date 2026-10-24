@@ -1,5 +1,5 @@
 //! Source sleep deadlines use normal simulation time.
-use crate::reference::SleepReference;
+use crate::reference::{SeatId, SeatReference, SleepReference};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SleepCamera {
@@ -21,16 +21,23 @@ pub struct SleepInput {
     pub active: bool,
     pub camera_allowed: bool,
     pub dead: bool,
+    pub show_text: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SleepOutput {
     pub phase: SleepPhase,
     pub eligible: bool,
+    pub show_hint: bool,
     pub charge: f32,
     pub wake_time: f64,
     pub cooldown_remaining: f64,
     pub progress: f32,
+}
+
+/// seatscript.showSleepText of the occupied seat.
+pub fn show_text(seats: &[SeatReference], seat: Option<SeatId>) -> bool {
+    seat.is_some_and(|id| seats.iter().any(|s| s.id == id && s.show_sleep_text))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,6 +60,7 @@ impl SleepState {
             output: SleepOutput {
                 phase: SleepPhase::Idle,
                 eligible: false,
+                show_hint: false,
                 charge: 0.,
                 wake_time: -f64::from(reference.cooldown_seconds),
                 cooldown_remaining: 0.,
@@ -108,6 +116,7 @@ impl SleepState {
                 self.output.eligible = eligible;
             }
         }
+        self.output.show_hint = self.output.eligible && input.show_text;
         self.output.cooldown_remaining =
             (self.output.wake_time + f64::from(r.cooldown_seconds) - now).max(0.);
         self.output
@@ -148,5 +157,76 @@ impl SleepState {
         self.output.charge = 0.;
         self.output.eligible = false;
         self.output.progress = 0.;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reference::{AnchorId, ItemId, ManagedEvidence, SourceId};
+
+    #[test]
+    fn hint_shows_only_in_flagged_seat() {
+        let source = SourceId {
+            file: String::new(),
+            path_id: 0,
+        };
+        let seat = |id, show_sleep_text| SeatReference {
+            default_pitch_degrees: 0.,
+            pitch_limits_degrees: [0.; 2],
+            id: SeatId(id),
+            source: source.clone(),
+            item: ItemId(0),
+            anchor: AnchorId(0),
+            vehicle: 0,
+            driver: false,
+            driving2: false,
+            hit_nodes: Vec::new(),
+            yaw_limits_degrees: [0.; 2],
+            exit_distance: 0.,
+            min_exit_angle_degrees: 0.,
+            exit_height: 0.,
+            show_sleep_text,
+        };
+        let seats = [seat(0, true), seat(1, false)];
+        let r = SleepReference {
+            source: source.clone(),
+            need_modifier: 1.,
+            hold_gain: 1.,
+            sleep_real_seconds: 1.,
+            sleep_cycle_seconds: 1.,
+            cooldown_seconds: 1.,
+            sleep_cam_ring_min: 0.,
+            sleep_cam_ring_max: 0.,
+            sleep_cam_height_min: 0.,
+            sleep_cam_height_max: 0.,
+            sleep_layer_mask: 0,
+            cloud_low_min_speed: 0.,
+            cloud_low_mid_speed: 0.,
+            cloud_low_max_speed: 0.,
+            cloud_high_min_speed: 0.,
+            cloud_high_mid_speed: 0.,
+            cloud_high_max_speed: 0.,
+            evidence: ManagedEvidence {
+                assembly_sha256: String::new(),
+                methods: Vec::new(),
+            },
+        };
+        for (seat, hint) in [
+            (Some(SeatId(0)), true),
+            (Some(SeatId(1)), false),
+            (None, false),
+        ] {
+            let input = SleepInput {
+                held: false,
+                active: true,
+                camera_allowed: true,
+                dead: false,
+                show_text: show_text(&seats, seat),
+            };
+            let output = SleepState::new(&r).step(&r, input, 10., 0.02);
+            assert!(output.eligible);
+            assert_eq!(output.show_hint, hint);
+        }
     }
 }
