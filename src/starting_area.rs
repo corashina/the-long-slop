@@ -1684,8 +1684,32 @@ impl GarageRuntime {
                     .interaction
                     .drop_held(&mut self.area.items, &mut self.physics);
             }
-            self.stream
-                .break_box(id, &mut self.area.items, &mut self.physics);
+            let Some(pose) = self.area.items.get(id).map(|s| s.pose) else {
+                continue;
+            };
+            if self
+                .stream
+                .break_box(id, &mut self.area.items, &mut self.physics)
+                .is_none()
+                || reference.acquisition.r#box.break_rules.no_gib
+            {
+                continue;
+            }
+            // Source Break spawns Gib at the box pose. No reduced-gibs setting exists here.
+            let debris = &reference.acquisition.r#box.debris;
+            let prototype = reference
+                .item_prototypes
+                .iter()
+                .position(|p| &p.id == debris)
+                .expect("validated box debris prototype");
+            spawned::spawn_prototype(
+                reference,
+                &mut self.area,
+                &mut self.physics,
+                prototype,
+                pose,
+            )
+            .expect("validated box debris prototype");
         }
     }
 

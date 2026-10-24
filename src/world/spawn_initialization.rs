@@ -279,7 +279,7 @@ impl SpawnEvaluation<'_> {
                                     self.rules.component(self.reference, &root, "massScript")?
                                 {
                                     count = super::spawn_selection::box_count(
-                                        integer(&mass.fields, "maxCountIfSpawnedInBox")?,
+                                        integer(mass.fields, "maxCountIfSpawnedInBox")?,
                                         self.random,
                                     );
                                 }
