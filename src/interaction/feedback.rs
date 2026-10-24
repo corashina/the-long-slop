@@ -34,6 +34,7 @@ impl ActionMask {
     pub const TAKE_ONE: u32 = 1 << 28;
     pub const SMOKE: u32 = 1 << 29;
     pub const PUT_ON: u32 = 1 << 30;
+    pub const CRANK: u32 = 1 << 31;
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
@@ -177,12 +178,12 @@ impl InteractionState {
                 a.context = match kind {
                     Knob::Volume => FeedbackContext::RadioVolume,
                     Knob::Tuning => FeedbackContext::RadioTuning,
-                    Knob::Dial | Knob::Band => FeedbackContext::Mechanism,
+                    Knob::Dial | Knob::Band | Knob::Crank => FeedbackContext::Mechanism,
                 };
-                a.actions.0 |= if kind == Knob::Band {
-                    ActionMask::SWITCH
-                } else {
-                    ActionMask::TUNE | ActionMask::SCROLL
+                a.actions.0 |= match kind {
+                    Knob::Band => ActionMask::SWITCH,
+                    Knob::Crank => ActionMask::CRANK,
+                    _ => ActionMask::TUNE | ActionMask::SCROLL,
                 };
             }
             if self.mechanisms.contains(t.item) {

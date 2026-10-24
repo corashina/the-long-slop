@@ -404,7 +404,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=13)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=14)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -899,6 +899,7 @@ impl AudioGameplayReference {
             (11, "item_hit"),
             (12, "car_hit"),
             (13, "rock_heat"),
+            (14, "music_box"),
         ] {
             require(
                 r.bindings
@@ -919,7 +920,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 12, "required audio roles")?;
+        require(r.bindings.len() == 13, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
