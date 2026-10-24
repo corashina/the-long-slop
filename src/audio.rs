@@ -3,6 +3,7 @@ use crate::interaction::{InteractionAction, WheelAction};
 use crate::reference::{AudioReference, ColliderId, ItemId, NodeId, ReferenceManifest};
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, to_rapier};
+use crate::world::WorldStream;
 use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
@@ -183,6 +184,7 @@ pub struct AudioState {
     sphere: Option<Ball>,
     impacts: impacts::ImpactState,
     rocks: ambience::RockAmbience,
+    world_interiors: interiors::WorldInteriors,
     footsteps: footsteps::FootstepState,
 }
 impl AudioState {
@@ -312,6 +314,7 @@ impl AudioState {
             sphere,
             impacts: impacts::ImpactState::default(),
             rocks: ambience::RockAmbience::default(),
+            world_interiors: interiors::WorldInteriors::new(reference.interiors.len()),
             footsteps: footsteps::FootstepState::default(),
             reference,
         }
@@ -927,6 +930,7 @@ impl AudioState {
         self.removed.clear();
         self.impacts.reset();
         self.rocks.reset();
+        self.world_interiors.reset();
         self.footsteps = footsteps::FootstepState::default();
         for m in &mut self.mechanism_sounds {
             m.remaining = 0.;
@@ -1021,7 +1025,13 @@ impl AudioState {
         };
         self.push_event(event);
     }
-    pub fn fixed_step(&mut self, area: &StartingArea, physics: &PhysicsWorld, dt: f32) {
+    pub fn fixed_step(
+        &mut self,
+        area: &StartingArea,
+        physics: &PhysicsWorld,
+        stream: &WorldStream,
+        dt: f32,
+    ) {
         self.game_seconds += f64::from(dt);
         self.broadcasts.advance(self.game_seconds);
         self.radio_frame = self.broadcasts.frame(
@@ -1098,6 +1108,22 @@ impl AudioState {
                 flags.1,
             );
         }
+        if self.world_interiors.sync(
+            stream.structure_revision(),
+            stream.frame().structures,
+            &stream.world_reference().prototypes,
+        ) {
+            let world = &self.world_interiors;
+            for hits in std::iter::once(&mut self.sensor.hits).chain(
+                self.route_sensors
+                    .iter_mut()
+                    .map(|(_, latch)| &mut latch.hits),
+            ) {
+                for hit in hits.iter_mut() {
+                    *hit = hit.and_then(|i| world.remap(i));
+                }
+            }
+        }
         self.sensor.begin_step();
         for (index, (id, latch)) in self.route_sensors.iter_mut().enumerate() {
             latch.begin_step();
@@ -1106,7 +1132,7 @@ impl AudioState {
             }
             if let Some(handle) = *id {
                 if let Some(sensor) = physics.rapier().colliders.get(handle) {
-                    for (_, other) in physics
+                    for (other_handle, other) in physics
                         .queries(QueryFilter {
                             exclude_collider: Some(handle),
                             exclude_rigid_body: sensor.parent(),
@@ -1118,7 +1144,11 @@ impl AudioState {
                         let id = ColliderId((other.user_data >> 64) as u32);
                         self.route_nodes[index] = self.collider_nodes.get(&id).copied();
                         latch.hits.clear();
-                        latch.hits.push(self.colliders.get(&id).copied());
+                        latch.hits.push(
+                            self.world_interiors
+                                .entry(other_handle)
+                                .or_else(|| self.colliders.get(&id).copied()),
+                        );
                         latch.hit();
                     }
                 }
@@ -1135,7 +1165,7 @@ impl AudioState {
             return;
         };
         let mut first = true;
-        for (_, collider) in physics
+        for (handle, collider) in physics
             .queries(QueryFilter::default())
             .intersect_shape(pose, sphere)
         {
@@ -1146,11 +1176,13 @@ impl AudioState {
                 self.sensor.hits.clear();
                 first = false;
             }
-            self.sensor.hits.push(
-                self.colliders
-                    .get(&ColliderId((collider.user_data >> 64) as u32))
-                    .copied(),
-            );
+            self.sensor
+                .hits
+                .push(self.world_interiors.entry(handle).or_else(|| {
+                    self.colliders
+                        .get(&ColliderId((collider.user_data >> 64) as u32))
+                        .copied()
+                }));
         }
         if !first {
             self.sensor.hit();
@@ -1233,17 +1265,49 @@ impl AudioState {
             .and_then(|&id| area.interaction.mechanisms.value(id, true))
             .unwrap_or(1.)
     }
+    /// The parent list index of a live interior.
+    fn interior_parent(&self, index: usize) -> Option<usize> {
+        match self.reference.interiors.get(index) {
+            Some(interior) => interior
+                .parent
+                .and_then(|id| self.reference.interiors.iter().position(|i| i.id == id)),
+            None => self.world_interiors.parent(index),
+        }
+    }
+    /// `invert`, `useValue` and `value` of a live interior.
+    fn interior_flags(&self, index: usize, stream: &WorldStream) -> (bool, bool, f32) {
+        if let Some(i) = self.reference.interiors.get(index) {
+            return (i.invert, i.use_value, i.value);
+        }
+        self.world_interiors
+            .get(index, &stream.world_reference().prototypes)
+            .map_or((false, false, 0.), |i| (i.invert, i.use_value, i.value))
+    }
     pub fn interior_value(
         &self,
         index: usize,
         area: &StartingArea,
+        stream: &WorldStream,
         caller: Option<usize>,
         depth: usize,
     ) -> f32 {
+        let Some(interior) = self.reference.interiors.get(index) else {
+            let door = |id: &_, prototype: &_, door: &_| {
+                stream
+                    .door_item(id, prototype, door)
+                    .and_then(|item| area.interaction.mechanisms.value(item, true))
+            };
+            return self.world_interiors.value(
+                index,
+                &stream.world_reference().prototypes,
+                &door,
+                caller,
+                depth,
+            );
+        };
         if depth > self.reference.interiors.len() {
             return 0.;
         }
-        let interior = &self.reference.interiors[index];
         let mut total = 0.;
         let mut count = interior.doors.len();
         if interior.removable_doors {
@@ -1284,7 +1348,7 @@ impl AudioState {
                         .as_ref()
                         .map_or(1., |door| self.control(door, area))
                 };
-                total += self.interior_value(parent, area, Some(index), depth + 1)
+                total += self.interior_value(parent, area, stream, Some(index), depth + 1)
                     * (2. * value).clamp(0., 1.);
             }
         }
@@ -1295,7 +1359,7 @@ impl AudioState {
             interior.maximum_transmission,
         )
     }
-    pub fn update_mixers(&mut self, area: &StartingArea, dt: f32) {
+    pub fn update_mixers(&mut self, area: &StartingArea, stream: &WorldStream, dt: f32) {
         let mut current = if self.sensor.sensed {
             self.sensor.hits.first().copied().flatten()
         } else {
@@ -1306,12 +1370,12 @@ impl AudioState {
                 .sensor
                 .sensed
                 .then(|| {
-                    self.sensor
-                        .hits
-                        .iter()
-                        .flatten()
-                        .copied()
-                        .find(|&i| route.interiors.contains(&self.reference.interiors[i].id))
+                    self.sensor.hits.iter().flatten().copied().find(|&i| {
+                        self.reference
+                            .interiors
+                            .get(i)
+                            .is_some_and(|interior| route.interiors.contains(&interior.id))
+                    })
                 })
                 .flatten();
             if let Some(interior) = inside {
@@ -1327,16 +1391,16 @@ impl AudioState {
             };
             let same = latch.sensed
                 && current.is_none_or(|p| {
-                    self.route_nodes[ri] == Some(self.reference.interiors[p].node)
+                    self.reference
+                        .interiors
+                        .get(p)
+                        .is_some_and(|interior| self.route_nodes[ri] == Some(interior.node))
                         || sensed.is_some_and(|i| {
+                            let parent = self.interior_parent(i);
                             i == p
-                                || self.reference.interiors[i].parent
-                                    == Some(self.reference.interiors[p].id)
-                                || self.reference.interiors[p].parent
-                                    == Some(self.reference.interiors[i].id)
-                                || self.reference.interiors[i].parent.is_some()
-                                    && self.reference.interiors[i].parent
-                                        == self.reference.interiors[p].parent
+                                || parent == Some(p)
+                                || self.interior_parent(p) == Some(i)
+                                || parent.is_some() && parent == self.interior_parent(p)
                         })
                 });
             self.route_mixers[ri] = if same {
@@ -1354,8 +1418,8 @@ impl AudioState {
                 .iter()
                 .map(|hit| {
                     hit.map_or(0., |i| {
-                        let v = self.interior_value(i, area, None, 0);
-                        if self.reference.interiors[i].invert {
+                        let v = self.interior_value(i, area, stream, None, 0);
+                        if self.interior_flags(i, stream).0 {
                             1. - v
                         } else {
                             v
@@ -1363,15 +1427,8 @@ impl AudioState {
                     })
                 })
                 .fold(f32::INFINITY, f32::min);
-            let interior = &self.reference.interiors[index];
-            settings.default_interior_gain
-                + (1.
-                    - if interior.use_value {
-                        interior.value
-                    } else {
-                        settings.default_interior_gain
-                    })
-                    * doors
+            let (_, use_value, value) = self.interior_flags(index, stream);
+            interiors::outside_target(settings.default_interior_gain, use_value, value, doors)
         } else {
             1.
         };
@@ -1614,7 +1671,7 @@ mod tests {
         run.area.items.sync_poses(&run.physics);
         let output = run.vehicles[0].engine_output;
         let audio = run.audio.as_mut().unwrap();
-        audio.fixed_step(&run.area, &run.physics, FIXED_DT);
+        audio.fixed_step(&run.area, &run.physics, &run.stream, FIXED_DT);
         audio.vehicle(
             VehicleAudioInput {
                 rpm: output.rpm,

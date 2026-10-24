@@ -1334,7 +1334,7 @@ impl GarageRuntime {
         self.break_boxes(reference);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
-            audio.fixed_step(&self.area, &self.physics, FIXED_DT);
+            audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
             audio.hits(&self.area, &self.physics, FIXED_DT);
             let stream = &mut self.stream;
             audio.footsteps(

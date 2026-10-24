@@ -121,6 +121,7 @@ fn g10_control_restore_has_no_side_effects() {
     audio.fixed_step(
         &restored.area,
         &restored.physics,
+        &restored.stream,
         crate::simulation::FIXED_DT,
     );
     let endpoints: Vec<_> = audio
@@ -152,6 +153,7 @@ fn g10_control_restore_has_no_side_effects() {
     audio.fixed_step(
         &restored.area,
         &restored.physics,
+        &restored.stream,
         crate::simulation::FIXED_DT,
     );
     let initial = run.audio.as_ref().unwrap().reference.radio.clone();
