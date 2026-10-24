@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 pub mod ambience;
 pub mod footsteps;
 pub mod impacts;
+pub mod interiors;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AudioEvent {
