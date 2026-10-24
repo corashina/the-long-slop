@@ -185,7 +185,57 @@ pub(super) fn friction(curve: &WheelFrictionCurve, slip: f32) -> f32 {
     value.copysign(slip)
 }
 
-/// Integrates wheel spin and returns the world force on the chassis at the contact.
+/// Tire and suspension result for one wheel contact.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct WheelForce {
+    pub up: Vector,
+    pub load: f32,
+    pub forward: Vector,
+    pub side: Vector,
+    /// Wheel surface speed along `forward`.
+    pub surface_speed: f32,
+    /// Tire force from the slip curves, in N.
+    pub fx: f32,
+    pub fy: f32,
+    pub forward_peak: f32,
+    pub sideways_peak: f32,
+    /// Static grip: a braked wheel at rest, and sideways grip at low speed.
+    pub hold_x: bool,
+    pub hold_y: bool,
+}
+
+impl WheelForce {
+    /// Accumulated tire impulse limits along `forward` and `side`.
+    /// Static grip may reach the peak force either way. Sliding grip may
+    /// reach the slip-curve force.
+    pub fn limits(&self, dt: f32) -> [(f32, f32); 2] {
+        let range = |force: f32, peak: f32, hold: bool| {
+            if hold {
+                (-peak * dt, peak * dt)
+            } else {
+                ((force * dt).min(0.0), (force * dt).max(0.0))
+            }
+        };
+        [
+            range(self.fx, self.forward_peak, self.hold_x),
+            range(self.fy, self.sideways_peak, self.hold_y),
+        ]
+    }
+
+    /// Keeps an accumulated impulse pair inside the friction ellipse.
+    pub fn ellipse(&self, impulse: [f32; 2], dt: f32) -> [f32; 2] {
+        let usage = ratio(impulse[0], self.forward_peak * dt).powi(2)
+            + ratio(impulse[1], self.sideways_peak * dt).powi(2);
+        if usage > 1.0 {
+            let scale = usage.sqrt().recip();
+            [impulse[0] * scale, impulse[1] * scale]
+        } else {
+            impulse
+        }
+    }
+}
+
+/// Integrates wheel spin and returns the contact force terms.
 /// The state must hold the new contact and suspension length.
 pub(super) fn solve(
     state: &mut WheelState,
@@ -193,7 +243,7 @@ pub(super) fn solve(
     frame: WheelFrame,
     torques: WheelTorques,
     dt: f32,
-) -> Vector {
+) -> Option<WheelForce> {
     let profile = state.profile;
     let h = dt / SPIN_SUBSTEPS as f32;
     let brake_step = torques.brake_nm.max(0.0) / profile.inertia * h;
@@ -208,7 +258,7 @@ pub(super) fn solve(
                 h,
             );
         }
-        return Vector::ZERO;
+        return None;
     };
     // Source rest position is targetPosition of the travel below the connection.
     let rest = slot.suspension_distance * slot.target_position;
@@ -257,13 +307,20 @@ pub(super) fn solve(
         fx_sum += fx;
         fy_sum += fy;
     }
-    // The chassis share cannot reverse its slip velocity in one step.
-    let share = frame.sprung_mass / dt;
-    let slip_speed = state.omega * profile.radius - vx;
-    let fx =
-        (fx_sum / SPIN_SUBSTEPS as f32).clamp(-share * slip_speed.abs(), share * slip_speed.abs());
-    let fy = (fy_sum / SPIN_SUBSTEPS as f32).clamp(-share * vy.abs(), share * vy.abs());
-    frame.up * load + forward * fx + side * fy
+    let slow = vx.abs() < MIN_SLIP_SPEED;
+    Some(WheelForce {
+        up: frame.up,
+        load,
+        forward,
+        side,
+        surface_speed: state.omega * profile.radius,
+        fx: fx_sum / SPIN_SUBSTEPS as f32,
+        fy: fy_sum / SPIN_SUBSTEPS as f32,
+        forward_peak,
+        sideways_peak,
+        hold_x: slow && state.omega == 0.0 && torques.brake_nm > 0.0,
+        hold_y: slow,
+    })
 }
 
 fn ratio(force: f32, peak: f32) -> f32 {
