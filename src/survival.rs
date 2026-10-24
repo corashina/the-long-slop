@@ -95,6 +95,26 @@ impl SurvivalState {
         self.pending
     }
 
+    pub fn capture_save(&self) -> crate::save::NeedsSnapshot {
+        crate::save::NeedsSnapshot {
+            needs: self.needs,
+            pending: self.pending,
+            bladder: crate::fluids::FluidSnapshot::from(&self.bladder),
+        }
+    }
+
+    /// Source LoadPlayer restores needs and queues without showing stats.
+    pub fn restore_save(&mut self, snapshot: &crate::save::NeedsSnapshot) {
+        self.needs = snapshot.needs;
+        self.pending = snapshot.pending;
+        self.bladder.restore_entries(snapshot.bladder.as_slice());
+        self.food_hurt = self.needs.food <= 0.;
+        self.water_hurt = self.needs.water <= 0.;
+        self.hp_hurt = self.needs.hp < self.maximum.hp * 0.25;
+        self.dead = self.needs.hp <= 0.;
+        self.death_elapsed = 0.;
+    }
+
     pub fn show_stats(&mut self) {
         self.stats_shown_at = self.elapsed;
     }
@@ -381,4 +401,275 @@ fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
 
 fn lerp(a: f32, b: f32, fraction: f32) -> f32 {
     a + (b - a) * fraction.clamp(0., 1.)
+}
+
+#[cfg(test)]
+mod source_rules {
+    use super::*;
+    use crate::reference::NeedValues;
+
+    const GAS: usize = 0;
+    const OIL: usize = 1;
+    const ALCOHOL: usize = 2;
+    const WATER: usize = 3;
+    const BLOOD: usize = 4;
+
+    fn reference() -> SurvivalReference {
+        let id = serde_json::json!({"file": "level1", "path_id": 1});
+        let evidence = serde_json::json!({"assembly_sha256": "", "methods": []});
+        let needs = serde_json::json!({"hp": 100., "food": 100., "water": 100., "bowel": 100.});
+        let zero = serde_json::json!({"food": 0., "water": 0., "bowel": 0., "hp": 0.});
+        serde_json::from_value(serde_json::json!({
+            "mode_source": id, "mode": 2, "death_seconds": 14.,
+            "drinking": {
+                "source": id, "tank": id, "collider": id,
+                "geometry": {"kind": "sphere", "center": [0., 0., 0.], "radius": 0.1},
+                "local_position": [0., 0., 0.], "radius": 0.1, "valve": 1.,
+                "no_angle": false, "no_pour": false, "is_drink_cap": true,
+                "particle_contact_radius_multiplier": 1., "evidence": evidence
+            },
+            "source": id, "player": id, "blood": id,
+            "initial": {"hp": 100., "food": 75., "water": 60., "bowel": 50.},
+            "maximum": needs, "initial_bladder": [], "bladder_capacity_liters": 1.,
+            "initial_queue": zero, "starter_food": 0, "foods": [], "starter_parts": [],
+            "starter_parent": id,
+            "starter_pose": {"translation": [0., 0., 0.], "rotation": [0., 0., 0., 1.], "scale": [1., 1., 1.]},
+            "evidence": evidence,
+            "toilet": {
+                "source": id, "bladder": id, "radius": 0.01, "no_angle": false,
+                "valve_gain": 3., "empty_amount": 0.01, "bowel_fraction": 0.3,
+                "fart_burp_ratio": 0.5, "fart_shit_ratio": 0.5,
+                "min_fart_pitch": 1., "max_fart_pitch": 1., "min_fart_volume": 1., "max_fart_volume": 1.,
+                "min_burp_pitch": 1., "max_burp_pitch": 1., "min_burp_volume": 1., "max_burp_volume": 1.,
+                "max_rate": 1., "min_rate": 0., "max_speed": 1., "force_color": [1., 1., 1., 1.], "force_color_m": 1.
+            },
+            "inputs": [], "drink_modifier": 1., "death_velocity_change": 20.,
+            "food_stat_show_time": 5., "food_stat_hide_time": 1.,
+            "water_to_piss_ratio": 0.01, "food_to_shit_ratio": 0.5, "blood_to_hp_ratio": 10.,
+            "alcohol_heal": 20., "alcohol_convert_to_piss": 30., "car_fluids_damage": 40.,
+            "max_healing_speed": 0.2, "healing_toilet_full_modfiier": 0.25,
+            "water_damage": 0.5, "food_damage": 0.25,
+            "def_temp": 20., "cold_temp": 0., "hot_temp": 40.,
+            "food_loss": 0.1, "cold_food_loss_modifier": 2., "hot_food_loss_modifier": 3.,
+            "water_loss": 0.7, "cold_water_loss_modifier": 4., "hot_water_loss_modifier": 5.,
+            "run_food_loss_modifier": 1., "run_water_loss_modifier": 1., "delay_speed": 1.
+        }))
+        .unwrap()
+    }
+
+    fn with_needs(reference: &SurvivalReference, needs: NeedValues) -> SurvivalState {
+        let mut state = SurvivalState::new(reference);
+        state.restore_save(&crate::save::NeedsSnapshot {
+            needs,
+            pending: ConsumptionEffect::default(),
+            bladder: crate::fluids::FluidSnapshot::default(),
+        });
+        state
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn needs_drop_at_the_source_rate_and_water_uses_food_loss() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 100.,
+                food: 50.,
+                water: 50.,
+                bowel: 0.,
+            },
+        );
+        let out = state.advance(&r, 1., r.def_temp, 1.);
+        assert!(close(out.needs.food, 50. - r.food_loss));
+        // currentWaterLoss = foodLoss * ...; waterLoss is never read by the source.
+        assert!(close(out.needs.water, 50. - r.food_loss));
+        assert!(close(out.needs.bowel, r.food_loss * r.food_to_shit_ratio));
+        assert!(close(
+            out.bladder_liters,
+            r.food_loss * r.water_to_piss_ratio
+        ));
+    }
+
+    #[test]
+    fn cold_raises_the_loss_rate() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 100.,
+                food: 50.,
+                water: 50.,
+                bowel: 0.,
+            },
+        );
+        let out = state.advance(&r, 1., r.cold_temp, 1.);
+        assert!(close(
+            out.needs.food,
+            50. - r.food_loss * r.cold_food_loss_modifier
+        ));
+        assert!(close(
+            out.needs.water,
+            50. - r.food_loss * r.cold_water_loss_modifier
+        ));
+    }
+
+    #[test]
+    fn starving_and_thirst_damage_until_death() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 1.,
+                food: 0.,
+                water: 0.,
+                bowel: 0.,
+            },
+        );
+        let out = state.advance(&r, 1., r.def_temp, 1.);
+        assert!(close(out.needs.hp, 1. - r.food_damage - r.water_damage));
+        assert!(!out.dead);
+        let out = state.advance(&r, 1., r.def_temp, 1.);
+        assert!(out.dead);
+        assert_eq!(out.needs.hp, 0.);
+        assert!(!out.can_eat);
+    }
+
+    #[test]
+    fn healing_slows_when_the_toilet_is_full() {
+        let r = reference();
+        let mut empty = with_needs(
+            &r,
+            NeedValues {
+                hp: 50.,
+                food: 100.,
+                water: 100.,
+                bowel: 0.,
+            },
+        );
+        let mut full = with_needs(
+            &r,
+            NeedValues {
+                hp: 50.,
+                food: 100.,
+                water: 100.,
+                bowel: 100.,
+            },
+        );
+        let healed = empty.advance(&r, 1., r.def_temp, 0.).needs.hp;
+        assert_eq!(healed, 50., "sleep scale 0 stops healing");
+        let healed = empty.advance(&r, 0.1, r.def_temp, 1.).needs.hp - 50.;
+        let slowed = full.advance(&r, 0.1, r.def_temp, 1.).needs.hp - 50.;
+        assert!(close(healed, r.max_healing_speed * 0.1));
+        assert!(close(
+            slowed,
+            r.max_healing_speed * r.healing_toilet_full_modfiier * 0.1
+        ));
+    }
+
+    #[test]
+    fn alcohol_heals_and_turns_water_into_urine() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 50.,
+                food: 100.,
+                water: 100.,
+                bowel: 0.,
+            },
+        );
+        let mut fractions = [0.; 6];
+        fractions[ALCOHOL] = 1.;
+        state.apply_drink(&r, fractions, 0.01);
+        assert!(close(state.pending().hp, 0.01 * r.alcohol_heal));
+        assert!(close(state.pending().water, 0.));
+        let out = state.output();
+        assert!(close(
+            out.needs.water,
+            100. - 0.01 * r.alcohol_convert_to_piss
+        ));
+        assert!(close(
+            out.bladder_liters,
+            0.01 * r.alcohol_convert_to_piss * r.water_to_piss_ratio
+        ));
+    }
+
+    #[test]
+    fn car_fluids_hurt_and_blood_heals() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 50.,
+                food: 100.,
+                water: 100.,
+                bowel: 0.,
+            },
+        );
+        let mut fractions = [0.; 6];
+        fractions[GAS] = 0.5;
+        fractions[OIL] = 0.25;
+        fractions[BLOOD] = 0.25;
+        state.apply_drink(&r, fractions, 0.1);
+        let expected = 0.1 * (0.25 * r.blood_to_hp_ratio - 0.75 * r.car_fluids_damage);
+        assert!(close(state.pending().hp, expected));
+        // The queue drains at delaySpeed per second, like source toHp.
+        let out = state.advance(&r, 0.5, r.def_temp, 0.);
+        assert!(close(out.needs.hp, 50. + expected * 0.5));
+        assert!(close(state.pending().hp, expected * 0.5));
+    }
+
+    #[test]
+    fn water_past_full_goes_to_the_bladder() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 100.,
+                food: 100.,
+                water: 99.,
+                bowel: 0.,
+            },
+        );
+        let mut fractions = [0.; 6];
+        fractions[WATER] = 1.;
+        // ChangeWithoutMix keeps the bladder's own mixture, so it needs fluid to grow.
+        state.bladder.change_one(0.1, WATER);
+        state.apply_drink(&r, fractions, 1.5);
+        let out = state.advance(&r, 1., r.def_temp, 0.);
+        assert!(close(out.needs.water, 100.));
+        assert!(close(out.bladder_liters, 0.6));
+    }
+
+    #[test]
+    fn saved_needs_round_trip() {
+        let r = reference();
+        let mut state = with_needs(
+            &r,
+            NeedValues {
+                hp: 20.,
+                food: 30.,
+                water: 40.,
+                bowel: 50.,
+            },
+        );
+        state.queue(ConsumptionEffect {
+            food: 1.,
+            water: 2.,
+            bowel: 3.,
+            hp: 4.,
+        });
+        state.bladder.change_one(0.25, WATER);
+        let saved = state.capture_save();
+        let json = serde_json::to_string(&saved).unwrap();
+        let mut loaded = SurvivalState::new(&r);
+        loaded.restore_save(&serde_json::from_str(&json).unwrap());
+        assert_eq!(loaded.capture_save(), saved);
+        assert!(!loaded.output().dead);
+        assert_eq!(loaded.output().opacity, 0., "loading does not flash stats");
+    }
 }

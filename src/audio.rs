@@ -1308,6 +1308,7 @@ pub enum AudioKind {
     AmbientDay = 7,
     AmbientNight = 8,
     Shit = 9,
+    EatCrunchy = 10,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
