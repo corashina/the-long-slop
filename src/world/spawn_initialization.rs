@@ -280,10 +280,10 @@ impl SpawnEvaluation<'_> {
                                 if let Some(mass) =
                                     self.rules.component(self.reference, &root, "massScript")?
                                 {
-                                    let max = integer(&mass.fields, "maxCountIfSpawnedInBox")?;
-                                    if max > 0 {
-                                        count = self.random.range_int(1, max + 1);
-                                    }
+                                    count = super::spawn_selection::box_count(
+                                        integer(mass.fields, "maxCountIfSpawnedInBox")?,
+                                        self.random,
+                                    );
                                 }
                             }
                             let mut id = parent.id.clone();

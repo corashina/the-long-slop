@@ -4,7 +4,7 @@ from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry
 from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
-from .caps import opening_metadata
+from .caps import default_words, opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
@@ -431,7 +431,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
     result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
-        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed']},'player':player_record,'seats':seats,
+        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'words':default_words(source)},'player':player_record,'seats':seats,
         'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
             'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM']}

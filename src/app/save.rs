@@ -180,6 +180,11 @@ fn process_request(
                     food.reset(world)
                 },
             );
+            world.resource_scope(
+                |world, mut items: Mut<crate::presentation::spawned::SpawnedVisuals>| {
+                    items.reset(world)
+                },
+            );
             world.resource_scope(|world, mut drive: Mut<Drive>| {
                 candidate
                     .presentation

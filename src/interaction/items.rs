@@ -663,6 +663,43 @@ impl ItemStore {
         Ok(())
     }
 
+    /// A runtime copy of an item prototype body. It has no imported or generated identity.
+    pub fn insert_spawned(
+        &mut self,
+        id: ItemId,
+        name: &str,
+        pose: VehiclePose,
+        body: RigidBodyHandle,
+    ) -> Result<(), ReferenceError> {
+        if self.indices.contains_key(&id) {
+            return Err(ReferenceError("Invalid spawned item identity".into()));
+        }
+        self.indices.insert(id, self.states.len());
+        self.body_ids.push(BodyId(u32::MAX));
+        self.names.push(name.into());
+        self.states.push(ItemState {
+            id,
+            body: Some(body),
+            location: ItemLocation::World,
+            pose,
+            local_pose: VehiclePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            generated_condition: None,
+            temperature: None,
+            fluid: None,
+            inactive_pose: None,
+            food: None,
+            hit_sound: None,
+            removed: false,
+            pending_attachment: false,
+        });
+        self.membership_revision += 1;
+        self.dirty.insert(id);
+        Ok(())
+    }
+
     pub fn body_id(&self, id: ItemId) -> Option<BodyId> {
         self.indices.get(&id).map(|index| self.body_ids[*index])
     }
@@ -712,6 +749,7 @@ impl ItemStore {
             dial: None,
             ammo: None,
             glow: None,
+            radio: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,
@@ -793,9 +831,28 @@ impl ItemStore {
         if self.states[index].location != ItemLocation::World || self.states[index].body.is_some() {
             return false;
         }
-        self.membership_revision += 1;
         self.generated.retain(|_, value| *value != id);
         self.initialized_supplies.remove(&id);
+        self.remove_state(index);
+        true
+    }
+    /// Remove a spawned item. Unbind its colliders and body first.
+    pub fn remove_spawned(&mut self, id: ItemId) -> bool {
+        let Some(index) = self.indices.get(&id).copied() else {
+            return false;
+        };
+        if self.is_generated(id)
+            || self.body_ids[index].0 != u32::MAX
+            || self.states[index].body.is_some()
+        {
+            return false;
+        }
+        self.remove_state(index);
+        true
+    }
+    fn remove_state(&mut self, index: usize) {
+        let id = self.states[index].id;
+        self.membership_revision += 1;
         self.dirty.remove(&id);
         self.indices.remove(&id);
         let last = self.states.len() - 1;
@@ -810,7 +867,6 @@ impl ItemStore {
                 *tank = index;
             }
         }
-        true
     }
 
     pub fn is_empty(&self) -> bool {

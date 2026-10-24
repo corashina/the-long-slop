@@ -9,7 +9,7 @@ use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use crate::world::{REBASE_LIMIT, WorldOrigin, WorldStream};
 use bevy_platform::collections::{HashMap, HashSet};
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::prelude::RigidBodyHandle;
+use rapier3d::prelude::{RigidBodyHandle, RigidBodyType};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Key {
@@ -39,6 +39,9 @@ pub struct PersistentWorld {
     reference_items: HashMap<BodyId, Vec<ItemId>>,
     item_bodies: ItemBodyIndex,
     pending_items: Vec<(ItemId, AbsolutePose)>,
+    /// Loose bodies made kinematic by distance, as source `itemPlaceRemoveScript`.
+    frozen: HashSet<RigidBodyHandle>,
+    important: Vec<[f64; 3]>,
     configured: bool,
 }
 impl PersistentWorld {
@@ -69,6 +72,8 @@ impl PersistentWorld {
             item_bodies: ItemBodyIndex::default(),
             records,
             pending_items: Vec::new(),
+            frozen: HashSet::new(),
+            important: Vec::new(),
             configured: true,
         };
         result.configure_indexes(reference);
@@ -131,6 +136,8 @@ impl PersistentWorld {
                 .iter()
                 .map(|item| Ok((identities.item(&item.instance)?, item.pose)))
                 .collect::<Result<_, SaveError>>()?,
+            frozen: HashSet::new(),
+            important: Vec::new(),
             configured: false,
         })
     }
@@ -371,6 +378,16 @@ impl PersistentWorld {
         }
         let mut changed = false;
         self.processed.clear();
+        let distances = &reference.world.distances;
+        let freeze = distances["ItemFreezeDist"].powi(2) as f64;
+        let unfreeze = distances["ItemUnFreezeDist"].powi(2) as f64;
+        // Source important objects: the player and every car.
+        let mut important = std::mem::take(&mut self.important);
+        important.clear();
+        important.push(stream.focus());
+        for index in 0..physics.vehicle_count() {
+            important.push(self.absolute_vehicle_position(physics, &stream.origin, index));
+        }
         let held = area
             .items
             .iter()
@@ -486,6 +503,27 @@ impl PersistentWorld {
                 if stored {
                     physics.edit_body(handle, |body| body.set_enabled(false));
                 }
+                // Source distances are horizontal.
+                let loose = parent.is_none()
+                    && inventory.is_none()
+                    && Some(handle) != held
+                    && physics.vehicle_of(handle).is_none()
+                    && !self.item_bodies.items(handle).is_empty();
+                let distance = important
+                    .iter()
+                    .map(|p| (p[0] - absolute[0]).powi(2) + (p[2] - absolute[2]).powi(2))
+                    .fold(f64::INFINITY, f64::min);
+                let body = &physics.rapier().bodies[handle];
+                if loose && distance >= freeze && body.is_dynamic() {
+                    self.frozen.insert(handle);
+                    physics.edit_body(handle, |body| {
+                        body.set_body_type(RigidBodyType::KinematicPositionBased, true)
+                    });
+                } else if (!loose || distance < unfreeze) && self.frozen.remove(&handle) {
+                    physics.edit_body(handle, |body| {
+                        body.set_body_type(RigidBodyType::Dynamic, true)
+                    });
+                }
             } else if physics.body_active(handle) {
                 changed = true;
                 let pose = from_rapier(body.position());
@@ -530,6 +568,7 @@ impl PersistentWorld {
                 });
             }
         }
+        self.important = important;
         self.pending_items.clear();
         if changed {
             wheels.sync_activity(physics);

@@ -41,6 +41,8 @@ pub struct ObjectSnapshot {
     pub ammo: Option<f32>,
     /// Genie lamp ginlampscript value; None at its startup value.
     pub glow: Option<f32>,
+    /// save_radioscript controls of a portable radio.
+    pub radio: Option<crate::save::RadioSnapshot>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,

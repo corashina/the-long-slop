@@ -1054,6 +1054,16 @@ impl SourceInstances {
                     ));
                 }
             }
+            if let Some(radio) = stream.radio(&instance.placement.id) {
+                let node = prototype.nodes[radio.needle_node].gltf_node as usize;
+                if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
+                    transform.set_if_neq(Transform {
+                        translation: Vec3::from_array(radio.needle.translation),
+                        rotation: Quat::from_array(radio.needle.rotation),
+                        scale: Vec3::from_array(radio.needle.scale),
+                    });
+                }
+            }
             if let Some(dial) = stream.dial(&instance.placement.id) {
                 for n in dial.nodes() {
                     let node = prototype.nodes[n.node].gltf_node as usize;
@@ -1078,6 +1088,18 @@ impl SourceInstances {
                     rotation: Quat::from_array(pose.rotation),
                     scale: Vec3::from_array(pose.scale),
                 });
+            }
+            if let Some(level) = stream.level(&instance.placement.id) {
+                for b in level.bubbles() {
+                    let node = prototype.nodes[b.node].gltf_node as usize;
+                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
+                        transform.set_if_neq(Transform {
+                            translation: Vec3::from_array(b.pose.translation),
+                            rotation: Quat::from_array(b.pose.rotation),
+                            scale: Vec3::from_array(b.pose.scale),
+                        });
+                    }
+                }
             }
             for (i, node) in prototype.nodes.iter().enumerate() {
                 if let Some((_, pose)) = instance

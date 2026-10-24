@@ -81,6 +81,7 @@ impl GarageRuntime {
                 dial: None,
                 ammo: None,
                 glow: None,
+                radio: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
@@ -301,6 +302,14 @@ impl GarageRuntime {
         candidate.stream.hold_saved_item_locations();
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
+        super::spawned::restore_save(
+            reference,
+            &mut candidate.area,
+            &mut candidate.physics,
+            &candidate.stream.origin,
+            &saved.spawned,
+        )?;
+        candidate.restore_cigarettes(&saved.cigarettes);
         let vehicle = saved
             .vehicles
             .iter()
@@ -544,7 +553,17 @@ impl GarageRuntime {
                 &ids,
                 origin,
                 &self.physics,
-                self.area.interaction.capture_carry_save(&ids)?,
+                // Spawned items save in the world, so the hand saves empty.
+                if self
+                    .area
+                    .interaction
+                    .held()
+                    .is_some_and(|id| self.area.spawned.contains(id))
+                {
+                    None
+                } else {
+                    self.area.interaction.capture_carry_save(&ids)?
+                },
             )?,
             needs: self.survival.capture_save(),
             vehicles: self
@@ -600,6 +619,11 @@ impl GarageRuntime {
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             radio: self.audio.as_ref().map(|audio| audio.radio.capture_save()),
             view: ViewSnapshot { camera: view },
+            spawned: self
+                .area
+                .spawned
+                .capture_save(reference, &self.area.items, origin),
+            cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {

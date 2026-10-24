@@ -106,6 +106,19 @@ impl SaveSnapshot {
                 rotation: p.rotation,
             })
         };
+        for (index, release) in self.world.boxes.iter().enumerate() {
+            generated(&release.id)?;
+            pose(&release.origin)?;
+            pose(&release.pose)?;
+            links(
+                self.world
+                    .changes
+                    .get(ObjectKey::Generated(release.id.clone()))
+                    .is_some_and(|c| c.snapshot.is_none())
+                    && !self.world.boxes[..index].iter().any(|r| r.id == release.id),
+                "Broken box without one removal",
+            )?;
+        }
         let mut edges = HashMap::new();
         let mut slots = HashSet::new();
         let mut held = None;

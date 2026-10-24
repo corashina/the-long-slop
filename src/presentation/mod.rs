@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod camera_projection;
 mod candidate_upload;
+mod cap_motion;
 pub mod conditions;
 pub mod consumables;
 pub mod fixed_assets;
@@ -14,6 +15,7 @@ pub mod reference;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;
+pub mod spawned;
 pub mod world;
 
 use crate::vehicle::VehiclePose;

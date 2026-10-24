@@ -56,3 +56,37 @@ impl InteractionState {
         self.mechanism_bodies.remove(&id);
     }
 }
+
+impl InteractionState {
+    /// Bind a spawned prototype body as an ordinary pickup.
+    pub fn register_spawned(
+        &mut self,
+        id: ItemId,
+        rule: crate::reference::PickupReference,
+        colliders: &[(ColliderHandle, ColliderId, u32)],
+    ) {
+        let layers = colliders.iter().fold(0, |mask, c| mask | c.2);
+        self.register_generated_pickup(id, rule, layers, false);
+        for &(handle, collider, _) in colliders {
+            self.bind_surface(
+                handle,
+                ActionBinding {
+                    collider,
+                    use_owner: None,
+                    pickup_owner: Some(id),
+                    removal_owner: None,
+                    push_owner: None,
+                },
+            );
+        }
+    }
+
+    pub fn remove_spawned(&mut self, id: ItemId, body: RigidBodyHandle) {
+        self.collider_bindings
+            .retain(|_, binding| binding.pickup_owner != Some(id));
+        self.kinds.remove(&id);
+        self.pickup_layers.remove(&id);
+        self.carry.unregister_generated(id);
+        self.bodies.retain(|_, handle| *handle != body);
+    }
+}

@@ -1,4 +1,6 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
+#[path = "stream_tests/drive_out.rs"]
+mod drive_out;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
 
@@ -1204,6 +1206,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         dial: None,
         ammo: None,
         glow: None,
+        radio: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,
@@ -1554,6 +1557,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
         seed: 42,
         changes: ChangeRecords::default(),
         spawn: candidate.contents.state.capture_history(),
+        boxes: Vec::new(),
     };
     saved
         .changes
