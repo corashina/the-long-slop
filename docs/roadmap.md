@@ -1,91 +1,89 @@
 # Project roadmap
 
-Updated: 2026-10-20. Approved scope: one complete garage repair and driving experience.
+Updated: 2026-10-24. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
-## Current scope
+## Frame rate rule
 
-Use one complete Lada, the starting home, garage, yard, and nearby terrain.
-Include required parts, tools, fluids, controls, local driving, and Save/Load.
-One sample means one complete car with all required wheels, parts, and controls.
-Existing extra cars and world code do not expand this milestone.
-Clothing, survival, weapons, and general cargo expansion are deferred.
-
-Code exists for most garage systems. Current browser acceptance remains open.
-A build, static check, or scripted route does not prove normal gameplay.
-Historical loading failures require fresh reproduction before repair.
+The game runs at about 60 FPS now. Every new feature must keep it there.
+Check the F3 overlay before and after each change. Report the frame-time cost.
+If a feature drops the frame rate, fix the cost before merge or agree a cut.
 
 ## Task rules
 
-Work in the order below. Keep each layer usable before starting the next.
-Recheck the code and source before each task. Complete missing behavior and verify existing behavior.
-Use the completion goal as the task boundary. Split large tasks during design.
-Difficulty estimates cover completion, including integration and verification.
-Moderate means limited changes. Hard means several connected systems. Very hard means complex physics, rendering, or performance work.
+Work section by section, in the order below. Keep the game playable after each task.
+Recheck the code and the original before each task. Complete missing behavior and verify existing behavior.
+Follow [AGENTS.md](../AGENTS.md) for checks.
+Measure original driving before changing tire, rim, hub, suspension, or brake physics. See [G11 measurements](g11-driving-measurements.md).
+Remove a row when its task is done. Do not mark rows done.
 
-Follow [AGENTS.md](../AGENTS.md) for checks. Run only critical tests.
-Release builds, full checks, and browser acceptance require an explicit request or an agreed milestone.
-Use isolated `codex/` worktrees for architecture and performance work. Keep changes unmerged unless authorized.
-Measure source driving before changing tire, rim, hub, suspension, or brake driving physics.
-Measure performance with matched release A/B/A runs. Report startup, garage, and local driving separately.
+IDs in brackets are points in the 1:1 parity list (`plans/parity-1to1.md` in the project files).
+Size: S is up to a day. M is a few days. L is about a week. XL is several weeks.
 
-Use this prompt template:
+## 1. Starting area, player, and movement
 
-> Complete roadmap task <ID>: <task>. Recheck its current state against build 11140890.
-> Limit work to the current garage scope and the task's completion goal.
-> Follow the task rules and applicable design approval requirements.
-> Report changes, checks, failures, deferred checks, and unverified runtime behavior.
+Finish the home, garage, Lada, and nearby driving first.
 
-## Current tasks
-
-Statuses describe code coverage. No row claims current browser acceptance.
-Verify = code exists; only acceptance remains. Partial = known behavior gaps. Missing = no complete gameplay path.
-
-| ID | Task and starting code | Difficulty | Status | Remaining work |
-| --- | --- | --- | --- | --- |
-| G06 | Clean, restore, and paint. [Tools](../src/interaction/cleaning.rs), [conditions](../src/conditions.rs) | Hard | Partial | Complete spray refraction and soft-particle depth fading. |
-| G09 | Inspect and move around the car. [Player](../src/player.rs), [input](../web/input.js) | Hard | Partial | Fix Rapier slope normals over flat floors near 2000 units. |
-| G11 | Complete Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | Very hard | Partial | Complete launch, tire grip, bare rims, empty hubs, suspension, wheel spin, and combined braking. Verify gears, clutch, and assists. |
-| G12 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | Hard | Verify | Drive out, turn, brake, park, and return. Verify nearby collision, ground seams, re-entry, and loose-object stability. |
-| G13 | Preserve garage progress. [Save](../src/save/schema.rs), [restore](../src/starting_area/save.rs) | Hard | Partial | Save radio controls. Preserve all garage and car state through save, browser reload, load, and continued driving. |
-| G14 | Add working Lada mirrors. [Renderer](../src/presentation/frame_graph.rs) | Very hard | Missing | Render live views for the selected car's mirrors. Preserve adjustment and removal behavior. Verify orientation, visibility, and lifecycle. |
-| G15 | Finish usability and performance. [Presentation](../src/presentation/mod.rs), [audio](../web/audio.js) | Very hard | Partial | Fix reproduced visual and audio defects. Agree performance targets, measure them, and fix measured startup or frame-time problems. |
-| G16 | Accept the complete garage experience | Hard | Verify | Repair the Lada, fill it, start it, drive outside, return, save, reload, and continue through normal input. |
-
-G11 includes service braking, engine braking, and the handbrake under simultaneous inputs.
-G12 requires a reliable local driving area. It does not require extended road generation or distant travel.
-G13 follows the approved garage state. Saved survival needs remain deferred.
-G15 covers defects in the selected experience. It does not reopen the old optimization proposal list.
-G16 requires real input, active physics, visible results, and submitted frames on the same tested package.
-It also requires the seven deferred G03 wheel checks in the [wheel audit](g03-wheel-audit.md).
-
-## Deferred local tasks
-
-These tasks require separate scope approval. Their difficulty estimates require review before planning.
-
-| ID | Task | Difficulty | Remaining scope |
+| ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| L01 | Clothing and appearance | Very hard | Wearables, appearance controls, player skins, full body pose, and inverse kinematics. |
-| L02 | Complete survival | Hard | Verify needs, consumption, sleep, and bodily actions. Save player needs and verify death behavior. |
-| L03 | General cargo and storage | Very hard | Extend flashlight storage locks to supported cargo. Preserve ownership, mass, collision, and saved state. |
-| L04 | Towing and trailers | Very hard | Complete supported connections, towing physics, controls, detachment, and saved state. |
-| L05 | Weapons and combat | Very hard | Complete firing, reload, melee, damage, effects, and saved state. |
-| L06 | Extra item actions | Hard | Cigarettes, digging, buried-item recovery, and one-time box-content release. |
-| L07 | General settings and save management | Hard | Rebinding, audio settings, save slots, and autosave. Appearance controls belong to L01. |
-| L08 | Custom radio music | Moderate | Add user music to the existing radio playback system. |
+| P01 | Fix player slope normals. [Player](../src/player.rs) | M | Fix Rapier slope normals over flat floors near 2000 units from origin. [A03] |
+| P02 | Finish paint and cleaning effects. [Cleaning](../src/interaction/cleaning.rs) | M | Spray refraction and soft-particle depth fade. [A01, A02] |
+| P03 | Finish Lada driving physics. [Vehicle](../src/vehicle.rs), [drivetrain](../src/simulation/drivetrain.rs) | L | Launch, tire grip, bare rims, empty hubs, suspension, wheel spin, combined braking. Verify gears, clutch, and assists. [A04-A07, M15] |
+| P04 | Drive outside and return. [Area](../src/starting_area.rs), [world](../src/world.rs) | M | Verify nearby collision, ground seams, re-entry, and loose-object stability. [A08] |
+| P05 | Save garage progress. [Save](../src/save/schema.rs), [restore](../src/starting_area/save.rs) | S | Save radio controls. Keep all garage and car state through save, reload, and load. [A09] |
+| P06 | Complete player movement. [Player](../src/player) | M | Ladders, head bob on foot and in cars, sleep eligibility, hazard triggers. [D04, D07, D08, E06] |
+| P07 | Add player sounds. [Audio](../web/audio.js) | M | Footsteps by surface, prop hit sounds, time-of-day ambience, interior muffling, audio priority limits. [L01, L03, L04, L06, L08] |
+| P08 | Complete survival. [Survival](../src/survival.rs) | M | Verify needs, healing, death, alcohol, car-fluid damage, all food values. Save player needs. [E01-E03, E07, F16] |
+| P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Shared on/off and battery base, then compasses, clock, portable radios, music box. [F01, F02, F05, F06, F08, F20] |
+| P10 | Add small item actions. [Items](../src/interaction/items.rs) | M | Spirit level, scale, spray bottle, genie lamp, cigarettes, box contents, fluid containers. [F09, F11, F13-F15, E05] |
+| P11 | Accept the starting area | M | Repair the Lada, fill it, start it, drive out, return, save, reload, and continue with normal input. [A11] |
 
-## Deferred full-game tasks
+## 2. Car parts and repair
 
-Existing implementations may be partial. Re-audit each task before design.
-
-| ID | Task | Difficulty | Remaining scope |
+| ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| W01 | Expand the vehicle range | Very hard | Additional cars, engine types, automatic gearboxes, motorcycles, and buses. |
-| W02 | Complete long-distance travel | Very hard | Extended road generation, streaming, origin shifts, distant revisits, memory limits, and persistence. |
-| W03 | Expand buildings and exploration | Very hard | More structures, interiors, interactions, and exploration routes. |
-| W04 | Complete world population | Very hard | Source loot selection, random placement, supported population rules, and broader item distribution. |
-| W05 | Add creatures and threats | Very hard | Animals, enemies, encounters, and related combat behavior. |
-| W06 | Add weather | Hard | Source weather behavior and its visual, audio, and gameplay effects. |
-| W07 | Add multiplayer | Very hard | Shared ownership, synchronization, sessions, and persistence. |
-| W08 | Complete advanced visual effects | Very hard | Remaining source effects outside the garage milestone, including lamp shadows, motion blur, and TAA. |
+| R01 | Complete repair rules. [Conditions](../src/conditions.rs), [parts](../src/interaction/parts.rs) | M | Repair values per condition type, covered-part rules, cross-fitting where the original allows it. [C01-C03] |
+| R02 | Complete electronics. | M | Battery and alternator load for every powered part. Verify coolant fan and thermostat. [C08, C09] |
+| R03 | Add the siphon hose. [Fluids](../src/fluids.rs) | L | Attach to caps, coil, and move fluid between tanks. [C04] |
+| R04 | Add fire and burning fluids. | M | Fire and embers, burnt-fluid smoke color. [F17, C05] |
+| R05 | Add cargo storage. [Storage](../src/interaction/storage.rs) | XL | Lock items to car beds and shelves. Keep mass, collision, and saved state. [F12] |
+
+## 3. World and terrain
+
+| ID | Task | Size | Remaining work |
+| --- | --- | --- | --- |
+| W01 | Restore world range. [World](../src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
+| W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
+| W03 | Add biomes. [Terrain](../crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
+| W04 | Expand buildings. [Generation](../src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
+| W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
+| W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
+| W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
+| W08 | Add grass tracks. [Grass](../web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
+
+## 4. More cars
+
+| ID | Task | Size | Remaining work |
+| --- | --- | --- | --- |
+| V01 | Add a general vehicle loader. [Vehicles](vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
+| V02 | Add the other cars. | L | Skoda, Lada wagon, two-stroke cars, Car07 automatic, Car08. [B02-B04, B06, B07] |
+| V03 | Add buses. | XL | Diesel rules, three buses, doors, door lamps, bus trailer. [B05, B08-B11] |
+| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle, sled. [B12-B14] |
+| V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
+| V06 | Complete driving input and effects. | M | Gear stick animation, mouse driving, wheel and joystick axes, wheel dust and ground sounds. [B18, B20-B22] |
+
+## 5. Later
+
+| ID | Task | Size | Remaining work |
+| --- | --- | --- | --- |
+| X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
+| X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids. [G01-G11, E04, C06] |
+| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
+| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
+| X05 | Save every remaining state | XL | Grow the save with each feature: items, buildings, wear, colors. [M13] |
+| X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
+| X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. [F07, F18, F19, F22] |
+| X08 | Custom radio music | M | Add user music to the radio. [L07] |
+
+Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]
