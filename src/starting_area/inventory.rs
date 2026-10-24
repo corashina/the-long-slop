@@ -585,8 +585,13 @@ impl StartingArea {
         ids: &crate::save::IdentityMap,
     ) -> Result<crate::save::InventorySnapshot, crate::save::SaveError> {
         let mut slots = [None, None, None, None];
+        // Spawned items save in the world, so their slots save empty.
+        let saved_item = |id: &ItemId| !self.spawned.contains(*id);
         for (saved, id) in slots.iter_mut().zip(self.inventory.slots) {
-            *saved = id.map(|id| ids.item_instance(id)).transpose()?;
+            *saved = id
+                .filter(saved_item)
+                .map(|id| ids.item_instance(id))
+                .transpose()?;
         }
         Ok(crate::save::InventorySnapshot {
             slots,
@@ -595,6 +600,7 @@ impl StartingArea {
                 .interaction
                 .equipment
                 .item()
+                .filter(saved_item)
                 .map(|id| ids.item_instance(id))
                 .transpose()?,
         })

@@ -21,6 +21,7 @@ use rapier3d::prelude::{
 };
 use std::collections::HashMap;
 
+pub mod spawned;
 mod survival;
 pub use survival::DrinkResult;
 pub(crate) use survival::active_part as active_food_part;
@@ -59,6 +60,7 @@ pub struct StartingArea {
     attachments: Vec<(RigidBodyHandle, RigidBodyHandle, rapier3d::math::Pose)>,
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
+    pub spawned: spawned::SpawnedItems,
     compound_colliders: Vec<CompoundCollider>,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
@@ -395,6 +397,7 @@ impl StartingArea {
             attachments,
             render_poses,
             item_render_poses,
+            spawned: spawned::SpawnedItems::default(),
             plates,
             _plate_draw: plate_draw,
             compound_colliders,

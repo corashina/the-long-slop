@@ -83,6 +83,15 @@ impl SaveSnapshot {
             }
         }
         links(items.len() == reference.items.len(), "Missing source items")?;
+        let mut spawned = HashSet::new();
+        for record in &self.spawned {
+            crate::starting_area::spawned::saved_prototype(reference, record)?;
+            absolute(&record.pose)?;
+            links(
+                spawned.insert((record.serial, record.pickup)),
+                "Duplicate spawned item",
+            )?;
+        }
         let parents = self.validate_attachments(reference, &ids, &items)?;
         self.validate_player(reference, &ids, &items, &parents)?;
         self.validate_needs(reference)?;

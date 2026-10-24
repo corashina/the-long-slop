@@ -620,7 +620,10 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     for asset in reference.assets.iter().filter(|a| {
         matches!(
             a.usage,
-            AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+            AssetUsage::UniqueScene
+                | AssetUsage::RoadLampPrototype
+                | AssetUsage::SkyPrototype
+                | AssetUsage::ItemPrototype
         )
     }) {
         let (_, handle) = visuals

@@ -444,6 +444,7 @@ pub fn load_materials(
                     | AssetUsage::RoadLampPrototype
                     | AssetUsage::SkyPrototype
                     | AssetUsage::FoodPrototype
+                    | AssetUsage::ItemPrototype
             )
         })
         .map(|asset| asset.id)

@@ -237,6 +237,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 sync_world,
                 sync_imported,
                 presentation::consumables::sync,
+                presentation::spawned::sync,
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
@@ -276,6 +277,7 @@ fn setup(
 ) {
     commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
+    commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {

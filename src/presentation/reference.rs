@@ -74,7 +74,10 @@ pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &Referenc
         .filter(|a| {
             matches!(
                 a.usage,
-                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+                AssetUsage::UniqueScene
+                    | AssetUsage::RoadLampPrototype
+                    | AssetUsage::SkyPrototype
+                    | AssetUsage::ItemPrototype
             )
         })
         .count();
@@ -98,7 +101,10 @@ pub fn spawn_scenes(
         .filter(|asset| {
             matches!(
                 asset.usage,
-                AssetUsage::UniqueScene | AssetUsage::RoadLampPrototype | AssetUsage::SkyPrototype
+                AssetUsage::UniqueScene
+                    | AssetUsage::RoadLampPrototype
+                    | AssetUsage::SkyPrototype
+                    | AssetUsage::ItemPrototype
             )
         })
         .zip(&visuals.handles)

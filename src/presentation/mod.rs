@@ -14,6 +14,7 @@ pub mod reference;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;
+pub mod spawned;
 pub mod world;
 
 use crate::vehicle::VehiclePose;
