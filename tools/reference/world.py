@@ -23,7 +23,9 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     'pickupable','usablescript','pushablescript','massScript','layerScript','tosaveitemscript',
     'enginescript','coolantTankscript','seatscript','tankcapscript','gumiscript','wheelscript',
     'craftscript','partscript','capsscript','kozlampa','electronicsscript','headlightscript','rearlights','flashlightscript',
-    'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript'}
+    'randomFlyer','newAiScript','nyulscript','paintingMain','childunparent','randomRock','RandomSpawnedObjScript','randomScaleScript','undergroundSpawnScript','spawnInBoxScript','paintingScript','ammoscript','foodscript','randomTypeSelector','ginlampscript','partconditionscript','partslotscript','wheelgraphicsscript','doorscript','benzinkutscript',
+    # Portable electronics (P09): compass, clock, radios, music box and their dials.
+    'compassscript','simplecompassscript','clockscript','radioscript','musicboxscript','meterscript','mutatoscript','forgoszamlap'}
 EDIBLE_COMPONENTS = {('sharedassets1.assets',134643),('sharedassets1.assets',149631)}
 def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts

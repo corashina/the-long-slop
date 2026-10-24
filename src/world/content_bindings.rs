@@ -45,6 +45,12 @@ impl WorldStream {
             else {
                 continue;
             };
+            snapshot.lamp = self
+                .contents
+                .active
+                .iter()
+                .find(|c| c.item == Some(id))
+                .and_then(|c| c.content.portable_lamp());
             let key = items.object_key(id);
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
@@ -281,6 +287,9 @@ impl WorldStream {
                 physics,
                 reference,
             );
+            if let Some(baseline) = &mut content.baseline {
+                baseline.lamp = content.content.portable_lamp();
+            }
             for binding in &mut content.bindings {
                 binding.baseline = crate::world::changes::capture(
                     binding.item,
@@ -560,6 +569,9 @@ impl WorldStream {
                 content.suspended_bodies.reserve(instance.bodies.len());
                 content.baseline =
                     crate::world::changes::capture(id, items, interaction, physics, reference);
+                if let Some(baseline) = &mut content.baseline {
+                    baseline.lamp = content.content.portable_lamp();
+                }
                 for binding in &mut content.bindings {
                     binding.baseline = crate::world::changes::capture(
                         binding.item,
@@ -645,11 +657,12 @@ impl WorldStream {
                     interaction
                         .parts
                         .mount_mechanism(item, &mut interaction.mechanisms);
-                    if let Some(snapshot) =
+                    if let Some(mut snapshot) =
                         crate::world::changes::capture(item, items, interaction, physics, reference)
                     {
                         for owner in &mut self.contents.active {
                             if owner.item == Some(item) {
+                                snapshot.lamp = owner.content.portable_lamp();
                                 owner.baseline = Some(snapshot);
                                 for binding in &mut owner.bindings {
                                     binding.baseline = crate::world::changes::capture(

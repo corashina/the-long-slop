@@ -894,7 +894,11 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
         })
         .collect();
     assert_eq!(lamps.len(), 3);
-    assert!(run.stream.use_generated_light(lamps[0].1).unwrap());
+    assert!(
+        run.stream
+            .use_generated_light(lamps[0].1, &mut run.area.items)
+            .unwrap()
+    );
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
     run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
@@ -943,7 +947,7 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
             .any(|s| s.placement.id == site.id)
     );
     run.stream
-        .sync_lamp_bindings(&mut run.area.interaction, &mut run.physics)
+        .sync_lamp_bindings(&run.area.items, &mut run.area.interaction, &mut run.physics)
         .unwrap();
     assert!(!run.stream.lamp_bindings.iter().any(|b| b.parent == site.id));
     for (key, _) in lamps {
