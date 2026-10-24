@@ -85,6 +85,7 @@ impl SaveSnapshot {
         links(items.len() == reference.items.len(), "Missing source items")?;
         let parents = self.validate_attachments(reference, &ids, &items)?;
         self.validate_player(reference, &ids, &items, &parents)?;
+        self.validate_needs(reference)?;
         self.validate_inventory(reference, &ids, &items)?;
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
@@ -453,6 +454,37 @@ impl SaveSnapshot {
             }
         }
         Ok(parents)
+    }
+
+    fn validate_needs(&self, reference: &ReferenceManifest) -> Result<(), SaveError> {
+        let n = &self.needs;
+        let maximum = reference.survival.maximum;
+        data(
+            [
+                (n.needs.hp, maximum.hp),
+                (n.needs.food, maximum.food),
+                (n.needs.water, maximum.water),
+                (n.needs.bowel, maximum.bowel),
+            ]
+            .iter()
+            .all(|(value, max)| value.is_finite() && (0.0..=*max).contains(value))
+                && n.needs.hp > 0.,
+            "Player needs",
+        )?;
+        data(
+            finite(&[
+                n.pending.food,
+                n.pending.water,
+                n.pending.bowel,
+                n.pending.hp,
+            ]),
+            "Pending needs",
+        )?;
+        let bladder: f32 = n.bladder.as_slice().iter().map(|e| e.amount).sum();
+        data(
+            bladder <= reference.survival.bladder_capacity_liters + 1e-4,
+            "Bladder fluids",
+        )
     }
 
     fn validate_player(
