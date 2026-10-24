@@ -284,7 +284,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     prefab=next(c for c in source.components(source.transform_for(source.resolve(main,md['Audio'])))[1] if c.type.name=='AudioSource')
     sounds=source.get('level1',70770)
     if source.class_name(sounds)!='soundMainScript':raise ValueError('Toilet source differs')
-    survival_groups=[('eat',0,main,md['soundEat'],prefab,[md['eatVolume']]*2,[1.,1.])]
+    survival_groups=[('eat',0,main,md['soundEat'],prefab,[md['eatVolume']]*2,[1.,1.]),
+        ('eat_crunchy',10,main,md['soundEatCrunchy'],prefab,[md['eatCrunchyVolume']]*2,[1.,1.])]
     for role,kind,field,group in zip(('burp','fart','shit'),(1,2,9),('SBurp','SFart','SFart'),source.read(sounds)['clips'],strict=True):
         prefix='Burp' if role=='burp' else 'Fart'
         survival_groups.append((role,kind,sounds,group['clips'],source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
@@ -304,13 +305,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
-        settings={'priority':70 if role=='eat' else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
+        eat=role in ('eat','eat_crunchy')
+        settings={'priority':70 if eat else d['Priority'],'loop':bool(d['Loop']) if role!='death' else False,
             'gain':d['m_Volume'],'pitch':d['m_Pitch'],'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],
-            'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if role=='eat' else d['panLevelCustomCurve']['m_Curve'][0]['value'],
+            'rolloff_mode':d['rolloffMode'],'spatial_blend':1. if eat else d['panLevelCustomCurve']['m_Curve'][0]['value'],
             'spatial_blend_curve':curve(d['panLevelCustomCurve']),'rolloff_curve':curve(d['rolloffCustomCurve'])}
-        if role=='eat':
+        if eat:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
-        cls,name={'eat':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
+        cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(source.resolve(owner,p)) for p in pointers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
