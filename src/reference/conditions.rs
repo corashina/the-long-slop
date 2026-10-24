@@ -648,7 +648,7 @@ impl ConditionRecord {
     }
 }
 
-fn validate_particle(
+pub(super) fn validate_particle(
     owner: &SourceId,
     p: &ParticleReference,
     r: &ReferenceManifest,

@@ -79,7 +79,7 @@ fn checked(source: &SourceId, path: i64) -> bool {
 fn optional_checked(source: &Option<SourceId>, path: i64) -> bool {
     source.as_ref().is_some_and(|s| checked(s, path))
 }
-fn clip_exists(m: &ReferenceManifest, source: &SourceId) -> bool {
+pub(super) fn clip_exists(m: &ReferenceManifest, source: &SourceId) -> bool {
     m.audio["clips"].as_array().is_some_and(|clips| {
         clips.iter().any(|c| {
             c["source"]["file"].as_str() == Some(source.file.as_str())

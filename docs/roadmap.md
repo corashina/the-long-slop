@@ -32,7 +32,7 @@ Finish the home, garage, Lada, and nearby driving first.
 | P06 | Complete player movement. [Player](../src/player) | M | Ladders, head bob on foot and in cars, sleep eligibility, hazard triggers. [D04, D07, D08, E06] |
 | P07 | Add player sounds. [Audio](../web/audio.js) | M | Footsteps by surface, prop hit sounds, time-of-day ambience, interior muffling, audio priority limits. [L01, L03, L04, L06, L08] |
 | P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Compasses, clock, portable radios, music box. [F02, F05, F06, F08] |
-| P10 | Add small item actions. [Items](../src/interaction/items.rs) | M | Spirit level, scale, spray bottle, genie lamp, cigarettes, box contents, fluid containers. [F09, F11, F13-F15, E05] |
+| P10 | Add small item actions. [Items](../src/interaction/items.rs) | M | Spirit level, spray bottle, genie lamp, cigarettes, box contents, fluid containers. [F09, F11, F13-F15, E05] |
 | P11 | Accept the starting area | M | Repair the Lada, fill it, start it, drive out, return, save, reload, and continue with normal input. [A11] |
 
 ## 2. Car parts and repair
