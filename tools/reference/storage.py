@@ -65,9 +65,10 @@ def containing(prototypes, node):
     return [(p['source'],i) for p in prototypes for i,n in enumerate(p['nodes']) if n['source']==node]
 
 def check_prototype_volume(name, fields, active, homes, usables, mechanisms):
-    """Require an automatic, ungated, active volume inside a prototype whose usables are mechanisms."""
+    """Require an ungated, active volume inside a prototype whose usables are mechanisms.
+    An onlyManual volume is kept: it skips the periodic Upd scan."""
     if not homes:raise ValueError(f'{name} storage volume is outside the world prototypes')
-    if fields['slot'] or fields['onlyManual'] or fields['noPhysicsLock'] or not active:
+    if fields['slot'] or fields['noPhysicsLock'] or not active:
         raise ValueError(f'{name} storage policy differs')
     for prototype,_ in homes:
         for usable in usables:
@@ -123,14 +124,17 @@ def recover_prototype_storage(source, manifest, output):
         usables=[source_id(source.resolve(r,p)) for p in f['susable'] if p['m_PathID']]
         if len(usables)!=len(f['susable']):raise ValueError(f'{name} has an empty usable')
         homes=containing(prototypes,source_id(node))
-        active=bool(f['m_Enabled']) and bool(cf['m_Enabled']) and all(source.read(source.resolve(t,source.read(t)['m_GameObject']))['m_IsActive'] for t in (node,col_node))
+        # Upd needs activeInHierarchy below each prototype root. The stored root is inactive; the spawn activates it.
+        # Scan reads only the collider box, so a disabled collider or inactive collider object still counts.
+        roots=[source.get(p['file'],p['path_id']) for p,_ in homes]
+        active=bool(f['m_Enabled']) and all(source.read(source.resolve(node,data['m_GameObject']))['m_IsActive']
+                                            for root in roots for data in source.chain(node)[:-len(source.chain(root))])
         check_prototype_volume(name,f,active,homes,usables,mechanisms)
-        for prototype,index in homes:
+        for (prototype,index),root in zip(homes,roots):
             if not any(p==prototype for p,_ in containing(prototypes,source_id(col_node))):raise ValueError(f'{name} collider is outside {prototype}')
-            root=source.get(prototype['file'],prototype['path_id'])
             chain=source.chain(col_node)[:-len(source.chain(root))]
             volumes.append({'prototype':prototype,'source':source_id(r),'node':index,**root_box(chain,cf),'storage_type':f['sType'],
-                            'usables':usables,'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp'])})
+                            'only_manual':bool(f['onlyManual']),'usables':usables,'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp'])})
         evidence.append({'source':source_id(r),'fields':f,'collider':cf})
     entries=[]
     for prototype in prototypes:

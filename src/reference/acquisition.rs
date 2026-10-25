@@ -823,6 +823,7 @@ fn prefab_root(source: &SourceId) -> Option<i64> {
         20981 => Some(63605),
         20649 => Some(63259),
         11985 => Some(54495),
+        41097 => Some(83430),
         _ => None,
     }
 }

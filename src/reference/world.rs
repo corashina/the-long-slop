@@ -1581,22 +1581,13 @@ impl WorldReference {
 /// Interior colliders, doors and parents resolve inside the prototype.
 fn interiors_valid(p: &WorldPrototypeReference, doors: &[&SourceId]) -> Result<(), ReferenceError> {
     let door = |s: &SourceId| doors.contains(&s);
+    // Parent cycles are valid. Source `GetValue(p)` skips the parent that called it.
     for (i, interior) in p.interiors.iter().enumerate() {
-        // A parent chain longer than the list has a cycle.
-        let mut parent = interior.parent;
-        let mut steps = 0;
-        while let Some(index) = parent
-            && steps <= p.interiors.len()
-        {
-            parent = p.interiors.get(index as usize).and_then(|r| r.parent);
-            steps += 1;
-        }
         require(
             p.colliders.iter().any(|c| c.source == interior.collider)
                 && interior
                     .parent
                     .is_none_or(|v| (v as usize) < p.interiors.len())
-                && steps <= p.interiors.len()
                 && interior.doors.iter().all(door)
                 && interior.parent_door.as_ref().is_none_or(door)
                 && interior.invert_doors.len() == interior.doors.len()
@@ -1877,10 +1868,11 @@ mod tests {
         let valid = prototype(&[interior("null", 5), interior("0", 5)]);
         assert_eq!(valid.interiors[1].parent, Some(0));
         assert!(interiors_valid(&valid, &doors).is_ok());
+        let cycle = prototype(&[interior("1", 5), interior("0", 5)]);
+        assert!(interiors_valid(&cycle, &doors).is_ok());
         for bad in [
             prototype(&[interior("null", 6)]),
             prototype(&[interior("1", 5)]),
-            prototype(&[interior("1", 5), interior("0", 5)]),
             prototype(&[interior("null", 5).replace(&s(1), &s(2))]),
             prototype(&[interior("null", 5).replace("[false]", "[]")]),
             prototype(&[interior("null", 5).replace("GetValue", "Start")]),

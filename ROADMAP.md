@@ -46,8 +46,8 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 3. Repair (R01): swap the hood and the trunk lid, repair rust and dirt.
 4. Electronics (R02): check the Lada radiator fan spins while the engine runs.
 5. Exhaust smoke (R04): rate follows rpm, color changes after a fuel mix change, 5x5 sheet animates. Check the particle quads are not upside down.
-6. Siphon hose (R03): first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height, drain with LMB, coil with R, store it, tear it off by driving.
-7. Cargo storage (R05): lock items in the Lada trunk, glove box, and engine bay, and in a box, a fridge, a pallet, and a coffin. Open the lid to release them.
+6. Siphon hose (R03): first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height (both ends are main, so the source runs the siphon twice per frame), drain with LMB, coil with R, store it, tear it off by driving.
+7. Cargo storage (R05): lock items in the Lada trunk, glove box, and engine bay, and in a fridge, a pallet, and a coffin. Open the lid to release them. The source box is manual only: items put in it later stay loose.
 8. Save and load with the hose attached and with cargo locked.
 9. Check F3 with smoke, near a hose, and while driving with cargo. Compare with the frame rate rule.
 

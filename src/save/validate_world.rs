@@ -464,6 +464,7 @@ mod tests {
                     half_extents: [1.; 3],
                     rotation: [0., 0., 0., 1.],
                     storage_type: 0,
+                    only_manual: false,
                     usables: Vec::new(),
                     dont_lock_if_owner_picked_up: false,
                 })

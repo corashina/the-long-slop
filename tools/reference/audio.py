@@ -119,7 +119,7 @@ def managed_evidence(library):
     calls = [m.start() for m in re.finditer(re.escape(STEP_CALL), region)]
     if len(calls) != 2: raise ValueError('Source footstep callers need a new audit')
     # A caller is the last member declaration before the call.
-    members = [(m.start(), m.group(1)) for m in re.finditer(r'\n\t[^\s][^\n]*?\b(\w+)\([^\n]*\)\n\t\{', region)]
+    members = [(m.start(), m.group(1)) for m in re.finditer(r'\n\t[^\s][^\r\n]*?\b(\w+)\([^\r\n]*\)\r?\n\t\{', region)]
     callers = list(dict.fromkeys(max((m for m in members if m[0] < c), default=(0, None))[1] for c in calls))
     if None in callers: raise ValueError('Source footstep callers need a new audit')
     footsteps = [evidence('stepSoundScript', 'Step'), *(evidence('fpscontroller', name) for name in callers)]

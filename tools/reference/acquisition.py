@@ -10,7 +10,7 @@ STATION_PREFABS = (26573, 27344, 41123)
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 TEXT_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 # Selected Lada contract, recovered from the checked build 11140890 source receipt.
-CONTRACT_SHA256 = 'dfc55b58ab0fe3eeb66befc68074d48b93a945d00265641b60fa87ecc5eab730'
+CONTRACT_SHA256 = 'e89f0c1c62ceee56357c6ad79e306ca4176d1b049398a34dcb8590929e2c339a'
 
 
 def _block(code, start):
@@ -264,7 +264,10 @@ def recover_acquisition(source, manifest):
         r=source.get('level1',pid);d=source.read(r);go=source.resolve(r,d['m_GameObject'])
         box['disabled_starter_boxes'].append({'source':source_id(r),'instance':source_id(go),'disable_spawn':bool(d['disableSpawn'])})
     for p in prototypes.values():
-        r=component(source,source.get(p['id']['file'],p['id']['path_id']),'massScript')
+        # Spawn reads maxCountIfSpawnedInBox only when the item has a massScript.
+        root=source.get(p['id']['file'],p['id']['path_id'])
+        if not any(c.type.name=='MonoBehaviour' and source.class_name(c)=='massScript' for c in source.components(root)[1]):continue
+        r=component(source,root,'massScript')
         box['content_counts'].append({'prototype':p['id'],'source':source_id(r),'maximum':source.read(r)['maxCountIfSpawnedInBox']})
     packp=prototypes[74];pack=source.get('sharedassets1.assets',141307)
     packs=[{'prototype':packp['id'], 'source':source_id(pack),'ammo':ammo(source.get('sharedassets1.assets',141757)),
@@ -637,7 +640,8 @@ SUPPORTED_PREFABS = {('sharedassets1.assets', 32825): ('sharedassets1.assets', 7
  ('sharedassets1.assets', 24480): ('sharedassets1.assets', 53837),
  ('sharedassets1.assets', 20981): ('sharedassets1.assets', 63605),
  ('sharedassets1.assets', 20649): ('sharedassets1.assets', 63259),
- ('sharedassets1.assets', 11985): ('sharedassets1.assets', 54495)}
+ ('sharedassets1.assets', 11985): ('sharedassets1.assets', 54495),
+ ('sharedassets1.assets', 41097): ('sharedassets1.assets', 83430)}
 
 BOX_BREAK = {'health': 7.0,
  'decrease_after_attack': False,
