@@ -38,6 +38,14 @@ def selected_actions(source, scripts, actions):
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
 
+def part_scope(parts, slots, excluded_actions):
+    """Return matching slot sources. A part without a slot spawns loose and cannot attach."""
+    matches=[slot['source'] for slot in slots if any(
+        (not slot['main_types'] or not p['maintipus'] or set(slot['main_types']) & set(p['maintipus']))
+        and set(slot['part_types']) & set(p['tipus']) for p in parts)]
+    if parts and not matches:excluded_actions=sorted(set(excluded_actions) | {'part_attachment'})
+    return matches,excluded_actions
+
 def required_record(source, owner, fields):
     """Check required fields and all their links before opening a dependent record."""
     identity = f'{key(owner)[0]}:{key(owner)[1]}'
@@ -301,13 +309,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                 classes={source.class_name(c) for c in scripts}
                 result=('other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else '',selected_actions(source,scripts,actions))
                 parts=[source.read(c) for c in root_scripts if source.class_name(c)=='partscript']
-                matches=[slot['source'] for slot in part_scope_slots if any(
-                    (not slot['main_types'] or not p['maintipus'] or set(slot['main_types']) & set(p['maintipus']))
-                    and set(slot['part_types']) & set(p['tipus']) for p in parts)]
-                part_matches[key(root)]=matches
-                if parts and not matches:
-                    if any(p['maintipus'] for p in parts):result=(result[0] or 'unsupported_part_type',result[1])
-                    else:result=(result[0],sorted(set(result[1]) | {'part_attachment'}))
+                part_matches[key(root)],excluded_actions=part_scope(parts,part_scope_slots,result[1])
+                result=(result[0],excluded_actions)
             scope_cache[key(root)]=result
         return scope_cache[key(root)]
     def startup_hierarchy(root):

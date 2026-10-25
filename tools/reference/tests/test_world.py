@@ -21,3 +21,11 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(generation_counts({'genAtStart':100,'genInOneFrame':1}), {'genAtStart':100,'genInOneFrame':1})
         for road in ({}, {'genAtStart':99,'genInOneFrame':1}, {'genAtStart':100,'genInOneFrame':2}):
             with self.assertRaises((KeyError,ValueError)): generation_counts(road)
+
+    def test_unslotted_part_spawns_without_part_attachment(self):
+        from tools.reference.world import part_scope
+        slots = [{'source': 's', 'main_types': [1], 'part_types': [2]}]
+        self.assertEqual(part_scope([{'maintipus': [9], 'tipus': [2]}], slots, ['wearable']), ([], ['part_attachment', 'wearable']))
+        self.assertEqual(part_scope([{'maintipus': [], 'tipus': [5]}], slots, []), ([], ['part_attachment']))
+        self.assertEqual(part_scope([{'maintipus': [1], 'tipus': [2]}], slots, []), (['s'], []))
+        self.assertEqual(part_scope([], slots, []), ([], []))
