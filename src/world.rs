@@ -101,6 +101,7 @@ mod spawn_initialization;
 mod spawn_rules;
 mod spawn_selection;
 
+mod biome_materials;
 mod building_extras;
 mod spawn_appearance;
 mod spawn_building;
