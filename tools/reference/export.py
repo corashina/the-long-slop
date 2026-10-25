@@ -92,6 +92,7 @@ def runtime_resources(manifest):
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
+    for v in manifest.get('vehicles',[]):collect(v.get('exhaust',[]))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
     world=manifest.get('world', {})
