@@ -256,6 +256,9 @@ impl SpawnEvaluation<'_> {
                     self.context,
                 )?;
                 if flag(f, "spawnBeforeOpen")? && !flag(f, "spawned")? {
+                    if let Some(item) = selected {
+                        self.note_selection(item);
+                    }
                     if let Some(item) = selected.and_then(|i| self.reference.catalog.items.get(i)) {
                         let root = self.rules.root(self.reference, &item.source)?.clone();
                         let point = optional(f, "spawnPos")?

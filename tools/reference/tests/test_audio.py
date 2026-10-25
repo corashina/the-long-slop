@@ -419,3 +419,25 @@ class HitAudio(unittest.TestCase):
                 {'name': 'collisionSoundM', 'value': {'kind': 'number', 'value': .5}}]}
         records = [record(1, {'file': 'f', 'path_id': 9}), record(2, None), {**record(3, {'file': 'f', 'path_id': 9}), 'class_name': 'massScript'}]
         self.assertEqual(list(pickup_hit_sources(records)), [({'file': 'f', 'path_id': 1}, {'file': 'f', 'path_id': 9}, .5)])
+
+    def test_ambience_zone_record_and_errors(self):
+        from tools.reference.audio import validate_ambience_zones, zone_record
+        prototype = {'file': 'sharedassets1.assets', 'path_id': 49604}
+        pose = {'translation': [1., 2., 3.], 'rotation': [0., 0., 0., 1.], 'scale': [1., 1., 1.]}
+        zone = {'minDist': 200., 'maxDist': 1000., 'volume': .15}
+        flat = {'m_Curve': [{'value': 0.}]}
+        sound = {'Loop': 1, 'm_PlayOnAwake': 0, 'panLevelCustomCurve': flat}
+        record = zone_record(prototype, zone, sound, pose, 7, 'm')
+        self.assertEqual(record, {'prototype': prototype, 'pose': pose, 'min_distance': 200., 'max_distance': 1000.,
+            'volume': .15, 'clip': 7, 'method': 'm'})
+        for change in [{'Loop': 0}, {'m_PlayOnAwake': 1}, {'panLevelCustomCurve': {'m_Curve': [{'value': 1.}]}}]:
+            with self.assertRaises(ValueError): zone_record(prototype, zone, {**sound, **change}, pose, 7, 'm')
+        row = {'role': 'ambience_zone', 'kind': 19, 'one_shot': False, 'clips': [7], 'settings': {'loop': True, 'spatial_blend': 0.}}
+        audio = {'ambience_zones': [record], 'survival': [row]}
+        validate_ambience_zones(audio, {7})
+        validate_ambience_zones({'ambience_zones': [], 'survival': []}, {7})
+        for change in [lambda a: a['survival'].clear(), lambda a: a['ambience_zones'][0].update(min_distance=1000.),
+                lambda a: a['ambience_zones'][0].update(volume=1.5), lambda a: a['ambience_zones'][0].update(clip=8),
+                lambda a: a['survival'][0]['settings'].update(loop=False), lambda a: a['survival'][0]['settings'].update(spatial_blend=1.)]:
+            changed = copy.deepcopy(audio); change(changed)
+            with self.assertRaises(ValueError): validate_ambience_zones(changed, {7, 8})

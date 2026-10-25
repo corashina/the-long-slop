@@ -75,6 +75,9 @@ pub struct WorldReference {
     pub exclusions: Vec<WorldExclusion>,
     #[serde(deserialize_with = "compact_vec")]
     pub material_textures: Vec<super::rendering::LightingTextureRecord>,
+    /// Lighting texture of each world Light cookie.
+    #[serde(deserialize_with = "compact_vec")]
+    pub light_cookies: Vec<WorldLightCookie>,
     pub pickup_hits: Vec<WorldPickupHit>,
     pub home_cable: HomeCableReference,
 }
@@ -85,6 +88,14 @@ pub struct WorldReference {
 pub struct HomeCableReference {
     pub root: NodeId,
     pub ropes: Vec<NodeId>,
+}
+
+/// Binds a world Light cookie source to its exported lighting spot cookie texture.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldLightCookie {
+    pub source: SourceId,
+    pub texture: u32,
 }
 
 /// Source hit sound of a world `pickupable` record with a `collideSound`.
@@ -740,6 +751,30 @@ impl WorldReference {
             )?;
         }
         self.initialization.validate(self, &receipts)?;
+        for (index, cookie) in self.light_cookies.iter().enumerate() {
+            require(
+                self.light_cookies[..index]
+                    .iter()
+                    .all(|c| c.source != cookie.source)
+                    && manifest.lighting.lights.iter().any(|l| {
+                        l.kind == super::LightKind::Spot && l.cookie == Some(cookie.texture)
+                    })
+                    && manifest
+                        .lighting
+                        .textures
+                        .iter()
+                        .any(|t| t.id == cookie.texture && t.source == cookie.source),
+                &field(&cookie.source, "world light cookie"),
+            )?;
+        }
+        for r in self.records.iter().filter(|r| r.class_name == "Light") {
+            if let Some(WorldValue::Link(cookie)) = r.fields.get("m_Cookie") {
+                require(
+                    self.light_cookies.iter().any(|c| &c.source == cookie),
+                    &field(&r.source, "world light cookie binding"),
+                )?;
+            }
+        }
         for row in &self.mechanisms {
             let prototype = self
                 .prototypes

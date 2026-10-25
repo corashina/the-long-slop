@@ -1,4 +1,5 @@
 """Derive playback rules from accepted records and managed control flow."""
+import copy
 import hashlib
 import json
 import math
@@ -199,6 +200,15 @@ def ambience_record(prototype, d, clips, evidence):
         'phases': {name: [d['minLerp' + suffix], d['maxLerp' + suffix]] for name, flag, suffix in PHASES if d[flag]},
         'interval': [d['minTime'], d['maxTime']], 'chance': d['chance'], 'gain': [d['minVolume'], d['maxVolume']],
         'pitch': [1., 1.], 'priority': PRIORITIES[7], 'method': evidence}
+
+
+def zone_record(prototype, zone, audio_source, pose, clip, evidence):
+    """Source ambienceZone.Upd plays a 2D loop with gain volume * InverseLerp(maxDist, minDist, distance)."""
+    if (not audio_source['Loop'] or audio_source['m_PlayOnAwake']
+            or any(k['value']!=0 for k in audio_source['panLevelCustomCurve']['m_Curve'])):
+        raise ValueError('Ambience zone source needs a 2D loop that the zone starts')
+    return {'prototype': prototype, 'pose': pose, 'min_distance': zone['minDist'], 'max_distance': zone['maxDist'],
+        'volume': zone['volume'], 'clip': clip, 'method': evidence}
 
 
 def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: str) -> dict:
@@ -441,13 +451,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     item_clips+=world_clips
     # The runtime finds the hit sound of a generated item by its pickupable source.
     manifest['world']['pickup_hits']=[{'source':s,'collision_clip':clip(c),'collision_gain':g} for (s,_,g),c in zip(hits,world_clips)]
-    audio['ambience']=[];rocks=[]
+    audio['ambience']=[];rocks=[];audio['ambience_zones']=[];zones=[]
     for prototype in manifest['world']['prototypes']:
-        interiors=[]
-        for node in source.hierarchy(source.get(prototype['source']['file'],prototype['source']['path_id']),activate_root=True):
+        interiors=[];root=source.get(prototype['source']['file'],prototype['source']['path_id'])
+        for node in source.hierarchy(root,activate_root=True):
             for c in node['components']:
                 if c.type.name!='MonoBehaviour':continue
                 if source.class_name(c)=='interiorscript':interiors.append(c)
+                if source.class_name(c)=='ambienceZone':zones.append((prototype['source'],root,node['reader'],c))
                 if source.class_name(c)!='soundplayscript':continue
                 rocks.append(c)
                 audio['ambience'].append(ambience_record(prototype['source'],source.read(c),
@@ -479,6 +490,22 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     walk=[readers(main,s['clips']) for s in md['walkSounds']]
     audio['footsteps']=footstep_record(md,source.read(step),bake_points([(0.,0.,0.)],source.chain(step_transform),body)[0],
         lambda pointers:[clip(r) for r in readers(main,pointers)],footstep_methods)
+    zone_sources=[]
+    for prototype,root,node,c in zones:
+        d=source.read(c);reader=source.resolve(c,d['Source']);ad=source.read(reader)
+        # The pose is in the prototype root frame, like the prototype body poses.
+        local=copy.copy(source);count=len(source.chain(root))
+        local.chain=lambda transform,count=count:source.chain(transform)[:-count]
+        audio['ambience_zones'].append(zone_record(prototype,d,ad,world_pose(local,node),
+            clip(source.resolve(reader,ad['m_audioClip'])),method('ambienceZone','Upd')))
+        zone_sources.append(reader)
+    if zone_sources:
+        # One playback row serves every zone, so the zone sources must share their settings.
+        shared=lambda r:{k:v for k,v in source.read(r).items() if k not in ('m_GameObject','m_audioClip')}
+        if any(shared(r)!=shared(zone_sources[0]) for r in zone_sources):raise ValueError('Ambience zone sources differ')
+        first=source.read(zone_sources[0])
+        survival_groups.append(('ambience_zone',19,zones[0][3],unique(source.resolve(r,source.read(r)['m_audioClip']) for r in zone_sources),
+            zone_sources[0],[first['m_Volume']]*2,[first['m_Pitch']]*2))
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'rock_heat':default_route,'footstep':default_route,
@@ -500,7 +527,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -691,6 +718,7 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
     validate_hit_audio(audio, ids, manifest['world']['pickup_hits'])
     validate_storm_audio(audio, ids)
     validate_footsteps(audio, ids, manifest)
+    validate_ambience_zones(audio, ids)
 
 
 def validate_storm_audio(audio: dict, ids: set) -> None:
@@ -724,6 +752,20 @@ def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:
                 or not 0<=a['interval'][0]<=a['interval'][1] or not 0<=a['chance']<=1
                 or not 0<=a['gain'][0]<=a['gain'][1] or a['priority']!=PRIORITIES[7]):
             raise ValueError('Invalid rock ambience')
+
+
+def validate_ambience_zones(audio: dict, ids: set) -> None:
+    rows=[r for r in audio['survival'] if r['kind']==19]
+    if len(rows)!=bool(audio['ambience_zones']):raise ValueError('Ambience zones need one playback row')
+    for z in audio['ambience_zones']:
+        values=[z['min_distance'],z['max_distance'],z['volume'],*z['pose']['translation']]
+        if (not all(map(math.isfinite,values)) or not 0<=z['min_distance']<z['max_distance'] or not 0<=z['volume']<=1
+                or z['clip'] not in ids or z['clip'] not in rows[0]['clips']):
+            raise ValueError('Invalid ambience zone')
+    for r in rows:
+        if (r['role']!='ambience_zone' or r['one_shot'] or not r['settings']['loop'] or r['settings']['spatial_blend']!=0
+                or set(r['clips'])-ids):
+            raise ValueError('Invalid ambience zone playback')
 
 
 def validate_footsteps(audio: dict, ids: set, manifest: dict) -> None:
