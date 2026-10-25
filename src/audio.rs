@@ -1471,6 +1471,7 @@ pub enum AudioKind {
     MusicBox = 14,
     Footstep = 15,
     StormInside = 16,
+    MeleeHit = 17,
     AmbienceZone = 19,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

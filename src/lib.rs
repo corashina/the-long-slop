@@ -1,6 +1,7 @@
 //! Shared driving simulation and browser application.
 #![recursion_limit = "256"]
 
+pub mod animation;
 #[cfg(target_arch = "wasm32")]
 pub mod app;
 pub mod audio;

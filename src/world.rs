@@ -22,7 +22,7 @@ mod prop_layers;
 mod props;
 pub use props::{PropCandidate, PropGenerator};
 pub mod spawn_state;
-mod unity_random;
+pub(crate) mod unity_random;
 pub(crate) use placement::place_point;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,

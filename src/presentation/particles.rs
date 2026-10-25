@@ -251,6 +251,8 @@ enum Owner {
     Exhaust(usize),
     /// Storm dust; `Group::source` is big (0) or small (1).
     Storm(crate::weather::StormId),
+    /// `mainscript` melee hit systems; `Group::source` is the system.
+    Melee,
 }
 struct Group {
     owner: Owner,
@@ -571,6 +573,17 @@ fn sync_particles(
                 );
             }
         }
+        for (system, p) in reference.0.melee.particles.iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::Melee,
+                system,
+                p,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
         for (vehicle, v) in reference.0.vehicles.iter().enumerate() {
             for (system, p) in v.exhaust.iter().enumerate() {
                 add_group(
@@ -629,6 +642,7 @@ fn sync_particles(
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
             Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
             Owner::Storm(_) => &storms[g.source],
+            Owner::Melee => &reference.0.melee.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -645,7 +659,8 @@ fn sync_particles(
             | Owner::Wash(_)
             | Owner::SprayBottle(_)
             | Owner::Exhaust(_)
-            | Owner::Storm(_) => None,
+            | Owner::Storm(_)
+            | Owner::Melee => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -687,6 +702,8 @@ fn sync_particles(
                     .find(|s| s.id == id)
                     .map_or(&[][..], |s| s.particles[g.source].particles()),
             )
+        } else if let Owner::Melee = g.owner {
+            Some(drive.runtime.area.interaction.melee.particles(g.source))
         } else if splash {
             fluid.map(|f| f.splash())
         } else {

@@ -56,6 +56,17 @@ pub const STEP_SURFACE_MASK: u128 = 0b111 << STEP_SURFACE_SHIFT;
 pub fn step_surface_bits(surface: Option<crate::reference::StepSurface>) -> u128 {
     surface.map_or(0, |s| (s as u128) << STEP_SURFACE_SHIFT)
 }
+/// Collider user data bits 35 to 38 hold the source tag code. 0 is none.
+pub const TAG_SHIFT: u32 = 35;
+pub const TAG_MASK: u128 = 0b1111 << TAG_SHIFT;
+pub fn tag_bits(tag: Option<crate::reference::ColliderTag>) -> u128 {
+    tag.map_or(0, |t| (t as u128 + 1) << TAG_SHIFT)
+}
+pub fn collider_tag(user_data: u128) -> Option<crate::reference::ColliderTag> {
+    let code = ((user_data & TAG_MASK) >> TAG_SHIFT) as usize;
+    code.checked_sub(1)
+        .and_then(|i| crate::reference::COLLIDER_TAGS.get(i).copied())
+}
 
 /// One started contact. `speed` is the relative speed at `point` before the solver.
 #[derive(Clone, Copy, Debug)]
@@ -278,7 +289,8 @@ impl VehicleBody {
                 .user_data(
                     VEHICLE_COLLIDER_FLAG
                         | ((id.0 as u128) << 64)
-                        | step_surface_bits(collider.step_surface),
+                        | step_surface_bits(collider.step_surface)
+                        | tag_bits(collider.tag),
                 );
             physics.insert_collider_with_parent(builder, chassis);
         }

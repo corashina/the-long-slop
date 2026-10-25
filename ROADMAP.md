@@ -75,7 +75,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W06 | Add digging and detection. | L | Shovel swing and digging, metal detector. [F10, F03] |
+| W06 | Add digging and detection. | L | Metal detector. [F03] |
 | W07 | Add weather. | L | Tumbleweeds, snowfall in the winter biome. [J03, J04] |
 
 ## 4. More cars

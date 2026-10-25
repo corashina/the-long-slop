@@ -227,7 +227,10 @@ impl StructureRecipe {
                 .density(0.0)
                 .enabled(record.enabled && active(record.node as usize))
                 .sensor(record.trigger)
-                .user_data(crate::vehicle::step_surface_bits(record.step_surface))
+                .user_data(
+                    crate::vehicle::step_surface_bits(record.step_surface)
+                        | crate::vehicle::tag_bits(record.tag),
+                )
                 .collision_groups(InteractionGroups::new(
                     Group::from_bits_truncate(1u32 << layer),
                     Group::from_bits_truncate(reference.collision_rules.layers[layer]),
