@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod melee;
+pub use melee::*;
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -220,6 +222,21 @@ pub struct ColliderRecord {
     pub restitution: f32,
     pub geometry: ColliderGeometry,
     pub step_surface: Option<StepSurface>,
+    pub tag: Option<ColliderTag>,
+}
+
+/// Source custom tag of a collider GameObject (TagManager order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColliderTag {
+    Flesh,
+    Plant,
+    Wood,
+    Fire,
+    Metal,
+    Sand,
+    Cobweb,
+    Ignore,
+    ContainsMetal,
 }
 
 /// Source footstep surface of a collider: `otherStepSoundScript.tip`, or tag `Wood` or `Sand`.
@@ -932,6 +949,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub melee: MeleeReference,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -2204,6 +2222,7 @@ impl ReferenceManifest {
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.melee.validate(self)?;
         self.conditions.validate(self)?;
         Ok(())
     }

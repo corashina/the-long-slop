@@ -252,6 +252,7 @@ pub struct WorldColliderReference {
     pub source_empty_mesh: Option<SourceId>,
     pub geometry: Option<ColliderGeometry>,
     pub step_surface: Option<super::StepSurface>,
+    pub tag: Option<super::ColliderTag>,
 }
 /// Gameplay role of a trigger collider.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1883,7 +1884,7 @@ mod tests {
 
     fn collider(trigger: bool, role: &str) -> WorldColliderReference {
         serde_json::from_str(&format!(
-            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null,"step_surface":"sand"}}"#
+            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null,"step_surface":"sand","tag":"Sand"}}"#
         ))
         .unwrap()
     }

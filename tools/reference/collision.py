@@ -78,11 +78,17 @@ def step_surface(source, game_object):
         component = source.resolve(game_object, part['component'])
         if component.type.name == 'MonoBehaviour' and source.class_name(component) == 'otherStepSoundScript':
             return STEP_TIPS[source.read(component)['tip']]
+    # The source checks sand before the Wood tag, so a Wood tag is not tip wood.
+    return {'Wood': 'wood_tag', 'Sand': 'sand'}.get(collider_tag(source, game_object))
+
+
+def collider_tag(source, game_object):
+    """Custom tag of a collider GameObject, as CompareTag and detectTags read it."""
+    data = source.read(game_object)
     # Player builds store a custom tag as 20000 plus its TagManager index.
     if data['m_Tag'] < 20000: return None
     if getattr(source, 'tag_names', None) is None:
         managers = [o for o in source.objects.values() if o.type.name == 'TagManager']
         if len(managers) != 1: raise ValueError('Source needs one TagManager')
         source.tag_names = source.read(managers[0])['tags']
-    # The source checks sand before the Wood tag, so a Wood tag is not tip wood.
-    return {'Wood': 'wood_tag', 'Sand': 'sand'}.get(source.tag_names[data['m_Tag'] - 20000])
+    return source.tag_names[data['m_Tag'] - 20000]
