@@ -1,6 +1,5 @@
 //! Checked source pole tilt, shared by source road placement.
 use super::SourceRandom;
-use crate::reference::RoadLampReference;
 use rapier3d::math::{Rotation, Vector};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,15 +16,20 @@ pub(crate) fn flatten_then_tilt(incoming: Rotation, angles: [i32; 3]) -> Rotatio
         * Rotation::from_rotation_z(z)
 }
 
-pub(crate) fn source_angles(seed: u64, id: RoadLampId, reference: &RoadLampReference) -> [i32; 3] {
+pub(crate) fn source_angles(
+    seed: u64,
+    id: RoadLampId,
+    chances: [f32; 2],
+    angles: [[i32; 3]; 2],
+) -> [i32; 3] {
     // Source seed and segment index are signed integers. Preserve their low bits and wrapping sum.
     let mut random = SourceRandom::new((seed as i32).wrapping_add(id.0 as i32));
-    let [chance1, chance2] = reference.rotation_chances;
+    let [chance1, chance2] = chances;
     let chance = random.sample() as f32 * (chance1 + chance2);
     let angles = if chance < chance1 {
-        reference.rotation_angles[0]
+        angles[0]
     } else if chance - chance1 < chance2 {
-        reference.rotation_angles[1]
+        angles[1]
     } else {
         return [0; 3];
     };

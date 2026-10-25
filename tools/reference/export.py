@@ -323,6 +323,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
+    from .world import prepare_home_cable
+    prepare_home_cable(source)
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
@@ -344,9 +346,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'driving-evidence.json').write_text(json.dumps(source.driving_evidence,indent=2,allow_nan=False),encoding='utf-8')
     from .plates import plate_source_evidence
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
-    from .world import recover_world
+    from .world import recover_world, recover_home_cable
     from .manifest import attach_world
     attach_world(manifest,recover_world(source,library,output,len(manifest['assets'])+1))
+    manifest['world']['home_cable']=recover_home_cable(source,manifest['nodes'])
     from .storage import recover_prototype_storage
     recover_prototype_storage(source,manifest,output)
     roles=[c['role'] for p in manifest['world']['prototypes'] for c in p['colliders'] if c['role']]

@@ -111,6 +111,8 @@ struct PreparedSurface {
 struct SelectedRoad {
     segment: RoadSegment,
     light: Option<super::WorldLight>,
+    /// Pole rope poses toward the next segment pole.
+    cable: Vec<super::NodeAppearance>,
 }
 struct RoadWork {
     pending_bytes: usize,
@@ -178,6 +180,11 @@ pub struct WorldStream {
     change_bounds: Option<[WorldBounds; 2]>,
     imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
     road_light: super::source_lights::SourceRoadLight,
+    cables: super::cables::CableRecipes,
+    /// Road building cables, one per wanted building root. Empty: no cable.
+    building_cables: Vec<CableEntry>,
+    cable_search: super::cables::BuildingCableSearch,
+    home_cable: super::cables::PoleSearch,
     lights: Vec<super::WorldLight>,
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
@@ -694,10 +701,12 @@ impl WorldStream {
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
+        let cables = super::cables::CableRecipes::new(world, seed)?;
         let biome_materials =
             super::biome_materials::BiomeMaterials::new(&world.biome_material_sets);
         if shared_cpu_bytes
             .saturating_add(road_light.retained_bytes())
+            .saturating_add(cables.retained_bytes())
             .saturating_add(biome_materials.retained_bytes())
             .saturating_add(contents.rules.retained_bytes())
             .saturating_add(structure_helpers.retained_bytes())
@@ -751,6 +760,10 @@ impl WorldStream {
             change_bounds: None,
             imported_baselines: Vec::new(),
             road_light,
+            cables,
+            building_cables: Vec::new(),
+            cable_search: super::cables::BuildingCableSearch::default(),
+            home_cable: super::cables::PoleSearch::default(),
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
@@ -1770,6 +1783,68 @@ impl WorldStream {
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
     }
+    /// Source `buildingscript.FStart(0)`: a road building connects to the nearest road pole.
+    /// Contents wait for the cable. The search replays at most 8 road segments per update.
+    fn prepare_building_cables(&mut self) {
+        self.building_cables.retain(|(id, _)| {
+            self.wanted_structures
+                .iter()
+                .chain(&self.replay_roots)
+                .any(|p| &p.id == id)
+        });
+        let mut budget = 8;
+        loop {
+            if self.cable_search.placement().is_none() {
+                let Some(p) = self
+                    .wanted_structures
+                    .iter()
+                    .chain(&self.replay_roots)
+                    .find(|p| {
+                        p.id.layer == WorldLayer::Building
+                            && p.id.children.is_empty()
+                            && !self.building_cables.iter().any(|(id, _)| id == &p.id)
+                    })
+                else {
+                    return;
+                };
+                match self.cables.building(&p.prototype) {
+                    Some(cable) => self.cable_search.start(&self.roads, cable, p.clone()),
+                    None => {
+                        let entry = (p.id.clone(), Vec::new());
+                        if !self.admit_generation(cable_entry_bytes(&entry)) {
+                            return;
+                        }
+                        self.building_cables.push(entry);
+                        continue;
+                    }
+                }
+            }
+            let before = budget;
+            let mut cable = Vec::new();
+            let done = self.cable_search.step(
+                &self.cables,
+                &self.reference,
+                &mut self.roads,
+                &mut budget,
+                &mut cable,
+            );
+            self.last_road_work += before - budget;
+            match done {
+                Ok(Some(id)) => {
+                    let entry = (id, cable);
+                    if !self.admit_generation(cable_entry_bytes(&entry)) {
+                        return;
+                    }
+                    self.building_cables.push(entry);
+                }
+                Ok(None) => return,
+                Err(error) => {
+                    self.failure = Some(error.0);
+                    return;
+                }
+            }
+        }
+    }
     fn prepare_contents(&mut self) {
         if self.failure.is_some() {
             return;
@@ -1807,6 +1882,10 @@ impl WorldStream {
         let available = (16 * MIB).saturating_sub(
             self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
         );
+        self.prepare_building_cables();
+        if self.failure.is_some() {
+            return;
+        }
         let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
         if let Err(error) = self.contents.advance(
             &self.reference,
@@ -1816,6 +1895,7 @@ impl WorldStream {
             } else {
                 &[]
             },
+            &self.building_cables,
             [self.request.player, self.request.vehicle],
             available,
             limit,
@@ -2088,6 +2168,29 @@ impl WorldStream {
             break;
         }
     }
+    /// Source home `buildingscript.FStart`: the road pole target for home rope 0.
+    /// The search starts on the startup roads and replays at most 8 road segments per call.
+    pub fn home_cable_target(&mut self, rope0: [f64; 3]) -> (super::QueryStatus, Option<[f64; 3]>) {
+        if !self.initial_generation_ready || self.failure.is_some() {
+            return (super::QueryStatus::Pending, None);
+        }
+        if self.home_cable.rope0() != Some(rope0) {
+            self.home_cable.start(&self.roads, rope0);
+        }
+        let mut budget = 8;
+        let done =
+            self.home_cable
+                .step(&self.cables, &self.reference, &mut self.roads, &mut budget);
+        self.last_road_work += 8 - budget;
+        match done {
+            Ok(true) => (super::QueryStatus::Complete, self.home_cable.target()),
+            Ok(false) => (super::QueryStatus::Pending, None),
+            Err(error) => {
+                self.failure = Some(error.0);
+                (super::QueryStatus::Pending, None)
+            }
+        }
+    }
     pub fn spawn_boundaries(&self) -> &[super::SpawnBoundary] {
         self.contents.state.boundaries()
     }
@@ -2095,6 +2198,13 @@ impl WorldStream {
         self.contents.initialized(id)
     }
     pub fn appearance(&self, id: &super::GeneratedId) -> &[super::NodeAppearance] {
+        if id.layer == WorldLayer::Lamp {
+            return self
+                .selected_roads
+                .iter()
+                .find(|r| i64::from(r.segment.index) == id.unit[0])
+                .map_or(&[], |r| &r.cable);
+        }
         self.contents.appearance(id)
     }
     /// Source `materialChangeScript.Start` biome for renderer `node`, from the object position, not the surface.
@@ -2411,24 +2521,46 @@ impl WorldStream {
                 self.failure = Some("Selected road descriptors exceed 512 roads".into());
                 return;
             }
-            // Reserve retained output, vector overlap, the light identity, and pole placement before selection.
+            // Source roadGenScript links rope i to segment i + 1. The index prepares ahead of selection.
+            let next = if index + 1 < super::road::ROAD_SEGMENTS {
+                let next = match self.roads.prepare_segment(index + 1, 8) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        self.failure = Some(error.0);
+                        return;
+                    }
+                };
+                self.last_road_work += self.roads.replay_work();
+                let Some(next) = next else {
+                    return;
+                };
+                Some(next)
+            } else {
+                None
+            };
+            // Reserve retained output, vector overlap, the light identity, the cable, and pole placement before selection.
             let prototype = self
                 .reference
                 .prototypes
                 .iter()
                 .find(|p| p.source == self.reference.road.prototypes[segment.biome as usize])
                 .unwrap();
-            let light_heap = self.road_light.retained_bytes()
-                + prototype
-                    .nodes
-                    .iter()
-                    .map(|n| n.source.file.capacity())
-                    .sum::<usize>();
+            let node_heap = prototype
+                .nodes
+                .iter()
+                .map(|n| n.source.file.capacity())
+                .sum::<usize>();
+            let light_heap = self.road_light.retained_bytes() + node_heap;
+            let cable_bytes = self.cables.road_ropes(segment.biome)
+                * (std::mem::size_of::<super::NodeAppearance>()
+                    + std::mem::size_of::<super::cables::NodePose>())
+                + node_heap;
             let bytes = (self.selected_roads.capacity() + 1) * std::mem::size_of::<SelectedRoad>()
                 + prototype.nodes.len() * std::mem::size_of::<road_mesh::RoadFrame>()
                 + 2 * (std::mem::size_of::<super::WorldLight>() + light_heap)
                 + (self.wanted_structures.capacity() + 1) * std::mem::size_of::<Placement>()
-                + 2 * light_heap;
+                + 2 * light_heap
+                + cable_bytes;
             if !self.admit_generation(bytes) {
                 return;
             }
@@ -2441,7 +2573,30 @@ impl WorldStream {
                 return;
             }
             let light = self.road_light.place(&self.reference, &segment);
-            self.selected_roads.push(SelectedRoad { segment, light });
+            let mut cable = Vec::new();
+            if let Some(next) = next {
+                let mut poses = Vec::new();
+                self.cables
+                    .road(&self.reference, &segment, &next, &mut poses);
+                cable = poses
+                    .into_iter()
+                    .map(|pose| super::NodeAppearance {
+                        node: pose.node,
+                        primary: None,
+                        scale: Some(pose.scale),
+                        rotation: Some(pose.rotation),
+                        active: None,
+                        material: None,
+                        color: None,
+                        color_material: None,
+                    })
+                    .collect();
+            }
+            self.selected_roads.push(SelectedRoad {
+                segment,
+                light,
+                cable,
+            });
         }
         let retained = self
             .selected_roads
@@ -3807,9 +3962,9 @@ impl WorldStream {
                 "Source generated bindings exceed admission budget".into(),
             ));
         }
-        let appearance = self.contents.appearance(&placement.id);
+        let appearance = self.appearance(&placement.id);
         let instance = if placement.scale == prototype.prefab_pose.scale
-            && !appearance.iter().any(|a| a.scale.is_some())
+            && !super::instances::moves_colliders(prototype, appearance)
         {
             self.recipes[&placement.prototype].publish(
                 placement.clone(),
@@ -3843,7 +3998,7 @@ impl WorldStream {
             instance.cpu_bytes += extra;
             instance
         };
-        let appearance = self.contents.appearance(&placement.id);
+        let appearance = self.appearance(&placement.id);
         for (index, body) in prototype.bodies.iter().enumerate() {
             physics.edit_body(instance.bodies[index], |state| {
                 state.set_enabled(super::spawn_appearance::node_active(
@@ -4614,6 +4769,7 @@ impl WorldStream {
                     .map(road_mesh::RoadPrototype::retained_bytes)
                     .sum::<usize>()
                 + self.road_light.retained_bytes()
+                + self.cables.retained_bytes()
                 + self.contents.rules.retained_bytes()
                 + self.building_components.retained_bytes()
                 + self.structure_helpers.retained_bytes()
@@ -4734,6 +4890,25 @@ impl WorldStream {
                     .filter_map(|r| r.light.as_ref())
                     .map(super::WorldLight::heap_bytes)
                     .sum::<usize>()
+                + self
+                    .selected_roads
+                    .iter()
+                    .map(|r| {
+                        r.cable.capacity() * std::mem::size_of::<super::NodeAppearance>()
+                            + r.cable
+                                .iter()
+                                .map(super::NodeAppearance::heap_bytes)
+                                .sum::<usize>()
+                    })
+                    .sum::<usize>()
+                + self.building_cables.capacity() * std::mem::size_of::<CableEntry>()
+                + self
+                    .building_cables
+                    .iter()
+                    .map(cable_entry_heap)
+                    .sum::<usize>()
+                + self.cable_search.retained_bytes()
+                + self.home_cable.retained_bytes()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_lights.capacity() * std::mem::size_of::<u32>()
@@ -5026,4 +5201,11 @@ impl Drop for WorldStream {
         // Terminate before Rust drops source caches, job storage, or reservation ownership.
         self.road_worker.dispose();
     }
+}
+type CableEntry = (super::GeneratedId, Vec<super::NodeAppearance>);
+fn cable_entry_bytes(entry: &CableEntry) -> usize {
+    std::mem::size_of::<CableEntry>() + cable_entry_heap(entry)
+}
+fn cable_entry_heap(entry: &CableEntry) -> usize {
+    super::contents::identity_heap(&entry.0) + super::contents::appearance_bytes(&entry.1)
 }

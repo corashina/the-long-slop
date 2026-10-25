@@ -86,6 +86,7 @@ impl SpawnEvaluation<'_> {
                         inputs: super::spawn_state::SpawnInitialization::default(),
                         placement: child.clone(),
                         appearance: Vec::new(),
+                        cable: Vec::new(),
                         lights: Vec::new(),
                         fluid: None,
                         tanks: Vec::new(),

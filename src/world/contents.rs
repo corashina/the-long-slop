@@ -115,6 +115,7 @@ impl ContentInstance {
                 placement,
                 inputs: super::spawn_state::SpawnInitialization::default(),
                 appearance: Vec::new(),
+                cable: Vec::new(),
                 lights: Vec::new(),
                 fluid: None,
                 tanks: Vec::new(),
@@ -354,6 +355,7 @@ impl SourceContents {
         reference: &WorldReference,
         structures: &[Placement],
         replays: &[Placement],
+        cables: &[(GeneratedId, Vec<super::NodeAppearance>)],
         focus: [[f64; 3]; 2],
         available_index_bytes: usize,
         limit: usize,
@@ -414,13 +416,23 @@ impl SourceContents {
                 continue;
             }
             let existing = self.active.iter().find(|c| c.content.placement.id == p.id);
+            // A road building waits for its stream cable.
+            let cable = cables.iter().find(|(id, _)| id == &p.id).map(|(_, c)| c);
+            if existing.is_none()
+                && p.id.layer == super::WorldLayer::Building
+                && p.id.children.is_empty()
+                && cable.is_none()
+            {
+                continue;
+            }
             let bound = self.rules.initialization_bound(
                 reference,
                 &p.prototype,
                 identity_heap(&p.id),
                 0,
-            )? + (self.cursors.capacity() + self.cursors.len() + 1)
-                * std::mem::size_of::<Cursor>()
+            )? + cable.map_or(0, appearance_bytes)
+                + (self.cursors.capacity() + self.cursors.len() + 1)
+                    * std::mem::size_of::<Cursor>()
                 + existing.map_or(0, |c| {
                     spawned_heap(&c.content) + c.content.inputs.retained_bytes()
                 });
@@ -501,6 +513,11 @@ impl SourceContents {
                         inputs: super::spawn_state::SpawnInitialization::default(),
                         placement: parent.clone(),
                         appearance: Vec::new(),
+                        cable: cables
+                            .iter()
+                            .find(|(id, _)| id == &parent.id)
+                            .map(|(_, c)| c.clone())
+                            .unwrap_or_default(),
                         lights: Vec::new(),
                         fluid: None,
                         tanks: Vec::new(),
@@ -967,6 +984,7 @@ impl SourceContents {
         evaluation.output.push(current);
         evaluation.bake_appearance()?;
         evaluation.bake_lamps()?;
+        evaluation.bake_cables();
         evaluation.check_staging(staging)?;
         let content = evaluation.output.pop().unwrap();
         self.input_revision = self.input_revision.wrapping_add(1);
@@ -1264,9 +1282,12 @@ fn spawned_heap(content: &SpawnedContent) -> usize {
             .iter()
             .map(super::WorldLight::heap_bytes)
             .sum::<usize>()
-        + content.appearance.capacity() * std::mem::size_of::<super::NodeAppearance>()
-        + content
-            .appearance
+        + appearance_bytes(&content.appearance)
+        + appearance_bytes(&content.cable)
+}
+pub(crate) fn appearance_bytes(appearance: &Vec<super::NodeAppearance>) -> usize {
+    appearance.capacity() * std::mem::size_of::<super::NodeAppearance>()
+        + appearance
             .iter()
             .map(super::NodeAppearance::heap_bytes)
             .sum::<usize>()
@@ -1446,7 +1467,7 @@ mod tests {
         let history = contents.state.capture_history();
         let scans = ScanCheck::new();
         contents
-            .advance(reference, &[], &[], [[0.; 3]; 2], usize::MAX, 1, 1, 1)
+            .advance(reference, &[], &[], &[], [[0.; 3]; 2], usize::MAX, 1, 1, 1)
             .unwrap();
         assert_eq!(scans.production_scans(), [5, 5, 5, 5]);
         assert_eq!(contents.next, 0);
@@ -1473,6 +1494,7 @@ mod tests {
         contents
             .advance(
                 reference,
+                &[],
                 &[],
                 &[],
                 [[0.; 3]; 2],
@@ -1540,6 +1562,7 @@ mod tests {
                 reference,
                 &[],
                 &[],
+                &[],
                 [[0.; 3]; 2],
                 16 * 1024 * 1024,
                 1,
@@ -1557,6 +1580,7 @@ mod tests {
         contents
             .advance(
                 reference,
+                &[],
                 &[],
                 &[],
                 [[0.; 3]; 2],

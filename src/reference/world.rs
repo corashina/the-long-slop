@@ -7,8 +7,8 @@ mod initialization;
 mod lod;
 mod memory;
 use super::{
-    AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, ReferenceError, ReferenceManifest,
-    SourceHash, SourceId, Transform, finite, hash, require, transform,
+    AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, NodeId, ReferenceError,
+    ReferenceManifest, SourceHash, SourceId, Transform, finite, hash, require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -75,6 +75,15 @@ pub struct WorldReference {
     #[serde(deserialize_with = "compact_vec")]
     pub material_textures: Vec<super::rendering::LightingTextureRecord>,
     pub pickup_hits: Vec<WorldPickupHit>,
+    pub home_cable: HomeCableReference,
+}
+
+/// Rope nodes of the home cable. Source: home `buildingscript.connectToPole` `ropeScript`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomeCableReference {
+    pub root: NodeId,
+    pub ropes: Vec<NodeId>,
 }
 
 /// Source hit sound of a world `pickupable` record with a `collideSound`.

@@ -144,6 +144,7 @@ impl SpawnEvaluation<'_> {
         }
         self.bake_appearance()?;
         self.bake_lamps()?;
+        self.bake_cables();
         Ok(())
     }
     pub(super) fn mark_started(&mut self, parent: &GeneratedId, source: &SourceId) -> bool {
