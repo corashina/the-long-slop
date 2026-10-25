@@ -160,6 +160,7 @@ impl PhysicsWorld {
         {
             self.body_mass_override = None;
         }
+        self.forget_body_cargo(body);
         self.physics.remove_body(body)
     }
     pub fn recompute_body_mass(&mut self, body: RigidBodyHandle) {

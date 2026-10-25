@@ -9,6 +9,7 @@ fn empty_world() -> PhysicsWorld {
     physics.gravity = Vector::ZERO;
     PhysicsWorld {
         body_mass_override: None,
+        body_cargo: Vec::new(),
         inactive_bodies: Default::default(),
         physics,
         query_bounds: Default::default(),

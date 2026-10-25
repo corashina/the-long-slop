@@ -80,6 +80,7 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
     let mut world = PhysicsWorld {
         inactive_bodies: Default::default(),
         body_mass_override: None,
+        body_cargo: Vec::new(),
         physics,
         query_bounds: QueryBounds::default(),
         presentation_bodies: Default::default(),

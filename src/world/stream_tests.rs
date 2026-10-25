@@ -837,7 +837,7 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(
         !run.stream
             .structures
@@ -927,14 +927,14 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     for _ in 0..20 {
         run.stream.retire_structures(
             &mut run.physics,
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
-        );
+        ).unwrap();
         if !run
             .stream
             .structures
@@ -2068,7 +2068,7 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(
         run.stream.contents.active.is_empty(),
         "itemless replay cannot pin retirement"
@@ -2333,7 +2333,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(
         run.area.items.resolve_key(&dropped_key).is_none(),
         "dropped loot must not retain save protection"
@@ -2557,7 +2557,7 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(
         run.stream.changes.get(&key).is_none(),
@@ -2677,7 +2677,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(run.area.items.resolve_key(&parent_key).is_none());
     assert!(run.stream.changes.get(&parent_key).is_some());
     run.stream.prune_unloaded_changes(&run.area.items);
@@ -2737,7 +2737,7 @@ fn roadside_retirement_batch_sweeps_changes_once() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
-        );
+        ).unwrap();
         assert_eq!(run.stream.structures.len(), remaining);
         assert_eq!(run.stream.change_prune_scans, scans);
     }
@@ -2746,14 +2746,14 @@ fn roadside_retirement_batch_sweeps_changes_once() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert_eq!(run.stream.change_prune_scans, scans + 1);
     run.stream.retire_structures(
         &mut run.physics,
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert_eq!(run.stream.change_prune_scans, scans + 1);
 }
 
@@ -2791,7 +2791,7 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(run.stream.changes.get(&key).unwrap().snapshot.is_none());
     assert!(
@@ -2805,7 +2805,7 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&distant_key).is_none());
     assert!(
@@ -3106,7 +3106,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         &mut run.area.items,
         &mut run.area.interaction,
         &mut run.wheels,
-    );
+    ).unwrap();
     for id in [held, stored, source_part] {
         run.area.items.mark_dirty(id);
     }
@@ -3390,7 +3390,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         &mut loaded.area.items,
         &mut loaded.area.interaction,
         &mut loaded.wheels,
-    );
+    ).unwrap();
     loaded.stream.prune_unloaded_changes(&loaded.area.items);
     assert!(loaded.area.items.resolve_key(&keys[1]).is_none());
     assert!(loaded.stream.changes.get(&keys[1]).is_none());
@@ -3614,7 +3614,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         &mut reset.area.items,
         &mut reset.area.interaction,
         &mut reset.wheels,
-    );
+    ).unwrap();
     reset.stream.prune_unloaded_changes(&reset.area.items);
     for key in &keys {
         assert!(reset.area.items.resolve_key(key).is_none());

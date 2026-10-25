@@ -554,7 +554,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Capture);
         stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
         timer.next(crate::world::stream_profile::Stage::FinalCleanup);
-        stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels);
+        stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels)?;
         self.instances.retire(
             stream,
             &mut self.commands,
