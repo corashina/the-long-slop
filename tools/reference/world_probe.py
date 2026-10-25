@@ -290,6 +290,8 @@ def _validate_payload(envelope: dict, harness: dict, contract: dict) -> None:
         settings = harness['context']['settings_input']
         if any(row.get(key) != settings[key] for key in ('defaultDrawDistance', 'liveDrawDistance', 'menuDrawDistance', 'menuSettingsSaved')):
             raise ValueError('Source draw distance inputs changed')
+        if row.get('distances', {}).get('drawDistance') != row['liveDrawDistance']:
+            raise ValueError('Missing source distance interpolation')
         if len({(tile['center']['x'], tile['center']['y']) for tile in row['terrain']}) != 4:
             raise ValueError('Missing distinct terrain border tiles')
         for tile in row['terrain']:
