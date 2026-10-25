@@ -33,6 +33,36 @@ class StorageTests(unittest.TestCase):
             {'item': 2, 'dont_mount': True, 'dont_mount_till_pickup': False},
             {'item': 3, 'dont_mount': False, 'dont_mount_till_pickup': True}])
 
+    def test_prototype_flags_use_prototype_key(self):
+        entries = [({'file': 'a', 'path_id': 1}, {'dontMount': 0, 'dontMountTillPickup': 1})]
+        self.assertEqual(storage.flag_entries(entries, 'prototype'), [
+            {'prototype': {'file': 'a', 'path_id': 1}, 'dont_mount': False, 'dont_mount_till_pickup': True}])
+
+    def test_root_box_applies_chain_in_root_frame(self):
+        quarter = dict(x=0., y=0.7071067811865476, z=0., w=0.7071067811865476)
+        chain = [dict(m_LocalPosition=dict(x=0., y=0., z=1.), m_LocalRotation=dict(x=0., y=0., z=0., w=1.), m_LocalScale=dict(x=2., y=1., z=1.)),
+                 dict(m_LocalPosition=dict(x=0., y=1., z=0.), m_LocalRotation=quarter, m_LocalScale=dict(x=1., y=1., z=1.))]
+        box = storage.root_box(chain, {'m_Center': dict(x=1., y=0., z=0.), 'm_Size': dict(x=2., y=4., z=6.)})
+        # Centre (1,0,0) -> scaled (2,0,1) -> yaw 90: (1,1,-2) in Unity, z flipped for glTF.
+        for got, want in zip(box['center'], [1., 1., 2.]):
+            self.assertAlmostEqual(got, want)
+        self.assertEqual(box['half_extents'], [2., 2., 3.])
+        for got, want in zip(box['rotation'], [0., -0.7071067811865476, 0., 0.7071067811865476]):
+            self.assertAlmostEqual(got, want)
+
+    def test_prototype_volume_requires_home_and_mechanism_usables(self):
+        fields = {'slot': [], 'onlyManual': 0, 'noPhysicsLock': 0}
+        home = {'file': 'f', 'path_id': 7}
+        usable = {'file': 'f', 'path_id': 9}
+        prototypes = [{'source': home, 'nodes': [{'source': {'file': 'f', 'path_id': 1}}, {'source': {'file': 'f', 'path_id': 2}}]}]
+        homes = storage.containing(prototypes, {'file': 'f', 'path_id': 2})
+        self.assertEqual(homes, [(home, 1)])
+        storage.check_prototype_volume('v', fields, True, homes, [usable], {('f', 7, 'f', 9)})
+        for args in (('v', fields, True, [], [], set()), ('v', fields, False, homes, [], set()),
+                     ('v', dict(fields, slot=[1]), True, homes, [], set()), ('v', fields, True, homes, [usable], set())):
+            with self.assertRaises(ValueError):
+                storage.check_prototype_volume(*args)
+
 
 if __name__ == '__main__':
     unittest.main()
