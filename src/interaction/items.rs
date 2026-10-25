@@ -141,7 +141,12 @@ impl ItemStore {
                 ItemLocationSave::GeneratedAttachment { .. }
             );
             // A saved lock pose is relative to the owner, not to the item body.
-            if !matches!(record.location, ItemLocationSave::Locked { .. }) {
+            let locked = match &record.location {
+                ItemLocationSave::Locked { .. } => true,
+                ItemLocationSave::GeneratedAttachment { attachment } => attachment.volume.is_some(),
+                _ => false,
+            };
+            if !locked {
                 state.local_pose = crate::save::local_pose(&record.local_pose);
             }
             state.food = record.food.as_ref().map(|food| FoodState {
@@ -474,6 +479,29 @@ impl ItemStore {
                 ItemLocation::Attached(owner) => ItemLocationSave::Attached {
                     owner: ids.item_instance(owner)?,
                 },
+                // A world owner volume has no fixed source key. It saves with the generated owner.
+                ItemLocation::Locked { owner, .. }
+                    if matches!(
+                        self.object_key(owner),
+                        crate::world::ObjectKey::Generated(_)
+                    ) =>
+                {
+                    ItemLocationSave::GeneratedAttachment {
+                        attachment: crate::world::changes::capture(
+                            id,
+                            self,
+                            interaction,
+                            physics,
+                            reference,
+                        )
+                        .and_then(|s| s.attachment)
+                        .ok_or_else(|| {
+                            crate::save::SaveError::InvalidLinks(
+                                "Missing generated storage owner".into(),
+                            )
+                        })?,
+                    }
+                }
                 ItemLocation::Locked { owner, volume } => ItemLocationSave::Locked {
                     owner: ids.item_instance(owner)?,
                     volume: crate::save::SourceKey::from(

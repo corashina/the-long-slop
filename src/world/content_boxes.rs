@@ -2,7 +2,10 @@
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
 use crate::interaction::items::{ItemLocation, ItemStore};
-use crate::reference::{BoxBreakRules, ItemId, ReferenceManifest, SourceId, TriggerRole};
+use crate::interaction::storage::StorageLocks;
+use crate::reference::{
+    BoxBreakRules, ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole,
+};
 use crate::vehicle::PhysicsWorld;
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
 use rapier3d::math::{Rotation, Vector};
@@ -275,18 +278,26 @@ impl WorldStream {
         self.boxes.broken.pop()
     }
     /// Source breakablescript.Break and mountStuff.Unstore: remove the box, release its content.
+    /// Items locked in the box unlock at their current pose first.
     pub fn break_box(
         &mut self,
         item: ItemId,
         items: &mut ItemStore,
+        storage: &mut StorageLocks,
         physics: &mut PhysicsWorld,
-    ) -> Option<BoxRelease> {
-        let state = items.get(item)?;
+    ) -> Result<Option<BoxRelease>, ReferenceError> {
+        let Some(state) = items.get(item) else {
+            return Ok(None);
+        };
         if state.removed || state.location != ItemLocation::World {
-            return None;
+            return Ok(None);
         }
-        let body = state.body?;
-        let content = self.contents.active.iter().find(|c| c.item == Some(item))?;
+        let Some(body) = state.body else {
+            return Ok(None);
+        };
+        let Some(content) = self.contents.active.iter().find(|c| c.item == Some(item)) else {
+            return Ok(None);
+        };
         let release = BoxRelease {
             id: content.content.placement.id.clone(),
             origin: content.content.placement.pose,
@@ -296,8 +307,9 @@ impl WorldStream {
             },
         };
         if !self.contents.boxes.release(release.clone()) {
-            return None;
+            return Ok(None);
         }
+        storage.unbind_owner(item, |_, _| false, items, physics)?;
         self.changes.remove(items.object_key(item));
         let contents = &mut self.contents;
         for content in &mut contents.active {
@@ -320,7 +332,7 @@ impl WorldStream {
         self.boxes.bindings.retain(|b| b.item != item);
         self.boxes.scan = None;
         self.boxes.changes = Some(self.changes.revision());
-        Some(release)
+        Ok(Some(release))
     }
 }
 

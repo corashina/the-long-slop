@@ -1773,7 +1773,13 @@ impl GarageRuntime {
             };
             if self
                 .stream
-                .break_box(id, &mut self.area.items, &mut self.physics)
+                .break_box(
+                    id,
+                    &mut self.area.items,
+                    &mut self.area.interaction.storage,
+                    &mut self.physics,
+                )
+                .expect("bound storage")
                 .is_none()
                 || reference.acquisition.r#box.break_rules.no_gib
             {

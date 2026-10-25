@@ -1361,6 +1361,7 @@ fn replay_selector_refreshes_set_replay_forget_and_removal() {
     attached.attachment = Some(super::super::AttachmentSnapshot {
         owner: Some(ObjectKey::Generated(vehicle.id.clone())),
         slot: None,
+        volume: None,
         local_pose: last.pose,
     });
     stream.changes.record(last_key.clone(), attached, &baseline);
@@ -1458,6 +1459,7 @@ fn replay_predicates_match_old_keys_for_instances_owners_and_removals() {
     attached.attachment = Some(super::super::AttachmentSnapshot {
         owner: Some(ObjectKey::Generated(placements[1].id.clone())),
         slot: None,
+        volume: None,
         local_pose: placements[1].pose,
     });
     stream.changes.record(
@@ -2181,6 +2183,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
             snapshot.attachment = Some(AttachmentSnapshot {
                 owner: Some(ObjectKey::Generated(placements[2].id.clone())),
                 slot: None,
+                volume: None,
                 local_pose: p.pose,
             });
         }
@@ -2632,6 +2635,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
     internal_snapshot.attachment = Some(AttachmentSnapshot {
         owner: Some(parent_key.clone()),
         slot: None,
+        volume: None,
         local_pose: AbsolutePose {
             position: [0.; 3],
             rotation: [0., 0., 0., 1.],
@@ -2649,6 +2653,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
     child_snapshot.attachment = Some(AttachmentSnapshot {
         owner: Some(internal_key.clone()),
         slot: None,
+        volume: None,
         local_pose: AbsolutePose {
             position: [0.; 3],
             rotation: [0., 0., 0., 1.],
@@ -3171,6 +3176,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     attached.attachment = Some(super::super::AttachmentSnapshot {
         owner: Some(keys[0].clone()),
         slot: None,
+        volume: None,
         local_pose: super::super::AbsolutePose {
             position: [0.; 3],
             rotation: [0., 0., 0., 1.],
@@ -3563,6 +3569,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     change.snapshot.as_mut().unwrap().attachment = Some(super::super::AttachmentSnapshot {
         owner: Some(keys[1].clone()),
         slot: None,
+        volume: None,
         local_pose: super::super::AbsolutePose {
             position: [0.; 3],
             rotation: [0., 0., 0., 1.],

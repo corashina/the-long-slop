@@ -134,6 +134,7 @@ impl WorldStream {
             } else {
                 self.changes.record(key.clone(), snapshot, baseline);
             }
+            self.retain_storage_owner(&key, reference, items, interaction, physics);
             if let crate::world::ObjectKey::Generated(_) = &key {
                 if let Some(owner) = self
                     .contents
@@ -162,6 +163,49 @@ impl WorldStream {
         }
     }
 
+    /// A generated storage owner needs a record while an item locks to it.
+    /// Its locked generated items unload with it and refer to it by key.
+    fn retain_storage_owner(
+        &mut self,
+        key: &ObjectKey,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        let Some(owner) = self
+            .changes
+            .get(key)
+            .and_then(|c| c.snapshot.as_ref())
+            .and_then(|s| s.attachment.as_ref())
+            .filter(|a| a.volume.is_some())
+            .and_then(|a| a.owner.as_ref())
+            .filter(|owner| matches!(owner, ObjectKey::Generated(_)))
+        else {
+            return;
+        };
+        if self.changes.get(owner).is_some() {
+            return;
+        }
+        let owner = owner.clone();
+        let Some(id) = items.resolve_key(&owner) else {
+            return;
+        };
+        let Some(snapshot) = changes::capture(id, items, interaction, physics, reference) else {
+            return;
+        };
+        self.changes.retain_dependency(owner.clone(), snapshot);
+        if let Some(content) = self
+            .contents
+            .active
+            .iter()
+            .chain(&self.static_controls)
+            .find(|c| c.item == Some(id))
+        {
+            self.changes
+                .set_replay(&owner, &content.origin, &content.content.placement.id);
+        }
+    }
     /// Bounds new owner payload, type-fit pairs, and existing vector/map reallocation.
     pub(super) fn binding_reservation(
         &self,
@@ -1490,6 +1534,7 @@ pub(crate) fn restore_item(
         return Ok(false);
     }
     let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
+    let volume = snapshot.attachment.as_ref().and_then(|a| a.volume.as_ref());
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
     if slot.is_some()
         && target_slot.is_none()
@@ -1525,7 +1570,7 @@ pub(crate) fn restore_item(
         if items.get(id).unwrap().location != ItemLocation::WheelSlot(wheel.id) {
             wheels.install(id, wheel.id, items, physics)?;
         }
-    } else if let Some(parent) = resolved {
+    } else if let Some(parent) = resolved.filter(|_| volume.is_none()) {
         if slot.is_none()
             && items.get(id).unwrap().location != ItemLocation::Attached(parent)
             && wheels.rules().iter().any(|r| r.item == id)
@@ -1534,7 +1579,10 @@ pub(crate) fn restore_item(
         }
     }
     if let (Some(parent_id), Some(attachment)) = (resolved, &snapshot.attachment) {
-        if attachment.slot.is_none() && !wheels.rules().iter().any(|r| r.item == id) {
+        if attachment.slot.is_none()
+            && volume.is_none()
+            && !wheels.rules().iter().any(|r| r.item == id)
+        {
             let parent = items.get(parent_id).unwrap();
             let Some(parent_body) = parent.body else {
                 return Ok(false);
@@ -1620,7 +1668,16 @@ pub(crate) fn restore_item(
     if let Some(mechanism) = snapshot.mechanism {
         interaction.mechanisms.restore(id, mechanism)?;
     }
-    if let (Some(parent), Some(attachment)) = (resolved, &snapshot.attachment) {
+    if let (Some(parent), Some(attachment), Some(_)) = (resolved, &snapshot.attachment, volume) {
+        changes::restore_lock(
+            id,
+            parent,
+            attachment,
+            items,
+            &mut interaction.storage,
+            physics,
+        )?;
+    } else if let (Some(parent), Some(attachment)) = (resolved, &snapshot.attachment) {
         let parent = items.get(parent).unwrap().clone();
         let local = crate::vehicle::VehiclePose {
             position: attachment.local_pose.position.map(|v| v as f32),
