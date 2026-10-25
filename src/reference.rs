@@ -610,6 +610,8 @@ pub struct RadiatorReference {
     pub max_fan_value: f32,
     pub max_fan_speed: f32,
     pub max_fluid_loss: f32,
+    /// Source `Fan`, spun while the fan is on.
+    pub fan_node: Option<NodeId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1846,6 +1848,10 @@ impl ReferenceManifest {
                         e.radiator.max_fluid_loss,
                     ]),
                 "radiator parameters",
+            )?;
+            require(
+                e.radiator.fan_node.is_none_or(|id| node_ids.contains(&id)),
+                "radiator fan node",
             )?;
         }
         require(
