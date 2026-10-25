@@ -15,7 +15,6 @@ If a feature drops the frame rate, fix the cost before merge or agree a cut.
 Work section by section, in the order below. Keep the game playable after each task.
 Recheck the code and the original before each task. Complete missing behavior and verify existing behavior.
 Follow [AGENTS.md](AGENTS.md) for checks.
-Measure original driving before changing tire, rim, hub, suspension, or brake physics. See [G11 measurements](docs/g11-driving-measurements.md).
 Remove a row when its task is done. Do not mark rows done.
 
 IDs in brackets are points in the 1:1 parity list (`plans/parity-1to1.md` in the project files).
