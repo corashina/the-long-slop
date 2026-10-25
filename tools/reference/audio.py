@@ -460,6 +460,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     # meleeweaponscript plays mainscript.meleeHitSounds; the runtime picks the group and its hitVolume gain.
     shovel=next(p['behavior'] for p in manifest['item_prototypes'] if p['behavior']['melee'])
     survival_groups.append(('melee_hit',16,main,unique(source.get(c['file'],c['path_id']) for group in shovel['contact_clips'] for c in group),prefab,[1.,1.],[1.,1.]))
+    # metalDetectorScript.Source loops one beep; UpdSound sets its pitch and volume each frame.
+    detectors=[source.get(r['source']['file'],r['source']['path_id']) for r in manifest['world']['records'] if r['class_name']=='metalDetectorScript']
+    beeps=[source.resolve(r,source.read(r)['Source']) for r in detectors]
+    if not beeps:raise ValueError('Missing metal detector prefabs')
+    def beep(reader):
+        d=source.read(reader);return (d['Loop'],d['m_Volume'],d['m_Pitch'],d['MinDistance'],d['MaxDistance'],d['rolloffMode'],key(source.resolve(reader,d['m_audioClip'])))
+    if any(b is None for b in beeps) or not beep(beeps[0])[0] or any(beep(b)!=beep(beeps[0]) for b in beeps):raise ValueError('Metal detector beeps differ')
+    survival_groups.append(('metal_detector',17,detectors[0],readers(beeps[0],[source.read(beeps[0])['m_audioClip']]),beeps[0],[1.,1.],[1.,1.]))
     step=source.resolve(player,pd['stepScript'])
     if source.class_name(step)!='stepSoundScript':raise ValueError('Player step source differs')
     from .collision import world_pose,bake_points
@@ -490,7 +498,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'melee_hit':('meleeweaponscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -585,16 +593,6 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     strip=lambda t:[{k:v for k,v in voice.items() if k!='source'} for voice in t]
     if any(strip(t)!=strip(templates[0]) for t in templates):raise ValueError('Portable radio voices differ')
     audio['portable_radio']={'sources':portable,'voices':templates[0]}
-    # Metal detectors share one looped beep voice; metalDetectorScript sets its pitch and volume.
-    detectors=[r['source'] for r in manifest['world']['records'] if r['class_name']=='metalDetectorScript']
-    beeps=[]
-    for identity in detectors:
-        r=source.get(identity['file'],identity['path_id']);beep=source.resolve(r,source.read(r)['Source'])
-        beeps.append({'id':0,'source':source_id(beep),'emitter':0,**voice_settings(beep),
-            'methods':[method('metalDetectorScript','Turn'),method('metalDetectorScript','UpdSound')]})
-    if not beeps:raise ValueError('Missing metal detector prefabs')
-    if any(strip([b])!=strip([beeps[0]]) for b in beeps):raise ValueError('Metal detector voices differ')
-    audio['metal_detector']={'sources':detectors,'voice':beeps[0]}
     # Preserve the compiled group graph, snapshot parameters, and native effect identity.
     mixer_sources = {key(source.resolve(source.get(*identity),source.read(source.get(*identity))['m_AudioMixer'])) for identity in groups}
     if len(mixer_sources)!=1:raise ValueError('Selected voices must resolve one source mixer')
@@ -634,7 +632,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
-    for field in ['engine','horn','radio','portable_radio','metal_detector']:
+    for field in ['engine','horn','radio','portable_radio']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")

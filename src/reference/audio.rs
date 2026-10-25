@@ -93,8 +93,6 @@ record!(RadioAudioReference {
 });
 // radioscript SS, SC and SC2 settings shared by every portable radio's voice slot.
 record!(PortableRadioAudioReference { sources: Vec<SourceId>, voices: [AudioVoiceReference; 3] });
-// Source metalDetectorScript.Source: one looped beep voice shared by every detector.
-record!(MetalDetectorAudioReference { sources: Vec<SourceId>, voice: AudioVoiceReference });
 record!(RadioVisualReference {
     screen: MaterialSwitchReference,
     indicator: MaterialSwitchReference,
@@ -211,7 +209,6 @@ record!(AudioReference {
     voices: Vec<AudioVoiceReference>, mixers: Vec<AudioMixerReference>, bindings: Vec<AudioEventBinding>,
     engine: EngineAudioReference, horn: HornAudioReference, radio: RadioAudioReference,
     portable_radio: PortableRadioAudioReference,
-    metal_detector: MetalDetectorAudioReference,
     mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
@@ -336,18 +333,7 @@ impl AudioReference {
                 })
                 && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time)
         };
-        require(
-            !self.metal_detector.sources.is_empty()
-                && self.metal_detector.voice.r#loop
-                && self.metal_detector.voice.clip.is_some(),
-            "metal detector beep voice",
-        )?;
-        let portable = self
-            .portable_radio
-            .voices
-            .iter()
-            .chain([&self.metal_detector.voice])
-            .map(|v| (true, v));
+        let portable = self.portable_radio.voices.iter().map(|v| (true, v));
         for (portable, v) in self.voices.iter().map(|v| (false, v)).chain(portable) {
             require(
                 (if portable {
@@ -943,6 +929,7 @@ impl AudioGameplayReference {
             (14, "music_box"),
             (15, "footstep"),
             (16, "melee_hit"),
+            (17, "metal_detector"),
         ] {
             require(
                 r.bindings
@@ -963,7 +950,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 15, "required audio roles")?;
+        require(r.bindings.len() == 16, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
