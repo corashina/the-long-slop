@@ -795,6 +795,7 @@ fn p11_starting_area_loop() {
         &play.reference,
         &stamp,
         &loaded,
+        crate::world::GameMode::default(),
         play.reference.world.draw_distance.default,
     )
     .unwrap();

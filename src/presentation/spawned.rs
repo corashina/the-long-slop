@@ -81,7 +81,7 @@ fn skin_body(manifest: &ReferenceManifest, prototype: &ItemPrototype) -> Option<
         prototype
             .bodies
             .iter()
-            .find(|b| b.id == hose.main)
+            .find(|b| b.id == hose.mains[0])
             .map(|b| b.node)
     })
 }

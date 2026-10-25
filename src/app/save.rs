@@ -308,8 +308,10 @@ fn process_request(
                 .and_then(serde_json::Value::as_f64)
                 .ok_or_else(|| invalid("Missing draw distance"))?
                 as f32;
+            let mode = super::game_mode();
             if request.kind == "PrepareNewGame"
                 && !drive.runtime.started
+                && drive.runtime.stream.mode() == mode
                 && drive
                     .runtime
                     .distances
@@ -333,8 +335,13 @@ fn process_request(
                     .ok_or_else(|| invalid("Missing save"))?;
                 let saved = SaveSnapshot::deserialize(saved)
                     .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                let runtime =
-                    GarageRuntime::from_save(&reference, &requests.source, &saved, draw_distance)?;
+                let runtime = GarageRuntime::from_save(
+                    &reference,
+                    &requests.source,
+                    &saved,
+                    mode,
+                    draw_distance,
+                )?;
                 (
                     runtime,
                     if saved.view.camera == CameraSave::Chase {
@@ -345,7 +352,7 @@ fn process_request(
                 )
             } else {
                 (
-                    GarageRuntime::new(&reference, draw_distance)?,
+                    GarageRuntime::new(&reference, mode, draw_distance)?,
                     CameraMode::default(),
                 )
             };

@@ -195,6 +195,9 @@ impl Material for SpecularMaterial {
             Mesh::ATTRIBUTE_UV_1,
             Mesh::ATTRIBUTE_TANGENT,
             Mesh::ATTRIBUTE_COLOR,
+            // Bevy reads joints at 6 and weights at 7 for a skinned mesh, such as the siphon hose.
+            Mesh::ATTRIBUTE_JOINT_INDEX,
+            Mesh::ATTRIBUTE_JOINT_WEIGHT,
         ]
         .into_iter()
         .enumerate()

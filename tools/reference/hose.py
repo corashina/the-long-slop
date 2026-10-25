@@ -68,9 +68,12 @@ def recover_hose(source, by_node, bodies, poses, node_ids, exporter, main, outpu
     if len(tubes) != SEGMENTS or len(skins) != 1: raise ValueError('Hose needs 6 tubescripts and one skin')
     segments, joints = chain_order(joints)
     if sorted(scripts) != sorted(segments): raise ValueError('Hose tubescript outside chain')
-    mains = [body for body, c in scripts.items() if source.read(c)['isMain']]
-    if len(mains) != 1: raise ValueError('Hose needs one main segment')
+    # Both source ends set isMain. Each main runs Fill once per frame.
+    mains = [body for body in segments if source.read(scripts[body])['isMain']]
+    if not mains: raise ValueError('Hose needs a main segment')
     main_script = scripts[mains[0]]
+    if any(source.read(scripts[b])[f] != source.read(main_script)[f] for b in mains for f in ('T1', 'T2')):
+        raise ValueError('Hose mains differ in ends')
     def tube(field):
         target = source.resolve(main_script, source.read(main_script)[field])
         if target is None or key(target) not in tubes: raise ValueError(f'Hose {field} outside chain')
@@ -92,7 +95,7 @@ def recover_hose(source, by_node, bodies, poses, node_ids, exporter, main, outpu
     skin_node, renderer = skins[0]
     t1, t2 = tube('T1'), tube('T2'); ends = []
     end(t1); end(t2)
-    return {'source': source_id(main_script), 'segments': segments, 'main': mains[0], 't1': t1, 't2': t2,
+    return {'source': source_id(main_script), 'segments': segments, 'mains': mains, 't1': t1, 't2': t2,
         'break_force': [source.read(scripts[b])['breakForce'] for b in segments],
         'connect_anchor': [local(source.read(scripts[b])['connectAnchor'], transform_of(scripts[b]), b) for b in segments],
         'joints': joints, 'ends': ends,
@@ -110,7 +113,9 @@ def validate_hose(hose, prototype) -> None:
         raise ValueError('Hose joints do not form one chain')
     if any(len(j[f]) != 3 for j in joints for f in ('anchor', 'connected_anchor')):
         raise ValueError('Hose joint anchor')
-    if not {hose['main'], hose['t1'], hose['t2']} <= set(segments) or hose['t1'] == hose['t2']:
+    mains = hose['mains']
+    if (not mains or len(set(mains)) != len(mains) or not {*mains, hose['t1'], hose['t2']} <= set(segments)
+            or hose['t1'] == hose['t2']):
         raise ValueError('Hose main or end outside chain')
     if len(hose['break_force']) != SEGMENTS or min(hose['break_force']) <= 0:
         raise ValueError('Hose break force')

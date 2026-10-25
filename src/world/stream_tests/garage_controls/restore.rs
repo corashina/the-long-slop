@@ -66,6 +66,7 @@ fn g10_control_restore_has_no_side_effects() {
         &reference,
         &stamp,
         &saved,
+        crate::world::GameMode::default(),
         reference.world.draw_distance.default,
     )
     .unwrap();

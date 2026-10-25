@@ -1,5 +1,7 @@
 import {installSceneResolution} from './scene-resolution.js';
 installSceneResolution(window,document.querySelector('#scene-resolution'));
+import {installGameMode} from './game-mode.js';
+installGameMode(window,document.querySelector('#biome'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage} from './save-storage.js';

@@ -19,8 +19,12 @@ fn first_permit_retains_runtime_and_commits_once_paused() {
     use the_long_slop::{reference::ReferenceManifest, starting_area::GarageRuntime};
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let mut runtime =
-        GarageRuntime::new(&reference, reference.world.draw_distance.default).unwrap();
+    let mut runtime = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let session = runtime.stream.frame().request.session;
     let pose = runtime.physics.snapshot(0).pose;
     let bodies = runtime.physics.rapier().bodies.len();
@@ -28,8 +32,12 @@ fn first_permit_retains_runtime_and_commits_once_paused() {
     let retry = FreshSessionPermit::prepare(8, &runtime, 3).unwrap();
     assert!(discarded.commit(8, &mut runtime, 3).is_err());
     assert!(retry.commit(8, &mut runtime, 4).is_err());
-    let mut changed_session =
-        GarageRuntime::new(&reference, reference.world.draw_distance.default).unwrap();
+    let mut changed_session = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(retry.commit(8, &mut changed_session, 3).is_err());
     assert!(!changed_session.started);
     assert!(!runtime.started);

@@ -113,6 +113,14 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
     serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// The Game mode biome from the browser. Values above 3 read as Mixed.
+fn game_mode() -> crate::world::GameMode {
+    let biome = game_biome();
+    crate::world::GameMode {
+        biome: if biome > 3 { 0 } else { biome as u8 },
+    }
+}
+
 #[wasm_bindgen]
 pub fn run(
     reference_json: &[u8],
@@ -128,7 +136,7 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, draw_distance)
+    let mut runtime = GarageRuntime::new(&reference, game_mode(), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,
@@ -249,6 +257,7 @@ pub fn run(
                 advance_physics,
                 sync_world,
                 sync_imported,
+                presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
                 presentation::spawned::sync,
                 sync_instruments,

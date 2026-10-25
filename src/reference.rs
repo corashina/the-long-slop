@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod melee;
+pub use melee::*;
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -65,7 +67,9 @@ pub mod survival;
 pub use inventory::*;
 pub mod particles;
 pub use particles::*;
+pub mod weather;
 pub use survival::*;
+pub use weather::*;
 pub mod instruments;
 pub mod ui;
 pub use instruments::*;
@@ -218,6 +222,21 @@ pub struct ColliderRecord {
     pub restitution: f32,
     pub geometry: ColliderGeometry,
     pub step_surface: Option<StepSurface>,
+    pub tag: Option<ColliderTag>,
+}
+
+/// Source custom tag of a collider GameObject (TagManager order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColliderTag {
+    Flesh,
+    Plant,
+    Wood,
+    Fire,
+    Metal,
+    Sand,
+    Cobweb,
+    Ignore,
+    ContainsMetal,
 }
 
 /// Source footstep surface of a collider: `otherStepSoundScript.tip`, or tag `Wood` or `Sand`.
@@ -919,6 +938,7 @@ pub struct ReferenceManifest {
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
     pub particles: Vec<ParticleReference>,
+    pub weather: WeatherReference,
     pub ambient: AmbientReference,
     pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
@@ -929,6 +949,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub melee: MeleeReference,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -1165,6 +1186,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         particles::validate_particles(self)?;
+        self.weather.validate()?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(
@@ -2190,9 +2212,17 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        let cable = &self.world.home_cable;
+        require(
+            !cable.ropes.is_empty()
+                && node_ids.contains(&cable.root)
+                && cable.ropes.iter().all(|id| node_ids.contains(id)),
+            "home cable",
+        )?;
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.melee.validate(self)?;
         self.conditions.validate(self)?;
         Ok(())
     }

@@ -26,6 +26,7 @@ pub mod cigarettes;
 pub(crate) mod hose;
 pub mod spawned;
 mod survival;
+mod weather;
 pub use survival::DrinkResult;
 pub(crate) use survival::active_part as active_food_part;
 
@@ -670,6 +671,8 @@ pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
+    pub weather: crate::weather::WeatherState,
+    weather_bindings: weather::WeatherBindings,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -725,18 +728,27 @@ impl GarageRuntime {
         self.clear_input();
         Ok(())
     }
-    pub fn new(reference: &ReferenceManifest, draw_distance: f32) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32, draw_distance)
+    pub fn new(
+        reference: &ReferenceManifest,
+        mode: crate::world::GameMode,
+        draw_distance: f32,
+    ) -> Result<Self, ReferenceError> {
+        Self::new_candidate(reference, true, DEFAULT_SEED as i32, mode, draw_distance)
     }
-    /// Test runtime at the export default draw distance.
+    /// Test runtime in the default game mode at the export default draw distance.
     #[cfg(test)]
     pub(crate) fn new_default(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        Self::new(reference, reference.world.draw_distance.default)
+        Self::new(
+            reference,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default,
+        )
     }
     fn new_candidate(
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
         let distances =
@@ -744,7 +756,7 @@ impl GarageRuntime {
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed, distances)?;
+        let mut stream = WorldStream::new(reference, seed, mode, distances)?;
         stream.select_source_car(reference.vehicles[0].spawn_car_id);
         if stream_world {
             stream.request_at(
@@ -771,6 +783,18 @@ impl GarageRuntime {
                 state.sync_lamps(&reference.lighting, &lighting);
                 state
             });
+        let weather_bindings = weather::WeatherBindings::new(
+            &physics,
+            area.player.body_handle(),
+            &audio.as_ref().map_or(Vec::new(), |audio| {
+                audio
+                    .reference
+                    .interiors
+                    .iter()
+                    .map(|i| i.collider)
+                    .collect()
+            }),
+        );
         let urine_visual = reference
             .particles
             .iter()
@@ -794,6 +818,8 @@ impl GarageRuntime {
             urine_reference,
             urine_emission: [0.; 2],
             ambient: crate::audio::AmbientState::new(&reference.ambient),
+            weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
+            weather_bindings,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -918,16 +944,28 @@ impl GarageRuntime {
     }
 
     fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
-        let gains = self
-            .ambient
-            .gains(&reference.ambient, self.lighting.cycle.output(), dt);
+        // napszakvaltakozas.FixedUpdate reads inSandStorm before the storms update.
+        let storm = self.weather.influence().strength.clamp(0., 1.);
+        let gains = self.ambient.gains(
+            &reference.ambient,
+            self.lighting.cycle.output(),
+            reference.weather.storm.ambient_decrease * storm,
+            dt,
+        );
         if let Some(audio) = &mut self.audio {
+            use crate::audio::AudioKind;
             let position = self
                 .stream
                 .origin
                 .absolute(self.area.player.body_pose(&self.physics).position);
-            audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
-            audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+            audio.source_loop(AudioKind::AmbientDay, 0, gains[0], position);
+            audio.source_loop(AudioKind::AmbientNight, 0, gains[1], position);
+            audio.source_loop(
+                AudioKind::StormInside,
+                0,
+                reference.weather.storm.volume * storm,
+                position,
+            );
             audio.sync_rocks(
                 self.stream.structure_revision(),
                 self.stream.frame().structures,
@@ -1307,6 +1345,7 @@ impl GarageRuntime {
         }
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
+        self.advance_weather(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1354,11 +1393,12 @@ impl GarageRuntime {
             audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
             audio.hits(&self.area, &self.physics, FIXED_DT);
             let stream = &mut self.stream;
+            let biome_override = stream.mode().biome_override();
             audio.footsteps(
                 &self.area,
                 &self.physics,
                 walking_input.held & keys::RUN != 0,
-                |position| crate::world::biome(stream.terrain_color(position), None),
+                |position| crate::world::biome(stream.terrain_color(position), biome_override),
             );
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
@@ -1416,6 +1456,13 @@ impl GarageRuntime {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
+        // napszak refreshes CurrentColor under the player each second.
+        if self.lighting.cycle.needs_terrain_color(0.) {
+            let color = self.stream.terrain_color(absolute);
+            self.lighting
+                .cycle
+                .set_terrain_color(&reference.lighting.cycle, &color, 0.);
+        }
         self.stream.request_at(
             absolute,
             self.persistent_world.absolute_vehicle_position(
@@ -1440,6 +1487,7 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
+            self.weather.set_origin(self.stream.origin.offset);
             self.urine
                 .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
                     |i| (self.area.origin[i] - old_origin[i]) as f32,

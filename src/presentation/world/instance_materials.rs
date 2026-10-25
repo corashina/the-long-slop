@@ -49,14 +49,21 @@ impl InstanceMaterials<'_> {
         plan: &crate::reference::prototype_plan::PrototypePlan,
     ) -> Result<bool, ReferenceError> {
         let mut ready = true;
-        for source_node in &prototype.nodes {
+        for (node_index, source_node) in prototype.nodes.iter().enumerate() {
             if !source_node.renderer_enabled {
                 continue;
             }
             let node = &plan.nodes[source_node.gltf_node as usize];
             for primitive in plan.primitives.iter().filter(|p| Some(p.mesh) == node.mesh) {
-                let (initial, selected) =
-                    selected_material(stream, reference, prototype, placement, &source_node.source);
+                let (initial, selected) = biome_material(
+                    stream,
+                    reference,
+                    prototype,
+                    placement,
+                    node_index,
+                    primitive,
+                    selected_material(stream, reference, prototype, placement, &source_node.source),
+                );
                 let selected = selected.cloned();
                 ready &= self.admit_binding(
                     stream,
@@ -496,4 +503,59 @@ pub fn selected_material<'a>(
                 .map(|m| (m.asset, m.gltf_material))
         });
     (initial, selected)
+}
+
+/// Source `materialChangeScript` swaps the first material slot only: submesh 0.
+/// It compares the material that painting and condition already selected.
+pub fn biome_material<'a>(
+    stream: &'a WorldStream,
+    reference: &ReferenceManifest,
+    prototype: &WorldPrototypeReference,
+    placement: &crate::world::Placement,
+    node: usize,
+    primitive: &PlanPrimitive,
+    chosen: (
+        Option<(crate::reference::AssetId, u32)>,
+        Option<&'a crate::reference::SourceId>,
+    ),
+) -> (
+    Option<(crate::reference::AssetId, u32)>,
+    Option<&'a crate::reference::SourceId>,
+) {
+    let (initial, selected) = chosen;
+    if primitive.submesh != 0 {
+        return (initial, selected);
+    }
+    let Some(biome) = stream.renderer_biome(prototype, placement, node) else {
+        return (initial, selected);
+    };
+    let current = if initial.is_none() && (selected.is_some() || primitive.has_source_material) {
+        selected.or(primitive.source_material.as_ref())
+    } else {
+        initial
+            .or_else(|| {
+                primitive
+                    .material
+                    .as_ref()
+                    .map(|m| (m.asset, m.gltf_material))
+            })
+            .and_then(|(asset, gltf)| {
+                reference
+                    .rendering
+                    .materials
+                    .iter()
+                    .find(|m| m.asset == asset && m.gltf_material == gltf)
+            })
+            .map(|m| &m.source)
+    };
+    let Some(variant) = current.and_then(|current| stream.biome_material(current, biome)) else {
+        return (initial, selected);
+    };
+    let primary = reference
+        .rendering
+        .materials
+        .iter()
+        .find(|m| m.source == *variant && m.asset == prototype.asset)
+        .map(|m| (m.asset, m.gltf_material));
+    (primary, Some(variant))
 }

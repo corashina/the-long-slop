@@ -184,6 +184,22 @@ def recover_fog_evidence(source):
         'rule':'settingsscript.DrawDistanceChanged uses InverseLerp, then Lerp; each operation uses float32. The fog modifier multiplies the fog density.'}
 
 
+def recover_grading_temperatures(source: Source) -> list:
+    """postprocesscontrol.TemperatureValues on the main camera sets the main-view ColorGrading temperature."""
+    player=source.get('level1',80125)
+    camera=source.resolve(player,source.read(player)['Cam'])
+    go=source.resolve(camera,source.read(camera)['m_GameObject'])
+    controls=[]
+    for pointer in source.read(go)['m_Component']:
+        component=source.resolve(go,pointer['component'])
+        if component.type.name=='MonoBehaviour' and source.class_name(component)=='postprocesscontrol':controls.append(component)
+    if len(controls)!=1:raise ValueError('Main camera requires one postprocesscontrol')
+    values=source.read(controls[0]).get('TemperatureValues')
+    if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
+        raise ValueError(f'{key(controls[0])} TemperatureValues requires three finite values')
+    return values
+
+
 def recover_cycle(source: Source, reader, output: Path) -> dict:
     output.mkdir(parents=True,exist_ok=True)
     if not hasattr(source,'lighting_textures'):source.lighting_textures={}
@@ -207,6 +223,7 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
         values=f[source_field]
         if len(values)!=3 or not all(math.isfinite(v) for v in values):raise ValueError(f'{key(reader)} {source_field} requires three finite values')
         result[field]=values
+    result['temperature_values']=recover_grading_temperatures(source)
     result['clouds']=[]
     for layer in ('Low','High'):
         cloud_node=source.get('level1',27215 if layer=='Low' else 27216)
@@ -607,7 +624,7 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
     for l in lighting['lights']:
         if l['cookie'] is not None and l['cookie'] not in textures:fail(l['source'],'cookie')
         if l['node'] is not None and l['node'] not in nodes:fail(l['source'],'node')
-    for field in ('temp_days','temp_nights','temp_add_noons'):
+    for field in ('temp_days','temp_nights','temp_add_noons','temperature_values'):
         values=lighting['cycle'].get(field)
         if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
             fail(lighting['cycle']['source'],field+' requires three finite values')

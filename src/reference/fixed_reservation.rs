@@ -12,8 +12,8 @@ pub struct FixedReservation {
 }
 impl FixedReservation {
     pub fn mesh(plan: &PrototypePlan, retained: usize) -> Result<Self, ReferenceError> {
+        // The siphon hose prototype is skinned. Joint and weight attributes are in the authored stride.
         for node in &plan.nodes {
-            require(node.skin.is_none(), "fixed mesh skin bound")?;
             require(
                 node.mesh
                     .is_none_or(|mesh| plan.primitives.iter().any(|p| p.mesh == mesh)),
@@ -26,11 +26,7 @@ impl FixedReservation {
             require(
                 primitive.vertices > 0
                     && primitive.indices > 0
-                    && primitive.attributes.iter().any(|a| a == "POSITION")
-                    && !primitive
-                        .attributes
-                        .iter()
-                        .any(|a| a.starts_with("JOINTS_") || a.starts_with("WEIGHTS_")),
+                    && primitive.attributes.iter().any(|a| a == "POSITION"),
                 "fixed mesh vertex contract",
             )?;
             let indices = primitive.indices.checked_mul(4).ok_or_else(overflow)?;

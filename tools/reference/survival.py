@@ -6,7 +6,7 @@ import re
 import struct
 from pathlib import Path
 from .source import LibrarySource, key, source_id
-from .collision import world_pose, geometry, step_surface
+from .collision import world_pose, geometry, step_surface, collider_tag
 from .gltf import GltfExporter
 from .actions import recover_pickup
 
@@ -81,7 +81,7 @@ def food_record(source, kind, root, manifest):
             colliders.append({'source':source_id(c),'node':nodes[key(n['reader'])]['id'],
                 'membership':1<<layer,'filter':matrix[layer],'sensor':bool(d['m_IsTrigger']),
                 'enabled':bool(d['m_Enabled']), 'geometry':geometry(source,exporter,c,n['reader'],pose,True),
-                'step_surface':step_surface(source,n['game_object'])})
+                'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
     return {'source':source_id(edible),'kind':kind,'effect':dict(food=data['foodValue'],water=data['waterValue'],bowel=data['shitValue'],hp=data['hpValue']),
         'bites':len(groups),'index':data['index'],'destroy_on_end':bool(data['destroyOnEnd']),
         'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],

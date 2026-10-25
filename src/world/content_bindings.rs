@@ -1283,7 +1283,7 @@ fn bind_pickup(
 }
 
 /// Siphon hose placement: one item per segment body, then one runtime hose.
-/// The main segment is the content item. The other segments are content bindings.
+/// The first main segment is the content item. The other segments are content bindings.
 #[allow(clippy::too_many_arguments)]
 fn bind_hose(
     content: &mut crate::world::contents::ContentInstance,
@@ -1318,7 +1318,7 @@ fn bind_hose(
         let bound = bind_pickup(
             content,
             pickup,
-            segment != hose.main,
+            segment != hose.mains[0],
             instance,
             prototype,
             &reference.world,

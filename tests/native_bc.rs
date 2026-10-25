@@ -138,6 +138,7 @@ fn installed_native_primary_bytes_and_shared_job_limits() {
     let mut stream = the_long_slop::world::WorldStream::new(
         &reference,
         42,
+        the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,
             reference.world.draw_distance.default,

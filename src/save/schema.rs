@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 15;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 15;
+pub const SAVE_SCHEMA_VERSION: u32 = 16;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 16;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -47,6 +47,30 @@ pub struct SaveSnapshot {
     pub spawned: Vec<SpawnedItemSnapshot>,
     /// Pack counts, cigarette burn state, and the mouth slot.
     pub cigarettes: CigarettesSnapshot,
+    /// Source save_sandstorm and the storm spawner timer.
+    pub weather: WeatherSnapshot,
+}
+/// Source sandstormLastTime (negated) and sandstormNextTime.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeatherSnapshot {
+    /// Seconds since the last spawn.
+    pub since_spawn: f32,
+    /// Seconds from the last spawn to the next spawn.
+    pub wait: f32,
+    pub storms: Vec<StormSnapshot>,
+}
+/// Source save_sandstorm: pos, euler rot y, prefabid, life, size, speed, xdir and ydir.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StormSnapshot {
+    pub position: [f64; 3],
+    pub yaw: f32,
+    pub prefab: u32,
+    pub life: f32,
+    pub size: f32,
+    pub speed: f32,
+    pub direction: [f32; 2],
 }
 /// Spawned items are named by their spawn serial.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -408,7 +432,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 10, 11, 12, 13, 14, 16] {
+        for version in [6, 10, 11, 12, 13, 14, 15, 17] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -419,9 +443,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 15 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 16 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":15}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":16}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

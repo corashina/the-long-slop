@@ -8,7 +8,8 @@ impl SaveSnapshot {
             .validate_identity(&reference.content_base)
             .map_err(|e| invalid(&e.0))?;
         let roads = crate::world::RoadIndex::new(
-            crate::world::RoadSequence::new(&reference.world, self.world.seed)
+            // The biome does not change road states or bounds.
+            crate::world::RoadSequence::new(&reference.world, self.world.seed, None)
                 .map_err(|e| invalid(&e.0))?,
             crate::world::terrain_evaluator(&reference.world, self.world.seed),
         );
@@ -464,6 +465,7 @@ mod tests {
                     half_extents: [1.; 3],
                     rotation: [0., 0., 0., 1.],
                     storage_type: 0,
+                    only_manual: false,
                     usables: Vec::new(),
                     dont_lock_if_owner_picked_up: false,
                 })

@@ -302,6 +302,7 @@ fn ignition_and_attachment() {
         &reference,
         &stamp,
         &saved,
+        crate::world::GameMode::default(),
         reference.world.draw_distance.default,
     )
     .unwrap();
@@ -765,6 +766,7 @@ fn garage_engine_remove_restore_continue() {
         &reference,
         &stamp,
         &saved,
+        crate::world::GameMode::default(),
         reference.world.draw_distance.default,
     )
     .unwrap();

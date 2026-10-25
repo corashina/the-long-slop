@@ -130,7 +130,7 @@ fn assert_items_kept(run: &GarageRuntime, before: &[(ItemId, [f64; 3])], stage: 
 
 pub(super) fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 3]> {
     let mut roads = crate::world::RoadIndex::new(
-        crate::world::RoadSequence::new(&reference.world, run.stream.seed()).unwrap(),
+        crate::world::RoadSequence::new(&reference.world, run.stream.seed(), None).unwrap(),
         crate::world::terrain_evaluator(&reference.world, run.stream.seed()),
     );
     let start = run.persistent_world.absolute_vehicle_position(

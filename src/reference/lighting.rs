@@ -85,6 +85,8 @@ pub struct CycleReference {
     pub temp_days: [f32; 3],
     pub temp_nights: [f32; 3],
     pub temp_add_noons: [f32; 3],
+    /// postprocesscontrol.TemperatureValues: main-view grading temperature per biome.
+    pub temperature_values: [f32; 3],
     pub flare_dawn: [f32; 3],
     pub flare_day: [f32; 3],
     pub flare_dusk: [f32; 3],
@@ -630,7 +632,12 @@ impl LightingRecord {
                 "biome scalars",
             )?;
         }
-        for values in [&c.temp_days, &c.temp_nights, &c.temp_add_noons] {
+        for values in [
+            &c.temp_days,
+            &c.temp_nights,
+            &c.temp_add_noons,
+            &c.temperature_values,
+        ] {
             check(finite(values), &c.source, "visual temperature arrays")?;
         }
         for values in [

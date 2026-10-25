@@ -40,6 +40,8 @@ pub struct PostTextures<'a> {
 pub struct PostFrame {
     pub token: u32,
     pub delta_seconds: f32,
+    /// Main-view grading temperature. None keeps the applied value.
+    pub grading_temperature: Option<f32>,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -74,6 +76,7 @@ struct MainChain {
     bloom: BloomPass,
     lut: LutPass,
     lut_baked: bool,
+    temperature: f32,
 }
 pub struct SourcePostChain {
     pub extent: [u32; 2],
@@ -121,16 +124,18 @@ impl SourcePostChain {
         };
         copy.rebind(device, cache, source);
         let main = {
-            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked) = match old_main {
-                Some(old) => (
-                    Some(old.histogram),
-                    Some(old.exposure),
-                    Some(old.bloom),
-                    Some(old.lut),
-                    old.lut_baked,
-                ),
-                None => (None, None, None, None, false),
-            };
+            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, temperature) =
+                match old_main {
+                    Some(old) => (
+                        Some(old.histogram),
+                        Some(old.exposure),
+                        Some(old.bloom),
+                        Some(old.lut),
+                        old.lut_baked,
+                        old.temperature,
+                    ),
+                    None => (None, None, None, None, false, record.grading.temperature),
+                };
             let histogram = HistogramPasses::new(
                 device,
                 queue,
@@ -184,6 +189,7 @@ impl SourcePostChain {
                 bloom,
                 lut,
                 lut_baked,
+                temperature,
             }
         };
         let inputs = MainInputs {
@@ -299,6 +305,16 @@ impl SourcePostChain {
             .output_index()
             .ok_or("Source exposure output is missing")?;
         self.main.bloom.encode(encoder, cache, exposure_index);
+        if let Some(temperature) = frame.grading_temperature
+            && temperature != self.main.temperature
+        {
+            if !temperature.is_finite() {
+                return Err("Invalid source grading temperature".into());
+            }
+            self.main.lut.set_temperature(device, queue, temperature);
+            self.main.temperature = temperature;
+            self.main.lut_baked = false;
+        }
         if !self.main.lut_baked {
             self.main.lut.encode(encoder, cache);
         }

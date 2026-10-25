@@ -144,7 +144,11 @@ pub struct RoadSequence {
     state: RoadState,
 }
 impl RoadSequence {
-    pub fn new(reference: &WorldReference, seed: i32) -> Result<Self, ReferenceError> {
+    pub fn new(
+        reference: &WorldReference,
+        seed: i32,
+        biome_override: Option<u8>,
+    ) -> Result<Self, ReferenceError> {
         let road = &reference.road;
         let frame = &reference.generation_frame;
         if road.road_bone_num != ROAD_CONTROLS as u32
@@ -180,8 +184,7 @@ impl RoadSequence {
                 angle_limits: [road.xmax_angle, road.ymax_angle],
                 width: road.width,
                 start_straight: road.start_straight,
-                biome_override: (reference.terrain.game_settings.biome != 0)
-                    .then_some((reference.terrain.game_settings.biome - 1) as u8),
+                biome_override,
                 straight_modifier: road.straight_modifier,
                 edge: road.align_edge_of_the_world != 0,
                 bounds_radius: bounds_radius(reference)?,

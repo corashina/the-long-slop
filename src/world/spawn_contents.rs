@@ -8,6 +8,8 @@ pub(crate) struct SpawnedContent {
     pub inputs: super::spawn_state::SpawnInitialization,
     pub placement: Placement,
     pub appearance: Vec<super::NodeAppearance>,
+    /// Road pole cable of a road building. Stream input; `bake_cables` copies it to `appearance`.
+    pub cable: Vec<super::NodeAppearance>,
     pub lights: Vec<super::WorldLight>,
     pub fluid: Option<crate::fluids::FluidContainer>,
     pub tanks: Vec<(SourceId, crate::fluids::FluidContainer)>,
@@ -107,11 +109,8 @@ impl<'a> SpawnEvaluation<'a> {
                             .iter()
                             .map(super::WorldLight::heap_bytes)
                             .sum::<usize>()
-                        + c.appearance.capacity() * size_of::<super::NodeAppearance>()
-                        + c.appearance
-                            .iter()
-                            .map(super::NodeAppearance::heap_bytes)
-                            .sum::<usize>()
+                        + super::contents::appearance_bytes(&c.appearance)
+                        + super::contents::appearance_bytes(&c.cable)
                 })
                 .sum::<usize>()
             + self.starts.capacity()
@@ -293,6 +292,7 @@ impl<'a> SpawnEvaluation<'a> {
                         inputs: super::spawn_state::SpawnInitialization::default(),
                         placement: child.clone(),
                         appearance: Vec::new(),
+                        cable: Vec::new(),
                         lights: Vec::new(),
                         fluid,
                         tanks,

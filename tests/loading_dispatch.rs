@@ -12,6 +12,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     let mut stream = WorldStream::new(
         &reference,
         42,
+        the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,
             reference.world.draw_distance.default,
@@ -63,6 +64,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     let mut candidate = WorldStream::new(
         &reference,
         43,
+        the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,
             reference.world.draw_distance.default,
@@ -107,6 +109,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     );
     let mut runtime = the_long_slop::starting_area::GarageRuntime::new(
         &reference,
+        the_long_slop::world::GameMode::default(),
         reference.world.draw_distance.default,
     )
     .unwrap();

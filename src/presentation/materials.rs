@@ -1386,6 +1386,9 @@ impl MaterialExtension for SourceExtension {
             Mesh::ATTRIBUTE_UV_1,
             Mesh::ATTRIBUTE_TANGENT,
             Mesh::ATTRIBUTE_COLOR,
+            // Bevy reads joints at 6 and weights at 7 for a skinned mesh, such as the siphon hose.
+            Mesh::ATTRIBUTE_JOINT_INDEX,
+            Mesh::ATTRIBUTE_JOINT_WEIGHT,
         ]
         .into_iter()
         .enumerate()
@@ -1534,7 +1537,7 @@ impl AsBindGroup for SourceReceiver {
     }
     fn unprepared_bind_group(
         &self,
-        layout: &BindGroupLayout,
+        _: &BindGroupLayout,
         device: &RenderDevice,
         params: &mut SystemParamItem<Self::Param>,
         _: bool,
@@ -1544,7 +1547,7 @@ impl AsBindGroup for SourceReceiver {
             .cookies
             .as_ref()
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
-        let mut result = UnpreparedBindGroup {
+        let result = UnpreparedBindGroup {
             bindings: BindingResources(vec![
                 (
                     100,
@@ -1617,7 +1620,7 @@ impl AsBindGroup for SourceReceiver {
         };
         Ok(result)
     }
-    fn bind_group_layout_entries(device: &RenderDevice, force: bool) -> Vec<BindGroupLayoutEntry> {
+    fn bind_group_layout_entries(_: &RenderDevice, _: bool) -> Vec<BindGroupLayoutEntry> {
         use binding_types::*;
         let mut entries = BindGroupLayoutEntries::with_indices(
             ShaderStages::FRAGMENT,

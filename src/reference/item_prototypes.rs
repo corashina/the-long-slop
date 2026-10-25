@@ -32,7 +32,8 @@ pub struct HoseReference {
     pub source: SourceId,
     /// Segment bodies in chain order.
     pub segments: [BodyId; HOSE_SEGMENTS],
-    pub main: BodyId,
+    /// Segments with `tubescript.isMain`. Each one runs `Fill` once per frame.
+    pub mains: Vec<BodyId>,
     pub t1: BodyId,
     pub t2: BodyId,
     /// `tubescript.breakForce` per segment.
@@ -117,10 +118,14 @@ impl HoseReference {
                 }),
             "hose joint chain",
         )?;
+        ids(self.mains.iter().copied(), "duplicate hose main")?;
         require(
-            [self.main, self.t1, self.t2]
-                .iter()
-                .all(|b| segments.contains(b))
+            !self.mains.is_empty()
+                && self
+                    .mains
+                    .iter()
+                    .chain([&self.t1, &self.t2])
+                    .all(|b| segments.contains(b))
                 && self.t1 != self.t2,
             "hose main or end segment",
         )?;
