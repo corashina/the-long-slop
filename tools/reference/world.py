@@ -374,6 +374,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         if item['index'] not in required_items:item['exclusion']='outside_selected_pools'
     print(f'Selected {len(roots)} prototypes and {len(selected.records)} caller records',flush=True)
     source.world_prototype_roots=set(roots)
+    from .world_biome_materials import scene_component, recover_sets, SETS_CLASS
+    source.biome_material_sets=recover_sets(source,scene_component(source,reader,SETS_CLASS))
+    source.biome_sets_used=set()
     source.world_material_source=copy.copy(source)
     source.world_material_source.lighting_textures={}
     source.world_material_export=lambda material:source_material(source,selected,material,output,source.world_material_source)
@@ -418,6 +421,10 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     from .world_mechanisms import recover_world_mechanisms
     world['mechanisms'] = recover_world_mechanisms(source,selected,world)
     from .world_paintings import export_paintings
+    from .world_biome_materials import export_sets
+    world['biome_material_sets'] = export_sets(source.biome_material_sets,source.biome_sets_used,selected)
+    marked=sum(n['biome_materials'] for p in world['prototypes'] for n in p['nodes'])
+    print(f'Biome materials: {len(world["biome_material_sets"])} of {len(source.biome_material_sets)} sets used; {marked} marked nodes',flush=True)
     world['painting_materials'] = export_paintings(source,reader,selected,world,output,max(p['asset'] for p in world['prototypes'])+1)
     receipts={tuple(r['source'].values()):r for r in world['receipts']}
     receipts.update(selected.receipts)
@@ -591,6 +598,9 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
         exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
         report=exporter.export([root])
+        from .world_biome_materials import check_exported, swaps
+        check_exported(source.biome_material_sets,exporter.biome_sets,{tuple(m['source'].values()) for m in report['materials']+report['deferred_materials']},name)
+        source.biome_sets_used.update(exporter.biome_sets)
         for material in report['materials']:
             selected.record(source.get(material['source']['file'],material['source']['path_id']))
             for texture in material['properties']['textures']:
@@ -603,7 +613,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             selected.record(node['game_object'])
         mapping={key(node['reader']):i for i,node in enumerate(hierarchy)}
         nodes=[{'source':r['source'],'name':source.read(n['game_object'])['m_Name'],'parent':mapping[key(n['parent'])] if n['parent'] else None,
-                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node']} for r,n in zip(report['nodes'],hierarchy)]
+                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node'],'biome_materials':swaps(source,n['components'])} for r,n in zip(report['nodes'],hierarchy)]
         local=copy.copy(source)
         ancestor_count=len(source.chain(root))
         local.chain=lambda transform: source.chain(transform)[:-ancestor_count]

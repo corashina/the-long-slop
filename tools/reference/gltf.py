@@ -123,6 +123,12 @@ class GltfExporter(GltfBuilder):
                         for field in ('mON','mOFF'): add(component,row[field])
                 elif name == 'radioscript':
                     for field in ('SOn','SOff','MutatoOn','MutatoOff'): add(component, data[field])
+        from .world_biome_materials import used_sets
+        sets = self.source.biome_material_sets
+        self.biome_sets = used_sets(self.source, records, sets)
+        for index in self.biome_sets:
+            for material in sets[index]:
+                if material is not None: materials[key(material)] = material
         for material in materials.values():
             shader = self.source.resolve(material, self.source.read(material)['m_Shader'])
             if self.source.read(shader)['m_ParsedForm']['m_Name'] in FAMILIES:
