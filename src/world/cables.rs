@@ -191,6 +191,30 @@ impl CableRecipes {
             seed,
         })
     }
+    /// Upper bound of `road` output poses for a road biome.
+    pub fn road_ropes(&self, biome: u8) -> usize {
+        self.roads[biome as usize].ropes.len()
+    }
+    pub fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.roads.capacity() * std::mem::size_of::<RoadCable>()
+            + self
+                .roads
+                .iter()
+                .map(|r| {
+                    r.ropes.capacity() * std::mem::size_of::<Rope>()
+                        + r.targets.capacity() * std::mem::size_of::<Vector>()
+                })
+                .sum::<usize>()
+            + self.buildings.capacity() * std::mem::size_of::<BuildingCable>()
+            + self
+                .buildings
+                .iter()
+                .map(|b| {
+                    b.prototype.file.capacity() + b.ropes.capacity() * std::mem::size_of::<usize>()
+                })
+                .sum::<usize>()
+    }
     pub fn building(&self, prototype: &SourceId) -> Option<&BuildingCable> {
         self.buildings.iter().find(|b| &b.prototype == prototype)
     }

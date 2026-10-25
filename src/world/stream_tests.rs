@@ -1706,6 +1706,93 @@ fn content_index_matches_linear_lookups() {
     }
 }
 
+#[test]
+#[ignore = "requires the installed source export"]
+fn road_pole_cable_reaches_the_next_pole() {
+    use bevy::math::{Mat4, Quat, Vec3};
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let stream = &mut run.stream;
+    let road = stream
+        .selected_roads
+        .iter()
+        .find(|r| r.light.is_some() && r.segment.index + 1 < super::super::road::ROAD_SEGMENTS)
+        .unwrap();
+    let (segment, light) = (road.segment, road.light.clone().unwrap());
+    let next = stream.roads.segment(segment.index + 1).unwrap();
+    let next_light = stream.road_light.place(&stream.reference, &next).unwrap();
+    let prototype = |light: &super::super::WorldLight| {
+        stream
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| p.source == light.prototype)
+            .unwrap()
+    };
+    // Unity TRS chain relative to the first pole, with appearance overrides.
+    let origin = light.pole.position;
+    let worlds = |light: &super::super::WorldLight, appearance: &[super::super::NodeAppearance]| {
+        let prototype = prototype(light);
+        let root = Mat4::from_scale_rotation_translation(
+            Vec3::from_array(light.scale),
+            Quat::from_array(light.pole.rotation),
+            Vec3::from_array([0, 1, 2].map(|a| (light.pole.position[a] - origin[a]) as f32)),
+        );
+        let local = |i: usize| {
+            let node = &prototype.nodes[i];
+            let last = |f: fn(&super::super::NodeAppearance) -> bool| {
+                appearance
+                    .iter()
+                    .rev()
+                    .find(|a| a.node == node.source && f(a))
+            };
+            Mat4::from_scale_rotation_translation(
+                Vec3::from_array(
+                    last(|a| a.scale.is_some()).map_or(node.transform.scale, |a| a.scale.unwrap()),
+                ),
+                Quat::from_array(
+                    last(|a| a.rotation.is_some())
+                        .map_or(node.transform.rotation, |a| a.rotation.unwrap()),
+                ),
+                Vec3::from_array(node.transform.translation),
+            )
+        };
+        (0..prototype.nodes.len())
+            .map(|i| {
+                let mut matrix = local(i);
+                let mut parent = prototype.nodes[i].parent;
+                while let Some(p) = parent {
+                    matrix = local(p as usize) * matrix;
+                    parent = prototype.nodes[p as usize].parent;
+                }
+                root * matrix
+            })
+            .collect::<Vec<_>>()
+    };
+    let cable = stream.appearance(&light.id);
+    assert!(!cable.is_empty());
+    let from = worlds(&light, cable);
+    let to = worlds(&next_light, &[]);
+    for rope in cable {
+        let i = prototype(&light)
+            .nodes
+            .iter()
+            .position(|n| n.source == rope.node)
+            .unwrap();
+        let start = from[i].transform_point3(Vec3::ZERO);
+        let forward = from[i].transform_vector3(Vec3::NEG_Z).normalize();
+        // Source ropeScript.Connect: localScale z = distance / 100.
+        let end = start + forward * rope.scale.unwrap()[2] * 100.;
+        assert!(
+            to.iter()
+                .any(|m| m.transform_point3(Vec3::ZERO).distance(end) < 0.01),
+            "rope {:?} does not reach a next pole node",
+            rope.node
+        );
+    }
+}
+
 fn decoration_source(path_id: i64) -> SourceId {
     SourceId {
         file: "sharedassets1.assets".into(),

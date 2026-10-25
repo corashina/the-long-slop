@@ -362,6 +362,37 @@ fn scaled_geometry(
     }
 }
 
+/// True when appearance overrides the rotation or scale of a node or its ancestors.
+fn moves_node(
+    prototype: &WorldPrototypeReference,
+    node: usize,
+    appearance: &[super::spawn_appearance::NodeAppearance],
+) -> bool {
+    let mut node = Some(node);
+    while let Some(i) = node {
+        let source = &prototype.nodes[i].source;
+        if appearance
+            .iter()
+            .any(|a| &a.node == source && (a.scale.is_some() || a.rotation.is_some()))
+        {
+            return true;
+        }
+        node = prototype.nodes[i].parent.map(|n| n as usize);
+    }
+    false
+}
+/// True when appearance changes collider geometry, so the shared recipe does not apply.
+pub(crate) fn moves_colliders(
+    prototype: &WorldPrototypeReference,
+    appearance: &[super::spawn_appearance::NodeAppearance],
+) -> bool {
+    !appearance.is_empty()
+        && prototype
+            .colliders
+            .iter()
+            .any(|c| moves_node(prototype, c.node as usize, appearance))
+}
+
 /// Source mesh points are baked in the owning body frame. Apply child rotation and scale there.
 fn node_scaled_geometry(
     prototype: &WorldPrototypeReference,
@@ -377,11 +408,7 @@ fn node_scaled_geometry(
         chain.push(i);
         node = prototype.nodes[i].parent.map(|n| n as usize);
     }
-    if !chain.iter().any(|&i| {
-        appearance.iter().any(|a| {
-            a.node == prototype.nodes[i].source && (a.scale.is_some() || a.rotation.is_some())
-        })
-    }) {
+    if !moves_node(prototype, record.node as usize, appearance) {
         return Ok(geometry.clone());
     }
     let body = record

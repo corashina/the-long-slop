@@ -111,6 +111,8 @@ struct PreparedSurface {
 struct SelectedRoad {
     segment: RoadSegment,
     light: Option<super::WorldLight>,
+    /// Pole rope poses toward the next segment pole.
+    cable: Vec<super::NodeAppearance>,
 }
 struct RoadWork {
     pending_bytes: usize,
@@ -177,6 +179,7 @@ pub struct WorldStream {
     change_bounds: Option<[WorldBounds; 2]>,
     imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
     road_light: super::source_lights::SourceRoadLight,
+    cables: super::cables::CableRecipes,
     lights: Vec<super::WorldLight>,
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
@@ -690,8 +693,10 @@ impl WorldStream {
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
+        let cables = super::cables::CableRecipes::new(world, seed)?;
         if shared_cpu_bytes
             .saturating_add(road_light.retained_bytes())
+            .saturating_add(cables.retained_bytes())
             .saturating_add(contents.rules.retained_bytes())
             .saturating_add(structure_helpers.retained_bytes())
             > PROTOTYPE_CPU
@@ -742,6 +747,7 @@ impl WorldStream {
             change_bounds: None,
             imported_baselines: Vec::new(),
             road_light,
+            cables,
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
@@ -2086,6 +2092,13 @@ impl WorldStream {
         self.contents.initialized(id)
     }
     pub fn appearance(&self, id: &super::GeneratedId) -> &[super::NodeAppearance] {
+        if id.layer == WorldLayer::Lamp {
+            return self
+                .selected_roads
+                .iter()
+                .find(|r| i64::from(r.segment.index) == id.unit[0])
+                .map_or(&[], |r| &r.cable);
+        }
         self.contents.appearance(id)
     }
     pub fn lamp_materials(
@@ -2375,24 +2388,46 @@ impl WorldStream {
                 self.failure = Some("Selected road descriptors exceed 512 roads".into());
                 return;
             }
-            // Reserve retained output, vector overlap, the light identity, and pole placement before selection.
+            // Source roadGenScript links rope i to segment i + 1. The index prepares ahead of selection.
+            let next = if index + 1 < super::road::ROAD_SEGMENTS {
+                let next = match self.roads.prepare_segment(index + 1, 8) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        self.failure = Some(error.0);
+                        return;
+                    }
+                };
+                self.last_road_work += self.roads.replay_work();
+                let Some(next) = next else {
+                    return;
+                };
+                Some(next)
+            } else {
+                None
+            };
+            // Reserve retained output, vector overlap, the light identity, the cable, and pole placement before selection.
             let prototype = self
                 .reference
                 .prototypes
                 .iter()
                 .find(|p| p.source == self.reference.road.prototypes[segment.biome as usize])
                 .unwrap();
-            let light_heap = self.road_light.retained_bytes()
-                + prototype
-                    .nodes
-                    .iter()
-                    .map(|n| n.source.file.capacity())
-                    .sum::<usize>();
+            let node_heap = prototype
+                .nodes
+                .iter()
+                .map(|n| n.source.file.capacity())
+                .sum::<usize>();
+            let light_heap = self.road_light.retained_bytes() + node_heap;
+            let cable_bytes = self.cables.road_ropes(segment.biome)
+                * (std::mem::size_of::<super::NodeAppearance>()
+                    + std::mem::size_of::<super::cables::NodePose>())
+                + node_heap;
             let bytes = (self.selected_roads.capacity() + 1) * std::mem::size_of::<SelectedRoad>()
                 + prototype.nodes.len() * std::mem::size_of::<road_mesh::RoadFrame>()
                 + 2 * (std::mem::size_of::<super::WorldLight>() + light_heap)
                 + (self.wanted_structures.capacity() + 1) * std::mem::size_of::<Placement>()
-                + 2 * light_heap;
+                + 2 * light_heap
+                + cable_bytes;
             if !self.admit_generation(bytes) {
                 return;
             }
@@ -2405,7 +2440,30 @@ impl WorldStream {
                 return;
             }
             let light = self.road_light.place(&self.reference, &segment);
-            self.selected_roads.push(SelectedRoad { segment, light });
+            let mut cable = Vec::new();
+            if let Some(next) = next {
+                let mut poses = Vec::new();
+                self.cables
+                    .road(&self.reference, &segment, &next, &mut poses);
+                cable = poses
+                    .into_iter()
+                    .map(|pose| super::NodeAppearance {
+                        node: pose.node,
+                        primary: None,
+                        scale: Some(pose.scale),
+                        rotation: Some(pose.rotation),
+                        active: None,
+                        material: None,
+                        color: None,
+                        color_material: None,
+                    })
+                    .collect();
+            }
+            self.selected_roads.push(SelectedRoad {
+                segment,
+                light,
+                cable,
+            });
         }
         let retained = self
             .selected_roads
@@ -3771,11 +3829,9 @@ impl WorldStream {
                 "Source generated bindings exceed admission budget".into(),
             ));
         }
-        let appearance = self.contents.appearance(&placement.id);
+        let appearance = self.appearance(&placement.id);
         let instance = if placement.scale == prototype.prefab_pose.scale
-            && !appearance
-                .iter()
-                .any(|a| a.scale.is_some() || a.rotation.is_some())
+            && !super::instances::moves_colliders(prototype, appearance)
         {
             self.recipes[&placement.prototype].publish(
                 placement.clone(),
@@ -3809,7 +3865,7 @@ impl WorldStream {
             instance.cpu_bytes += extra;
             instance
         };
-        let appearance = self.contents.appearance(&placement.id);
+        let appearance = self.appearance(&placement.id);
         for (index, body) in prototype.bodies.iter().enumerate() {
             physics.edit_body(instance.bodies[index], |state| {
                 state.set_enabled(super::spawn_appearance::node_active(
@@ -4580,6 +4636,7 @@ impl WorldStream {
                     .map(road_mesh::RoadPrototype::retained_bytes)
                     .sum::<usize>()
                 + self.road_light.retained_bytes()
+                + self.cables.retained_bytes()
                 + self.contents.rules.retained_bytes()
                 + self.building_components.retained_bytes()
                 + self.structure_helpers.retained_bytes()
@@ -4699,6 +4756,17 @@ impl WorldStream {
                     .iter()
                     .filter_map(|r| r.light.as_ref())
                     .map(super::WorldLight::heap_bytes)
+                    .sum::<usize>()
+                + self
+                    .selected_roads
+                    .iter()
+                    .map(|r| {
+                        r.cable.capacity() * std::mem::size_of::<super::NodeAppearance>()
+                            + r.cable
+                                .iter()
+                                .map(super::NodeAppearance::heap_bytes)
+                                .sum::<usize>()
+                    })
                     .sum::<usize>()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
