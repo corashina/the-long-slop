@@ -362,7 +362,7 @@ fn scaled_geometry(
     }
 }
 
-/// Source mesh points are baked in the owning body frame. Apply child scale there.
+/// Source mesh points are baked in the owning body frame. Apply child rotation and scale there.
 fn node_scaled_geometry(
     prototype: &WorldPrototypeReference,
     record: &crate::reference::WorldColliderReference,
@@ -378,9 +378,9 @@ fn node_scaled_geometry(
         node = prototype.nodes[i].parent.map(|n| n as usize);
     }
     if !chain.iter().any(|&i| {
-        appearance
-            .iter()
-            .any(|a| a.node == prototype.nodes[i].source && a.scale.is_some())
+        appearance.iter().any(|a| {
+            a.node == prototype.nodes[i].source && (a.scale.is_some() || a.rotation.is_some())
+        })
     }) {
         return Ok(geometry.clone());
     }
@@ -410,7 +410,13 @@ fn node_scaled_geometry(
                 .find(|a| a.node == prototype.nodes[i].source && a.scale.is_some())
                 .and_then(|a| a.scale)
                 .unwrap_or(t.scale);
-            p = Rotation::from_array(t.rotation) * (p * Vector::from_array(scale))
+            let rotation = appearance
+                .iter()
+                .rev()
+                .find(|a| a.node == prototype.nodes[i].source && a.rotation.is_some())
+                .and_then(|a| a.rotation)
+                .unwrap_or(t.rotation);
+            p = Rotation::from_array(rotation) * (p * Vector::from_array(scale))
                 + Vector::from_array(t.translation);
         }
         (body.inverse() * p).to_array()

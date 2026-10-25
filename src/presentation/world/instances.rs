@@ -366,22 +366,18 @@ impl SourceInstances {
                                         Vec3::from_array(node.translation),
                                     )
                                 };
-                                let mut local = local;
-                                if let Some(source) =
-                                    prototype.nodes.iter().find(|n| n.gltf_node == node.index)
+                                let local = match prototype
+                                    .nodes
+                                    .iter()
+                                    .find(|n| n.gltf_node == node.index)
                                 {
-                                    if let Some(scale) = stream
-                                        .appearance(&placement.id)
-                                        .iter()
-                                        .rev()
-                                        .find(|a| a.node == source.source && a.scale.is_some())
-                                        .and_then(|a| a.scale)
-                                    {
-                                        let mut transform = Transform::from_matrix(local);
-                                        transform.scale = Vec3::from_array(scale);
-                                        local = transform.to_matrix();
-                                    }
-                                }
+                                    Some(source) => override_local(
+                                        local,
+                                        stream.appearance(&placement.id),
+                                        &source.source,
+                                    ),
+                                    None => local,
+                                };
                                 worlds[node.index as usize] = local.as_dmat4();
                                 nodes.push(
                                     commands
@@ -424,22 +420,18 @@ impl SourceInstances {
                                             Vec3::from_array(parent.translation),
                                         )
                                     };
-                                    let mut local = local;
-                                    if let Some(source) =
-                                        prototype.nodes.iter().find(|n| n.gltf_node == parent.index)
+                                    let local = match prototype
+                                        .nodes
+                                        .iter()
+                                        .find(|n| n.gltf_node == parent.index)
                                     {
-                                        if let Some(scale) = stream
-                                            .appearance(&placement.id)
-                                            .iter()
-                                            .rev()
-                                            .find(|a| a.node == source.source && a.scale.is_some())
-                                            .and_then(|a| a.scale)
-                                        {
-                                            let mut transform = Transform::from_matrix(local);
-                                            transform.scale = Vec3::from_array(scale);
-                                            local = transform.to_matrix();
-                                        }
-                                    }
+                                        Some(source) => override_local(
+                                            local,
+                                            stream.appearance(&placement.id),
+                                            &source.source,
+                                        ),
+                                        None => local,
+                                    };
                                     matrix = local * matrix;
                                     current = parent.index;
                                 }
@@ -1506,6 +1498,34 @@ fn active_food(
         node = parent as usize;
     }
     false
+}
+/// Applies the last rotation and the last scale override of a node to its local transform.
+fn override_local(
+    local: Mat4,
+    appearance: &[crate::world::NodeAppearance],
+    node: &crate::reference::SourceId,
+) -> Mat4 {
+    let rotation = appearance
+        .iter()
+        .rev()
+        .find(|a| &a.node == node && a.rotation.is_some())
+        .and_then(|a| a.rotation);
+    let scale = appearance
+        .iter()
+        .rev()
+        .find(|a| &a.node == node && a.scale.is_some())
+        .and_then(|a| a.scale);
+    if rotation.is_none() && scale.is_none() {
+        return local;
+    }
+    let mut transform = Transform::from_matrix(local);
+    if let Some(rotation) = rotation {
+        transform.rotation = Quat::from_array(rotation);
+    }
+    if let Some(scale) = scale {
+        transform.scale = Vec3::from_array(scale);
+    }
+    transform.to_matrix()
 }
 fn active(
     prototype: &WorldPrototypeReference,

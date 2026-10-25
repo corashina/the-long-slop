@@ -308,6 +308,7 @@ impl WorldStream {
                     material: Some(material.clone()),
                     color: None,
                     color_material: None,
+                    rotation: None,
                 });
             }
         }

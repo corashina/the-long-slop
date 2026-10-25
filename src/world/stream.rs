@@ -3773,7 +3773,9 @@ impl WorldStream {
         }
         let appearance = self.contents.appearance(&placement.id);
         let instance = if placement.scale == prototype.prefab_pose.scale
-            && !appearance.iter().any(|a| a.scale.is_some())
+            && !appearance
+                .iter()
+                .any(|a| a.scale.is_some() || a.rotation.is_some())
         {
             self.recipes[&placement.prototype].publish(
                 placement.clone(),
