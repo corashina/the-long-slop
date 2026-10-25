@@ -2,7 +2,7 @@
 
 Updated: 2026-10-25. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
-Save format authority: [save schema](../src/save/schema.rs).
+Save format authority: [save schema](src/save/schema.rs).
 
 ## Frame rate rule
 
@@ -14,8 +14,7 @@ If a feature drops the frame rate, fix the cost before merge or agree a cut.
 
 Work section by section, in the order below. Keep the game playable after each task.
 Recheck the code and the original before each task. Complete missing behavior and verify existing behavior.
-Follow [AGENTS.md](../AGENTS.md) for checks.
-Measure original driving before changing tire, rim, hub, suspension, or brake physics. See [G11 measurements](g11-driving-measurements.md).
+Follow [AGENTS.md](AGENTS.md) for checks.
 Remove a row when its task is done. Do not mark rows done.
 
 IDs in brackets are points in the 1:1 parity list (`plans/parity-1to1.md` in the project files).
@@ -56,20 +55,20 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| W01 | Restore world range. [World](../src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
+| W01 | Restore world range. [World](src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W03 | Add biomes. [Terrain](../crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
-| W04 | Expand buildings. [Generation](../src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
+| W03 | Add biomes. [Terrain](crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
+| W04 | Expand buildings. [Generation](src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
 | W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
-| W08 | Add grass tracks. [Grass](../web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
+| W08 | Add grass tracks. [Grass](web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
 
 ## 4. More cars
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V01 | Add a general vehicle loader. [Vehicles](vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
+| V01 | Add a general vehicle loader. [Vehicles](docs/vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. [B02-B04, B06, B07, L06] |
 | V03 | Add buses. | XL | Diesel rules, three buses, doors, door lamps, bus trailer. [B05, B08-B11] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle, sled. [B12-B14] |
