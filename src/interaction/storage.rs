@@ -100,8 +100,8 @@ impl StorageLocks {
                 dropped_at: 0.0,
             });
         }
-        let mut volumes = Vec::with_capacity(reference.flashlights.storage.volumes.len());
-        for record in &reference.flashlights.storage.volumes {
+        let mut volumes = Vec::with_capacity(reference.storage.volumes.len());
+        for record in &reference.storage.volumes {
             let collider = reference
                 .colliders
                 .iter()
@@ -143,7 +143,7 @@ impl StorageLocks {
                 current: Vec::with_capacity(reference.colliders.len()),
             });
         }
-        let policy = &reference.flashlights.storage;
+        let policy = &reference.storage.policy;
         Ok(Self {
             part_usables: reference
                 .mechanisms
