@@ -1469,6 +1469,7 @@ pub enum AudioKind {
     Footstep = 15,
     StormInside = 16,
     MeleeHit = 17,
+    MetalDetector = 18,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1497,6 +1498,17 @@ impl AudioState {
         }
     }
     pub fn source_loop(&mut self, kind: AudioKind, emitter: u32, gain: f32, position: [f64; 3]) {
+        self.pitched_loop(kind, emitter, gain, None, position);
+    }
+    /// A loop whose pitch the source sets each frame. `None` keeps the source pitch.
+    pub fn pitched_loop(
+        &mut self,
+        kind: AudioKind,
+        emitter: u32,
+        gain: f32,
+        pitch: Option<f32>,
+        position: [f64; 3],
+    ) {
         let b = self
             .reference
             .survival
@@ -1510,7 +1522,7 @@ impl AudioState {
             action: AudioAction::Update,
             clip: b.clips[0],
             gain,
-            pitch: b.pitch[0],
+            pitch: pitch.unwrap_or(b.pitch[0]),
             position,
         };
         if let Some(old) = self
@@ -1556,6 +1568,10 @@ impl AudioState {
     pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
         self.survival_loops
             .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
+    }
+    /// Stops the loops of every emitter of a kind.
+    pub fn stop_survival_loops(&mut self, kind: AudioKind) {
+        self.survival_loops.retain(|v| v.kind != kind);
     }
 }
 

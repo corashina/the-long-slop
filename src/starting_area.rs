@@ -997,6 +997,22 @@ impl GarageRuntime {
                     audio.music_note(origin.absolute(item.pose.position), pitch, detune, chance);
                 }
             });
+        // metalDetectorScript.Turn stops the beep of a detector that is off.
+        if let Some(audio) = audio.as_mut() {
+            audio.stop_survival_loops(crate::audio::AudioKind::MetalDetector);
+        }
+        self.stream
+            .advance_detectors(dt, items, &self.physics, |item, position, pitch, volume| {
+                if let Some(audio) = audio.as_mut() {
+                    audio.pitched_loop(
+                        crate::audio::AudioKind::MetalDetector,
+                        item.0,
+                        volume,
+                        Some(pitch),
+                        origin.absolute(position),
+                    );
+                }
+            });
         for (index, owner) in self.light_owners.iter().enumerate() {
             self.lighting.set_controller_mounted(
                 index,
@@ -1194,6 +1210,7 @@ impl GarageRuntime {
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
                 if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                    && !self.stream.switch_detector(knob, &mut self.area.items)
                     && let Some((item, true)) =
                         self.stream
                             .radio_control(knob, direction, &mut self.area.items)

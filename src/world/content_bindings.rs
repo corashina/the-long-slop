@@ -74,6 +74,12 @@ impl WorldStream {
                     .and_then(|c| c.snapshot.as_ref())
                     .and_then(|s| s.radio)
             });
+            snapshot.detector = self.detector_value(id).or_else(|| {
+                self.changes
+                    .get(&key)
+                    .and_then(|c| c.snapshot.as_ref())
+                    .and_then(|s| s.detector)
+            });
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
                     == rapier3d::prelude::RigidBodyType::KinematicPositionBased
@@ -1053,9 +1059,7 @@ impl WorldStream {
             if !departing && (distance < remove * remove || protected) && !removed {
                 if let Some(body) = id.and_then(|id| items.get(id)).and_then(|s| s.body) {
                     if !protected
-                        && (buried
-                            || distance >= freeze * freeze
-                            || distance < unfreeze * unfreeze)
+                        && (buried || distance >= freeze * freeze || distance < unfreeze * unfreeze)
                     {
                         let kind = if buried || distance >= freeze * freeze {
                             rapier3d::prelude::RigidBodyType::KinematicPositionBased

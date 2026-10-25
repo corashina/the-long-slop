@@ -1076,6 +1076,17 @@ impl SourceInstances {
                     }
                 }
             }
+            if let Some(detector) = stream.detector(&instance.placement.id) {
+                let n = &detector.needle;
+                let node = prototype.nodes[n.node].gltf_node as usize;
+                if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
+                    transform.set_if_neq(Transform {
+                        translation: Vec3::from_array(n.pose.translation),
+                        rotation: Quat::from_array(n.pose.rotation),
+                        scale: Vec3::from_array(n.pose.scale),
+                    });
+                }
+            }
             if let Some(dial) = stream.dial(&instance.placement.id) {
                 for n in dial.nodes() {
                     let node = prototype.nodes[n.node].gltf_node as usize;
