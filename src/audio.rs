@@ -1580,13 +1580,7 @@ impl AmbientState {
         storm: f32,
         dt: f32,
     ) -> [f32; 2] {
-        use crate::lighting::CyclePhase;
-        let night = match cycle.phase {
-            CyclePhase::Night => 1.,
-            CyclePhase::Day => 0.,
-            CyclePhase::Dawn => 1. - cycle.progress,
-            CyclePhase::Dusk => cycle.progress,
-        };
+        let night = cycle.night();
         let modifier =
             self.modifier * self.only_modifier * (cycle.biome_color[0] - cycle.biome_color[2]);
         let gains = [reference.day_volume, reference.night_volume]

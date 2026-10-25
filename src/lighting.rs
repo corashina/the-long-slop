@@ -52,6 +52,18 @@ pub struct CycleOutput {
     pub shader_time_seconds: f64,
 }
 
+impl CycleOutput {
+    /// Source night weight: 0 by day, 1 at night. Dawn and dusk follow the phase progress.
+    pub fn night(&self) -> f32 {
+        match self.phase {
+            CyclePhase::Night => 1.,
+            CyclePhase::Day => 0.,
+            CyclePhase::Dawn => 1. - self.progress,
+            CyclePhase::Dusk => self.progress,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CycleAdvance {
     pub simulation_delta: f32,

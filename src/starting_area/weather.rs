@@ -154,6 +154,15 @@ impl GarageRuntime {
                     .flatten()
             },
         );
+        let volumes = &bindings.volumes;
+        self.weather.advance_particles(
+            &reference.weather,
+            dt,
+            player,
+            self.lighting.cycle.output().night(),
+            physics,
+            |collider| volumes.iter().any(|v| v.collider == collider),
+        );
         self.lighting
             .cycle
             .compose_weather(&reference.weather, self.weather.influence());

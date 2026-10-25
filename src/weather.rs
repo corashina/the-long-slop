@@ -50,8 +50,12 @@ pub struct Storm {
     /// Source distanceLerp when Wind runs, before this step computes it again.
     wind_strength: f32,
     targets: Vec<WindTarget>,
-    /// Big and small dust systems. Task 1.7 advances them.
+    /// Big and small dust systems.
     pub particles: [ParticleState; 2],
+    /// Source lastPos: the player position of the previous particle step.
+    last_player: Option<[f64; 3]>,
+    /// Small dust emitter. It stays in place while the player is outside `radius`.
+    small_position: [f64; 3],
 }
 
 pub struct WeatherState {
@@ -144,8 +148,18 @@ impl WeatherState {
                 let mut p =
                     ParticleState::new(&reference.particles[i], id.0 as u64 * 2 + i as u64 + 1);
                 p.rotation = Rotation::from_rotation_y(-yaw_degrees.to_radians());
+                p.radius_scale = size;
+                // Update sets emission rates from defBRate* and defSRate*, scaled by strength.
+                let [time, distance] = if i == 0 {
+                    [r.def_b_rate_t, r.def_b_rate_d]
+                } else {
+                    [r.def_s_rate_t, r.def_s_rate_d]
+                };
+                p.set_rates(time, distance);
                 p
             }),
+            last_player: None,
+            small_position: position,
         });
         id
     }
@@ -227,6 +241,55 @@ impl WeatherState {
             }
         }
         self.storms.retain(|storm| storm.life > 0.);
+    }
+
+    /// Source dust after `advance`. `night` is the SetColorLerp weight: 0 day, 1 night.
+    /// `interior` selects interior colliders. Particles that touch them are removed.
+    pub fn advance_particles(
+        &mut self,
+        reference: &WeatherReference,
+        dt: f32,
+        player_absolute: [f64; 3],
+        night: f32,
+        physics: &PhysicsWorld,
+        interior: impl Fn(ColliderHandle) -> bool,
+    ) {
+        if !dt.is_finite() || dt <= 0. {
+            return;
+        }
+        let r = &reference.storm;
+        for storm in &mut self.storms {
+            let last = storm.last_player.unwrap_or(player_absolute);
+            storm.last_player = Some(player_absolute);
+            if storm.previous_distance < r.radius {
+                storm.small_position = small_emitter(player_absolute, last, dt, r.yoffset);
+            }
+            let emitters = [
+                (storm.absolute_position, storm.life_strength),
+                (storm.small_position, storm.strength),
+            ];
+            for (p, (position, strength)) in storm.particles.iter_mut().zip(emitters) {
+                let first = crate::lighting::gradient(&r.day_color1, p.time());
+                let second = crate::lighting::gradient(&r.day_color2, p.time());
+                let draw = p.random_draw();
+                p.start_color = Some(std::array::from_fn(|j| {
+                    let day = first[j] + (second[j] - first[j]) * draw;
+                    day + (r.night_color[j] - day) * night
+                }));
+                p.set_origin(self.origin);
+                p.advance(dt, position, strength, physics);
+                p.remove_inside(physics, &interior);
+            }
+        }
+    }
+
+    /// Live dust particles of all storms.
+    pub fn particle_count(&self) -> usize {
+        self.storms
+            .iter()
+            .flat_map(|s| &s.particles)
+            .map(|p| p.particles().len())
+            .sum()
     }
 
     /// Collects wind targets once per `wind_scan_seconds` for each storm.
@@ -322,6 +385,15 @@ impl WeatherState {
             }
         }
     }
+}
+
+/// Source small dust position: halfway between lastPos and the player, led by twice its velocity.
+fn small_emitter(player: [f64; 3], last: [f64; 3], dt: f32, yoffset: f32) -> [f64; 3] {
+    let dt = dt.clamp(0.0001, 1.) as f64;
+    std::array::from_fn(|i| {
+        let up = if i == 1 { yoffset as f64 } else { 0. };
+        (player[i] + (player[i] - last[i]) / dt * 2. + up + last[i]) * 0.5
+    })
 }
 
 /// A separate deterministic stream. Unity's native random sequence is unrecovered.
@@ -525,6 +597,85 @@ pub(crate) mod tests {
         assert!((d - 15000.).abs() < 0.2, "{d}");
         assert!((0.5..=1.5).contains(&storm.size));
         assert!((3. ..=12.).contains(&storm.speed));
+    }
+
+    /// Storm reference with emitting dust systems and flat day colors.
+    fn dusty() -> WeatherReference {
+        let mut r = reference();
+        let flat = |value: [f32; 4]| GradientReference {
+            mode: 0,
+            colors: vec![crate::reference::GradientColor { time: 0., value }],
+            alphas: vec![crate::reference::GradientAlpha {
+                time: 0.,
+                value: value[3],
+            }],
+        };
+        r.storm.day_color1 = flat([1., 0., 0., 1.]);
+        r.storm.day_color2 = flat([1., 0., 0., 1.]);
+        r.storm.night_color = [0., 0., 1., 1.];
+        r.storm.def_b_rate_t = 20.;
+        r.storm.def_s_rate_t = 10.;
+        r.storm.yoffset = 2.;
+        r.particles = ["storm_big", "storm_small"]
+            .map(|role| ParticleReference {
+                role: role.into(),
+                ..crate::exhaust::tests::smoke(1000, 100.)
+            })
+            .into();
+        r
+    }
+
+    #[test]
+    fn small_dust_follows_player_and_rates_follow_distance() {
+        let r = dusty();
+        let physics = PhysicsWorld::empty_for_tests();
+        let mut weather = state(&r);
+        weather.storms[0].life = 1.;
+        let step = |weather: &mut WeatherState, player: [f64; 3]| {
+            weather.advance(&r, 0., 1., player, |_| (0., DESERT));
+            weather.advance_particles(&r, 1., player, 0.5, &physics, |_| false);
+        };
+        // distanceLerp 0.5 at 750 m. Small dust leads the player by twice its velocity.
+        step(&mut weather, [0., 0., 750.]);
+        assert_eq!(weather.storms[0].small_position, [0., 1., 750.]);
+        step(&mut weather, [0., 0., 751.]);
+        assert_eq!(weather.storms[0].small_position, [0., 1., 751.5]);
+        let count =
+            |weather: &WeatherState, i: usize| weather.storms[0].particles[i].particles().len();
+        assert_eq!(count(&weather, 0), 40, "defBRateT * llerp");
+        assert!(
+            (count(&weather, 1) as i32 - 10).abs() <= 1,
+            "defSRateT * distanceLerp"
+        );
+        // Day red lerped halfway to the night color.
+        let color = weather.storms[0].particles[0].particles()[0].color;
+        assert_eq!(color, [0.5, 0., 0.5, 1.]);
+        // Outside radius: the small emitter stops and stays.
+        let small = count(&weather, 1);
+        step(&mut weather, [0., 0., 1100.]);
+        assert_eq!(weather.storms[0].small_position, [0., 1., 751.5]);
+        assert_eq!(count(&weather, 1), small);
+        assert_eq!(count(&weather, 0), 60);
+    }
+
+    #[test]
+    fn interior_removes_dust() {
+        let mut r = dusty();
+        for p in &mut r.particles {
+            p.module_flags.insert("TriggerModule".into(), true);
+            p.scalars.insert("TriggerModule.inside".into(), 1.);
+            p.scalars.insert("TriggerModule.radiusScale".into(), 1.);
+        }
+        let mut physics = PhysicsWorld::empty_for_tests();
+        let interior = physics.insert_collider(ColliderBuilder::cuboid(5., 5., 5.).sensor(true));
+        physics.refresh_queries();
+        let mut weather = state(&r);
+        weather.storms[0].life = 1.;
+        weather.advance(&r, 0., 0.1, [0., 0., 750.], |_| (0., DESERT));
+        weather.advance_particles(&r, 0.1, [0., 0., 750.], 0., &physics, |_| false);
+        assert_eq!(weather.storms[0].particles[0].particles().len(), 2);
+        weather.advance_particles(&r, 0.1, [0., 0., 750.], 0., &physics, |c| c == interior);
+        assert!(weather.storms[0].particles[0].particles().is_empty());
     }
 
     #[test]
