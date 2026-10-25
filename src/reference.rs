@@ -2194,6 +2194,13 @@ impl ReferenceManifest {
             )?;
         }
         require(a.driveway_height.is_finite(), "driveway height")?;
+        let cable = &self.world.home_cable;
+        require(
+            !cable.ropes.is_empty()
+                && node_ids.contains(&cable.root)
+                && cable.ropes.iter().all(|id| node_ids.contains(id)),
+            "home cable",
+        )?;
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;

@@ -379,6 +379,7 @@ mod tests {
             material: None,
             color: None,
             color_material: None,
+            rotation: None,
         });
         active[1].caps.push(cap());
         controls[1].caps.push(cap());

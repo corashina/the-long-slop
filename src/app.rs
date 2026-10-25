@@ -246,6 +246,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
                 advance_physics,
                 sync_world,
                 sync_imported,
+                presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
                 presentation::spawned::sync,
                 sync_instruments,

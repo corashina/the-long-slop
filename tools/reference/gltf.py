@@ -365,7 +365,7 @@ class GltfExporter(GltfBuilder):
                         raise ValueError(f'{source_id(mesh_reader)} empty mesh has indices')
                     node.extras['source_empty_mesh']=source_id(mesh_reader)
                     mesh_reader=None
-                if mesh_reader and (((record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set()) or identity in getattr(self.source,'condition_geometry_nodes',set())) and render_enabled) or retain_world_geometry or player_asset or identity in getattr(self.source,'item_geometry_nodes',set())):
+                if mesh_reader and (((record['active'] or identity in getattr(self.source,'food_geometry_nodes',set()) or identity in getattr(self.source,'flashlight_inactive_nodes',set()) or identity in getattr(self.source,'condition_geometry_nodes',set()) or identity in getattr(self.source,'home_cable_geometry_nodes',set())) and render_enabled) or retain_world_geometry or player_asset or identity in getattr(self.source,'item_geometry_nodes',set())):
                     materials=[self.source.resolve(renderer,p) for p in renderer_data['m_Materials']]
                     selected=getattr(self.source,'lighting_startup_materials',{}).get(key(renderer)) or getattr(self.source,'condition_materials',{}).get(key(renderer))
                     if selected:materials=[selected for _ in materials]

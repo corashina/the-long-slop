@@ -17,6 +17,7 @@ PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8a
 CONTEXT = 'minimum_draw_distance_frozen_generation_frame'
 WORLD_DATABASE_ID = 66024
 BUILDING_FIELDS = ('berror','bkezdohaz','bkut','bbudi','bbenzinkut01','bbuszmegallo','blegjobbbenzinkut','bmuhely','bnagybenzinkut','boldhouse','boldpetrolstation','bturrethaz','bvizmu','btelefonfulke','bpost','bcabin','byellowfoodkut','bfalu01','bcastle')
+HOME_BUILDING = 70166
 GENERATORS = (65060, 64958, 64720, 65037)
 RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'stuffspawn',
     'terrainRandomStuffSpawn', 'terrainHeightAlignToBuildingScript', 'digholescript2',
@@ -28,7 +29,9 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Portable electronics (P09): compass, clock, radios, music box and their dials.
     'compassscript','simplecompassscript','clockscript','radioscript','musicboxscript','meterscript','mutatoscript','forgoszamlap',
     # Small item actions (P10): spirit level, spray bottle, boxes, wash spots, cigarette packs.
-    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript'}
+    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript',
+    # Power cables (W04): rope segments and their pole targets.
+    'ropeScript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
@@ -500,6 +503,30 @@ def recover_catalog(source, reader, selected, database):
     for row in categories:
         row['invalid_category_indices']=[i for i in row['categories'] or [] if i>=len(category_names)]
     return {'source':source_id(database),'items':items,'categories':sorted(categories,key=lambda c:c['index'])}
+
+def home_rope(source):
+    """The home buildingscript connectToPole ropeScript, its data and its root Transform."""
+    home=source.get('level1',HOME_BUILDING)
+    if source.class_name(home)!='buildingscript':raise ValueError(f'level1:{HOME_BUILDING} is not buildingscript')
+    rope=source.resolve(home,source.read(home)['connectToPole'])
+    if rope is None or source.class_name(rope)!='ropeScript':raise ValueError(f'level1:{HOME_BUILDING} connectToPole is not ropeScript')
+    data=source.read(rope)
+    return rope,data,source.transform_for(source.resolve(rope,data['m_GameObject']))
+
+def prepare_home_cable(source):
+    """The home rope root is inactive until it connects. Keep the meshes of its subtree."""
+    _,_,root=home_rope(source)
+    source.home_cable_geometry_nodes={key(n['reader']) for n in source.hierarchy(root,activate_root=True)}
+
+def recover_home_cable(source, nodes):
+    """Map the home buildingscript connectToPole rope to manifest node ids."""
+    rope,data,root=home_rope(source)
+    node_ids={(n['source']['file'],n['source']['path_id']):n['id'] for n in nodes}
+    def node(transform, field):
+        if transform is None or key(transform) not in node_ids:raise ValueError(f'{key(rope)} {field}: rope node is not exported')
+        return node_ids[key(transform)]
+    return {'root':node(root,'m_GameObject'),'ropes':[node(source.resolve(rope,p),f'ropes[{i}]') for i,p in enumerate(data['ropes'])]}
+
 
 def recover_grass_displacement(source, selected, prototypes):
     """Retain the checked displacement camera and selected renderer writers."""

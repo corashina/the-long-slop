@@ -11,6 +11,7 @@ fn activity(node: SourceId, active: bool) -> NodeAppearance {
         material: None,
         color: None,
         color_material: None,
+        rotation: None,
         scale: None,
     }
 }
@@ -70,6 +71,7 @@ impl SpawnEvaluation<'_> {
                             material: material.cloned(),
                             color: None,
                             color_material: None,
+                            rotation: None,
                             scale: None,
                         });
                     }
