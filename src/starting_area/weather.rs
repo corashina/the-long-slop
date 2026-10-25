@@ -157,5 +157,26 @@ impl GarageRuntime {
         self.lighting
             .cycle
             .compose_weather(&reference.weather, self.weather.influence());
+        let Some(audio) = &mut self.audio else {
+            return;
+        };
+        use crate::audio::AudioKind;
+        audio.remove_storm_loops(self.weather.storms());
+        // sandstormscript.Update: source.volume = defVolume * llerp.
+        let volume = audio
+            .reference
+            .survival
+            .iter()
+            .find(|b| b.kind == AudioKind::Storm as u32)
+            .expect("validated storm audio")
+            .gain[0];
+        for storm in self.weather.storms() {
+            audio.source_loop(
+                AudioKind::Storm,
+                storm.id.0,
+                volume * storm.life_strength,
+                storm.absolute_position,
+            );
+        }
     }
 }

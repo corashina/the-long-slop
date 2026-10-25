@@ -928,16 +928,28 @@ impl GarageRuntime {
     }
 
     fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
-        let gains = self
-            .ambient
-            .gains(&reference.ambient, self.lighting.cycle.output(), dt);
+        // napszakvaltakozas.FixedUpdate reads inSandStorm before the storms update.
+        let storm = self.weather.influence().strength.clamp(0., 1.);
+        let gains = self.ambient.gains(
+            &reference.ambient,
+            self.lighting.cycle.output(),
+            reference.weather.storm.ambient_decrease * storm,
+            dt,
+        );
         if let Some(audio) = &mut self.audio {
+            use crate::audio::AudioKind;
             let position = self
                 .stream
                 .origin
                 .absolute(self.area.player.body_pose(&self.physics).position);
-            audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
-            audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
+            audio.source_loop(AudioKind::AmbientDay, 0, gains[0], position);
+            audio.source_loop(AudioKind::AmbientNight, 0, gains[1], position);
+            audio.source_loop(
+                AudioKind::StormInside,
+                0,
+                reference.weather.storm.volume * storm,
+                position,
+            );
             audio.sync_rocks(
                 self.stream.structure_revision(),
                 self.stream.frame().structures,

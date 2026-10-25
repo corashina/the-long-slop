@@ -422,7 +422,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         survival_groups.append((role,kind,sounds,readers(sounds,group['clips']),source.resolve(player,pd[field]),[pd['min'+prefix+'Volume'],pd['max'+prefix+'Volume']],[pd['min'+prefix+'Pitch'],pd['max'+prefix+'Pitch']]))
     survival_groups.append(('death',5,main,readers(main,[md['SdeathBell']]),source.resolve(player,pd['SDeathBellSource']),[1.,1.],[.8,1.2]))
     cycle=source.resolve(main,md['napszak']);cd=source.read(cycle)
-    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
+    storm=source.get('sharedassets1.assets',158276)
+    if source.class_name(storm)!='sandstormscript':raise ValueError('Storm audio source differs')
+    for role,kind,owner,pointer in [('sleep',4,player,pd['SleepCamSource']),('storm',6,storm,source.read(storm)['source']),('storm_inside',16,cycle,cd['sandStormSource']),('ambient_day',7,cycle,cd['DayAmbientSound'][0]),('ambient_night',8,cycle,cd['NightAmbientSound'][0])]:
         selected_source=source.resolve(owner,pointer);ad=source.read(selected_source)
         survival_groups.append((role,kind,selected_source,readers(selected_source,[ad['m_audioClip']]),selected_source,[ad['m_Volume']]*2,[ad['m_Pitch']]*2))
     tiers=[readers(main,md[f'collide{i}']) for i in range(4)]
@@ -487,7 +489,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -676,7 +678,16 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
                 or any(a['time']>=b['time'] for a,b in zip(keys,keys[1:]))):
             raise ValueError(f'Invalid shared audio curve: {name}')
     validate_hit_audio(audio, ids, manifest['world']['pickup_hits'])
+    validate_storm_audio(audio, ids)
     validate_footsteps(audio, ids, manifest)
+
+
+def validate_storm_audio(audio: dict, ids: set) -> None:
+    for role,kind in (('storm',6),('storm_inside',16)):
+        found=[r for r in audio['survival'] if r['role']==role]
+        if (len(found)!=1 or found[0]['kind']!=kind or found[0]['one_shot'] or not found[0]['settings']['loop']
+                or len(found[0]['clips'])!=1 or set(found[0]['clips'])-ids or found[0]['gain'][0]!=found[0]['gain'][1]):
+            raise ValueError(f'Invalid storm audio: {role}')
 
 
 def validate_hit_audio(audio: dict, ids: set, pickup_hits: list) -> None:

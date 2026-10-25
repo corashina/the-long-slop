@@ -400,6 +400,17 @@ class HitAudio(unittest.TestCase):
         for hit in [{'collision_clip': 5, 'collision_gain': .5}, {'collision_clip': 6, 'collision_gain': float('nan')}]:
             with self.assertRaises(ValueError): validate_hit_audio(audio, set(range(1, 7)), [hit])
 
+    def test_storm_audio(self):
+        from tools.reference.audio import validate_storm_audio
+        def record(role, kind):
+            return {'role': role, 'kind': kind, 'one_shot': False, 'clips': [1], 'gain': [.5, .5], 'settings': {'loop': True}}
+        audio = {'survival': [record('storm', 6), record('storm_inside', 16)]}
+        validate_storm_audio(audio, {1})
+        for index, field, value in [(0, 'kind', 10), (1, 'one_shot', True), (0, 'settings', {'loop': False}), (1, 'clips', [2]), (0, 'gain', [.5, 1.])]:
+            changed = copy.deepcopy(audio); changed['survival'][index][field] = value
+            with self.assertRaises(ValueError): validate_storm_audio(changed, {1})
+        with self.assertRaises(ValueError): validate_storm_audio({'survival': audio['survival'][:1]}, {1})
+
     def test_world_pickup_hit_sources(self):
         from tools.reference.audio import pickup_hit_sources
         def record(path_id, clip):
