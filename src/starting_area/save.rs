@@ -304,6 +304,11 @@ impl GarageRuntime {
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
         candidate.weather.set_origin(candidate.stream.origin.offset);
+        candidate.weather.restore(
+            &reference.weather,
+            candidate.simulation_seconds,
+            &saved.weather,
+        );
         super::spawned::restore_save(
             reference,
             &mut candidate.area,
@@ -627,6 +632,9 @@ impl GarageRuntime {
                 .spawned
                 .capture_save(reference, &self.area.items, origin),
             cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
+            weather: self
+                .weather
+                .snapshot(&reference.weather, self.simulation_seconds),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {

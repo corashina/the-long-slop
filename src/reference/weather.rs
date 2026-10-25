@@ -42,6 +42,8 @@ pub struct StormReference {
 #[serde(deny_unknown_fields)]
 pub struct WeatherReference {
     pub source: SourceId,
+    /// Source sandStormSpawnScript.prefabid: the storm index in the item database.
+    pub prefab_id: u32,
     pub min_interval_seconds: f32,
     pub max_interval_seconds: f32,
     pub spawn_radius: f32,
