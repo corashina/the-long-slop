@@ -68,6 +68,9 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 11. Set a draw distance that does not fit (above about 5500 m). New game must refuse it and name the largest value. Reload: the slider keeps the last value that started.
 12. Check the slider is locked in the pause menu. Check far terrain, buildings and fog at 2500 m against the original.
 13. Run `cargo test --test world_range -- --ignored --nocapture`. Peaks must stay below the limits.
+14. Digging (W06): find a buried item (underground spawn). Swing the shovel in each direction (LMB with back, left, right keys). Check the swing sound, hit sounds, hit particles on metal, wood, plants and sand, and that hits push loose items.
+15. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
+16. Metal detector (W06): turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on. Check F3 while it scans.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
