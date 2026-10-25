@@ -96,9 +96,8 @@ impl Tumbleweeds {
         }
         let mut spot = object.position + offset;
         let top = spot + Vector::Y * r.ray_height;
-        if let Some(distance) = cast(top, -Vector::Y, f32::INFINITY, r.spawn_ray_lm) {
-            spot.y = top.y - distance + r.spawn_height;
-        }
+        let distance = cast(top, -Vector::Y, f32::INFINITY, r.spawn_ray_lm)?;
+        spot.y = top.y - distance + r.spawn_height;
         (!walls(r, spot, cast)).then_some(spot)
     }
 
@@ -231,14 +230,9 @@ mod tests {
         let (mut inside, mut outside) = (0, 0);
         for step in 0..400 {
             let spot = weeds
-                .spawn(
-                    &r,
-                    step as f64 * 100.,
-                    &[PLAYER],
-                    |_| false,
-                    |_, _, _, _| None,
-                )
+                .spawn(&r, step as f64 * 100., &[PLAYER], |_| false, ground)
                 .unwrap();
+            let spot = Vector::new(spot.x, 0., spot.z);
             let distance = spot.length();
             if PLAYER.forward.angle_between(spot).to_degrees() < r.fov {
                 inside += 1;
@@ -263,7 +257,8 @@ mod tests {
         let mut weeds = Tumbleweeds::new(3);
         assert!(weeds.spawn(&r, 0., &[PLAYER], |_| true, walled).is_none());
         // Fewer hits than ray_count_to_stay do not block.
-        let few = |_: Vector, d: Vector, _: f32, _: u32| (d.x > 0.9).then_some(1.);
+        let few =
+            |p: Vector, d: Vector, l: f32, m: u32| ground(p, d, l, m).or((d.x > 0.9).then_some(1.));
         assert!(weeds.spawn(&r, 1000., &[PLAYER], |_| true, few).is_some());
         weeds.add(ItemId(1));
         weeds.gust(&r, 1., 0.02, |_| Some(Vector::ZERO), walled);
