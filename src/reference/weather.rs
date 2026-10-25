@@ -38,6 +38,81 @@ pub struct StormReference {
     pub wind_scan_seconds: f32,
     pub wind_bounds_range: [f32; 2],
 }
+/// Source thumbleweedMain and its prefab links. Ranges are [min, max].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TumbleweedReference {
+    pub source: SourceId,
+    /// Item database index of the prefab.
+    pub item_id: u32,
+    /// Prefab GameObject.
+    pub prefab: SourceId,
+    /// The prefab thumbleweedScript, from tosaveitemscript.thumbleweed.
+    pub script: SourceId,
+    /// The Rigidbody on the thumbleweedScript object.
+    pub body: SourceId,
+    /// Gib GameObject, when the prefab links one.
+    pub gib: Option<SourceId>,
+    /// Source TerrainGenerationSettings.importantObjs transforms.
+    pub important_objects: Vec<SourceId>,
+    pub ray_count: u32,
+    pub ray_length: f32,
+    pub ray_count_to_stay: u32,
+    pub limit: u32,
+    /// Degrees.
+    pub fov: f32,
+    pub wind_force_range: [f32; 2],
+    pub wind_time_range: [f32; 2],
+    pub wind_live_time_range: [f32; 2],
+    pub short_spawn_time_range: [f32; 2],
+    pub long_spawn_time_range: [f32; 2],
+    pub spawn_dist_range: [f32; 2],
+    pub spawn_dist_in_fov_range: [f32; 2],
+    pub spawn_ray_lm: u32,
+    pub ray_lm: u32,
+    pub long_spawn_chance: f32,
+    pub spawn_height: f32,
+    pub ray_height: f32,
+    pub ring_degrees: f32,
+    pub evidence: ManagedEvidence,
+}
+impl TumbleweedReference {
+    pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let ranges = [
+            self.wind_force_range,
+            self.wind_time_range,
+            self.wind_live_time_range,
+            self.short_spawn_time_range,
+            self.long_spawn_time_range,
+            self.spawn_dist_range,
+            self.spawn_dist_in_fov_range,
+        ];
+        require(
+            self.evidence.valid()
+                && finite(&[
+                    self.ray_length,
+                    self.fov,
+                    self.long_spawn_chance,
+                    self.spawn_height,
+                    self.ray_height,
+                    self.ring_degrees,
+                ])
+                && ranges.iter().all(|r| finite(r) && r[0] <= r[1])
+                && self.limit > 0
+                && self.ray_count > 0
+                && self.ray_count_to_stay > 0
+                && self.ray_count_to_stay <= self.ray_count
+                && (0. ..=180.).contains(&self.fov)
+                && !self.important_objects.is_empty(),
+            "tumbleweed spawner",
+        )?;
+        let item = m.world.catalog.items.get(self.item_id as usize);
+        require(
+            item.is_some_and(|i| i.field == "gthumbleweed" && i.source == self.prefab),
+            "tumbleweed item",
+        )
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeatherReference {
@@ -51,9 +126,10 @@ pub struct WeatherReference {
     pub evidence: ManagedEvidence,
     /// The big and small storm systems, in this order.
     pub particles: Vec<ParticleReference>,
+    pub tumbleweeds: TumbleweedReference,
 }
 impl WeatherReference {
-    pub fn validate(&self) -> Result<(), ReferenceError> {
+    pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
         require(
             self.evidence.valid()
                 && finite(&[
@@ -129,6 +205,6 @@ impl WeatherReference {
         for p in &self.particles {
             particles::validate_particle(p)?;
         }
-        Ok(())
+        self.tumbleweeds.validate(m)
     }
 }

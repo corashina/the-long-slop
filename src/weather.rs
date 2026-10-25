@@ -489,6 +489,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::reference::{
         GradientReference, ManagedEvidence, ParticleReference, SourceId, StormReference, Transform,
+        TumbleweedReference,
     };
     use rapier3d::prelude::{ColliderBuilder, InteractionGroups, RigidBodyBuilder};
 
@@ -580,6 +581,37 @@ pub(crate) mod tests {
                 methods: Vec::new(),
             },
             particles: vec![particle("storm_big"), particle("storm_small")],
+            tumbleweeds: TumbleweedReference {
+                source: source(),
+                item_id: 312,
+                prefab: source(),
+                script: source(),
+                body: source(),
+                gib: None,
+                important_objects: vec![source()],
+                ray_count: 8,
+                ray_length: 3.,
+                ray_count_to_stay: 4,
+                limit: 10,
+                fov: 60.,
+                wind_force_range: [1., 2.],
+                wind_time_range: [1., 2.],
+                wind_live_time_range: [1., 2.],
+                short_spawn_time_range: [1., 2.],
+                long_spawn_time_range: [10., 20.],
+                spawn_dist_range: [50., 100.],
+                spawn_dist_in_fov_range: [100., 200.],
+                spawn_ray_lm: 1,
+                ray_lm: 1,
+                long_spawn_chance: 0.3,
+                spawn_height: 2.,
+                ray_height: 100000.,
+                ring_degrees: 360.,
+                evidence: ManagedEvidence {
+                    assembly_sha256: String::new(),
+                    methods: Vec::new(),
+                },
+            },
         }
     }
     /// One still storm at the origin. The first spawn is far in the future.
