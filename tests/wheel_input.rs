@@ -68,7 +68,7 @@ fn installed_source_tire_input_order_and_rejection() {
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
     let slot = &reference.wheel_slots[0];
     let rim = slot.rim;
     let original_tire = slot.tire;

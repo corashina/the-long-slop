@@ -509,12 +509,20 @@ impl SourceInstances {
                                                     || a.color_material.is_some())
                                         });
                                     let (initial, selected) =
-                                        super::instance_materials::selected_material(
+                                        super::instance_materials::biome_material(
                                             stream,
                                             reference,
                                             prototype,
                                             placement,
-                                            &source_node.source,
+                                            source_index,
+                                            primitive,
+                                            super::instance_materials::selected_material(
+                                                stream,
+                                                reference,
+                                                prototype,
+                                                placement,
+                                                &source_node.source,
+                                            ),
                                         );
                                     let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,

@@ -110,9 +110,10 @@ impl WorldReference {
         size_of::<Self>() + 2 * size_of::<usize>() + self.heap_bytes()
     }
 }
-fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,capture_library,settings_context,spawn_context,initialization,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,painting_materials,prototypes,records,receipts,exclusions,material_textures);
+fields!(WorldReference:mechanisms,sample_payload_sha256,managed_sha256,library,capture_library,settings_context,spawn_context,initialization,generation_frame,distances,source_hashes,road,terrain,buildings,catalog,part_scope_slots,generators,startup,startup_holes,collision_rules,grass_displacement,lod,initial_materials,painting_materials,biome_material_sets,prototypes,records,receipts,exclusions,material_textures);
 fields!(WorldPrototypeReference:source,role,asset,nodes,controls,excluded_actions,deferred_materials,skins,bodies,colliders,prefab_pose);
-fields!(WorldPrototypeNode:source,name,parent,active,renderer_enabled,layer,transform,gltf_node);
+fields!(WorldPrototypeNode:source,name,parent,active,renderer_enabled,layer,transform,gltf_node,biome_materials);
+fields!(WorldBiomeMaterialSet:desert,variants);
 fields!(SkinnedMeshReference<u32, u32>:source,mesh,node,bones,bind_poses,positions,normals,tangents,uv,joints,weights,triangles);
 fields!(WorldColliderReference:body,source,node,enabled,trigger,role,material,deformed_skin,source_empty_mesh,geometry);
 fields!(WorldSourceReceipt:source,sha256);
@@ -129,7 +130,7 @@ fields!(WorldStartupHole:component,filter,mesh,mesh_sha256,vertices);
 fields!(WorldNoiseReference:amplitude,frequency,lacunarity,octaves,persistence);
 fields!(WorldRoadReference:gen_at_start,gen_in_one_frame,source,prototypes,length,road_bone_num,road_bone_length,road_segment_length,road_above_terrain,width,scale,xmax_angle,ymax_angle,start_straight,straight_modifier,align_edge_of_the_world,aliign_road,align_buildings,force_homesick,def_point_range,def_point_step,add_point,building_bone_num,noises);
 fields!(WorldTerrainReference:source,prefabs,materials,textures,game_settings,tiles,edge_of_world,edge_of_world_gradient,edge_of_world_generation_dist,edge_of_world_warp_dist,edge_of_world_warp_offset,random_seed,seed);
-fields!(WorldGameSettings:source,biome,homesick_mode);
+fields!(WorldGameSettings:source,homesick_mode);
 fields!(WorldTileReference:tile_size,resolution,draw_distance,y_coord);
 fields!(WorldGeneratorReference:source,types,seedplus,no_spawn_chance,point_dist,chunk_dist,height_add,affected_by_road,affects_terrain,align_to_building,align_to_road,buildingspawn,wait_for_terrain);
 fields!(WorldObjectTypeReference:prototype,in_desert,in_grass,in_winter,affected_by_road,chance,max_dist_from_road,min_dist_from_building,min_dist_from_road);

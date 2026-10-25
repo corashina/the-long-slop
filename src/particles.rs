@@ -35,6 +35,8 @@ pub struct ParticleState {
     last_emitter: Option<[f64; 3]>,
     pub(crate) rotation: Rotation,
     pub(crate) emission_rotation: Option<Rotation>,
+    /// Scales the shape radius. Storms set it to their size.
+    pub(crate) radius_scale: f32,
     pub(crate) start_color: Option<[f32; 4]>,
     pub(crate) origin: [f64; 3],
     burst_started: bool,
@@ -50,6 +52,7 @@ impl ParticleState {
             last_emitter: None,
             rotation: Rotation::IDENTITY,
             emission_rotation: None,
+            radius_scale: 1.,
             start_color: None,
             origin: [0.; 3],
             burst_started: false,
@@ -57,6 +60,47 @@ impl ParticleState {
     }
     pub fn particles(&self) -> &[ParticleOutput] {
         &self.particles
+    }
+    /// Source `ParticleSystem.time`: seconds into the current duration.
+    pub fn time(&self) -> f32 {
+        self.elapsed
+    }
+    /// One draw from this system's stream, for a start color set by its owner.
+    pub(crate) fn random_draw(&mut self) -> f32 {
+        self.random.unit()
+    }
+    /// Base emission rates. `advance` scales them by its strength.
+    pub(crate) fn set_rates(&mut self, over_time: f32, over_distance: f32) {
+        self.reference.rate_over_time = over_time;
+        self.reference.rate_over_distance = over_distance;
+    }
+    /// Source trigger module with the Kill inside action: removes particles that touch an
+    /// interior collider. `interior` selects those colliders. Call after `advance`.
+    pub fn remove_inside(
+        &mut self,
+        physics: &PhysicsWorld,
+        interior: impl Fn(ColliderHandle) -> bool,
+    ) {
+        let r = &self.reference;
+        if r.module_flags.get("TriggerModule") != Some(&true)
+            || r.scalars["TriggerModule.inside"] != 1.
+        {
+            return;
+        }
+        let scale = 0.5 * r.scalars["TriggerModule.radiusScale"];
+        let predicate = |handle: ColliderHandle, _: &rapier3d::prelude::Collider| interior(handle);
+        let queries = physics.queries(QueryFilter::default().predicate(&predicate));
+        let origin = self.origin;
+        self.particles.retain(|p| {
+            let position = Vector::from_array(std::array::from_fn(|i| {
+                (p.absolute_position[i] - origin[i]) as f32
+            }));
+            let ball = Ball::new((p.size * scale).max(f32::EPSILON));
+            queries
+                .intersect_shape(Pose::from_translation(position), &ball)
+                .next()
+                .is_none()
+        });
     }
     /// A new Instantiate of the system: its burst and duration start again.
     pub fn restart(&mut self) {
@@ -130,14 +174,12 @@ impl ParticleState {
             let direction = Vector::new(a.cos() * radial, a.sin() * radial, -z);
             let thickness = r.scalars["ShapeModule.radiusThickness"];
             let inner = (1. - thickness).powi(3);
-            let radius = r.scalars["ShapeModule.radius.value"]
-                * (inner + (1. - inner) * self.random.unit()).cbrt();
+            let shape_radius = r.scalars["ShapeModule.radius.value"] * self.radius_scale;
+            let radius = shape_radius * (inner + (1. - inner) * self.random.unit()).cbrt();
             let mut position = if hemisphere {
                 direction * radius
             } else {
-                Vector::new(a.cos(), a.sin(), 0.)
-                    * r.scalars["ShapeModule.radius.value"]
-                    * self.random.unit().sqrt()
+                Vector::new(a.cos(), a.sin(), 0.) * shape_radius * self.random.unit().sqrt()
             };
             // Native EmitterStoreData adds a random unit vector times randomPositionAmount.
             let amount = r.scalars["ShapeModule.randomPositionAmount"];

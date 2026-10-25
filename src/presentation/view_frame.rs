@@ -273,7 +273,6 @@ pub(crate) fn snapshot(
     drive: Res<crate::app::Drive>,
     requests: Res<crate::app::save::SaveRequests>,
     graph: Res<super::readiness::RendererStateHandle>,
-    reference: Res<crate::app::RuntimeReference>,
     assets: Option<Res<LightingAssets>>,
     scene: Res<SourceSceneLighting>,
     epoch: Res<SourceSceneEpoch>,

@@ -53,17 +53,25 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 
 ## 3. World and terrain
 
+Run these checks in the section 3 test pass on Tomasz's PC:
+
+1. Re-export, then rebuild. Old exports do not load (W03 changed the world and lighting records).
+2. Check the export log line "Biome materials" (set count and marked nodes).
+3. Check the Game mode button position on the start menu.
+4. Start a new game in each biome. Check terrain, props, roads, lamps, fog, sky and swapped materials.
+5. Load a Mixed save with Winter set. The world must load as winter.
+6. Check the winter color: colder view in Winter, changes at biome borders in Mixed.
+7. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
+8. Sandstorms (W07): run `cargo test --lib terrain_sample_matches_published_ground -- --ignored`. Spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm.
+9. Power cables (W04): check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped. Check F3 along the road.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | W01 | Restore world range. [World](src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W03 | Add biomes. [Terrain](crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
-| W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
-| W08 | Add grass tracks. [Grass](web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
-
-Check in the section test pass: power cables (W04). Re-export first. Check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and F3.
+| W07 | Add weather. | L | Saved sandstorm state, tumbleweeds, snowfall in the winter biome. [J02-J04] |
 
 ## 4. More cars
 

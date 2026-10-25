@@ -238,7 +238,7 @@ impl AsBindGroup for ParticleMaterial {
         .to_vec()
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Owner {
     Urine,
     Brush(usize),
@@ -249,6 +249,8 @@ enum Owner {
     SprayBottle(usize),
     /// Vehicle exhaust smoke; `Group::source` is the system.
     Exhaust(usize),
+    /// Storm dust; `Group::source` is big (0) or small (1).
+    Storm(crate::weather::StormId),
 }
 struct Group {
     owner: Owner,
@@ -262,6 +264,8 @@ struct Group {
     sheet: Option<TextureSheet>,
     /// Material `_MainTex` tiling. Scales the per-particle sheet tile offset.
     tiling: Vec2,
+    /// False for the retained slots of a removed storm.
+    active: bool,
 }
 #[derive(Resource, Default)]
 pub(crate) struct ParticleRender {
@@ -357,6 +361,16 @@ fn add_group(
     commands: &mut Commands,
     materials: &mut Assets<ParticleMaterial>,
 ) {
+    // A removed storm's retained slots serve the next storm of the same system.
+    if let Some(g) = state
+        .groups
+        .iter_mut()
+        .find(|g| matches!(g.owner, Owner::Storm(_)) && !g.active && g.source == index)
+    {
+        g.owner = owner;
+        g.active = true;
+        return;
+    }
     let start = state.uniforms.len();
     let count = (r.capacity as usize).div_ceil(BATCH);
     let m = &r.materials[0];
@@ -466,6 +480,7 @@ fn add_group(
         black_fog: shader.additive(),
         sheet,
         tiling,
+        active: true,
     });
 }
 #[allow(clippy::too_many_arguments)]
@@ -570,6 +585,33 @@ fn sync_particles(
             }
         }
     }
+    let weather = &drive.runtime.weather;
+    for g in &mut state.groups {
+        if let Owner::Storm(id) = g.owner {
+            g.active = weather.storms().iter().any(|s| s.id == id);
+        }
+    }
+    let storms = &reference.0.weather.particles;
+    for storm in weather.storms() {
+        for (system, p) in storms.iter().enumerate() {
+            let owner = Owner::Storm(storm.id);
+            if !state
+                .groups
+                .iter()
+                .any(|g| g.active && g.owner == owner && g.source == system)
+            {
+                add_group(
+                    &mut state,
+                    owner,
+                    system,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
+    }
     let origin = drive.runtime.stream.origin.offset;
     let Ok(camera) = camera.single() else {
         return;
@@ -586,6 +628,7 @@ fn sync_particles(
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
             Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
+            Owner::Storm(_) => &storms[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -601,7 +644,8 @@ fn sync_particles(
             | Owner::Spray(_)
             | Owner::Wash(_)
             | Owner::SprayBottle(_)
-            | Owner::Exhaust(_) => None,
+            | Owner::Exhaust(_)
+            | Owner::Storm(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -635,12 +679,20 @@ fn sync_particles(
             )
         } else if let Owner::Exhaust(vehicle) = g.owner {
             Some(drive.runtime.vehicles[vehicle].exhaust.particles(g.source))
+        } else if let Owner::Storm(id) = g.owner {
+            Some(
+                weather
+                    .storms()
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map_or(&[][..], |s| s.particles[g.source].particles()),
+            )
         } else if splash {
             fluid.map(|f| f.splash())
         } else {
             None
         };
-        let count = if !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
+        let count = if !g.active || !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
             0
         } else {
             particles.map_or_else(|| fluid.map_or(0, |f| f.particles().len()), |p| p.len())

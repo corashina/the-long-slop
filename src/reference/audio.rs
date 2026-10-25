@@ -919,6 +919,7 @@ impl AudioGameplayReference {
             (2, "fart"),
             (4, "sleep"),
             (5, "death"),
+            (6, "storm"),
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
@@ -928,6 +929,7 @@ impl AudioGameplayReference {
             (13, "rock_heat"),
             (14, "music_box"),
             (15, "footstep"),
+            (16, "storm_inside"),
         ] {
             require(
                 r.bindings
@@ -948,7 +950,7 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 14, "required audio roles")?;
+        require(r.bindings.len() == 16, "required audio roles")?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {

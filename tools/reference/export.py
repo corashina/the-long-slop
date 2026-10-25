@@ -89,6 +89,7 @@ def runtime_resources(manifest):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
     collect(manifest.get('particles', []))
+    collect(manifest.get('weather', {}))
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
@@ -273,6 +274,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .survival import prepare_food, recover_survival, bind_survival
     from .particles import recover_particles, recover_outlet_particles, validate_particles_export
     from .audio import recover_ambient
+    from .weather import recover_weather, validate_weather_export
     prepare_food(source, roots)
     food_roots=roots.pop('food')
     prefab=source.get('sharedassets1.assets',82556)
@@ -318,6 +320,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
     particles=recover_particles(source,output)
+    weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
     from .world import prepare_home_cable
@@ -363,6 +366,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['ambient']=recover_ambient(source)
     manifest['lighting']['textures']=list(source.lighting_textures.values())
     validate_particles_export(particles,manifest)
+    manifest['weather']=weather
+    validate_weather_export(weather,manifest)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)

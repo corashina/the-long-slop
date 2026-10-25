@@ -58,7 +58,7 @@ fn lada_parts_retain_contents_mass_collision_and_identity() {
     let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
     assert_eq!(r.build_id, 11140890);
     assert_eq!(r.vehicles.len(), 1);
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, the_long_slop::world::GameMode::default()).unwrap();
     let chassis = run.physics.chassis_handle(0);
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     let bodies = run.physics.rapier().bodies.len();
@@ -199,7 +199,7 @@ fn lada_plates_retain_source_owners_without_duplicate_members() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
     assert_eq!(r.vehicles.len(), 1);
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, the_long_slop::world::GameMode::default()).unwrap();
     let chassis = run.physics.chassis_handle(0);
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     for plate in &r.plates.plates {
@@ -269,7 +269,7 @@ fn lada_plates_retain_source_owners_without_duplicate_members() {
 fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, the_long_slop::world::GameMode::default()).unwrap();
     let bumper = |kind: &str| {
         r.parts
             .iter()
@@ -373,7 +373,7 @@ fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
 fn lada_hood_and_trunk_cross_fit_like_source_can_craft() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, the_long_slop::world::GameMode::default()).unwrap();
     let chassis = run.physics.chassis_handle(0);
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     let named = |name: &str| r.items.iter().find(|i| i.name == name).unwrap().id;

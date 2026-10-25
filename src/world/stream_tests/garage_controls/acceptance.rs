@@ -791,7 +791,13 @@ fn p11_starting_area_loop() {
         )
         .unwrap();
     let loaded = SaveSnapshot::from_json(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut restored = GarageRuntime::from_save(&play.reference, &stamp, &loaded).unwrap();
+    let mut restored = GarageRuntime::from_save(
+        &play.reference,
+        &stamp,
+        &loaded,
+        crate::world::GameMode::default(),
+    )
+    .unwrap();
     super::super::prepare_ready(&mut restored, &play.reference);
     let mut claim = None;
     for _ in 0..600 {

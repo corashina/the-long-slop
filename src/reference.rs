@@ -65,6 +65,8 @@ pub mod survival;
 pub use inventory::*;
 pub mod particles;
 pub use particles::*;
+pub mod weather;
+pub use weather::*;
 pub use survival::*;
 pub mod instruments;
 pub mod ui;
@@ -919,6 +921,7 @@ pub struct ReferenceManifest {
     pub survival: SurvivalReference,
     pub sleep: SleepReference,
     pub particles: Vec<ParticleReference>,
+    pub weather: WeatherReference,
     pub ambient: AmbientReference,
     pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
@@ -1165,6 +1168,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         particles::validate_particles(self)?;
+        self.weather.validate()?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(

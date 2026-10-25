@@ -61,6 +61,9 @@ pub struct WorldReference {
     pub mechanisms: Vec<WorldMechanism>,
     #[serde(deserialize_with = "compact_vec")]
     pub painting_materials: Vec<WorldPaintingMaterial>,
+    /// Source `materialpairscript` sets that marked prototype nodes use.
+    #[serde(deserialize_with = "compact_vec")]
+    pub biome_material_sets: Vec<WorldBiomeMaterialSet>,
     #[serde(deserialize_with = "compact_vec")]
     pub prototypes: Vec<WorldPrototypeReference>,
     #[serde(deserialize_with = "compact_vec")]
@@ -176,6 +179,35 @@ pub struct WorldPrototypeNode {
     pub layer: u8,
     pub transform: Transform,
     pub gltf_node: u32,
+    /// The node has an enabled source `materialChangeScript`.
+    pub biome_materials: bool,
+}
+/// Source `materialpairscript` set, exported as `[desert, winter, grass]`.
+/// A renderer under a marked node whose first material is `desert` takes the winter or grass material.
+/// `None` keeps the desert material.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    from = "(SourceId, Option<SourceId>, Option<SourceId>)",
+    into = "(SourceId, Option<SourceId>, Option<SourceId>)"
+)]
+pub struct WorldBiomeMaterialSet {
+    pub desert: SourceId,
+    /// Winter, then grass.
+    pub variants: [Option<SourceId>; 2],
+}
+impl From<(SourceId, Option<SourceId>, Option<SourceId>)> for WorldBiomeMaterialSet {
+    fn from((desert, winter, grass): (SourceId, Option<SourceId>, Option<SourceId>)) -> Self {
+        Self {
+            desert,
+            variants: [winter, grass],
+        }
+    }
+}
+impl From<WorldBiomeMaterialSet> for (SourceId, Option<SourceId>, Option<SourceId>) {
+    fn from(set: WorldBiomeMaterialSet) -> Self {
+        let [winter, grass] = set.variants;
+        (set.desert, winter, grass)
+    }
 }
 /// SkinnedMeshRenderer vertex streams. `Node` owns the renderer. `Bone` owns each bone Transform.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -417,7 +449,6 @@ pub struct WorldTerrainReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldGameSettings {
     pub source: SourceId,
-    pub biome: i32,
     #[serde(rename = "homesickMode")]
     pub homesick_mode: i32,
 }
@@ -558,6 +589,37 @@ pub struct WorldBuildingSide {
     pub min_xpos: f32,
     #[serde(rename = "minYAngle")]
     pub min_y_angle: f32,
+}
+impl WorldReference {
+    /// Every set material binds as a world prototype material. Desert materials are unique.
+    fn validate_biome_material_sets(
+        &self,
+        manifest: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        let known: HashSet<&SourceId> = self
+            .prototypes
+            .iter()
+            .flat_map(|p| p.deferred_materials.iter().map(|m| &m.source))
+            .chain(
+                manifest
+                    .rendering
+                    .materials
+                    .iter()
+                    .filter(|m| self.prototypes.iter().any(|p| p.asset == m.asset))
+                    .map(|m| &m.source),
+            )
+            .collect();
+        let mut deserts = HashSet::new();
+        for set in &self.biome_material_sets {
+            require(
+                deserts.insert(&set.desert)
+                    && known.contains(&set.desert)
+                    && set.variants.iter().flatten().all(|m| known.contains(m)),
+                &field(&set.desert, "biome material set"),
+            )?;
+        }
+        Ok(())
+    }
 }
 fn source_valid(source: &SourceId, hashes: &[SourceHash]) -> bool {
     source.path_id != 0 && hashes.iter().any(|h| h.file == source.file)
@@ -814,6 +876,7 @@ impl WorldReference {
                 "Painting source material and texture assignment",
             )?;
         }
+        self.validate_biome_material_sets(manifest)?;
         for binding in &self.initial_materials {
             binding.validate(&record_map)?;
         }
@@ -1806,6 +1869,17 @@ fn validate_world_libraries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn biome_material_sets_parse_desert_then_winter_and_grass() {
+        let set: WorldBiomeMaterialSet =
+            serde_json::from_str(r#"[{"file":"a","path_id":1},null,{"file":"a","path_id":3}]"#)
+                .unwrap();
+        assert_eq!(set.desert.path_id, 1);
+        assert!(set.variants[0].is_none());
+        assert_eq!(set.variants[1].as_ref().unwrap().path_id, 3);
+        assert!(serde_json::from_str::<WorldBiomeMaterialSet>(r#"[null,null,null]"#).is_err());
+    }
 
     fn collider(trigger: bool, role: &str) -> WorldColliderReference {
         serde_json::from_str(&format!(

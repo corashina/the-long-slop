@@ -11,7 +11,7 @@ use rapier3d::math::{Rotation, Vector};
 fn installed_spawn_alignment_and_settling() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
     use the_long_slop::world::{RequiredView, WorldStream};
     let camera = [
         [1., 0., 0., 1e8],
@@ -32,7 +32,7 @@ fn installed_spawn_alignment_and_settling() {
         light_mask: u32::MAX,
         origin: [0.; 3],
     }];
-    let mut replay = WorldStream::new(&reference, 42).unwrap();
+    let mut replay = WorldStream::new(&reference, 42, the_long_slop::world::GameMode::default()).unwrap();
     replay.request_at([0.; 3], [0.; 3]);
     for _ in 0..300 {
         replay.advance_generation();
@@ -160,7 +160,7 @@ fn installed_spawn_alignment_and_settling() {
     run.stream.set_presentation_allocation(allocation).unwrap();
     assert!(fixed_room(&run.stream, 1024, 0, 1024, true).unwrap());
     let mut roads = the_long_slop::world::RoadIndex::new(
-        the_long_slop::world::RoadSequence::new(&reference.world, 42).unwrap(),
+        the_long_slop::world::RoadSequence::new(&reference.world, 42, None).unwrap(),
         the_long_slop::world::terrain_evaluator(&reference.world, 42),
     );
     roads.prepare(102);

@@ -625,6 +625,7 @@ mod tests {
                 scale,
             },
             gltf_node: 0,
+            biome_materials: false,
         };
         let identity = [0., 0., 0., 1.];
         let prototype = WorldPrototypeReference {
