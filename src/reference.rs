@@ -238,6 +238,18 @@ pub enum ColliderTag {
     Ignore,
     ContainsMetal,
 }
+/// `ColliderTag` values in declaration order.
+pub const COLLIDER_TAGS: [ColliderTag; 9] = [
+    ColliderTag::Flesh,
+    ColliderTag::Plant,
+    ColliderTag::Wood,
+    ColliderTag::Fire,
+    ColliderTag::Metal,
+    ColliderTag::Sand,
+    ColliderTag::Cobweb,
+    ColliderTag::Ignore,
+    ColliderTag::ContainsMetal,
+];
 
 /// Source footstep surface of a collider: `otherStepSoundScript.tip`, or tag `Wood` or `Sand`.
 /// The value is the collider user data code.
