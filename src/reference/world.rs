@@ -14,6 +14,8 @@ pub use grass::*;
 pub use initial_materials::*;
 pub use initialization::*;
 pub use lod::*;
+mod draw_distance;
+pub use draw_distance::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -29,7 +31,6 @@ pub struct WorldReference {
     pub managed_sha256: String,
     pub library: LibraryProvenance,
     pub capture_library: LibraryProvenance,
-    pub settings_context: String,
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
     pub generation_frame: Transform,
@@ -37,7 +38,7 @@ pub struct WorldReference {
     pub magnetic_field: [f32; 4],
     /// mainscript.lightTurnOffValue: electronics output that powers radios and lamps.
     pub electronics_cutoff: f32,
-    pub distances: BTreeMap<String, f32>,
+    pub draw_distance: DrawDistanceReference,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,
     pub road: WorldRoadReference,
@@ -677,11 +678,7 @@ impl WorldReference {
                 && self.managed_sha256 == WORLD_MANAGED_SHA256,
             "world source sample/hash",
         )?;
-        require(
-            self.settings_context == "minimum_draw_distance_frozen_generation_frame"
-                && transform(&self.generation_frame),
-            "world source context/frame",
-        )?;
+        require(transform(&self.generation_frame), "world source frame")?;
         validate_world_libraries(&self.library, &self.capture_library, &manifest.library)?;
         require(
             self.spawn_context.classification == "controlled_startup_before_garage"
@@ -917,35 +914,7 @@ impl WorldReference {
         ] {
             require(records.contains(s), &field(s, "required world input"))?;
         }
-        require(
-            self.distances.get("drawDistance") == Some(&500.)
-                && self.distances.values().all(|v| v.is_finite()),
-            "world minimum draw distances",
-        )?;
-        for name in [
-            "TerrainGenDist",
-            "TerrainRemoveDist",
-            "DistantTerrainGenDist",
-            "DistantTerrainRemoveDist",
-            "DistantTerrain2GenDist",
-            "DistantTerrain2RemoveDist",
-            "RoadGenDist",
-            "BuildingGenDist",
-            "BuildingRemoveDist",
-            "ObjGenDist",
-            "ObjRemoveDist",
-            "MountainGenDist",
-            "MountainRemoveDist",
-            "ItemSpawnDist",
-            "ItemRemoveDist",
-            "ItemFreezeDist",
-            "ItemUnFreezeDist",
-        ] {
-            require(
-                self.distances.get(name).is_some_and(|v| *v > 0.),
-                &format!("world distances.{name}"),
-            )?;
-        }
+        self.draw_distance.validate()?;
         let r = &self.road;
         require(
             finite(&[

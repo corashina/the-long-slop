@@ -9,6 +9,8 @@ pub use changes::{
 };
 pub use types::*;
 
+mod draw_distance;
+pub use draw_distance::DrawDistances;
 mod cables;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use cables::aim;
@@ -44,7 +46,9 @@ pub(crate) mod pipeline_ownership;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod renderer_pending;
 pub(crate) mod stream;
+mod stream_limits;
 pub use stream::content_index::ContentIndex;
+pub use stream_limits::StreamLimits;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
 pub use stream::content_boxes::BoxRelease;

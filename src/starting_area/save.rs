@@ -205,10 +205,12 @@ impl GarageRuntime {
         expected: &SourceStamp,
         saved: &SaveSnapshot,
         mode: crate::world::GameMode,
+        draw_distance: f32,
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
-        let mut candidate = Self::new_candidate(reference, false, saved.world.seed, mode)?;
+        let mut candidate =
+            Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
         candidate
             .area
             .conditions

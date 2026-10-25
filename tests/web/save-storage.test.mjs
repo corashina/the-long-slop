@@ -46,6 +46,6 @@ test('schema_5_rejection_preserves_stored_bytes',async()=>{
  const {createSaveSession}=await import('../../web/save-session.js');
  const b=boundary(); const write=b.storage.write({...payload,schema_version:5}); await connect(b); b.tx.oncomplete(); await write;
  const before=JSON.stringify(b.tx.record); let commits=0;
- const session=createSaveSession({storage:{read:async()=>b.tx.record,write:async()=>{throw new Error('Unexpected write');}},runtime:{prepare:async()=>{throw new Error('Schema version');},commit:async()=>{commits++;},discard:()=>{}}});
+ const session=createSaveSession({drawDistance:()=>2500,storage:{read:async()=>b.tx.record,write:async()=>{throw new Error('Unexpected write');}},runtime:{prepare:async()=>{throw new Error('Schema version');},commit:async()=>{commits++;},discard:()=>{}}});
  await assert.rejects(session.load(),/Schema version/); assert.equal(JSON.stringify(b.tx.record),before); assert.equal(commits,0);
 });

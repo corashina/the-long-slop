@@ -16,10 +16,12 @@ pub struct WorldCameraSettings {
     pub mask: u32,
 }
 
-pub fn world_camera_settings(fov_degrees: f32) -> WorldCameraSettings {
+/// The source draws near and far with Cam1 and Cam2. The port draws with one camera.
+/// It uses `Cam2FarPlane` as `far`. The Cam1 far and Cam2 near planes stay unused.
+pub fn world_camera_settings(fov_degrees: f32, far: f32) -> WorldCameraSettings {
     WorldCameraSettings {
         near: 0.05,
-        far: 15000.0,
+        far,
         fov_degrees,
         mask: 0x14DA8F33,
     }

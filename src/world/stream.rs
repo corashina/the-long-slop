@@ -20,15 +20,11 @@ use std::{
 use super::renderer_pending::{PipelineContinuation, RendererOwner};
 
 const MIB: usize = 1024 * 1024;
-const MAX_ROADS: usize = 512;
-const MAX_NEAR: usize = 512;
-const MAX_DISTANT: usize = 256;
-const MAX_OBJECTS: usize = 32768;
 const MAX_PENDING: usize = 32;
 /// Focus movement in metres before the structure window refreshes.
 const STRUCTURE_REFRESH_DISTANCE: f32 = 1.0;
-const ACTIVE_CPU: usize = 256 * MIB;
-const ACTIVE_GPU: usize = 128 * MIB;
+pub(crate) const STAGING: usize = 32 * MIB;
+pub(crate) const CHECKPOINTS: usize = 16 * MIB;
 pub(crate) const PROTOTYPE_CPU: usize = 512 * MIB;
 pub(crate) const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -168,6 +164,8 @@ pub struct WorldStream {
     structure_helpers: super::structure_helpers::StructureHelpers,
     building_components: super::building_extras::BuildingComponents,
     reference: Arc<WorldReference>,
+    pub(crate) distances: super::DrawDistances,
+    limits: super::stream_limits::StreamLimits,
     presentation: PresentationAllocation,
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
@@ -189,6 +187,8 @@ pub struct WorldStream {
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
     request: WorldRequest,
+    /// Absolute positions of every car, as source important objects.
+    cars: Vec<[f64; 3]>,
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
@@ -363,7 +363,7 @@ impl WorldStream {
         }
         let mut dependencies = HashSet::new();
         super::changes::external_attachment_chain(&changes, &mut dependencies);
-        let radius = self.reference.distances["ItemRemoveDist"];
+        let radius = self.distances.item_remove_dist;
         changes.retain(|key, change| {
             items.resolve_key(key).is_some()
                 || required.contains(key)
@@ -417,6 +417,37 @@ impl WorldStream {
             revision: self.generation_revision,
         }
     }
+    pub fn limits(&self) -> super::StreamLimits {
+        self.limits
+    }
+    /// Largest draw distance whose limits fit this world.
+    pub fn largest_fitting(&self) -> Result<f32, ReferenceError> {
+        super::StreamLimits::largest_fitting(&self.reference, self.road_light.influence_margin())
+    }
+    /// Selected counts and active bytes, in the shape of the limits.
+    pub fn selected(&self) -> super::StreamLimits {
+        let metrics = self.metrics();
+        super::StreamLimits {
+            roads: self.selected_roads.len(),
+            tiles: std::array::from_fn(|tier| {
+                self.wanted_tiles
+                    .iter()
+                    .filter(|k| k.layer == tier_layer(tier))
+                    .count()
+            }),
+            objects: metrics.generated_objects,
+            active_cpu: metrics.active_cpu_bytes,
+            active_gpu: metrics.active_gpu_bytes,
+            terrain_job: 0,
+        }
+    }
+    /// The road and terrain selection of the current request is complete.
+    pub fn selection_complete(&self) -> bool {
+        self.failure.is_none()
+            && self.startup.is_some()
+            && self.plan_revision == self.request.revision
+            && self.next_road == self.road_candidates.len()
+    }
     pub fn restore_save(
         &mut self,
         saved: &crate::save::WorldSnapshot,
@@ -440,7 +471,7 @@ impl WorldStream {
             + self.roads.retained_index_bytes()
             + self.placements.retained_index_bytes()
             + saved.generation.placements.checkpoint_heap_bytes()
-            > 16 * MIB
+            > CHECKPOINTS
         {
             return Err(ReferenceError(
                 "Restored source history exceeds checkpoint budget".into(),
@@ -488,8 +519,7 @@ impl WorldStream {
         [self.request.player, self.request.vehicle]
             .iter()
             .any(|focus| {
-                source_distance_squared(*focus, position)
-                    < self.reference.distances["ItemSpawnDist"].powi(2)
+                source_distance_squared(*focus, position) < self.distances.item_spawn_dist.powi(2)
             })
     }
     pub fn saved_bindings_ready(&self, items: &crate::interaction::items::ItemStore) -> bool {
@@ -639,10 +669,25 @@ impl WorldStream {
         self.mode
     }
 
+    /// Test stream in the default game mode at the export default draw distance.
+    #[cfg(test)]
+    pub(crate) fn new_default(
+        reference: &ReferenceManifest,
+        seed: i32,
+    ) -> Result<Self, ReferenceError> {
+        let r = &reference.world.draw_distance;
+        Self::new(
+            reference,
+            seed,
+            super::GameMode::default(),
+            super::DrawDistances::resolve(r, r.default),
+        )
+    }
     pub fn new(
         reference: &ReferenceManifest,
         seed: i32,
         mode: super::GameMode,
+        distances: super::DrawDistances,
     ) -> Result<Self, ReferenceError> {
         let world = &reference.world;
         let shared_cpu_bytes = reference.world_retained_cpu_bytes();
@@ -716,6 +761,15 @@ impl WorldStream {
                 "Source rule indices exceed prototype CPU budget".into(),
             ));
         }
+        let margin = road_light.influence_margin();
+        let limits = super::stream_limits::StreamLimits::new(world, &distances, margin)?;
+        if !limits.fits() {
+            return Err(ReferenceError(format!(
+                "Draw distance {} m does not fit. Largest: {} m",
+                distances.draw_distance,
+                super::stream_limits::StreamLimits::largest_fitting(world, margin)?
+            )));
+        }
         Ok(Self {
             required: Default::default(),
             lamp_material_choices: Vec::new(),
@@ -750,6 +804,8 @@ impl WorldStream {
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
+            distances,
+            limits,
             package_id: reference.content_base.clone(),
             generation_revision: 0,
             changes: super::ChangeRecords::default(),
@@ -764,8 +820,8 @@ impl WorldStream {
             building_cables: Vec::new(),
             cable_search: super::cables::BuildingCableSearch::default(),
             home_cable: super::cables::PoleSearch::default(),
-            lights: Vec::with_capacity(MAX_ROADS),
-            wanted_lights: Vec::with_capacity(MAX_ROADS),
+            lights: Vec::with_capacity(limits.roads),
+            wanted_lights: Vec::with_capacity(limits.roads),
             origin: WorldOrigin::default(),
             request: WorldRequest {
                 session: NEXT_SESSION
@@ -777,6 +833,7 @@ impl WorldStream {
                 player: [0.0; 3],
                 vehicle: [0.0; 3],
             },
+            cars: Vec::new(),
             recovery: None,
             recovery_search: None,
             roads,
@@ -786,16 +843,16 @@ impl WorldStream {
             road_worker_reserved_bytes: 0,
             road_work: None,
             placements: PlacementIndex::new(world, seed),
-            props: super::prop_layers::PropLayers::new(world, seed)?,
+            props: super::prop_layers::PropLayers::new(world, seed, &distances)?,
             contents,
             boxes: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
             tiles: [
-                super::terrain_tile(world, 0)?,
-                super::terrain_tile(world, 1)?,
-                super::terrain_tile(world, 2)?,
+                super::terrain_tile(world, &distances, 0)?,
+                super::terrain_tile(world, &distances, 1)?,
+                super::terrain_tile(world, &distances, 2)?,
             ],
             initial_generation_ready: false,
             plan_revision: 0,
@@ -809,9 +866,9 @@ impl WorldStream {
             next_road: 0,
             selected_roads: Vec::new(),
             next_geometry: 0,
-            wanted_roads: Vec::with_capacity(MAX_ROADS),
-            wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
-            road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
+            wanted_roads: Vec::with_capacity(limits.roads),
+            wanted_tiles: Vec::with_capacity(limits.tiles.iter().sum()),
+            road_points: Vec::with_capacity(limits.roads * super::ROAD_CONTROLS),
             structures: Vec::new(),
             trigger_roles: super::TriggerRoles::default(),
             structure_revision: 0,
@@ -826,7 +883,8 @@ impl WorldStream {
             saved_locations_pending: false,
             recipes: HashMap::new(),
             supplies: Vec::new(),
-            wanted_structures: Vec::with_capacity(MAX_OBJECTS),
+            // Grows with use. Capacity is charged as retained CPU.
+            wanted_structures: Vec::new(),
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_candidates: Vec::new(),
@@ -850,7 +908,7 @@ impl WorldStream {
             self.overlap = previous;
             return Err(error);
         }
-        if self.metrics().checkpoint_bytes > 16 * MIB {
+        if self.metrics().checkpoint_bytes > CHECKPOINTS {
             self.overlap = previous;
             return Err(ReferenceError(
                 "Source candidate history overlap exceeds its budget".into(),
@@ -916,13 +974,13 @@ impl WorldStream {
             ResourceBudget {
                 name: "World CPU",
                 used: active_cpu,
-                limit: ACTIVE_CPU,
+                limit: self.limits.active_cpu,
                 unit: "bytes",
             },
             ResourceBudget {
                 name: "World GPU",
                 used: active_gpu,
-                limit: ACTIVE_GPU,
+                limit: self.limits.active_gpu,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -940,7 +998,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Objects",
                 used: objects,
-                limit: MAX_OBJECTS,
+                limit: self.limits.objects,
                 unit: "objects",
             },
             ResourceBudget {
@@ -952,7 +1010,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Staging",
                 used: staging,
-                limit: 32 * MIB,
+                limit: STAGING,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -964,7 +1022,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Generation staging",
                 used: self.generation_pending_bytes() - self.binding_reserved,
-                limit: 32 * MIB - self.dependency_staging_reserve,
+                limit: STAGING - self.dependency_staging_reserve,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -991,13 +1049,14 @@ impl WorldStream {
             })
     }
     fn admit_generation(&mut self, bytes: usize) -> bool {
-        if bytes > 32 * MIB - self.dependency_staging_reserve
-            || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU
+        if bytes > STAGING - self.dependency_staging_reserve
+            || self.metrics().active_cpu_bytes.saturating_add(bytes) > self.limits.active_cpu
         {
             self.failure = Some(format!(
-                "Source generation budget exceeded: CPU requested {} bytes, limit {ACTIVE_CPU} bytes; staging requested {bytes} bytes, limit {} bytes",
+                "Source generation budget exceeded: CPU requested {} bytes, limit {} bytes; staging requested {bytes} bytes, limit {} bytes",
                 self.metrics().active_cpu_bytes.saturating_add(bytes),
-                32 * MIB - self.dependency_staging_reserve
+                self.limits.active_cpu,
+                STAGING - self.dependency_staging_reserve
             ));
             return false;
         }
@@ -1007,12 +1066,12 @@ impl WorldStream {
     // Grass and synchronous published bindings drain without further resource loads.
     pub fn available_staging_bytes(&self) -> usize {
         self.available_dependency_staging_bytes().min(
-            (32 * MIB - self.dependency_staging_reserve)
+            (STAGING - self.dependency_staging_reserve)
                 .saturating_sub(self.generation_pending_bytes() - self.binding_reserved),
         )
     }
     pub fn available_dependency_staging_bytes(&self) -> usize {
-        (32 * MIB).saturating_sub(
+        STAGING.saturating_sub(
             self.presentation.staging_bytes
                 + self.generation_pending_bytes()
                 + self.overlap.pending_bytes,
@@ -1026,7 +1085,7 @@ impl WorldStream {
         reserve: usize,
         metadata: usize,
     ) -> Result<(), ReferenceError> {
-        if reserve == 0 || reserve >= 32 * MIB {
+        if reserve == 0 || reserve >= STAGING {
             return Err(ReferenceError(
                 "Invalid dependency staging reservation".into(),
             ));
@@ -1297,6 +1356,11 @@ impl WorldStream {
         self.recipes.remove(source);
         Ok(())
     }
+    /// Sets every car position for item freeze and removal.
+    pub fn request_cars(&mut self, cars: impl IntoIterator<Item = [f64; 3]>) {
+        self.cars.clear();
+        self.cars.extend(cars);
+    }
     pub fn request_at(&mut self, player: [f64; 3], vehicle: [f64; 3]) {
         if self.recovery.is_some() {
             return;
@@ -1328,10 +1392,10 @@ impl WorldStream {
         let after = [player, vehicle];
         let moved = before != after;
         let prop_changed = self.props.focus_changed(before, after);
-        let eligibility_changed = self
-            .contents
-            .eligibility_changed(&self.reference, before, after);
-        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        let eligibility_changed =
+            self.contents
+                .eligibility_changed(self.distances.item_spawn_dist, before, after);
+        let radius = f64::from(self.distances.item_spawn_dist);
         let selected = |points: [[f64; 3]; 2], position: [f64; 3]| {
             points.into_iter().any(|p| {
                 (p[0] - position[0]).abs() <= radius && (p[2] - position[2]).abs() <= radius
@@ -1399,8 +1463,7 @@ impl WorldStream {
         }
         self.generation_revision += 1;
         // Frontier changes outside the selected source window do not invalidate readiness.
-        let distance =
-            f64::from(self.reference.distances["RoadGenDist"]) + self.road_light.influence_margin();
+        let distance = f64::from(self.distances.road_gen_dist) + self.road_light.influence_margin();
         if let Some(segment) = self.roads.latest_segment() {
             if self
                 .road_focus
@@ -1597,13 +1660,18 @@ impl WorldStream {
             }
             return;
         }
-        match StartupTerrain::new(&self.reference, &self.evaluator, &self.startup_points) {
+        match StartupTerrain::new(
+            &self.reference,
+            &self.distances,
+            &self.evaluator,
+            &self.startup_points,
+        ) {
             Ok(startup) => {
                 let count = self.placements.foundation_count();
                 let helpers = count + startup.foundations.len();
                 let bytes = count * std::mem::size_of::<super::FoundationPoint>()
                     + helpers * std::mem::size_of::<TerrainFoundation>();
-                if self.metrics().active_cpu_bytes + bytes > ACTIVE_CPU {
+                if self.metrics().active_cpu_bytes + bytes > self.limits.active_cpu {
                     self.failure =
                         Some("Source color helper admission exceeds active CPU budget".into());
                     return;
@@ -1619,7 +1687,7 @@ impl WorldStream {
     }
 
     fn refresh_structures(&mut self) -> bool {
-        let radius = self.reference.distances["BuildingGenDist"];
+        let radius = self.distances.building_gen_dist;
         let points = [self.request.player, self.request.vehicle];
         let bounds = union(
             window(points[0], radius as f64),
@@ -1683,7 +1751,7 @@ impl WorldStream {
             room,
             self.seed,
             &mut self.wanted_structures,
-            MAX_OBJECTS,
+            self.limits.objects,
         ) {
             self.failure = Some(error.0);
         }
@@ -1726,10 +1794,11 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
-        let helper_radius = ["ObjGenDist", "MountainGenDist", "BuildingGenDist"]
-            .into_iter()
-            .map(|key| self.reference.distances[key])
-            .fold(0_f32, f32::max) as f64;
+        let d = &self.distances;
+        let helper_radius = d
+            .obj_gen_dist
+            .max(d.mountain_gen_dist)
+            .max(d.building_gen_dist) as f64;
         self.refresh_helper_context(union(
             window(self.request.player, helper_radius),
             window(self.request.vehicle, helper_radius),
@@ -1747,7 +1816,9 @@ impl WorldStream {
             biome_override: self.mode.biome_override(),
         };
         let current = self.props.placements().len();
-        let maximum = MAX_OBJECTS
+        let maximum = self
+            .limits
+            .objects
             .saturating_sub(metrics.generated_objects)
             .saturating_add(current);
         if let Err(error) = self.props.advance(
@@ -1859,7 +1930,11 @@ impl WorldStream {
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
         let pending = 32usize.saturating_sub(metrics.pending_work);
-        let limit = 32usize.min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
+        let limit = 32usize.min(
+            self.limits
+                .objects
+                .saturating_sub(metrics.generated_objects),
+        );
         if limit == 0 {
             if !self
                 .contents
@@ -1867,19 +1942,22 @@ impl WorldStream {
                 .unwrap_or(false)
             {
                 self.failure = Some(format!(
-                    "Source content object budget exceeded: requested {}, limit {MAX_OBJECTS}",
-                    metrics.generated_objects + 1
+                    "Source content object budget exceeded: requested {}, limit {}",
+                    metrics.generated_objects + 1,
+                    self.limits.objects
                 ));
             }
             return;
         }
-        let reservation = self
-            .available_staging_bytes()
-            .min(ACTIVE_CPU.saturating_sub(metrics.active_cpu_bytes));
+        let reservation = self.available_staging_bytes().min(
+            self.limits
+                .active_cpu
+                .saturating_sub(metrics.active_cpu_bytes),
+        );
         if !self.admit_generation(reservation) {
             return;
         }
-        let available = (16 * MIB).saturating_sub(
+        let available = CHECKPOINTS.saturating_sub(
             self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
         );
         self.prepare_building_cables();
@@ -1889,6 +1967,7 @@ impl WorldStream {
         let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
         if let Err(error) = self.contents.advance(
             &self.reference,
+            self.distances.item_spawn_dist,
             &self.wanted_structures,
             if replay_admission {
                 &self.replay_roots
@@ -1928,7 +2007,7 @@ impl WorldStream {
                     .into_iter()
                     .any(|f| {
                         source_distance_squared(f, p.pose.position)
-                            < self.reference.distances["ItemSpawnDist"].powi(2)
+                            < self.distances.item_spawn_dist.powi(2)
                     })
                 || self.replay_indices.iter().any(|&index| {
                     let (_, c) = self.changes.get_indexed(index);
@@ -2014,7 +2093,7 @@ impl WorldStream {
                 .into_iter()
                 .any(|p| {
                     source_distance_squared(p, content.placement.pose.position)
-                        < self.reference.distances["ItemSpawnDist"].powi(2)
+                        < self.distances.item_spawn_dist.powi(2)
                 });
             if !baseline_near
                 && !selected
@@ -2080,7 +2159,7 @@ impl WorldStream {
     }
 
     fn select_changed_destinations(&mut self) {
-        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        let radius = f64::from(self.distances.item_spawn_dist);
         let bounds = [self.request.player, self.request.vehicle].map(|focus| WorldBounds {
             min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
             max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
@@ -2089,13 +2168,13 @@ impl WorldStream {
             self.replay_indices.clear();
             for bounds in bounds {
                 let (count, bytes) = self.changes.query_reservation(bounds);
-                if count > MAX_OBJECTS
+                if count > self.limits.objects
                     || bytes.saturating_mul(4) > self.available_staging_bytes()
                     || self
                         .metrics()
                         .active_cpu_bytes
                         .saturating_add(bytes.saturating_mul(4))
-                        > ACTIVE_CPU
+                        > self.limits.active_cpu
                 {
                     self.failure =
                         Some("Changed destination selection exceeds staging admission".into());
@@ -2109,7 +2188,7 @@ impl WorldStream {
                     }
                 }
             }
-            if self.replay_indices.len() > MAX_OBJECTS {
+            if self.replay_indices.len() > self.limits.objects {
                 self.failure = Some("Changed destination replay exceeds active admission".into());
                 return;
             }
@@ -2156,7 +2235,7 @@ impl WorldStream {
                     .metrics()
                     .active_cpu_bytes
                     .saturating_add(descriptor_bytes)
-                    > ACTIVE_CPU
+                    > self.limits.active_cpu
             {
                 return;
             }
@@ -2315,7 +2394,7 @@ impl WorldStream {
         let road_changed = self.planned_road_focus != self.road_focus;
         if road_changed {
             let road_distance =
-                self.reference.distances["RoadGenDist"] as f64 + self.road_light.influence_margin();
+                self.distances.road_gen_dist as f64 + self.road_light.influence_margin();
             // One union query retains both support windows without copying full index arrays.
             let query = union(
                 window(self.road_focus[0], road_distance),
@@ -2342,7 +2421,7 @@ impl WorldStream {
                     .segments_in(query, self.roads.coverage(), &mut self.road_candidates),
                 super::QueryStatus::Complete
             );
-            let radius = self.reference.distances["RoadGenDist"];
+            let radius = self.distances.road_gen_dist;
             let margin = self.road_light.influence_margin();
             self.selected_roads.retain(|r| {
                 self.road_candidates.contains(&r.segment.index)
@@ -2353,23 +2432,26 @@ impl WorldStream {
                     }))
             });
             self.planned_road_focus = self.road_focus;
-            if self.wanted_structures.len() > MAX_OBJECTS {
-                return Err(ReferenceError("Source object count exceeds8192".into()));
+            if self.wanted_structures.len() > self.limits.objects {
+                return Err(ReferenceError(format!(
+                    "Source object count exceeds {}",
+                    self.limits.objects
+                )));
             }
         }
         let buildings_changed = (force_structures || road_changed) && self.refresh_structures();
         self.terrain_context_dirty |= road_changed || buildings_changed;
         self.wanted_tiles.clear();
-        if self.wanted_structures.len() > MAX_OBJECTS {
+        if self.wanted_structures.len() > self.limits.objects {
             return Err(ReferenceError(format!(
-                "Source object count exceeds {MAX_OBJECTS}"
+                "Source object count exceeds {}",
+                self.limits.objects
             )));
         }
         for (tier, tile) in self.tiles.iter().enumerate() {
             let radius = tile.draw_distance as i64;
             let side = (radius * 2 + 1).max(4);
-            let count =
-                (((radius as f64 + 0.5).powi(2) * std::f32::consts::PI as f64) as usize).max(5);
+            let count = super::stream_limits::circle_tiles(*tile);
             let mut offsets = Vec::with_capacity((side * side) as usize);
             for z in 0..side {
                 for x in 0..side {
@@ -2400,7 +2482,7 @@ impl WorldStream {
                 .iter()
                 .filter(|k| k.layer == tier_layer(tier))
                 .count();
-            if active > if tier == 0 { MAX_NEAR } else { MAX_DISTANT } {
+            if active > self.limits.tiles[tier] {
                 return Err(ReferenceError(format!(
                     "Source terrain tier {tier} count budget"
                 )));
@@ -2420,7 +2502,7 @@ impl WorldStream {
                         self.selected_roads.iter().any(|r| r.segment == road)
                             && self.road_focus.into_iter().any(|p| {
                                 source_distance_squared(p, road.position())
-                                    <= self.reference.distances["RoadGenDist"].powi(2)
+                                    <= self.distances.road_gen_dist.powi(2)
                             })
                     })
                 } else {
@@ -2464,7 +2546,7 @@ impl WorldStream {
             };
             segment
         };
-        let radius = self.reference.distances["RoadGenDist"];
+        let radius = self.distances.road_gen_dist;
         let geometry = self
             .road_focus
             .into_iter()
@@ -2510,15 +2592,19 @@ impl WorldStream {
             .metrics()
             .generated_objects
             .saturating_add(new_light + old_poles + new_pole);
-        if required > MAX_OBJECTS {
+        if required > self.limits.objects {
             self.failure = Some(format!(
-                "Source road {index} object budget exceeded: requested {required}, limit {MAX_OBJECTS}"
+                "Source road {index} object budget exceeded: requested {required}, limit {}",
+                self.limits.objects
             ));
             return;
         }
         if existing.is_none() {
-            if self.selected_roads.len() >= MAX_ROADS {
-                self.failure = Some("Selected road descriptors exceed 512 roads".into());
+            if self.selected_roads.len() >= self.limits.roads {
+                self.failure = Some(format!(
+                    "Selected road descriptors exceed {} roads",
+                    self.limits.roads
+                ));
                 return;
             }
             // Source roadGenScript links rope i to segment i + 1. The index prepares ahead of selection.
@@ -2610,13 +2696,16 @@ impl WorldStream {
             self.wanted_lights.push(index);
         }
         self.refresh_poles();
-        if self.metrics().generated_objects > MAX_OBJECTS {
-            self.failure = Some(format!("Source object count exceeds {MAX_OBJECTS}"));
+        if self.metrics().generated_objects > self.limits.objects {
+            self.failure = Some(format!(
+                "Source object count exceeds {}",
+                self.limits.objects
+            ));
             return;
         }
         if geometry {
-            if self.wanted_roads.len() == MAX_ROADS {
-                self.failure = Some("Source road count exceeds 512".into());
+            if self.wanted_roads.len() == self.limits.roads {
+                self.failure = Some(format!("Source road count exceeds {}", self.limits.roads));
                 return;
             }
             self.wanted_roads.push(index);
@@ -2795,7 +2884,7 @@ impl WorldStream {
             .active_cpu_bytes
             .saturating_add(pending_bytes + cache_bytes)
             .saturating_add(delta)
-            > ACTIVE_CPU
+            > self.limits.active_cpu
         {
             self.road_failure(ReferenceError(
                 "Road worker capacity exceeds CPU budget".into(),
@@ -3117,11 +3206,11 @@ impl WorldStream {
             || metrics
                 .active_cpu_bytes
                 .saturating_add(surface_render_cpu(&work.published.surface))
-                > ACTIVE_CPU
+                > self.limits.active_cpu
             || metrics
                 .active_gpu_bytes
                 .saturating_add(surface_render_bytes(&work.published.surface))
-                > ACTIVE_GPU
+                > self.limits.active_gpu
         {
             return Err(ReferenceError(
                 "Source renderer allocation exceeds its resource budget".into(),
@@ -3248,16 +3337,16 @@ impl WorldStream {
         let metrics = self.metrics();
         // Geometry and renderer staging were reserved before allocation. Rapier adds collision storage.
         let count = match work.published.key.layer {
-            WorldLayer::Road => (metrics.road_segments, MAX_ROADS),
-            WorldLayer::Terrain => (metrics.near_tiles, MAX_NEAR),
-            WorldLayer::DistantTerrain => (metrics.distant_tiles[0], MAX_DISTANT),
-            WorldLayer::DistantTerrain2 => (metrics.distant_tiles[1], MAX_DISTANT),
+            WorldLayer::Road => (metrics.road_segments, self.limits.roads),
+            WorldLayer::Terrain => (metrics.near_tiles, self.limits.tiles[0]),
+            WorldLayer::DistantTerrain => (metrics.distant_tiles[0], self.limits.tiles[1]),
+            WorldLayer::DistantTerrain2 => (metrics.distant_tiles[1], self.limits.tiles[2]),
             _ => unreachable!(),
         };
         if count.0 >= count.1
-            || metrics.checkpoint_bytes > 16 * MIB
-            || metrics.active_cpu_bytes > ACTIVE_CPU
-            || metrics.active_gpu_bytes > ACTIVE_GPU
+            || metrics.checkpoint_bytes > CHECKPOINTS
+            || metrics.active_cpu_bytes > self.limits.active_cpu
+            || metrics.active_gpu_bytes > self.limits.active_gpu
         {
             let error = ReferenceError(format!(
                 "Source geometry budget at {:?}",
@@ -3289,7 +3378,9 @@ impl WorldStream {
                 self.reference.collision_rules.layers[layer as usize],
                 0.6,
                 0.0,
-                ACTIVE_CPU.saturating_sub(metrics.active_cpu_bytes),
+                self.limits
+                    .active_cpu
+                    .saturating_sub(metrics.active_cpu_bytes),
             ) {
                 Ok((collider, collision_bytes)) => {
                     work.published.collider = Some(collider);
@@ -3317,7 +3408,7 @@ impl WorldStream {
             && self.supports(window(self.request.player, 3.0))
             && self.supports(window(self.request.vehicle, 4.0))
         {
-            let distances = &self.reference.distances;
+            let distances = &self.distances;
             let focus = [self.request.player, self.request.vehicle];
             let tiles = self.tiles;
             let mut removed = [false; 4];
@@ -3331,12 +3422,11 @@ impl WorldStream {
                     self.wanted_roads.contains(&(surface.key.unit[0] as u32))
                 } else {
                     let size = tiles[tier - 1].size as f32;
-                    let field = [
-                        "TerrainRemoveDist",
-                        "DistantTerrainRemoveDist",
-                        "DistantTerrain2RemoveDist",
+                    let radius = [
+                        distances.terrain_remove_dist,
+                        distances.distant_terrain_remove_dist,
+                        distances.distant_terrain2_remove_dist,
                     ][tier - 1];
-                    let radius = distances[field];
                     let center = [
                         surface.key.unit[0] as f32 * size,
                         surface.key.unit[1] as f32 * size,
@@ -3411,7 +3501,10 @@ impl WorldStream {
         let x1 = ((swept.max[0] + size * 0.5) / size).floor() as i64;
         let z0 = ((-swept.max[2] + size * 0.5) / size).floor() as i64;
         let z1 = ((-swept.min[2] + size * 0.5) / size).floor() as i64;
-        if x1 < x0 || z1 < z0 || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > MAX_NEAR as i64 {
+        if x1 < x0
+            || z1 < z0
+            || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > self.limits.tiles[0] as i64
+        {
             return false;
         }
         (x0..=x1).all(|x| {
@@ -3433,7 +3526,7 @@ impl WorldStream {
             + self.structure_helpers.count(&self.wanted_structures);
         let extra = required.saturating_sub(self.color_helpers.capacity())
             * std::mem::size_of::<TerrainFoundation>();
-        if self.metrics().active_cpu_bytes.saturating_add(extra) > ACTIVE_CPU {
+        if self.metrics().active_cpu_bytes.saturating_add(extra) > self.limits.active_cpu {
             self.failure = Some("Source helper context exceeds active CPU budget".into());
             return;
         }
@@ -3919,9 +4012,10 @@ impl WorldStream {
                 return Err(ReferenceError("Building supply prefix is preparing".into()));
             }
         }
-        if self.metrics().generated_objects + 1 + points.len() * 2 > MAX_OBJECTS {
+        if self.metrics().generated_objects + 1 + points.len() * 2 > self.limits.objects {
             return Err(ReferenceError(format!(
-                "Source object count exceeds {MAX_OBJECTS}"
+                "Source object count exceeds {}",
+                self.limits.objects
             )));
         }
         if self
@@ -3929,7 +4023,7 @@ impl WorldStream {
             .active_cpu_bytes
             .saturating_add(self.recipes[&placement.prototype].instance_bytes())
             .saturating_add(super::contents::placement_heap(placement))
-            > ACTIVE_CPU
+            > self.limits.active_cpu
         {
             return Err(ReferenceError(
                 "Source structure physics exceeds active CPU budget".into(),
@@ -3951,12 +4045,12 @@ impl WorldStream {
                 .saturating_add(binding_reservation)
                 .saturating_add(self.recipes[&placement.prototype].instance_bytes())
                 .saturating_add(super::contents::placement_heap(placement))
-                > ACTIVE_CPU
+                > self.limits.active_cpu
             || self
                 .metrics()
                 .generated_objects
                 .saturating_add(binding_objects)
-                > MAX_OBJECTS
+                > self.limits.objects
         {
             return Err(ReferenceError(
                 "Source generated bindings exceed admission budget".into(),
@@ -3975,7 +4069,7 @@ impl WorldStream {
             )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
-            if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
+            if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > self.limits.active_cpu
                 || extra + binding_reservation > self.available_dependency_staging_bytes()
             {
                 return Err(ReferenceError(
@@ -4286,7 +4380,7 @@ impl WorldStream {
             self.change_prune_scans += 1;
         }
         super::changes::external_attachment_chain(&self.changes, &mut self.external_dependencies);
-        let radius = self.reference.distances["ItemRemoveDist"];
+        let radius = self.distances.item_remove_dist;
         let foci = [self.request.player, self.request.vehicle];
         let dependencies = &self.external_dependencies;
         let saved = &self.saved_item_protection;
@@ -4337,7 +4431,7 @@ impl WorldStream {
         let mut retired_structure = false;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
-            let radius = self.reference.distances["BuildingGenDist"];
+            let radius = self.distances.building_gen_dist;
             if self.contents.contains(id)
                 || self
                     .static_controls

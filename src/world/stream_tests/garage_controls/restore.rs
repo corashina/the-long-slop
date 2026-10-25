@@ -67,6 +67,7 @@ fn g10_control_restore_has_no_side_effects() {
         &stamp,
         &saved,
         crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     super::super::prepare_ready(&mut restored, &reference);

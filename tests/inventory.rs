@@ -31,8 +31,12 @@ fn fixture() -> (ReferenceManifest, SourceStamp, GarageRuntime) {
             })
             .collect(),
     };
-    let runtime =
-        GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
+    let runtime = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     (reference, stamp, runtime)
 }
 
