@@ -63,4 +63,16 @@ impl PhysicsWorld {
             self.set_body_mass(body, state.authored_mass_kg);
         }
     }
+
+    /// Adds locked item mass to a carrier body. Vehicle cargo stays through `set_vehicle_mass`.
+    pub fn add_cargo_mass(&mut self, body: RigidBodyHandle, mass_kg: f32) {
+        self.recompute_body_mass(body);
+        if let Some(index) = self.vehicle_of(body) {
+            let base = self.physics.bodies[body].mass() - self.vehicles[index].cargo_mass;
+            self.vehicles[index].cargo_mass = (self.vehicles[index].cargo_mass + mass_kg).max(0.0);
+            self.set_vehicle_mass(index, base);
+        } else {
+            self.set_body_mass(body, (self.authored_body_mass(body) + mass_kg).max(0.001));
+        }
+    }
 }

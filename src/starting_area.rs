@@ -264,7 +264,7 @@ impl StartingArea {
         }
         interaction.parts.bind(&mut items, physics)?;
         interaction.attachments.bind(&mut items, physics)?;
-        interaction.storage.bind(&mut items, physics)?;
+        interaction.storage.bind(physics)?;
         interaction.sync_parts(&mut items, physics)?;
         let starter = reference.survival.starter_food;
         if let Some(food) = items.get(starter).and_then(|item| item.food) {
@@ -465,18 +465,11 @@ impl StartingArea {
     }
     pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
         for record in &self.compound_colliders {
+            let user_data = physics.rapier().colliders[record.handle].user_data;
             if self
                 .interaction
                 .attachments
-                .owns_collider(crate::reference::ColliderId(
-                    (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
-                ))
-                || self
-                    .interaction
-                    .storage
-                    .owns_collider(crate::reference::ColliderId(
-                        (physics.rapier().colliders[record.handle].user_data >> 64) as u32,
-                    ))
+                .owns_collider(crate::reference::ColliderId((user_data >> 64) as u32))
             {
                 continue;
             }
@@ -490,6 +483,10 @@ impl StartingArea {
                 .parent()
                 .and_then(|parent| physics.vehicle_of(parent))
                 .is_none()
+                || self
+                    .interaction
+                    .storage
+                    .owns_collider(user_data, &self.items)
             {
                 continue;
             }

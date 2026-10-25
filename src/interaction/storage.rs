@@ -1,6 +1,6 @@
-//! Source physics locks for portable flashlights.
+//! Source `mountStuff` physics locks. Any loose item can lock to a storage volume.
 use super::{
-    items::{ItemLocation, ItemStore, node_pose},
+    items::{ItemLocation, ItemStore},
     mechanisms::MechanismState,
     parts::PartAttachments,
 };
@@ -10,40 +10,48 @@ use crate::reference::{
 use crate::vehicle::{PhysicsWorld, VEHICLE_COLLIDER_FLAG, from_rapier, to_rapier};
 use rapier3d::math::{Pose, Vector};
 use rapier3d::prelude::{ColliderHandle, QueryFilter, RigidBodyHandle, SharedShape};
+use std::collections::{HashMap, HashSet};
 
-struct Shape {
-    id: ColliderId,
-    handle: Option<ColliderHandle>,
-    loose_local: Pose,
-    enabled: bool,
-}
-struct Flashlight {
+/// Scan buffer capacity per volume. Distinct items seen in one volume.
+const SCAN_CAPACITY: usize = 64;
+/// Collider scratch capacity for one lock or unlock.
+const COLLIDER_CAPACITY: usize = 256;
+
+/// One locked item. Its own body is disabled while its colliders ride on the carrier.
+struct Locked {
     item: ItemId,
-    mass: f32,
-    active: bool,
-    body: Option<RigidBodyHandle>,
-    owner: Option<ItemId>,
-    volume: Option<usize>,
+    volume: u16,
+    body: RigidBodyHandle,
+    /// The item pose relative to its own body.
     loose_local: Pose,
-    shapes: Vec<Shape>,
-    dropped_at: f32,
+    /// Mass of the item body, with the items locked to it.
+    mass: f32,
 }
 struct Volume {
     owner: ItemId,
     storage_type: u8,
     active: bool,
+    dont_lock_if_owner_picked_up: bool,
     slots: Vec<PartSlotId>,
     usables: Vec<ItemId>,
     collider: ColliderId,
     handle: Option<ColliderHandle>,
     shape: SharedShape,
-    previous: Vec<ColliderHandle>,
-    current: Vec<ColliderHandle>,
+    /// Gate slots are filled and gate usables are closed. Set before each scan.
+    gates_closed: bool,
+    previous: Vec<ItemId>,
+    current: Vec<ItemId>,
 }
 pub struct StorageLocks {
-    flashlights: Vec<Flashlight>,
+    locked: Vec<Locked>,
     volumes: Vec<Volume>,
     part_usables: Vec<(ItemId, ItemId)>,
+    dont_mount: HashSet<ItemId>,
+    /// Source `dontMountTillPickup`. A pick-up removes the item. Not saved.
+    till_pickup: HashSet<ItemId>,
+    drop_times: HashMap<ItemId, f32>,
+    colliders: Vec<ColliderHandle>,
+    riders: Vec<ItemId>,
     mount_mask: u32,
     drop_delay: f32,
     scan_interval: f32,
@@ -54,52 +62,6 @@ pub struct StorageLocks {
 }
 impl StorageLocks {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        let mut flashlights = Vec::with_capacity(reference.flashlights.instances.len());
-        for instance in &reference.flashlights.instances {
-            let item = reference
-                .items
-                .iter()
-                .find(|i| i.id == instance.item)
-                .ok_or_else(|| error("Missing flashlight item"))?;
-            let body = reference
-                .bodies
-                .iter()
-                .find(|b| b.id == item.body)
-                .ok_or_else(|| error("Missing flashlight body"))?;
-            let body_pose = to_rapier(crate::vehicle::VehiclePose {
-                position: body.pose.translation,
-                rotation: body.pose.rotation,
-            });
-            let item_pose = to_rapier(node_pose(reference, item.node)?);
-            let shapes = instance
-                .colliders
-                .iter()
-                .map(|id| {
-                    let record = reference
-                        .colliders
-                        .iter()
-                        .find(|c| c.id == *id)
-                        .ok_or_else(|| error("Missing flashlight shape"))?;
-                    Ok(Shape {
-                        id: *id,
-                        handle: None,
-                        loose_local: Pose::IDENTITY,
-                        enabled: record.enabled,
-                    })
-                })
-                .collect::<Result<Vec<_>, ReferenceError>>()?;
-            flashlights.push(Flashlight {
-                item: item.id,
-                mass: item.mass_kg,
-                active: instance.startup_active,
-                body: None,
-                owner: None,
-                volume: None,
-                loose_local: body_pose.inverse() * item_pose,
-                shapes,
-                dropped_at: 0.0,
-            });
-        }
         let mut volumes = Vec::with_capacity(reference.storage.volumes.len());
         for record in &reference.storage.volumes {
             let collider = reference
@@ -134,24 +96,51 @@ impl StorageLocks {
                 owner: record.owner,
                 storage_type: record.storage_type,
                 active: record.active,
+                dont_lock_if_owner_picked_up: record.dont_lock_if_owner_picked_up,
                 slots: record.slots.clone(),
                 usables,
                 collider: record.collider,
                 handle: None,
                 shape,
-                previous: Vec::with_capacity(reference.colliders.len()),
-                current: Vec::with_capacity(reference.colliders.len()),
+                gates_closed: false,
+                previous: Vec::with_capacity(SCAN_CAPACITY),
+                current: Vec::with_capacity(SCAN_CAPACITY),
             });
         }
-        let policy = &reference.storage.policy;
-        Ok(Self {
-            part_usables: reference
-                .mechanisms
-                .iter()
-                .filter_map(|m| m.parent_item.map(|parent| (parent, m.item)))
-                .collect(),
-            flashlights,
+        let flags = &reference.storage.flags;
+        let mut locks =
+            Self::with_volumes(volumes, reference.items.len(), &reference.storage.policy);
+        locks.part_usables = reference
+            .mechanisms
+            .iter()
+            .filter_map(|m| m.parent_item.map(|parent| (parent, m.item)))
+            .collect();
+        locks.dont_mount = flags
+            .iter()
+            .filter(|f| f.dont_mount)
+            .map(|f| f.item)
+            .collect();
+        locks.till_pickup = flags
+            .iter()
+            .filter(|f| f.dont_mount_till_pickup)
+            .map(|f| f.item)
+            .collect();
+        Ok(locks)
+    }
+    fn with_volumes(
+        volumes: Vec<Volume>,
+        items: usize,
+        policy: &crate::reference::StoragePolicy,
+    ) -> Self {
+        Self {
+            locked: Vec::with_capacity(items),
             volumes,
+            part_usables: Vec::new(),
+            dont_mount: HashSet::new(),
+            till_pickup: HashSet::new(),
+            drop_times: HashMap::with_capacity(items),
+            colliders: Vec::with_capacity(COLLIDER_CAPACITY),
+            riders: Vec::with_capacity(items),
             mount_mask: policy.mount_mask,
             drop_delay: policy.drop_delay_seconds,
             scan_interval: policy.scan_interval_seconds,
@@ -159,38 +148,11 @@ impl StorageLocks {
             last_scan: 0.0,
             startup_frame: 0,
             bound: false,
-        })
+        }
     }
-    pub fn bind(
-        &mut self,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<(), ReferenceError> {
+    pub fn bind(&mut self, physics: &PhysicsWorld) -> Result<(), ReferenceError> {
         if self.bound {
             return Ok(());
-        }
-        for light in &mut self.flashlights {
-            let body = items
-                .get(light.item)
-                .and_then(|i| i.body)
-                .ok_or_else(|| error("Missing flashlight body binding"))?;
-            light.body = Some(body);
-            light.loose_local = to_rapier(items.get(light.item).unwrap().local_pose);
-            for shape in &mut light.shapes {
-                let (handle, collider) = physics
-                    .rapier()
-                    .colliders
-                    .iter()
-                    .find(|(_, c)| ColliderId((c.user_data >> 64) as u32) == shape.id)
-                    .ok_or_else(|| error("Missing flashlight collider binding"))?;
-                shape.handle = Some(handle);
-                shape.loose_local =
-                    physics.rapier().bodies[body].position().inverse() * *collider.position();
-                physics.edit_collider(handle, |collider| collider.set_density(0.0));
-            }
-            if !light.active {
-                physics.edit_body(body, |body| body.set_enabled(false));
-            }
         }
         for volume in &mut self.volumes {
             volume.handle = physics
@@ -206,187 +168,284 @@ impl StorageLocks {
         self.bound = true;
         Ok(())
     }
-    pub fn contains(&self, item: ItemId) -> bool {
-        self.flashlights.iter().any(|f| f.item == item)
-    }
-    pub fn active(&self, item: ItemId) -> bool {
-        self.flashlights.iter().any(|f| f.item == item && f.active)
-    }
     pub fn stored(&self, item: ItemId) -> bool {
-        self.flashlights
-            .iter()
-            .any(|f| f.item == item && f.owner.is_some())
+        self.locked.iter().any(|l| l.item == item)
     }
-    pub fn loose_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
-        self.flashlights
-            .iter()
-            .find(|f| f.item == item && f.active)?
-            .body
+    /// The disabled own body of a locked item.
+    pub fn locked_body(&self, item: ItemId) -> Option<RigidBodyHandle> {
+        self.locked.iter().find(|l| l.item == item).map(|l| l.body)
     }
-    pub fn owns_collider(&self, id: ColliderId) -> bool {
-        self.flashlights
-            .iter()
-            .any(|f| f.shapes.iter().any(|s| s.id == id))
+    /// True if the collider belongs to a locked item or to an item that rides on one.
+    pub fn owns_collider(&self, user_data: u128, items: &ItemStore) -> bool {
+        if self.locked.is_empty() {
+            return false;
+        }
+        let Some(mut id) = collider_item(user_data) else {
+            return false;
+        };
+        for _ in 0..items.len() {
+            match items.get(id).map(|i| i.location) {
+                Some(ItemLocation::Locked { .. }) => return true,
+                _ => match items.parent(id) {
+                    Some(parent) => id = parent,
+                    None => return false,
+                },
+            }
+        }
+        false
     }
     pub fn mark_dropped(&mut self, item: ItemId) {
-        if let Some(light) = self.flashlights.iter_mut().find(|f| f.item == item) {
-            light.dropped_at = self.elapsed;
-        }
+        self.drop_times.insert(item, self.elapsed);
     }
-    pub fn rebase(&mut self, _shift: [f32; 3]) {
-        // Physics rebases body poses. Volumes follow their parent bodies.
+    pub fn picked_up(&mut self, item: ItemId) {
+        self.till_pickup.remove(&item);
     }
-    fn permitted(
+    fn gates_closed(
         volume: &Volume,
-        items: &ItemStore,
         parts: &PartAttachments,
         mechanisms: &MechanismState,
         part_usables: &[(ItemId, ItemId)],
     ) -> bool {
-        if !volume.active || !items.mounted(volume.owner) || matches!(volume.storage_type, 5 | 7) {
-            return false;
-        }
-        for slot in &volume.slots {
-            let Some(item) = parts.slot_item(*slot) else {
-                return false;
-            };
-            if let Some((_, usable)) = part_usables.iter().find(|(part, _)| *part == item) {
-                if mechanisms
-                    .value(*usable, false)
-                    .is_some_and(|value| value > 0.1)
-                {
-                    return false;
-                }
-            }
-        }
-        for usable in &volume.usables {
-            if mechanisms
-                .value(*usable, false)
+        let open = |usable: ItemId| {
+            mechanisms
+                .value(usable, false)
                 .is_some_and(|value| value > 0.1)
-            {
-                return false;
-            }
-        }
-        true
+        };
+        volume.slots.iter().all(|slot| {
+            parts.slot_item(*slot).is_some_and(|item| {
+                part_usables
+                    .iter()
+                    .find(|(part, _)| *part == item)
+                    .is_none_or(|(_, usable)| !open(*usable))
+            })
+        }) && !volume.usables.iter().any(|usable| open(*usable))
+    }
+    /// Source `CanStore` at setting 2, with owner presence.
+    fn permitted(volume: &Volume, items: &ItemStore, physics: &PhysicsWorld) -> bool {
+        volume.active
+            && volume.gates_closed
+            && crate::reference::storage::stores(volume.storage_type)
+            && items.get(volume.owner).is_some_and(|owner| {
+                !owner.removed
+                    && owner.inactive_pose.is_none()
+                    && !(volume.dont_lock_if_owner_picked_up
+                        && owner.location == ItemLocation::Held)
+                    && owner.body.is_some_and(|body| {
+                        physics.body_active(body) && physics.rapier().bodies.get(body).is_some()
+                    })
+            })
     }
     fn scan_volume(volume: &mut Volume, physics: &PhysicsWorld, mount_mask: u32) {
         volume.current.clear();
-        let handle = volume.handle.unwrap();
-        let pose = *physics.rapier().colliders[handle].position();
+        let pose = *physics.rapier().colliders[volume.handle.unwrap()].position();
         let predicate = |_, collider: &rapier3d::prelude::Collider| {
             collider.is_enabled()
                 && collider.collision_groups().memberships.bits() & mount_mask != 0
         };
         let filter = QueryFilter::default().predicate(&predicate);
-        for (handle, _) in physics
+        for (_, collider) in physics
             .queries(filter)
             .intersect_shape(pose, volume.shape.as_ref())
         {
-            volume.current.push(handle);
+            if let Some(item) = collider_item(collider.user_data)
+                && !volume.current.contains(&item)
+            {
+                volume.current.push(item);
+            }
         }
     }
+    /// Source `FreezeUpd` lock checks, without the two-scan rule.
+    fn can_lock(
+        &self,
+        item: ItemId,
+        owner: ItemId,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+    ) -> bool {
+        let Some(state) = items.get(item) else {
+            return false;
+        };
+        let Some(carrier) = items.get(owner).and_then(|o| o.body) else {
+            return false;
+        };
+        state.location == ItemLocation::World
+            && !state.removed
+            && !state.pending_attachment
+            && state.inactive_pose.is_none()
+            && !self.dont_mount.contains(&item)
+            && !self.till_pickup.contains(&item)
+            && self
+                .drop_times
+                .get(&item)
+                .is_none_or(|time| self.elapsed - time >= self.drop_delay)
+            && item != owner
+            && !items.descends(owner, item)
+            && !items.mounted(item)
+            && state.body.is_some_and(|body| {
+                body != carrier
+                    && physics.body_active(body)
+                    && physics.vehicle_of(body).is_none()
+                    && physics
+                        .rapier()
+                        .bodies
+                        .get(body)
+                        .is_some_and(|b| b.is_enabled() && b.is_dynamic())
+            })
+    }
+    /// Adds mass to the carrier and to each locked owner body between them.
+    fn add_mass(
+        &mut self,
+        owner: ItemId,
+        carrier: RigidBodyHandle,
+        mass: f32,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) {
+        physics.add_cargo_mass(carrier, mass);
+        let mut id = owner;
+        while let Some(ItemLocation::Locked { owner: next, .. }) = items.get(id).map(|i| i.location)
+        {
+            if let Some(entry) = self.locked.iter_mut().find(|l| l.item == id) {
+                entry.mass += mass;
+                physics.add_cargo_mass(entry.body, mass);
+            }
+            id = next;
+        }
+    }
+    /// Moves the item colliders, and the colliders of items locked to it, onto the owner carrier.
+    /// Returns false if another loose item shares the item body.
     fn lock(
         &mut self,
-        index: usize,
-        volume_index: usize,
-        owner: ItemId,
+        item: ItemId,
+        volume: u16,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
-    ) -> Result<(), ReferenceError> {
-        let light = &mut self.flashlights[index];
-        let body = light
-            .body
-            .ok_or_else(|| error("Flashlight has no loose body"))?;
-        let parent = items
+    ) -> Result<bool, ReferenceError> {
+        let owner = self.volumes[volume as usize].owner;
+        let carrier = items
             .get(owner)
             .and_then(|i| i.body)
             .ok_or_else(|| error("Storage owner has no body"))?;
-        let item_pose = *physics.rapier().bodies[body].position() * light.loose_local;
-        let parent_pose = *physics.rapier().bodies[parent].position();
-        let vehicle = physics.vehicle_of(parent);
-        for shape in &light.shapes {
-            let handle = shape.handle.unwrap();
-            let world_pose = *physics.rapier().colliders[handle].position();
-
-            physics.set_collider_parent(handle, Some(parent));
-            physics.edit_collider(handle, |collider| {
-                collider.set_position_wrt_parent(parent_pose.inverse() * world_pose)
-            });
-            if vehicle.is_some() {
-                physics.edit_collider(handle, |collider| {
-                    collider.user_data |= VEHICLE_COLLIDER_FLAG;
-                });
-            } else {
-                physics.edit_collider(handle, |collider| {
-                    collider.user_data &= !VEHICLE_COLLIDER_FLAG;
-                });
+        let state = items
+            .get(item)
+            .ok_or_else(|| error("Missing storage item"))?;
+        let body = state
+            .body
+            .ok_or_else(|| error("Storage item has no body"))?;
+        let loose_local = to_rapier(state.local_pose);
+        if items
+            .iter()
+            .any(|s| s.body == Some(body) && s.id != item && !items.descends(s.id, item))
+        {
+            return Ok(false);
+        }
+        let body_pose = *physics.rapier().bodies[body].position();
+        let carrier_pose = *physics.rapier().bodies[carrier].position();
+        physics.recompute_body_mass(body);
+        let mass = physics.authored_body_mass(body);
+        let flag = if physics.vehicle_of(carrier).is_some() {
+            VEHICLE_COLLIDER_FLAG
+        } else {
+            0
+        };
+        self.colliders.clear();
+        for handle in physics.rapier().bodies[body].colliders() {
+            if collider_item(physics.rapier().colliders[*handle].user_data)
+                .is_some_and(|id| id == item || items.descends(id, item))
+            {
+                self.colliders.push(*handle);
             }
         }
-        physics.edit_body(body, |body| body.set_enabled(false));
-        if let Some(vehicle) = vehicle {
-            let mass = physics.rapier().bodies[parent].mass() + light.mass;
-            physics.set_vehicle_mass(vehicle, mass);
+        for &handle in &self.colliders {
+            let world = body_pose * local_pose(physics, handle);
+            physics.set_collider_parent(handle, Some(carrier));
+            physics.edit_collider(handle, |collider| {
+                collider.set_position_wrt_parent(carrier_pose.inverse() * world);
+                collider.user_data = (collider.user_data & !VEHICLE_COLLIDER_FLAG) | flag;
+            });
         }
-        let item = items.set_body(light.item, Some(parent)).unwrap();
-        item.location = ItemLocation::Attached(owner);
-        item.local_pose = from_rapier(&(parent_pose.inverse() * item_pose));
-        item.pose = from_rapier(&item_pose);
-        light.owner = Some(owner);
-        light.volume = Some(volume_index);
-        Ok(())
+        physics.edit_body(body, |body| body.set_enabled(false));
+        let rebase = carrier_pose.inverse() * body_pose;
+        self.riders.clear();
+        self.riders
+            .extend(items.iter().filter(|s| s.body == Some(body)).map(|s| s.id));
+        for &rider in &self.riders {
+            let state = items.set_body(rider, Some(carrier)).unwrap();
+            state.local_pose = from_rapier(&(rebase * to_rapier(state.local_pose)));
+        }
+        items.get_mut(item).unwrap().location = ItemLocation::Locked { owner, volume };
+        self.add_mass(owner, carrier, mass, items, physics);
+        self.locked.push(Locked {
+            item,
+            volume,
+            body,
+            loose_local,
+            mass,
+        });
+        Ok(true)
     }
+    /// Returns the item to its own body with the carrier velocity. Its locked children stay locked to it.
     pub fn unlock(
         &mut self,
         item: ItemId,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        let light = self
-            .flashlights
-            .iter_mut()
-            .find(|f| f.item == item && f.owner.is_some())
-            .ok_or_else(|| error("Flashlight is not stored"))?;
-        let parent = items
+        let index = self
+            .locked
+            .iter()
+            .position(|l| l.item == item)
+            .ok_or_else(|| error("Item is not stored"))?;
+        let state = items
             .get(item)
-            .and_then(|i| i.body)
-            .ok_or_else(|| error("Missing storage parent body"))?;
-        let item_pose = *physics.rapier().bodies[parent].position()
-            * to_rapier(items.get(item).unwrap().local_pose);
-        let loose_pose = item_pose * light.loose_local.inverse();
-        let velocity = physics.rapier().bodies[parent].velocity_at_point(loose_pose.translation);
-        let angular = physics.rapier().bodies[parent].angvel();
-        let body = light.body.unwrap();
-        if let Some(vehicle) = physics.vehicle_of(parent) {
-            let mass = (physics.rapier().bodies[parent].mass() - light.mass).max(0.001);
-            physics.set_vehicle_mass(vehicle, mass);
+            .ok_or_else(|| error("Missing storage item"))?;
+        let ItemLocation::Locked { owner, .. } = state.location else {
+            return Err(error("Item is not stored"));
+        };
+        let carrier = state.body.ok_or_else(|| error("Missing storage carrier"))?;
+        let item_pose = to_rapier(state.local_pose);
+        let entry = self.locked.swap_remove(index);
+        let carrier_pose = *physics.rapier().bodies[carrier].position();
+        let body_pose = carrier_pose * item_pose * entry.loose_local.inverse();
+        let velocity = physics.rapier().bodies[carrier].velocity_at_point(body_pose.translation);
+        let angular = physics.rapier().bodies[carrier].angvel();
+        self.add_mass(owner, carrier, -entry.mass, items, physics);
+        self.colliders.clear();
+        for handle in physics.rapier().bodies[carrier].colliders() {
+            if collider_item(physics.rapier().colliders[*handle].user_data)
+                .is_some_and(|id| id == item || items.descends(id, item))
+            {
+                self.colliders.push(*handle);
+            }
         }
-        {
-            physics.edit_body(body, |loose| {
-                loose.set_position(loose_pose, true);
-                loose.set_enabled(true);
-                loose.set_linvel(velocity, true);
-                loose.set_angvel(angular, true);
-            });
-        }
-        for shape in &light.shapes {
-            let handle = shape.handle.unwrap();
-
-            physics.set_collider_parent(handle, Some(body));
+        for &handle in &self.colliders {
+            let world = carrier_pose * local_pose(physics, handle);
+            physics.set_collider_parent(handle, Some(entry.body));
             physics.edit_collider(handle, |collider| {
-                collider.set_position_wrt_parent(shape.loose_local)
-            });
-            physics.edit_collider(handle, |collider| collider.set_enabled(shape.enabled));
-            physics.edit_collider(handle, |collider| {
+                collider.set_position_wrt_parent(body_pose.inverse() * world);
                 collider.user_data &= !VEHICLE_COLLIDER_FLAG;
             });
         }
-        let state = items.set_body(item, Some(body)).unwrap();
-        state.location = ItemLocation::World;
-        state.local_pose = from_rapier(&light.loose_local);
-        state.pose = from_rapier(&item_pose);
-        light.owner = None;
-        light.volume = None;
-        light.dropped_at = self.elapsed;
+        physics.edit_body(entry.body, |body| {
+            body.set_position(body_pose, true);
+            body.set_enabled(true);
+            body.set_linvel(velocity, true);
+            body.set_angvel(angular, true);
+        });
+        let rebase = body_pose.inverse() * carrier_pose;
+        self.riders.clear();
+        self.riders.extend(
+            items
+                .iter()
+                .filter(|s| s.body == Some(carrier) && (s.id == item || items.descends(s.id, item)))
+                .map(|s| s.id),
+        );
+        for &rider in &self.riders {
+            let state = items.set_body(rider, Some(entry.body)).unwrap();
+            state.local_pose = from_rapier(&(rebase * to_rapier(state.local_pose)));
+        }
+        items.get_mut(item).unwrap().location = ItemLocation::World;
+        self.drop_times.insert(item, self.elapsed);
         Ok(())
     }
     pub fn initialization_ready(&self) -> bool {
@@ -440,54 +499,46 @@ impl StorageLocks {
             return Ok(false);
         }
         self.last_scan = self.elapsed;
+        for volume in &mut self.volumes {
+            volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
+        }
+        self.scan(items, physics)
+    }
+    /// One `Upd` pass over every volume. Gate state is already set.
+    fn scan(
+        &mut self,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<bool, ReferenceError> {
         let mut changed = false;
-        for volume_index in 0..self.volumes.len() {
-            let eligible = Self::permitted(
-                &self.volumes[volume_index],
-                items,
-                parts,
-                mechanisms,
-                &self.part_usables,
-            );
-            let owner = self.volumes[volume_index].owner;
-            if !eligible {
-                for i in 0..self.flashlights.len() {
-                    if self.flashlights[i].volume == Some(volume_index) {
-                        self.unlock(self.flashlights[i].item, items, physics)?;
-                        changed = true;
-                    }
+        for index in 0..self.volumes.len() {
+            let volume = index as u16;
+            let permitted = Self::permitted(&self.volumes[index], items, physics);
+            if !permitted {
+                while let Some(item) = self
+                    .locked
+                    .iter()
+                    .find(|l| l.volume == volume)
+                    .map(|l| l.item)
+                {
+                    self.unlock(item, items, physics)?;
+                    changed = true;
                 }
             }
-            {
-                let volume = &mut self.volumes[volume_index];
-                Self::scan_volume(volume, physics, self.mount_mask);
-            }
-            if eligible {
-                for i in 0..self.flashlights.len() {
-                    let light = &self.flashlights[i];
-                    if !light.active
-                        || light.owner.is_some()
-                        || self.elapsed - light.dropped_at < self.drop_delay
-                        || items
-                            .get(light.item)
-                            .is_none_or(|item| item.location != ItemLocation::World)
-                        || owner == light.item
-                        || items.mounted(light.item)
+            Self::scan_volume(&mut self.volumes[index], physics, self.mount_mask);
+            if permitted {
+                let owner = self.volumes[index].owner;
+                for slot in 0..self.volumes[index].current.len() {
+                    let item = self.volumes[index].current[slot];
+                    if self.volumes[index].previous.contains(&item)
+                        && self.can_lock(item, owner, items, physics)
+                        && self.lock(item, volume, items, physics)?
                     {
-                        continue;
-                    }
-                    let retained = light.shapes.iter().any(|s| {
-                        let h = s.handle.unwrap();
-                        self.volumes[volume_index].current.contains(&h)
-                            && self.volumes[volume_index].previous.contains(&h)
-                    });
-                    if retained {
-                        self.lock(i, volume_index, owner, items, physics)?;
                         changed = true;
                     }
                 }
             }
-            let volume = &mut self.volumes[volume_index];
+            let volume = &mut self.volumes[index];
             std::mem::swap(&mut volume.previous, &mut volume.current);
         }
         if changed {
@@ -496,6 +547,266 @@ impl StorageLocks {
         Ok(changed)
     }
 }
+/// Collider world poses update in the next query refresh. The parent pose is current.
+fn local_pose(physics: &PhysicsWorld, handle: ColliderHandle) -> Pose {
+    physics.rapier().colliders[handle]
+        .position_wrt_parent()
+        .copied()
+        .unwrap_or(Pose::IDENTITY)
+}
+/// Collider user data low 32 bits hold the item id plus one. Zero is no item.
+fn collider_item(user_data: u128) -> Option<ItemId> {
+    let value = (user_data & u32::MAX as u128) as u32;
+    value.checked_sub(1).map(ItemId)
+}
 fn error(message: &str) -> ReferenceError {
     ReferenceError(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reference::{SourceId, StoragePolicy};
+    use crate::vehicle::VehiclePose;
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+
+    const CARRIER: ItemId = ItemId(1);
+    const BOX: ItemId = ItemId(2);
+    const CAN: ItemId = ItemId(3);
+
+    struct Rig {
+        physics: PhysicsWorld,
+        items: ItemStore,
+        locks: StorageLocks,
+        carrier: RigidBodyHandle,
+    }
+
+    fn user_data(item: ItemId, collider: u32) -> u128 {
+        ((collider as u128) << 64) | (item.0 as u128 + 1)
+    }
+    fn body(physics: &mut PhysicsWorld, x: f32, mass: f32, item: ItemId) -> RigidBodyHandle {
+        let body = physics.insert_body(
+            RigidBodyBuilder::dynamic()
+                .translation(Vector::new(x, 0.0, 0.0))
+                .additional_mass(mass),
+        );
+        physics.insert_collider_with_parent(
+            ColliderBuilder::cuboid(0.1, 0.1, 0.1)
+                .density(0.0)
+                .user_data(user_data(item, 100 + item.0)),
+            body,
+        );
+        body
+    }
+    fn volume(physics: &mut PhysicsWorld, parent: RigidBodyHandle, owner: ItemId) -> Volume {
+        let id = 200 + owner.0;
+        let handle = physics.insert_collider_with_parent(
+            ColliderBuilder::cuboid(1.0, 1.0, 1.0)
+                .sensor(true)
+                .density(0.0)
+                .user_data(user_data(owner, id)),
+            parent,
+        );
+        Volume {
+            owner,
+            storage_type: 0,
+            active: true,
+            dont_lock_if_owner_picked_up: false,
+            slots: Vec::new(),
+            usables: Vec::new(),
+            collider: ColliderId(id),
+            handle: Some(handle),
+            shape: SharedShape::cuboid(1.0, 1.0, 1.0),
+            gates_closed: true,
+            previous: Vec::with_capacity(SCAN_CAPACITY),
+            current: Vec::with_capacity(SCAN_CAPACITY),
+        }
+    }
+    fn item(items: &mut ItemStore, id: ItemId, body: RigidBodyHandle) {
+        let pose = VehiclePose {
+            position: [0.0; 3],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        };
+        items.insert_spawned(id, "test", pose, body).unwrap();
+    }
+    /// Carrier with a 10 kg body and one volume. A 2 kg can inside it.
+    /// With `nested`, a 3 kg box with its own volume holds the can. The box volume scans first.
+    fn rig(nested: bool) -> Rig {
+        let mut physics = PhysicsWorld::empty_for_tests();
+        let mut items = ItemStore::empty_for_tests();
+        let carrier = body(&mut physics, 0.0, 10.0, CARRIER);
+        item(&mut items, CARRIER, carrier);
+        let can = body(&mut physics, 0.3, 2.0, CAN);
+        item(&mut items, CAN, can);
+        let mut volumes = Vec::new();
+        if nested {
+            let crate_body = body(&mut physics, 0.5, 3.0, BOX);
+            item(&mut items, BOX, crate_body);
+            volumes.push(volume(&mut physics, crate_body, BOX));
+        }
+        volumes.push(volume(&mut physics, carrier, CARRIER));
+        let policy = StoragePolicy {
+            settings_source: SourceId {
+                file: "test".into(),
+                path_id: 1,
+            },
+            default_setting: 2,
+            mount_mask: 8_388_609,
+            drop_delay_seconds: 1.0,
+            scan_interval_seconds: 1.5,
+        };
+        let mut locks = StorageLocks::with_volumes(volumes, 8, &policy);
+        locks.bound = true;
+        // The carrier body overlaps the box volume. Source heavy owners carry `dontMount`.
+        locks.dont_mount.insert(CARRIER);
+        Rig {
+            physics,
+            items,
+            locks,
+            carrier,
+        }
+    }
+    impl Rig {
+        fn scan(&mut self, dt: f32) {
+            self.locks.elapsed += dt;
+            self.physics.refresh_queries();
+            self.locks.scan(&mut self.items, &mut self.physics).unwrap();
+        }
+        fn location(&self, id: ItemId) -> ItemLocation {
+            self.items.get(id).unwrap().location
+        }
+        fn mass(&self, body: RigidBodyHandle) -> f32 {
+            self.physics.rapier().bodies[body].mass()
+        }
+        fn world(&self, shape: ColliderHandle) -> Pose {
+            let collider = &self.physics.rapier().colliders[shape];
+            *self.physics.rapier().bodies[collider.parent().unwrap()].position()
+                * local_pose(&self.physics, shape)
+        }
+        fn collider(&self, item: ItemId) -> ColliderHandle {
+            self.physics
+                .rapier()
+                .colliders
+                .iter()
+                .find(|(_, c)| c.user_data == user_data(item, 100 + item.0))
+                .unwrap()
+                .0
+        }
+    }
+    fn close(a: &Pose, b: &Pose) -> bool {
+        (a.translation - b.translation).length() < 1e-4
+            && a.rotation.angle_between(b.rotation) < 1e-4
+    }
+
+    #[test]
+    fn lock_needs_two_scans_and_drop_delay_then_pickup_releases() {
+        let mut rig = rig(false);
+        let can_body = rig.items.get(CAN).unwrap().body.unwrap();
+        let shape = rig.collider(CAN);
+        let world = rig.world(shape);
+        rig.locks.mark_dropped(CAN);
+        rig.scan(0.0);
+        assert_eq!(rig.location(CAN), ItemLocation::World, "one scan");
+        rig.scan(0.5);
+        assert_eq!(rig.location(CAN), ItemLocation::World, "drop delay");
+        rig.scan(0.6);
+        assert_eq!(
+            rig.location(CAN),
+            ItemLocation::Locked {
+                owner: CARRIER,
+                volume: 0
+            }
+        );
+        assert_eq!(rig.items.get(CAN).unwrap().body, Some(rig.carrier));
+        assert_eq!(
+            rig.physics.rapier().colliders[shape].parent(),
+            Some(rig.carrier)
+        );
+        assert!(close(&rig.world(shape), &world));
+        assert!(!rig.physics.rapier().bodies[can_body].is_enabled());
+        assert!((rig.mass(rig.carrier) - 12.0).abs() < 1e-4);
+
+        rig.locks
+            .unlock(CAN, &mut rig.items, &mut rig.physics)
+            .unwrap();
+        assert_eq!(rig.location(CAN), ItemLocation::World);
+        assert_eq!(rig.items.get(CAN).unwrap().body, Some(can_body));
+        assert_eq!(
+            rig.physics.rapier().colliders[shape].parent(),
+            Some(can_body)
+        );
+        assert!(close(&rig.world(shape), &world));
+        assert!(rig.physics.rapier().bodies[can_body].is_enabled());
+        assert!((rig.mass(rig.carrier) - 10.0).abs() < 1e-4);
+        assert!((rig.mass(can_body) - 2.0).abs() < 1e-4);
+        rig.scan(0.5);
+        assert_eq!(
+            rig.location(CAN),
+            ItemLocation::World,
+            "drop delay after pick-up"
+        );
+        rig.scan(0.6);
+        assert!(matches!(rig.location(CAN), ItemLocation::Locked { .. }));
+    }
+
+    #[test]
+    fn nested_box_moves_child_colliders_and_gate_close_releases_it() {
+        let mut rig = rig(true);
+        let box_body = rig.items.get(BOX).unwrap().body.unwrap();
+        let can_body = rig.items.get(CAN).unwrap().body.unwrap();
+        let can_shape = rig.collider(CAN);
+        let can_world = rig.world(can_shape);
+        rig.scan(0.0);
+        rig.scan(1.5);
+        assert_eq!(
+            rig.location(CAN),
+            ItemLocation::Locked {
+                owner: BOX,
+                volume: 0
+            }
+        );
+        assert_eq!(
+            rig.location(BOX),
+            ItemLocation::Locked {
+                owner: CARRIER,
+                volume: 1
+            }
+        );
+        assert_eq!(
+            rig.physics.rapier().colliders[can_shape].parent(),
+            Some(rig.carrier)
+        );
+        assert_eq!(rig.items.get(CAN).unwrap().body, Some(rig.carrier));
+        assert!(close(&rig.world(can_shape), &can_world));
+        assert!((rig.mass(rig.carrier) - 15.0).abs() < 1e-4);
+        assert!((rig.mass(box_body) - 5.0).abs() < 1e-4);
+
+        rig.locks.volumes[1].gates_closed = false;
+        rig.scan(1.5);
+        assert_eq!(rig.location(BOX), ItemLocation::World);
+        assert_eq!(
+            rig.location(CAN),
+            ItemLocation::Locked {
+                owner: BOX,
+                volume: 0
+            }
+        );
+        assert_eq!(
+            rig.physics.rapier().colliders[can_shape].parent(),
+            Some(box_body)
+        );
+        assert_eq!(rig.items.get(CAN).unwrap().body, Some(box_body));
+        assert!(close(&rig.world(can_shape), &can_world));
+        assert!((rig.mass(rig.carrier) - 10.0).abs() < 1e-4);
+
+        rig.locks
+            .unlock(CAN, &mut rig.items, &mut rig.physics)
+            .unwrap();
+        assert_eq!(
+            rig.physics.rapier().colliders[can_shape].parent(),
+            Some(can_body)
+        );
+        assert!((rig.mass(box_body) - 3.0).abs() < 1e-4);
+        assert!((rig.mass(can_body) - 2.0).abs() < 1e-4);
+    }
 }

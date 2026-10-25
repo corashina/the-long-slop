@@ -779,18 +779,17 @@ impl InteractionState {
     ) -> Result<ItemId, ReferenceError> {
         let body = self
             .storage
-            .loose_body(item)
-            .ok_or_else(|| ReferenceError("Missing flashlight body".into()))?;
-        if !self.storage.stored(item)
-            || !self
-                .carry
-                .allows_pickup(item, player.seat().is_some(), items.mounted(item))
+            .locked_body(item)
+            .ok_or_else(|| ReferenceError("Item is not stored".into()))?;
+        if !self
+            .carry
+            .allows_pickup(item, player.seat().is_some(), items.mounted(item))
         {
             return Err(ReferenceError("Cannot carry this item".into()));
         }
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.storage.unlock(item, items, physics)?;
-        self.carry.pickup(item, point, player, items, physics)?;
+        self.pickup_item(item, point, player, items, physics)?;
         Ok(item)
     }
     pub fn allocate_generated_light(&mut self) -> Result<LightControlId, ReferenceError> {
@@ -1351,6 +1350,7 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         self.carry.pickup(item, point, player, items, physics)?;
+        self.storage.picked_up(item);
         Ok(())
     }
 
@@ -1366,7 +1366,6 @@ impl InteractionState {
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);
-        self.storage.rebase(shift);
         for opening in &mut self.openings {
             if let Some(contact) = opening.contact.as_mut() {
                 contact.rebase(Vector::from_array(shift));
@@ -1757,8 +1756,7 @@ impl InteractionState {
                 self.pickup_stored_item(target.item, target.point, player, items, physics)
                     .is_ok()
             } else {
-                self.carry
-                    .pickup(target.item, target.point, player, items, physics)
+                self.pickup_item(target.item, target.point, player, items, physics)
                     .is_ok()
             })
         {
@@ -2016,7 +2014,7 @@ impl InteractionState {
             .ok_or_else(|| ReferenceError("Missing loose plate body".into()))?;
         self.carry.can_acquire(item, point, player, body, physics)?;
         self.attachments.remove(item, items, physics)?;
-        self.carry.pickup(item, point, player, items, physics)?;
+        self.pickup_item(item, point, player, items, physics)?;
         self.parts.sync(items, physics)?;
         Ok(())
     }

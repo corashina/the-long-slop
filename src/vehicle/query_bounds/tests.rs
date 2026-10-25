@@ -795,6 +795,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         handbrake_torque: 0.0,
         assemblies: [assembly; 4],
         last_handbrake: 0.0,
+        cargo_mass: 0.0,
     });
     let mut scan = super::reference::ScanBounds::default();
     assert_matches_scan(&mut world, &mut scan, &[Vector::Y * 0.75]);

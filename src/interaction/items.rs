@@ -22,6 +22,11 @@ pub enum ItemLocation {
     Equipped,
     Attached(ItemId),
     WheelSlot(WheelSlotId),
+    /// Physics lock in a storage volume. `volume` is an index in `StorageLocks`.
+    Locked {
+        owner: ItemId,
+        volume: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +113,24 @@ impl ItemBodyIndex {
 }
 
 impl ItemStore {
+    #[cfg(test)]
+    pub(crate) fn empty_for_tests() -> Self {
+        Self {
+            dirty: HashSet::new(),
+            states: Vec::new(),
+            indices: BevyHashMap::new(),
+            body_ids: Vec::new(),
+            vehicle_tanks: Vec::new(),
+            names: Vec::new(),
+            vehicle_items: Vec::new(),
+            slot_owners: HashMap::new(),
+            generated: BevyHashMap::new(),
+            membership_revision: 0,
+            initialized_supplies: HashSet::new(),
+            next_generated: 0,
+            origin: WorldOrigin::default(),
+        }
+    }
     pub(crate) fn restore_save(
         &mut self,
         ids: &crate::save::IdentityMap,
@@ -465,6 +488,10 @@ impl ItemStore {
                 ItemLocation::Attached(owner) => ItemLocationSave::Attached {
                     owner: ids.item_instance(owner)?,
                 },
+                // Task 4 replaces this with a `Locked` save record.
+                ItemLocation::Locked { owner, .. } => ItemLocationSave::Attached {
+                    owner: ids.item_instance(owner)?,
+                },
             };
             records.push(ItemSnapshot {
                 instance: ids.item_instance(id)?,
@@ -501,7 +528,9 @@ impl ItemStore {
                 return false;
             }
             match item.location {
-                ItemLocation::Attached(parent) => owns(parent),
+                ItemLocation::Attached(parent) | ItemLocation::Locked { owner: parent, .. } => {
+                    owns(parent)
+                }
                 ItemLocation::PartSlot(slot) => self
                     .slot_owners
                     .get(&slot)
@@ -521,6 +550,27 @@ impl ItemStore {
             match self.get(id).map(|item| item.location) {
                 Some(ItemLocation::Attached(parent)) => id = parent,
                 _ => return false,
+            }
+        }
+        false
+    }
+    /// The item that carries this one: attachment parent, lock owner, or generated slot owner.
+    pub fn parent(&self, id: ItemId) -> Option<ItemId> {
+        match self.get(id)?.location {
+            ItemLocation::Attached(parent) | ItemLocation::Locked { owner: parent, .. } => {
+                Some(parent)
+            }
+            ItemLocation::PartSlot(slot) => self.slot_owners.get(&slot).copied().flatten(),
+            _ => None,
+        }
+    }
+    /// True if `root` is a strict ancestor of `id` through `parent`.
+    pub fn descends(&self, mut id: ItemId, root: ItemId) -> bool {
+        for _ in 0..self.states.len() {
+            match self.parent(id) {
+                Some(parent) if parent == root => return true,
+                Some(parent) => id = parent,
+                None => return false,
             }
         }
         false
@@ -1108,21 +1158,7 @@ mod world_sync_tests {
     use crate::world::WorldLayer;
 
     fn empty_store() -> ItemStore {
-        ItemStore {
-            dirty: HashSet::new(),
-            states: Vec::new(),
-            indices: BevyHashMap::new(),
-            body_ids: Vec::new(),
-            vehicle_tanks: Vec::new(),
-            names: Vec::new(),
-            vehicle_items: Vec::new(),
-            slot_owners: HashMap::new(),
-            generated: BevyHashMap::new(),
-            membership_revision: 0,
-            initialized_supplies: HashSet::new(),
-            next_generated: 0,
-            origin: WorldOrigin::default(),
-        }
+        ItemStore::empty_for_tests()
     }
     fn key(ordinal: u32) -> GeneratedId {
         GeneratedId {

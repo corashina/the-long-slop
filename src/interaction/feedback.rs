@@ -272,12 +272,11 @@ impl InteractionState {
                     a.context = FeedbackContext::Wheel;
                 }
                 match item.location {
-                    ItemLocation::Attached(_)
-                        if self.storage.stored(t.item)
-                            && self
-                                .carry
-                                .allows_pickup(t.item, player.seat().is_some(), true)
-                            && self.storage.loose_body(t.item).is_some_and(|body| {
+                    ItemLocation::Locked { .. }
+                        if self
+                            .carry
+                            .allows_pickup(t.item, player.seat().is_some(), false)
+                            && self.storage.locked_body(t.item).is_some_and(|body| {
                                 self.carry
                                     .can_acquire(t.item, t.point, player, body, physics)
                                     .is_ok()

@@ -378,16 +378,6 @@ impl WheelAssemblies {
             })
             .map(|i| (i.id, i.mass_kg))
             .collect();
-        // Flashlights start outside the car. Add their mass only while car-owned.
-        let mut general_mass = general_mass;
-        general_mass.extend(reference.flashlights.instances.iter().map(|instance| {
-            let item = reference
-                .items
-                .iter()
-                .find(|item| item.id == instance.item)
-                .unwrap();
-            (item.id, item.mass_kg)
-        }));
         let item_vehicle = |id: ItemId| {
             reference
                 .items
@@ -1067,12 +1057,17 @@ impl WheelAssemblies {
                 }
             }
             for &(id, dry) in &self.general_mass {
-                if items.get(id).is_some_and(|i| i.body == Some(chassis)) {
+                // Storage adds the mass of locked items.
+                if items.get(id).is_some_and(|i| {
+                    i.body == Some(chassis) && !matches!(i.location, ItemLocation::Locked { .. })
+                }) {
                     mass += dry;
                 }
             }
             for id in state.tanks.iter().chain(&self.generated_tanks) {
-                if items.get(*id).is_some_and(|i| i.body != Some(chassis)) {
+                if items.get(*id).is_some_and(|i| {
+                    i.body != Some(chassis) || matches!(i.location, ItemLocation::Locked { .. })
+                }) {
                     continue;
                 }
                 mass += items
