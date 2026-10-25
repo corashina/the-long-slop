@@ -189,6 +189,7 @@ pub struct PhysicsWorld {
     vehicles: Vec<VehicleBody>,
     hit_collector: HitCollector,
     hits: Vec<HitContact>,
+    ignored: mutations::IgnoredCollisions,
 }
 
 impl PhysicsWorld {
@@ -209,6 +210,7 @@ impl PhysicsWorld {
             vehicles: Vec::with_capacity(poses.len()),
             hit_collector: HitCollector::default(),
             hits: Vec::with_capacity(HIT_CAPACITY),
+            ignored: Default::default(),
             inactive_bodies: std::collections::HashSet::with_capacity(
                 reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
             ),
@@ -558,7 +560,8 @@ impl PhysicsWorld {
             self.query_bounds.mark_simulated_body(body);
             self.presentation_bodies.mark(body);
         }
-        self.physics.step_with_events(&(), &self.hit_collector);
+        self.physics
+            .step_with_events(&self.ignored, &self.hit_collector);
         self.hit_collector.take(&mut self.hits);
         for body in self.physics.islands.active_bodies() {
             self.query_bounds.mark_simulated_body(body);

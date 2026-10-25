@@ -489,6 +489,7 @@ mod tests {
                 angle_disabled: true,
                 spill_disabled: true,
                 tube_connected: false,
+                cant_tube: false,
                 can_toggle: true,
                 can_tune: false,
                 tune_rate: 0.,

@@ -36,6 +36,13 @@ impl ActionMask {
     pub const PUT_ON: u32 = 1 << 30;
     pub const CRANK: u32 = 1 << 31;
 }
+/// Hose prompt bits: attach on the mount key, coil up on R, drain on LMB.
+pub struct HosePrompt;
+impl HosePrompt {
+    pub const ATTACH: u8 = 1;
+    pub const COIL: u8 = 2;
+    pub const DRAIN: u8 = 4;
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
 pub enum FeedbackContext {
@@ -70,6 +77,9 @@ pub struct ActionAvailability {
     pub light_control: Option<LightControlId>,
     pub lmb_use: bool,
     pub fill_reservation: Option<OpeningId>,
+    /// `HosePrompt` bits.
+    pub hose: u8,
+    pub(super) hose_cap: Option<OpeningId>,
 }
 pub struct FluidFeedback<'a> {
     pub amount: f32,
@@ -335,6 +345,11 @@ impl InteractionState {
                 }
             }
         } else if let Some(held) = self.held() {
+            (a.hose, a.hose_cap) = self.hose_actions(held, filling_target, items, physics);
+            if let Some(cap) = a.hose_cap {
+                a.actions.0 |= ActionMask::MOUNT;
+                a.opening = Some(cap);
+            }
             if let Some(t) = installation_target
                 && aim.installation_block.is_none()
                 && let Some(slot) = t.slot

@@ -4,9 +4,25 @@ use rapier3d::control::{CharacterCollision, KinematicCharacterController};
 use rapier3d::math::Vector;
 use rapier3d::parry::shape::Shape;
 use rapier3d::prelude::{
-    Collider, ColliderHandle, ColliderSet, GenericJoint, ImpulseJoint, ImpulseJointHandle,
-    QueryFilter, QueryPipelineMut, RigidBody, RigidBodyHandle,
+    ActiveHooks, Collider, ColliderHandle, ColliderSet, GenericJoint, ImpulseJoint,
+    ImpulseJointHandle, PairFilterContext, PhysicsHooks, QueryFilter, QueryPipelineMut, RigidBody,
+    RigidBodyHandle, SolverFlags,
 };
+use std::collections::HashMap;
+
+/// Bodies of one group do not collide with one another (source `Physics.IgnoreCollision`).
+/// Each body maps to its group key.
+#[derive(Default)]
+pub(super) struct IgnoredCollisions(HashMap<RigidBodyHandle, RigidBodyHandle>);
+impl PhysicsHooks for IgnoredCollisions {
+    fn filter_contact_pair(&self, context: &PairFilterContext) -> Option<SolverFlags> {
+        let group = |body: Option<RigidBodyHandle>| body.and_then(|body| self.0.get(&body));
+        match (group(context.rigid_body1), group(context.rigid_body2)) {
+            (Some(a), Some(b)) if a == b => None,
+            _ => Some(SolverFlags::default()),
+        }
+    }
+}
 
 impl PhysicsWorld {
     pub fn edit_body<R>(
@@ -115,7 +131,22 @@ impl PhysicsWorld {
             .colliders
             .set_parent(collider, parent, &mut self.physics.bodies);
     }
+    /// The colliders of these bodies stop colliding with one another.
+    pub fn ignore_collisions_between(&mut self, bodies: &[RigidBodyHandle]) {
+        let Some(&group) = bodies.first() else {
+            return;
+        };
+        for &body in bodies {
+            self.ignored.0.insert(body, group);
+            for &collider in self.physics.bodies[body].colliders() {
+                let collider = &mut self.physics.colliders[collider];
+                collider
+                    .set_active_hooks(collider.active_hooks() | ActiveHooks::FILTER_CONTACT_PAIRS);
+            }
+        }
+    }
     pub fn remove_body(&mut self, body: RigidBodyHandle) -> Option<RigidBody> {
+        self.ignored.0.remove(&body);
         let state = self.physics.bodies.get(body)?;
         for &collider in state.colliders() {
             self.query_bounds.retire_collider(collider);
@@ -180,6 +211,23 @@ impl PhysicsWorld {
         wake_up: bool,
     ) -> Option<ImpulseJoint> {
         self.physics.impulse_joints.remove(joint, wake_up)
+    }
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        let mut physics = rapier3d::prelude::PhysicsWorld::new();
+        physics.integration_parameters.dt = crate::simulation::FIXED_DT;
+        Self {
+            body_mass_override: None,
+            inactive_bodies: Default::default(),
+            physics,
+            query_bounds: Default::default(),
+            presentation_bodies: Default::default(),
+            chassis: Vec::new(),
+            vehicles: Vec::new(),
+            hit_collector: Default::default(),
+            hits: Vec::new(),
+            ignored: Default::default(),
+        }
     }
     #[cfg(test)]
     pub(super) fn set_gravity(&mut self, gravity: Vector) {

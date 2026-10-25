@@ -9,7 +9,6 @@ pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
-#[allow(dead_code)] // Used by the hose system in a later task.
 mod hose;
 mod input;
 pub use input::InteractionOutcome;
@@ -142,18 +141,6 @@ impl OpeningState {
         self.borrowed_tank.unwrap_or(self.reference.tank)
     }
 }
-/// Flow and particle rules of one siphon hose end.
-#[allow(dead_code)] // Used by the hose system in a later task.
-pub(super) struct HoseEndRules<'a> {
-    pub flow_liters_per_second: f32,
-    pub flow_radius: f32,
-    pub tilt_degrees: f32,
-    pub tilt_axis: Vector,
-    pub local_pose: Pose,
-    pub particles: &'a FluidParticleReference,
-    pub visual: &'a crate::reference::ParticleReference,
-    pub splash: &'a crate::reference::ParticleReference,
-}
 struct OpeningRules {
     id: OpeningId,
     tank: ItemId,
@@ -164,6 +151,7 @@ struct OpeningRules {
     angle_disabled: bool,
     spill_disabled: bool,
     tube_connected: bool,
+    cant_tube: bool,
     can_toggle: bool,
     can_tune: bool,
     tune_rate: f32,
@@ -181,6 +169,7 @@ impl From<&OpeningRecord> for OpeningRules {
             angle_disabled: opening.angle_disabled,
             spill_disabled: opening.spill_disabled,
             tube_connected: opening.tube_connected,
+            cant_tube: opening.cant_tube,
             can_toggle: opening.can_toggle,
             can_tune: opening.can_tune,
             tune_rate: opening.tune_rate,
@@ -270,6 +259,7 @@ pub struct InteractionState {
     pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
+    hoses: hose::HoseState,
     receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
     callback_nodes: Vec<NodeId>,
     seats: Vec<SeatState>,
@@ -667,6 +657,10 @@ impl InteractionState {
                     .unwrap_or(0),
             ),
             openings,
+            hoses: hose::HoseState::new(
+                reference.fluid_rules.min_tube_vertical_height,
+                reference.fluid_rules.max_tube_vertical_height,
+            ),
             sounds: [None; 64],
             sound_count: 0,
             seats,
@@ -946,6 +940,7 @@ impl InteractionState {
             self.latched_mechanism = None;
         }
         self.carry.unregister_generated(id);
+        self.unregister_hose(id);
         for fits in self.slot_fits.values_mut() {
             fits.remove(&id);
         }
@@ -1076,61 +1071,46 @@ impl InteractionState {
     }
 
     /// Register a hose end opening. The segment owns the pose; it has no fluid.
-    #[allow(dead_code)] // Used by the hose system in a later task.
-    pub(super) fn register_hose_end(
+    fn register_hose_end(
         &mut self,
         segment: ItemId,
-        rules: HoseEndRules<'_>,
+        end: &crate::reference::HoseEnd,
     ) -> Result<OpeningId, ReferenceError> {
         let id = self.next_opening_id()?;
+        let o = &end.opening;
         self.openings.push(OpeningState {
             reference: OpeningRules {
                 id,
                 tank: segment,
                 cap: segment,
-                flow_liters_per_second: rules.flow_liters_per_second,
-                flow_radius: rules.flow_radius,
-                tilt_degrees: rules.tilt_degrees,
-                angle_disabled: false,
-                spill_disabled: false,
-                tube_connected: false,
+                flow_liters_per_second: o.flow_liters_per_second,
+                flow_radius: o.flow_radius,
+                tilt_degrees: o.tilt_degrees,
+                angle_disabled: o.angle_disabled,
+                spill_disabled: o.spill_disabled,
+                tube_connected: o.tube_connected,
+                cant_tube: o.cant_tube,
                 can_toggle: false,
                 can_tune: false,
                 tune_rate: 0.0,
-                presentation: FluidPresentation {
-                    has_name: false,
-                    name: String::new(),
-                    no_text: true,
-                },
+                presentation: o.presentation.clone(),
             },
-            local_pose: rules.local_pose,
-            tilt_axis: rules.tilt_axis,
+            local_pose: transform_pose(&end.pose),
+            tilt_axis: Vector::from_array(o.tilt_axis),
             valve: 0.0,
             flow: None,
             fill_called: false,
             empty_pour: false,
-            particles: Some(rules.particles.clone()),
+            particles: Some(o.particles.clone()),
             contact: Some(fluid_contact::FluidContact::new(
-                rules.particles,
-                rules.visual,
-                rules.splash,
+                &o.particles,
+                &end.visual,
+                &end.splash,
                 id.0,
             )),
             borrowed_tank: None,
         });
         Ok(id)
-    }
-    #[allow(dead_code)] // Used by the hose system in a later task.
-    pub(super) fn set_borrowed_tank(&mut self, id: OpeningId, tank: Option<ItemId>) {
-        if let Some(opening) = self.openings.iter_mut().find(|o| o.reference.id == id) {
-            opening.borrowed_tank = tank;
-        }
-    }
-    #[allow(dead_code)] // Used by the hose system in a later task.
-    pub(super) fn set_opening_valve(&mut self, id: OpeningId, valve: f32) {
-        if let Some(opening) = self.openings.iter_mut().find(|o| o.reference.id == id) {
-            opening.valve = valve.clamp(0.0, 1.0);
-        }
     }
     fn next_opening_id(&self) -> Result<OpeningId, ReferenceError> {
         self.openings
@@ -1220,6 +1200,7 @@ impl InteractionState {
             angle_disabled: number(cap_record, "noAngle")? != 0.0,
             spill_disabled: definition.no_pour,
             tube_connected: number(cap_record, "tube")? != 0.0,
+            cant_tube: number(cap_record, "canttube")? != 0.0,
             can_toggle,
             can_tune,
             tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
@@ -1645,6 +1626,10 @@ impl InteractionState {
                         )));
                     }
                 }
+            } else if let Some(cap) = available.hose_cap
+                && let Some(held) = self.attach_held_hose(cap, items, physics)
+            {
+                action = Some(InteractionAction::Drop(held));
             }
         }
         if grab_input.pressed & keys::GRAB != 0
@@ -1911,6 +1896,12 @@ impl InteractionState {
         }
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
+        let hose_input = hose::HoseInput {
+            held: self.held(),
+            coil: input.held & keys::RELOAD != 0,
+            drain: input.held & keys::PRIMARY != 0,
+        };
+        self.step_hoses(hose_input, dt, fluid_scale, items, physics);
         let mut filled_destination = None;
         if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
@@ -2296,6 +2287,7 @@ mod hose_end_tests {
                 angle_disabled: false,
                 spill_disabled: false,
                 tube_connected: false,
+                cant_tube: false,
                 can_toggle: false,
                 can_tune: false,
                 tune_rate: 0.,
