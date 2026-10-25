@@ -203,7 +203,12 @@ fn fragment(in:TerrainOutput)->FragmentOutput {
             let uv_dy = cookie_uv_gradient(lamp, local, world_dy);
             if lamp.cookie_rect.x == 1.0 { weight *= textureSampleGrad(sun_cookie, sun_cookie_sampler, cookie_uv, uv_dx, uv_dy).a; }
             else if lamp.cookie_rect.x == 2.0 { weight *= textureSampleGrad(default_cookie, default_sampler, cookie_uv, uv_dx, uv_dy).a; }
-            else { weight *= textureSampleGrad(cookies, cookie_sampler, cookie_uv, i32(lamp.cookie_rect.w), uv_dx, uv_dy).a; }
+            else {
+                let half = lamp.cookie_rect.x > 3.0;
+                let array_uv = select(cookie_uv, cookie_uv * 0.5 + 0.25, half);
+                let scale = select(1.0, 0.5, half);
+                weight *= textureSampleGrad(cookies, cookie_sampler, array_uv, i32(lamp.cookie_rect.x) - 3, uv_dx * scale, uv_dy * scale).a;
+            }
         }
         light += source_brdf(diffuse, specular, smoothness, pbr.N, pbr.V, direction) * lamp.color.rgb * weight;
     }

@@ -119,7 +119,7 @@ fn fragment(input:GrassOutput)->FragmentOutput {
             let uv_dx=cookie_uv_gradient(lamp,local,world_dx);let uv_dy=cookie_uv_gradient(lamp,local,world_dy);
             if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,uv_dx,uv_dy).a;}
             else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,uv_dx,uv_dy).a;}
-            else {weight*=textureSampleGrad(cookies,cookie_sampler,uv,i32(lamp.cookie_rect.w),uv_dx,uv_dy).a;}
+            else {let half=lamp.cookie_rect.x>3.;let scale=select(1.,.5,half);weight*=textureSampleGrad(cookies,cookie_sampler,select(uv,uv*.5+.25,half),i32(lamp.cookie_rect.x)-3,uv_dx*scale,uv_dy*scale).a;}
         }
         color+=lamp.color.rgb*input.color.rgb*weight;
     }
