@@ -200,20 +200,10 @@ impl PhysicsWorld {
         if poses.len() != reference.vehicles.len() {
             return Err(ReferenceError("Expected one pose per vehicle".into()));
         }
-        let mut physics = Self {
-            physics: rapier3d::prelude::PhysicsWorld::new(),
-            body_mass_override: None,
-            query_bounds: QueryBounds::default(),
-            presentation_bodies: PresentationBodies::default(),
-            chassis: Vec::with_capacity(poses.len()),
-            vehicles: Vec::with_capacity(poses.len()),
-            hit_collector: HitCollector::default(),
-            hits: Vec::with_capacity(HIT_CAPACITY),
-            inactive_bodies: std::collections::HashSet::with_capacity(
-                reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
-            ),
-        };
-        physics.physics.integration_parameters.dt = FIXED_DT;
+        let mut physics = Self::empty(
+            poses.len(),
+            reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
+        );
         for (vehicle, pose) in reference.vehicles.iter().zip(poses) {
             let vehicle = VehicleBody::new(reference, vehicle, *pose, &mut physics)?;
             physics.chassis.push(vehicle.chassis);
@@ -221,6 +211,22 @@ impl PhysicsWorld {
         }
         physics.refresh_queries();
         Ok(physics)
+    }
+    /// A world without vehicles.
+    pub(crate) fn empty(vehicles: usize, bodies: usize) -> Self {
+        let mut physics = Self {
+            physics: rapier3d::prelude::PhysicsWorld::new(),
+            body_mass_override: None,
+            query_bounds: QueryBounds::default(),
+            presentation_bodies: PresentationBodies::default(),
+            chassis: Vec::with_capacity(vehicles),
+            vehicles: Vec::with_capacity(vehicles),
+            hit_collector: HitCollector::default(),
+            hits: Vec::with_capacity(HIT_CAPACITY),
+            inactive_bodies: std::collections::HashSet::with_capacity(bodies),
+        };
+        physics.physics.integration_parameters.dt = FIXED_DT;
+        physics
     }
 }
 
