@@ -83,6 +83,8 @@ impl WorldOrigin {
     }
 }
 
+#[cfg(test)]
+mod loot_audit;
 mod spawn_contents;
 mod spawn_initialization;
 mod spawn_rules;
