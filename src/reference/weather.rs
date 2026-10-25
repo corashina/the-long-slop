@@ -108,7 +108,10 @@ impl TumbleweedReference {
         )?;
         let item = m.world.catalog.items.get(self.item_id as usize);
         require(
-            item.is_some_and(|i| i.field == "gthumbleweed" && i.source == self.prefab),
+            item.is_some_and(|i| i.field == "gthumbleweed" && i.source == self.prefab)
+                && m.item_prototypes
+                    .iter()
+                    .any(|p| p.item_id == Some(self.item_id)),
             "tumbleweed item",
         )
     }

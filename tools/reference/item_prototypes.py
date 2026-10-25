@@ -10,7 +10,7 @@ SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_
             (81642,None,56,'item_box_debris'),(81645,None,14,'item_box_debris_reduced'),
             (70812,217,1,'item_sunglasses'),(53838,218,1,'item_hat'),(53837,221,1,'item_cap'),
             (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'),
-            (83430,61,6,'item_siphon_hose'))
+            (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'))
 
 
 def prepare_item_prototypes(source, roots):
@@ -162,7 +162,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
                 node=nodes[node]['parent']
             return False
         if not within(p['root']) or nodes[p['root']]['parent'] is not None or assets[p['asset']]['root']!=p['source']:raise ValueError('Foreign prototype root')
-        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7),83430:(6,0)}
+        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7),83430:(6,0),51557:(1,1)}
         if (len(p['colliders']),len(p['renderers']))!=counts[p['id']['path_id']]:raise ValueError('Incomplete selected geometry')
         bodies={b['id']:b for b in p['bodies']}
         for records in (p['bodies'],p['colliders']):unique(r['id'] for r in records);unique((r['source']['file'],r['source']['path_id']) for r in records)
@@ -183,11 +183,11 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}
             exception=exceptions.get((p['id']['path_id'],source['path_id']))
-            expected_icon={61:None,74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None}[p['item_id']] if exception is None else None
+            expected_icon={61:None,74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None,312:4569}[p['item_id']] if exception is None else None
             icon=pickup['inventory_icon']
             if source['file']!='sharedassets1.assets' or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
             # Hose segment eligibility and icons are not checked yet against build 11140890.
-            if p['item_id']!=61 and pickup['can_inventory']!=(p['item_id'] not in (62,245,230) and exception is None):raise ValueError('Pickup source eligibility')
+            if p['item_id']!=61 and pickup['can_inventory']!=(p['item_id'] not in (62,245,230,312) and exception is None):raise ValueError('Pickup source eligibility')
             if p['item_id']!=61 and icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
             if exception is not None and nodes.get(x['node'],{}).get('source')!={'file':'sharedassets1.assets','path_id':exception}:raise ValueError('Debris eligibility owner')
             if not within(x['node']) or x['body'] not in bodies or x['body']!=owner(x['node']):raise ValueError('Wrong pickup body')

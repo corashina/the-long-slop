@@ -6,6 +6,9 @@ use crate::vehicle::PhysicsWorld;
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{Ball, Collider, ColliderHandle, QueryFilter, RigidBodyHandle};
 
+mod tumbleweeds;
+pub use tumbleweeds::{ImportantObject, Tumbleweeds};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StormId(pub u32);
 
@@ -70,6 +73,7 @@ pub struct WeatherState {
     random: StormRandom,
     origin: [f64; 3],
     body_capacity: usize,
+    pub tumbleweeds: Tumbleweeds,
 }
 
 impl WeatherState {
@@ -88,6 +92,7 @@ impl WeatherState {
             random,
             origin: [0.; 3],
             body_capacity: 0,
+            tumbleweeds: Tumbleweeds::new(seed),
         }
     }
     pub fn storms(&self) -> &[Storm] {

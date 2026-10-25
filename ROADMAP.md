@@ -64,6 +64,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 7. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
 8. Sandstorms (W07): run `cargo test --lib terrain_sample_matches_published_ground -- --ignored`. Spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm. Save and load inside a storm.
 9. Power cables (W04): check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped. Check F3 along the road.
+10. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
@@ -71,7 +72,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
-| W07 | Add weather. | L | Tumbleweeds, snowfall in the winter biome. [J03, J04] |
+| W07 | Add weather. | L | Snowfall in the winter biome. [J03] |
 
 ## 4. More cars
 
