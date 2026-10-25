@@ -1738,7 +1738,7 @@ mod tests {
     fn engine_audio_follows_detached_state() {
         // Source enginescript.Update, 12105-12213: audio follows running, not attachment.
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference).unwrap();
+        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         assert_voices(run.audio.as_ref().unwrap(), true);
@@ -1825,7 +1825,13 @@ mod tests {
                 "2026-10-20T12:00:00Z",
             )
             .unwrap();
-        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        let mut restored = GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &saved,
+            crate::world::GameMode::default(),
+        )
+        .unwrap();
         assert!(!restored.audio.as_ref().unwrap().last_running);
         restored
             .area
@@ -1852,7 +1858,7 @@ mod tests {
     #[ignore = "requires the installed build 11140890 export"]
     fn engine_emitters_follow_item_pose_and_restore() {
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference).unwrap();
+        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         detach(&mut run, &reference);
@@ -1933,7 +1939,13 @@ mod tests {
                 "2026-10-20T12:00:00Z",
             )
             .unwrap();
-        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        let mut restored = GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &saved,
+            crate::world::GameMode::default(),
+        )
+        .unwrap();
         assert!(restored.vehicles[0].engine_output.running);
         assert!(restored.audio.as_ref().unwrap().last_running);
         publish(&mut restored);

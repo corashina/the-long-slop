@@ -370,7 +370,7 @@ mod tests {
         r.openings[source].spill_disabled = true;
         r.openings[receiver].particles.bounce = 0.8;
         r.openings[receiver].particles.dampen = 0.6;
-        let mut run = GarageRuntime::new(&r).unwrap();
+        let mut run = GarageRuntime::new(&r, crate::world::GameMode::default()).unwrap();
         run.area.items.get_mut(source_id).unwrap().fluid = Some(FluidContainer::new(
             20.,
             &[FluidEntry {
