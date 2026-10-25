@@ -181,6 +181,8 @@ pub struct SourceSpawnState {
     boundaries: Vec<SpawnBoundary>,
     /// Boundary indices by key hash. Lookups stay constant time on long trips.
     index: HashMap<u64, Vec<usize>>,
+    /// Heap of boundaries, index buckets and parent identities.
+    heap_bytes: usize,
     pub context: SpawnContext,
 }
 fn boundary_hash(parent: &GeneratedId, caller: &SourceId, ordinal: u32, phase: SpawnPhase) -> u64 {
@@ -203,6 +205,7 @@ impl SourceSpawnState {
             painting_pools: history.painting_pools,
             boundaries: Vec::with_capacity(history.boundaries.len()),
             index: HashMap::with_capacity(history.boundaries.len()),
+            heap_bytes: 0,
             parents: HashSet::new(),
             context: history.context,
         };
@@ -216,11 +219,6 @@ impl SourceSpawnState {
                 return Err(ReferenceError("Duplicate spawn boundary".into()));
             }
             state.push(boundary);
-        }
-        if state.retained_bytes() > 16 * 1024 * 1024 {
-            return Err(ReferenceError(
-                "Source spawn history exceeds checkpoint budget".into(),
-            ));
         }
         Ok(state)
     }
@@ -253,16 +251,24 @@ impl SourceSpawnState {
             })
     }
     fn push(&mut self, boundary: SpawnBoundary) {
-        self.index
+        let bucket = self
+            .index
             .entry(boundary_hash(
                 &boundary.parent,
                 &boundary.caller,
                 boundary.ordinal,
                 boundary.phase,
             ))
-            .or_default()
-            .push(self.boundaries.len());
+            .or_default();
+        let before = bucket.capacity();
+        bucket.push(self.boundaries.len());
+        self.heap_bytes += (bucket.capacity() - before) * std::mem::size_of::<usize>()
+            + identity_bytes(&boundary.parent)
+            + boundary.caller.file.capacity()
+            + pools_bytes(&boundary.painting_pools)
+            + boundary.initialization.retained_bytes();
         if !self.parents.contains(&boundary.parent) {
+            self.heap_bytes += identity_bytes(&boundary.parent);
             self.parents.insert(boundary.parent.clone());
         }
         self.boundaries.push(boundary);
@@ -278,33 +284,20 @@ impl SourceSpawnState {
             }),
             boundaries: Vec::new(),
             index: HashMap::new(),
+            heap_bytes: 0,
             painting_pools: Vec::new(),
             parents: HashSet::new(),
             context,
         }
     }
+    /// Constant time: per-boundary heap is summed when a boundary is pushed.
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + pools_bytes(&self.painting_pools)
             + self.boundaries.capacity() * std::mem::size_of::<SpawnBoundary>()
             + self.index.capacity() * std::mem::size_of::<(u64, Vec<usize>)>()
-            + self
-                .index
-                .values()
-                .map(|v| v.capacity() * std::mem::size_of::<usize>())
-                .sum::<usize>()
             + self.parents.capacity() * std::mem::size_of::<GeneratedId>()
-            + self.parents.iter().map(identity_bytes).sum::<usize>()
-            + self
-                .boundaries
-                .iter()
-                .map(|b| {
-                    identity_bytes(&b.parent)
-                        + b.caller.file.capacity()
-                        + pools_bytes(&b.painting_pools)
-                        + b.initialization.retained_bytes()
-                })
-                .sum::<usize>()
+            + self.heap_bytes
     }
     pub fn boundaries(&self) -> &[SpawnBoundary] {
         &self.boundaries
@@ -325,7 +318,6 @@ impl SourceSpawnState {
         caller: &SourceId,
         ordinal: u32,
         phase: SpawnPhase,
-        available_index_bytes: usize,
         staging: usize,
         initialization: &SpawnInitialization,
         call: impl FnOnce(
@@ -356,18 +348,8 @@ impl SourceSpawnState {
             + caller.file.len()
             + pools_bytes(&self.painting_pools)
             + initialization.retained_bytes();
-        if self.retained_bytes().saturating_add(extra) > available_index_bytes {
-            return Err(ReferenceError(
-                "Source spawn replay metadata exceeds checkpoint budget".into(),
-            ));
-        }
-        let overlap = extra
-            + pools_bytes(&self.painting_pools)
-            + if self.boundaries.len() == self.boundaries.capacity() {
-                self.boundaries.capacity() * std::mem::size_of::<SpawnBoundary>()
-            } else {
-                0
-            };
+        // History growth is not frame staging; try_reserve reports a real allocation failure.
+        let overlap = extra + pools_bytes(&self.painting_pools);
         if overlap > staging {
             return Err(ReferenceError(
                 "Spawn boundary preparation exceeds staging".into(),
@@ -386,17 +368,6 @@ impl SourceSpawnState {
             painting_pools: self.painting_pools.clone(),
             initialization: initialization.clone(),
         };
-        let actual = self.retained_bytes()
-            + identity_bytes(&boundary.parent)
-            + boundary.caller.file.capacity()
-            + pools_bytes(&boundary.painting_pools)
-            + boundary.initialization.retained_bytes();
-        if actual > available_index_bytes {
-            self.boundaries.shrink_to_fit();
-            return Err(ReferenceError(
-                "Source spawn replay metadata capacity exceeds checkpoint budget".into(),
-            ));
-        }
         let mut random = self.live;
         let mut pools = self.painting_pools.clone();
         let value = call(
@@ -406,14 +377,6 @@ impl SourceSpawnState {
             initialization,
             staging - overlap,
         )?;
-        let final_bytes =
-            actual.saturating_sub(pools_bytes(&self.painting_pools)) + pools_bytes(&pools);
-        if final_bytes > available_index_bytes {
-            self.boundaries.shrink_to_fit();
-            return Err(ReferenceError(
-                "Source mutable initialization inputs exceed checkpoint budget".into(),
-            ));
-        }
         self.push(boundary);
         self.live = random;
         self.painting_pools = pools;
@@ -495,5 +458,14 @@ mod tests {
         let mut duplicate = boundaries;
         duplicate.push(duplicate[7].clone());
         assert!(SourceSpawnState::restore_history(history(duplicate)).is_err());
+    }
+
+    #[test]
+    fn large_spawn_history_restores() {
+        // 3,000 boundaries with 8 KiB pools each is about 24 MiB, over the old 16 MiB cap.
+        let boundaries: Vec<_> = (0..3000).map(|i| boundary(i, 2048)).collect();
+        let state = SourceSpawnState::restore_history(history(boundaries)).unwrap();
+        assert!(state.retained_bytes() > 16 * 1024 * 1024);
+        assert_eq!(state.boundary_count(), 3000);
     }
 }

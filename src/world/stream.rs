@@ -438,16 +438,6 @@ impl WorldStream {
         self.placements
             .validate_index(&saved.generation.placements)?;
         let history = super::SourceSpawnState::restore_history(saved.spawn.clone())?;
-        if history.retained_bytes()
-            + self.roads.retained_index_bytes()
-            + self.placements.retained_index_bytes()
-            + saved.generation.placements.checkpoint_heap_bytes()
-            > CHECKPOINTS
-        {
-            return Err(ReferenceError(
-                "Restored source history exceeds checkpoint budget".into(),
-            ));
-        }
         self.roads.restore_index(&saved.generation.roads)?;
         self.placements
             .restore_index(&saved.generation.placements)?;
@@ -873,12 +863,6 @@ impl WorldStream {
         if let Err(error) = self.set_presentation_allocation(self.presentation) {
             self.overlap = previous;
             return Err(error);
-        }
-        if self.metrics().checkpoint_bytes > CHECKPOINTS {
-            self.overlap = previous;
-            return Err(ReferenceError(
-                "Source candidate history overlap exceeds its budget".into(),
-            ));
         }
         Ok(())
     }
@@ -1922,9 +1906,6 @@ impl WorldStream {
         if !self.admit_generation(reservation) {
             return;
         }
-        let available = CHECKPOINTS.saturating_sub(
-            self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
-        );
         self.prepare_building_cables();
         if self.failure.is_some() {
             return;
@@ -1941,7 +1922,6 @@ impl WorldStream {
             },
             &self.building_cables,
             [self.request.player, self.request.vehicle],
-            available,
             limit,
             pending,
             reservation,
@@ -3309,7 +3289,6 @@ impl WorldStream {
             _ => unreachable!(),
         };
         if count.0 >= count.1
-            || metrics.checkpoint_bytes > CHECKPOINTS
             || metrics.active_cpu_bytes > self.limits.active_cpu
             || metrics.active_gpu_bytes > self.limits.active_gpu
         {
