@@ -1,5 +1,6 @@
 pub const FIXED_DT: f32 = 0.01999999955;
 pub mod dials;
+pub mod metal_detector;
 pub mod drivetrain;
 pub mod engine;
 pub mod ignition;
