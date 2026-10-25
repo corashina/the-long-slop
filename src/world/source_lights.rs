@@ -3,9 +3,10 @@ use super::spawn_rules::*;
 use super::{AbsolutePose, GeneratedId, RoadSegment, WorldBounds, WorldFrame, WorldLayer};
 use crate::reference::{
     LightId, LightKind, LightReference, ReferenceError, ReferenceManifest, RoadLampReference,
-    ShadowReference, SourceId, Transform, WorldReference, WorldValue,
+    ShadowReference, SourceId, Transform, WorldPrototypeReference, WorldReference,
+    WorldSourceRecord, WorldValue,
 };
-use rapier3d::math::Pose;
+use rapier3d::math::{Pose, Rotation, Vector};
 
 #[derive(Clone)]
 pub struct WorldLight {
@@ -56,7 +57,7 @@ impl WorldLight {
 }
 struct RoadLightRecipe {
     reference: RoadLampReference,
-    pole_node: usize,
+    pole: RoadPole,
     local_light: Pose,
     light: LightReference,
     margin: f64,
@@ -65,15 +66,169 @@ pub(crate) struct SourceRoadLight {
     recipes: Vec<RoadLightRecipe>,
     seed: i32,
 }
-fn record<'a>(
+pub(crate) fn record<'a>(
     world: &'a WorldReference,
     id: &SourceId,
-) -> Result<&'a crate::reference::WorldSourceRecord, ReferenceError> {
+) -> Result<&'a WorldSourceRecord, ReferenceError> {
     world
         .records
         .iter()
         .find(|r| &r.source == id)
-        .ok_or_else(|| ReferenceError("Missing source light record".into()))
+        .ok_or_else(|| ReferenceError(format!("Missing source record {}:{}", id.file, id.path_id)))
+}
+/// The `roadscript` record of a road prototype.
+pub(crate) fn road_controller<'a>(
+    world: &'a WorldReference,
+    prototype: &SourceId,
+) -> Result<&'a WorldSourceRecord, ReferenceError> {
+    let owner = link(&record(world, prototype)?.fields, "m_GameObject")?;
+    world
+        .records
+        .iter()
+        .find(|r| {
+            r.class_name == "roadscript"
+                && matches!(r.fields.get("m_GameObject"), Some(WorldValue::Link(go)) if go == owner)
+        })
+        .ok_or_else(|| ReferenceError("Missing biome road controller".into()))
+}
+/// The prototype node of a source GameObject.
+pub(crate) fn object_node(
+    world: &WorldReference,
+    prototype: &WorldPrototypeReference,
+    object: &SourceId,
+) -> Result<usize, ReferenceError> {
+    let transform = world
+        .records
+        .iter()
+        .find(|r| {
+            matches!(r.class_name.as_str(), "Transform" | "RectTransform")
+                && matches!(r.fields.get("m_GameObject"), Some(WorldValue::Link(go)) if go == object)
+        })
+        .ok_or_else(|| ReferenceError("Missing source object transform".into()))?;
+    transform_node(prototype, &transform.source)
+}
+/// The prototype node of a source Transform.
+pub(crate) fn transform_node(
+    prototype: &WorldPrototypeReference,
+    transform: &SourceId,
+) -> Result<usize, ReferenceError> {
+    prototype
+        .nodes
+        .iter()
+        .position(|n| &n.source == transform)
+        .ok_or_else(|| ReferenceError("Missing source transform node".into()))
+}
+/// Source `roadscript.RandomPoleRot` inputs of one road prototype.
+#[derive(Clone)]
+pub(crate) struct RoadPole {
+    pub node: usize,
+    /// Accumulated authored scale of the pole node.
+    pub scale: Vector,
+    pub chances: [f32; 2],
+    pub angles: [[i32; 3]; 2],
+}
+/// World pose of a tilted road pole.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PoleFrame {
+    pub position: [f64; 3],
+    pub rotation: Rotation,
+}
+impl PoleFrame {
+    /// World position of a point in the pole frame (see `RoadPole::local`).
+    pub fn point(&self, local: Vector) -> [f64; 3] {
+        let offset = self.rotation * local;
+        std::array::from_fn(|i| self.position[i] + offset[i] as f64)
+    }
+}
+impl RoadPole {
+    pub fn new(
+        prototype: &WorldPrototypeReference,
+        controller: &WorldSourceRecord,
+    ) -> Result<Self, ReferenceError> {
+        let f = &controller.fields;
+        let node = transform_node(prototype, link(f, "randomPoleRotTransform")?)?;
+        Ok(Self {
+            node,
+            scale: Vector::from_array(super::placement::node_pose(prototype, node).scale),
+            chances: [
+                number(f, "randomPoleRotChance1")?,
+                number(f, "randomPoleRotChance2")?,
+            ],
+            angles: [
+                [
+                    integer(f, "randomPoleRotAngleX1")?,
+                    integer(f, "randomPoleRotAngleY1")?,
+                    integer(f, "randomPoleRotAngleZ1")?,
+                ],
+                [
+                    integer(f, "randomPoleRotAngleX2")?,
+                    integer(f, "randomPoleRotAngleY2")?,
+                    integer(f, "randomPoleRotAngleZ2")?,
+                ],
+            ],
+        })
+    }
+    /// Pose of a pole descendant in the pole frame. The translation includes the pole scale.
+    pub fn local(
+        &self,
+        prototype: &WorldPrototypeReference,
+        mut node: usize,
+    ) -> Result<Pose, ReferenceError> {
+        let mut local = Pose::IDENTITY;
+        for _ in 0..prototype.nodes.len() {
+            if node == self.node {
+                local.translation *= self.scale;
+                return Ok(local);
+            }
+            let n = &prototype.nodes[node];
+            let t = &n.transform;
+            let ancestor = crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+                position: t.translation,
+                rotation: t.rotation,
+            });
+            local.translation = ancestor.translation
+                + ancestor.rotation * (Vector::from_array(t.scale) * local.translation);
+            local.rotation = ancestor.rotation * local.rotation;
+            node = n
+                .parent
+                .ok_or_else(|| ReferenceError("Source node is outside its pole".into()))?
+                as usize;
+        }
+        Err(ReferenceError("Source pole ancestor cycle".into()))
+    }
+    /// Road frame of the pole node with the source tilt.
+    pub fn frame(
+        &self,
+        prototype: &WorldPrototypeReference,
+        segment: &RoadSegment,
+        seed: i32,
+    ) -> PoleFrame {
+        let frames = road_mesh::frames(
+            prototype.nodes.iter().map(|node| road_mesh::RoadNode {
+                parent: node.parent,
+                translation: node.transform.translation,
+                rotation: node.transform.rotation,
+                scale: node.transform.scale,
+            }),
+            &prototype.controls,
+            &segment.source_rotations,
+        );
+        let frame = frames[self.node];
+        let rotation = super::lamps::flatten_then_tilt(
+            frame.rotation,
+            super::lamps::source_angles(
+                seed as u64,
+                super::lamps::RoadLampId(segment.index as i64),
+                self.chances,
+                self.angles,
+            ),
+        );
+        let origin = segment.position();
+        PoleFrame {
+            position: std::array::from_fn(|i| origin[i] + frame.position[i] as f64),
+            rotation,
+        }
+    }
 }
 pub(crate) fn light_record(
     world: &WorldReference,
@@ -141,76 +296,30 @@ impl SourceRoadLight {
                 .iter()
                 .find(|p| &p.source == source)
                 .unwrap();
-            let controller=world.records.iter().find(|r| r.class_name=="roadscript" && matches!(r.fields.get("m_GameObject"),Some(WorldValue::Link(go)) if record(world,source).is_ok_and(|t|matches!(t.fields.get("m_GameObject"),Some(WorldValue::Link(owner)) if owner==go)))).ok_or_else(||ReferenceError("Missing biome road controller".into()))?;
-            let f = &controller.fields;
-            let pole = link(f, "randomPoleRotTransform")?;
-            let pole_node = prototype
-                .nodes
-                .iter()
-                .position(|n| &n.source == pole)
-                .ok_or_else(|| ReferenceError("Missing biome pole node".into()))?;
-            let koz = record(world, link(f, "koz")?)?;
+            let controller = road_controller(world, source)?;
+            let pole = RoadPole::new(prototype, controller)?;
+            let koz = record(world, link(&controller.fields, "koz")?)?;
             let light = light_record(world, link(&koz.fields, "LLight")?)?;
             let owner = link(&record(world, &light.source)?.fields, "m_GameObject")?;
-            let mut node=prototype.nodes.iter().position(|n| record(world,&n.source).is_ok_and(|r|matches!(r.fields.get("m_GameObject"),Some(WorldValue::Link(go)) if go==owner))).ok_or_else(||ReferenceError("Missing biome light node".into()))?;
-            let mut local_light = Pose::IDENTITY;
-            for _ in 0..prototype.nodes.len() {
-                if node == pole_node {
-                    break;
-                }
-                let n = &prototype.nodes[node];
-                let t = &n.transform;
-                let ancestor = crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
-                    position: t.translation,
-                    rotation: t.rotation,
-                });
-                local_light.translation = ancestor.translation
-                    + ancestor.rotation
-                        * (rapier3d::math::Vector::from_array(t.scale) * local_light.translation);
-                local_light.rotation = ancestor.rotation * local_light.rotation;
-                node = n
-                    .parent
-                    .ok_or_else(|| ReferenceError("Biome lamp is outside its pole".into()))?
-                    as usize;
-            }
-            if node != pole_node {
-                return Err(ReferenceError("Biome lamp ancestor cycle".into()));
-            }
+            let local_light = pole.local(prototype, object_node(world, prototype, owner)?)?;
             let mut road = reference.lighting.road_lamp.clone();
             road.source = koz.source.clone();
             road.road_source = controller.source.clone();
             road.asset = prototype.asset;
-            road.rotation_chances = [
-                number(f, "randomPoleRotChance1")?,
-                number(f, "randomPoleRotChance2")?,
-            ];
-            road.rotation_angles = [
-                [
-                    integer(f, "randomPoleRotAngleX1")?,
-                    integer(f, "randomPoleRotAngleY1")?,
-                    integer(f, "randomPoleRotAngleZ1")?,
-                ],
-                [
-                    integer(f, "randomPoleRotAngleX2")?,
-                    integer(f, "randomPoleRotAngleY2")?,
-                    integer(f, "randomPoleRotAngleZ2")?,
-                ],
-            ];
-            road.road_pose.scale = prototype.nodes[pole_node].transform.scale;
-            let pole_pose = super::placement::node_pose(prototype, pole_node);
-            let radius = pole_pose
+            road.rotation_chances = pole.chances;
+            road.rotation_angles = pole.angles;
+            road.road_pose.scale = pole.scale.to_array();
+            let radius = super::placement::node_pose(prototype, pole.node)
                 .translation
                 .iter()
                 .map(|v| (*v as f64).powi(2))
                 .sum::<f64>()
                 .sqrt();
-            local_light.translation *= rapier3d::math::Vector::from_array(pole_pose.scale);
-            road.road_pose.scale = pole_pose.scale;
             let margin =
                 radius + local_light.translation.length() as f64 + light.range_meters as f64;
             recipes.push(RoadLightRecipe {
                 reference: road,
-                pole_node,
+                pole,
                 local_light,
                 light,
                 margin,
@@ -243,27 +352,7 @@ impl SourceRoadLight {
             .iter()
             .find(|p| p.source == reference.road.prototypes[segment.biome as usize])
             .unwrap();
-        let frames = road_mesh::frames(
-            prototype.nodes.iter().map(|node| road_mesh::RoadNode {
-                parent: node.parent,
-                translation: node.transform.translation,
-                rotation: node.transform.rotation,
-                scale: node.transform.scale,
-            }),
-            &prototype.controls,
-            &segment.source_rotations,
-        );
-        let frame = frames[recipe.pole_node];
-        let rotation = super::lamps::flatten_then_tilt(
-            frame.rotation,
-            super::lamps::source_angles(
-                self.seed as u64,
-                super::lamps::RoadLampId(segment.index as i64),
-                &recipe.reference,
-            ),
-        );
-        let position = std::array::from_fn(|i| segment.position()[i] + frame.position[i] as f64);
-        let offset = rotation * recipe.local_light.translation;
+        let pole = recipe.pole.frame(prototype, segment, self.seed);
         Some(WorldLight {
             id: GeneratedId {
                 layer: WorldLayer::Lamp,
@@ -273,17 +362,17 @@ impl SourceRoadLight {
                 children: vec![(recipe.reference.source.clone(), 0)],
             },
             pole: AbsolutePose {
-                position,
-                rotation: rotation.to_array(),
+                position: pole.position,
+                rotation: pole.rotation.to_array(),
             },
             pose: AbsolutePose {
-                position: std::array::from_fn(|i| position[i] + offset[i] as f64),
-                rotation: (rotation * recipe.local_light.rotation).to_array(),
+                position: pole.point(recipe.local_light.translation),
+                rotation: (pole.rotation * recipe.local_light.rotation).to_array(),
             },
             range: recipe.light.range_meters,
             record: recipe.light.clone(),
             biome: Some(segment.biome),
-            prototype: prototype.nodes[recipe.pole_node].source.clone(),
+            prototype: prototype.nodes[recipe.pole.node].source.clone(),
             scale: recipe.reference.road_pose.scale,
             enabled: true,
             intensity: recipe.light.startup_intensity,
