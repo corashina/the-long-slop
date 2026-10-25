@@ -741,6 +741,8 @@ fn engine_fluids_and_cooling() {
     let blood_after_leak = blood - leak * blood / (water_after_leak + blood);
     close(rig.coolant.mixture().amount(3), water_after_leak);
     close(rig.coolant.mixture().amount(4), blood_after_leak);
+    // Source condition 4 fan speed.
+    close(output.fan_speed, rule.radiator.max_fan_speed * 0.2);
 
     // Source sequential overdraw can create fluid after a negative total.
     // The engine publication boundary bounds each amount by its previous amount.
