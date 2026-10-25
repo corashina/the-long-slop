@@ -1534,7 +1534,7 @@ impl AsBindGroup for SourceReceiver {
     }
     fn unprepared_bind_group(
         &self,
-        layout: &BindGroupLayout,
+        _: &BindGroupLayout,
         device: &RenderDevice,
         params: &mut SystemParamItem<Self::Param>,
         _: bool,
@@ -1544,7 +1544,7 @@ impl AsBindGroup for SourceReceiver {
             .cookies
             .as_ref()
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
-        let mut result = UnpreparedBindGroup {
+        let result = UnpreparedBindGroup {
             bindings: BindingResources(vec![
                 (
                     100,
@@ -1617,7 +1617,7 @@ impl AsBindGroup for SourceReceiver {
         };
         Ok(result)
     }
-    fn bind_group_layout_entries(device: &RenderDevice, force: bool) -> Vec<BindGroupLayoutEntry> {
+    fn bind_group_layout_entries(_: &RenderDevice, _: bool) -> Vec<BindGroupLayoutEntry> {
         use binding_types::*;
         let mut entries = BindGroupLayoutEntries::with_indices(
             ShaderStages::FRAGMENT,
