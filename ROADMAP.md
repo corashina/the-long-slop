@@ -64,10 +64,13 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 7. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
 8. Sandstorms (W07): run `cargo test --lib terrain_sample_matches_published_ground -- --ignored`. Spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm. Save and load inside a storm.
 9. Power cables (W04): check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and the rope meshes are not flipped. Check F3 along the road.
+10. Draw distance (W01): check F3 at 500, 2500 and 5000 m near the garage and on the road. Compare with the frame rate rule.
+11. Set a draw distance that does not fit (above about 5500 m). New game must refuse it and name the largest value. Reload: the slider keeps the last value that started.
+12. Check the slider is locked in the pause menu. Check far terrain, buildings and fog at 2500 m against the original.
+13. Run `cargo test --test world_range -- --ignored --nocapture`. Peaks must stay below the limits.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| W01 | Restore world range. [World](src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Buried item state and save, shovel swing and digging, metal detector. [F10, F03] |
