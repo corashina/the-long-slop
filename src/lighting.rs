@@ -86,13 +86,15 @@ pub struct CycleState {
     sampled_sky: [f32; 4],
     terrain_color: [f32; 4],
     next_biome_refresh: f64,
+    /// Resolved source `DDS.fogModifier`.
+    fog_modifier: f32,
 }
 
 impl CycleState {
     /// Initialize from a validated cycle reference.
-    pub fn new(reference: &CycleReference) -> Self {
+    pub fn new(reference: &CycleReference, fog_modifier: f32) -> Self {
         let cycle_seconds = f64::from(reference.startup_offset_seconds);
-        let output = evaluate(reference, cycle_seconds, 0., 0., 0., [0.; 4]);
+        let output = evaluate(reference, fog_modifier, cycle_seconds, 0., 0., 0., [0.; 4]);
         Self {
             elapsed_seconds: 0.,
             cycle_seconds,
@@ -106,6 +108,7 @@ impl CycleState {
             sky_sample_time: 0.,
             terrain_color: [0.; 4],
             next_biome_refresh: reference.biome_refresh_seconds as f64,
+            fog_modifier,
         }
     }
 
@@ -141,6 +144,7 @@ impl CycleState {
         let grading_temperature = self.output.grading_temperature;
         self.output = evaluate(
             reference,
+            self.fog_modifier,
             cycle,
             active,
             self.cloud_coordinate,
@@ -175,6 +179,7 @@ impl CycleState {
         let grading_temperature = self.output.grading_temperature;
         self.output = evaluate(
             reference,
+            self.fog_modifier,
             saved.evaluated_cycle_seconds,
             saved.elapsed_seconds,
             saved.cloud_coordinate,
@@ -264,7 +269,7 @@ impl CycleState {
                 color_lerp(day_fog, night_fog, inverse_lerp(0., 0.5, p)),
             ),
         };
-        o.fog_density = density * r.fog_modifier;
+        o.fog_density = density * self.fog_modifier;
         o.fog_color = color;
         for (cloud, source) in o.clouds.iter_mut().zip(&r.clouds) {
             let day = color_lerp(source.day_color, s.cloud_color, w);
@@ -315,7 +320,7 @@ impl CycleState {
         }
     }
     pub fn reset(&mut self, reference: &CycleReference) {
-        *self = Self::new(reference);
+        *self = Self::new(reference, self.fog_modifier);
     }
 
     /// Return monotonic active play time, without the source startup offset.
@@ -330,6 +335,7 @@ impl CycleState {
 
 fn evaluate(
     r: &CycleReference,
+    fog_modifier: f32,
     seconds: f64,
     active: f64,
     cloud_x: f32,
@@ -526,7 +532,7 @@ fn evaluate(
             CyclePhase::Day => 1.,
             _ => gradient(&r.atmosphere_thickness, gradient_time)[0] * 255.,
         },
-        fog_density: fog_density * r.fog_modifier,
+        fog_density: fog_density * fog_modifier,
         fog_color,
         roadside_enabled: match phase {
             CyclePhase::Dawn => p < 0.5,
@@ -774,9 +780,12 @@ pub struct LightingState {
     pose_progress: Vec<Option<SwitchMotion>>,
 }
 impl LightingState {
-    pub fn new(reference: &crate::reference::LightingRecord) -> Self {
+    pub fn new(
+        reference: &crate::reference::LightingRecord,
+        distances: &crate::world::DrawDistances,
+    ) -> Self {
         let mut state = Self {
-            cycle: CycleState::new(&reference.cycle),
+            cycle: CycleState::new(&reference.cycle, distances.fog_modifier),
             visibility: reference
                 .controllers
                 .iter()
@@ -1536,7 +1545,6 @@ mod tests {
             flare_lerp_start: 0.2,
             flare_lerp_end: 0.8,
             biome_refresh_seconds: 1.,
-            fog_modifier: 2.,
             temperature_values: [0.; 3],
             desert_color: [1., 0., 0., 1.],
             sky_colors: [[0.3; 4]; 3],
@@ -1599,7 +1607,8 @@ mod tests {
         s.atmosphere_thickness = 3.;
         s.intensity_multipler = 0.5;
         s.ambient_multipler = 0.25;
-        let mut state = CycleState::new(&r);
+        let fog_modifier = 2.;
+        let mut state = CycleState::new(&r, fog_modifier);
         advance(&mut state, &r);
         let clear = state.output().clone();
         assert_eq!(clear.phase, CyclePhase::Day);
@@ -1613,7 +1622,7 @@ mod tests {
         state.compose_weather(&weather, full);
         let o = state.output();
         assert_eq!(o.fog_color, weather.storm.fog_color);
-        assert_eq!(o.fog_density, 0.5 * r.fog_modifier);
+        assert_eq!(o.fog_density, 0.5 * fog_modifier);
         assert_eq!(o.atmosphere_thickness, 3.);
         assert_eq!(o.directional_intensity, clear.directional_intensity * 0.5);
         assert_eq!(o.ambient, clear.ambient * 0.25);
@@ -1631,7 +1640,7 @@ mod tests {
             },
         );
         let o = state.output();
-        assert_eq!(o.fog_density, lerp(0.01, 0.5, 0.125) * r.fog_modifier);
+        assert_eq!(o.fog_density, lerp(0.01, 0.5, 0.125) * fog_modifier);
         assert_eq!(
             o.sky_tint,
             color_lerp(clear.sky_tint, weather.storm.sky_color, 0.5)

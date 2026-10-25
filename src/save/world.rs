@@ -378,9 +378,8 @@ impl PersistentWorld {
         }
         let mut changed = false;
         self.processed.clear();
-        let distances = &reference.world.distances;
-        let freeze = distances["ItemFreezeDist"].powi(2) as f64;
-        let unfreeze = distances["ItemUnFreezeDist"].powi(2) as f64;
+        let freeze = stream.distances.item_freeze_dist.powi(2) as f64;
+        let unfreeze = stream.distances.item_unfreeze_dist.powi(2) as f64;
         // Source important objects: the player and every car.
         let mut important = std::mem::take(&mut self.important);
         important.clear();
@@ -682,7 +681,7 @@ mod world_sync_tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
+        let mut run = GarageRuntime::new_default(&reference).unwrap();
         crate::world::stream::tests::prepare_ready(&mut run, &reference);
         assert!(run.startup_aligned);
         run.sync_world_activity(&reference).unwrap();

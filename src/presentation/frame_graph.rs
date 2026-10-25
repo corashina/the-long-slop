@@ -245,6 +245,7 @@ pub fn spawn_cameras(
     reference: &crate::reference::ReferenceManifest,
     pose: Transform,
     fov_degrees: f32,
+    far: f32,
 ) {
     let record = &reference.render_lighting;
     let sky = &record.cameras[0];
@@ -284,7 +285,7 @@ pub fn spawn_cameras(
     let capture = images.add(image);
     for index in 0..VIEW_COUNT {
         let (near, far, fov, mask, order, samples) = if index < WORLD_VIEWS {
-            let world = super::camera::world_camera_settings(fov_degrees);
+            let world = super::camera::world_camera_settings(fov_degrees, far);
             (
                 world.near,
                 world.far,
@@ -307,7 +308,7 @@ pub fn spawn_cameras(
                 .filter(|layer| mask & (1u32 << layer) != 0)
                 .collect::<RenderLayers>(),
             Projection::Perspective(if index < WORLD_VIEWS {
-                super::camera_projection::player_perspective(fov, 1.)
+                super::camera_projection::player_perspective(fov, 1., far)
             } else {
                 PerspectiveProjection {
                     fov: fov.to_radians(),

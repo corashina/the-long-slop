@@ -7,12 +7,13 @@ pub fn sync_player_projection(projection: &mut Projection, player_view: bool, fo
     }
 }
 
-pub fn player_perspective(fov_degrees: f32, aspect_ratio: f32) -> PerspectiveProjection {
+/// `far` is the session `Cam2FarPlane`.
+pub fn player_perspective(fov_degrees: f32, aspect_ratio: f32, far: f32) -> PerspectiveProjection {
     PerspectiveProjection {
         fov: fov_degrees.to_radians(),
         aspect_ratio,
         near: 0.05,
-        far: 15000.,
+        far,
         ..Default::default()
     }
 }

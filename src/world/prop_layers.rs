@@ -25,24 +25,15 @@ pub(crate) struct PropLayers {
     layer: usize,
 }
 impl PropLayers {
-    pub fn new(reference: &WorldReference, seed: i32) -> Result<Self, ReferenceError> {
+    pub fn new(
+        reference: &WorldReference,
+        seed: i32,
+        distances: &super::DrawDistances,
+    ) -> Result<Self, ReferenceError> {
         let mut layers = Vec::with_capacity(4);
         for i in 0..4 {
             let generator = PropGenerator::new(reference, seed, i)?;
-            let draw = reference.distances[if i == 0 {
-                "ObjGenDist"
-            } else if i == 1 {
-                "MountainGenDist"
-            } else {
-                "BuildingGenDist"
-            }];
-            let remove = reference.distances[if i == 0 {
-                "ObjRemoveDist"
-            } else if i == 1 {
-                "MountainRemoveDist"
-            } else {
-                "BuildingRemoveDist"
-            }];
+            let (draw, remove) = layer_distances(distances, i);
             let size = generator.reference.chunk_dist;
             let side = ((draw * 2.0 / size) as usize + 1).max(2);
             let half = (side - 1) as f32 * size * 0.5;
@@ -281,6 +272,14 @@ impl PropLayers {
             .find(|l| l.generator.layer == placement.id.layer)?
             .generator
             .material(&placement.prototype, placement.object_seed)
+    }
+}
+/// Generation and removal distance of prop layer `i`.
+pub(super) fn layer_distances(distances: &super::DrawDistances, i: usize) -> (f32, f32) {
+    match i {
+        0 => (distances.obj_gen_dist, distances.obj_remove_dist),
+        1 => (distances.mountain_gen_dist, distances.mountain_remove_dist),
+        _ => (distances.building_gen_dist, distances.building_remove_dist),
     }
 }
 fn squared(p: [f32; 2]) -> f32 {

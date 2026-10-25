@@ -277,7 +277,10 @@ mod tests {
         for x in [19_980_000.0, -19_980_000.0] {
             assert_eq!(height(x, true), height(x, false));
         }
-        assert_eq!(height(19_990_000.0, true), height(19_990_000.0, false) * 0.5);
+        assert_eq!(
+            height(19_990_000.0, true),
+            height(19_990_000.0, false) * 0.5
+        );
         let z = [0.0, 20_000_000.0];
         assert_ne!(terrain.base_height(z, false), 0.0);
         assert_eq!(terrain.base_height(z, true), 0.0);

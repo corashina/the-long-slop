@@ -237,6 +237,7 @@ impl PreparedPresentation {
         let projection = super::camera_projection::player_perspective(
             player_view.fov_degrees,
             self.aspect_ratio,
+            candidate.distances.cam2_far_plane,
         );
         let clip = projection.get_clip_from_view()
             * Mat4::from_rotation_translation(camera.rotation, position).inverse();
@@ -793,6 +794,7 @@ fn candidate_required_views(
     let forward = [forward.x, forward.y, -forward.z];
     let first = super::camera::world_camera_settings(
         candidate.area.player.view(&candidate.physics).fov_degrees,
+        candidate.distances.cam2_far_plane,
     );
     let first = required_view(
         &camera_snapshot(

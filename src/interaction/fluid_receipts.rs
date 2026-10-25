@@ -318,9 +318,7 @@ mod tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut run =
-            crate::starting_area::GarageRuntime::new(&r, crate::world::GameMode::default())
-                .unwrap();
+        let mut run = crate::starting_area::GarageRuntime::new_default(&r).unwrap();
         let source = r.openings.iter().find(|o| o.tank == ItemId(116)).unwrap();
         let destination = r
             .openings
@@ -402,9 +400,7 @@ mod tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut run =
-            crate::starting_area::GarageRuntime::new(&r, crate::world::GameMode::default())
-                .unwrap();
+        let mut run = crate::starting_area::GarageRuntime::new_default(&r).unwrap();
         let receiver = r.vehicles[0].engine.fuel_tank;
         let cap = r.openings.iter().find(|o| o.tank == receiver).unwrap();
         let emitter = r
@@ -602,9 +598,7 @@ mod tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut run =
-            crate::starting_area::GarageRuntime::new(&r, crate::world::GameMode::default())
-                .unwrap();
+        let mut run = crate::starting_area::GarageRuntime::new_default(&r).unwrap();
         let view = to_rapier(run.area.player.view(&run.physics).head_pose);
         let center = view.translation + view.rotation * run.area.interaction.drink_collider_center;
         let source = ItemId(116);

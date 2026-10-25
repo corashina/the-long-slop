@@ -680,17 +680,7 @@ impl Inputs {
                 copy_prototype(prototype, kind.type_id, &records)
             })
             .collect();
-        let minimum = rules
-            .groups
-            .iter()
-            .flat_map(|g| &g.types)
-            .map(|s| {
-                // Bound with the actual source integer quantization and float spacing store.
-                let hundredths = (s.min_dist as f64 * 100.0) as i32;
-                ((hundredths as f32 as f64 * 0.01_f32 as f64) as f32 as f64
-                    * rules.dist_modifier as f64) as f32
-            })
-            .fold(f32::INFINITY, f32::min);
+        let minimum = building_spacing(&rules);
         assert!(minimum > 0.0 && rules.min_start_dist >= 0.0);
         let max_buildings = (SOURCE_END / minimum as f64).ceil() as usize + 1;
         let terrain = super::terrain_evaluator(reference, seed);
@@ -709,6 +699,46 @@ impl Inputs {
             max_buildings,
         }
     }
+}
+
+/// Smallest source z spacing between consecutive buildings.
+pub(crate) fn building_spacing(rules: &WorldBuildingReference) -> f32 {
+    rules
+        .groups
+        .iter()
+        .flat_map(|g| &g.types)
+        .map(|s| {
+            // Bound with the actual source integer quantization and float spacing store.
+            let hundredths = (s.min_dist as f64 * 100.0) as i32;
+            ((hundredths as f32 as f64 * 0.01_f32 as f64) as f32 as f64
+                * rules.dist_modifier as f64) as f32
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+/// Largest lateral building offset from the road curve.
+pub(crate) fn building_offset(rules: &WorldBuildingReference) -> f64 {
+    let extent = |side: &crate::reference::WorldBuildingSide| {
+        (side.min_xpos.abs().max(side.max_xpos.abs())) as f64
+    };
+    let mut offset = rules.default_sides.iter().map(extent).fold(0.0, f64::max);
+    for group in &rules.groups {
+        for selection in &group.types {
+            let sides = if selection.dont_use_default == 0 {
+                &rules.default_sides
+            } else {
+                &selection.sides
+            };
+            let modifier = if selection.dont_use_default == 0 && selection.use_modifier != 0 {
+                selection.x_dist_modifier.abs() as f64
+            } else {
+                1.0
+            };
+            for side in sides {
+                offset = offset.max(extent(side) * modifier);
+            }
+        }
+    }
+    offset
 }
 
 type Records<'a> = HashMap<&'a SourceId, &'a WorldSourceRecord>;

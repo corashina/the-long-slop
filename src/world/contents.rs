@@ -260,11 +260,11 @@ impl SourceContents {
     }
     pub fn eligibility_changed(
         &self,
-        reference: &WorldReference,
+        spawn: f32,
         before: [[f64; 3]; 2],
         after: [[f64; 3]; 2],
     ) -> bool {
-        let spawn = reference.distances["ItemSpawnDist"].powi(2);
+        let spawn = spawn.powi(2);
         self.cursors.iter().any(|c| {
             !c.replay_only
                 && c.building.is_some()
@@ -353,6 +353,7 @@ impl SourceContents {
     pub fn advance(
         &mut self,
         reference: &WorldReference,
+        spawn: f32,
         structures: &[Placement],
         replays: &[Placement],
         cables: &[(GeneratedId, Vec<super::NodeAppearance>)],
@@ -388,7 +389,6 @@ impl SourceContents {
         if limit == 0 || staging == 0 {
             return Ok(());
         }
-        let spawn = reference.distances["ItemSpawnDist"];
         let cursor_before = self.retained_bytes();
         for (instance, replay_only) in structures
             .iter()
@@ -1363,6 +1363,11 @@ mod tests {
             .world
     }
 
+    /// Expectations were recorded at the 500 m source minimum.
+    fn spawn(reference: &WorldReference) -> f32 {
+        reference.draw_distance.minimum.item_spawn_dist
+    }
+
     fn cursors(reference: &WorldReference) -> SourceContents {
         let mut contents = SourceContents::new(reference);
         let prototype = reference.buildings.types[0].prototype.clone();
@@ -1467,7 +1472,18 @@ mod tests {
         let history = contents.state.capture_history();
         let scans = ScanCheck::new();
         contents
-            .advance(reference, &[], &[], &[], [[0.; 3]; 2], usize::MAX, 1, 1, 1)
+            .advance(
+                reference,
+                spawn(reference),
+                &[],
+                &[],
+                &[],
+                [[0.; 3]; 2],
+                usize::MAX,
+                1,
+                1,
+                1,
+            )
             .unwrap();
         assert_eq!(scans.production_scans(), [5, 5, 5, 5]);
         assert_eq!(contents.next, 0);
@@ -1494,6 +1510,7 @@ mod tests {
         contents
             .advance(
                 reference,
+                spawn(reference),
                 &[],
                 &[],
                 &[],
@@ -1560,6 +1577,7 @@ mod tests {
         let error = rejected
             .advance(
                 reference,
+                spawn(reference),
                 &[],
                 &[],
                 &[],
@@ -1580,6 +1598,7 @@ mod tests {
         contents
             .advance(
                 reference,
+                spawn(reference),
                 &[],
                 &[],
                 &[],
