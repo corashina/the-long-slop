@@ -292,6 +292,7 @@ pub fn validate_prototypes(m: &ReferenceManifest) -> Result<(), ReferenceError> 
     require(
         m.item_prototypes.iter().map(|p| p.id.0.path_id).eq([
             75443, 51722, 61587, 81642, 81645, 70812, 53838, 53837, 63605, 63259, 54495, 83430,
+            51557,
         ]),
         "selected item prototypes",
     )?;
@@ -357,6 +358,7 @@ impl ItemPrototype {
             54495 => (Some(230), 1, None, false, false, Some(134670)),
             // Hose segment inventory flags and icons are not checked against the source build.
             83430 => (Some(61), 6, None, false, false, None),
+            51557 => (Some(312), 1, Some(4569), false, false, Some(146482)),
             _ => return Err(ReferenceError("unknown item prototype".into())),
         };
         let hose = item_id == Some(61);
@@ -388,6 +390,7 @@ impl ItemPrototype {
             63259 => (3, 2),
             54495 => (1, 7),
             83430 => (6, 0),
+            51557 => (1, 1),
             _ => unreachable!(),
         };
         require(

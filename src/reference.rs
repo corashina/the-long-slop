@@ -1198,7 +1198,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         particles::validate_particles(self)?;
-        self.weather.validate()?;
+        self.weather.validate(self)?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(
