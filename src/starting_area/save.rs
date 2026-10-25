@@ -309,6 +309,7 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &saved.spawned,
         )?;
+        super::hose::restore(reference, &mut candidate.area, &mut candidate.physics)?;
         candidate.restore_cigarettes(&saved.cigarettes);
         let vehicle = saved
             .vehicles

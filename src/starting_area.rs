@@ -23,6 +23,7 @@ use rapier3d::prelude::{
 use std::collections::HashMap;
 
 pub mod cigarettes;
+pub(crate) mod hose;
 pub mod spawned;
 mod survival;
 pub use survival::DrinkResult;
@@ -1899,6 +1900,7 @@ impl GarageRuntime {
         }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
+        hose::spawn_start(reference, &mut self.area, &mut self.physics)?;
         self.area.commit_poses(&self.physics, true);
         self.startup_aligned = true;
         Ok(true)

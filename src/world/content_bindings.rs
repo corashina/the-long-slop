@@ -304,26 +304,7 @@ impl WorldStream {
                 return Err(error);
             }
             crate::world::content_mechanisms::sync(&mut content, items, interaction, physics);
-            content.baseline = crate::world::changes::capture(
-                content.item.unwrap(),
-                items,
-                interaction,
-                physics,
-                reference,
-            );
-            if let Some(baseline) = &mut content.baseline {
-                baseline.lamp = content.content.portable_lamp();
-            }
-            for binding in &mut content.bindings {
-                binding.baseline = crate::world::changes::capture(
-                    binding.item,
-                    items,
-                    interaction,
-                    physics,
-                    reference,
-                )
-                .unwrap();
-            }
+            capture_baselines(&mut content, reference, items, interaction, physics);
             content.suspended_bodies.reserve(instance.bodies.len());
             self.static_controls.push(content);
             self.static_control_revision += 1;
@@ -449,206 +430,160 @@ impl WorldStream {
                 .iter()
                 .find(|p| p.source == placement.prototype)
                 .unwrap();
-            let pickup_root = if let Some(unparent) = self.contents.rules.component(
-                &self.reference,
-                &placement.prototype,
-                "childunparent",
-            )? {
-                link(unparent.fields, "g")?
+            let hose = reference
+                .item_prototypes
+                .iter()
+                .find(|p| p.hose.is_some() && p.source == placement.prototype);
+            let result = if let Some(hose) = hose {
+                bind_hose(
+                    content,
+                    instance,
+                    prototype,
+                    hose,
+                    reference,
+                    &self.contents.rules,
+                    items,
+                    interaction,
+                    physics,
+                )
             } else {
-                &placement.prototype
-            };
-            let Some(pickup) =
-                self.contents
-                    .rules
-                    .component(&self.reference, pickup_root, "pickupable")?
-            else {
-                continue;
-            };
-            let result = (|| -> Result<(), ReferenceError> {
-                let rule = pickup_rule(pickup)?;
-                let root = self.contents.rules.root(&self.reference, pickup.source)?;
-                let body_index = prototype
-                    .bodies
-                    .iter()
-                    .position(|b| prototype.nodes[b.node as usize].source == *root)
-                    .ok_or_else(|| ReferenceError("Generated pickup has no source body".into()))?;
-                let body = instance.bodies[body_index];
-                let pickup_node = prototype
-                    .nodes
-                    .iter()
-                    .position(|n| &n.source == root)
-                    .ok_or_else(|| ReferenceError("Generated pickup transform missing".into()))?;
-                let pickup_pose = crate::world::placement::place_pose(
-                    placement.pose,
-                    placement.scale,
-                    crate::world::placement::node_pose(prototype, pickup_node),
-                );
-                let id = items.insert_generated(placement.id.clone(), prototype, pickup_pose)?;
-                content.item = Some(id);
-                let hit = hit_sound(&self.reference, pickup.source);
-                let state = items.set_body(id, Some(body)).unwrap();
-                state.hit_sound = hit;
-                state.fluid = content.content.fluid.clone();
-                state.generated_condition = Some(content.content.condition);
-                state.local_pose = from_rapier(
-                    &(physics.rapier().bodies[body].position().inverse() * to_rapier(state.pose)),
-                );
-                let state = items.get(id).unwrap();
-                let body_pose = to_rapier(state.pose) * to_rapier(state.local_pose).inverse();
-                physics.edit_body(body, |state| state.set_position(body_pose, true));
-                let mut layers = 0u32;
-                for (source, handle) in &instance.colliders {
-                    let collider = prototype
-                        .colliders
-                        .iter()
-                        .find(|c| c.source == *source)
-                        .unwrap();
-                    if collider.body != Some(body_index as u32) {
-                        continue;
-                    }
-                    layers |= 1u32 << prototype.nodes[collider.node as usize].layer;
-                    let collider_id = interaction.allocate_generated_collider()?;
-                    physics.edit_collider(*handle, |collider| {
-                        collider.user_data = (collider.user_data & STEP_SURFACE_MASK)
-                            | ((collider_id.0 as u128) << 64)
-                            | (id.0 as u128 + 1);
-                        collider.set_active_events(hit_events(hit));
-                    });
-                    interaction.bind_surface(
-                        *handle,
-                        ActionBinding {
-                            collider: collider_id,
-                            use_owner: None,
-                            pickup_owner: Some(id),
-                            removal_owner: None,
-                            push_owner: None,
-                        },
-                    );
-                }
-                interaction.register_generated_pickup(
-                    id,
-                    rule.clone(),
-                    layers,
-                    state.fluid.is_some(),
-                );
-                content.render_body = Some((body, state.local_pose));
-                content.item = Some(id);
-                if let Some(edible) =
+                let pickup_root = if let Some(unparent) = self.contents.rules.component(
+                    &self.reference,
+                    &placement.prototype,
+                    "childunparent",
+                )? {
+                    link(unparent.fields, "g")?
+                } else {
+                    &placement.prototype
+                };
+                let Some(pickup) =
                     self.contents
                         .rules
-                        .component(&self.reference, pickup_root, "ediblescript")?
-                {
-                    if let Some((prototype_index, food)) = reference
-                        .survival
-                        .foods
-                        .iter()
-                        .enumerate()
-                        .find(|(_, food)| &food.source == edible.source)
-                    {
-                        items.get_mut(id).unwrap().food =
-                            Some(crate::interaction::items::FoodState {
-                                prototype_index,
-                                bite: food.index,
-                            });
-                        let handles: Vec<_> = instance
-                            .colliders
-                            .iter()
-                            .filter(|(source, _)| {
-                                food.colliders.iter().any(|c| &c.source == source)
-                            })
-                            .map(|(_, handle)| *handle)
-                            .collect();
-                        interaction.register_consumable(id, food, &handles);
-                    }
-                }
-                crate::world::content_containers::bind(
-                    content,
-                    instance,
-                    prototype,
-                    &self.contents.rules,
-                    reference,
-                    items,
-                    interaction,
-                    physics,
-                )?;
-                crate::world::content_parts::bind(
-                    content,
-                    instance,
-                    prototype,
-                    &self.contents.rules,
-                    reference,
-                    rule,
-                    layers,
-                    items,
-                    interaction,
-                    physics,
-                )?;
-                crate::world::content_wheels::bind(
-                    content,
-                    instance,
-                    prototype,
-                    &self.contents.rules,
-                    reference,
-                    items,
-                    interaction,
-                    physics,
-                    wheels,
-                )?;
-                crate::world::content_slots::bind(
-                    content,
-                    instance,
-                    prototype,
-                    &self.contents.rules,
-                    reference,
-                    items,
-                    interaction,
-                    physics,
-                    wheels,
-                )?;
-                crate::world::content_mechanisms::bind(
-                    content,
-                    instance,
-                    prototype,
-                    reference,
-                    &self.contents.rules,
-                    items,
-                    interaction,
-                    physics,
-                )?;
-                if interaction.parts.contains(id) {
-                    wheels.register_generated_general(
+                        .component(&self.reference, pickup_root, "pickupable")?
+                else {
+                    continue;
+                };
+                (|| -> Result<(), ReferenceError> {
+                    let BoundPickup {
                         id,
-                        physics.rapier().bodies[body].mass(),
-                        items.get(id).unwrap().fluid.is_some(),
-                    );
-                }
-                crate::world::content_mechanisms::sync(content, items, interaction, physics);
-                content.suspended_bodies.reserve(instance.bodies.len());
-                content.baseline =
-                    crate::world::changes::capture(id, items, interaction, physics, reference);
-                if let Some(baseline) = &mut content.baseline {
-                    baseline.lamp = content.content.portable_lamp();
-                }
-                for binding in &mut content.bindings {
-                    binding.baseline = crate::world::changes::capture(
-                        binding.item,
+                        body,
+                        rule,
+                        layers,
+                        ..
+                    } = bind_pickup(
+                        content,
+                        pickup,
+                        false,
+                        instance,
+                        prototype,
+                        &self.reference,
+                        &self.contents.rules,
                         items,
                         interaction,
                         physics,
+                    )?;
+                    if let Some(edible) = self.contents.rules.component(
+                        &self.reference,
+                        pickup_root,
+                        "ediblescript",
+                    )? {
+                        if let Some((prototype_index, food)) = reference
+                            .survival
+                            .foods
+                            .iter()
+                            .enumerate()
+                            .find(|(_, food)| &food.source == edible.source)
+                        {
+                            items.get_mut(id).unwrap().food =
+                                Some(crate::interaction::items::FoodState {
+                                    prototype_index,
+                                    bite: food.index,
+                                });
+                            let handles: Vec<_> = instance
+                                .colliders
+                                .iter()
+                                .filter(|(source, _)| {
+                                    food.colliders.iter().any(|c| &c.source == source)
+                                })
+                                .map(|(_, handle)| *handle)
+                                .collect();
+                            interaction.register_consumable(id, food, &handles);
+                        }
+                    }
+                    crate::world::content_containers::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
                         reference,
-                    )
-                    .unwrap();
-                }
-                let state = items.get(id).unwrap();
-                physics.edit_body(body, |body| {
-                    body.set_position(
-                        to_rapier(state.pose) * to_rapier(state.local_pose).inverse(),
-                        true,
-                    )
-                });
-                Ok(())
-            })();
+                        items,
+                        interaction,
+                        physics,
+                    )?;
+                    crate::world::content_parts::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
+                        reference,
+                        rule,
+                        layers,
+                        items,
+                        interaction,
+                        physics,
+                    )?;
+                    crate::world::content_wheels::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
+                        reference,
+                        items,
+                        interaction,
+                        physics,
+                        wheels,
+                    )?;
+                    crate::world::content_slots::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.contents.rules,
+                        reference,
+                        items,
+                        interaction,
+                        physics,
+                        wheels,
+                    )?;
+                    crate::world::content_mechanisms::bind(
+                        content,
+                        instance,
+                        prototype,
+                        reference,
+                        &self.contents.rules,
+                        items,
+                        interaction,
+                        physics,
+                    )?;
+                    if interaction.parts.contains(id) {
+                        wheels.register_generated_general(
+                            id,
+                            physics.rapier().bodies[body].mass(),
+                            items.get(id).unwrap().fluid.is_some(),
+                        );
+                    }
+                    crate::world::content_mechanisms::sync(content, items, interaction, physics);
+                    content.suspended_bodies.reserve(instance.bodies.len());
+                    capture_baselines(content, reference, items, interaction, physics);
+                    let state = items.get(id).unwrap();
+                    physics.edit_body(body, |body| {
+                        body.set_position(
+                            to_rapier(state.pose) * to_rapier(state.local_pose).inverse(),
+                            true,
+                        )
+                    });
+                    Ok(())
+                })()
+            };
             if let Err(error) = result {
                 rollback(content, instance, items, interaction, physics, wheels);
                 let index = self
@@ -1132,6 +1067,200 @@ impl WorldStream {
             self.ready_structures
                 .retain(|id| *id != content.content.placement.id);
         }
+    }
+}
+
+/// A generated pickup item on its instance body.
+struct BoundPickup {
+    id: crate::reference::ItemId,
+    body: rapier3d::prelude::RigidBodyHandle,
+    body_index: usize,
+    rule: PickupReference,
+    layers: u32,
+}
+
+/// Bind one `pickupable` to its instance body, colliders and hit sound.
+/// The item becomes the content item, or a content binding when `child`.
+#[allow(clippy::too_many_arguments)]
+fn bind_pickup(
+    content: &mut crate::world::contents::ContentInstance,
+    pickup: SourceRecord<'_>,
+    child: bool,
+    instance: &crate::world::StructureInstance,
+    prototype: &crate::reference::WorldPrototypeReference,
+    world: &crate::reference::WorldReference,
+    rules: &SourceRules,
+    items: &mut ItemStore,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+) -> Result<BoundPickup, ReferenceError> {
+    let rule = pickup_rule(pickup)?;
+    let root = rules.root(world, pickup.source)?;
+    let body_index = prototype
+        .bodies
+        .iter()
+        .position(|b| prototype.nodes[b.node as usize].source == *root)
+        .ok_or_else(|| ReferenceError("Generated pickup has no source body".into()))?;
+    let body = instance.bodies[body_index];
+    let pickup_node = prototype
+        .nodes
+        .iter()
+        .position(|n| &n.source == root)
+        .ok_or_else(|| ReferenceError("Generated pickup transform missing".into()))?;
+    let placement = &content.content.placement;
+    let pickup_pose = crate::world::placement::place_pose(
+        placement.pose,
+        placement.scale,
+        crate::world::placement::node_pose(prototype, pickup_node),
+    );
+    let mut key = placement.id.clone();
+    if child {
+        key.children.push((pickup.source.clone(), 0));
+    }
+    let id = items.insert_generated(key, prototype, pickup_pose)?;
+    let hit = hit_sound(world, pickup.source);
+    let state = items.set_body(id, Some(body)).unwrap();
+    state.hit_sound = hit;
+    if !child {
+        state.fluid = content.content.fluid.clone();
+        state.generated_condition = Some(content.content.condition);
+    }
+    state.local_pose =
+        from_rapier(&(physics.rapier().bodies[body].position().inverse() * to_rapier(state.pose)));
+    let local = state.local_pose;
+    let container = state.fluid.is_some();
+    let body_pose = to_rapier(state.pose) * to_rapier(local).inverse();
+    physics.edit_body(body, |state| state.set_position(body_pose, true));
+    // Record the item before fallible steps so rollback removes it.
+    if child {
+        content
+            .bindings
+            .push(crate::world::contents::ContentBinding {
+                source: pickup.source.clone(),
+                item: id,
+                baseline: items.generated_snapshot(id, None).unwrap(),
+                render_body: Some((body, local)),
+            });
+    } else {
+        content.item = Some(id);
+        content.render_body = Some((body, local));
+    }
+    let mut layers = 0u32;
+    for (source, handle) in &instance.colliders {
+        let collider = prototype
+            .colliders
+            .iter()
+            .find(|c| c.source == *source)
+            .unwrap();
+        if collider.body != Some(body_index as u32) {
+            continue;
+        }
+        layers |= 1u32 << prototype.nodes[collider.node as usize].layer;
+        let collider_id = interaction.allocate_generated_collider()?;
+        physics.edit_collider(*handle, |collider| {
+            collider.user_data = (collider.user_data & STEP_SURFACE_MASK)
+                | ((collider_id.0 as u128) << 64)
+                | (id.0 as u128 + 1);
+            collider.set_active_events(hit_events(hit));
+        });
+        interaction.bind_surface(
+            *handle,
+            ActionBinding {
+                collider: collider_id,
+                use_owner: None,
+                pickup_owner: Some(id),
+                removal_owner: None,
+                push_owner: None,
+            },
+        );
+    }
+    interaction.register_generated_pickup(id, rule.clone(), layers, container);
+    Ok(BoundPickup {
+        id,
+        body,
+        body_index,
+        rule,
+        layers,
+    })
+}
+
+/// Siphon hose placement: one item per segment body, then one runtime hose.
+/// The main segment is the content item. The other segments are content bindings.
+#[allow(clippy::too_many_arguments)]
+fn bind_hose(
+    content: &mut crate::world::contents::ContentInstance,
+    instance: &crate::world::StructureInstance,
+    prototype: &crate::reference::WorldPrototypeReference,
+    hose_prototype: &crate::reference::ItemPrototype,
+    reference: &ReferenceManifest,
+    rules: &SourceRules,
+    items: &mut ItemStore,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+) -> Result<(), ReferenceError> {
+    let hose = hose_prototype.hose.as_ref().unwrap();
+    let mut segments = [crate::reference::ItemId(0); crate::reference::HOSE_SEGMENTS];
+    for (item, segment) in segments.iter_mut().zip(hose.segments) {
+        // The world prototype and the item prototype share the prefab Rigidbody sources.
+        let source = &hose_prototype
+            .bodies
+            .iter()
+            .find(|b| b.id == segment)
+            .ok_or_else(|| ReferenceError("Hose segment body missing".into()))?
+            .source;
+        let body_index = prototype
+            .bodies
+            .iter()
+            .position(|b| &b.source == source)
+            .ok_or_else(|| ReferenceError("Generated hose segment has no body".into()))?;
+        let node = &prototype.nodes[prototype.bodies[body_index].node as usize].source;
+        let pickup = rules
+            .component(&reference.world, node, "pickupable")?
+            .ok_or_else(|| ReferenceError("Generated hose segment has no pickup".into()))?;
+        let bound = bind_pickup(
+            content,
+            pickup,
+            segment != hose.main,
+            instance,
+            prototype,
+            &reference.world,
+            rules,
+            items,
+            interaction,
+            physics,
+        )?;
+        if bound.body_index != body_index {
+            return Err(ReferenceError("Generated hose pickup body differs".into()));
+        }
+        *item = bound.id;
+    }
+    if content.item.is_none() {
+        return Err(ReferenceError("Generated hose has no main segment".into()));
+    }
+    interaction.register_hose(hose_prototype, segments, items, physics)?;
+    content.suspended_bodies.reserve(instance.bodies.len());
+    capture_baselines(content, reference, items, interaction, physics);
+    Ok(())
+}
+
+/// Source baselines of the content item and its bindings.
+fn capture_baselines(
+    content: &mut crate::world::contents::ContentInstance,
+    reference: &ReferenceManifest,
+    items: &ItemStore,
+    interaction: &InteractionState,
+    physics: &PhysicsWorld,
+) {
+    content.baseline = content
+        .item
+        .and_then(|id| crate::world::changes::capture(id, items, interaction, physics, reference));
+    if let Some(baseline) = &mut content.baseline {
+        baseline.lamp = content.content.portable_lamp();
+    }
+    for binding in &mut content.bindings {
+        binding.baseline =
+            crate::world::changes::capture(binding.item, items, interaction, physics, reference)
+                .unwrap();
     }
 }
 

@@ -97,6 +97,7 @@ impl SaveSnapshot {
             &self.spawned,
             &self.cigarettes,
         )?;
+        crate::starting_area::hose::validate_save(reference, &self.spawned)?;
         let parents = self.validate_attachments(reference, &ids, &items)?;
         self.validate_player(reference, &ids, &items, &parents)?;
         self.validate_needs(reference)?;
