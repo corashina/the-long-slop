@@ -1,4 +1,5 @@
 pub mod attachments;
+pub mod buried;
 pub mod carry;
 pub mod cigarettes;
 pub mod cleaning;
@@ -226,6 +227,7 @@ struct SeatState {
 
 pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
+    pub buried: buried::BuriedItems,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -580,6 +582,7 @@ impl InteractionState {
             .collect();
         Ok(Self {
             cleaning: cleaning::CleaningTools::new(reference)?,
+            buried: buried::BuriedItems::default(),
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -1419,6 +1422,10 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
+        // Source pickupable.CanPickup refuses IsBuried items.
+        if self.buried.is_buried(item, items, physics, self.player_body) {
+            return Err(ReferenceError("Item is buried".into()));
+        }
         self.carry.pickup(item, point, player, items, physics)?;
         self.storage.picked_up(item);
         Ok(())
@@ -1473,6 +1480,7 @@ impl InteractionState {
                 look_mouse: input.mouse,
             };
         }
+        self.buried.tick(dt);
         for opening in &mut self.openings {
             opening.flow = None;
             opening.fill_called = false;
@@ -2267,6 +2275,7 @@ mod hose_end_tests {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         }
     }
 

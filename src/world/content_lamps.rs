@@ -147,6 +147,7 @@ impl WorldStream {
                 angular_velocity: [0.; 3],
                 sleeping: false,
                 held: false,
+                buried: false,
                 attachment: None,
                 mechanism: None,
             };
@@ -573,6 +574,7 @@ mod tests {
                 angular_velocity: [0.; 3],
                 sleeping: false,
                 held: false,
+                buried: false,
                 attachment: None,
                 mechanism: None,
             },

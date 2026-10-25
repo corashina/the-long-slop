@@ -685,6 +685,7 @@ mod tests {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         }
     }
 
