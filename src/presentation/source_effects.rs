@@ -28,6 +28,7 @@ struct EffectInput {
     scene: u32,
     frame: u32,
     delta_seconds: f32,
+    grading_temperature: Option<f32>,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -47,6 +48,7 @@ fn snapshot_input(
         return;
     }
     input.delta_seconds = drive.render_delta_seconds;
+    input.grading_temperature = drive.runtime.lighting.cycle.output().grading_temperature;
     input.frame = frame.frame;
 }
 
@@ -363,6 +365,7 @@ fn encode_post(
         PostFrame {
             token: frame.main_token,
             delta_seconds: input.delta_seconds,
+            grading_temperature: input.grading_temperature,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target().unwrap(),

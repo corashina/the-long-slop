@@ -53,11 +53,20 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 
 ## 3. World and terrain
 
+Run these checks in the section 3 test pass on Tomasz's PC:
+
+1. Re-export, then rebuild. Old exports do not load (W03 changed the world and lighting records).
+2. Check the export log line "Biome materials" (set count and marked nodes).
+3. Check the Game mode button position on the start menu.
+4. Start a new game in each biome. Check terrain, props, roads, lamps, fog, sky and swapped materials.
+5. Load a Mixed save with Winter set. The world must load as winter.
+6. Check the winter color: colder view in Winter, changes at biome borders in Mixed.
+7. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | W01 | Restore world range. [World](src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W03 | Add biomes. [Terrain](crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
 | W04 | Expand buildings. [Generation](src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |

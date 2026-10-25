@@ -54,9 +54,22 @@ pub use startup::{StartupTerrain, source_world_pose};
 mod terrain;
 pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,
-    TerrainRoadPoint, TerrainTile, biome, source_perlin,
+    TerrainRoadPoint, TerrainTile, biome, forced_color, source_perlin,
 };
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
+
+/// Game mode biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GameMode {
+    pub biome: u8,
+}
+
+impl GameMode {
+    /// Biome index for `biome`: 0 desert, 1 winter, 2 grass. Mixed uses the terrain color.
+    pub fn biome_override(self) -> Option<u8> {
+        self.biome.checked_sub(1)
+    }
+}
 
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;
@@ -88,6 +101,7 @@ mod spawn_initialization;
 mod spawn_rules;
 mod spawn_selection;
 
+mod biome_materials;
 mod building_extras;
 mod spawn_appearance;
 mod spawn_building;

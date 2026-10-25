@@ -13,9 +13,10 @@ export class MenuState {
  ready(){if(this.state==='error')return;this.readyFlag=true;this.state=this.started?'pause-menu':'start-menu';if(!this.status||this.status==='Loading the garage...')this.status='The garage is ready.';}
  loading(){if(this.state==='error')return;if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.readyFlag=false;this.actions=0;this.state='loading';this.error='';this.status=this.operation?pendingText[this.operation]:'Loading the garage...';}
  fail(message){this.generation++;this.pending=false;this.operation='';this.readyFlag=false;this.state='error';this.error=message;this.status='';this.actions=this.started?ACTIONS.PAUSE:0;}
- pause(saveSession){if(this.operation&&this.operation!=='save'&&saveSession?.cancel()){this.generation++;this.pending=false;this.operation='';this.status='';this.error='';}if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
+ pause(saveSession){if(this.operation&&this.operation!=='save'&&saveSession?.cancel()){this.generation++;this.pending=false;this.operation='';this.status='';this.error='';}if(!this.operation)this.generation++;this.pending=Boolean(this.operation);this.actions=this.started?ACTIONS.PAUSE:0;if(this.state==='error')return;if(this.state==='controls'||this.state==='game-mode'){this.origin=this.started?'pause-menu':'start-menu';return;}this.state=this.readyFlag?(this.started?'pause-menu':'start-menu'):'loading';}
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
- back(){if(this.state==='controls')this.state=this.origin;}
+ gameMode(){if(this.pending||this.state!=='start-menu')return;this.origin=this.state;this.state='game-mode';}
+ back(){if(this.state==='controls'||this.state==='game-mode')this.state=this.origin;}
  recover(){if(this.state==='pause-menu'&&!this.pending&&!this.dead)this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
  async run(operation,saveSession){
@@ -39,12 +40,12 @@ export class MenuState {
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
 export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,drivingBindings}) {
- const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen');
+ const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
- const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-controls','start-controls']];
+ const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-controls','start-controls'],['#start-game-mode','start-controls']];
  const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#controls','controls']];
- const actionNodes=[...initialNodes,...pauseNodes],nodes=[...actionNodes,['#back','back']];
+ const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
  let lastState='',lastError='',lastStatus='',lastTravel=-1,pendingDriving=0;
  const clutch=document.querySelector('#automatic-clutch'),gears=document.querySelector('#automatic-gears');
  function drivingState(assists){clutch.checked=Boolean(assists&1);gears.checked=Boolean(assists&2)&&clutch.checked;gears.disabled=!clutch.checked||model.pending;clutch.disabled=model.pending;}
@@ -62,11 +63,12 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
  const columnWrapper=document.querySelector('.control-columns'),columns=columnWrapper.querySelectorAll(':scope > section');
  function resize(){
   const narrow=innerWidth<800;menu.classList.toggle('narrow',narrow);
-  for(const [selector,role] of nodes){const n=document.querySelector(selector);applyLayout(n,ui.layouts[role],ui.urls);if(ui.layoutUrls[role]){n.style.backgroundImage='url("'+ui.layoutUrls[role]+'")';n.style.backgroundColor='transparent';}if(narrow&&selector!=='#back'){Object.assign(n.style,{left:'auto',top:'auto',width:'100%',height:'44px',fontSize:'18px'});}}
+  for(const [selector,role] of nodes){const n=document.querySelector(selector);applyLayout(n,ui.layouts[role],ui.urls);if(ui.layoutUrls[role]){n.style.backgroundImage='url("'+ui.layoutUrls[role]+'")';n.style.backgroundColor='transparent';}if(narrow&&!backNodes.includes(selector)){Object.assign(n.style,{left:'auto',top:'auto',width:'100%',height:'44px',fontSize:'18px'});}}
   if(!narrow){
    const row=layoutBox(ui.layouts.continue,innerWidth,innerHeight),gap=Math.min(16,row.height*.25),top=innerHeight-16-pauseNodes.length*row.height-(pauseNodes.length-1)*gap;
    pauseNodes.forEach(([selector],index)=>Object.assign(document.querySelector(selector).style,{left:row.x+'px',top:(top+index*(row.height+gap))+'px',width:row.width+'px',height:row.height+'px'}));
    const load=document.querySelector('#start-load'),start=layoutBox(ui.layouts.start,innerWidth,innerHeight);load.style.left=((innerWidth-start.width)/2)+'px';
+   const mode=document.querySelector('#start-game-mode'),modeBox=layoutBox(ui.layouts['start-controls'],innerWidth,innerHeight);Object.assign(mode.style,{left:((innerWidth-modeBox.width)/2)+'px',top:(start.y-modeBox.height-Math.min(16,modeBox.height*.25))+'px'});
   }
   for(let i=0;i<columns.length;i++){
    const role=i===0?'foot':'driving',column=columns[i],layout=ui.layouts[role],box=layoutBox(layout,innerWidth,innerHeight);
@@ -76,7 +78,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
   }
  }
  function paint(){
-  const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
+  const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';gameMode.hidden=state!=='game-mode';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
   clutch.disabled=model.pending;gears.disabled=model.pending||!clutch.checked;
   for(const [selector] of actionNodes)document.querySelector(selector).disabled=!model.readyFlag||model.pending;
@@ -88,7 +90,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
    if(state==='start-menu'||state==='pause-menu'){
     const pair=ui.pairUrls[Math.floor(Math.random()*ui.pairUrls.length)];art.style.backgroundImage='url("'+pair.background+'")';frame.style.backgroundImage='url("'+pair.frame+'")';
     queueMicrotask(()=>document.querySelector(state==='pause-menu'?'#resume':'#new-game').focus({preventScroll:true}));
-   } else if(state==='controls')queueMicrotask(()=>document.querySelector('#back').focus({preventScroll:true}));
+   } else if(state==='controls'||state==='game-mode')queueMicrotask(()=>document.querySelector(state==='controls'?'#back':'#game-mode-back').focus({preventScroll:true}));
    lastState=state;
   }
  }
@@ -102,12 +104,13 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,audio,d
  for(const id of ['#start-load','#load'])document.querySelector(id).addEventListener('click',()=>operate('load'));
  document.querySelector('#resume').addEventListener('click',capture);
  for(const id of ['#controls','#start-controls'])document.querySelector(id).addEventListener('click',()=>{model.controls();paint();});
- document.querySelector('#back').addEventListener('click',()=>{model.back();paint();});
+ document.querySelector('#start-game-mode').addEventListener('click',()=>{model.gameMode();paint();});
+ for(const id of backNodes)document.querySelector(id).addEventListener('click',()=>{model.back();paint();});
  document.querySelector('#recover').addEventListener('click',()=>{clearInput();model.recover();flush();paint();});
  const fullscreen=document.querySelector('#fullscreen');fullscreen.disabled=!document.fullscreenEnabled;
  fullscreen.addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.querySelector('main').requestFullscreen();}catch{model.error='Fullscreen is unavailable.';paint();}});
  document.addEventListener('fullscreenchange',()=>{fullscreen.textContent=document.fullscreenElement?'Exit fullscreen':'Fullscreen';resize();});
- window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='controls'){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
+ window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='controls'||model.state==='game-mode'){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();

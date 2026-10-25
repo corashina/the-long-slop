@@ -682,7 +682,7 @@ mod world_sync_tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut run = GarageRuntime::new(&reference).unwrap();
+        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
         crate::world::stream::tests::prepare_ready(&mut run, &reference);
         assert!(run.startup_aligned);
         run.sync_world_activity(&reference).unwrap();

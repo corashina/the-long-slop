@@ -160,6 +160,7 @@ pub struct WorldStream {
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
+    mode: super::GameMode,
     package_id: String,
     generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
@@ -194,6 +195,7 @@ pub struct WorldStream {
     contents: super::contents::SourceContents,
     boxes: content_boxes::BoxRuntime,
     evaluator: TerrainEvaluator,
+    biome_materials: super::biome_materials::BiomeMaterials,
     color_foundations: Vec<super::FoundationPoint>,
     color_helpers: Vec<TerrainFoundation>,
     tiles: [TerrainTile; 3],
@@ -632,7 +634,15 @@ impl WorldStream {
         })
     }
 
-    pub fn new(reference: &ReferenceManifest, seed: i32) -> Result<Self, ReferenceError> {
+    pub fn mode(&self) -> super::GameMode {
+        self.mode
+    }
+
+    pub fn new(
+        reference: &ReferenceManifest,
+        seed: i32,
+        mode: super::GameMode,
+    ) -> Result<Self, ReferenceError> {
         let world = &reference.world;
         let shared_cpu_bytes = reference.world_retained_cpu_bytes();
         if shared_cpu_bytes > PROTOTYPE_CPU {
@@ -642,7 +652,7 @@ impl WorldStream {
         }
         let evaluator = super::terrain_evaluator(world, seed);
         let roads = RoadIndex::new(
-            RoadSequence::new(world, seed)?,
+            RoadSequence::new(world, seed, mode.biome_override())?,
             super::terrain_evaluator(world, seed),
         );
         let terrain_transform = world
@@ -690,8 +700,11 @@ impl WorldStream {
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
+        let biome_materials =
+            super::biome_materials::BiomeMaterials::new(&world.biome_material_sets);
         if shared_cpu_bytes
             .saturating_add(road_light.retained_bytes())
+            .saturating_add(biome_materials.retained_bytes())
             .saturating_add(contents.rules.retained_bytes())
             .saturating_add(structure_helpers.retained_bytes())
             > PROTOTYPE_CPU
@@ -723,6 +736,8 @@ impl WorldStream {
             music_box_scan: None,
             lamp_binding_revision: 0,
             seed,
+            mode,
+            biome_materials,
             structure_helpers,
             building_components: Default::default(),
             presentation: PresentationAllocation::default(),
@@ -1722,7 +1737,7 @@ impl WorldStream {
             road_radius_squared: None,
             foundations: &self.color_helpers,
             holes: &[],
-            biome_override: source_override(&self.reference),
+            biome_override: self.mode.biome_override(),
         };
         let current = self.props.placements().len();
         let maximum = MAX_OBJECTS
@@ -2087,6 +2102,33 @@ impl WorldStream {
     }
     pub fn appearance(&self, id: &super::GeneratedId) -> &[super::NodeAppearance] {
         self.contents.appearance(id)
+    }
+    /// Source `materialChangeScript.Start` biome for renderer `node`, from the object position, not the surface.
+    /// `None` when no active marked node holds the renderer.
+    pub fn renderer_biome(
+        &self,
+        prototype: &crate::reference::WorldPrototypeReference,
+        placement: &Placement,
+        node: usize,
+    ) -> Option<u8> {
+        if !super::biome_materials::under_mark(prototype, node)
+            || !super::spawn_appearance::node_active(
+                prototype,
+                node,
+                self.appearance(&placement.id),
+            )
+        {
+            return None;
+        }
+        let p = placement.pose.position;
+        let color = self
+            .evaluator
+            .color([p[0] as f32, -p[2] as f32], p[1] as f32);
+        Some(super::biome(color, self.mode.biome_override()))
+    }
+    /// Biome material for a first material. `None` keeps the material.
+    pub fn biome_material(&self, material: &SourceId, biome: u8) -> Option<&SourceId> {
+        self.biome_materials.variant(material, biome)
     }
     pub fn lamp_materials(
         &mut self,
@@ -2857,7 +2899,7 @@ impl WorldStream {
                 settings: self.evaluator.settings(),
                 unit: key.unit,
                 tile,
-                biome_override: source_override(&self.reference),
+                biome_override: self.mode.biome_override(),
                 roads: &roads,
                 foundations: &foundations,
                 holes: &holes,
@@ -3280,15 +3322,10 @@ impl WorldStream {
             road_radius_squared: Some(1_000_000.0),
             foundations: &self.color_helpers,
             holes: &[],
-            biome_override: source_override(&self.reference),
+            biome_override: self.mode.biome_override(),
         };
         let color = self.evaluator.color(xz, context.height(xz));
-        match source_override(&self.reference) {
-            Some(0) => [1., 0., 0., color[3]],
-            Some(1) => [0., 0., 1., color[3]],
-            Some(2) => [0., 1., 0., color[3]],
-            _ => color,
-        }
+        super::forced_color(color, context.biome_override)
     }
     pub fn required_content(&self) -> super::RequiredContent<'_> {
         super::RequiredContent {
@@ -4856,10 +4893,6 @@ impl WorldStream {
     }
 }
 
-fn source_override(reference: &WorldReference) -> Option<u8> {
-    (reference.terrain.game_settings.biome != 0)
-        .then_some((reference.terrain.game_settings.biome - 1) as u8)
-}
 fn same_request(a: WorldRequest, b: WorldRequest) -> bool {
     a.session == b.session && a.revision == b.revision
 }

@@ -723,18 +723,22 @@ impl GarageRuntime {
         self.clear_input();
         Ok(())
     }
-    pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32)
+    pub fn new(
+        reference: &ReferenceManifest,
+        mode: crate::world::GameMode,
+    ) -> Result<Self, ReferenceError> {
+        Self::new_candidate(reference, true, DEFAULT_SEED as i32, mode)
     }
     fn new_candidate(
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        mode: crate::world::GameMode,
     ) -> Result<Self, ReferenceError> {
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed)?;
+        let mut stream = WorldStream::new(reference, seed, mode)?;
         stream.select_source_car(reference.vehicles[0].spawn_car_id);
         if stream_world {
             stream.request_at(
@@ -1343,11 +1347,12 @@ impl GarageRuntime {
             audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
             audio.hits(&self.area, &self.physics, FIXED_DT);
             let stream = &mut self.stream;
+            let biome_override = stream.mode().biome_override();
             audio.footsteps(
                 &self.area,
                 &self.physics,
                 walking_input.held & keys::RUN != 0,
-                |position| crate::world::biome(stream.terrain_color(position), None),
+                |position| crate::world::biome(stream.terrain_color(position), biome_override),
             );
             while let Some(sound) = self.area.interaction.pop_sound() {
                 match sound {
@@ -1405,6 +1410,13 @@ impl GarageRuntime {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
+        // napszak refreshes CurrentColor under the player each second.
+        if self.lighting.cycle.needs_terrain_color(0.) {
+            let color = self.stream.terrain_color(absolute);
+            self.lighting
+                .cycle
+                .set_terrain_color(&reference.lighting.cycle, &color, 0.);
+        }
         self.stream.request_at(
             absolute,
             self.persistent_world.absolute_vehicle_position(
