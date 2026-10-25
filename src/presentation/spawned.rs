@@ -3,11 +3,13 @@ use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use crate::app::{Drive, RuntimeReference};
 use crate::interaction::items::ItemLocation;
-use crate::reference::{AssetUsage, ItemId, NodeId, ReferenceManifest, SourceId};
+use crate::reference::{AssetUsage, ItemId, ItemPrototype, NodeId, ReferenceManifest, SourceId};
+use crate::starting_area::spawned::{SpawnedItem, SpawnedItems};
 use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::system::SystemParam;
 use bevy::gltf::GltfExtras;
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use std::collections::HashMap;
@@ -22,6 +24,8 @@ struct SpawnedInstance {
     source_materials_bound: bool,
     nodes: Vec<(NodeId, Entity)>,
     primitives: Vec<Entity>,
+    /// This instance shows the prototype skin and its joints are not yet the sibling items' bodies.
+    skin_pending: bool,
     /// Scene root pose relative to the item body pose.
     body_to_scene: rapier3d::math::Pose,
 }
@@ -70,6 +74,84 @@ fn owning_body(
     None
 }
 
+/// Body node whose instance shows the prototype skin. Other instances hide it.
+fn skin_body(manifest: &ReferenceManifest, prototype: &ItemPrototype) -> Option<NodeId> {
+    let hose = prototype.hose.as_ref()?;
+    owning_body(manifest, prototype, hose.skin.node).or_else(|| {
+        prototype
+            .bodies
+            .iter()
+            .find(|b| b.id == hose.main)
+            .map(|b| b.node)
+    })
+}
+
+/// Bound scene node of the sibling item (same spawn serial) that owns `body`.
+fn sibling_node(
+    spawned: &SpawnedVisuals,
+    items: &SpawnedItems,
+    prototype: &ItemPrototype,
+    item: &SpawnedItem,
+    body: &crate::reference::BodyRecord,
+) -> Option<Entity> {
+    let sibling = items.iter().find(|s| {
+        s.serial == item.serial
+            && s.prototype == item.prototype
+            && prototype.pickups[s.pickup].body == body.id
+    })?;
+    spawned.node(sibling.id, body.node)
+}
+
+/// Point the skin joints of `item` at the body nodes of the sibling items. Each bone is a body,
+/// and each body is its own item. Returns false while a sibling is not bound.
+fn bind_skin(
+    commands: &mut Commands,
+    spawned: &SpawnedVisuals,
+    items: &SpawnedItems,
+    prototype: &ItemPrototype,
+    item: &SpawnedItem,
+    primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
+    skins: &Query<&SkinnedMesh>,
+) -> bool {
+    let Some(skin) = prototype.hose.as_ref().map(|hose| &hose.skin) else {
+        return true;
+    };
+    let Some(mesh) = spawned.node(item.id, skin.node) else {
+        return false;
+    };
+    let bodies = skin
+        .bones
+        .iter()
+        .map(|bone| prototype.bodies.iter().find(|b| b.id == *bone));
+    if !bodies.clone().all(|body| {
+        body.is_some_and(|body| sibling_node(spawned, items, prototype, item, body).is_some())
+    }) {
+        return false;
+    }
+    let joints: Vec<Entity> = bodies
+        .map(|body| sibling_node(spawned, items, prototype, item, body.unwrap()).unwrap())
+        .collect();
+    for (primitive, parent) in primitives {
+        if parent.parent() != mesh {
+            continue;
+        }
+        let Ok(current) = skins.get(primitive) else {
+            error!("Spawned skin primitive lacks its glTF skin");
+            continue;
+        };
+        if current.joints.len() != joints.len() {
+            error!("Spawned skin joint count differs from the exported bones");
+            continue;
+        }
+        // The glTF inverse bind poses are the exported `bind_poses` in the same bone order.
+        commands.entity(primitive).insert(SkinnedMesh {
+            inverse_bindposes: current.inverse_bindposes.clone(),
+            joints: joints.clone(),
+        });
+    }
+    true
+}
+
 /// Scene graph queries that bind a prototype instance.
 #[derive(SystemParam)]
 pub(crate) struct SceneQueries<'w, 's> {
@@ -77,6 +159,7 @@ pub(crate) struct SceneQueries<'w, 's> {
     parents: Query<'w, 's, &'static ChildOf>,
     primitives: Query<'w, 's, (Entity, &'static ChildOf), With<Mesh3d>>,
     source_materials: Query<'w, 's, (), With<MeshMaterial3d<SourceMaterial>>>,
+    skins: Query<'w, 's, &'static SkinnedMesh>,
     transforms: Query<'w, 's, &'static mut Transform, With<SpawnedScene>>,
     visibility: Query<'w, 's, &'static mut Visibility>,
 }
@@ -95,6 +178,7 @@ pub(crate) fn sync(
         parents,
         primitives,
         source_materials,
+        skins,
         mut transforms,
         mut visibility,
     } = scene;
@@ -176,6 +260,7 @@ pub(crate) fn sync(
                     source_materials_bound: false,
                     nodes: Vec::new(),
                     primitives: Vec::new(),
+                    skin_pending: skin_body(manifest, prototype) == Some(body.node),
                     body_to_scene: body_local.inverse() * to_rapier(root_pose).inverse(),
                 },
             );
@@ -224,15 +309,22 @@ pub(crate) fn sync(
             if instance.nodes.len() != count {
                 continue;
             }
-            // Other pickup bodies of the prototype are separate items.
+            // Other pickup bodies of the prototype are separate items. One item shows the skin.
             let own = prototype
                 .bodies
                 .iter()
                 .find(|b| b.id == prototype.pickups[item.pickup].body)
                 .unwrap()
                 .node;
+            let skin = prototype.hose.as_ref().map(|hose| hose.skin.node);
+            let skin_body = skin_body(manifest, prototype);
             for &(node, entity) in &instance.nodes {
-                if owning_body(manifest, prototype, node).is_some_and(|body| body != own) {
+                let owner = if Some(node) == skin {
+                    skin_body
+                } else {
+                    owning_body(manifest, prototype, node)
+                };
+                if owner.is_some_and(|body| body != own) {
                     commands.entity(entity).insert(Visibility::Hidden);
                 }
             }
@@ -286,6 +378,19 @@ pub(crate) fn sync(
             } else {
                 Visibility::Hidden
             });
+        }
+        if instance.skin_pending
+            && bind_skin(
+                &mut commands,
+                &spawned,
+                &area.spawned,
+                prototype,
+                item,
+                &primitives,
+                &skins,
+            )
+        {
+            spawned.instances.get_mut(&item.id).unwrap().skin_pending = false;
         }
     }
 }
