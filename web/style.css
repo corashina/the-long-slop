@@ -24,9 +24,9 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #performance p {margin:8px 0 0;color:#bbb;font:11px/1.4 Arial,sans-serif;}
 .menu-actions {position:absolute;inset:0;}
 #session-distance {position:absolute;right:24px;bottom:16px;margin:0;font-size:clamp(16px,1.5vw,24px);text-shadow:2px 2px 2px #000;}
-#controls-screen {position:absolute;inset:0;}
-#controls-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
-#menu:has(#controls-screen:not([hidden])) h1,#menu:has(#controls-screen:not([hidden])) #status {visibility:hidden;}
+#controls-screen,#game-mode-screen {position:absolute;inset:0;}
+#controls-title,#game-mode-title {position:absolute;left:24px;top:20px;margin:0;font-size:clamp(24px,3.2vw,60px);font-weight:400;}
+#menu:has(#controls-screen:not([hidden]),#game-mode-screen:not([hidden])) h1,#menu:has(#controls-screen:not([hidden]),#game-mode-screen:not([hidden])) #status {visibility:hidden;}
 .control-columns {position:absolute;inset:0;}
 .control-columns h3 {font-size:clamp(20px,2.5vw,50px);font-weight:400;margin:0 0 24px;text-shadow:2px 2px 2px #000;}
 .control-columns dl {margin:0;font-family:Arial,sans-serif;font-size:clamp(16px,1.65vw,36px);line-height:1.5;text-shadow:2px 2px 2px #000;}
@@ -34,9 +34,9 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 .control-columns dd {margin:0;}
 .display-controls {position:absolute;left:16px;right:16px;bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;font:18px Arial,sans-serif;}
 .display-controls label {display:flex;align-items:center;gap:8px;}
-#fullscreen,#scene-resolution {min-height:44px;padding:8px 16px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
+#fullscreen,#scene-resolution,#biome {min-height:44px;padding:8px 16px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
 #fullscreen {position:relative;}
-#controls-screen #back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
+#controls-screen #back,#game-mode-back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
 #runtime-error {position:absolute;left:16px;right:16px;top:16px;margin:0;padding:16px;background:#4b211d;color:#fff;overflow-wrap:anywhere;}
 #loading-details {position:absolute;z-index:4;right:24px;bottom:24px;width:min(440px,calc(100% - 48px));max-height:calc(100% - 170px);overflow:auto;padding:20px;background:#000d;color:#fff;font:16px/1.45 Arial,sans-serif;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
 #loading-details h2 {margin:0 0 12px;font-size:20px;font-weight:400;}
