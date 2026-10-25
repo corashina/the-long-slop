@@ -228,7 +228,7 @@ impl WorldStream {
         for (field, kind) in [
             (Some(link(f, "Bvolume")?), Knob::Volume),
             (Some(link(f, "Btune")?), Knob::Tuning),
-            (band, Knob::Band),
+            (band, Knob::Switch),
         ] {
             let Some(usable) = field else {
                 continue;
@@ -336,7 +336,7 @@ impl WorldStream {
             (Knob::Volume, false) => RadioControl::VolumeDown,
             (Knob::Tuning, true) => RadioControl::TuneUp,
             (Knob::Tuning, false) => RadioControl::TuneDown,
-            (Knob::Band, _) => RadioControl::Band,
+            (Knob::Switch, _) => RadioControl::Band,
             (Knob::Dial | Knob::Crank, _) => return None,
         };
         let (on, am) = (b.state.on, b.state.am);

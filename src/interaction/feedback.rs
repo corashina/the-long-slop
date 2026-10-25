@@ -188,10 +188,10 @@ impl InteractionState {
                 a.context = match kind {
                     Knob::Volume => FeedbackContext::RadioVolume,
                     Knob::Tuning => FeedbackContext::RadioTuning,
-                    Knob::Dial | Knob::Band | Knob::Crank => FeedbackContext::Mechanism,
+                    Knob::Dial | Knob::Switch | Knob::Crank => FeedbackContext::Mechanism,
                 };
                 a.actions.0 |= match kind {
-                    Knob::Band => ActionMask::SWITCH,
+                    Knob::Switch => ActionMask::SWITCH,
                     Knob::Crank => ActionMask::CRANK,
                     _ => ActionMask::TUNE | ActionMask::SCROLL,
                 };

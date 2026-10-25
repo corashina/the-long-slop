@@ -71,12 +71,14 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 14. World population (W05): run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture` (about 5 min plus build). All 11 building types must pass. The `unsupported_part_type` drops must be gone.
 15. Check loot in a few building types: gas and oil cans, beer, barrels, buckets and the WC now spawn. Flashlights in loot must not stop the world, and their beams show the cookie on walls and terrain.
 16. Near the Mansion: the crow sound fades in from 1000 m to full at 200 m, and the day and night ambience fades out by the same amount. Check F3 near the Mansion.
-17. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
+17. Digging (W06): find a buried item (underground spawn). Swing the shovel in each direction (LMB with back, left, right keys). Check the swing sound, hit sounds, hit particles on metal, wood, plants and sand, and that hits push loose items.
+18. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
+19. Metal detector (W06): turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on. Check F3 while it scans.
+20. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W06 | Add digging and detection. | L | Metal detector. [F03] |
 
 ## 4. More cars
 

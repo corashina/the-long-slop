@@ -108,8 +108,8 @@ pub enum Knob {
     Dial,
     Volume,
     Tuning,
-    /// BChangeAMFM: turned with use.
-    Band,
+    /// usablescript turned with use: radio BChangeAMFM, metal detector onOffButton.
+    Switch,
     /// musicboxscript use: rotateAble, turned with the mouse.
     Crank,
 }
@@ -1744,7 +1744,7 @@ impl InteractionState {
                             action = Some(InteractionAction::Crank(knob, look));
                         }
                     }
-                } else if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
+                } else if let Some((knob, Knob::Switch)) = self.dial_knob(&target, physics) {
                     if use_input.pressed & keys::USE != 0
                         || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
                     {

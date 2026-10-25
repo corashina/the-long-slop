@@ -140,7 +140,7 @@ impl MeleeState {
                 .nodes
                 .iter()
                 .position(|n| n.source == *source)
-                .map(|i| root_relative(&prototype.nodes, i))
+                .map(|i| prototype.root_relative(i))
                 .ok_or_else(|| ReferenceError("Missing shovel node".into()))
         };
         let (tip, _) = node(&shovel.target)?;
@@ -449,24 +449,6 @@ impl MeleeState {
 }
 
 /// Pose of a prototype node in its root frame, and the node local scale.
-fn root_relative(nodes: &[crate::reference::WorldPrototypeNode], index: usize) -> (Pose, Vector) {
-    let scale = Vector::from_array(nodes[index].transform.scale);
-    let mut pose = Pose::IDENTITY;
-    let mut node = index;
-    while let Some(parent) = nodes[node].parent {
-        let t = &nodes[node].transform;
-        let rotation =
-            Rotation::from_xyzw(t.rotation[0], t.rotation[1], t.rotation[2], t.rotation[3]);
-        pose = Pose::from_parts(
-            Vector::from_array(t.translation)
-                + rotation * (Vector::from_array(t.scale) * pose.translation),
-            rotation * pose.rotation,
-        );
-        node = parent as usize;
-    }
-    (pose, scale)
-}
-
 /// Source `Quaternion.LookRotation(dir, up)` in converted space: source +Z is -Z.
 fn look_rotation(direction: Vector) -> Rotation {
     let back = -direction.normalize();

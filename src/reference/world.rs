@@ -153,6 +153,28 @@ pub struct WorldPrototypeReference {
     pub interiors: Vec<WorldInteriorReference>,
 }
 
+impl WorldPrototypeReference {
+    /// A node pose relative to the prototype root, with the node's own local scale.
+    pub fn root_relative(&self, index: usize) -> (rapier3d::math::Pose, rapier3d::math::Vector) {
+        use rapier3d::math::{Pose, Rotation, Vector};
+        let nodes = &self.nodes;
+        let scale = Vector::from_array(nodes[index].transform.scale);
+        let mut pose = Pose::IDENTITY;
+        let mut node = index;
+        while let Some(parent) = nodes[node].parent {
+            let t = &nodes[node].transform;
+            let rotation = Rotation::from_array(t.rotation);
+            pose = Pose::from_parts(
+                Vector::from_array(t.translation)
+                    + rotation * (Vector::from_array(t.scale) * pose.translation),
+                rotation * pose.rotation,
+            );
+            node = parent as usize;
+        }
+        (pose, scale)
+    }
+}
+
 /// Source `interiorscript` of a world building. Doors are `usablescript` world mechanisms.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
