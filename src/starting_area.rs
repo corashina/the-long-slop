@@ -612,6 +612,7 @@ pub struct VehicleRuntime {
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
+    pub exhaust: crate::exhaust::ExhaustState,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -648,6 +649,12 @@ impl VehicleRuntime {
             trip_m: 0.0,
             ignition: IgnitionState::default(),
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle),
+            exhaust: crate::exhaust::ExhaustState::new(
+                &vehicle.exhaust,
+                vehicle.engine.max_rpm,
+                vehicle.engine.smoke_rate,
+                vehicle.source.path_id as u64,
+            ),
             recovery_bounds,
             previous: [0.0; 3],
         })
@@ -1287,6 +1294,7 @@ impl GarageRuntime {
                 driving && index == self.vehicle,
                 controls,
             );
+            self.advance_exhaust(reference, index);
         }
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
@@ -1506,6 +1514,39 @@ impl GarageRuntime {
                 && r.electronics_output > r.electronics_off_threshold,
             distance_m: state.trip_m,
         }
+    }
+
+    /// Advances exhaust smoke every step, so old smoke ages out when the engine stops.
+    fn advance_exhaust(&mut self, reference: &ReferenceManifest, index: usize) {
+        let engine = &reference.vehicles[index].engine;
+        let output = self.vehicles[index].engine_output;
+        let running = self.area.items.mounted(engine.item)
+            && self
+                .area
+                .items
+                .get(engine.item)
+                .and_then(|item| item.body)
+                .is_some_and(|body| self.physics.body_active(body))
+            && output.running;
+        // The chassis body frame is the car root node: reference validation requires it.
+        let root = self.physics.rapier().bodies[self.physics.chassis_handle(index)].position();
+        self.vehicles[index].exhaust.advance(
+            FIXED_DT,
+            crate::exhaust::ExhaustInput {
+                running,
+                rpm: output.rpm,
+                tank: self
+                    .area
+                    .items
+                    .get(engine.fuel_tank)
+                    .and_then(|i| i.fluid.as_ref()),
+                root_absolute: self.stream.origin.absolute(root.translation.to_array()),
+                rotation: root.rotation,
+                origin: self.stream.origin.offset,
+            },
+            &reference.fluid_rules.burn_colors,
+            &self.physics,
+        );
     }
 
     /// Steps one engine and applies its forces. Only the driven vehicle reads keys.

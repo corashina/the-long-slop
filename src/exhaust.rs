@@ -17,6 +17,8 @@ pub struct ExhaustInput<'a> {
     pub root_absolute: [f64; 3],
     /// Rotation of the car root node.
     pub rotation: Rotation,
+    /// Absolute position of the physics origin.
+    pub origin: [f64; 3],
 }
 
 /// Per-car `carscript.psSmoke` systems.
@@ -60,6 +62,7 @@ impl ExhaustState {
                 system.start_color = color;
             }
             system.rotation = input.rotation;
+            system.set_origin(input.origin);
             system.advance(dt, input.root_absolute, strength, physics);
         }
     }
@@ -256,6 +259,7 @@ mod tests {
             tank: Some(tank),
             root_absolute: [10., 1., -3.],
             rotation: Rotation::IDENTITY,
+            origin: [0.; 3],
         }
     }
 

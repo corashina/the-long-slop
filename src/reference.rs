@@ -2090,6 +2090,8 @@ impl ReferenceManifest {
             require(
                 body_ids.contains(&v.body)
                     && node_ids.contains(&v.root)
+                    // Exhaust and other root-relative poses use the chassis body frame.
+                    && self.bodies.iter().any(|b| b.id == v.body && b.node == v.root)
                     && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
                     && v.colliders.iter().all(|id| collider_ids.contains(id)),
                 "vehicle bindings",
