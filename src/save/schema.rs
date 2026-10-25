@@ -1,9 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 14;
-/// Older saves load with empty later additions; spray ammo and lamp values load at their spawn values.
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 11;
+pub const SAVE_SCHEMA_VERSION: u32 = 15;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 15;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -44,15 +43,13 @@ pub struct SaveSnapshot {
     pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
-    /// Runtime item prototype copies. Absent in schema 11.
-    #[serde(default)]
+    /// Runtime item prototype copies.
     pub spawned: Vec<SpawnedItemSnapshot>,
-    /// Pack counts, cigarette burn state, and the mouth slot. Absent in schema 11.
-    #[serde(default)]
+    /// Pack counts, cigarette burn state, and the mouth slot.
     pub cigarettes: CigarettesSnapshot,
 }
 /// Spawned items are named by their spawn serial.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CigarettesSnapshot {
     pub packs: Vec<PackSnapshot>,
@@ -93,10 +90,7 @@ impl SaveSnapshot {
         if !schema_supported(version.schema_version) {
             return Err(SaveError::IncompatibleSources("Schema version".into()));
         }
-        let mut snapshot: Self =
-            serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))?;
-        snapshot.schema_version = SAVE_SCHEMA_VERSION;
-        Ok(snapshot)
+        serde_json::from_slice(bytes).map_err(|e| SaveError::CorruptData(e.to_string()))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -135,8 +129,8 @@ pub struct WorldSnapshot {
     pub changes: crate::world::ChangeRecords,
     #[serde(with = "super::identity::lossless")]
     pub spawn: crate::world::spawn_state::SpawnHistory,
-    /// Broken generated boxes. Their removal is in `changes`. Absent before schema 13.
-    #[serde(default, with = "super::identity::lossless")]
+    /// Broken generated boxes. Their removal is in `changes`.
+    #[serde(with = "super::identity::lossless")]
     pub boxes: Vec<crate::world::BoxRelease>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -246,6 +240,11 @@ pub enum ItemLocationSave {
     },
     Attached {
         owner: InstanceId,
+    },
+    /// Physics lock in a storage volume. `local_pose` is the pose to the owner.
+    Locked {
+        owner: InstanceId,
+        volume: SourceKey,
     },
     GeneratedAttachment {
         #[serde(with = "super::identity::lossless")]
@@ -409,7 +408,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 7, 8, 9, 10, 15] {
+        for version in [6, 10, 11, 12, 13, 14, 16] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -419,10 +418,10 @@ mod g04_ordered_state {
     }
 
     #[test]
-    fn previous_schema_passes_the_version_gate() {
-        // Schema 11 reaches payload parsing; the empty payload then fails as corrupt data.
+    fn current_schema_passes_the_version_gate() {
+        // Schema 15 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":11}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":15}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

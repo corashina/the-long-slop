@@ -115,6 +115,7 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         handbrake_torque: 600.0,
         assemblies: [assembly; 4],
         last_handbrake: 0.0,
+        cargo_mass: 0.0,
     });
     world.refresh_queries();
     world

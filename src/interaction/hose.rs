@@ -540,6 +540,10 @@ impl InteractionState {
             return Err(ReferenceError("Hose segment is already bound".into()));
         }
         let mut bodies = [RigidBodyHandle::invalid(); HOSE_SEGMENTS];
+        for id in segments {
+            // Jointed segments do not lock one by one. The source locks a ragdoll as a group.
+            self.storage.exclude(id);
+        }
         for (body, id) in bodies.iter_mut().zip(segments) {
             *body = items
                 .get(id)

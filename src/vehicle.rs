@@ -177,6 +177,8 @@ struct VehicleBody {
     handbrake_torque: f32,
     assemblies: [WheelAssembly; 4],
     last_handbrake: f32,
+    /// Mass of items locked to the chassis. `set_vehicle_mass` adds it.
+    cargo_mass: f32,
 }
 
 pub struct PhysicsWorld {
@@ -343,11 +345,31 @@ impl VehicleBody {
             handbrake_torque: vehicle.handbrake_torque_nm,
             assemblies,
             last_handbrake: vehicle.handbrake as u8 as f32,
+            cargo_mass: 0.0,
         })
     }
 }
 
 impl PhysicsWorld {
+    /// A world with no vehicles and no gravity.
+    #[cfg(test)]
+    pub(crate) fn empty_for_tests() -> Self {
+        let mut physics = rapier3d::prelude::PhysicsWorld::new();
+        physics.integration_parameters.dt = FIXED_DT;
+        physics.gravity = Vector::ZERO;
+        Self {
+            body_mass_override: None,
+            inactive_bodies: Default::default(),
+            physics,
+            query_bounds: QueryBounds::default(),
+            presentation_bodies: Default::default(),
+            chassis: Vec::new(),
+            vehicles: Vec::new(),
+            hit_collector: Default::default(),
+            hits: Vec::new(),
+            ignored: Default::default(),
+        }
+    }
     pub fn vehicle_count(&self) -> usize {
         self.vehicles.len()
     }
@@ -630,8 +652,10 @@ impl PhysicsWorld {
             .count()
     }
 
+    /// Sets the vehicle mass without locked cargo. The cargo mass is added.
     pub fn set_vehicle_mass(&mut self, index: usize, mass_kg: f32) {
         let vehicle = &mut self.vehicles[index];
+        let mass_kg = mass_kg + vehicle.cargo_mass;
         let geometry_mass: f32 = self.physics.bodies[vehicle.chassis]
             .colliders()
             .iter()

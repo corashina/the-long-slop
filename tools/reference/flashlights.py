@@ -1,62 +1,24 @@
-"""Checked portable flashlight and vehicle storage bindings."""
+"""Checked portable flashlight bindings."""
 import json
-import re
 from .source import key, source_id
+from .managed_code import managed_code, require
 
 ROOTS=(32123,32124)
-VOLUMES=(65838,65854,67560,79410,77806,78464,79301,69971)
+
+REQUIRED={
+    ('flashlightscript','public void TURN()'):('if (ON)','TurnOff(bsound: true);','TurnOn(bsound: true);'),
+    ('flashlightscript','public void Refresh(bool sendmulti = true)'):('if (lamp.broken)','else if (ON && Electronics())','r[i].material = lamp.mON;','r[i].material = lamp.mOFF;'),
+    ('flashlightscript','public bool Electronics()'):('return electronics.output > mainscript.lightTurnOffValue;','return true;'),
+}
 
 def managed_contract(source):
-    from .library.reader import checked
-    library=source.library
-    managed=library.manifest['managed_analysis']
-    receipts={record['file']:record for record in managed['files']}
-    code=checked(library.records_root,receipts['managed/Assembly-CSharp.cs']).decode('utf-8').replace('\r\n','\n')
-    decomp=json.loads(checked(library.records_root,receipts['managed/decompilation.json']))
-    assembly='TheLongDrive_Data/Managed/Assembly-CSharp.dll'
-    if decomp['input']['sha256']!=library.source_files[assembly].sha256:
-        raise ValueError('Flashlight managed source provenance differs')
-    def selected(name):
-        start=code.index(f'public class {name} : MonoBehaviour')
-        end=code.find('\npublic class ',start+1)
-        return code[start:end if end!=-1 else len(code)]
-    def method(name,signature):
-        class_code=selected(name)
-        match=re.search(r'(?m)^\s*'+re.escape(signature)+r'\s*\{',class_code)
-        if not match:raise ValueError(f'{name}.{signature} managed method missing')
-        depth=1
-        for pos in range(match.end(),len(class_code)):
-            if class_code[pos]=='{':depth+=1
-            elif class_code[pos]=='}':
-                depth-=1
-                if depth==0:return class_code[match.end():pos]
-        raise ValueError(f'{name}.{signature} managed method is incomplete')
-    required={
-        ('flashlightscript','public void TURN()'):('if (ON)','TurnOff(bsound: true);','TurnOn(bsound: true);'),
-        ('flashlightscript','public void Refresh(bool sendmulti = true)'):('if (lamp.broken)','else if (ON && Electronics())','r[i].material = lamp.mON;','r[i].material = lamp.mOFF;'),
-        ('flashlightscript','public bool Electronics()'):('return electronics.output > mainscript.lightTurnOffValue;','return true;'),
-        ('mountStuff','public void QuickFreeze(bool _prescan)'):('if (_prescan)','Scan();','if (CanStore())'),
-        ('mountStuff','public void FreezeUpd()'):('lastcols = cols;','if (cols[i] == lastcols[j])'),
-        ('mountStuff','public bool CanStore()'):('GetValue() > 0.1f',),
-        ('mainscript','private void Update()'):('Time.time - lastPhysicsLockTime1 > 1.5f','UpdPhysicsLock1();'),
-    }
-    for (name,signature),expressions in required.items():
-        body=method(name,signature)
-        for expression in expressions:
-            if expression not in body:raise ValueError(f'{name}.{signature} managed source differs: {expression}')
-    mount=selected('mountStuff')
-    if 'private static float neededDropTime = 1f;' not in mount:
-        raise ValueError('mountStuff drop delay differs')
-    start_freeze=method('mountStuff','private IEnumerator StartFreeze()')
-    if not re.search(r'yield return null;\s*yield return null;\s*for \(int i = 0; i < 3; i\+\+\)\s*\{\s*QuickFreeze\(i == 0\);\s*yield return null;\s*\}',start_freeze):
-        raise ValueError('mountStuff.StartFreeze three-pass initialization differs')
-    return {'assembly':{'file':assembly,'sha256':decomp['input']['sha256']},
-            'source':receipts['managed/Assembly-CSharp.cs']}
+    code,contract=managed_code(source,'Flashlight')
+    require(code,REQUIRED)
+    return contract
 
 def prepare_flashlight_roots(source, roots):
     source.flashlight_root_keys={('level1',i) for i in ROOTS}
     source.flashlight_inactive_nodes={key(r['reader']) for r in source.hierarchy(source.get('level1',32124))}
-    source.storage_collider_keys={key(source.resolve(r,source.read(r)['col'])) for r in (source.get('level1',i) for i in VOLUMES)}
     for i in ROOTS:roots['items'].append(source.get('level1',i))
 
 def validate_flashlight_mesh_export(source, path):
@@ -94,12 +56,12 @@ def validate_flashlight_mesh_export(source, path):
             checked+=1
         if not checked:raise ValueError(f'Flashlight hierarchy has no source renderer mesh: level1:{root_id}')
 
-def recover_flashlights(source, roots, pointer_node, item_nodes, controllers, colliders, output, part_slots):
+def recover_flashlights(source, pointer_node, item_nodes, controllers, output):
     def linked(reader,pointer):return source.resolve(reader,pointer) if pointer['m_PathID'] else None
     def sid(reader,pointer):
         target=linked(reader,pointer)
         return source_id(target) if target else None
-    models=[];instances=[];evidence={'startup':{},'bodies':[],'storage':[],'prefabs':[],
+    models=[];instances=[];evidence={'startup':{},'bodies':[],'prefabs':[],
                                       'managed':managed_contract(source)}
     terrain=source.get('level1',64898)
     if ('level1',117) not in [key(source.resolve(terrain,p)) for p in source.read(terrain)['EnableAfterStart']]:raise ValueError('StartSpawnItems activation link missing')
@@ -140,27 +102,6 @@ def recover_flashlights(source, roots, pointer_node, item_nodes, controllers, co
         instances.append({'model':source_id(prefab),'item':item_nodes[node],'node':node,'pickup':source_id(pickup),'save':source_id(save),'controller':control['id'],'startup_active':active,'colliders':control['aim_colliders']})
         evidence['bodies'].append({'source':source_id(body),'fields':bf});evidence['prefabs'].append({'source':source_id(prefab),'controller':source.read(pc),'pickup':pf})
     if [i['startup_active'] for i in instances]!=[True,False]:raise ValueError('Flashlight startup activation differs')
-    slot_ids={(s['source']['file'],s['source']['path_id']):s['id'] for s in part_slots}
-    collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
-    volumes=[]
-    for i in VOLUMES:
-        r=source.get('level1',i);f=source.read(r);col=linked(r,f['col']);owner=pointer_node(r,f['parentTosave'])
-        volumes.append({'source':source_id(r),'node':pointer_node(r,f['m_GameObject']),'owner':item_nodes[owner],'collider':collider_ids[key(col)],'storage_type':f['sType'],'only_manual':bool(f['onlyManual']),'no_physics_lock':bool(f['noPhysicsLock']),'owner_pickup':sid(r,f['Pick']),'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp']),'slots':[slot_ids[key(linked(r,p))] for p in f['slot']],'usables':[sid(r,p) for p in f['susable']],'active':bool(f['m_Enabled']) and bool(source.read(source.resolve(r,f['m_GameObject']))['m_IsActive'])})
-        evidence['storage'].append({'source':source_id(r),'fields':f})
-    expected_types=(0,0,5,5,5,5,3,4)
-    expected_slots=((),(),(),(),(),(),(77859,),(77842,))
-    for volume,kind,slots in zip(volumes,expected_types,expected_slots):
-        source_reader=source.get(volume['source']['file'],volume['source']['path_id'])
-        fields=source.read(source_reader)
-        selected_slots=tuple(linked(source_reader,p).path_id for p in fields['slot'])
-        if (fields['parentTosave']['m_PathID']!=73405 or volume['storage_type']!=kind
-                or selected_slots!=slots or volume['usables'] or volume['only_manual']
-                or volume['no_physics_lock'] or not volume['active']):
-            raise ValueError(f"{volume['source']} storage policy differs")
-    dropdown=source.get('level1',70023);df=source.read(dropdown);settings=source.get('level1',65886);source.read(settings)
-    if not df['useDefInt'] or df['defInt']!=2 or key(linked(dropdown,df['setting']))!=key(settings):raise ValueError('Storage fresh default differs')
-    main=source.get('level1',64919);mask=source.read(main)['mountLayerMask']['m_Bits']
-    if mask!=8388609:raise ValueError('level1:64919 storage layer mask differs')
-    evidence['startup']={'terrain':source_id(terrain),'parent':source_id(source.get('level1',117)),'dropdown':df}
+    evidence['startup']={'terrain':source_id(terrain),'parent':source_id(source.get('level1',117))}
     (output/'flashlights-evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
-    return {'models':models,'instances':instances,'storage':{'settings_source':source_id(settings),'default_setting':df['defInt'],'mount_mask':mask,'drop_delay_seconds':1.,'scan_interval_seconds':1.5,'volumes':volumes}}
+    return {'models':models,'instances':instances}

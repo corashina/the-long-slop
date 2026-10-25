@@ -454,7 +454,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         if missing and controller['kind']!='road':raise ValueError(f"{controller['source']} required aim collider outside export: {missing}")
         controller['aim_colliders']=[collider_ids[old_colliders[i]] for i in controller['aim_colliders'] if old_colliders[i] in collider_ids]
     from .flashlights import recover_flashlights
-    result['flashlights']=recover_flashlights(source,roots,pointer_node,item_nodes,result['lighting']['controllers'],colliders,output,part_slots)
+    result['flashlights']=recover_flashlights(source,pointer_node,item_nodes,result['lighting']['controllers'],output)
+    from .storage import recover_storage
+    result['storage']=recover_storage(source,pointer_node,item_nodes,components,colliders,part_slots,output)
     from .conditions import recover_conditions
     source.condition_bodies=bodies
     source.condition_items=items

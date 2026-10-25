@@ -198,7 +198,7 @@ def verify_reference(output: Path, library) -> None:
     for record in evidence_receipts:checked(output,record)
     if json.loads((output/'conditions-evidence.json').read_bytes())['conditions']!=manifest['conditions']:
         raise ValueError('Condition evidence differs from runtime records')
-    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','plate-evidence.json','flashlights-evidence.json','driving-evidence.json','conditions-evidence.json'}
+    names = {'manifest.json','geometry-evidence.json','parameter-evidence.json','library-selection.json','lighting-evidence.json','material-evidence.json','plate-evidence.json','flashlights-evidence.json','storage-evidence.json','driving-evidence.json','conditions-evidence.json'}
     for asset in manifest['assets']:
         for record in [asset, *asset['dependencies']]:
             name = record.get('file', record.get('path')).removeprefix('reference/')
@@ -265,6 +265,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     spare=source.get('level1',71403)
     from .flashlights import prepare_flashlight_roots, validate_flashlight_mesh_export
     prepare_flashlight_roots(source, roots)
+    from .storage import prepare_storage_roots
+    prepare_storage_roots(source)
     prepare_cleaning_roots(source, roots)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     roots['items'].append(transform(3542))

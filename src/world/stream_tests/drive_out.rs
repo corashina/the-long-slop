@@ -13,7 +13,7 @@ thread_local! {
     static CLAIM: std::cell::RefCell<Option<PipelineContinuation>> = const { std::cell::RefCell::new(None) };
 }
 
-fn frame(run: &mut GarageRuntime, reference: &ReferenceManifest) {
+pub(super) fn frame(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     frame_with(run, reference, FrameInput::default());
 }
 
@@ -46,7 +46,7 @@ fn wait_supported(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     panic!("world support did not return");
 }
 
-fn settle(run: &mut GarageRuntime, reference: &ReferenceManifest, seconds: f32) {
+pub(super) fn settle(run: &mut GarageRuntime, reference: &ReferenceManifest, seconds: f32) {
     for _ in 0..(seconds / crate::simulation::FIXED_DT) as usize {
         frame(run, reference);
     }
@@ -128,7 +128,7 @@ fn assert_items_kept(run: &GarageRuntime, before: &[(ItemId, [f64; 3])], stage: 
     );
 }
 
-fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 3]> {
+pub(super) fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 3]> {
     let mut roads = crate::world::RoadIndex::new(
         crate::world::RoadSequence::new(&reference.world, run.stream.seed()).unwrap(),
         crate::world::terrain_evaluator(&reference.world, run.stream.seed()),
@@ -161,7 +161,7 @@ fn road_points(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<[f64; 
 }
 
 /// Place the car on the ground at an absolute point, facing along the road.
-fn place_car(
+pub(super) fn place_car(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     point: [f64; 3],
@@ -203,7 +203,7 @@ fn assert_car_resting(run: &GarageRuntime, stage: &str) {
     );
 }
 
-fn enter(run: &mut GarageRuntime, reference: &ReferenceManifest) -> bool {
+pub(super) fn enter(run: &mut GarageRuntime, reference: &ReferenceManifest) -> bool {
     let seat = reference.seats.iter().find(|s| s.driver).unwrap();
     let anchor = reference
         .anchors
@@ -221,7 +221,7 @@ fn enter(run: &mut GarageRuntime, reference: &ReferenceManifest) -> bool {
 }
 
 /// Step until 75 frames simulated. Generation may block some frames.
-fn park(run: &mut GarageRuntime, reference: &ReferenceManifest, stage: [f64; 3]) {
+pub(super) fn park(run: &mut GarageRuntime, reference: &ReferenceManifest, stage: [f64; 3]) {
     wait_supported(run, reference);
     let mut blocked = 0;
     let mut stepped = 0;

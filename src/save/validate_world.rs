@@ -245,7 +245,7 @@ impl SaveSnapshot {
                         )?;
                     }
                 }
-                ItemLocationSave::Attached { owner } => {
+                ItemLocationSave::Attached { owner } | ItemLocationSave::Locked { owner, .. } => {
                     edges.insert(key, ObjectKey::Imported(ids.item(owner)?));
                 }
                 _ => (),

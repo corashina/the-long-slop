@@ -576,16 +576,5 @@ mod tests {
             serde_json::from_str::<ObjectSnapshot>(&json).unwrap(),
             saved
         );
-        // Schema 11 records have neither field and load at the spawn values.
-        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let fields = old.as_object_mut().unwrap();
-        fields.remove("ammo");
-        fields.remove("glow");
-        assert_eq!(
-            serde_json::from_value::<ObjectSnapshot>(old).unwrap(),
-            snapshot(None, None)
-        );
-        assert!(crate::save::schema_supported(11) && crate::save::schema_supported(12));
-        assert!(!crate::save::schema_supported(10));
     }
 }

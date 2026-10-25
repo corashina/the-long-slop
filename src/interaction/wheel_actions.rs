@@ -138,7 +138,7 @@ impl InteractionState {
         let body = items.get(rim).unwrap().body.unwrap();
         self.carry.can_acquire(tire, point, player, body, physics)?;
         wheels.split(rim, items, physics)?;
-        self.carry.pickup(tire, point, player, items, physics)?;
+        self.pickup_item(tire, point, player, items, physics)?;
         Ok(tire)
     }
 }
