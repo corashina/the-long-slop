@@ -9,6 +9,7 @@ pub mod audio;
 pub mod browser;
 
 pub mod conditions;
+pub mod exhaust;
 pub mod fluids;
 pub mod interaction;
 pub mod lighting;

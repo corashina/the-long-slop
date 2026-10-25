@@ -22,6 +22,7 @@ pub struct ParticleOutput {
     velocity_draw: [f32; 3],
     inherit_draw: f32,
     collision_draw: f32,
+    uv_draw: f32,
 }
 
 #[derive(Debug)]
@@ -212,6 +213,11 @@ impl ParticleState {
             } else {
                 0.
             };
+            let uv_draw = if r.module_flags.get("UVModule") == Some(&true) {
+                self.random.unit()
+            } else {
+                0.
+            };
             self.particles.push(ParticleOutput {
                 absolute_position: std::array::from_fn(|i| {
                     emitter_absolute[i] + position[i] as f64
@@ -242,6 +248,7 @@ impl ParticleState {
                 velocity_draw,
                 inherit_draw,
                 collision_draw,
+                uv_draw,
             });
         }
         let ring = r.scalars["ringBufferMode"] == 1.;
@@ -385,6 +392,43 @@ impl ParticleState {
     }
 }
 
+/// Unity texture sheet animation over lifetime on a whole grid sheet.
+#[derive(Clone, Debug)]
+pub struct TextureSheet {
+    pub tiles: [u32; 2],
+    frame_over_time: ParticleCurve,
+    start_frame: ParticleCurve,
+    cycles: f32,
+}
+impl TextureSheet {
+    /// `None` when the UV module is off.
+    pub fn new(r: &ParticleReference) -> Option<Self> {
+        (r.module_flags.get("UVModule") == Some(&true)).then(|| Self {
+            tiles: [
+                r.scalars["UVModule.tilesX"] as u32,
+                r.scalars["UVModule.tilesY"] as u32,
+            ],
+            frame_over_time: r.curves["UVModule.frameOverTime"].clone(),
+            start_frame: r.curves["UVModule.startFrame"].clone(),
+            cycles: r.scalars["UVModule.cycles"],
+        })
+    }
+    pub fn frame(&self, p: &ParticleOutput) -> u32 {
+        let t = p.age / p.lifetime;
+        sheet_frame(
+            particle_curve(&self.frame_over_time, t, p.uv_draw),
+            particle_curve(&self.start_frame, t, p.uv_draw),
+            self.cycles,
+            self.tiles[0] * self.tiles[1],
+        )
+    }
+}
+/// Frame from normalized curve values. Frame 0 is the top-left tile, row by row.
+fn sheet_frame(over_time: f32, start: f32, cycles: f32, frames: u32) -> u32 {
+    let phase = (over_time * cycles + start).rem_euclid(1.);
+    ((phase * frames as f32) as u32).min(frames - 1)
+}
+
 pub(crate) fn particle_curve(c: &ParticleCurve, t: f32, draw: f32) -> f32 {
     use crate::simulation::engine::torque;
     match c.mode {
@@ -459,5 +503,20 @@ pub(crate) fn fluid_reference(
         max_speed: p.scalars["outlet.maxSpeed"],
         min_rate: p.scalars["outlet.minRate"],
         max_rate: p.scalars["outlet.maxRate"],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_frame;
+
+    #[test]
+    fn texture_sheet_frames() {
+        assert_eq!(sheet_frame(0., 0., 1., 25), 0);
+        assert_eq!(sheet_frame(0.9999, 0., 1., 25), 24);
+        assert_eq!(sheet_frame(0.5, 0., 1., 25), 12);
+        // Two cycles wrap back to the first frame at half life.
+        assert_eq!(sheet_frame(0.5, 0., 2., 25), 0);
+        assert_eq!(sheet_frame(0.9, 0.2, 1., 25), 2);
     }
 }

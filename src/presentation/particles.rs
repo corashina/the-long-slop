@@ -2,6 +2,7 @@
 use super::lighting::SourceLighting;
 use crate::{
     app::{Drive, RuntimeReference},
+    particles::TextureSheet,
     reference::ParticleReference,
 };
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef};
@@ -246,6 +247,8 @@ enum Owner {
     Outlet(u32),
     /// Spray bottle spray (0) and splash (1).
     SprayBottle(usize),
+    /// Vehicle exhaust smoke; `Group::source` is the system.
+    Exhaust(usize),
 }
 struct Group {
     owner: Owner,
@@ -256,6 +259,9 @@ struct Group {
     entities: Vec<Entity>,
     /// Additive source particles fog toward black.
     black_fog: bool,
+    sheet: Option<TextureSheet>,
+    /// Material `_MainTex` tiling. Scales the per-particle sheet tile offset.
+    tiling: Vec2,
 }
 #[derive(Resource, Default)]
 pub(crate) struct ParticleRender {
@@ -381,9 +387,15 @@ fn add_group(
         _ if legacy => m.colors["_TintColor"],
         _ => m.colors["_Color"],
     };
+    let sheet = TextureSheet::new(r);
+    // Unity applies `_MainTex_ST` after the sheet tile: uv * tile * scale + tile offset * scale + offset.
+    let tile = sheet.as_ref().map_or(Vec2::ONE, |s| {
+        Vec2::ONE / UVec2::from_array(s.tiles).as_vec2()
+    });
+    let tiling = Vec2::from_array(t.scale);
     let mut uniform = ParticleUniform::default();
     uniform.tint = Vec4::from_array(linear(tint));
-    uniform.st = Vec4::new(t.scale[0], t.scale[1], t.offset[0], t.offset[1]);
+    uniform.st = (tiling * tile).extend(t.offset[0]).extend(t.offset[1]);
     uniform.settings = Vec4::new(
         if legacy { 2. } else { 1. },
         r.scalars["renderer.m_MinParticleSize"],
@@ -452,6 +464,8 @@ fn add_group(
         order: Vec::with_capacity(r.capacity as usize),
         entities,
         black_fog: shader.additive(),
+        sheet,
+        tiling,
     });
 }
 #[allow(clippy::too_many_arguments)]
@@ -542,6 +556,19 @@ fn sync_particles(
                 );
             }
         }
+        for (vehicle, v) in reference.0.vehicles.iter().enumerate() {
+            for (system, p) in v.exhaust.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Exhaust(vehicle),
+                    system,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
+        }
     }
     let origin = drive.runtime.stream.origin.offset;
     let Ok(camera) = camera.single() else {
@@ -558,6 +585,7 @@ fn sync_particles(
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
+            Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -569,7 +597,11 @@ fn sync_particles(
                 .fluid_particles()
                 .find(|(key, _)| key.0 == id)
                 .map(|(_, p)| p),
-            Owner::Brush(_) | Owner::Spray(_) | Owner::Wash(_) | Owner::SprayBottle(_) => None,
+            Owner::Brush(_)
+            | Owner::Spray(_)
+            | Owner::Wash(_)
+            | Owner::SprayBottle(_)
+            | Owner::Exhaust(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -601,6 +633,8 @@ fn sync_particles(
                     .cleaning
                     .particles(tool, g.source),
             )
+        } else if let Owner::Exhaust(vehicle) = g.owner {
+            Some(drive.runtime.vehicles[vehicle].exhaust.particles(g.source))
         } else if splash {
             fluid.map(|f| f.splash())
         } else {
@@ -651,18 +685,30 @@ fn sync_particles(
             }
             for j in 0..n {
                 let index = g.order[batch * BATCH + j];
-                let (size, color, angle) = if let Some(p) = particles {
-                    (p[index].size, p[index].color, p[index].rotation)
+                let (size, color, angle, tile) = if let Some(p) = particles {
+                    let tile = g.sheet.as_ref().map_or(Vec2::ZERO, |s| {
+                        sheet_offset(s.frame(&p[index]), s.tiles) * g.tiling
+                    });
+                    (p[index].size, p[index].color, p[index].rotation, tile)
                 } else {
                     let p = &fluid.unwrap().particles()[index];
-                    (p.size, p.color, p.rotation)
+                    (p.size, p.color, p.rotation, Vec2::ZERO)
                 };
                 u.positions[j] = position(index).extend(size);
                 u.colors[j] = Vec4::from_array(linear(color));
-                u.angles[j] = Vec4::new(angle.cos(), angle.sin(), 0., 0.);
+                u.angles[j] = Vec4::new(angle.cos(), angle.sin(), tile.x, tile.y);
             }
         }
     }
+}
+
+/// Tile UV offset. Textures keep Unity row order (v 0 at the bottom); Unity frame 0 is the top-left tile.
+fn sheet_offset(frame: u32, tiles: [u32; 2]) -> Vec2 {
+    let (column, row) = (frame % tiles[0], frame / tiles[0]);
+    Vec2::new(
+        column as f32 / tiles[0] as f32,
+        1. - (row + 1) as f32 / tiles[1] as f32,
+    )
 }
 
 fn linear(c: [f32; 4]) -> [f32; 4] {

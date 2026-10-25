@@ -213,23 +213,6 @@ impl PhysicsWorld {
         self.physics.impulse_joints.remove(joint, wake_up)
     }
     #[cfg(test)]
-    pub(crate) fn empty() -> Self {
-        let mut physics = rapier3d::prelude::PhysicsWorld::new();
-        physics.integration_parameters.dt = crate::simulation::FIXED_DT;
-        Self {
-            body_mass_override: None,
-            inactive_bodies: Default::default(),
-            physics,
-            query_bounds: Default::default(),
-            presentation_bodies: Default::default(),
-            chassis: Vec::new(),
-            vehicles: Vec::new(),
-            hit_collector: Default::default(),
-            hits: Vec::new(),
-            ignored: Default::default(),
-        }
-    }
-    #[cfg(test)]
     pub(super) fn set_gravity(&mut self, gravity: Vector) {
         self.physics.gravity = gravity;
     }

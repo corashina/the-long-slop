@@ -9,6 +9,8 @@ from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
 from .driving import recover_driving
+from .lighting import rgba
+from .particles import recover_exhaust
 from .player_movement import recover_player_movement, recover_seat_view
 
 
@@ -28,6 +30,22 @@ def fluid_entries(value: dict) -> list[dict]:
     if len(entries) > 6 or sum(entry['amount'] for entry in entries) > capacity:
         raise ValueError('Initial fluid exceeds capacity')
     return entries
+
+
+def burn_colors(main: dict) -> list[list[float]]:
+    """Read mainscript.fluids[i].burnColor in fluid type order."""
+    colors = [rgba(fluid['burnColor']) for fluid in main['fluids']]
+    if len(colors) != 6 or not all(math.isfinite(v) for c in colors for v in c):
+        raise ValueError('Invalid fluid burn colors')
+    return colors
+
+
+def smoke_rate(engine: dict) -> float:
+    """Read enginescript.defSmokeRate."""
+    rate = engine['defSmokeRate']
+    if not math.isfinite(rate) or rate < 0:
+        raise ValueError('Invalid engine smoke rate')
+    return rate
 
 
 def build_manifest(source, roots, reports, hashes, library, cars, output):
@@ -318,14 +336,16 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             fuel_consumption=[sum(f['amount'] for f in engine['FuelConsumption']['fluids'] if f['type']==i) for i in range(6)],two_stroke=bool(engine['twostroke']),
             electronics_enabled=electronics is None or electronics_data['maxOutput']*(1.-min(1.,max(0.,electronics_data['jamValue']/(electronics_data['overRideMaxJamValue'] if electronics_data['overRideMaxJamValue']>0 else 0.3))))>0.2)
         engine_record.update(max_rpm_difference=engine['maxRpmDifference'],torque_modifier=engine['modifier'],oil_fluid=engine['Oilfluid'],
-            no_overheat=bool(engine['noOverHeat']),kickstart=bool(engine['kickstart']),start_chance_interval_seconds=1.)
+            no_overheat=bool(engine['noOverHeat']),kickstart=bool(engine['kickstart']),start_chance_interval_seconds=1.,smoke_rate=smoke_rate(engine))
         engine_record.update(auto_shift_clutch_rpm=engine['autoShiftClutchRpm'],auto_shift_clutch_rpm_range=engine['autoShiftClutchRpmRange'])
         curve=engine['torqueCurve'];engine_record['torque_curve']={'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}
         engine_record['globals']={'source':source_id(main_reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],'outside_temperature_modifier':main['outsideTempM']}
         engine_record['globals']['min_steam_temperature']=main['minSteamTemp']
-        engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss']}
+        engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss'],
+            'fan_node':pointer_node(radiator_reader,radiator['Fan']) if radiator['Fan']['m_PathID'] else None}
         return engine_record
     engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]
+    exhaust_records=[recover_exhaust(source,reader,data,node_readers[root],index,output) for index,(root,reader,data) in enumerate(zip(car_roots,car_readers,car_data))]
     capsule=source.get('level1',58456);camera=source.get('level1',40241)
     player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'aim_reach':player['FrayRange']}
     player_record.update(recover_player_movement(source))
@@ -411,12 +431,12 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
     result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
-        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],
+        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'burn_colors':burn_colors(main),
             'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,'seats':seats,
         'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
-            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM']}
-            for engine,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
+            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM'],'exhaust':exhaust}
+            for engine,exhaust,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,exhaust_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)
         for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}

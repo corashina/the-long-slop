@@ -716,7 +716,7 @@ mod tests {
     /// A 6 segment hose along X, a tank body at the T1 end, and its open cap (id 3).
     /// Own caps are 1 and 2.
     fn fixture() -> (HoseState, Vec<OpeningState>, ItemStore, PhysicsWorld) {
-        let mut physics = PhysicsWorld::empty();
+        let mut physics = PhysicsWorld::empty(0, 0);
         let mut body = |x: f32| {
             physics
                 .insert(

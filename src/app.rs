@@ -953,11 +953,26 @@ fn sync_instruments(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<InstrumentVisuals>,
+    imported: Res<ReferenceVisuals>,
     mut transforms: Query<&mut Transform, Without<DriveCamera>>,
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
 ) {
     let drive = &mut *drive;
     let run = &drive.runtime;
+    // Source `coolantTankscript.Cool`: Fan.Rotate(0, 0, selectedFanSpeed * dt) in local space.
+    if imported.bound && run.started && !run.paused {
+        for (vehicle, state) in reference.0.vehicles.iter().zip(&run.vehicles) {
+            let Some(node) = vehicle.engine.radiator.fan_node else {
+                continue;
+            };
+            let speed = state.engine_output.fan_speed;
+            if speed != 0.
+                && let Ok(mut transform) = transforms.get_mut(imported.nodes[&node])
+            {
+                transform.rotate_local_z((speed * drive.render_delta_seconds).to_radians());
+            }
+        }
+    }
     for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
         let r = &vehicle.instruments;
         let sample = run.instrument_sample(&reference.0, index);

@@ -189,7 +189,7 @@ fn public_queries_follow_step_without_an_extra_caller_refresh() {
 }
 
 pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
-    crate::vehicle::PhysicsWorld::empty()
+    crate::vehicle::PhysicsWorld::empty(0, 0)
 }
 
 pub(super) fn ray_hit(

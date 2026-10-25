@@ -20,12 +20,12 @@ struct Varyings {
     @location(3) eye:f32,@location(4) grab:vec4<f32>,
 }
 @vertex fn vertex(v:Vertex)->Varyings {
-    let i=u32(v.position.z);let p=particles.positions[i];let angle=particles.angles[i];
+    let i=u32(v.position.z);let p=particles.positions[i];let angle=particles.angles[i];// xy: cos, sin. zw: sheet tile offset.
     var center=view.view_from_world*vec4(p.xyz,1.);
     let diameter=clamp(p.w,particles.settings.y*abs(center.z)*2./abs(view.clip_from_view[1][1]),particles.settings.z*abs(center.z)*2./abs(view.clip_from_view[1][1]));
     let corner=vec2(v.position.x*angle.x-v.position.y*angle.y,v.position.x*angle.y+v.position.y*angle.x)*diameter;
     center.x+=corner.x;center.y+=corner.y;
-    var o:Varyings;o.position=view.clip_from_view*center;o.uv=v.uv*particles.st.xy+particles.st.zw;
+    var o:Varyings;o.position=view.clip_from_view*center;o.uv=v.uv*particles.st.xy+particles.st.zw+angle.zw;
     o.color=particles.colors[i]*particles.tint*particles.settings.x;let a=view.clip_from_view[2][2];let b=view.clip_from_view[3][2];let near=b/(a+1.);let far=b/a;
     o.depth=max((abs(center.z)-near)*far/(far-near),0.);
     // Source COMPUTE_EYEDEPTH and D3D ComputeGrabScreenPos.

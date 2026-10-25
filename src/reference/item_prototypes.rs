@@ -156,8 +156,8 @@ impl HoseReference {
                     && e.splash.role == format!("splash_hose_{}", index + 1),
                 "hose end particle roles",
             )?;
-            e.visual.validate_selected()?;
-            e.splash.validate_selected()?;
+            super::particles::validate_particle(&e.visual)?;
+            super::particles::validate_particle(&e.splash)?;
         }
         let skin = &self.skin;
         require(

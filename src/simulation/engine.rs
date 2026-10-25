@@ -126,6 +126,8 @@ pub struct EngineOutput {
     pub heat_penalty: f32,
     pub consumed_fuel_liters: f32,
     pub temperature: f32,
+    /// Source `selectedFanSpeed` in degrees per second while `Cool` spins the fan.
+    pub fan_speed: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -383,6 +385,7 @@ impl EngineState {
                     ),
             );
         }
+        let mut fan_speed = 0.0;
         if running && let Some(condition) = installed.radiator_condition {
             let radiator = &reference.radiator;
             let condition = usize::from(condition.min(4));
@@ -395,6 +398,9 @@ impl EngineState {
                 speed = (speed + fan_value).clamp(fan_value, reference.globals.max_car_velocity);
             } else if self.temperature < radiator.fan_temperature_off {
                 self.fan_on = false;
+            }
+            if self.fan_on {
+                fan_speed = radiator.max_fan_speed * [1.0, 0.8, 0.6, 0.4, 0.2][condition];
             }
             let thermostat = inverse_lerp(
                 radiator.thermostat_range[0],
@@ -436,6 +442,7 @@ impl EngineState {
             heat_penalty,
             consumed_fuel_liters: consumed_fuel,
             temperature: self.temperature,
+            fan_speed,
         };
         self.last_output
     }
