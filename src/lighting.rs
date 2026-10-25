@@ -37,6 +37,8 @@ pub struct CycleOutput {
     pub biome_color: [f32; 4],
     /// Source temperature controls cloud density, needs, and engine heat.
     pub ambient_temperature: f32,
+    /// Main-view ColorGrading temperature. None before the first terrain refresh keeps the profile value.
+    pub grading_temperature: Option<f32>,
     /// Source order: low layer, high layer.
     pub clouds: [CloudOutput; 2],
     pub cloud_noise_coordinate: f32,
@@ -116,6 +118,7 @@ impl CycleState {
             self.cloud_coordinate -= self.cloud_coordinate.ceil();
         }
         self.elapsed_seconds = active;
+        let grading_temperature = self.output.grading_temperature;
         self.output = evaluate(
             reference,
             cycle,
@@ -124,6 +127,7 @@ impl CycleState {
             self.star_rotation,
             self.terrain_color,
         );
+        self.output.grading_temperature = grading_temperature;
         self.set_sleep_progress(reference, advance.sleep_progress);
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
             0.
@@ -147,6 +151,7 @@ impl CycleState {
         self.cycle_seconds = saved.cycle_seconds;
         self.cloud_coordinate = saved.cloud_coordinate;
         self.star_rotation = saved.star_rotation;
+        let grading_temperature = self.output.grading_temperature;
         self.output = evaluate(
             reference,
             saved.evaluated_cycle_seconds,
@@ -155,6 +160,7 @@ impl CycleState {
             saved.star_rotation,
             self.terrain_color,
         );
+        self.output.grading_temperature = grading_temperature;
     }
     /// Felho changes material speed at sleep endpoints without advancing time.
     pub fn set_sleep_progress(&mut self, r: &CycleReference, progress: Option<f32>) {
@@ -174,6 +180,8 @@ impl CycleState {
     pub fn set_terrain_color(&mut self, reference: &CycleReference, color: &[f32; 4], dt: f64) {
         if self.needs_terrain_color(dt) {
             self.terrain_color = *color;
+            self.output.grading_temperature =
+                Some(biome_float(&reference.temperature_values, *color));
             self.next_biome_refresh =
                 self.elapsed_seconds + dt + reference.biome_refresh_seconds as f64;
         }
@@ -400,6 +408,7 @@ fn evaluate(
         },
         biome_color: biome,
         ambient_temperature: temp,
+        grading_temperature: None,
         clouds,
         cloud_noise_coordinate: cloud_x,
         cloud_noise,
@@ -1297,4 +1306,20 @@ pub fn spot_cookie_matrix(
             -local.z * projected_scale,
         ]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::biome_float;
+
+    #[test]
+    fn grading_temperature_matches_lerp_float() {
+        // napszak.LerpFloat: Lerp(Lerp(v[2], v[0], c.r), v[1], c.b).
+        let v = [10., -40., 4.];
+        assert_eq!(biome_float(&v, [1., 0., 0., 1.]), 10.);
+        assert_eq!(biome_float(&v, [0., 0., 1., 1.]), -40.);
+        assert_eq!(biome_float(&v, [0., 1., 0., 1.]), 4.);
+        // r = .5 gives 7; b = .25 moves a quarter toward -40.
+        assert_eq!(biome_float(&v, [0.5, 0.25, 0.25, 1.]), -4.75);
+    }
 }
