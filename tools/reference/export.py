@@ -371,6 +371,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)
+    from .melee import recover_melee, validate_melee
+    manifest['melee'] = recover_melee(source, output)
     from .clothing import recover_clothing,validate_clothing
     manifest['clothing'] = recover_clothing(source,manifest,output)
     manifest['lighting']['textures']=list(source.lighting_textures.values())
@@ -386,6 +388,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_acquisition(manifest['acquisition'], manifest)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_small_items(manifest['small_items'], manifest)
+    validate_melee(manifest['melee'], manifest)
     validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())
     evidence['conditions']=manifest['conditions']
