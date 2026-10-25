@@ -408,6 +408,37 @@ impl WorldStream {
             revision: self.generation_revision,
         }
     }
+    pub fn limits(&self) -> super::StreamLimits {
+        self.limits
+    }
+    /// Largest draw distance whose limits fit this world.
+    pub fn largest_fitting(&self) -> Result<f32, ReferenceError> {
+        super::StreamLimits::largest_fitting(&self.reference, self.road_light.influence_margin())
+    }
+    /// Selected counts and active bytes, in the shape of the limits.
+    pub fn selected(&self) -> super::StreamLimits {
+        let metrics = self.metrics();
+        super::StreamLimits {
+            roads: self.selected_roads.len(),
+            tiles: std::array::from_fn(|tier| {
+                self.wanted_tiles
+                    .iter()
+                    .filter(|k| k.layer == tier_layer(tier))
+                    .count()
+            }),
+            objects: metrics.generated_objects,
+            active_cpu: metrics.active_cpu_bytes,
+            active_gpu: metrics.active_gpu_bytes,
+            terrain_job: 0,
+        }
+    }
+    /// The road and terrain selection of the current request is complete.
+    pub fn selection_complete(&self) -> bool {
+        self.failure.is_none()
+            && self.startup.is_some()
+            && self.plan_revision == self.request.revision
+            && self.next_road == self.road_candidates.len()
+    }
     pub fn restore_save(
         &mut self,
         saved: &crate::save::WorldSnapshot,

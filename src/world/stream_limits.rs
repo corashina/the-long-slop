@@ -23,7 +23,7 @@ const ROAD_BEND: f64 = SQRT_2;
 const STEP: f32 = 100.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct StreamLimits {
+pub struct StreamLimits {
     pub roads: usize,
     /// Per terrain tier.
     pub tiles: [usize; 3],

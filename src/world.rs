@@ -45,6 +45,7 @@ pub(crate) mod renderer_pending;
 pub(crate) mod stream;
 mod stream_limits;
 pub use stream::content_index::ContentIndex;
+pub use stream_limits::StreamLimits;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
 pub use stream::content_boxes::BoxRelease;
