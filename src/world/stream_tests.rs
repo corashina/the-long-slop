@@ -1793,6 +1793,27 @@ fn road_pole_cable_reaches_the_next_pole() {
     }
 }
 
+#[test]
+#[ignore = "requires the installed source export"]
+fn road_building_cable_is_in_building_appearance() {
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let stream = &run.stream;
+    assert!(!stream.building_cables.is_empty());
+    for (id, cable) in stream.building_cables.iter().filter(|(_, c)| !c.is_empty()) {
+        assert_eq!(cable[0].active, Some(true));
+        let appearance = stream.appearance(id);
+        for rope in &cable[1..] {
+            // Source CheckCableConnections: target 0 under 200 m, plus the pole width.
+            assert!(rope.scale.unwrap()[2] < 2.1);
+            assert!(appearance.iter().any(|a| a.node == rope.node
+                && a.rotation == rope.rotation
+                && a.scale == rope.scale));
+        }
+    }
+}
+
 fn decoration_source(path_id: i64) -> SourceId {
     SourceId {
         file: "sharedassets1.assets".into(),

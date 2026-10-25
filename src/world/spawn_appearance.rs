@@ -48,6 +48,12 @@ pub(crate) fn node_active(
     false
 }
 impl SpawnEvaluation<'_> {
+    /// Source `buildingscript.FStart` cable. Bake after lamps, so the cable is not lost on refresh.
+    pub(super) fn bake_cables(&mut self) {
+        for content in &mut self.output {
+            content.appearance.extend_from_slice(&content.cable);
+        }
+    }
     pub(super) fn bake_appearance(&mut self) -> Result<(), ReferenceError> {
         for content in &mut self.output {
             content.inputs = self.initialization.for_parent(&content.placement.id);

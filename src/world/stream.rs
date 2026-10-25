@@ -180,6 +180,9 @@ pub struct WorldStream {
     imported_baselines: Vec<(crate::reference::ItemId, super::ObjectSnapshot)>,
     road_light: super::source_lights::SourceRoadLight,
     cables: super::cables::CableRecipes,
+    /// Road building cables, one per wanted building root. Empty: no cable.
+    building_cables: Vec<CableEntry>,
+    cable_search: super::cables::BuildingCableSearch,
     lights: Vec<super::WorldLight>,
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
@@ -748,6 +751,8 @@ impl WorldStream {
             imported_baselines: Vec::new(),
             road_light,
             cables,
+            building_cables: Vec::new(),
+            cable_search: super::cables::BuildingCableSearch::default(),
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
@@ -1767,6 +1772,68 @@ impl WorldStream {
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
     }
+    /// Source `buildingscript.FStart(0)`: a road building connects to the nearest road pole.
+    /// Contents wait for the cable. The search replays at most 8 road segments per update.
+    fn prepare_building_cables(&mut self) {
+        self.building_cables.retain(|(id, _)| {
+            self.wanted_structures
+                .iter()
+                .chain(&self.replay_roots)
+                .any(|p| &p.id == id)
+        });
+        let mut budget = 8;
+        loop {
+            if self.cable_search.placement().is_none() {
+                let Some(p) = self
+                    .wanted_structures
+                    .iter()
+                    .chain(&self.replay_roots)
+                    .find(|p| {
+                        p.id.layer == WorldLayer::Building
+                            && p.id.children.is_empty()
+                            && !self.building_cables.iter().any(|(id, _)| id == &p.id)
+                    })
+                else {
+                    return;
+                };
+                match self.cables.building(&p.prototype) {
+                    Some(cable) => self.cable_search.start(&self.roads, cable, p.clone()),
+                    None => {
+                        let entry = (p.id.clone(), Vec::new());
+                        if !self.admit_generation(cable_entry_bytes(&entry)) {
+                            return;
+                        }
+                        self.building_cables.push(entry);
+                        continue;
+                    }
+                }
+            }
+            let before = budget;
+            let mut cable = Vec::new();
+            let done = self.cable_search.step(
+                &self.cables,
+                &self.reference,
+                &mut self.roads,
+                &mut budget,
+                &mut cable,
+            );
+            self.last_road_work += before - budget;
+            match done {
+                Ok(Some(id)) => {
+                    let entry = (id, cable);
+                    if !self.admit_generation(cable_entry_bytes(&entry)) {
+                        return;
+                    }
+                    self.building_cables.push(entry);
+                }
+                Ok(None) => return,
+                Err(error) => {
+                    self.failure = Some(error.0);
+                    return;
+                }
+            }
+        }
+    }
     fn prepare_contents(&mut self) {
         if self.failure.is_some() {
             return;
@@ -1804,6 +1871,10 @@ impl WorldStream {
         let available = (16 * MIB).saturating_sub(
             self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
         );
+        self.prepare_building_cables();
+        if self.failure.is_some() {
+            return;
+        }
         let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
         if let Err(error) = self.contents.advance(
             &self.reference,
@@ -1813,6 +1884,7 @@ impl WorldStream {
             } else {
                 &[]
             },
+            &self.building_cables,
             [self.request.player, self.request.vehicle],
             available,
             limit,
@@ -4768,6 +4840,13 @@ impl WorldStream {
                                 .sum::<usize>()
                     })
                     .sum::<usize>()
+                + self.building_cables.capacity() * std::mem::size_of::<CableEntry>()
+                + self
+                    .building_cables
+                    .iter()
+                    .map(cable_entry_heap)
+                    .sum::<usize>()
+                + self.cable_search.retained_bytes()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_lights.capacity() * std::mem::size_of::<u32>()
@@ -5064,4 +5143,11 @@ impl Drop for WorldStream {
         // Terminate before Rust drops source caches, job storage, or reservation ownership.
         self.road_worker.dispose();
     }
+}
+type CableEntry = (super::GeneratedId, Vec<super::NodeAppearance>);
+fn cable_entry_bytes(entry: &CableEntry) -> usize {
+    std::mem::size_of::<CableEntry>() + cable_entry_heap(entry)
+}
+fn cable_entry_heap(entry: &CableEntry) -> usize {
+    super::contents::identity_heap(&entry.0) + super::contents::appearance_bytes(&entry.1)
 }

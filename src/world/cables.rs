@@ -1,11 +1,12 @@
 //! Source power cable math: rope aim, pole selection and cable recipes.
-use super::RoadSegment;
 use super::source_lights::{RoadPole, object_node, record, road_controller, transform_node};
 use super::spawn_rules::{array, link, optional, value_link};
+use super::{AbsolutePose, NodeAppearance, Placement, RoadIndex, RoadSegment, WorldBounds};
 use crate::reference::{
     ReferenceError, SourceId, WorldPrototypeReference, WorldReference, WorldValue,
 };
-use rapier3d::math::{Rotation, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
+use std::ops::Range;
 
 /// Source `roadGenScript.CheckCableConnections` range in meters.
 pub(crate) const CABLE_RANGE: f64 = 200.;
@@ -71,12 +72,26 @@ pub(crate) fn nearest_target<'a>(
     Some((pole, index))
 }
 
-/// One road rope in its pole frame.
+/// One rope in its pole frame (road) or below the prototype root (building).
 struct Rope {
-    node: usize,
+    node: SourceId,
     position: Vector,
     parent: Rotation,
     scale: [f32; 2],
+}
+impl Rope {
+    fn appearance(&self, rotation: [f32; 4], scale_z: f32) -> NodeAppearance {
+        NodeAppearance {
+            node: self.node.clone(),
+            primary: None,
+            scale: Some([self.scale[0], self.scale[1], scale_z]),
+            rotation: Some(rotation),
+            active: None,
+            material: None,
+            color: None,
+            color_material: None,
+        }
+    }
 }
 /// Source `ropeScript` of one road prototype, in its pole frame.
 struct RoadCable {
@@ -99,7 +114,7 @@ impl RoadCable {
                     .ok_or_else(|| ReferenceError("Source rope is outside its pole".into()))?;
                 let scale = prototype.nodes[node].transform.scale;
                 Ok(Rope {
-                    node,
+                    node: prototype.nodes[node].source.clone(),
                     position: pole.local(prototype, node)?.translation,
                     parent: pole.local(prototype, parent as usize)?.rotation,
                     scale: [scale[0], scale[1]],
@@ -117,11 +132,111 @@ impl RoadCable {
         })
     }
 }
+/// Pose of a node below the prototype root. The placement replaces the root transform.
+fn below_root(
+    prototype: &WorldPrototypeReference,
+    mut node: usize,
+) -> Result<Pose, ReferenceError> {
+    let mut local = Pose::IDENTITY;
+    for _ in 0..prototype.nodes.len() {
+        let n = &prototype.nodes[node];
+        let Some(parent) = n.parent else {
+            return Ok(local);
+        };
+        let t = &n.transform;
+        local.translation = Vector::from_array(t.translation)
+            + Rotation::from_array(t.rotation) * (Vector::from_array(t.scale) * local.translation);
+        local.rotation = Rotation::from_array(t.rotation) * local.rotation;
+        node = parent as usize;
+    }
+    Err(ReferenceError("Source building ancestor cycle".into()))
+}
 /// Source `buildingscript.connectToPole`: the inactive rope root and its ropes.
 pub(crate) struct BuildingCable {
-    pub prototype: SourceId,
-    pub root: usize,
-    pub ropes: Vec<usize>,
+    prototype: SourceId,
+    root: SourceId,
+    ropes: Vec<Rope>,
+}
+impl BuildingCable {
+    fn new(
+        prototype: &WorldPrototypeReference,
+        root: usize,
+        ropes: &[usize],
+    ) -> Result<Self, ReferenceError> {
+        if ropes.is_empty() {
+            return Err(ReferenceError("Source building cable has no ropes".into()));
+        }
+        let ropes = ropes
+            .iter()
+            .map(|&node| {
+                let parent = prototype.nodes[node]
+                    .parent
+                    .ok_or_else(|| ReferenceError("Source rope is outside its building".into()))?;
+                let scale = prototype.nodes[node].transform.scale;
+                Ok(Rope {
+                    node: prototype.nodes[node].source.clone(),
+                    position: below_root(prototype, node)?.translation,
+                    parent: below_root(prototype, parent as usize)?.rotation,
+                    scale: [scale[0], scale[1]],
+                })
+            })
+            .collect::<Result<_, ReferenceError>>()?;
+        Ok(Self {
+            prototype: prototype.source.clone(),
+            root: prototype.nodes[root].source.clone(),
+            ropes,
+        })
+    }
+    /// World position and parent world rotation of a rope.
+    fn world(&self, rope: &Rope, pose: AbsolutePose, scale: [f32; 3]) -> ([f64; 3], Rotation) {
+        let rotation = Rotation::from_array(pose.rotation);
+        let offset = rotation * (Vector::from_array(scale) * rope.position);
+        (
+            std::array::from_fn(|i| pose.position[i] + offset[i] as f64),
+            rotation * rope.parent,
+        )
+    }
+    /// World position of rope 0, the source search origin.
+    pub fn rope0(&self, pose: AbsolutePose, scale: [f32; 3]) -> [f64; 3] {
+        self.world(&self.ropes[0], pose, scale).0
+    }
+    /// Source `CheckCableConnections` and `ropeScript.Connect(target, k)`.
+    /// `poles` are ranges of `targets`. No pole in range: no output, the root stays inactive.
+    pub fn connect(
+        &self,
+        pose: AbsolutePose,
+        scale: [f32; 3],
+        targets: &[[f64; 3]],
+        poles: &[Range<usize>],
+        output: &mut Vec<NodeAppearance>,
+    ) {
+        output.clear();
+        let Some((pole, k)) = nearest_target(
+            self.rope0(pose, scale),
+            poles
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (i as u32, &targets[r.clone()])),
+        ) else {
+            return;
+        };
+        let target = targets[poles[pole as usize].start + k];
+        output.push(NodeAppearance {
+            node: self.root.clone(),
+            primary: None,
+            scale: None,
+            rotation: None,
+            active: Some(true),
+            material: None,
+            color: None,
+            color_material: None,
+        });
+        for rope in &self.ropes {
+            let (position, parent) = self.world(rope, pose, scale);
+            let (rotation, scale_z) = aim(position, parent, target);
+            output.push(rope.appearance(rotation, scale_z));
+        }
+    }
 }
 /// Road and building cables, resolved once per stream.
 pub(crate) struct CableRecipes {
@@ -147,6 +262,21 @@ fn prototype<'a>(
         .iter()
         .find(|p| &p.source == source)
         .ok_or_else(|| ReferenceError("Missing cable prototype".into()))
+}
+fn ropes_bytes(ropes: &Vec<Rope>) -> usize {
+    ropes.capacity() * std::mem::size_of::<Rope>()
+        + ropes.iter().map(|r| r.node.file.capacity()).sum::<usize>()
+}
+fn road_prototype<'a>(
+    world: &'a WorldReference,
+    segment: &RoadSegment,
+) -> &'a WorldPrototypeReference {
+    let source = &world.road.prototypes[segment.biome as usize];
+    world
+        .prototypes
+        .iter()
+        .find(|p| &p.source == source)
+        .unwrap()
 }
 impl CableRecipes {
     pub fn new(world: &WorldReference, seed: i32) -> Result<Self, ReferenceError> {
@@ -179,11 +309,11 @@ impl CableRecipes {
                 continue;
             };
             let rope = &record(world, rope)?.fields;
-            buildings.push(BuildingCable {
-                prototype: prototype.source.clone(),
-                root: object_node(world, prototype, link(rope, "m_GameObject")?)?,
-                ropes: nodes(prototype, array(rope, "ropes")?)?,
-            });
+            buildings.push(BuildingCable::new(
+                prototype,
+                object_node(world, prototype, link(rope, "m_GameObject")?)?,
+                &nodes(prototype, array(rope, "ropes")?)?,
+            )?);
         }
         Ok(Self {
             roads,
@@ -202,8 +332,7 @@ impl CableRecipes {
                 .roads
                 .iter()
                 .map(|r| {
-                    r.ropes.capacity() * std::mem::size_of::<Rope>()
-                        + r.targets.capacity() * std::mem::size_of::<Vector>()
+                    ropes_bytes(&r.ropes) + r.targets.capacity() * std::mem::size_of::<Vector>()
                 })
                 .sum::<usize>()
             + self.buildings.capacity() * std::mem::size_of::<BuildingCable>()
@@ -211,7 +340,7 @@ impl CableRecipes {
                 .buildings
                 .iter()
                 .map(|b| {
-                    b.prototype.file.capacity() + b.ropes.capacity() * std::mem::size_of::<usize>()
+                    b.prototype.file.capacity() + b.root.file.capacity() + ropes_bytes(&b.ropes)
                 })
                 .sum::<usize>()
     }
@@ -226,15 +355,25 @@ impl CableRecipes {
         next: &RoadSegment,
         output: &mut Vec<NodePose>,
     ) {
-        let find = |s: &RoadSegment| {
-            let source = &world.road.prototypes[s.biome as usize];
-            world
-                .prototypes
-                .iter()
-                .find(|p| &p.source == source)
-                .unwrap()
-        };
-        self.road_between([find(segment), find(next)], segment, next, output);
+        self.road_between(
+            [road_prototype(world, segment), road_prototype(world, next)],
+            segment,
+            next,
+            output,
+        );
+    }
+    /// Append the world positions of the pole rope targets of `segment`.
+    pub fn targets(
+        &self,
+        world: &WorldReference,
+        segment: &RoadSegment,
+        output: &mut Vec<[f64; 3]>,
+    ) {
+        let cable = &self.roads[segment.biome as usize];
+        let frame = cable
+            .pole
+            .frame(road_prototype(world, segment), segment, self.seed);
+        output.extend(cable.targets.iter().map(|t| frame.point(*t)));
     }
     fn road_between(
         &self,
@@ -255,11 +394,95 @@ impl CableRecipes {
                 to.point(*point),
             );
             output.push(NodePose {
-                node: prototypes[0].nodes[rope.node].source.clone(),
+                node: rope.node.clone(),
                 rotation,
                 scale: [rope.scale[0], rope.scale[1], scale],
             });
         }
+    }
+}
+
+/// Resumable road pole search for one building cable. The buffers are reused.
+#[derive(Default)]
+pub(crate) struct BuildingCableSearch {
+    placement: Option<Placement>,
+    bounds: Option<WorldBounds>,
+    segments: Vec<u32>,
+    next: usize,
+    targets: Vec<[f64; 3]>,
+    poles: Vec<Range<usize>>,
+}
+impl BuildingCableSearch {
+    pub fn placement(&self) -> Option<&Placement> {
+        self.placement.as_ref()
+    }
+    /// Source `CheckCableConnections` reads the roads that exist at `FStart`: use the prepared prefix.
+    pub fn start(&mut self, roads: &RoadIndex, cable: &BuildingCable, placement: Placement) {
+        let rope0 = cable.rope0(placement.pose, placement.scale);
+        let bounds = WorldBounds {
+            min: rope0.map(|v| v - CABLE_RANGE),
+            max: rope0.map(|v| v + CABLE_RANGE),
+        };
+        assert_eq!(
+            roads.segments_in(bounds, roads.coverage(), &mut self.segments),
+            super::QueryStatus::Complete
+        );
+        self.bounds = Some(bounds);
+        self.next = 0;
+        self.targets.clear();
+        self.poles.clear();
+        self.placement = Some(placement);
+    }
+    /// Replay at most `budget` road segments.
+    /// When done, `output` holds the cable and the result is the building identity.
+    pub fn step(
+        &mut self,
+        recipes: &CableRecipes,
+        world: &WorldReference,
+        roads: &mut RoadIndex,
+        budget: &mut usize,
+        output: &mut Vec<NodeAppearance>,
+    ) -> Result<Option<super::GeneratedId>, ReferenceError> {
+        let (Some(placement), Some(bounds)) = (&self.placement, self.bounds) else {
+            return Ok(None);
+        };
+        while let Some(&index) = self.segments.get(self.next) {
+            if *budget == 0 {
+                return Ok(None);
+            }
+            let segment = roads.prepare_segment(index, *budget)?;
+            *budget = budget.saturating_sub(roads.replay_work());
+            let Some(segment) = segment else {
+                return Ok(None);
+            };
+            self.next += 1;
+            if (0..3).all(|a| {
+                segment.bounds.min[a] <= bounds.max[a] && segment.bounds.max[a] >= bounds.min[a]
+            }) {
+                let start = self.targets.len();
+                recipes.targets(world, &segment, &mut self.targets);
+                self.poles.push(start..self.targets.len());
+            }
+        }
+        let cable = recipes
+            .building(&placement.prototype)
+            .ok_or_else(|| ReferenceError("Missing source building cable".into()))?;
+        cable.connect(
+            placement.pose,
+            placement.scale,
+            &self.targets,
+            &self.poles,
+            output,
+        );
+        Ok(self.placement.take().map(|p| p.id))
+    }
+    pub fn retained_bytes(&self) -> usize {
+        self.placement
+            .as_ref()
+            .map_or(0, super::contents::placement_heap)
+            + self.segments.capacity() * std::mem::size_of::<u32>()
+            + self.targets.capacity() * std::mem::size_of::<[f64; 3]>()
+            + self.poles.capacity() * std::mem::size_of::<Range<usize>>()
     }
 }
 
@@ -300,6 +523,55 @@ mod tests {
         let second = [[20., 0., 0.], [10., 0., 0.], [15., 0., 0.]];
         let poles = [(7, &first[..]), (8, &second[..])];
         assert_eq!(nearest_target([0.; 3], poles.into_iter()), Some((8, 1)));
+    }
+
+    #[test]
+    fn building_cable_connects_to_a_pole_in_range() {
+        let id = |path_id| SourceId {
+            file: "level1".into(),
+            path_id,
+        };
+        let cable = BuildingCable {
+            prototype: id(1),
+            root: id(2),
+            ropes: vec![Rope {
+                node: id(3),
+                position: Vector::new(2., 5., 0.),
+                parent: Rotation::IDENTITY,
+                scale: [0.5, 0.7],
+            }],
+        };
+        let yaw = Rotation::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let pose = AbsolutePose {
+            position: [1000., 0., 2000.],
+            rotation: yaw.to_array(),
+        };
+        let scale = [2.; 3];
+        let rope0 = cable.rope0(pose, scale);
+        assert!((0..3).all(|i| (rope0[i] - [1000., 10., 1996.][i]).abs() < 1e-4));
+        let offset = |d: [f64; 3]| std::array::from_fn(|i| rope0[i] + d[i]);
+        // Pole 0: target 0 at 55 m, target 1 at 50 m. Pole 1: target 0 at 250 m.
+        let targets = [
+            offset([33., 0., 44.]),
+            offset([30., 0., 40.]),
+            offset([150., 0., 200.]),
+        ];
+        let mut output = Vec::new();
+        cable.connect(pose, scale, &targets, &[0..2, 2..3], &mut output);
+        assert_eq!(output.len(), 2);
+        assert_eq!((&output[0].node, output[0].active), (&id(2), Some(true)));
+        let rope = &output[1];
+        assert_eq!(rope.node, id(3));
+        let [x, y, z] = rope.scale.unwrap();
+        assert_eq!([x, y], [0.5, 0.7]);
+        assert!((z - 0.5).abs() < 1e-5, "scale z is distance / 100");
+        let forward = world_forward(yaw, rope.rotation.unwrap());
+        assert!((forward - Vector::new(0.6, 0., 0.8)).length() < 1e-4);
+        cable.connect(pose, scale, &targets, &[2..3], &mut output);
+        assert!(
+            output.is_empty(),
+            "no pole under 200 m: the root stays inactive"
+        );
     }
 
     #[test]
