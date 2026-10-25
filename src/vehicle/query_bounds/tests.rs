@@ -189,19 +189,7 @@ fn public_queries_follow_step_without_an_extra_caller_refresh() {
 }
 
 pub(super) fn empty_world() -> crate::vehicle::PhysicsWorld {
-    let mut physics = PhysicsWorld::new();
-    physics.integration_parameters.dt = crate::simulation::FIXED_DT;
-    crate::vehicle::PhysicsWorld {
-        inactive_bodies: Default::default(),
-        body_mass_override: None,
-        physics,
-        query_bounds: QueryBounds::default(),
-        presentation_bodies: Default::default(),
-        chassis: Vec::new(),
-        vehicles: Vec::new(),
-        hit_collector: Default::default(),
-        hits: Vec::new(),
-    }
+    crate::vehicle::PhysicsWorld::empty(0, 0)
 }
 
 pub(super) fn ray_hit(

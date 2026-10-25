@@ -87,6 +87,7 @@ impl InteractionState {
         self.kinds.remove(&id);
         self.pickup_layers.remove(&id);
         self.carry.unregister_generated(id);
+        self.unregister_hose(id);
         self.bodies.retain(|_, handle| *handle != body);
     }
 }

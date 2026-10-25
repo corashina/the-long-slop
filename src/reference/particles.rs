@@ -246,7 +246,7 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
     Ok(())
 }
 /// Checks one particle record that the runtime simulates in custom space.
-fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceError> {
+pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceError> {
     p.validate_motion()?;
     let check = |valid: bool, field: &str| {
         if valid {

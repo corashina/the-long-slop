@@ -159,7 +159,7 @@ impl InteractionState {
             .iter()
             .position(|o| o.reference.id == destination)
             .unwrap();
-        let source_tank = self.openings[source_index].reference.tank;
+        let source_tank = self.openings[source_index].fluid_owner();
         let destination_tank = self.openings[destination_index].reference.tank;
         let Some(destination_fluid) = items.get(destination_tank).and_then(|i| i.fluid.as_ref())
         else {
@@ -489,6 +489,7 @@ mod tests {
                 angle_disabled: true,
                 spill_disabled: true,
                 tube_connected: false,
+                cant_tube: false,
                 can_toggle: true,
                 can_tune: false,
                 tune_rate: 0.,
@@ -502,6 +503,7 @@ mod tests {
             empty_pour: false,
             particles: None,
             contact: None,
+            borrowed_tank: None,
         };
         state.openings.push(second);
         state.receipt_tanks[0].caps = vec![cap.id, second_id];

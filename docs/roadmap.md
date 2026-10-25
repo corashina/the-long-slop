@@ -38,11 +38,10 @@ All tasks are done. Run this test pass on Tomasz's PC next:
 
 ## 2. Car parts and repair
 
-Section test pass: run the ignored export tests in `tests/garage_parts.rs`. In the browser, swap hood and trunk, and repair rust and dirt. Re-export, then check the Lada radiator fan spins while the engine runs. Check exhaust smoke: rate with rpm, color after a fuel mix change, 5x5 sheet animation, F3 cost.
+Section test pass: run the ignored export tests in `tests/garage_parts.rs`. In the browser, swap hood and trunk, and repair rust and dirt. Re-export, then check the Lada radiator fan spins while the engine runs. Check exhaust smoke: rate with rpm, color after a fuel mix change, 5x5 sheet animation, F3 cost. Check the siphon hose: the garage hose spawns clear of walls; attach to the Lada tank and a can; siphon by height; drain with LMB; coil up with R; store; tear off by driving; save and load; F3 near a hose.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| R03 | Add the siphon hose. [Fluids](../src/fluids.rs) | L | Attach to caps, coil, and move fluid between tanks. [C04] |
 | R05 | Add cargo storage. [Storage](../src/interaction/storage.rs) | XL | Lock items to car beds and shelves. Keep mass, collision, and saved state. [F12] |
 
 ## 3. World and terrain

@@ -880,6 +880,25 @@ impl ItemStore {
         self.states.iter_mut()
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_states(states: Vec<ItemState>) -> Self {
+        Self {
+            dirty: HashSet::new(),
+            indices: states.iter().enumerate().map(|(i, s)| (s.id, i)).collect(),
+            states,
+            body_ids: Vec::new(),
+            vehicle_tanks: Vec::new(),
+            names: Vec::new(),
+            vehicle_items: Vec::new(),
+            slot_owners: HashMap::new(),
+            generated: BevyHashMap::new(),
+            membership_revision: 0,
+            initialized_supplies: HashSet::new(),
+            next_generated: 0,
+            origin: WorldOrigin::default(),
+        }
+    }
+
     pub fn get(&self, id: ItemId) -> Option<&ItemState> {
         self.indices.get(&id).map(|index| &self.states[*index])
     }
@@ -1108,21 +1127,7 @@ mod world_sync_tests {
     use crate::world::WorldLayer;
 
     fn empty_store() -> ItemStore {
-        ItemStore {
-            dirty: HashSet::new(),
-            states: Vec::new(),
-            indices: BevyHashMap::new(),
-            body_ids: Vec::new(),
-            vehicle_tanks: Vec::new(),
-            names: Vec::new(),
-            vehicle_items: Vec::new(),
-            slot_owners: HashMap::new(),
-            generated: BevyHashMap::new(),
-            membership_revision: 0,
-            initialized_supplies: HashSet::new(),
-            next_generated: 0,
-            origin: WorldOrigin::default(),
-        }
+        ItemStore::from_states(Vec::new())
     }
     fn key(ordinal: u32) -> GeneratedId {
         GeneratedId {

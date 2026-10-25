@@ -451,6 +451,7 @@ pub struct OpeningRecord {
     pub angle_disabled: bool,
     pub spill_disabled: bool,
     pub tube_connected: bool,
+    pub cant_tube: bool,
     pub flow_radius: f32,
     pub particles: FluidParticleReference,
     pub can_toggle: bool,
@@ -623,6 +624,10 @@ pub struct FluidRulesReference {
     pub pour_speed: f32,
     pub slow_oil_modifier: f32,
     pub fluid_tune_speed: f32,
+    /// Hose end height difference where siphon flow starts.
+    pub min_tube_vertical_height: f32,
+    /// Hose end height difference where siphon flow is full.
+    pub max_tube_vertical_height: f32,
     /// Source `mainscript.fluids[i].burnColor`, indexed by fluid type.
     pub burn_colors: [[f32; 4]; 6],
     /// Source `ls.FillDefWW` default English text, indexed by `ls.w`.
@@ -983,6 +988,75 @@ fn ids<T: Eq + std::hash::Hash>(
 }
 fn hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn valid_tuning(valve: f32, can_tune: bool, tune_rate: f32) -> bool {
+    valve.is_finite()
+        && (0.0..=1.0).contains(&valve)
+        && tune_rate.is_finite()
+        && tune_rate >= 0.0
+        && (!can_tune || tune_rate > 0.0)
+}
+fn validate_cap_visuals(
+    visuals: &CapVisualReference,
+    node: impl Fn(NodeId) -> bool,
+) -> Result<(), ReferenceError> {
+    require(
+        visuals
+            .open_nodes
+            .iter()
+            .chain(&visuals.closed_nodes)
+            .all(|id| node(*id))
+            && [visuals.cap_node, visuals.closed_node, visuals.open_node]
+                .iter()
+                .all(|id| id.is_none_or(&node))
+            && finite(&visuals.closed_euler_degrees)
+            && finite(&visuals.open_euler_degrees),
+        "cap visual bindings",
+    )?;
+    require(
+        visuals.closed_node.is_some() == visuals.open_node.is_some()
+            && (visuals.cap_node.is_some()
+                || (visuals.closed_node.is_none() && !visuals.euler_rotation)),
+        "cap visual control",
+    )
+}
+fn valid_flow(
+    flow: f32,
+    tilt_degrees: f32,
+    tilt_axis: &[f32; 3],
+    radius: f32,
+    p: &FluidParticleReference,
+) -> bool {
+    finite(&[flow, tilt_degrees])
+        && flow > 0.0
+        && finite(tilt_axis)
+        && radius.is_finite()
+        && radius > 0.0
+        && p.capacity > 0
+        && finite(&[
+            p.cone_degrees,
+            p.cone_radius,
+            p.lifetime_seconds,
+            p.radius,
+            p.gravity_multiplier,
+            p.max_speed,
+            p.min_rate,
+            p.max_rate,
+            p.bounce,
+            p.dampen,
+        ])
+        && transform(&p.local_pose)
+        && p.cone_degrees >= 0.
+        && p.cone_radius >= 0.
+        && p.lifetime_seconds > 0.
+        && p.radius > 0.
+        && p.gravity_multiplier >= 0.
+        && p.max_speed > 0.
+        && p.max_rate >= p.min_rate
+        && (0. ..=1.).contains(&p.bounce)
+        && (0. ..=1.).contains(&p.dampen)
+        && p.collision_mask != 0
 }
 
 impl ReferenceManifest {
@@ -1618,34 +1692,11 @@ impl ReferenceManifest {
             }
         }
         for r in &self.openings {
-            let visuals = &r.visuals;
             require(
-                r.valve.is_finite()
-                    && (0.0..=1.0).contains(&r.valve)
-                    && r.tune_rate.is_finite()
-                    && r.tune_rate >= 0.0
-                    && (!r.can_tune || r.tune_rate > 0.0),
+                valid_tuning(r.valve, r.can_tune, r.tune_rate),
                 "opening valve/tuning",
             )?;
-            require(
-                visuals
-                    .open_nodes
-                    .iter()
-                    .chain(&visuals.closed_nodes)
-                    .all(|id| node_ids.contains(id))
-                    && [visuals.cap_node, visuals.closed_node, visuals.open_node]
-                        .iter()
-                        .all(|id| id.is_none_or(|id| node_ids.contains(&id)))
-                    && finite(&visuals.closed_euler_degrees)
-                    && finite(&visuals.open_euler_degrees),
-                "cap visual bindings",
-            )?;
-            require(
-                visuals.closed_node.is_some() == visuals.open_node.is_some()
-                    && (visuals.cap_node.is_some()
-                        || (visuals.closed_node.is_none() && !visuals.euler_rotation)),
-                "cap visual control",
-            )?;
+            validate_cap_visuals(&r.visuals, |id| node_ids.contains(&id))?;
             require(
                 item_ids.contains(&r.tank)
                     && item_ids.contains(&r.cap)
@@ -1653,35 +1704,13 @@ impl ReferenceManifest {
                 "opening binding",
             )?;
             require(
-                finite(&[r.flow_liters_per_second, r.tilt_degrees])
-                    && r.flow_liters_per_second > 0.0
-                    && finite(&r.tilt_axis)
-                    && r.flow_radius.is_finite()
-                    && r.flow_radius > 0.0
-                    && r.particles.capacity > 0
-                    && finite(&[
-                        r.particles.cone_degrees,
-                        r.particles.cone_radius,
-                        r.particles.lifetime_seconds,
-                        r.particles.radius,
-                        r.particles.gravity_multiplier,
-                        r.particles.max_speed,
-                        r.particles.min_rate,
-                        r.particles.max_rate,
-                        r.particles.bounce,
-                        r.particles.dampen,
-                    ])
-                    && transform(&r.particles.local_pose)
-                    && r.particles.cone_degrees >= 0.
-                    && r.particles.cone_radius >= 0.
-                    && r.particles.lifetime_seconds > 0.
-                    && r.particles.radius > 0.
-                    && r.particles.gravity_multiplier >= 0.
-                    && r.particles.max_speed > 0.
-                    && r.particles.max_rate >= r.particles.min_rate
-                    && (0. ..=1.).contains(&r.particles.bounce)
-                    && (0. ..=1.).contains(&r.particles.dampen)
-                    && r.particles.collision_mask != 0,
+                valid_flow(
+                    r.flow_liters_per_second,
+                    r.tilt_degrees,
+                    &r.tilt_axis,
+                    r.flow_radius,
+                    &r.particles,
+                ),
                 "opening flow",
             )?;
         }
@@ -1867,7 +1896,11 @@ impl ReferenceManifest {
                 self.fluid_rules.pour_speed,
                 self.fluid_rules.slow_oil_modifier,
                 self.fluid_rules.fluid_tune_speed,
+                self.fluid_rules.min_tube_vertical_height,
+                self.fluid_rules.max_tube_vertical_height,
             ]) && self.fluid_rules.pour_speed > 0.0
+                && self.fluid_rules.min_tube_vertical_height
+                    < self.fluid_rules.max_tube_vertical_height
                 && !self.fluid_rules.words.is_empty()
                 && self.fluid_rules.burn_colors.iter().all(|c| finite(c)),
             "fluid rules",

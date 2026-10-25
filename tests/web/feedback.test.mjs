@@ -9,11 +9,11 @@ function setup(t){
  Object.assign(globalThis,{window:new EventTarget(),document,innerWidth:1280,innerHeight:720});
  const layout={canvas:{resolution:[1280,720],mode:0},ancestry:[],font_size:16,font:'sans-serif',color:[1,1,1,1],image_color:[1,1,1,1],sprite:null};
  const roles=['use','pickup','mount','fill','reticle','fluid','carry'];
- const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],icons:{},sprites:[]};
+ const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],icons:{},sprites:[],hose_prompts:{attach:'Stick in',drain:'Drain',coilup:'Coil up'}};
  const feedback=createFeedback(ui,'switch',{items:[]});feedback.setVisible(true);
- const record={actions:0,context:0,carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',quantities:[0,0,0,0,0,0],name:'',notice:'',condition:-1,throwCharge:0,throwActive:false};
+ const record={hose:0,actions:0,context:0,carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',quantities:[0,0,0,0,0,0],name:'',notice:'',condition:-1,throwCharge:0,throwActive:false};
  t.after(()=>{feedback.dispose();for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
- return {nodes,update(actions,carrying=false){feedback.update({...record,actions,carrying});return nodes.get('#hud').children.filter(n=>n.className==='action-row'&&!n.hidden).map(n=>n.textContent);}};
+ return {nodes,update(actions,carrying=false,hose=0){feedback.update({...record,actions,carrying,hose});return nodes.get('#hud').children.filter(n=>n.className==='action-row'&&!n.hidden).map(n=>n.textContent);}};
 }
 
 test('G08 HUD rows follow equipment availability and remove obsolete carry wording',t=>{
@@ -40,4 +40,10 @@ test('F15 cap text lists fluids in the tank list order',()=>{
  // Water (3) entered first, then gas (0): order nibbles are type + 1.
  const r={noText:false,context:0,hasName:true,fluidName:'Coolant',amount:2,capacity:5,quantities:[0.5,0,0,1.5,0,0],fluidOrder:4|(1<<4)};
  assert.equal(formatTank(r),'Coolant:\n2 / 5 L\n75% Water\n25% Gas');
+});
+
+test('R03 hose prompts replace mount and add coil up and drain',t=>{
+ const app=setup(t),mount=16,rotate=32768;
+ assert.deepEqual(app.update(mount|rotate,true,1|2|4),['[F]: Stick in','[R]: Coil up','[LMB]: Drain']);
+ assert.deepEqual(app.update(rotate,true,2),['[R]: Coil up']);
 });

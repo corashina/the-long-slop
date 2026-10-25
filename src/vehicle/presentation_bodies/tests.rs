@@ -17,6 +17,7 @@ fn empty_world() -> PhysicsWorld {
         vehicles: Vec::new(),
         hit_collector: Default::default(),
         hits: Vec::new(),
+        ignored: Default::default(),
     }
 }
 

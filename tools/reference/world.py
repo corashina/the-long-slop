@@ -568,6 +568,23 @@ def recover_spawn_context(samples):
         'startup_draws':4,'date':[2026,10,12]}
 
 
+def skin_record(source, exporter, component, node, bone_id):
+    """SkinnedMeshRenderer vertex streams. `bone_id` maps a bone Transform to its owner id."""
+    data=source.read(component)
+    mesh=source.resolve(component,data['m_Mesh']);doc,directory,mesh_index=exporter.accepted_mesh(mesh)
+    primitive=doc.meshes[mesh_index].primitives[0]
+    return {'source':source_id(component),'mesh':source_id(mesh),'node':node,
+        'bones':[bone_id(source.resolve(component,p)) for p in data['m_Bones']],
+        'bind_poses':convert_bind_poses(source.read(mesh)['m_BindPose']),
+        'positions':exporter.rows(doc,directory,primitive.attributes.POSITION),
+        'normals':exporter.rows(doc,directory,primitive.attributes.NORMAL),
+        'tangents':exporter.rows(doc,directory,primitive.attributes.TANGENT) if primitive.attributes.TANGENT is not None else [],
+        'uv':exporter.rows(doc,directory,primitive.attributes.TEXCOORD_0),
+        'joints':exporter.rows(doc,directory,primitive.attributes.JOINTS_0),
+        'weights':exporter.rows(doc,directory,primitive.attributes.WEIGHTS_0),
+        'triangles':exporter.geometry(mesh)[2]}
+
+
 def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cache,first_asset):
     prototypes=[]
     for index,(identity,root) in enumerate(roots.items(),first_asset):
@@ -607,18 +624,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                 if component.type.name=='MonoBehaviour' and source.class_name(component)=='roadscript':
                     controls=[mapping[key(source.resolve(component,p))] for p in data['bones']]
                 if component.type.name=='SkinnedMeshRenderer' and data['m_Mesh']['m_PathID']:
-                    mesh=source.resolve(component,data['m_Mesh']);doc,directory,mesh_index=exporter.accepted_mesh(mesh)
-                    primitive=doc.meshes[mesh_index].primitives[0]
-                    skins.append({'source':source_id(component),'mesh':source_id(mesh),'node':mapping[key(n['reader'])],
-                        'bones':[mapping[key(source.resolve(component,p))] for p in data['m_Bones']],
-                        'bind_poses':convert_bind_poses(source.read(mesh)['m_BindPose']),
-                        'positions':exporter.rows(doc,directory,primitive.attributes.POSITION),
-                        'normals':exporter.rows(doc,directory,primitive.attributes.NORMAL),
-                        'tangents':exporter.rows(doc,directory,primitive.attributes.TANGENT) if primitive.attributes.TANGENT is not None else [],
-                        'uv':exporter.rows(doc,directory,primitive.attributes.TEXCOORD_0),
-                        'joints':exporter.rows(doc,directory,primitive.attributes.JOINTS_0),
-                        'weights':exporter.rows(doc,directory,primitive.attributes.WEIGHTS_0),
-                        'triangles':exporter.geometry(mesh)[2]})
+                    skins.append(skin_record(source,exporter,component,mapping[key(n['reader'])],lambda bone:mapping[key(bone)]))
                 if component.type.name in ('BoxCollider','MeshCollider','SphereCollider','CapsuleCollider'):
                     selected.record(component)
                     physical_material=source.resolve(component,data['m_Material'])
