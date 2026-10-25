@@ -12,7 +12,7 @@ def joint(body, other):
 
 def hose():
     opening = {'source': {'file': 'sharedassets1.assets', 'path_id': 1}, 'tank': None, 'flow_liters_per_second': .1, 'flow_radius': .02}
-    return {'segments': SEGMENTS, 'main': 6, 't1': 4, 't2': 5,
+    return {'segments': SEGMENTS, 'mains': [4, 5], 't1': 4, 't2': 5,
         'break_force': [500.] * 6, 'connect_anchor': [[0., 0., .075]] * 6,
         'joints': [joint(a, b) for a, b in zip(SEGMENTS, SEGMENTS[1:])],
         'ends': [{'body': body, 'node': 9 + i, 'opening': opening,
@@ -45,7 +45,7 @@ class HoseTests(unittest.TestCase):
         validate_hose(hose(), PROTOTYPE)
         broken = []
         missing_end = hose(); missing_end['ends'].pop(); broken.append(missing_end)
-        outside = hose(); outside['main'] = 9; broken.append(outside)
+        outside = hose(); outside['mains'] = [9]; broken.append(outside)
         split = hose(); split['joints'][2] = joint(6, 3); broken.append(split)
         endless = copy.deepcopy(hose()); endless['break_force'][0] = math.nan; broken.append(endless)
         for record in broken:

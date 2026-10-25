@@ -97,6 +97,8 @@ struct Hose {
     connect_anchor: [Vector; HOSE_SEGMENTS],
     break_force: [f32; HOSE_SEGMENTS],
     ends: [End; 2],
+    /// Main segments. Each one runs `Fill` once per frame.
+    mains: usize,
     /// Segment in the inventory. The other segments are parked on it.
     stored: Option<usize>,
     coiled: bool,
@@ -507,7 +509,9 @@ impl HoseState {
                 hose.care(end, self.time, openings, items, physics);
             }
             hose.refresh_own_caps(openings);
-            hose.siphon(dt, fluid_scale, heights, openings, items, physics);
+            for _ in 0..hose.mains {
+                hose.siphon(dt, fluid_scale, heights, openings, items, physics);
+            }
             let held = input
                 .held
                 .and_then(|id| hose.items.iter().position(|i| *i == id));
@@ -581,6 +585,7 @@ impl InteractionState {
             connect_anchor: hose.connect_anchor.map(Vector::from_array),
             break_force: hose.break_force,
             ends,
+            mains: hose.mains.len(),
             stored: None,
             coiled: false,
         });
@@ -759,6 +764,7 @@ mod tests {
             connect_anchor: [Vector::ZERO; HOSE_SEGMENTS],
             break_force: [1e9; HOSE_SEGMENTS],
             ends: [end(0, 1), end(5, 2)],
+            mains: 2,
             stored: None,
             coiled: false,
         });

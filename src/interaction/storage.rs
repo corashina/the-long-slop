@@ -48,6 +48,8 @@ struct Volume {
     owner: ItemId,
     storage_type: u8,
     active: bool,
+    /// Source `onlyManual`. The periodic scan skips the volume.
+    only_manual: bool,
     dont_lock_if_owner_picked_up: bool,
     slots: Vec<PartSlotId>,
     usables: Vec<ItemId>,
@@ -64,6 +66,7 @@ impl Volume {
             owner: ItemId(u32::MAX),
             storage_type: 0,
             active: false,
+            only_manual: false,
             dont_lock_if_owner_picked_up: false,
             slots: Vec::new(),
             usables: Vec::with_capacity(4),
@@ -84,6 +87,7 @@ struct PrototypeVolume {
     half_extents: [f32; 3],
     shape: SharedShape,
     storage_type: u8,
+    only_manual: bool,
     /// Prototype node of each gate usable.
     usables: Vec<u32>,
     dont_lock_if_owner_picked_up: bool,
@@ -149,6 +153,7 @@ impl StorageLocks {
                 owner: record.owner,
                 storage_type: record.storage_type,
                 active: record.active,
+                only_manual: record.only_manual,
                 dont_lock_if_owner_picked_up: record.dont_lock_if_owner_picked_up,
                 slots: record.slots.clone(),
                 usables,
@@ -190,6 +195,7 @@ impl StorageLocks {
                     half_extents: record.half_extents,
                     shape: SharedShape::cuboid(x, y, z),
                     storage_type: record.storage_type,
+                    only_manual: record.only_manual,
                     usables,
                     dont_lock_if_owner_picked_up: record.dont_lock_if_owner_picked_up,
                 })
@@ -332,6 +338,7 @@ impl StorageLocks {
             volume.owner = item;
             volume.storage_type = record.storage_type;
             volume.active = true;
+            volume.only_manual = record.only_manual;
             volume.dont_lock_if_owner_picked_up = record.dont_lock_if_owner_picked_up;
             volume.usables.clear();
             volume
@@ -867,7 +874,7 @@ impl StorageLocks {
     ) -> Result<bool, ReferenceError> {
         let mut changed = false;
         for index in 0..self.volumes.len() {
-            if matches!(self.volumes[index].frame, Frame::Free) {
+            if matches!(self.volumes[index].frame, Frame::Free) || self.volumes[index].only_manual {
                 continue;
             }
             let volume = index as u16;
@@ -971,6 +978,7 @@ mod tests {
             owner,
             storage_type: 0,
             active: true,
+            only_manual: false,
             dont_lock_if_owner_picked_up: false,
             slots: Vec::new(),
             usables: Vec::new(),
@@ -1066,6 +1074,7 @@ mod tests {
             half_extents: [1.0; 3],
             shape: SharedShape::cuboid(1.0, 1.0, 1.0),
             storage_type: 0,
+            only_manual: false,
             usables: Vec::new(),
             dont_lock_if_owner_picked_up: true,
         });
@@ -1488,6 +1497,7 @@ mod tests {
             half_extents: [0.5; 3],
             shape: SharedShape::cuboid(0.5, 0.5, 0.5),
             storage_type: 0,
+            only_manual: false,
             usables: Vec::new(),
             dont_lock_if_owner_picked_up: false,
         });
