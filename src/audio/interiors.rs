@@ -94,6 +94,10 @@ impl WorldInteriors {
     pub fn entry(&self, handle: ColliderHandle) -> Option<usize> {
         self.handles.get(&handle).copied()
     }
+    /// The live world interior colliders.
+    pub fn colliders(&self) -> impl Iterator<Item = ColliderHandle> + '_ {
+        self.handles.keys().copied()
+    }
     /// The settings of a world list index.
     pub fn get<'a>(
         &self,

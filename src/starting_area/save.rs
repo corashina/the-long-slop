@@ -303,6 +303,7 @@ impl GarageRuntime {
         candidate.stream.hold_saved_item_locations();
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
+        candidate.weather.set_origin(candidate.stream.origin.offset);
         super::spawned::restore_save(
             reference,
             &mut candidate.area,

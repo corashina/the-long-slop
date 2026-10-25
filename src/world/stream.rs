@@ -620,12 +620,6 @@ impl WorldStream {
     pub fn focus(&self) -> [f64; 3] {
         self.request.player
     }
-    pub fn terrain_sample(&mut self, point: [f64; 3]) -> (f32, [f32; 4]) {
-        let height = self
-            .evaluator
-            .base_height([point[0] as f32, point[2] as f32], false);
-        (height, self.terrain_color(point))
-    }
     pub fn uses_painting_asset(&self, asset: crate::reference::AssetId) -> bool {
         self.contents.instances().any(|c| {
             c.appearance
@@ -3313,6 +3307,10 @@ impl WorldStream {
             .append(&self.wanted_structures, &mut self.color_helpers);
     }
     pub fn terrain_color(&mut self, point: [f64; 3]) -> [f32; 4] {
+        self.terrain_sample(point).1
+    }
+    /// Terrain surface height and color at an absolute point. Source Z is the negated world Z.
+    pub fn terrain_sample(&mut self, point: [f64; 3]) -> (f32, [f32; 4]) {
         self.refresh_helper_context(window(point, 1000.));
         let xz = [point[0] as f32, -point[2] as f32];
         let context = TerrainContext {
@@ -3324,8 +3322,9 @@ impl WorldStream {
             holes: &[],
             biome_override: self.mode.biome_override(),
         };
-        let color = self.evaluator.color(xz, context.height(xz));
-        super::forced_color(color, context.biome_override)
+        let height = context.height(xz);
+        let color = self.evaluator.color(xz, height);
+        (height, super::forced_color(color, context.biome_override))
     }
     pub fn required_content(&self) -> super::RequiredContent<'_> {
         super::RequiredContent {

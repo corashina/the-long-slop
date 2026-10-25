@@ -472,6 +472,35 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
     swept_boundaries(&mut run, &reference);
 }
 
+#[test]
+#[ignore = "requires the installed source export"]
+fn terrain_sample_matches_published_ground() {
+    let reference = reference();
+    let mut run = GarageRuntime::new(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let player = run.area.player.body_pose(&run.physics).position;
+    let mut checked = 0;
+    // Both Z signs: a sample with the source Z sign flipped misses one side.
+    for offset in [
+        [40., 0., 40.],
+        [40., 0., -40.],
+        [-60., 0., 25.],
+        [-25., 0., -60.],
+    ] {
+        let point: [f32; 3] = std::array::from_fn(|i| player[i] + offset[i]);
+        let Some(ground) = run.stream.ground_height(&run.physics, point) else {
+            continue;
+        };
+        let (height, _) = run.stream.terrain_sample(run.stream.origin.absolute(point));
+        assert!(
+            (height - ground).abs() < 1.,
+            "{point:?}: {height} != {ground}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 2);
+}
+
 fn move_player(run: &mut GarageRuntime, position: [f32; 3]) {
     let old = run.area.player.body_pose(&run.physics).position;
     run.area

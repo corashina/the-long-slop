@@ -26,6 +26,7 @@ pub mod cigarettes;
 pub(crate) mod hose;
 pub mod spawned;
 mod survival;
+mod weather;
 pub use survival::DrinkResult;
 pub(crate) use survival::active_part as active_food_part;
 
@@ -670,6 +671,8 @@ pub struct GarageRuntime {
     pub survival: crate::survival::SurvivalState,
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
+    pub weather: crate::weather::WeatherState,
+    weather_bindings: weather::WeatherBindings,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -765,6 +768,18 @@ impl GarageRuntime {
                 state.sync_lamps(&reference.lighting, &lighting);
                 state
             });
+        let weather_bindings = weather::WeatherBindings::new(
+            &physics,
+            area.player.body_handle(),
+            &audio.as_ref().map_or(Vec::new(), |audio| {
+                audio
+                    .reference
+                    .interiors
+                    .iter()
+                    .map(|i| i.collider)
+                    .collect()
+            }),
+        );
         let urine_visual = reference
             .particles
             .iter()
@@ -788,6 +803,8 @@ impl GarageRuntime {
             urine_reference,
             urine_emission: [0.; 2],
             ambient: crate::audio::AmbientState::new(&reference.ambient),
+            weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
+            weather_bindings,
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -1300,6 +1317,7 @@ impl GarageRuntime {
         }
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
+        self.advance_weather(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1437,6 +1455,7 @@ impl GarageRuntime {
         if self.stream.rebase(focus, &mut self.physics).is_some() {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
+            self.weather.set_origin(self.stream.origin.offset);
             self.urine
                 .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
                     |i| (self.area.origin[i] - old_origin[i]) as f32,
