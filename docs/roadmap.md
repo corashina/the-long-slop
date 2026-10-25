@@ -38,7 +38,19 @@ All tasks are done. Run this test pass on Tomasz's PC next:
 
 ## 2. Car parts and repair
 
-All tasks are done. Section test pass: run the ignored export tests in `tests/garage_parts.rs`. In the browser, swap hood and trunk, and repair rust and dirt. Re-export, then check the Lada radiator fan spins while the engine runs. Check exhaust smoke: rate with rpm, color after a fuel mix change, 5x5 sheet animation, F3 cost. Check the siphon hose: the garage hose spawns clear of walls; attach to the Lada tank and a can; siphon by height; drain with LMB; coil up with R; store; tear off by driving; save and load; F3 near a hose. Cargo storage: run `r05_cargo_locks_in_trunk -- --ignored`; in the browser lock items in the Lada trunk, glove box, engine bay, a box, a fridge, a pallet, and a coffin; open the lid to release them; save and load; F3 while driving with cargo.
+Fix part repair, electronics, the siphon hose, exhaust smoke, and cargo storage.
+
+All tasks are done. Run this test pass on Tomasz's PC after section 1:
+
+1. Pull master. Re-export, then rebuild. Old exports and saves do not load.
+2. Run the ignored export tests: `cargo test --test garage_parts -- --ignored` and `cargo test --lib r05_cargo_locks_in_trunk -- --ignored`.
+3. Repair (R01): swap the hood and the trunk lid, repair rust and dirt.
+4. Electronics (R02): check the Lada radiator fan spins while the engine runs.
+5. Exhaust smoke (R04): rate follows rpm, color changes after a fuel mix change, 5x5 sheet animates. Check the particle quads are not upside down.
+6. Siphon hose (R03): first check the garage hose spawns clear of the walls. Attach it to the Lada tank and a can. Siphon by height, drain with LMB, coil with R, store it, tear it off by driving.
+7. Cargo storage (R05): lock items in the Lada trunk, glove box, and engine bay, and in a box, a fridge, a pallet, and a coffin. Open the lid to release them.
+8. Save and load with the hose attached and with cargo locked.
+9. Check F3 with smoke, near a hose, and while driving with cargo. Compare with the frame rate rule.
 
 ## 3. World and terrain
 
