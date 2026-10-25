@@ -141,9 +141,10 @@ impl ItemStore {
         for record in saved {
             let state = self.get_mut(ids.item(&record.instance)?).unwrap();
             state.location = match &record.location {
-                ItemLocationSave::World | ItemLocationSave::GeneratedAttachment { .. } => {
-                    ItemLocation::World
-                }
+                // `GarageRuntime::from_save` locks saved items after their bodies bind.
+                ItemLocationSave::World
+                | ItemLocationSave::GeneratedAttachment { .. }
+                | ItemLocationSave::Locked { .. } => ItemLocation::World,
                 ItemLocationSave::Held => ItemLocation::Held,
                 ItemLocationSave::Stored { slot } => ItemLocation::Stored(*slot),
                 ItemLocationSave::Equipped => ItemLocation::Equipped,
@@ -157,7 +158,10 @@ impl ItemStore {
                 record.location,
                 ItemLocationSave::GeneratedAttachment { .. }
             );
-            state.local_pose = crate::save::local_pose(&record.local_pose);
+            // A saved lock pose is relative to the owner, not to the item body.
+            if !matches!(record.location, ItemLocationSave::Locked { .. }) {
+                state.local_pose = crate::save::local_pose(&record.local_pose);
+            }
             state.food = record.food.as_ref().map(|food| FoodState {
                 prototype_index: reference
                     .survival
@@ -488,17 +492,29 @@ impl ItemStore {
                 ItemLocation::Attached(owner) => ItemLocationSave::Attached {
                     owner: ids.item_instance(owner)?,
                 },
-                // Task 4 replaces this with a `Locked` save record.
-                ItemLocation::Locked { owner, .. } => ItemLocationSave::Attached {
+                ItemLocation::Locked { owner, volume } => ItemLocationSave::Locked {
                     owner: ids.item_instance(owner)?,
+                    volume: crate::save::SourceKey::from(
+                        &reference
+                            .storage
+                            .volumes
+                            .get(volume as usize)
+                            .ok_or_else(|| {
+                                crate::save::SaveError::InvalidLinks(
+                                    "Unknown storage volume".into(),
+                                )
+                            })?
+                            .source,
+                    ),
                 },
             };
+            let local_pose = self.saved_local_pose(id, &interaction.storage)?;
             records.push(ItemSnapshot {
                 instance: ids.item_instance(id)?,
                 pose: AbsolutePose { position, rotation },
                 local_pose: LocalPose {
-                    position: item.local_pose.position,
-                    rotation: item.local_pose.rotation,
+                    position: local_pose.position,
+                    rotation: local_pose.rotation,
                 },
                 location,
                 temperature: item.temperature,
@@ -514,6 +530,45 @@ impl ItemStore {
         }
         records.sort_by(|a, b| a.instance.cmp(&b.instance));
         Ok(records)
+    }
+    /// A locked item saves its pose to the owner. An item that rides on a lock saves its
+    /// pose to the loose body it returns to on unlock.
+    pub(crate) fn saved_local_pose(
+        &self,
+        id: ItemId,
+        storage: &super::storage::StorageLocks,
+    ) -> Result<VehiclePose, crate::save::SaveError> {
+        let missing = || crate::save::SaveError::InvalidLinks("Missing storage lock".into());
+        let item = self.get(id).ok_or_else(missing)?;
+        if let ItemLocation::Locked { owner, .. } = item.location {
+            let owner = self.get(owner).ok_or_else(missing)?;
+            if owner.body != item.body {
+                return Err(crate::save::SaveError::InvalidLinks(
+                    "Storage carrier mismatch".into(),
+                ));
+            }
+            return Ok(from_rapier(
+                &(to_rapier(owner.local_pose).inverse() * to_rapier(item.local_pose)),
+            ));
+        }
+        let mut ancestor = id;
+        for _ in 0..self.states.len() {
+            let Some(parent) = self.parent(ancestor) else {
+                break;
+            };
+            let state = self.get(parent).ok_or_else(missing)?;
+            if matches!(state.location, ItemLocation::Locked { .. }) {
+                if state.body != item.body {
+                    break;
+                }
+                let loose = storage.loose_local(parent).ok_or_else(missing)?;
+                return Ok(from_rapier(
+                    &(loose * to_rapier(state.local_pose).inverse() * to_rapier(item.local_pose)),
+                ));
+            }
+            ancestor = parent;
+        }
+        Ok(item.local_pose)
     }
     pub fn register_generated_slot(&mut self, id: PartSlotId, owner: Option<ItemId>) {
         self.slot_owners.insert(id, owner);

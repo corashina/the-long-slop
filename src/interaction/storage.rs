@@ -384,6 +384,52 @@ impl StorageLocks {
         });
         Ok(true)
     }
+    /// The locked item pose relative to its disabled own body.
+    pub fn loose_local(&self, item: ItemId) -> Option<Pose> {
+        self.locked
+            .iter()
+            .find(|l| l.item == item)
+            .map(|l| l.loose_local)
+    }
+    /// Source `Lock(_ignoreTime: true)` for a saved item: no drop delay and no two-scan rule.
+    /// `owner_local` is the item pose relative to the owner. The owner must be locked first.
+    pub fn lock_saved(
+        &mut self,
+        item: ItemId,
+        volume: u16,
+        owner_local: Pose,
+        items: &mut ItemStore,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let owner = self
+            .volumes
+            .get(volume as usize)
+            .ok_or_else(|| error("Unknown storage volume"))?
+            .owner;
+        let owner_state = items
+            .get(owner)
+            .ok_or_else(|| error("Missing storage owner"))?;
+        let carrier = owner_state
+            .body
+            .ok_or_else(|| error("Storage owner has no body"))?;
+        let owner_pose =
+            *physics.rapier().bodies[carrier].position() * to_rapier(owner_state.local_pose);
+        let state = items
+            .get(item)
+            .ok_or_else(|| error("Missing storage item"))?;
+        let body = state
+            .body
+            .ok_or_else(|| error("Storage item has no body"))?;
+        if state.location != ItemLocation::World || body == carrier {
+            return Err(error("Saved storage item is not loose"));
+        }
+        let body_pose = owner_pose * owner_local * to_rapier(state.local_pose).inverse();
+        physics.edit_body(body, |body| body.set_position(body_pose, false));
+        if !self.lock(item, volume, items, physics)? {
+            return Err(error("Saved storage item shares its body"));
+        }
+        Ok(())
+    }
     /// Returns the item to its own body with the carrier velocity. Its locked children stay locked to it.
     pub fn unlock(
         &mut self,
@@ -808,5 +854,77 @@ mod tests {
         );
         assert!((rig.mass(box_body) - 3.0).abs() < 1e-4);
         assert!((rig.mass(can_body) - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn saved_lock_round_trip_restores_owner_pose_and_mass() {
+        use crate::save::{InstanceId, ItemLocationSave, LocalPose, SourceKey};
+        let mut original = rig(false);
+        let shape = original.collider(CAN);
+        original.scan(0.0);
+        original.scan(1.5);
+        assert!(matches!(
+            original.location(CAN),
+            ItemLocation::Locked { .. }
+        ));
+        let world = original.world(shape);
+        let pose = original
+            .items
+            .saved_local_pose(CAN, &original.locks)
+            .unwrap();
+        let source = SourceKey {
+            file: "level".into(),
+            path_id: "7".into(),
+        };
+        let saved = (
+            ItemLocationSave::Locked {
+                owner: InstanceId::Initial {
+                    source: source.clone(),
+                },
+                volume: source,
+            },
+            LocalPose {
+                position: pose.position,
+                rotation: pose.rotation,
+            },
+        );
+        let json = serde_json::to_string(&saved).unwrap();
+        let parsed: (ItemLocationSave, LocalPose) = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, saved);
+
+        // Load with a moved carrier and the can body elsewhere. No scan and no drop delay.
+        let mut loaded = rig(false);
+        let carrier_pose = Pose::from_parts(
+            Vector::new(0.0, 1.0, 0.0),
+            rapier3d::math::Rotation::from_rotation_y(0.5),
+        );
+        let carrier = loaded.carrier;
+        loaded
+            .physics
+            .edit_body(carrier, |body| body.set_position(carrier_pose, false));
+        let can_body = loaded.items.get(CAN).unwrap().body.unwrap();
+        loaded.physics.edit_body(can_body, |body| {
+            body.set_position(Pose::from_translation(Vector::new(5.0, 0.0, 0.0)), false)
+        });
+        loaded.locks.mark_dropped(CAN);
+        loaded
+            .locks
+            .lock_saved(
+                CAN,
+                0,
+                to_rapier(crate::save::local_pose(&parsed.1)),
+                &mut loaded.items,
+                &mut loaded.physics,
+            )
+            .unwrap();
+        assert_eq!(
+            loaded.location(CAN),
+            ItemLocation::Locked {
+                owner: CARRIER,
+                volume: 0
+            }
+        );
+        assert!(close(&loaded.world(shape), &(carrier_pose * world)));
+        assert!((loaded.mass(carrier) - 12.0).abs() < 1e-4);
     }
 }
