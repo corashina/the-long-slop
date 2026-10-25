@@ -7,6 +7,6 @@ export function installDrawDistance(storage,input,output,{minimum,maximum,fallba
  const show=()=>{output.textContent=value+' m';};
  Object.assign(input,{min:String(minimum),max:String(maximum),step:String(STEP),value:String(value)});show();
  input.addEventListener('input',()=>{value=snap(Number(input.value));show();});
- input.addEventListener('change',()=>{try{storage().setItem(KEY,String(value));}catch{}});
- return {value:()=>value,lock(locked){input.disabled=locked;}};
+ // Store only a value a world accepted, so a refused value never comes back after a reload.
+ return {value:()=>value,lock(locked){input.disabled=locked;},store(){try{storage().setItem(KEY,String(value));}catch{}},clear(){try{storage().removeItem(KEY);}catch{}}};
 }

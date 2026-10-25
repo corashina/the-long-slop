@@ -9,7 +9,7 @@ export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
 let slider,worldDrawDistance;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save')worldDrawDistance=slider.value();}});
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
 import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
@@ -140,7 +140,7 @@ const sleep={phase:0,eligible:false,showHint:false,charge:0,cooldownRemaining:0,
 window.gameSleep=(phase,eligible,showHint,charge,cooldownRemaining,progress)=>{
  sleep.phase=phase;sleep.eligible=eligible;sleep.showHint=showHint;sleep.charge=charge;sleep.cooldownRemaining=cooldownRemaining;sleep.progress=progress;sleep.held=(input.state.held&262144)!==0;sleep.dead=dead;sleeping=phase===2;survival?.updateSleep(sleep,feedback?.state.enabled);
 };
-function fail(message,notifyRenderer=true){if(failed)return;failed=true;performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
+function fail(message,notifyRenderer=true){if(failed)return;failed=true;if(/Draw distance [\d.]+ m does not fit/.test(message))slider?.clear();performancePanel.stop();startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.fail({...startupFailureDetails,message,loading:loading.snapshot()});startupDone=true;loading.fail();const text='Cannot start the game. '+message+' Reload to try again.';if(menu){menu.fail(text);status.textContent='';}else{status.textContent='';runtimeError.textContent=text;runtimeError.hidden=false;}if(notifyRenderer)renderFailure?.(message);}
 function finishStartup(){if(failed||startupDone||!startupReady||!input||!menu)return;startup.reconcile(performance.getEntriesByType('resource'));stopStartupEnvironment();startup.finish({inputReady:true});startupDone=true;}
 window.gameFailure=message=>fail(message,false);
 window.gameLoading=()=>{if(failed)return;loading.start();loading.stage('Loading the garage...');menu.loading();};
