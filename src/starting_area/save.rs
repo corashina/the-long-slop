@@ -204,10 +204,13 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         expected: &SourceStamp,
         saved: &SaveSnapshot,
+        mode: crate::world::GameMode,
+        draw_distance: f32,
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
-        let mut candidate = Self::new_candidate(reference, false, saved.world.seed)?;
+        let mut candidate =
+            Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
         candidate
             .area
             .conditions
@@ -302,6 +305,12 @@ impl GarageRuntime {
         candidate.stream.hold_saved_item_locations();
         candidate.stream.origin.offset = saved.player.pose.position;
         candidate.area.sync_origin(candidate.stream.origin.offset);
+        candidate.weather.set_origin(candidate.stream.origin.offset);
+        candidate.weather.restore(
+            &reference.weather,
+            candidate.simulation_seconds,
+            &saved.weather,
+        );
         super::spawned::restore_save(
             reference,
             &mut candidate.area,
@@ -625,6 +634,9 @@ impl GarageRuntime {
                 .spawned
                 .capture_save(reference, &self.area.items, origin),
             cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
+            weather: self
+                .weather
+                .snapshot(&reference.weather, self.simulation_seconds),
         };
         if let Some(pending) = &self.pending_restore {
             for saved in &pending.items {

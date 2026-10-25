@@ -256,3 +256,33 @@ impl TerrainEvaluator {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Exported edge values. f32 steps are 2 m near 2e7, so these X values are exact.
+    #[test]
+    fn edge_of_world_fades_height() {
+        let terrain = TerrainEvaluator::new(TerrainSettings {
+            seed: -1705217151,
+            edge: 20_000_000.0,
+            edge_gradient: 20_000.0,
+        });
+        let height = |x: f32, edge| terrain.base_height([x, 0.0], edge);
+        for x in [20_000_000.0, -20_000_000.0] {
+            assert_ne!(height(x, false), 0.0);
+            assert_eq!(height(x, true), 0.0);
+        }
+        for x in [19_980_000.0, -19_980_000.0] {
+            assert_eq!(height(x, true), height(x, false));
+        }
+        assert_eq!(
+            height(19_990_000.0, true),
+            height(19_990_000.0, false) * 0.5
+        );
+        let z = [0.0, 20_000_000.0];
+        assert_ne!(terrain.base_height(z, false), 0.0);
+        assert_eq!(terrain.base_height(z, true), 0.0);
+    }
+}

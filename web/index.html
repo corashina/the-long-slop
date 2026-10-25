@@ -14,7 +14,7 @@
 <h1>The Long Slop</h1>
 <p id="status" role="status" aria-live="polite">Loading the game...</p>
 <p id="capture-error" role="alert" hidden></p>
-<div id="start-actions" class="menu-actions"><button id="new-game" type="button" disabled>New game</button><button id="start-load" type="button" disabled>Load</button><button id="start-controls" type="button" disabled>Controls</button></div>
+<div id="start-actions" class="menu-actions"><button id="new-game" type="button" disabled>New game</button><button id="start-load" type="button" disabled>Load</button><button id="start-controls" type="button" disabled>Controls</button><button id="start-game-mode" type="button" disabled>Game mode</button></div>
 <div id="pause-actions" class="menu-actions" hidden><button id="resume" type="button">Continue</button><button id="save" type="button">Save</button><button id="load" type="button">Load</button><button id="pause-new-game" type="button">New game</button><button id="recover" type="button">Recover</button><button id="controls" type="button">Controls</button><p id="session-distance"></p></div>
 <section id="controls-screen" aria-labelledby="controls-title" hidden>
 <h2 id="controls-title">Controls</h2>
@@ -32,7 +32,10 @@
 <div><dt>Reverse</dt><dd data-driving-binding="reverse"></dd></div><div><dt>Neutral</dt><dd data-driving-binding="neutral"></dd></div>
 <div><dt>Gear 1</dt><dd data-driving-binding="gear1"></dd></div><div><dt>Gear 2</dt><dd data-driving-binding="gear2"></dd></div><div><dt>Gear 3</dt><dd data-driving-binding="gear3"></dd></div><div><dt>Gear 4</dt><dd data-driving-binding="gear4"></dd></div><div><dt>Gear 5</dt><dd data-driving-binding="gear5"></dd></div><div><dt>Gear 6</dt><dd data-driving-binding="gear6"></dd></div>
 <div><dt>Camera</dt><dd>C</dd></div><div><dt>Get out</dt><dd>E</dd></div><div><dt>Menu</dt><dd>Esc</dd></div></dl></section>
-</div><div class="display-controls"><button id="back" type="button">Back</button><button id="fullscreen" type="button">Fullscreen</button><label for="scene-resolution">Scene resolution <select id="scene-resolution"><option value="1" selected>100%</option><option value="0.75">75%</option></select></label></div></section></section>
+</div><div class="display-controls"><button id="back" type="button">Back</button><button id="fullscreen" type="button">Fullscreen</button><label for="scene-resolution">Scene resolution <select id="scene-resolution"><option value="1" selected>100%</option><option value="0.75">75%</option></select></label><label for="draw-distance">Draw distance <input id="draw-distance" type="range"><output id="draw-distance-value" for="draw-distance"></output></label></div></section>
+<section id="game-mode-screen" aria-labelledby="game-mode-title" hidden>
+<h2 id="game-mode-title">Game mode</h2>
+<div class="display-controls"><button id="game-mode-back" type="button">Back</button><label for="biome">Biome <select id="biome"><option value="0">Mixed</option><option value="1">Desert</option><option value="2">Winter</option><option value="3">Grass</option></select></label></div></section></section>
 <aside id="hud" aria-label="Interaction feedback" hidden>
 <p id="driving-gear" hidden></p>
 <img id="crosshair" alt="" aria-hidden="true">

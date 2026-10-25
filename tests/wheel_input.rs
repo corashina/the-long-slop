@@ -1,3 +1,4 @@
+use rapier3d::math::{Rotation, Vector};
 use the_long_slop::{
     interaction::{
         AimTarget, InteractionAction, ResolvedAim, SlotTarget, WheelAction, feedback::ActionMask,
@@ -8,7 +9,6 @@ use the_long_slop::{
     starting_area::GarageRuntime,
     vehicle::VehiclePose,
 };
-use rapier3d::math::{Rotation, Vector};
 
 fn input(
     run: &mut GarageRuntime,
@@ -68,7 +68,12 @@ fn installed_source_tire_input_order_and_rejection() {
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let slot = &reference.wheel_slots[0];
     let rim = slot.rim;
     let original_tire = slot.tire;

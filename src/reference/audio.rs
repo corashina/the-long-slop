@@ -252,12 +252,12 @@ record!(AmbienceZoneReference {
     clip: u32,
     method: AudioMethod
 });
-/// Zones play through the one looped 2D survival row of kind 16.
+/// Zones play through the one looped 2D survival row of kind 19.
 fn validate_zones(
     zones: &[AmbienceZoneReference],
     survival: &[SurvivalAudioReference],
 ) -> Result<(), ReferenceError> {
-    let row = survival.iter().find(|b| b.kind == 16);
+    let row = survival.iter().find(|b| b.kind == 19);
     require(
         zones.is_empty() == row.is_none()
             && row.is_none_or(|b| {
@@ -458,7 +458,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=15)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=16)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -978,6 +978,7 @@ impl AudioGameplayReference {
             (2, "fart"),
             (4, "sleep"),
             (5, "death"),
+            (6, "storm"),
             (7, "ambient_day"),
             (8, "ambient_night"),
             (9, "shit"),
@@ -987,6 +988,9 @@ impl AudioGameplayReference {
             (13, "rock_heat"),
             (14, "music_box"),
             (15, "footstep"),
+            (16, "storm_inside"),
+            (17, "melee_hit"),
+            (18, "metal_detector"),
         ] {
             require(
                 r.bindings
@@ -1011,10 +1015,10 @@ impl AudioGameplayReference {
         let zones = r
             .bindings
             .iter()
-            .filter(|b| b.kind == 16 && b.role == "ambience_zone" && !b.clips.is_empty())
+            .filter(|b| b.kind == 19 && b.role == "ambience_zone" && !b.clips.is_empty())
             .count();
         require(
-            zones <= 1 && r.bindings.len() == 14 + zones,
+            zones <= 1 && r.bindings.len() == 18 + zones,
             "required audio roles",
         )?;
         Ok(r)
@@ -1109,7 +1113,7 @@ mod tests {
         .unwrap();
         let curve = r#"{"keys":[{"time":0,"value":0,"in_tangent":0,"out_tangent":0,"in_weight":0,"out_weight":0,"weighted_mode":0}],"pre_wrap_mode":2,"post_wrap_mode":2,"rotation_order":4}"#;
         let survival: Vec<SurvivalAudioReference> = serde_json::from_str(&format!(
-            r#"[{{"role":"ambience_zone","kind":16,"one_shot":false,
+            r#"[{{"role":"ambience_zone","kind":19,"one_shot":false,
             "source":{{"file":"sharedassets1.assets","path_id":144139}},
             "audio_source":{{"file":"sharedassets1.assets","path_id":123024}},
             "clips":[7],"gain":[1,1],"pitch":[1,1],"offset":[0,0,0],

@@ -74,7 +74,6 @@ pub struct CycleReference {
     pub flare_lerp_start: f32,
     pub flare_lerp_end: f32,
     pub biome_refresh_seconds: f32,
-    pub fog_modifier: f32,
     pub desert_color: [f32; 4],
     pub sky_colors: [[f32; 4]; 3],
     pub day_ground_colors: [[f32; 4]; 3],
@@ -86,6 +85,8 @@ pub struct CycleReference {
     pub temp_days: [f32; 3],
     pub temp_nights: [f32; 3],
     pub temp_add_noons: [f32; 3],
+    /// postprocesscontrol.TemperatureValues: main-view grading temperature per biome.
+    pub temperature_values: [f32; 3],
     pub flare_dawn: [f32; 3],
     pub flare_day: [f32; 3],
     pub flare_dusk: [f32; 3],
@@ -536,7 +537,6 @@ impl LightingRecord {
                     c.night_intensity,
                     c.noon_intensity,
                     c.day_ambient,
-                    c.fog_modifier,
                     c.night_ambient,
                     c.min_reflection,
                     c.max_reflection,
@@ -562,7 +562,6 @@ impl LightingRecord {
                     c.night_intensity,
                     c.noon_intensity,
                     c.day_ambient,
-                    c.fog_modifier,
                     c.night_ambient,
                     c.min_reflection,
                     c.max_reflection,
@@ -633,7 +632,12 @@ impl LightingRecord {
                 "biome scalars",
             )?;
         }
-        for values in [&c.temp_days, &c.temp_nights, &c.temp_add_noons] {
+        for values in [
+            &c.temp_days,
+            &c.temp_nights,
+            &c.temp_add_noons,
+            &c.temperature_values,
+        ] {
             check(finite(values), &c.source, "visual temperature arrays")?;
         }
         for values in [
@@ -1005,17 +1009,9 @@ impl LightingRecord {
         for camera in &self.cameras {
             check(
                 valid_source(&camera.source)
-                    && finite(&[
-                        camera.near_plane,
-                        camera.far_plane,
-                        camera.startup_near_plane,
-                        camera.startup_far_plane,
-                        camera.field_of_view,
-                    ])
+                    && finite(&[camera.near_plane, camera.far_plane, camera.field_of_view])
                     && camera.near_plane > 0.
                     && camera.far_plane > camera.near_plane
-                    && camera.startup_near_plane > 0.
-                    && camera.startup_far_plane > camera.startup_near_plane
                     && camera.field_of_view > 0.
                     && camera.field_of_view < 180.
                     && camera.culling_mask != 0,
@@ -1157,8 +1153,6 @@ pub struct LightingCameraReference {
     pub role: String,
     pub near_plane: f32,
     pub far_plane: f32,
-    pub startup_near_plane: f32,
-    pub startup_far_plane: f32,
     pub field_of_view: f32,
     pub hdr: bool,
     pub culling_mask: u32,

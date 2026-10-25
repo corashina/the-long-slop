@@ -41,6 +41,10 @@ pub struct PropGenerator {
     width: f32,
     seed: i32,
 }
+/// Candidate grid side of one chunk.
+pub(crate) fn candidate_side(reference: &WorldGeneratorReference) -> usize {
+    ((reference.chunk_dist / reference.point_dist) as usize).max(2)
+}
 impl PropGenerator {
     pub fn new(world: &WorldReference, seed: i32, index: usize) -> Result<Self, ReferenceError> {
         let reference = world.generators[index].clone();
@@ -50,7 +54,7 @@ impl PropGenerator {
             WorldLayer::Tower,
             WorldLayer::DesertBuilding,
         ][index];
-        let side = ((reference.chunk_dist / reference.point_dist) as usize).max(2);
+        let side = candidate_side(&reference);
         let half = (side - 1) as f32 * reference.point_dist * 0.5;
         let mut points = Vec::with_capacity(side * side);
         for z in 0..side {

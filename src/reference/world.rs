@@ -7,13 +7,15 @@ mod initialization;
 mod lod;
 mod memory;
 use super::{
-    AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, ReferenceError, ReferenceManifest,
-    SourceHash, SourceId, Transform, finite, hash, require, transform,
+    AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, NodeId, ReferenceError,
+    ReferenceManifest, SourceHash, SourceId, Transform, finite, hash, require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
 pub use initialization::*;
 pub use lod::*;
+mod draw_distance;
+pub use draw_distance::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -29,7 +31,6 @@ pub struct WorldReference {
     pub managed_sha256: String,
     pub library: LibraryProvenance,
     pub capture_library: LibraryProvenance,
-    pub settings_context: String,
     pub spawn_context: WorldSpawnContext,
     pub initialization: WorldInitialization,
     pub generation_frame: Transform,
@@ -37,7 +38,7 @@ pub struct WorldReference {
     pub magnetic_field: [f32; 4],
     /// mainscript.lightTurnOffValue: electronics output that powers radios and lamps.
     pub electronics_cutoff: f32,
-    pub distances: BTreeMap<String, f32>,
+    pub draw_distance: DrawDistanceReference,
     #[serde(deserialize_with = "compact_vec")]
     pub source_hashes: Vec<SourceHash>,
     pub road: WorldRoadReference,
@@ -61,6 +62,9 @@ pub struct WorldReference {
     pub mechanisms: Vec<WorldMechanism>,
     #[serde(deserialize_with = "compact_vec")]
     pub painting_materials: Vec<WorldPaintingMaterial>,
+    /// Source `materialpairscript` sets that marked prototype nodes use.
+    #[serde(deserialize_with = "compact_vec")]
+    pub biome_material_sets: Vec<WorldBiomeMaterialSet>,
     #[serde(deserialize_with = "compact_vec")]
     pub prototypes: Vec<WorldPrototypeReference>,
     #[serde(deserialize_with = "compact_vec")]
@@ -75,6 +79,15 @@ pub struct WorldReference {
     #[serde(deserialize_with = "compact_vec")]
     pub light_cookies: Vec<WorldLightCookie>,
     pub pickup_hits: Vec<WorldPickupHit>,
+    pub home_cable: HomeCableReference,
+}
+
+/// Rope nodes of the home cable. Source: home `buildingscript.connectToPole` `ropeScript`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomeCableReference {
+    pub root: NodeId,
+    pub ropes: Vec<NodeId>,
 }
 
 /// Binds a world Light cookie source to its exported lighting spot cookie texture.
@@ -178,6 +191,35 @@ pub struct WorldPrototypeNode {
     pub layer: u8,
     pub transform: Transform,
     pub gltf_node: u32,
+    /// The node has an enabled source `materialChangeScript`.
+    pub biome_materials: bool,
+}
+/// Source `materialpairscript` set, exported as `[desert, winter, grass]`.
+/// A renderer under a marked node whose first material is `desert` takes the winter or grass material.
+/// `None` keeps the desert material.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    from = "(SourceId, Option<SourceId>, Option<SourceId>)",
+    into = "(SourceId, Option<SourceId>, Option<SourceId>)"
+)]
+pub struct WorldBiomeMaterialSet {
+    pub desert: SourceId,
+    /// Winter, then grass.
+    pub variants: [Option<SourceId>; 2],
+}
+impl From<(SourceId, Option<SourceId>, Option<SourceId>)> for WorldBiomeMaterialSet {
+    fn from((desert, winter, grass): (SourceId, Option<SourceId>, Option<SourceId>)) -> Self {
+        Self {
+            desert,
+            variants: [winter, grass],
+        }
+    }
+}
+impl From<WorldBiomeMaterialSet> for (SourceId, Option<SourceId>, Option<SourceId>) {
+    fn from(set: WorldBiomeMaterialSet) -> Self {
+        let [winter, grass] = set.variants;
+        (set.desert, winter, grass)
+    }
 }
 /// SkinnedMeshRenderer vertex streams. `Node` owns the renderer. `Bone` owns each bone Transform.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -222,6 +264,7 @@ pub struct WorldColliderReference {
     pub source_empty_mesh: Option<SourceId>,
     pub geometry: Option<ColliderGeometry>,
     pub step_surface: Option<super::StepSurface>,
+    pub tag: Option<super::ColliderTag>,
 }
 /// Gameplay role of a trigger collider.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -419,7 +462,6 @@ pub struct WorldTerrainReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldGameSettings {
     pub source: SourceId,
-    pub biome: i32,
     #[serde(rename = "homesickMode")]
     pub homesick_mode: i32,
 }
@@ -561,6 +603,37 @@ pub struct WorldBuildingSide {
     #[serde(rename = "minYAngle")]
     pub min_y_angle: f32,
 }
+impl WorldReference {
+    /// Every set material binds as a world prototype material. Desert materials are unique.
+    fn validate_biome_material_sets(
+        &self,
+        manifest: &ReferenceManifest,
+    ) -> Result<(), ReferenceError> {
+        let known: HashSet<&SourceId> = self
+            .prototypes
+            .iter()
+            .flat_map(|p| p.deferred_materials.iter().map(|m| &m.source))
+            .chain(
+                manifest
+                    .rendering
+                    .materials
+                    .iter()
+                    .filter(|m| self.prototypes.iter().any(|p| p.asset == m.asset))
+                    .map(|m| &m.source),
+            )
+            .collect();
+        let mut deserts = HashSet::new();
+        for set in &self.biome_material_sets {
+            require(
+                deserts.insert(&set.desert)
+                    && known.contains(&set.desert)
+                    && set.variants.iter().flatten().all(|m| known.contains(m)),
+                &field(&set.desert, "biome material set"),
+            )?;
+        }
+        Ok(())
+    }
+}
 fn source_valid(source: &SourceId, hashes: &[SourceHash]) -> bool {
     source.path_id != 0 && hashes.iter().any(|h| h.file == source.file)
 }
@@ -616,11 +689,7 @@ impl WorldReference {
                 && self.managed_sha256 == WORLD_MANAGED_SHA256,
             "world source sample/hash",
         )?;
-        require(
-            self.settings_context == "minimum_draw_distance_frozen_generation_frame"
-                && transform(&self.generation_frame),
-            "world source context/frame",
-        )?;
+        require(transform(&self.generation_frame), "world source frame")?;
         validate_world_libraries(&self.library, &self.capture_library, &manifest.library)?;
         require(
             self.spawn_context.classification == "controlled_startup_before_garage"
@@ -840,6 +909,7 @@ impl WorldReference {
                 "Painting source material and texture assignment",
             )?;
         }
+        self.validate_biome_material_sets(manifest)?;
         for binding in &self.initial_materials {
             binding.validate(&record_map)?;
         }
@@ -879,35 +949,7 @@ impl WorldReference {
         ] {
             require(records.contains(s), &field(s, "required world input"))?;
         }
-        require(
-            self.distances.get("drawDistance") == Some(&500.)
-                && self.distances.values().all(|v| v.is_finite()),
-            "world minimum draw distances",
-        )?;
-        for name in [
-            "TerrainGenDist",
-            "TerrainRemoveDist",
-            "DistantTerrainGenDist",
-            "DistantTerrainRemoveDist",
-            "DistantTerrain2GenDist",
-            "DistantTerrain2RemoveDist",
-            "RoadGenDist",
-            "BuildingGenDist",
-            "BuildingRemoveDist",
-            "ObjGenDist",
-            "ObjRemoveDist",
-            "MountainGenDist",
-            "MountainRemoveDist",
-            "ItemSpawnDist",
-            "ItemRemoveDist",
-            "ItemFreezeDist",
-            "ItemUnFreezeDist",
-        ] {
-            require(
-                self.distances.get(name).is_some_and(|v| *v > 0.),
-                &format!("world distances.{name}"),
-            )?;
-        }
+        self.draw_distance.validate()?;
         let r = &self.road;
         require(
             finite(&[
@@ -1833,9 +1875,20 @@ fn validate_world_libraries(
 mod tests {
     use super::*;
 
+    #[test]
+    fn biome_material_sets_parse_desert_then_winter_and_grass() {
+        let set: WorldBiomeMaterialSet =
+            serde_json::from_str(r#"[{"file":"a","path_id":1},null,{"file":"a","path_id":3}]"#)
+                .unwrap();
+        assert_eq!(set.desert.path_id, 1);
+        assert!(set.variants[0].is_none());
+        assert_eq!(set.variants[1].as_ref().unwrap().path_id, 3);
+        assert!(serde_json::from_str::<WorldBiomeMaterialSet>(r#"[null,null,null]"#).is_err());
+    }
+
     fn collider(trigger: bool, role: &str) -> WorldColliderReference {
         serde_json::from_str(&format!(
-            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null,"step_surface":"sand"}}"#
+            r#"{{"body":null,"source":{{"file":"a","path_id":1}},"node":0,"enabled":true,"trigger":{trigger},"role":{role},"material":null,"deformed_skin":null,"source_empty_mesh":null,"geometry":null,"step_surface":"sand","tag":"Sand"}}"#
         ))
         .unwrap()
     }

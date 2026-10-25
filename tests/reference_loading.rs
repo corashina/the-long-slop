@@ -73,10 +73,22 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
         .push(root);
     let evaluator =
         the_long_slop::world::terrain_evaluator(&reference.world, reference.world.terrain.seed);
-    the_long_slop::world::StartupTerrain::new(&reference.world, &evaluator, &[])
-        .expect("installed startup frames initialize");
-    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(&reference)
-        .expect("installed world initializes");
+    the_long_slop::world::StartupTerrain::new(
+        &reference.world,
+        &the_long_slop::world::DrawDistances::resolve(
+            &reference.world.draw_distance,
+            reference.world.draw_distance.default,
+        ),
+        &evaluator,
+        &[],
+    )
+    .expect("installed startup frames initialize");
+    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .expect("installed world initializes");
     use the_long_slop::world::PresentationAllocation;
     let allocation = runtime.stream.presentation_allocation();
     let mib = 1024 * 1024;
@@ -169,11 +181,11 @@ fn installed_manifest_checks_lod_bounds_and_initializes_runtime() {
     use the_long_slop::world::{ROAD_SEGMENTS, RoadIndex, RoadSequence};
     let seed = reference.world.terrain.seed;
     let mut small = RoadIndex::new(
-        RoadSequence::new(&reference.world, seed).unwrap(),
+        RoadSequence::new(&reference.world, seed, None).unwrap(),
         the_long_slop::world::terrain_evaluator(&reference.world, seed),
     );
     let mut large = RoadIndex::new(
-        RoadSequence::new(&reference.world, seed).unwrap(),
+        RoadSequence::new(&reference.world, seed, None).unwrap(),
         evaluator,
     );
     let start = std::time::Instant::now();

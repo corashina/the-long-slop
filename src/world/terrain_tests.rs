@@ -57,8 +57,13 @@ fn fingerprint(surface: &WorldSurface) -> u64 {
 fn terrain_source_fingerprints() {
     use crate::world::{TerrainContext, TerrainFoundation, TerrainRoadPoint};
     let r = reference();
+    // Fingerprints were recorded at the 500 m source minimum.
+    let distances = crate::world::DrawDistances::resolve(
+        &r.draw_distance,
+        r.draw_distance.minimum.draw_distance,
+    );
     let evaluator = terrain_evaluator(r, 42);
-    let mut sequence = RoadSequence::new(r, 42).unwrap();
+    let mut sequence = RoadSequence::new(r, 42, None).unwrap();
     let mut roads = Vec::new();
     for _ in 0..r.road.gen_at_start {
         let segment = sequence.advance(&evaluator).unwrap();
@@ -94,7 +99,7 @@ fn terrain_source_fingerprints() {
         ],
     ];
     for tier in 0..3 {
-        let tile = terrain_tile(r, tier).unwrap();
+        let tile = terrain_tile(r, &distances, tier).unwrap();
         let context = TerrainContext {
             evaluator: &evaluator,
             tile,
@@ -170,4 +175,13 @@ fn terrain_source_fingerprints() {
             );
         }
     }
+}
+#[test]
+fn game_mode_forces_terrain_color() {
+    use crate::world::{GameMode, forced_color};
+    let raw = [0.7, 0.2, 0.1, 0.4];
+    let winter = GameMode { biome: 2 }.biome_override();
+    assert_eq!(winter, Some(1));
+    assert_eq!(forced_color(raw, winter), [0., 0., 1., 0.4]);
+    assert_eq!(forced_color(raw, GameMode::default().biome_override()), raw);
 }

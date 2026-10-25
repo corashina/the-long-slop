@@ -56,7 +56,7 @@ fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
     use crate::simulation::instruments::{InstrumentState, needle_angle};
 
     let (reference, _) = installed_source();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     run.vehicles[0].ignition.ignition = true;
     let vehicle = &reference.vehicles[0];
     let instruments = &vehicle.instruments;
@@ -146,7 +146,7 @@ fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
 fn ignition_and_attachment() {
     let (reference, stamp) = installed_source();
     let source = &reference.vehicles[0].engine;
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let held = FrameInput {
         held: keys::IGNITION,
         ..Default::default()
@@ -298,7 +298,14 @@ fn ignition_and_attachment() {
         )
         .unwrap();
     assert!(saved.vehicles[0].ignition);
-    let restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let restored = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(restored.paused);
     assert!(restored.vehicles[0].ignition.ignition);
     assert!(!restored.vehicles[0].ignition.starter);
@@ -405,7 +412,7 @@ fn ignition_and_attachment() {
 fn active_chassis_preserves_inactive_detached_engine() {
     let (reference, _) = installed_source();
     let source = &reference.vehicles[0].engine;
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let mut mechanical = run.vehicles[0].engine.capture_save();
     mechanical.rpm = 2000.;
     mechanical.temperature = 80.;
@@ -524,7 +531,7 @@ fn interval_draws_preserve_attempts_and_cancellation() {
     let (mut reference, _) = installed_source();
     // Rule test: keep combustion stopped so one held press consumes many draws.
     reference.vehicles[0].engine.start_chance = 0.;
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let held = FrameInput {
         held: keys::IGNITION,
         ..Default::default()
@@ -651,7 +658,7 @@ fn garage_engine_remove_restore_continue() {
             assert_eq!(after.temperature, item.temperature);
         }
     };
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     // Empty-fuel cranking consumes real interval draws before mixed fuel is added.
     run.area
         .items
@@ -755,7 +762,14 @@ fn garage_engine_remove_restore_continue() {
             "2026-10-20T12:00:00Z",
         )
         .unwrap();
-    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(loaded.paused);
     assert!(loaded.restore_pending());
     assert!(

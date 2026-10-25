@@ -63,6 +63,7 @@ impl StartupTerrain {
 
     pub fn new<'a>(
         reference: &'a WorldReference,
+        distances: &super::DrawDistances,
         evaluator: &TerrainEvaluator,
         roads: &[TerrainRoadPoint],
     ) -> Result<Self, ReferenceError> {
@@ -153,7 +154,7 @@ impl StartupTerrain {
                 node = get(parent)?;
             }
         };
-        let tile = super::terrain_tile(reference, 0)?;
+        let tile = super::terrain_tile(reference, distances, 0)?;
         let mut result = Self::default();
         let mut shared = None;
         // Source runs the shared roots, player root, then each fixed root.

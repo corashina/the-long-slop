@@ -1275,6 +1275,7 @@ mod world_sync_tests {
                 layer: 0,
                 transform: transform.clone(),
                 gltf_node: 0,
+                biome_materials: false,
             }],
             controls: Vec::new(),
             excluded_actions: Vec::new(),

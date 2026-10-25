@@ -7,7 +7,6 @@ from pathlib import Path
 from .source import Source, key, source_id, vector
 from .gltf import converted_transform, convert_point
 from .collision import world_pose
-from . import draw_distance
 
 HOUSE=(67484,68886,72019,75508,76065)
 IDENTITY={'translation':[0.,0.,0.],'rotation':[0.,0.,0.,1.],'scale':[1.,1.,1.]}
@@ -176,16 +175,29 @@ def gradient(data):
     return {'mode':data['m_Mode'],'colors':[{'time':data[f'ctime{i}']/65535.,'value':rgba(data[f'key{i}'])} for i in range(data['m_NumColorKeys'])],
         'alphas':[{'time':data[f'atime{i}']/65535.,'value':data[f'key{i}']['a']} for i in range(data['m_NumAlphaKeys'])]}
 
-def recover_fog_modifier(source):
+def recover_fog_evidence(source):
     reader=source.get('level0',16865);settings=source.read(reader)
     lo=settings['DDSmin'];hi=settings['DDSmax']
-    modifier=draw_distance.setting(settings,'fogModifier')
-    source.lighting_fog_evidence={'source':source_id(reader),'draw_distance':draw_distance.DRAW_DISTANCE,
+    source.lighting_fog_evidence={'source':source_id(reader),
         'minimum':{'draw_distance':lo['drawDistance'],'fog_modifier':lo['fogModifier']},
         'maximum':{'draw_distance':hi['drawDistance'],'fog_modifier':hi['fogModifier']},
-        'clamped_fraction':draw_distance.fraction(settings),'fog_modifier':modifier,
-        'rule':'settingsscript.DrawDistanceChanged uses InverseLerp, then Lerp; each operation uses float32.'}
-    return modifier
+        'rule':'settingsscript.DrawDistanceChanged uses InverseLerp, then Lerp; each operation uses float32. The fog modifier multiplies the fog density.'}
+
+
+def recover_grading_temperatures(source: Source) -> list:
+    """postprocesscontrol.TemperatureValues on the main camera sets the main-view ColorGrading temperature."""
+    player=source.get('level1',80125)
+    camera=source.resolve(player,source.read(player)['Cam'])
+    go=source.resolve(camera,source.read(camera)['m_GameObject'])
+    controls=[]
+    for pointer in source.read(go)['m_Component']:
+        component=source.resolve(go,pointer['component'])
+        if component.type.name=='MonoBehaviour' and source.class_name(component)=='postprocesscontrol':controls.append(component)
+    if len(controls)!=1:raise ValueError('Main camera requires one postprocesscontrol')
+    values=source.read(controls[0]).get('TemperatureValues')
+    if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
+        raise ValueError(f'{key(controls[0])} TemperatureValues requires three finite values')
+    return values
 
 
 def recover_cycle(source: Source, reader, output: Path) -> dict:
@@ -200,7 +212,7 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
         'dayAngleMin':'day_angle_min','dayAngleMax':'day_angle_max','midnightAngleR':'midnight_angle_dawn','midnightAngleE':'midnight_angle_dusk',
         'minMoonAngle':'min_moon_angle','maxMoonAngle':'max_moon_angle','colorDelay':'color_delay','starSpeed':'star_speed',
         'CloudPerlinSpread':'cloud_perlin_spread','CloudPerlinSpeed':'cloud_perlin_speed','sunFlareLerpMStart':'flare_lerp_start','sunFlareLerpMEnd':'flare_lerp_end'}
-    result.update({v:f[k] for k,v in fields.items()});result['day_yaw_degrees']=60.;result['biome_refresh_seconds']=1.;result['fog_modifier']=recover_fog_modifier(source)
+    result.update({v:f[k] for k,v in fields.items()});result['day_yaw_degrees']=60.;result['biome_refresh_seconds']=1.;recover_fog_evidence(source)
     # The approved desert-only world uses TerrainGenerator's forced desert RGB selector.
     result['desert_color']=[1.,0.,0.,1.]
     for k,v in {'skyColors':'sky_colors','daySkyGroundColors':'day_ground_colors','nightSkyGroundColors':'night_ground_colors',
@@ -211,6 +223,7 @@ def recover_cycle(source: Source, reader, output: Path) -> dict:
         values=f[source_field]
         if len(values)!=3 or not all(math.isfinite(v) for v in values):raise ValueError(f'{key(reader)} {source_field} requires three finite values')
         result[field]=values
+    result['temperature_values']=recover_grading_temperatures(source)
     result['clouds']=[]
     for layer in ('Low','High'):
         cloud_node=source.get('level1',27215 if layer=='Low' else 27216)
@@ -519,14 +532,9 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
         'shadow_cascade_splits':list(vector(q['shadowCascade4Split']))}
     result['cameras']=[]
     player=source.get('level1',80125);pf=source.read(player)
-    settings_reader=source.get('level0',16865);sf=source.read(settings_reader)
-    def setting(name):return draw_distance.setting(sf,name)
-    result['startup_fog_density']*=cycle['fog_modifier']
     for role in ('Cam','mainCam','farCamera','skyCamera'):
         camera=source.resolve(player,pf[role]);cf=source.read(camera)
         result['cameras'].append({'source':source_id(camera),'role':role,'near_plane':cf['near clip plane'],'far_plane':cf['far clip plane'],
-            'startup_near_plane':setting('Cam2NearPlane') if role=='farCamera' else cf['near clip plane'],
-            'startup_far_plane':setting('Cam1FarPlane') if role in ('Cam','mainCam') else setting('Cam2FarPlane') if role=='farCamera' else cf['far clip plane'],
             'field_of_view':cf['field of view'],'hdr':bool(cf['m_HDR']),'culling_mask':cf['m_CullingMask']['m_Bits']})
     source.lighting_lights[0]['startup_intensity']=cycle['day_intensity']
     source.lighting_lights[0]['color']=cycle['day_color']
@@ -616,13 +624,10 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
     for l in lighting['lights']:
         if l['cookie'] is not None and l['cookie'] not in textures:fail(l['source'],'cookie')
         if l['node'] is not None and l['node'] not in nodes:fail(l['source'],'node')
-    for field in ('temp_days','temp_nights','temp_add_noons'):
+    for field in ('temp_days','temp_nights','temp_add_noons','temperature_values'):
         values=lighting['cycle'].get(field)
         if not isinstance(values,list) or len(values)!=3 or not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
             fail(lighting['cycle']['source'],field+' requires three finite values')
-    modifier=lighting['cycle'].get('fog_modifier')
-    if not isinstance(modifier,(int,float)) or not math.isfinite(modifier) or modifier<0:
-        fail(lighting['cycle']['source'],'fog_modifier requires a finite nonnegative value')
     flares=lighting['cycle']['sun_flares']
     expected_flares=[57088,57090,57089]
     if len(flares)!=len(expected_flares):fail(lighting['cycle']['source'],'sun flare chain')

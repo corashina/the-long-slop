@@ -64,7 +64,12 @@ fn installed_source() -> (ReferenceManifest, SourceStamp) {
 #[ignore = "requires the installed build 11140890 export"]
 fn fluid_save_order_and_validation() {
     let (reference, stamp) = installed_source();
-    let mut game = GarageRuntime::new(&reference).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let fuel_id = reference.vehicles[0].engine.fuel_tank;
     let container = game
         .area
@@ -112,7 +117,14 @@ fn fluid_save_order_and_validation() {
         ]
     );
     let decoded = SaveSnapshot::from_json(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let restored = GarageRuntime::from_save(&reference, &stamp, &decoded).unwrap();
+    let restored = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &decoded,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     // Item contents restore before the world streaming gate opens.
     let recaptured = restored
         .area
@@ -184,7 +196,14 @@ fn fluid_save_order_and_validation() {
             },
         ]
     );
-    let restored = GarageRuntime::from_save(&reference, &stamp, &quantity_only).unwrap();
+    let restored = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &quantity_only,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     // Item contents restore before the world streaming gate opens.
     let recaptured = restored
         .area
@@ -223,7 +242,14 @@ fn fluid_save_order_and_validation() {
         retained_zero.items[fuel].fluids.as_ref().unwrap(),
         &retained_entries
     );
-    let restored = GarageRuntime::from_save(&reference, &stamp, &retained_zero).unwrap();
+    let restored = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &retained_zero,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     // Load removes one nonpositive entry before the world streaming gate opens.
     let recaptured = restored
         .area
@@ -273,7 +299,16 @@ fn fluid_save_order_and_validation() {
     let mut invalid = saved.clone();
     invalid.schema_version = 8;
     assert!(invalid.validate(&reference, &stamp).is_err());
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            the_long_slop::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     assert!(matches!(
         SaveSnapshot::from_json(br#"{"schema_version":7}"#),
         Err(SaveError::IncompatibleSources(_))
@@ -295,7 +330,12 @@ fn fluid_save_order_and_validation() {
 fn ignition_save_ownership_and_cancellation() {
     use the_long_slop::simulation::ignition::IgnitionInput;
     let (reference, stamp) = installed_source();
-    let mut game = GarageRuntime::new(&reference).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let delay = reference.vehicles[0].engine.starter_delay_seconds;
     let held = IgnitionInput {
         held: true,
@@ -318,7 +358,14 @@ fn ignition_save_ownership_and_cancellation() {
     let json = serde_json::to_value(&saved).unwrap();
     assert!(json["vehicles"][0]["engine"].get("ignition").is_none());
     assert!(json["vehicles"][0].get("starter").is_none());
-    let loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(loaded.paused);
     assert!(loaded.vehicles[0].ignition.ignition);
     assert!(!loaded.vehicles[0].ignition.starter);
@@ -540,7 +587,12 @@ fn engine_draws_and_restore() {
     assert_eq!(restored.engine.capture_save().start_draw, "0");
 
     let (_, stamp) = installed_source();
-    let game = GarageRuntime::new(&reference).unwrap();
+    let game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let mut full = game
         .capture_save(
             &reference,
@@ -941,7 +993,12 @@ fn engine_fluids_and_cooling() {
     assert_eq!(detached.sump, oil);
 
     // Restore actual item quantities and order, without opening the world gate.
-    let mut game = GarageRuntime::new(&reference).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     game.vehicles[0].engine = rig.engine.clone();
     for (id, fluid) in [
         (source.fuel_tank, &rig.fuel),
@@ -958,7 +1015,14 @@ fn engine_fluids_and_cooling() {
             "2026-10-20T12:00:00Z",
         )
         .unwrap();
-    let loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let mut continued = EngineRig {
         engine: loaded.vehicles[0].engine.clone(),
         fuel: loaded

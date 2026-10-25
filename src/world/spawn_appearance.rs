@@ -7,6 +7,8 @@ pub struct NodeAppearance {
     pub node: SourceId,
     pub primary: Option<(crate::reference::AssetId, u32)>,
     pub scale: Option<[f32; 3]>,
+    /// Local rotation override, port space quaternion xyzw.
+    pub rotation: Option<[f32; 4]>,
     pub active: Option<bool>,
     pub material: Option<SourceId>,
     pub color: Option<[f32; 4]>,
@@ -46,6 +48,12 @@ pub(crate) fn node_active(
     false
 }
 impl SpawnEvaluation<'_> {
+    /// Source `buildingscript.FStart` cable. Bake after lamps, so the cable is not lost on refresh.
+    pub(super) fn bake_cables(&mut self) {
+        for content in &mut self.output {
+            content.appearance.extend_from_slice(&content.cable);
+        }
+    }
     pub(super) fn bake_appearance(&mut self) -> Result<(), ReferenceError> {
         for content in &mut self.output {
             content.inputs = self.initialization.for_parent(&content.placement.id);
@@ -83,6 +91,7 @@ impl SpawnEvaluation<'_> {
                     material: None,
                     color: None,
                     color_material: None,
+                    rotation: None,
                 });
             }
 
@@ -97,6 +106,7 @@ impl SpawnEvaluation<'_> {
                     material: None,
                     color: None,
                     color_material: None,
+                    rotation: None,
                     scale: None,
                 });
             }
@@ -112,6 +122,7 @@ impl SpawnEvaluation<'_> {
                     material: None,
                     color: None,
                     color_material: None,
+                    rotation: None,
                 });
             }
             for state in &self.initialization.conditions {
@@ -205,6 +216,7 @@ impl SpawnEvaluation<'_> {
                         material: material.clone(),
                         color,
                         color_material: color_material.clone(),
+                        rotation: None,
                         scale: None,
                     });
                 }
@@ -224,6 +236,7 @@ impl SpawnEvaluation<'_> {
                             material: None,
                             color: None,
                             color_material: None,
+                            rotation: None,
                             scale: None,
                         });
                     }

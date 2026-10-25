@@ -8,15 +8,15 @@ from .source import LibrarySource, key, source_id, vector
 from .library.reader import LibraryReader
 from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
-from .collision import geometry, step_surface, world_pose
+from .collision import geometry, step_surface, collider_tag, world_pose
 from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
-CONTEXT = 'minimum_draw_distance_frozen_generation_frame'
 WORLD_DATABASE_ID = 66024
 BUILDING_FIELDS = ('berror','bkezdohaz','bkut','bbudi','bbenzinkut01','bbuszmegallo','blegjobbbenzinkut','bmuhely','bnagybenzinkut','boldhouse','boldpetrolstation','bturrethaz','bvizmu','btelefonfulke','bpost','bcabin','byellowfoodkut','bfalu01','bcastle')
+HOME_BUILDING = 70166
 GENERATORS = (65060, 64958, 64720, 65037)
 RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'stuffspawn',
     'terrainRandomStuffSpawn', 'terrainHeightAlignToBuildingScript', 'digholescript2',
@@ -28,7 +28,11 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Portable electronics (P09): compass, clock, radios, music box and their dials.
     'compassscript','simplecompassscript','clockscript','radioscript','musicboxscript','meterscript','mutatoscript','forgoszamlap',
     # Small item actions (P10): spirit level, spray bottle, boxes, wash spots, cigarette packs.
-    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript'}
+    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript',
+    # Digging and detection (W06): metal detector.
+    'metalDetectorScript',
+    # Power cables (W04): rope segments and their pole targets.
+    'ropeScript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
@@ -377,6 +381,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         if item['index'] not in required_items:item['exclusion']='outside_selected_pools'
     print(f'Selected {len(roots)} prototypes and {len(selected.records)} caller records',flush=True)
     source.world_prototype_roots=set(roots)
+    from .world_biome_materials import scene_component, recover_sets, SETS_CLASS
+    source.biome_material_sets=recover_sets(source,scene_component(source,reader,SETS_CLASS))
+    source.biome_sets_used=set()
     source.world_material_source=copy.copy(source)
     source.world_material_source.lighting_textures={}
     source.world_material_export=lambda material:source_material(source,selected,material,output,source.world_material_source)
@@ -405,10 +412,11 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     lod=recover_lod(source,selected)
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
+    draw_settings=source.get('level0',16865)
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':provenance(reader.receipt),'capture_library':capture_library,
-        'settings_context':CONTEXT,'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'distances':draw_distance.distances(source.read(source.get('level0',16865)),assembled['distances']),'source_hashes':[],
+        'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(source_id(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
-        'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),**{k:main['GSettings'][k] for k in ('biome','homesickMode')}},
+        'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),'homesickMode':main['GSettings']['homesickMode']},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
             **{k:settings[k] for k in ('edgeOfWorld','edgeOfWorldGradient','edgeOfWorldGenerationDist','edgeOfWorldWarpDist','edgeOfWorldWarpOffset','randomSeed','seed')}},
         'buildings':{'source':source_id(building_owner),'types':building_types,**{k:buildings[k] for k in ('groups','defaultSides','minStartDist','maxStartDist','distModifier')}},
@@ -421,6 +429,10 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     from .world_mechanisms import recover_world_mechanisms
     world['mechanisms'] = recover_world_mechanisms(source,selected,world)
     from .world_paintings import export_paintings
+    from .world_biome_materials import export_sets
+    world['biome_material_sets'] = export_sets(source.biome_material_sets,source.biome_sets_used,selected)
+    marked=sum(n['biome_materials'] for p in world['prototypes'] for n in p['nodes'])
+    print(f'Biome materials: {len(world["biome_material_sets"])} of {len(source.biome_material_sets)} sets used; {marked} marked nodes',flush=True)
     world['painting_materials'] = export_paintings(source,reader,selected,world,output,max(p['asset'] for p in world['prototypes'])+1)
     receipts={tuple(r['source'].values()):r for r in world['receipts']}
     receipts.update(selected.receipts)
@@ -510,6 +522,30 @@ def recover_catalog(source, reader, selected, database):
     for row in categories:
         row['invalid_category_indices']=[i for i in row['categories'] or [] if i>=len(category_names)]
     return {'source':source_id(database),'items':items,'categories':sorted(categories,key=lambda c:c['index'])}
+
+def home_rope(source):
+    """The home buildingscript connectToPole ropeScript, its data and its root Transform."""
+    home=source.get('level1',HOME_BUILDING)
+    if source.class_name(home)!='buildingscript':raise ValueError(f'level1:{HOME_BUILDING} is not buildingscript')
+    rope=source.resolve(home,source.read(home)['connectToPole'])
+    if rope is None or source.class_name(rope)!='ropeScript':raise ValueError(f'level1:{HOME_BUILDING} connectToPole is not ropeScript')
+    data=source.read(rope)
+    return rope,data,source.transform_for(source.resolve(rope,data['m_GameObject']))
+
+def prepare_home_cable(source):
+    """The home rope root is inactive until it connects. Keep the meshes of its subtree."""
+    _,_,root=home_rope(source)
+    source.home_cable_geometry_nodes={key(n['reader']) for n in source.hierarchy(root,activate_root=True)}
+
+def recover_home_cable(source, nodes):
+    """Map the home buildingscript connectToPole rope to manifest node ids."""
+    rope,data,root=home_rope(source)
+    node_ids={(n['source']['file'],n['source']['path_id']):n['id'] for n in nodes}
+    def node(transform, field):
+        if transform is None or key(transform) not in node_ids:raise ValueError(f'{key(rope)} {field}: rope node is not exported')
+        return node_ids[key(transform)]
+    return {'root':node(root,'m_GameObject'),'ropes':[node(source.resolve(rope,p),f'ropes[{i}]') for i,p in enumerate(data['ropes'])]}
+
 
 def recover_grass_displacement(source, selected, prototypes):
     """Retain the checked displacement camera and selected renderer writers."""
@@ -608,6 +644,9 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         name=f'world-{identity[0].replace(".","-")}-{identity[1]}'
         exporter=GltfExporter(source,output/f'{name}.gltf',reader,index)
         report=exporter.export([root])
+        from .world_biome_materials import check_exported, swaps
+        check_exported(source.biome_material_sets,exporter.biome_sets,{tuple(m['source'].values()) for m in report['materials']+report['deferred_materials']},name)
+        source.biome_sets_used.update(exporter.biome_sets)
         for material in report['materials']:
             selected.record(source.get(material['source']['file'],material['source']['path_id']))
             for texture in material['properties']['textures']:
@@ -620,7 +659,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
             selected.record(node['game_object'])
         mapping={key(node['reader']):i for i,node in enumerate(hierarchy)}
         nodes=[{'source':r['source'],'name':source.read(n['game_object'])['m_Name'],'parent':mapping[key(n['parent'])] if n['parent'] else None,
-                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node']} for r,n in zip(report['nodes'],hierarchy)]
+                'active':bool(source.read(n['game_object'])['m_IsActive']),'renderer_enabled':bool(exporter.document.nodes[r['gltf_node']].extras.get('source_renderer_enabled',False)),'layer':source.read(n['game_object'])['m_Layer'],'transform':r['transform'],'gltf_node':r['gltf_node'],'biome_materials':swaps(source,n['components'])} for r,n in zip(report['nodes'],hierarchy)]
         local=copy.copy(source)
         ancestor_count=len(source.chain(root))
         local.chain=lambda transform: source.chain(transform)[:-ancestor_count]
@@ -662,7 +701,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                     role=recover_trigger_role(local,n['reader'],root,body_pose) if data['m_IsTrigger'] else None
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
-                        'step_surface':step_surface(source,n['game_object'])})
+                        'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         for node in hierarchy:
             for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,

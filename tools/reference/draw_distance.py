@@ -1,30 +1,39 @@
-"""Source draw-distance settings for the selected profile."""
+"""Source draw-distance settings. The game resolves them at runtime."""
 import struct
 
-# The source minimum. All distance-dependent exports use this one value.
-DRAW_DISTANCE = 500.
+FIELDS = ('drawDistance', 'fogModifier', 'Cam1FarPlane', 'Cam2NearPlane', 'Cam2FarPlane',
+          'TerrainGenDist', 'TerrainRemoveDist', 'DistantTerrainGenDist', 'DistantTerrainRemoveDist',
+          'DistantTerrain2GenDist', 'DistantTerrain2RemoveDist',
+          'DistantTerrainShader1Near', 'DistantTerrainShader1Far', 'DistantTerrainShader1Amount',
+          'DistantTerrainShader2Near', 'DistantTerrainShader2Far', 'DistantTerrainShader2Amount',
+          'ObjGenDist', 'ObjRemoveDist', 'MountainGenDist', 'MountainRemoveDist',
+          'BuildingGenDist', 'BuildingRemoveDist', 'RoadGenDist',
+          'ItemRemoveDist', 'ItemSpawnDist', 'ItemFreezeDist', 'ItemUnFreezeDist')
 
 
 def f32(value):
     return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
-def fraction(settings, draw=DRAW_DISTANCE):
+def fraction(settings, draw):
     """settingsscript.DrawDistanceChanged: float32 InverseLerp, clamped."""
     lo, hi = settings['DDSmin']['drawDistance'], settings['DDSmax']['drawDistance']
     return max(0., min(1., f32(f32(draw - lo) / f32(hi - lo))))
 
 
-def setting(settings, name, draw=DRAW_DISTANCE):
+def setting(settings, name, draw):
     """settingsscript.DrawDistanceChanged: float32 Lerp between DDSmin and DDSmax."""
     lo, hi = settings['DDSmin'][name], settings['DDSmax'][name]
     return f32(lo + f32(hi - lo) * fraction(settings, draw))
 
 
-def distances(settings, captured):
-    """Recompute the captured source distances, then return them for DRAW_DISTANCE."""
+def record(source, settings, captured):
+    """Check the captured scene distances against the source lerp, then return both source sets."""
     draw = captured['drawDistance']
     for name, value in captured.items():
         if setting(settings, name, draw) != value:
             raise ValueError(f'Source draw-distance interpolation differs from captured distances.{name}')
-    return {name: setting(settings, name) for name in captured}
+    return {'source': source,
+            'minimum': {name: settings['DDSmin'][name] for name in FIELDS},
+            'maximum': {name: settings['DDSmax'][name] for name in FIELDS},
+            'default': settings['S']['FDrawDistance']}

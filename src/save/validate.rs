@@ -108,6 +108,7 @@ impl SaveSnapshot {
         if let Some(radio) = &self.radio {
             data(unit(radio.tuning) && unit(radio.volume), "Radio controls")?;
         }
+        validate_weather(&reference.weather, &self.weather)?;
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
         for brush in &reference.conditions.brushes {
@@ -1067,6 +1068,35 @@ fn sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+fn validate_weather(
+    reference: &r::WeatherReference,
+    saved: &WeatherSnapshot,
+) -> Result<(), SaveError> {
+    data(
+        saved.since_spawn.is_finite()
+            && saved.since_spawn >= 0.
+            && saved.wait.is_finite()
+            && saved.wait > 0.,
+        "Storm spawn timer",
+    )?;
+    let within = |value: f32, range: [f32; 2]| (range[0]..=range[1]).contains(&value);
+    for storm in &saved.storms {
+        links(storm.prefab == reference.prefab_id, "Storm prefab")?;
+        data(
+            storm
+                .position
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= crate::world::MAX_ABSOLUTE_COORDINATE)
+                && finite(&[storm.yaw])
+                && finite(&storm.direction)
+                && unit(storm.life)
+                && within(storm.size, reference.storm.size_range)
+                && within(storm.speed, reference.storm.speed_range),
+            "Storm state",
+        )?;
+    }
+    Ok(())
 }
 fn finite(values: &[f32]) -> bool {
     values.iter().all(|v| v.is_finite())

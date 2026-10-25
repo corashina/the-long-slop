@@ -89,6 +89,7 @@ def runtime_resources(manifest):
             for child in value: collect(child)
     collect(manifest.get('lighting', {}))
     collect(manifest.get('particles', []))
+    collect(manifest.get('weather', {}))
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
@@ -273,6 +274,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .survival import prepare_food, recover_survival, bind_survival
     from .particles import recover_particles, recover_outlet_particles, validate_particles_export
     from .audio import recover_ambient
+    from .weather import recover_weather, validate_weather_export
     prepare_food(source, roots)
     food_roots=roots.pop('food')
     prefab=source.get('sharedassets1.assets',82556)
@@ -318,8 +320,11 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     prepare_item_prototypes(source, roots)
     recover_survival(source,roots,output)
     particles=recover_particles(source,output)
+    weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
+    from .world import prepare_home_cable
+    prepare_home_cable(source)
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
@@ -341,9 +346,10 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     (output/'driving-evidence.json').write_text(json.dumps(source.driving_evidence,indent=2,allow_nan=False),encoding='utf-8')
     from .plates import plate_source_evidence
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
-    from .world import recover_world
+    from .world import recover_world, recover_home_cable
     from .manifest import attach_world
     attach_world(manifest,recover_world(source,library,output,len(manifest['assets'])+1))
+    manifest['world']['home_cable']=recover_home_cable(source,manifest['nodes'])
     from .storage import recover_prototype_storage
     recover_prototype_storage(source,manifest,output)
     roles=[c['role'] for p in manifest['world']['prototypes'] for c in p['colliders'] if c['role']]
@@ -360,9 +366,13 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['ambient']=recover_ambient(source)
     manifest['lighting']['textures']=list(source.lighting_textures.values())
     validate_particles_export(particles,manifest)
+    manifest['weather']=weather
+    validate_weather_export(weather,manifest)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)
+    from .melee import recover_melee, validate_melee
+    manifest['melee'] = recover_melee(source, output)
     from .clothing import recover_clothing,validate_clothing
     manifest['clothing'] = recover_clothing(source,manifest,output)
     manifest['lighting']['textures']=list(source.lighting_textures.values())
@@ -378,6 +388,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_acquisition(manifest['acquisition'], manifest)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_small_items(manifest['small_items'], manifest)
+    validate_melee(manifest['melee'], manifest)
     validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())
     evidence['conditions']=manifest['conditions']

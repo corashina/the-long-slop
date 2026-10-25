@@ -527,13 +527,14 @@ mod tests {
             flare_progress: 0.,
             flare_brightness: 0.,
             shader_time_seconds: 0.,
+            grading_temperature: None,
         };
         let mut ambient = crate::audio::AmbientState::new(&reference);
         ambient.duck(0.5);
         assert_eq!(ambient.only_modifier, 0.5);
         ambient.duck(0.2);
         assert_eq!(ambient.only_modifier, 0.5, "the duck keeps the minimum");
-        assert_eq!(ambient.gains(&reference, &cycle, 1.), [0.5; 2]);
+        assert_eq!(ambient.gains(&reference, &cycle, 0., 1.), [0.5; 2]);
         assert!((ambient.only_modifier - 0.6).abs() < 1e-6);
     }
 }

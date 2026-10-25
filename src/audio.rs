@@ -1460,6 +1460,7 @@ pub enum AudioKind {
     Urinate = 3,
     Sleep = 4,
     Death = 5,
+    Storm = 6,
     AmbientDay = 7,
     AmbientNight = 8,
     Shit = 9,
@@ -1469,7 +1470,8 @@ pub enum AudioKind {
     RockHeat = 13,
     MusicBox = 14,
     Footstep = 15,
-    AmbienceZone = 16,
+    StormInside = 16,
+    AmbienceZone = 19,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1553,6 +1555,11 @@ impl AudioState {
         self.survival_loops
             .retain(|v| v.kind != kind || v.emitter != emitter);
     }
+    /// Stops the loops of removed storms.
+    pub fn remove_storm_loops(&mut self, storms: &[crate::weather::Storm]) {
+        self.survival_loops
+            .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
+    }
 }
 
 /// Day and night ambient channels, independent of particle effects.
@@ -1574,23 +1581,19 @@ impl AmbientState {
         self.only_modifier = self.only_modifier.min(1. - lerp);
     }
 
+    /// `storm` is the source `sandStormAmbientDecrease * inSandStorm` of the previous step.
     pub fn gains(
         &mut self,
         reference: &crate::reference::AmbientReference,
         cycle: &crate::lighting::CycleOutput,
+        storm: f32,
         dt: f32,
     ) -> [f32; 2] {
-        use crate::lighting::CyclePhase;
-        let night = match cycle.phase {
-            CyclePhase::Night => 1.,
-            CyclePhase::Day => 0.,
-            CyclePhase::Dawn => 1. - cycle.progress,
-            CyclePhase::Dusk => cycle.progress,
-        };
+        let night = cycle.night();
         let modifier =
             self.modifier * self.only_modifier * (cycle.biome_color[0] - cycle.biome_color[2]);
         let gains = [reference.day_volume, reference.night_volume]
-            .map(|v| ((v[0] + (v[1] - v[0]) * night) * modifier).clamp(0., 1.));
+            .map(|v| ((v[0] + (v[1] - v[0]) * night) * modifier - storm).clamp(0., 1.));
         self.modifier = (self.modifier + dt * reference.recovery_per_second).clamp(0., 1.);
         self.only_modifier =
             (self.only_modifier + dt * reference.recovery_per_second).clamp(0., 1.);
@@ -1747,7 +1750,7 @@ mod tests {
     fn engine_audio_follows_detached_state() {
         // Source enginescript.Update, 12105-12213: audio follows running, not attachment.
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference).unwrap();
+        let mut run = GarageRuntime::new_default(&reference).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         assert_voices(run.audio.as_ref().unwrap(), true);
@@ -1834,7 +1837,14 @@ mod tests {
                 "2026-10-20T12:00:00Z",
             )
             .unwrap();
-        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        let mut restored = GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &saved,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default,
+        )
+        .unwrap();
         assert!(!restored.audio.as_ref().unwrap().last_running);
         restored
             .area
@@ -1861,7 +1871,7 @@ mod tests {
     #[ignore = "requires the installed build 11140890 export"]
     fn engine_emitters_follow_item_pose_and_restore() {
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference).unwrap();
+        let mut run = GarageRuntime::new_default(&reference).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         detach(&mut run, &reference);
@@ -1942,7 +1952,14 @@ mod tests {
                 "2026-10-20T12:00:00Z",
             )
             .unwrap();
-        let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+        let mut restored = GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &saved,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default,
+        )
+        .unwrap();
         assert!(restored.vehicles[0].engine_output.running);
         assert!(restored.audio.as_ref().unwrap().last_running);
         publish(&mut restored);

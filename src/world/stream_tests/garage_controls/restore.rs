@@ -62,7 +62,14 @@ fn g10_control_restore_has_no_side_effects() {
             "2026-10-20T12:00:00Z",
         )
         .unwrap();
-    let mut restored = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let mut restored = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     super::super::prepare_ready(&mut restored, &reference);
     assert!(restored.advance_saved_restore(&reference).unwrap());
     assert!(!restored.restore_pending());

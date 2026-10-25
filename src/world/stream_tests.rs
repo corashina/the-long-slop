@@ -1,8 +1,8 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
-#[path = "stream_tests/drive_out.rs"]
-mod drive_out;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
+#[path = "stream_tests/drive_out.rs"]
+mod drive_out;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
 
@@ -20,7 +20,7 @@ fn reference() -> ReferenceManifest {
 #[ignore = "requires the installed source export"]
 fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
     let reference = reference();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut stream = WorldStream::new_default(&reference, 42).unwrap();
     stream.initial_generation_ready = true;
     stream.terrain_ready[0] = true;
     stream.wanted_tiles.push(SurfaceKey {
@@ -87,7 +87,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
 #[ignore = "requires the installed source export"]
 fn structure_refresh_accumulates_both_foci_and_forced_refreshes() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     run.stream.request_at([0.; 3], [0.; 3]);
     for _ in 0..10000 {
         run.stream.prepare(100.);
@@ -195,7 +195,7 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
     prototype.colliders.clear();
     let source = prototype.source.clone();
     let scale = prototype.prefab_pose.scale;
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let stream = &mut run.stream;
     stream.request.player = [0.; 3];
     stream.request.vehicle = [100., 0., 0.];
@@ -422,7 +422,7 @@ fn publish_with_receipts(run: &mut GarageRuntime) {
 #[ignore = "requires the installed source export"]
 fn required_publication_reaches_ready_and_withholds_dependencies() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     assert!(run.stream.required_ready());
     assert!(run.world_supported());
@@ -470,6 +470,35 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
     assert!(run.stream.required_ready());
     mechanism_binding_gate(&mut run, &reference);
     swept_boundaries(&mut run, &reference);
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn terrain_sample_matches_published_ground() {
+    let reference = reference();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let player = run.area.player.body_pose(&run.physics).position;
+    let mut checked = 0;
+    // Both Z signs: a sample with the source Z sign flipped misses one side.
+    for offset in [
+        [40., 0., 40.],
+        [40., 0., -40.],
+        [-60., 0., 25.],
+        [-25., 0., -60.],
+    ] {
+        let point: [f32; 3] = std::array::from_fn(|i| player[i] + offset[i]);
+        let Some(ground) = run.stream.ground_height(&run.physics, point) else {
+            continue;
+        };
+        let (height, _) = run.stream.terrain_sample(run.stream.origin.absolute(point));
+        assert!(
+            (height - ground).abs() < 1.,
+            "{point:?}: {height} != {ground}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 2);
 }
 
 fn move_player(run: &mut GarageRuntime, position: [f32; 3]) {
@@ -700,7 +729,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
 #[ignore = "requires the installed source export"]
 fn roadside_owner_controls_keep_state_until_owner_retirement() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     mechanism_binding_gate(&mut run, &reference);
     let owner = run
@@ -832,12 +861,14 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
     run.stream.request_at([0.; 3], [0.; 3]);
     prepare_ready(&mut run, &reference);
     run.stream.wanted_structures.retain(|p| p.id != instance);
-    run.stream.retire_structures(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_structures(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(
         !run.stream
             .structures
@@ -855,7 +886,7 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
 #[ignore = "requires the installed source export"]
 fn roadside_lamp_state_expires_with_its_source_owner() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     let garage_player = run
         .stream
@@ -922,19 +953,23 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
     }
     assert!(run.stream.supports(window(run.stream.request.player, 3.)));
     assert!(run.stream.supports(window(run.stream.request.vehicle, 4.)));
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
-    for _ in 0..20 {
-        run.stream.retire_structures(
+    run.stream
+        .retire_contents(
             &mut run.physics,
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
-        ).unwrap();
+        )
+        .unwrap();
+    for _ in 0..20 {
+        run.stream
+            .retire_structures(
+                &mut run.physics,
+                &mut run.area.items,
+                &mut run.area.interaction,
+                &mut run.wheels,
+            )
+            .unwrap();
         if !run
             .stream
             .structures
@@ -972,7 +1007,7 @@ fn complete_probe_union_preserves_revision_and_fresh_cycles() {
         world::{REQUIRED_VIEW_CAPACITY, RequiredView, RequiredViews},
     };
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     let tiny = |center: [f64; 3], mask| {
         let [x, y, z] = center.map(|v| v as f32);
@@ -1218,7 +1253,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
     }
 }
 fn old_replay_keys(stream: &WorldStream) -> Vec<super::super::ObjectKey> {
-    let radius = f64::from(stream.reference.distances["ItemSpawnDist"]);
+    let radius = f64::from(stream.distances.item_spawn_dist);
     let mut result = Vec::new();
     let mut query = Vec::new();
     for focus in [stream.request.player, stream.request.vehicle] {
@@ -1324,9 +1359,9 @@ fn replay_index_query_matches_old_order_and_exact_bounds() {
 fn replay_selector_refreshes_set_replay_forget_and_removal() {
     use super::super::ObjectKey;
     let reference = reference();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut stream = WorldStream::new_default(&reference, 42).unwrap();
     let source = &reference.world.road.prototypes[0];
-    let radius = f64::from(stream.reference.distances["ItemSpawnDist"]);
+    let radius = f64::from(stream.distances.item_spawn_dist);
     stream.request.vehicle = [radius, 0., 0.];
     let baseline = replay_snapshot([radius * 20.; 3]);
     let deleted = ObjectKey::Generated(replay_placement(source, 1, baseline.pose.position).id);
@@ -1441,9 +1476,9 @@ fn replay_selector_refreshes_set_replay_forget_and_removal() {
 fn replay_predicates_match_old_keys_for_instances_owners_and_removals() {
     use super::super::ObjectKey;
     let reference = reference();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut stream = WorldStream::new_default(&reference, 42).unwrap();
     let source = &reference.world.road.prototypes[0];
-    let far = f64::from(stream.reference.distances["ItemSpawnDist"]) * 10.;
+    let far = f64::from(stream.distances.item_spawn_dist) * 10.;
     let placements: Vec<_> = (1..=6)
         .map(|i| replay_placement(source, i, [far, 0., 0.]))
         .collect();
@@ -1546,7 +1581,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     let baseline = replay_snapshot([9000.; 3]);
     let old = ObjectKey::Imported(crate::reference::ItemId(999998));
     let replacement = ObjectKey::Imported(crate::reference::ItemId(999999));
-    let mut candidate = WorldStream::new(&reference, 42).unwrap();
+    let mut candidate = WorldStream::new_default(&reference, 42).unwrap();
     candidate
         .changes
         .record(old.clone(), replay_snapshot([0.; 3]), &baseline);
@@ -1575,7 +1610,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
     assert_replay_selection(&candidate);
     assert_eq!(old_replay_keys(&candidate), vec![replacement.clone()]);
     // The active stream owns its selection while the candidate is replaced and dropped.
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     mechanism_binding_gate(&mut run, &reference);
     let owner = run
@@ -1675,7 +1710,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
 fn content_index_matches_linear_lookups() {
     use super::super::contents::ContentInstance;
     let reference = reference();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut stream = WorldStream::new_default(&reference, 42).unwrap();
     let source = &reference.world.road.prototypes[0];
     let placements: Vec<_> = (1..=5)
         .map(|i| replay_placement(source, i, [i as f64, 0., 0.]))
@@ -1703,6 +1738,114 @@ fn content_index_matches_linear_lookups() {
             stream.indexed_appearance(&content, id).len(),
             stream.appearance(id).len()
         );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn road_pole_cable_reaches_the_next_pole() {
+    use bevy::math::{Mat4, Quat, Vec3};
+    let reference = reference();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let stream = &mut run.stream;
+    let road = stream
+        .selected_roads
+        .iter()
+        .find(|r| r.light.is_some() && r.segment.index + 1 < super::super::road::ROAD_SEGMENTS)
+        .unwrap();
+    let (segment, light) = (road.segment, road.light.clone().unwrap());
+    let next = stream.roads.segment(segment.index + 1).unwrap();
+    let next_light = stream.road_light.place(&stream.reference, &next).unwrap();
+    let prototype = |light: &super::super::WorldLight| {
+        stream
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| p.source == light.prototype)
+            .unwrap()
+    };
+    // Unity TRS chain relative to the first pole, with appearance overrides.
+    let origin = light.pole.position;
+    let worlds = |light: &super::super::WorldLight, appearance: &[super::super::NodeAppearance]| {
+        let prototype = prototype(light);
+        let root = Mat4::from_scale_rotation_translation(
+            Vec3::from_array(light.scale),
+            Quat::from_array(light.pole.rotation),
+            Vec3::from_array([0, 1, 2].map(|a| (light.pole.position[a] - origin[a]) as f32)),
+        );
+        let local = |i: usize| {
+            let node = &prototype.nodes[i];
+            let last = |f: fn(&super::super::NodeAppearance) -> bool| {
+                appearance
+                    .iter()
+                    .rev()
+                    .find(|a| a.node == node.source && f(a))
+            };
+            Mat4::from_scale_rotation_translation(
+                Vec3::from_array(
+                    last(|a| a.scale.is_some()).map_or(node.transform.scale, |a| a.scale.unwrap()),
+                ),
+                Quat::from_array(
+                    last(|a| a.rotation.is_some())
+                        .map_or(node.transform.rotation, |a| a.rotation.unwrap()),
+                ),
+                Vec3::from_array(node.transform.translation),
+            )
+        };
+        (0..prototype.nodes.len())
+            .map(|i| {
+                let mut matrix = local(i);
+                let mut parent = prototype.nodes[i].parent;
+                while let Some(p) = parent {
+                    matrix = local(p as usize) * matrix;
+                    parent = prototype.nodes[p as usize].parent;
+                }
+                root * matrix
+            })
+            .collect::<Vec<_>>()
+    };
+    let cable = stream.appearance(&light.id);
+    assert!(!cable.is_empty());
+    let from = worlds(&light, cable);
+    let to = worlds(&next_light, &[]);
+    for rope in cable {
+        let i = prototype(&light)
+            .nodes
+            .iter()
+            .position(|n| n.source == rope.node)
+            .unwrap();
+        let start = from[i].transform_point3(Vec3::ZERO);
+        let forward = from[i].transform_vector3(Vec3::NEG_Z).normalize();
+        // Source ropeScript.Connect: localScale z = distance / 100.
+        let end = start + forward * rope.scale.unwrap()[2] * 100.;
+        assert!(
+            to.iter()
+                .any(|m| m.transform_point3(Vec3::ZERO).distance(end) < 0.01),
+            "rope {:?} does not reach a next pole node",
+            rope.node
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn road_building_cable_is_in_building_appearance() {
+    let reference = reference();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
+    prepare_ready(&mut run, &reference);
+    let stream = &run.stream;
+    assert!(!stream.building_cables.is_empty());
+    for (id, cable) in stream.building_cables.iter().filter(|(_, c)| !c.is_empty()) {
+        assert_eq!(cable[0].active, Some(true));
+        let appearance = stream.appearance(id);
+        for rope in &cable[1..] {
+            // Source CheckCableConnections: target 0 under 200 m, plus the pole width.
+            assert!(rope.scale.unwrap()[2] < 2.1);
+            assert!(appearance.iter().any(|a| a.node == rope.node
+                && a.rotation == rope.rotation
+                && a.scale == rope.scale));
+        }
     }
 }
 
@@ -1767,7 +1910,7 @@ fn fixed_decorations_preserve_collision_without_item_bindings() {
         .unwrap()
         .prototypes
         .push(wrong_file);
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let sources = [84448, 69558, 66737, 79572].map(decoration_source);
     for (ordinal, source) in sources.iter().enumerate() {
         let prototype = reference
@@ -1967,7 +2110,7 @@ fn fixed_decorations_preserve_collision_without_item_bindings() {
 fn fixed_decoration_replay_rebases_retires_and_republishes() {
     use rapier3d::prelude::RigidBodyType;
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let source = decoration_source(66737);
     let prototype = reference
         .world
@@ -2009,7 +2152,13 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
     );
     let saved: crate::save::WorldSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    run.stream = WorldStream::new(&reference, saved.seed).unwrap();
+    run.stream = WorldStream::new(
+        &reference,
+        saved.seed,
+        crate::world::GameMode::default(),
+        run.distances,
+    )
+    .unwrap();
     run.stream.restore_save(&saved).unwrap();
     publish_decoration_fixture(&mut run, placement.clone());
     assert!(
@@ -2065,12 +2214,14 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
     }
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(
         run.stream.contents.active.is_empty(),
         "itemless replay cannot pin retirement"
@@ -2111,7 +2262,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
     use super::super::{AttachmentSnapshot, ObjectKey};
     use crate::interaction::items::ItemLocation;
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let sources = [84448, 69558, 66737, 79572].map(decoration_source);
     let mut placements: Vec<_> = sources
         .iter()
@@ -2200,7 +2351,13 @@ fn fixed_decoration_possessions_restore_on_item_path() {
     );
     let json = serde_json::to_vec(&saved).unwrap();
     let saved: crate::save::WorldSnapshot = serde_json::from_slice(&json).unwrap();
-    run.stream = WorldStream::new(&reference, saved.seed).unwrap();
+    run.stream = WorldStream::new(
+        &reference,
+        saved.seed,
+        crate::world::GameMode::default(),
+        run.distances,
+    )
+    .unwrap();
     run.stream.restore_save(&saved).unwrap();
     run.stream.protect_saved_items(&required);
     for p in &placements {
@@ -2331,12 +2488,14 @@ fn fixed_decoration_possessions_restore_on_item_path() {
     run.area.items.get_mut(dropped).unwrap().location = ItemLocation::World;
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(
         run.area.items.resolve_key(&dropped_key).is_none(),
         "dropped loot must not retain save protection"
@@ -2402,7 +2561,7 @@ fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
             })
             .collect(),
     };
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let oil = reference
         .items
         .iter()
@@ -2467,7 +2626,14 @@ fn fixed_decoration_imported_inventory_reload_waits_for_real_readiness() {
         )
         .unwrap();
     let saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(loaded.restore_pending());
     assert!(
         loaded
@@ -2537,7 +2703,7 @@ fn roadside_loot(
 #[ignore = "requires the installed source export"]
 fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (placement, id) = roadside_loot(&mut run, &reference, 810);
     let key = run.area.items.object_key(id);
     run.area.items.get_mut(id).unwrap().generated_condition = Some(0.25);
@@ -2555,12 +2721,14 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
     );
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(
         run.stream.changes.get(&key).is_none(),
@@ -2588,7 +2756,13 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
             run.stream.changes.retained_bytes()
         )
     );
-    run.stream = WorldStream::new(&reference, saved.seed).unwrap();
+    run.stream = WorldStream::new(
+        &reference,
+        saved.seed,
+        crate::world::GameMode::default(),
+        run.distances,
+    )
+    .unwrap();
     run.stream.restore_save(&saved).unwrap();
     assert!(run.stream.changes.get(&key).is_none());
     assert!(
@@ -2604,7 +2778,7 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
 fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
     use super::super::{AttachmentSnapshot, ChangeRecords, ObjectKey};
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (parent, parent_id) = roadside_loot(&mut run, &reference, 813);
     let parent_key = run.area.items.object_key(parent_id);
     run.area
@@ -2677,12 +2851,14 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
     run.stream.changes_prune_due = false;
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(run.area.items.resolve_key(&parent_key).is_none());
     assert!(run.stream.changes.get(&parent_key).is_some());
     run.stream.prune_unloaded_changes(&run.area.items);
@@ -2699,7 +2875,13 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
     );
     let readback: crate::save::WorldSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
-    let mut reloaded = WorldStream::new(&reference, readback.seed).unwrap();
+    let mut reloaded = WorldStream::new(
+        &reference,
+        readback.seed,
+        crate::world::GameMode::default(),
+        run.distances,
+    )
+    .unwrap();
     reloaded.restore_save(&readback).unwrap();
     for key in [&parent_key, &internal_key, &child_key] {
         assert!(
@@ -2720,7 +2902,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
 #[ignore = "requires the installed source export"]
 fn roadside_retirement_batch_sweeps_changes_once() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     for structure in std::mem::take(&mut run.stream.structures) {
         structure.retire(&mut run.physics, &mut run.stream.trigger_roles);
@@ -2737,28 +2919,34 @@ fn roadside_retirement_batch_sweeps_changes_once() {
     run.stream.changes_prune_due = true;
     let scans = run.stream.change_prune_scans;
     for remaining in [1, 0] {
-        run.stream.retire_structures(
+        run.stream
+            .retire_structures(
+                &mut run.physics,
+                &mut run.area.items,
+                &mut run.area.interaction,
+                &mut run.wheels,
+            )
+            .unwrap();
+        assert_eq!(run.stream.structures.len(), remaining);
+        assert_eq!(run.stream.change_prune_scans, scans);
+    }
+    run.stream
+        .retire_structures(
             &mut run.physics,
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
-        ).unwrap();
-        assert_eq!(run.stream.structures.len(), remaining);
-        assert_eq!(run.stream.change_prune_scans, scans);
-    }
-    run.stream.retire_structures(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+        )
+        .unwrap();
     assert_eq!(run.stream.change_prune_scans, scans + 1);
-    run.stream.retire_structures(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_structures(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert_eq!(run.stream.change_prune_scans, scans + 1);
 }
 
@@ -2767,7 +2955,7 @@ fn roadside_retirement_batch_sweeps_changes_once() {
 fn roadside_consumed_tombstone_survives_until_source_departure() {
     use super::super::ObjectKey;
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (placement, id) = roadside_loot(&mut run, &reference, 811);
     let key = run.area.items.object_key(id);
     let distant = replay_placement(&decoration_source(84448), 812, [9000.; 3]);
@@ -2791,12 +2979,14 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
         &run.physics,
     );
     run.stream.changes_prune_due = false;
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(run.stream.changes.get(&key).unwrap().snapshot.is_none());
     assert!(
@@ -2805,18 +2995,48 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
     );
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&distant_key).is_none());
     assert!(
         run.stream.changes.get(&key).is_none(),
         "consumed source must reset after departure"
     );
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn parked_car_keeps_nearby_item_dynamic() {
+    let reference = reference();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
+    let (placement, id) = roadside_loot(&mut run, &reference, 813);
+    let key = run.area.items.object_key(id);
+    let far = [10000., 0., 0.];
+    run.stream.request.player = far;
+    run.stream.request.vehicle = far;
+    run.stream.request_cars([far, placement.pose.position]);
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
+    let id = run
+        .area
+        .items
+        .resolve_key(&key)
+        .expect("parked car keeps item");
+    let body = run.area.items.get(id).unwrap().body.unwrap();
+    assert!(run.physics.rapier().bodies[body].is_dynamic());
 }
 
 #[test]
@@ -2856,7 +3076,7 @@ fn roadside_expiry_requires_both_sites_outside_both_foci() {
 fn roadside_pruning_compacts_indices_without_stale_replay_access() {
     use super::super::ObjectKey;
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let source = decoration_source(84448);
     let baseline = replay_snapshot([9000.; 3]);
     let mut keys = Vec::new();
@@ -2941,7 +3161,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
 
     let reference = reference();
     let stamp = roadside_stamp(&reference);
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     let garage_player = run.area.player.body_pose(&run.physics).position;
     let garage_car = run.physics.snapshot(run.vehicle).pose;
@@ -3106,12 +3326,14 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             .absolute(run.area.player.focus_position(&run.physics)),
         run.stream.origin.absolute(garage_car.position),
     );
-    run.stream.retire_contents(
-        &mut run.physics,
-        &mut run.area.items,
-        &mut run.area.interaction,
-        &mut run.wheels,
-    ).unwrap();
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
     for id in [held, stored, source_part] {
         run.area.items.mark_dirty(id);
     }
@@ -3214,8 +3436,24 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     }
     let mut invalid = saved.clone();
     assert!(invalid.world.changes.forget(&keys[1]));
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
-    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(loaded.restore_pending());
     assert_eq!(
         loaded
@@ -3391,16 +3629,26 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     car.position = far_local;
     loaded.physics.reset_preserving_wheels(loaded.vehicle, car);
     loaded.stream.request_at(far, far);
-    loaded.stream.retire_contents(
-        &mut loaded.physics,
-        &mut loaded.area.items,
-        &mut loaded.area.interaction,
-        &mut loaded.wheels,
-    ).unwrap();
+    loaded
+        .stream
+        .retire_contents(
+            &mut loaded.physics,
+            &mut loaded.area.items,
+            &mut loaded.area.interaction,
+            &mut loaded.wheels,
+        )
+        .unwrap();
     loaded.stream.prune_unloaded_changes(&loaded.area.items);
     assert!(loaded.area.items.resolve_key(&keys[1]).is_none());
     assert!(loaded.stream.changes.get(&keys[1]).is_none());
-    let mut reset = GarageRuntime::from_save(&reference, &stamp, &saved_unattached).unwrap();
+    let mut reset = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved_unattached,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let mut claim = None;
     for _ in 0..1000 {
         let required = roadside_views(&reset.stream);
@@ -3461,7 +3709,14 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let mut unlisted_equipped = equipped_save.clone();
     unlisted_equipped.inventory.slots[unlisted_equipped.inventory.selected as usize] = None;
-    let mut independent = GarageRuntime::from_save(&reference, &stamp, &unlisted_equipped).unwrap();
+    let mut independent = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &unlisted_equipped,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     prepare_ready(&mut independent, &reference);
     assert!(independent.advance_saved_restore(&reference).unwrap());
     assert!(!independent.restore_pending());
@@ -3530,10 +3785,28 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     }
     let mut invalid = unlisted_equipped.clone();
     invalid.world.changes.remove(tool_key.clone());
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     let mut invalid = equipped_save.clone();
     invalid.inventory.slots[2] = invalid.inventory.equipped.clone();
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     let mut invalid = unlisted_equipped.clone();
     let mut held_state = before_tool.clone();
     held_state.held = true;
@@ -3541,7 +3814,16 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .world
         .changes
         .record(tool_key.clone(), held_state, before_tool);
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     let mut invalid = unlisted_equipped.clone();
     invalid.inventory.equipped = Some(crate::save::InstanceId::Generated {
         id: match &keys[1] {
@@ -3554,7 +3836,14 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         invalid.validate(&reference, &stamp).is_ok(),
         "prototype checks wait for generated bindings"
     );
-    let mut ineligible = GarageRuntime::from_save(&reference, &stamp, &invalid).unwrap();
+    let mut ineligible = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &invalid,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     prepare_ready(&mut ineligible, &reference);
     assert!(
         ineligible.advance_saved_restore(&reference).is_err(),
@@ -3563,7 +3852,16 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     // Reject generated ownership and attachment conflicts without slot membership.
     let mut invalid = unlisted_equipped.clone();
     invalid.player.carry = saved_unattached.player.carry.clone();
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     let mut invalid = unlisted_equipped.clone();
     let mut change = invalid.world.changes.get(tool_key).unwrap().clone();
     change.snapshot.as_mut().unwrap().attachment = Some(super::super::AttachmentSnapshot {
@@ -3579,7 +3877,16 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .world
         .changes
         .record(tool_key.clone(), change.snapshot.unwrap(), before_tool);
-    assert!(GarageRuntime::from_save(&reference, &stamp, &invalid).is_err());
+    assert!(
+        GarageRuntime::from_save(
+            &reference,
+            &stamp,
+            &invalid,
+            crate::world::GameMode::default(),
+            reference.world.draw_distance.default
+        )
+        .is_err()
+    );
     assert_eq!(
         reset
             .area
@@ -3616,12 +3923,15 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .physics
         .reset_preserving_wheels(reset.vehicle, reset_car);
     reset.stream.request_at(far, far);
-    reset.stream.retire_contents(
-        &mut reset.physics,
-        &mut reset.area.items,
-        &mut reset.area.interaction,
-        &mut reset.wheels,
-    ).unwrap();
+    reset
+        .stream
+        .retire_contents(
+            &mut reset.physics,
+            &mut reset.area.items,
+            &mut reset.area.interaction,
+            &mut reset.wheels,
+        )
+        .unwrap();
     reset.stream.prune_unloaded_changes(&reset.area.items);
     for key in &keys {
         assert!(reset.area.items.resolve_key(key).is_none());
@@ -3702,7 +4012,7 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
             })
             .collect(),
     };
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new_default(&r).unwrap();
     let oil = r.vehicles[0].engine.oil_tank;
     let engine = r.vehicles[0].engine.item;
     run.area
@@ -3745,7 +4055,14 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
     let saved = run
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
         .unwrap();
-    let mut restored = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    let mut restored = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     let tank = restored
         .area
         .items
@@ -3779,7 +4096,14 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
     let recaptured = restored
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
         .unwrap();
-    let mut second = GarageRuntime::from_save(&r, &stamp, &recaptured).unwrap();
+    let mut second = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &recaptured,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     let second_tank = second.area.items.get(oil).unwrap().fluid.as_ref().unwrap();
     assert_eq!(second_tank.entries().collect::<Vec<_>>(), entries[2..]);
     let second_body = second.area.items.get(engine).unwrap().body.unwrap();
@@ -3807,7 +4131,14 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
     let third_save = second
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-20T12:00:00Z")
         .unwrap();
-    let mut third = GarageRuntime::from_save(&r, &stamp, &third_save).unwrap();
+    let mut third = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &third_save,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     assert_eq!(
         third
             .area
@@ -3841,7 +4172,14 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
     assert!((third.physics.rapier().bodies[third_body].mass() - mass - 0.25).abs() < 0.001);
     // World reactivation restores complete state without a logical source load.
     let snapshot = second.area.items.generated_snapshot(oil, None).unwrap();
-    let mut reactivated = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    let mut reactivated = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     reactivated
         .area
         .items
@@ -3895,7 +4233,14 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
         Some(exact.as_slice())
     );
     let expected = [exact[0], exact[2]];
-    let mut exact_load = GarageRuntime::from_save(&r, &stamp, &exact_save).unwrap();
+    let mut exact_load = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &exact_save,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     assert_eq!(
         exact_load
             .area
@@ -3948,7 +4293,7 @@ fn g04_ordered_save_load_cleans_once_before_detached_mass_sync() {
 }
 
 fn g08_ready(reference: &ReferenceManifest) -> GarageRuntime {
-    let mut run = GarageRuntime::new(reference).unwrap();
+    let mut run = GarageRuntime::new_default(reference).unwrap();
     prepare_ready(&mut run, reference);
     run.sync_world_activity(reference).unwrap();
     run.started = true;
@@ -4580,7 +4925,7 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
             })
             .collect(),
     };
-    let mut game = GarageRuntime::new(&r).unwrap();
+    let mut game = GarageRuntime::new_default(&r).unwrap();
     let oil = r.items.iter().find(|i| i.name == "OilCan").unwrap().id;
     let light = r
         .flashlights
@@ -4668,7 +5013,14 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     let saved = game
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:00Z")
         .unwrap();
-    let mut loaded = GarageRuntime::from_save(&r, &stamp, &saved).unwrap();
+    let mut loaded = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     prepare_ready(&mut loaded, &r);
     assert!(loaded.advance_saved_restore(&r).unwrap());
     let recaptured = loaded
@@ -4759,7 +5111,14 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     let stored = loaded
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:01Z")
         .unwrap();
-    let mut restored = GarageRuntime::from_save(&r, &stamp, &stored).unwrap();
+    let mut restored = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &stored,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     prepare_ready(&mut restored, &r);
     assert!(restored.advance_saved_restore(&r).unwrap());
     assert_eq!(restored.area.items.get(food).unwrap().food.unwrap().bite, 1);
@@ -4783,7 +5142,14 @@ fn source_transfers_reject_atomically_and_restore_both_hands() {
     let removed = restored
         .capture_save(&r, &stamp, CameraSave::FirstPerson, "2026-10-15T12:00:02Z")
         .unwrap();
-    let restored = GarageRuntime::from_save(&r, &stamp, &removed).unwrap();
+    let restored = GarageRuntime::from_save(
+        &r,
+        &stamp,
+        &removed,
+        crate::world::GameMode::default(),
+        r.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(restored.area.items.get(food).unwrap().removed);
 }
 
@@ -4932,7 +5298,14 @@ fn g08_save_independent_equipment_and_both_owners() {
         members.len(),
         saved.inventory.slots.iter().flatten().count()
     );
-    let mut loaded = GarageRuntime::from_save(&reference, &stamp, &saved).unwrap();
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     assert!(loaded.restore_pending());
     prepare_ready(&mut loaded, &reference);
     assert!(loaded.stream.required_ready());
@@ -5095,7 +5468,14 @@ fn g08_save_independent_equipment_and_both_owners() {
             "2026-10-20T12:00:02Z",
         )
         .unwrap();
-    let mut after_load = GarageRuntime::from_save(&reference, &stamp, &pressed_save).unwrap();
+    let mut after_load = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &pressed_save,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     prepare_ready(&mut after_load, &reference);
     assert!(after_load.advance_saved_restore(&reference).unwrap());
     after_load.paused = false;
@@ -5439,7 +5819,7 @@ fn trigger_roles_follow_publish_and_retire() {
     let body = collider.body;
     let body = body.map(|b| prototype.bodies[b as usize].pose.rotation);
     let recipe = crate::world::StructureRecipe::new(&reference.world, &prototype).unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let mut roles = crate::world::TriggerRoles::default();
     let mut placement = replay_placement(&prototype.source, 9823, [50.; 3]);
     placement.scale = prototype.prefab_pose.scale;
@@ -5478,7 +5858,7 @@ fn trigger_roles_follow_publish_and_retire() {
 #[ignore = "requires the installed source export"]
 fn hazard_trigger_damages_player_until_death() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     let position = run.area.player.body_pose(&run.physics).position;
     let handle = run.physics.insert_collider(
         rapier3d::prelude::ColliderBuilder::cuboid(5., 5., 5.)

@@ -56,6 +56,7 @@ pub struct FoodCollider {
     pub enabled: bool,
     pub geometry: ColliderGeometry,
     pub step_surface: Option<StepSurface>,
+    pub tag: Option<super::ColliderTag>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

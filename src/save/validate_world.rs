@@ -8,7 +8,8 @@ impl SaveSnapshot {
             .validate_identity(&reference.content_base)
             .map_err(|e| invalid(&e.0))?;
         let roads = crate::world::RoadIndex::new(
-            crate::world::RoadSequence::new(&reference.world, self.world.seed)
+            // The biome does not change road states or bounds.
+            crate::world::RoadSequence::new(&reference.world, self.world.seed, None)
                 .map_err(|e| invalid(&e.0))?,
             crate::world::terrain_evaluator(&reference.world, self.world.seed),
         );

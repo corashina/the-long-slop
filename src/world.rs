@@ -9,6 +9,11 @@ pub use changes::{
 };
 pub use types::*;
 
+mod draw_distance;
+pub use draw_distance::DrawDistances;
+mod cables;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use cables::aim;
 mod lamps;
 mod source_lights;
 pub use source_lights::{WorldLight, required_world_lights};
@@ -42,7 +47,9 @@ pub(crate) mod pipeline_ownership;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod renderer_pending;
 pub(crate) mod stream;
+mod stream_limits;
 pub use stream::content_index::ContentIndex;
+pub use stream_limits::StreamLimits;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod upload_receipt;
 pub use stream::content_boxes::BoxRelease;
@@ -55,9 +62,22 @@ pub use startup::{StartupTerrain, source_world_pose};
 mod terrain;
 pub use ::terrain::{
     RandomState, SourceRandom, TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainJob,
-    TerrainRoadPoint, TerrainTile, biome, source_perlin,
+    TerrainRoadPoint, TerrainTile, biome, forced_color, source_perlin,
 };
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
+
+/// Game mode biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GameMode {
+    pub biome: u8,
+}
+
+impl GameMode {
+    /// Biome index for `biome`: 0 desert, 1 winter, 2 grass. Mixed uses the terrain color.
+    pub fn biome_override(self) -> Option<u8> {
+        self.biome.checked_sub(1)
+    }
+}
 
 pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;
@@ -91,6 +111,7 @@ mod spawn_initialization;
 mod spawn_rules;
 mod spawn_selection;
 
+mod biome_materials;
 mod building_extras;
 mod spawn_appearance;
 mod spawn_building;
