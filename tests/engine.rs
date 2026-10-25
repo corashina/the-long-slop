@@ -64,8 +64,12 @@ fn installed_source() -> (ReferenceManifest, SourceStamp) {
 #[ignore = "requires the installed build 11140890 export"]
 fn fluid_save_order_and_validation() {
     let (reference, stamp) = installed_source();
-    let mut game =
-        GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let fuel_id = reference.vehicles[0].engine.fuel_tank;
     let container = game
         .area
@@ -118,6 +122,7 @@ fn fluid_save_order_and_validation() {
         &stamp,
         &decoded,
         the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     // Item contents restore before the world streaming gate opens.
@@ -196,6 +201,7 @@ fn fluid_save_order_and_validation() {
         &stamp,
         &quantity_only,
         the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     // Item contents restore before the world streaming gate opens.
@@ -241,6 +247,7 @@ fn fluid_save_order_and_validation() {
         &stamp,
         &retained_zero,
         the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     // Load removes one nonpositive entry before the world streaming gate opens.
@@ -297,7 +304,8 @@ fn fluid_save_order_and_validation() {
             &reference,
             &stamp,
             &invalid,
-            the_long_slop::world::GameMode::default()
+            the_long_slop::world::GameMode::default(),
+            reference.world.draw_distance.default
         )
         .is_err()
     );
@@ -322,8 +330,12 @@ fn fluid_save_order_and_validation() {
 fn ignition_save_ownership_and_cancellation() {
     use the_long_slop::simulation::ignition::IgnitionInput;
     let (reference, stamp) = installed_source();
-    let mut game =
-        GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let delay = reference.vehicles[0].engine.starter_delay_seconds;
     let held = IgnitionInput {
         held: true,
@@ -351,6 +363,7 @@ fn ignition_save_ownership_and_cancellation() {
         &stamp,
         &saved,
         the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     assert!(loaded.paused);
@@ -574,7 +587,12 @@ fn engine_draws_and_restore() {
     assert_eq!(restored.engine.capture_save().start_draw, "0");
 
     let (_, stamp) = installed_source();
-    let game = GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
+    let game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     let mut full = game
         .capture_save(
             &reference,
@@ -975,8 +993,12 @@ fn engine_fluids_and_cooling() {
     assert_eq!(detached.sump, oil);
 
     // Restore actual item quantities and order, without opening the world gate.
-    let mut game =
-        GarageRuntime::new(&reference, the_long_slop::world::GameMode::default()).unwrap();
+    let mut game = GarageRuntime::new(
+        &reference,
+        the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     game.vehicles[0].engine = rig.engine.clone();
     for (id, fluid) in [
         (source.fuel_tank, &rig.fuel),
@@ -998,6 +1020,7 @@ fn engine_fluids_and_cooling() {
         &stamp,
         &saved,
         the_long_slop::world::GameMode::default(),
+        reference.world.draw_distance.default,
     )
     .unwrap();
     let mut continued = EngineRig {

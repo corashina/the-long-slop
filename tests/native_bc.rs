@@ -139,6 +139,10 @@ fn installed_native_primary_bytes_and_shared_job_limits() {
         &reference,
         42,
         the_long_slop::world::GameMode::default(),
+        the_long_slop::world::DrawDistances::resolve(
+            &reference.world.draw_distance,
+            reference.world.draw_distance.default,
+        ),
     )
     .unwrap();
     while !stream.initial_generation_ready() {

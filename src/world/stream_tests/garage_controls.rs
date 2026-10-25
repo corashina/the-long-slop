@@ -27,7 +27,7 @@ pub(super) fn load_garage() -> (ReferenceManifest, GarageRuntime) {
     let reference = super::reference();
     assert_eq!(reference.build_id, 11140890);
     assert_eq!(reference.vehicles.len(), 1);
-    let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
     super::prepare_ready(&mut run, &reference);
     assert!(run.world_supported());
     run.started = true;

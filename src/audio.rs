@@ -1741,7 +1741,7 @@ mod tests {
     fn engine_audio_follows_detached_state() {
         // Source enginescript.Update, 12105-12213: audio follows running, not attachment.
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
+        let mut run = GarageRuntime::new_default(&reference).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         assert_voices(run.audio.as_ref().unwrap(), true);
@@ -1833,6 +1833,7 @@ mod tests {
             &stamp,
             &saved,
             crate::world::GameMode::default(),
+            reference.world.draw_distance.default,
         )
         .unwrap();
         assert!(!restored.audio.as_ref().unwrap().last_running);
@@ -1861,7 +1862,7 @@ mod tests {
     #[ignore = "requires the installed build 11140890 export"]
     fn engine_emitters_follow_item_pose_and_restore() {
         let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
+        let mut run = GarageRuntime::new_default(&reference).unwrap();
         seed_running(&mut run);
         publish(&mut run);
         detach(&mut run, &reference);
@@ -1947,6 +1948,7 @@ mod tests {
             &stamp,
             &saved,
             crate::world::GameMode::default(),
+            reference.world.draw_distance.default,
         )
         .unwrap();
         assert!(restored.vehicles[0].engine_output.running);

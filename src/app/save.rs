@@ -233,6 +233,7 @@ fn process_request(
                 drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
             }
             let camera = super::active_camera(&drive);
+            let far = drive.runtime.distances.cam2_far_plane;
             let fov = drive
                 .runtime
                 .area
@@ -249,6 +250,9 @@ fn process_request(
             for (mut transform, mut projection, main, sky) in cameras.iter_mut(world) {
                 if main.is_some() {
                     *transform = camera;
+                    if let Projection::Perspective(perspective) = &mut *projection {
+                        perspective.far = far;
+                    }
                 } else if sky.is_some() {
                     *transform = Transform::from_rotation(camera.rotation);
                 }
@@ -298,10 +302,20 @@ fn process_request(
             if requests.pending.is_some() {
                 return Err(invalid("A prepared session is pending"));
             }
+            let draw_distance = request
+                .payload
+                .get("draw_distance")
+                .and_then(serde_json::Value::as_f64)
+                .ok_or_else(|| invalid("Missing draw distance"))?
+                as f32;
             let mode = super::game_mode();
             if request.kind == "PrepareNewGame"
                 && !drive.runtime.started
                 && drive.runtime.stream.mode() == mode
+                && drive
+                    .runtime
+                    .distances
+                    .matches(&reference.world.draw_distance, draw_distance)
             {
                 let permit = FreshSessionPermit::prepare(
                     request.id,
@@ -315,9 +329,19 @@ fn process_request(
                 return Ok(request.id.to_string());
             }
             let (mut runtime, camera) = if request.kind == "Prepare" {
-                let saved: SaveSnapshot = serde_json::from_value(request.payload.clone())
+                let saved = request
+                    .payload
+                    .get("save")
+                    .ok_or_else(|| invalid("Missing save"))?;
+                let saved = SaveSnapshot::deserialize(saved)
                     .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                let runtime = GarageRuntime::from_save(&reference, &requests.source, &saved, mode)?;
+                let runtime = GarageRuntime::from_save(
+                    &reference,
+                    &requests.source,
+                    &saved,
+                    mode,
+                    draw_distance,
+                )?;
                 (
                     runtime,
                     if saved.view.camera == CameraSave::Chase {
@@ -327,7 +351,10 @@ fn process_request(
                     },
                 )
             } else {
-                (GarageRuntime::new(&reference, mode)?, CameraMode::default())
+                (
+                    GarageRuntime::new(&reference, mode, draw_distance)?,
+                    CameraMode::default(),
+                )
             };
             runtime.started = true;
             runtime.paused = true;

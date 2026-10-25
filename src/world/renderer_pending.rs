@@ -763,8 +763,7 @@ mod batch_tests {
             &std::fs::read("web/assets/reference/manifest.json").unwrap(),
         )
         .unwrap();
-        let mut stream =
-            WorldStream::new(&reference, 42, crate::world::GameMode::default()).unwrap();
+        let mut stream = WorldStream::new_default(&reference, 42).unwrap();
         for _ in 0..2000 {
             if stream.available_external_jobs() > 0 {
                 break;

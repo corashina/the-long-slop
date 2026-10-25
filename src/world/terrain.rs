@@ -9,6 +9,7 @@ use terrain::{TerrainEvaluator, TerrainSettings, TerrainTile, surface_origin};
 
 pub fn terrain_tile(
     reference: &WorldReference,
+    distances: &super::DrawDistances,
     tier: usize,
 ) -> Result<TerrainTile, ReferenceError> {
     let tile = reference
@@ -28,24 +29,18 @@ pub fn terrain_tile(
             _ => Err(ReferenceError(format!("TerrainGenerationSettings.{field}"))),
         }
     };
-    let distance = |field: &str| {
-        reference
-            .distances
-            .get(field)
-            .copied()
-            .ok_or_else(|| ReferenceError(format!("World distances.{field}")))
-    };
+    let d = distances;
     let (scale, draw) = match tier {
-        0 => (1.0, distance("TerrainGenDist")?),
+        0 => (1.0, d.terrain_gen_dist),
         1 => (
-            ((distance("drawDistance")? as f64 / 3.0 / 3.0 * 4.0)
-                / number("defDistantTerrainSize")? as f64) as f32,
-            distance("DistantTerrainGenDist")?,
+            ((d.draw_distance as f64 / 3.0 / 3.0 * 4.0) / number("defDistantTerrainSize")? as f64)
+                as f32,
+            d.distant_terrain_gen_dist,
         ),
         2 => (
-            ((distance("Cam2FarPlane")? as f64 / 3.0 / 3.0 * 4.0)
-                / number("defDistantTerrain2Size")? as f64) as f32,
-            distance("DistantTerrain2GenDist")?,
+            ((d.cam2_far_plane as f64 / 3.0 / 3.0 * 4.0) / number("defDistantTerrain2Size")? as f64)
+                as f32,
+            d.distant_terrain2_gen_dist,
         ),
         _ => return Err(ReferenceError(format!("Terrain tier {tier}"))),
     };
