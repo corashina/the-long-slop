@@ -907,14 +907,22 @@ impl GarageRuntime {
     }
 
     fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let position = self
+            .stream
+            .origin
+            .absolute(self.area.player.body_pose(&self.physics).position);
+        // Source order: the zones duck the ambient before napszak reads it.
+        if let Some(audio) = &mut self.audio {
+            audio.sync_zones(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            self.ambient.duck(audio.zone_step(position));
+        }
         let gains = self
             .ambient
             .gains(&reference.ambient, self.lighting.cycle.output(), dt);
         if let Some(audio) = &mut self.audio {
-            let position = self
-                .stream
-                .origin
-                .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(crate::audio::AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(crate::audio::AudioKind::AmbientNight, 0, gains[1], position);
             audio.sync_rocks(
