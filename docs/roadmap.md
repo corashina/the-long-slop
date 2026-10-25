@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-24. Goal: recreate The Long Drive for the web.
+Updated: 2026-10-25. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](../src/save/schema.rs).
 
@@ -25,10 +25,16 @@ Size: S is up to a day. M is a few days. L is about a week. XL is several weeks.
 
 Finish the home, garage, Lada, and nearby driving first.
 
-| ID | Task | Size | Remaining work |
-| --- | --- | --- | --- |
-| P09 | Add portable electronics. [Items](../src/interaction/items.rs) | M | Music box. [F08] |
-| P10 | Finish small item actions. [Items](../src/interaction/items.rs) | S | Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [E05, F13, F14] |
+All tasks are done. Run this test pass on Tomasz's PC next:
+
+1. Pull master. Re-export, then rebuild. Old exports and saves do not load.
+2. Check F3 near the garage and on the road. Compare with the frame rate rule.
+3. Play the garage loop in the browser: repair, fill, start, drive out, return, save, reload.
+4. Check the 20 L can stays on the ground after drive-out and return.
+5. Check paint spray and sponge particles (P02): refraction and soft edges.
+6. Check slope normals far from origin, ladders, head bob, sleep hint, hazards.
+7. Check player sounds: hits, footsteps, ambience, muffling in buildings.
+8. Check the music box, radios, compass, clock, and small items.
 
 ## 2. Car parts and repair
 
@@ -74,7 +80,7 @@ Finish the home, garage, Lada, and nearby driving first.
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | Grow the save with each feature: items, buildings, wear, colors. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
-| X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. [F07, F18, F19, F22] |
+| X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]
