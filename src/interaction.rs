@@ -17,6 +17,7 @@ pub mod items;
 pub mod labels;
 pub(crate) mod level;
 pub mod mechanisms;
+pub mod melee;
 pub(crate) mod memory;
 pub mod parts;
 pub mod push;
@@ -228,6 +229,7 @@ struct SeatState {
 pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
     pub buried: buried::BuriedItems,
+    pub melee: melee::MeleeState,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -583,6 +585,7 @@ impl InteractionState {
         Ok(Self {
             cleaning: cleaning::CleaningTools::new(reference)?,
             buried: buried::BuriedItems::default(),
+            melee: melee::MeleeState::new(reference)?,
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -732,6 +735,9 @@ impl InteractionState {
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
         self.bodies.insert(id, handle);
         self.mechanisms.bind_body(id, handle);
+    }
+    pub fn player_body(&self) -> Option<RigidBodyHandle> {
+        self.player_body
     }
     pub fn bind_player_body(&mut self, handle: RigidBodyHandle) {
         self.player_body = Some(handle);
@@ -1440,6 +1446,7 @@ impl InteractionState {
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.cleaning.reset_contact();
+        self.melee.rebase(shift);
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);

@@ -14,6 +14,10 @@ pub struct PlayerPoseState {
     head: VehiclePose,
     body: VehiclePose,
     pub inventory: NodeId,
+    hand: NodeId,
+    /// Source RH parent in the head frame. Animated RH poses are parent-local.
+    hand_parent: VehiclePose,
+    hand_default: VehiclePose,
 }
 impl PlayerPoseState {
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
@@ -33,6 +37,7 @@ impl PlayerPoseState {
             .find(|n| n.source.file == "level1" && n.source.path_id == 31175)
             .ok_or_else(|| ReferenceError("Missing source inventory frame".into()))?
             .id;
+        let hand_parent = from_rapier(&(camera * to_rapier(node_pose(r, head)?)));
         let mut frames = HashMap::new();
         for id in std::iter::once(anchors["RH"].node)
             .chain(r.clothing.pose.wearable_anchors.iter().copied())
@@ -57,11 +62,22 @@ impl PlayerPoseState {
             rotation: [0., 0., 0., 1.],
         };
         Ok(Self {
-            frames,
             head: identity,
             body: identity,
             inventory,
+            hand: anchors["RH"].node,
+            hand_parent,
+            hand_default: frames[&anchors["RH"].node].0,
+            frames,
         })
+    }
+    /// `weaponhandlingscript`: the animator drives RH. `None` returns it to `defRH`,
+    /// which has the source RH pose.
+    pub fn set_hand(&mut self, local: Option<VehiclePose>) {
+        self.frames.get_mut(&self.hand).unwrap().0 = match local {
+            Some(local) => from_rapier(&(to_rapier(self.hand_parent) * to_rapier(local))),
+            None => self.hand_default,
+        };
     }
     pub fn set_frames(&mut self, head: VehiclePose, body: VehiclePose) {
         self.head = head;
