@@ -31,7 +31,7 @@ fn fixture() -> (ReferenceManifest, SourceStamp, GarageRuntime) {
             })
             .collect(),
     };
-    let runtime = GarageRuntime::new(&reference).unwrap();
+    let runtime = GarageRuntime::new(&reference, reference.world.draw_distance.default).unwrap();
     (reference, stamp, runtime)
 }
 

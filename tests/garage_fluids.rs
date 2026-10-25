@@ -38,7 +38,7 @@ static ALLOCATOR: AllocationCounter = AllocationCounter;
 fn g04_ordered_snapshot_capture_and_copy_do_not_allocate() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let run = GarageRuntime::new(&r).unwrap();
+    let run = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     let oil = r.vehicles[0].engine.oil_tank;
     let warm = run.area.items.generated_snapshot(oil, None).unwrap();
     assert!(warm.fluids.is_some());
@@ -69,7 +69,7 @@ fn g04_portable_mass_bounds_signed_depletion() {
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     let id = ItemId(116);
     let body = run.area.items.get(id).unwrap().body.unwrap();
     let opening = r.openings.iter().find(|o| o.tank == id).unwrap();
@@ -186,8 +186,8 @@ fn fluid_step(
 }
 
 fn hold_tank(run: &mut GarageRuntime, tank: the_long_slop::reference::ItemId) {
-    use the_long_slop::vehicle::to_rapier;
     use rapier3d::math::Vector;
+    use the_long_slop::vehicle::to_rapier;
     let body = run.area.items.get(tank).unwrap().body.unwrap();
     let view = to_rapier(run.area.player.view(&run.physics).head_pose);
     let point = view.translation + view.rotation * Vector::NEG_Z;
@@ -327,7 +327,7 @@ fn g04_caps_and_direct_fill() {
         .find(|o| o.tank == supply)
         .unwrap()
         .clone();
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     hold_tank(&mut run, source);
     assert!(!run.area.interaction.opening_is_open(source_cap.id));
 
@@ -558,7 +558,7 @@ fn g04_caps_and_direct_fill() {
             .find(|t| t.item == receiver)
             .unwrap()
             .no_fill_this = no_fill_this;
-        let mut blocked = GarageRuntime::new(&r).unwrap();
+        let mut blocked = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
         hold_tank(&mut blocked, source);
         set_cap(&mut blocked, &r, receiver_cap.id, true);
         let before = blocked.area.items.get(source).unwrap().fluid.clone();
@@ -570,6 +570,7 @@ fn g04_caps_and_direct_fill() {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_particle_receipt() {
+    use rapier3d::math::{Pose, Vector};
     use the_long_slop::{
         fluids::{FluidContainer, FluidEntry, spill},
         interaction::ResolvedAim,
@@ -577,14 +578,13 @@ fn g04_particle_receipt() {
         simulation::{FIXED_DT, FrameInput},
         vehicle::to_rapier,
     };
-    use rapier3d::math::{Pose, Vector};
     let mut r = ReferenceManifest::from_runtime_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
     let source = ItemId(116);
     let receiver = r.vehicles[0].engine.fuel_tank;
-    let probe = GarageRuntime::new(&r).unwrap();
+    let probe = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     let chassis = probe.physics.chassis_handle(0);
     let collider = probe
         .physics
@@ -648,7 +648,7 @@ fn g04_particle_receipt() {
         .find(|o| o.tank == receiver)
         .unwrap()
         .clone();
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     set_cap(&mut run, &r, receiver_cap.id, true);
     set_cap(&mut run, &r, source_cap.id, true);
     run.area.items.get_mut(source).unwrap().fluid = Some(FluidContainer::new(
@@ -746,20 +746,20 @@ fn mass_near(actual: f32, expected: f32) {
 #[test]
 #[ignore = "requires the installed single-Lada export"]
 fn g04_detached_tanks_and_save() {
+    use rapier3d::math::{Rotation, Vector};
     use the_long_slop::{
         interaction::{InteractionAction, ResolvedAim, items::ItemLocation},
         reference::ItemId,
         simulation::FrameInput,
         vehicle::to_rapier,
     };
-    use rapier3d::math::{Rotation, Vector};
     let r = ReferenceManifest::from_runtime_json(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
     assert_eq!(r.build_id, 11140890);
     assert_eq!(r.vehicles.len(), 1);
-    let mut run = GarageRuntime::new(&r).unwrap();
+    let mut run = GarageRuntime::new(&r, r.world.draw_distance.default).unwrap();
     sync_fluid_mass(&mut run);
     // The carry anchor is created once on first pickup.
     hold_tank(&mut run, ItemId(120));

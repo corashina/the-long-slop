@@ -9,6 +9,8 @@ pub use changes::{
 };
 pub use types::*;
 
+mod draw_distance;
+pub use draw_distance::DrawDistances;
 mod lamps;
 mod source_lights;
 pub use source_lights::{WorldLight, required_world_lights};

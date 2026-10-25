@@ -9,7 +9,15 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
         &std::fs::read("web/assets/reference/manifest.json").unwrap(),
     )
     .unwrap();
-    let mut stream = WorldStream::new(&reference, 42).unwrap();
+    let mut stream = WorldStream::new(
+        &reference,
+        42,
+        the_long_slop::world::DrawDistances::resolve(
+            &reference.world.draw_distance,
+            reference.world.draw_distance.default,
+        ),
+    )
+    .unwrap();
     let mut allocated = false;
     assert!(
         admit_control(&mut stream, 4 * 1024 * 1024 * 1024, || {
@@ -52,7 +60,15 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
         stream.presentation_allocation().prototype_cpu,
         before.prototype_cpu + fixed.cpu
     );
-    let mut candidate = WorldStream::new(&reference, 43).unwrap();
+    let mut candidate = WorldStream::new(
+        &reference,
+        43,
+        the_long_slop::world::DrawDistances::resolve(
+            &reference.world.draw_distance,
+            reference.world.draw_distance.default,
+        ),
+    )
+    .unwrap();
     candidate.set_overlap(overlap).unwrap();
     let candidate_before = candidate.presentation_allocation();
     let candidate_cpu = candidate.metrics().prototype_cpu_bytes;
@@ -89,7 +105,11 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
         stream.presentation_allocation().prototype_cpu,
         before.prototype_cpu + fixed.cpu
     );
-    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(&reference).unwrap();
+    let mut runtime = the_long_slop::starting_area::GarageRuntime::new(
+        &reference,
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
     admit_control(&mut runtime.stream, shared, || ()).unwrap();
     let retained = runtime.stream.presentation_allocation();
     let discarded =

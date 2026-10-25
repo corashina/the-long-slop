@@ -687,6 +687,8 @@ pub struct GarageRuntime {
     pub persistent_world: crate::save::PersistentWorld,
     pending_restore: Option<save::PendingRestore>,
     pub lighting: crate::lighting::LightingState,
+    /// Resolved once from the requested draw distance.
+    pub distances: crate::world::DrawDistances,
     pub physics: PhysicsWorld,
     pub area: StartingArea,
     pub stream: WorldStream,
@@ -723,18 +725,26 @@ impl GarageRuntime {
         self.clear_input();
         Ok(())
     }
-    pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32)
+    pub fn new(reference: &ReferenceManifest, draw_distance: f32) -> Result<Self, ReferenceError> {
+        Self::new_candidate(reference, true, DEFAULT_SEED as i32, draw_distance)
+    }
+    /// Test runtime at the export default draw distance.
+    #[cfg(test)]
+    pub(crate) fn new_default(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
+        Self::new(reference, reference.world.draw_distance.default)
     }
     fn new_candidate(
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
+        let distances =
+            crate::world::DrawDistances::resolve(&reference.world.draw_distance, draw_distance);
         let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed)?;
+        let mut stream = WorldStream::new(reference, seed, distances)?;
         stream.select_source_car(reference.vehicles[0].spawn_car_id);
         if stream_world {
             stream.request_at(
@@ -752,7 +762,7 @@ impl GarageRuntime {
         area.items.sync_poses(&physics);
         area.commit_poses(&physics, true);
         stream.initialize_imported_changes(reference, &area.items, &area.interaction, &physics);
-        let lighting = crate::lighting::LightingState::new(&reference.lighting);
+        let lighting = crate::lighting::LightingState::new(&reference.lighting, &distances);
         let audio = crate::reference::AudioReference::from_value(&reference.audio, reference)
             .ok()
             .map(|r| {
@@ -804,6 +814,7 @@ impl GarageRuntime {
             recovering: false,
             startup_aligned: false,
             lighting,
+            distances,
             vehicles: reference
                 .vehicles
                 .iter()

@@ -24,7 +24,7 @@ fn drive(physics: &mut PhysicsWorld, seconds: f32, input: DriveInput, motor_nm: 
 fn installed_lada_launches_and_brakes() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(&reference, reference.world.draw_distance.default).unwrap();
     let physics = &mut run.physics;
     // Flat ground away from the garage.
     let start = physics.snapshot(0).pose.position;

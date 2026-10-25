@@ -400,7 +400,10 @@ pub(crate) fn snapshot(
         }
         let (extent, world_from_view) = input[index]?;
         let (near, far, fov, mask, distance) = if index < WORLD_VIEWS {
-            let world = super::camera::world_camera_settings(fov_degrees);
+            let world = super::camera::world_camera_settings(
+                fov_degrees,
+                drive.runtime.distances.cam2_far_plane,
+            );
             (
                 world.near,
                 world.far,

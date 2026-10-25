@@ -969,9 +969,9 @@ impl WorldStream {
         interaction: &mut InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
     ) -> Result<(), ReferenceError> {
-        let remove = self.reference.distances["ItemRemoveDist"];
-        let freeze = self.reference.distances["ItemFreezeDist"];
-        let unfreeze = self.reference.distances["ItemUnFreezeDist"];
+        let remove = self.distances.item_remove_dist;
+        let freeze = self.distances.item_freeze_dist;
+        let unfreeze = self.distances.item_unfreeze_dist;
         let mut index = 0;
         while index < self.contents.active.len() {
             let content = &self.contents.active[index];

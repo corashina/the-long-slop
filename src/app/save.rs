@@ -310,10 +310,12 @@ fn process_request(
                 game_save_result(request.id, &request.kind, &request.id.to_string(), "");
                 return Ok(request.id.to_string());
             }
+            let draw_distance = reference.world.draw_distance.default;
             let (mut runtime, camera) = if request.kind == "Prepare" {
                 let saved: SaveSnapshot = serde_json::from_value(request.payload.clone())
                     .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                let runtime = GarageRuntime::from_save(&reference, &requests.source, &saved)?;
+                let runtime =
+                    GarageRuntime::from_save(&reference, &requests.source, &saved, draw_distance)?;
                 (
                     runtime,
                     if saved.view.camera == CameraSave::Chase {
@@ -323,7 +325,10 @@ fn process_request(
                     },
                 )
             } else {
-                (GarageRuntime::new(&reference)?, CameraMode::default())
+                (
+                    GarageRuntime::new(&reference, draw_distance)?,
+                    CameraMode::default(),
+                )
             };
             runtime.started = true;
             runtime.paused = true;

@@ -135,7 +135,15 @@ fn installed_native_primary_bytes_and_shared_job_limits() {
     );
     let largest = texture();
     let staging = primary_staging(&largest, &catalog(&largest)).unwrap();
-    let mut stream = the_long_slop::world::WorldStream::new(&reference, 42).unwrap();
+    let mut stream = the_long_slop::world::WorldStream::new(
+        &reference,
+        42,
+        the_long_slop::world::DrawDistances::resolve(
+            &reference.world.draw_distance,
+            reference.world.draw_distance.default,
+        ),
+    )
+    .unwrap();
     while !stream.initial_generation_ready() {
         stream.prepare(100.);
         assert!(stream.frame().failure.is_none());

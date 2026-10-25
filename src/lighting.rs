@@ -68,13 +68,15 @@ pub struct CycleState {
     output: CycleOutput,
     terrain_color: [f32; 4],
     next_biome_refresh: f64,
+    /// Resolved source `DDS.fogModifier`.
+    fog_modifier: f32,
 }
 
 impl CycleState {
     /// Initialize from a validated cycle reference.
-    pub fn new(reference: &CycleReference) -> Self {
+    pub fn new(reference: &CycleReference, fog_modifier: f32) -> Self {
         let cycle_seconds = f64::from(reference.startup_offset_seconds);
-        let output = evaluate(reference, cycle_seconds, 0., 0., 0., [0.; 4]);
+        let output = evaluate(reference, fog_modifier, cycle_seconds, 0., 0., 0., [0.; 4]);
         Self {
             elapsed_seconds: 0.,
             cycle_seconds,
@@ -84,6 +86,7 @@ impl CycleState {
             output,
             terrain_color: [0.; 4],
             next_biome_refresh: reference.biome_refresh_seconds as f64,
+            fog_modifier,
         }
     }
 
@@ -118,6 +121,7 @@ impl CycleState {
         self.elapsed_seconds = active;
         self.output = evaluate(
             reference,
+            self.fog_modifier,
             cycle,
             active,
             self.cloud_coordinate,
@@ -149,6 +153,7 @@ impl CycleState {
         self.star_rotation = saved.star_rotation;
         self.output = evaluate(
             reference,
+            self.fog_modifier,
             saved.evaluated_cycle_seconds,
             saved.elapsed_seconds,
             saved.cloud_coordinate,
@@ -179,7 +184,7 @@ impl CycleState {
         }
     }
     pub fn reset(&mut self, reference: &CycleReference) {
-        *self = Self::new(reference);
+        *self = Self::new(reference, self.fog_modifier);
     }
 
     /// Return monotonic active play time, without the source startup offset.
@@ -194,6 +199,7 @@ impl CycleState {
 
 fn evaluate(
     r: &CycleReference,
+    fog_modifier: f32,
     seconds: f64,
     active: f64,
     cloud_x: f32,
@@ -390,7 +396,7 @@ fn evaluate(
             CyclePhase::Day => 1.,
             _ => gradient(&r.atmosphere_thickness, gradient_time)[0] * 255.,
         },
-        fog_density: fog_density * r.fog_modifier,
+        fog_density: fog_density * fog_modifier,
         fog_color,
         roadside_enabled: match phase {
             CyclePhase::Dawn => p < 0.5,
@@ -637,9 +643,12 @@ pub struct LightingState {
     pose_progress: Vec<Option<SwitchMotion>>,
 }
 impl LightingState {
-    pub fn new(reference: &crate::reference::LightingRecord) -> Self {
+    pub fn new(
+        reference: &crate::reference::LightingRecord,
+        distances: &crate::world::DrawDistances,
+    ) -> Self {
         let mut state = Self {
-            cycle: CycleState::new(&reference.cycle),
+            cycle: CycleState::new(&reference.cycle, distances.fog_modifier),
             visibility: reference
                 .controllers
                 .iter()

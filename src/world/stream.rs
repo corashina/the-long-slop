@@ -165,6 +165,7 @@ pub struct WorldStream {
     structure_helpers: super::structure_helpers::StructureHelpers,
     building_components: super::building_extras::BuildingComponents,
     reference: Arc<WorldReference>,
+    pub(crate) distances: super::DrawDistances,
     presentation: PresentationAllocation,
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
@@ -354,7 +355,7 @@ impl WorldStream {
         }
         let mut dependencies = HashSet::new();
         super::changes::external_attachment_chain(&changes, &mut dependencies);
-        let radius = self.reference.distances["ItemRemoveDist"];
+        let radius = self.distances.item_remove_dist;
         changes.retain(|key, change| {
             items.resolve_key(key).is_some()
                 || required.contains(key)
@@ -479,8 +480,7 @@ impl WorldStream {
         [self.request.player, self.request.vehicle]
             .iter()
             .any(|focus| {
-                source_distance_squared(*focus, position)
-                    < self.reference.distances["ItemSpawnDist"].powi(2)
+                source_distance_squared(*focus, position) < self.distances.item_spawn_dist.powi(2)
             })
     }
     pub fn saved_bindings_ready(&self, items: &crate::interaction::items::ItemStore) -> bool {
@@ -632,7 +632,20 @@ impl WorldStream {
         })
     }
 
-    pub fn new(reference: &ReferenceManifest, seed: i32) -> Result<Self, ReferenceError> {
+    /// Test stream at the export default draw distance.
+    #[cfg(test)]
+    pub(crate) fn new_default(
+        reference: &ReferenceManifest,
+        seed: i32,
+    ) -> Result<Self, ReferenceError> {
+        let r = &reference.world.draw_distance;
+        Self::new(reference, seed, super::DrawDistances::resolve(r, r.default))
+    }
+    pub fn new(
+        reference: &ReferenceManifest,
+        seed: i32,
+        distances: super::DrawDistances,
+    ) -> Result<Self, ReferenceError> {
         let world = &reference.world;
         let shared_cpu_bytes = reference.world_retained_cpu_bytes();
         if shared_cpu_bytes > PROTOTYPE_CPU {
@@ -732,6 +745,7 @@ impl WorldStream {
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
+            distances,
             package_id: reference.content_base.clone(),
             generation_revision: 0,
             changes: super::ChangeRecords::default(),
@@ -764,16 +778,16 @@ impl WorldStream {
             road_worker_reserved_bytes: 0,
             road_work: None,
             placements: PlacementIndex::new(world, seed),
-            props: super::prop_layers::PropLayers::new(world, seed)?,
+            props: super::prop_layers::PropLayers::new(world, seed, &distances)?,
             contents,
             boxes: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
             tiles: [
-                super::terrain_tile(world, 0)?,
-                super::terrain_tile(world, 1)?,
-                super::terrain_tile(world, 2)?,
+                super::terrain_tile(world, &distances, 0)?,
+                super::terrain_tile(world, &distances, 1)?,
+                super::terrain_tile(world, &distances, 2)?,
             ],
             initial_generation_ready: false,
             plan_revision: 0,
@@ -1306,10 +1320,10 @@ impl WorldStream {
         let after = [player, vehicle];
         let moved = before != after;
         let prop_changed = self.props.focus_changed(before, after);
-        let eligibility_changed = self
-            .contents
-            .eligibility_changed(&self.reference, before, after);
-        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        let eligibility_changed =
+            self.contents
+                .eligibility_changed(self.distances.item_spawn_dist, before, after);
+        let radius = f64::from(self.distances.item_spawn_dist);
         let selected = |points: [[f64; 3]; 2], position: [f64; 3]| {
             points.into_iter().any(|p| {
                 (p[0] - position[0]).abs() <= radius && (p[2] - position[2]).abs() <= radius
@@ -1377,8 +1391,7 @@ impl WorldStream {
         }
         self.generation_revision += 1;
         // Frontier changes outside the selected source window do not invalidate readiness.
-        let distance =
-            f64::from(self.reference.distances["RoadGenDist"]) + self.road_light.influence_margin();
+        let distance = f64::from(self.distances.road_gen_dist) + self.road_light.influence_margin();
         if let Some(segment) = self.roads.latest_segment() {
             if self
                 .road_focus
@@ -1575,7 +1588,12 @@ impl WorldStream {
             }
             return;
         }
-        match StartupTerrain::new(&self.reference, &self.evaluator, &self.startup_points) {
+        match StartupTerrain::new(
+            &self.reference,
+            &self.distances,
+            &self.evaluator,
+            &self.startup_points,
+        ) {
             Ok(startup) => {
                 let count = self.placements.foundation_count();
                 let helpers = count + startup.foundations.len();
@@ -1597,7 +1615,7 @@ impl WorldStream {
     }
 
     fn refresh_structures(&mut self) -> bool {
-        let radius = self.reference.distances["BuildingGenDist"];
+        let radius = self.distances.building_gen_dist;
         let points = [self.request.player, self.request.vehicle];
         let bounds = union(
             window(points[0], radius as f64),
@@ -1704,10 +1722,11 @@ impl WorldStream {
         if self.failure.is_some() {
             return;
         }
-        let helper_radius = ["ObjGenDist", "MountainGenDist", "BuildingGenDist"]
-            .into_iter()
-            .map(|key| self.reference.distances[key])
-            .fold(0_f32, f32::max) as f64;
+        let d = &self.distances;
+        let helper_radius = d
+            .obj_gen_dist
+            .max(d.mountain_gen_dist)
+            .max(d.building_gen_dist) as f64;
         self.refresh_helper_context(union(
             window(self.request.player, helper_radius),
             window(self.request.vehicle, helper_radius),
@@ -1801,6 +1820,7 @@ impl WorldStream {
         let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
         if let Err(error) = self.contents.advance(
             &self.reference,
+            self.distances.item_spawn_dist,
             &self.wanted_structures,
             if replay_admission {
                 &self.replay_roots
@@ -1839,7 +1859,7 @@ impl WorldStream {
                     .into_iter()
                     .any(|f| {
                         source_distance_squared(f, p.pose.position)
-                            < self.reference.distances["ItemSpawnDist"].powi(2)
+                            < self.distances.item_spawn_dist.powi(2)
                     })
                 || self.replay_indices.iter().any(|&index| {
                     let (_, c) = self.changes.get_indexed(index);
@@ -1925,7 +1945,7 @@ impl WorldStream {
                 .into_iter()
                 .any(|p| {
                     source_distance_squared(p, content.placement.pose.position)
-                        < self.reference.distances["ItemSpawnDist"].powi(2)
+                        < self.distances.item_spawn_dist.powi(2)
                 });
             if !baseline_near
                 && !selected
@@ -1991,7 +2011,7 @@ impl WorldStream {
     }
 
     fn select_changed_destinations(&mut self) {
-        let radius = f64::from(self.reference.distances["ItemSpawnDist"]);
+        let radius = f64::from(self.distances.item_spawn_dist);
         let bounds = [self.request.player, self.request.vehicle].map(|focus| WorldBounds {
             min: [focus[0] - radius, f64::NEG_INFINITY, focus[2] - radius],
             max: [focus[0] + radius, f64::INFINITY, focus[2] + radius],
@@ -2169,7 +2189,7 @@ impl WorldStream {
         let road_changed = self.planned_road_focus != self.road_focus;
         if road_changed {
             let road_distance =
-                self.reference.distances["RoadGenDist"] as f64 + self.road_light.influence_margin();
+                self.distances.road_gen_dist as f64 + self.road_light.influence_margin();
             // One union query retains both support windows without copying full index arrays.
             let query = union(
                 window(self.road_focus[0], road_distance),
@@ -2196,7 +2216,7 @@ impl WorldStream {
                     .segments_in(query, self.roads.coverage(), &mut self.road_candidates),
                 super::QueryStatus::Complete
             );
-            let radius = self.reference.distances["RoadGenDist"];
+            let radius = self.distances.road_gen_dist;
             let margin = self.road_light.influence_margin();
             self.selected_roads.retain(|r| {
                 self.road_candidates.contains(&r.segment.index)
@@ -2274,7 +2294,7 @@ impl WorldStream {
                         self.selected_roads.iter().any(|r| r.segment == road)
                             && self.road_focus.into_iter().any(|p| {
                                 source_distance_squared(p, road.position())
-                                    <= self.reference.distances["RoadGenDist"].powi(2)
+                                    <= self.distances.road_gen_dist.powi(2)
                             })
                     })
                 } else {
@@ -2318,7 +2338,7 @@ impl WorldStream {
             };
             segment
         };
-        let radius = self.reference.distances["RoadGenDist"];
+        let radius = self.distances.road_gen_dist;
         let geometry = self
             .road_focus
             .into_iter()
@@ -3126,7 +3146,7 @@ impl WorldStream {
             && self.supports(window(self.request.player, 3.0))
             && self.supports(window(self.request.vehicle, 4.0))
         {
-            let distances = &self.reference.distances;
+            let distances = &self.distances;
             let focus = [self.request.player, self.request.vehicle];
             let tiles = self.tiles;
             let mut removed = [false; 4];
@@ -3140,12 +3160,11 @@ impl WorldStream {
                     self.wanted_roads.contains(&(surface.key.unit[0] as u32))
                 } else {
                     let size = tiles[tier - 1].size as f32;
-                    let field = [
-                        "TerrainRemoveDist",
-                        "DistantTerrainRemoveDist",
-                        "DistantTerrain2RemoveDist",
+                    let radius = [
+                        distances.terrain_remove_dist,
+                        distances.distant_terrain_remove_dist,
+                        distances.distant_terrain2_remove_dist,
                     ][tier - 1];
-                    let radius = distances[field];
                     let center = [
                         surface.key.unit[0] as f32 * size,
                         surface.key.unit[1] as f32 * size,
@@ -4095,7 +4114,7 @@ impl WorldStream {
             self.change_prune_scans += 1;
         }
         super::changes::external_attachment_chain(&self.changes, &mut self.external_dependencies);
-        let radius = self.reference.distances["ItemRemoveDist"];
+        let radius = self.distances.item_remove_dist;
         let foci = [self.request.player, self.request.vehicle];
         let dependencies = &self.external_dependencies;
         let saved = &self.saved_item_protection;
@@ -4146,7 +4165,7 @@ impl WorldStream {
         let mut retired_structure = false;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
-            let radius = self.reference.distances["BuildingGenDist"];
+            let radius = self.distances.building_gen_dist;
             if self.contents.contains(id)
                 || self
                     .static_controls

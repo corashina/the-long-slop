@@ -57,6 +57,11 @@ fn fingerprint(surface: &WorldSurface) -> u64 {
 fn terrain_source_fingerprints() {
     use crate::world::{TerrainContext, TerrainFoundation, TerrainRoadPoint};
     let r = reference();
+    // Fingerprints were recorded at the 500 m source minimum.
+    let distances = crate::world::DrawDistances::resolve(
+        &r.draw_distance,
+        r.draw_distance.minimum.draw_distance,
+    );
     let evaluator = terrain_evaluator(r, 42);
     let mut sequence = RoadSequence::new(r, 42).unwrap();
     let mut roads = Vec::new();
@@ -94,7 +99,7 @@ fn terrain_source_fingerprints() {
         ],
     ];
     for tier in 0..3 {
-        let tile = terrain_tile(r, tier).unwrap();
+        let tile = terrain_tile(r, &distances, tier).unwrap();
         let context = TerrainContext {
             evaluator: &evaluator,
             tile,

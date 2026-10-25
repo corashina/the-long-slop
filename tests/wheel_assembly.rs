@@ -105,7 +105,7 @@ fn installed_lada_g03_identity_mass_and_collision() {
         .iter()
         .position(|v| v.source.path_id == 77839)
         .unwrap();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(&reference, reference.world.draw_distance.default).unwrap();
     let chassis = run.physics.chassis_handle(vehicle);
     let original_mass = run.physics.rapier().bodies[chassis].mass();
     let item_count = run.area.items.iter().count();
