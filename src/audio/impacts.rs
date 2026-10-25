@@ -298,6 +298,7 @@ mod tests {
             hit_sound: Some(HitSound { clip: 7, gain: 0.5 }),
             removed: false,
             pending_attachment: false,
+            buried: false,
         };
         let r = rules();
         let (clip, gain) = item_hit(&item, 2., false, &r).unwrap();
