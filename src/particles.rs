@@ -58,6 +58,32 @@ impl ParticleState {
             burst_started: false,
         }
     }
+    /// A system that only runs `Emit`: no authored burst starts it.
+    pub fn emit_only(reference: &ParticleReference, seed: u64) -> Self {
+        Self {
+            burst_started: true,
+            ..Self::new(reference, seed)
+        }
+    }
+    /// `mainscript.Particle`: the system moves to the point and runs `Emit(count)`.
+    pub fn emit(&mut self, count: usize, emitter_absolute: [f64; 3], rotation: Rotation) {
+        let r = &self.reference;
+        if !r.flags["gameObject.active"] || count == 0 {
+            return;
+        }
+        let local = Rotation::from_xyzw(
+            r.local_pose.rotation[0],
+            r.local_pose.rotation[1],
+            r.local_pose.rotation[2],
+            r.local_pose.rotation[3],
+        );
+        let offset = rotation * Vector::from_array(r.local_pose.translation);
+        self.rotation = rotation;
+        self.reset_emitter();
+        let emitter = std::array::from_fn(|i| emitter_absolute[i] + offset[i] as f64);
+        let emission = self.emission_rotation.unwrap_or(rotation * local);
+        self.spawn(count, emitter, emission, Vector::ZERO);
+    }
     pub fn particles(&self) -> &[ParticleOutput] {
         &self.particles
     }
@@ -117,49 +143,15 @@ impl ParticleState {
             self.origin = origin;
         }
     }
-    pub fn advance(
+    /// Spawns `count` particles at the emitter, as one emission step.
+    fn spawn(
         &mut self,
-        dt: f32,
+        count: usize,
         emitter_absolute: [f64; 3],
-        strength: f32,
-        physics: &PhysicsWorld,
+        rotation: Rotation,
+        emitter_velocity: Vector,
     ) {
-        if !self.reference.flags["gameObject.active"] || !dt.is_finite() || dt <= 0. {
-            self.reset_emitter();
-            return;
-        }
         let r = &self.reference;
-        let local = Rotation::from_xyzw(
-            r.local_pose.rotation[0],
-            r.local_pose.rotation[1],
-            r.local_pose.rotation[2],
-            r.local_pose.rotation[3],
-        );
-        let rotation = self.emission_rotation.unwrap_or(self.rotation * local);
-        let offset = self.rotation * Vector::from_array(r.local_pose.translation);
-        let emitter_absolute = std::array::from_fn(|i| emitter_absolute[i] + offset[i] as f64);
-        let emitter_velocity = self.last_emitter.map_or(Vector::ZERO, |p| {
-            Vector::from_array(std::array::from_fn(|i| {
-                ((emitter_absolute[i] - p[i]) / dt as f64) as f32
-            }))
-        });
-        let distance = self.last_emitter.map_or(0., |p| {
-            (0..3)
-                .map(|i| (p[i] - emitter_absolute[i]).powi(2))
-                .sum::<f64>()
-                .sqrt() as f32
-        });
-        self.last_emitter = Some(emitter_absolute);
-        self.elapsed = (self.elapsed + dt) % r.duration;
-        self.remainder +=
-            (r.rate_over_time * dt + r.rate_over_distance * distance) * strength.max(0.);
-        let mut count = self.remainder.floor() as usize;
-        self.remainder -= count as f32;
-        // Authored splash starts with one burst. No managed collision-to-splash link exists.
-        if !self.burst_started && r.scalars.get("EmissionModule.m_BurstCount") == Some(&1.) {
-            count += r.curves["EmissionModule.m_Bursts.0.countCurve"].scalar as usize;
-        }
-        self.burst_started = true;
         for _ in 0..count.min(r.capacity as usize - self.particles.len()) {
             let a = self.random.unit() * std::f32::consts::TAU;
             let hemisphere = r.scalars["ShapeModule.type"] == 2.;
@@ -293,6 +285,52 @@ impl ParticleState {
                 uv_draw,
             });
         }
+    }
+    pub fn advance(
+        &mut self,
+        dt: f32,
+        emitter_absolute: [f64; 3],
+        strength: f32,
+        physics: &PhysicsWorld,
+    ) {
+        if !self.reference.flags["gameObject.active"] || !dt.is_finite() || dt <= 0. {
+            self.reset_emitter();
+            return;
+        }
+        let r = &self.reference;
+        let local = Rotation::from_xyzw(
+            r.local_pose.rotation[0],
+            r.local_pose.rotation[1],
+            r.local_pose.rotation[2],
+            r.local_pose.rotation[3],
+        );
+        let rotation = self.emission_rotation.unwrap_or(self.rotation * local);
+        let offset = self.rotation * Vector::from_array(r.local_pose.translation);
+        let emitter_absolute = std::array::from_fn(|i| emitter_absolute[i] + offset[i] as f64);
+        let emitter_velocity = self.last_emitter.map_or(Vector::ZERO, |p| {
+            Vector::from_array(std::array::from_fn(|i| {
+                ((emitter_absolute[i] - p[i]) / dt as f64) as f32
+            }))
+        });
+        let distance = self.last_emitter.map_or(0., |p| {
+            (0..3)
+                .map(|i| (p[i] - emitter_absolute[i]).powi(2))
+                .sum::<f64>()
+                .sqrt() as f32
+        });
+        self.last_emitter = Some(emitter_absolute);
+        self.elapsed = (self.elapsed + dt) % r.duration;
+        self.remainder +=
+            (r.rate_over_time * dt + r.rate_over_distance * distance) * strength.max(0.);
+        let mut count = self.remainder.floor() as usize;
+        self.remainder -= count as f32;
+        // Authored splash starts with one burst. No managed collision-to-splash link exists.
+        if !self.burst_started && r.scalars.get("EmissionModule.m_BurstCount") == Some(&1.) {
+            count += r.curves["EmissionModule.m_Bursts.0.countCurve"].scalar as usize;
+        }
+        self.burst_started = true;
+        self.spawn(count, emitter_absolute, rotation, emitter_velocity);
+        let r = &self.reference;
         let ring = r.scalars["ringBufferMode"] == 1.;
         self.particles.retain_mut(|p| {
             if p.age >= p.lifetime {

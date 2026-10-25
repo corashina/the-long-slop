@@ -156,6 +156,7 @@ pub fn spawn_body(
             .user_data(
                 ((collider_id.0 as u128) << 64)
                     | crate::vehicle::step_surface_bits(c.step_surface)
+                    | crate::vehicle::tag_bits(c.tag)
                     | (id.0 as u128 + 1),
             )
             .build();
