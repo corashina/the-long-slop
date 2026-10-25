@@ -118,7 +118,8 @@ pub struct WorldPrototypeReference {
     #[serde(deserialize_with = "compact_vec")]
     pub deferred_materials: Vec<WorldSourceMaterial>,
     #[serde(deserialize_with = "compact_vec")]
-    pub skins: Vec<WorldSkinReference>,
+    /// Skins of world prototype nodes. Bones are prototype node indices.
+    pub skins: Vec<SkinnedMeshReference<u32, u32>>,
     #[serde(deserialize_with = "compact_vec")]
     pub bodies: Vec<WorldPrototypeBody>,
     #[serde(deserialize_with = "compact_vec")]
@@ -167,14 +168,18 @@ pub struct WorldPrototypeNode {
     pub transform: Transform,
     pub gltf_node: u32,
 }
+/// SkinnedMeshRenderer vertex streams. `Node` owns the renderer. `Bone` owns each bone Transform.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorldSkinReference {
+#[serde(
+    deny_unknown_fields,
+    bound(deserialize = "Node: Deserialize<'de>, Bone: Deserialize<'de>")
+)]
+pub struct SkinnedMeshReference<Node, Bone> {
     pub source: SourceId,
     pub mesh: SourceId,
-    pub node: u32,
+    pub node: Node,
     #[serde(deserialize_with = "compact_vec")]
-    pub bones: Vec<u32>,
+    pub bones: Vec<Bone>,
     #[serde(deserialize_with = "compact_vec")]
     pub bind_poses: Vec<[f32; 16]>,
     #[serde(deserialize_with = "compact_vec")]
@@ -1442,23 +1447,13 @@ impl WorldReference {
         let mut skin_sources = HashSet::new();
         for skin in &p.skins {
             let f = field(&skin.source, "skin bindings/weights");
-            let count = skin.positions.len();
             require(
                 receipts.contains(&skin.source)
                     && receipts.contains(&skin.mesh)
                     && skin_sources.insert(&skin.source)
                     && (skin.node as usize) < p.nodes.len()
-                    && !skin.bones.is_empty()
-                    && skin.bones.len() == skin.bind_poses.len()
                     && skin.bones.iter().all(|i| (*i as usize) < p.nodes.len())
-                    && skin.bones.iter().collect::<HashSet<_>>().len() == skin.bones.len()
-                    && skin.bind_poses.iter().all(|v| finite(v))
-                    && count > 0
-                    && skin.normals.len() == count
-                    && (skin.tangents.is_empty() || skin.tangents.len() == count)
-                    && skin.uv.len() == count
-                    && skin.joints.len() == count
-                    && skin.weights.len() == count,
+                    && skin.valid_streams(),
                 &f,
             )?;
             let renderer = checked_record(records, &skin.source, &["SkinnedMeshRenderer"])?;
@@ -1469,29 +1464,6 @@ impl WorldReference {
                     && record_link(renderer, "m_Mesh") == Some(&skin.mesh)
                     && node_links_match(renderer, "m_Bones", &skin.bones, &p.nodes),
                 &field(&skin.source, "source skin ownership/bones/mesh"),
-            )?;
-            require(
-                skin.positions.iter().all(|v| finite(v))
-                    && skin.normals.iter().all(|v| finite(v))
-                    && skin.tangents.iter().all(|v| finite(v))
-                    && skin.uv.iter().all(|v| finite(v)),
-                &f,
-            )?;
-            for (j, w) in skin.joints.iter().zip(&skin.weights) {
-                require(
-                    finite(w)
-                        && w.iter().all(|v| *v >= 0. && *v <= 1.)
-                        && (w.iter().sum::<f32>() - 1.).abs() < 0.0001
-                        && j.iter().all(|v| (*v as usize) < skin.bones.len()),
-                    &f,
-                )?;
-            }
-            require(
-                !skin.triangles.is_empty()
-                    && skin.triangles.iter().all(|g| {
-                        !g.is_empty() && g.iter().flatten().all(|i| (*i as usize) < count)
-                    }),
-                &field(&skin.source, "skin triangles"),
             )?;
         }
         let mut body_nodes = HashMap::new();
@@ -1775,6 +1747,38 @@ where
         ));
     }
     Ok(values.into_boxed_slice().into_vec())
+}
+
+impl<Node, Bone: Eq + std::hash::Hash> SkinnedMeshReference<Node, Bone> {
+    /// Unique bones with finite bind poses, complete vertex streams, unit weights, and indexed triangles.
+    pub(crate) fn valid_streams(&self) -> bool {
+        let count = self.positions.len();
+        !self.bones.is_empty()
+            && self.bones.len() == self.bind_poses.len()
+            && self.bones.iter().collect::<HashSet<_>>().len() == self.bones.len()
+            && self.bind_poses.iter().all(|v| finite(v))
+            && count > 0
+            && self.normals.len() == count
+            && (self.tangents.is_empty() || self.tangents.len() == count)
+            && self.uv.len() == count
+            && self.joints.len() == count
+            && self.weights.len() == count
+            && self.positions.iter().all(|v| finite(v))
+            && self.normals.iter().all(|v| finite(v))
+            && self.tangents.iter().all(|v| finite(v))
+            && self.uv.iter().all(|v| finite(v))
+            && self.joints.iter().zip(&self.weights).all(|(j, w)| {
+                finite(w)
+                    && w.iter().all(|v| *v >= 0. && *v <= 1.)
+                    && (w.iter().sum::<f32>() - 1.).abs() < 0.0001
+                    && j.iter().all(|v| (*v as usize) < self.bones.len())
+            })
+            && !self.triangles.is_empty()
+            && self
+                .triangles
+                .iter()
+                .all(|g| !g.is_empty() && g.iter().flatten().all(|i| (*i as usize) < count))
+    }
 }
 
 fn validate_world_libraries(

@@ -194,6 +194,10 @@ impl StorageLocks {
         }
         false
     }
+    /// Keep an item out of every volume.
+    pub fn exclude(&mut self, item: ItemId) {
+        self.dont_mount.insert(item);
+    }
     pub fn mark_dropped(&mut self, item: ItemId) {
         self.drop_times.insert(item, self.elapsed);
     }
@@ -679,7 +683,7 @@ mod tests {
     /// With `nested`, a 3 kg box with its own volume holds the can. The box volume scans first.
     fn rig(nested: bool) -> Rig {
         let mut physics = PhysicsWorld::empty_for_tests();
-        let mut items = ItemStore::empty_for_tests();
+        let mut items = ItemStore::from_states(Vec::new());
         let carrier = body(&mut physics, 0.0, 10.0, CARRIER);
         item(&mut items, CARRIER, carrier);
         let can = body(&mut physics, 0.3, 2.0, CAN);

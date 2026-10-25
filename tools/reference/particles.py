@@ -69,12 +69,14 @@ def recover_particles(source, output):
 def validate_particles_export(particles,manifest):
     if len(particles)!=2+2*len(manifest['openings']) or len({p['role'] for p in particles})!=len(particles):raise ValueError('Missing selected particles')
     textures={t['id'] for t in manifest['lighting']['textures']}
-    for p in particles:
-        if not 0<p['capacity']<=1000000 or p['rate_over_time']<0 or p['rate_over_distance']<0:raise ValueError('Invalid particle capacity or rate')
-        if p['capacity']!=p['scalars']['InitialModule.maxNumParticles']:raise ValueError('Particle authored capacity differs')
-        if not p['materials'] or 'InitialModule.startLifetime' not in p['curves']:raise ValueError('Missing particle data')
-        for material in p['materials']:
-            if any(t['texture'] not in textures for t in material['textures']):raise ValueError('Missing particle texture')
+    for p in particles:validate_particle(p,textures)
+
+def validate_particle(p,textures):
+    if not 0<p['capacity']<=1000000 or p['rate_over_time']<0 or p['rate_over_distance']<0:raise ValueError('Invalid particle capacity or rate')
+    if p['capacity']!=p['scalars']['InitialModule.maxNumParticles']:raise ValueError('Particle authored capacity differs')
+    if not p['materials'] or 'InitialModule.startLifetime' not in p['curves']:raise ValueError('Missing particle data')
+    for material in p['materials']:
+        if any(t['texture'] not in textures for t in material['textures']):raise ValueError('Missing particle texture')
 
 # Modules that src/particles.rs runs. ShapeModule and EmissionModule feed emission; the others change live particles.
 EXHAUST_MODULES=frozenset({'InitialModule','ShapeModule','EmissionModule','VelocityModule','ForceModule',
@@ -116,16 +118,18 @@ def outlet_values(source,p,cap):
         p['vectors'][f'fluid.{i}']=rgba(f['color'])[:3]
         p['scalars'][f'fluid.{i}.alpha']=f['color']['a']
 
-def recover_outlet_particles(source,manifest,output):
-    particles=[]
-    for opening in manifest['openings']:
-        cap=source.get(opening['source']['file'],opening['source']['path_id']);cd=source.read(cap)
-        owner=source.transform_for(source.resolve(cap,cd['m_GameObject']))
-        for prefix,field in [('outlet','ps'),('splash','sps')]:
-            reader=source.resolve(cap,cd[field]);rate=cd['maxRate'] if field=='ps' else source.read(reader)['EmissionModule']['rateOverTime']['scalar']
-            p=particle(source,reader,f'{prefix}_{opening["id"]}',rate,output,owner)
-            outlet_values(source,p,cd);particles.append(p)
+def cap_particles(source,cap,suffix,output):
+    """Outlet and splash particles of one tankcapscript, relative to its cap Transform."""
+    cd=source.read(cap);owner=source.transform_for(source.resolve(cap,cd['m_GameObject']));particles=[]
+    for prefix,field in [('outlet','ps'),('splash','sps')]:
+        reader=source.resolve(cap,cd[field]);rate=cd['maxRate'] if field=='ps' else source.read(reader)['EmissionModule']['rateOverTime']['scalar']
+        p=particle(source,reader,f'{prefix}_{suffix}',rate,output,owner)
+        outlet_values(source,p,cd);particles.append(p)
     return particles
+
+def recover_outlet_particles(source,manifest,output):
+    return [p for opening in manifest['openings']
+        for p in cap_particles(source,source.get(opening['source']['file'],opening['source']['path_id']),opening['id'],output)]
 
 def validate_particle_export(particles, manifest, library):
     from .library.reader import LibraryReader

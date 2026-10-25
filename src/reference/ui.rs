@@ -60,6 +60,7 @@ pub struct UiElement {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiReference {
+    pub hose_prompts: HosePrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -68,11 +69,24 @@ pub struct UiReference {
     pub overlay_color: [f32; 4],
     pub frame_color: [f32; 4],
 }
+/// Source `ls.w` default English hose prompts.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HosePrompts {
+    pub attach: String,
+    pub drain: String,
+    pub coilup: String,
+}
 impl UiReference {
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
             !self.sprites.is_empty() && !self.pairs.is_empty(),
             "UI assets",
+        )?;
+        let h = &self.hose_prompts;
+        require(
+            !h.attach.is_empty() && !h.drain.is_empty() && !h.coilup.is_empty(),
+            "hose prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self

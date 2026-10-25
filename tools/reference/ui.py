@@ -150,5 +150,6 @@ def export_ui(source, output, library):
     if not pairs:raise ValueError('Missing source menu frames')
     for identity in sorted(getattr(source, 'pickup_icons', set())):
         sprite(source.get(*identity), 'inventory-item')
-    return {'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    from .hose import hose_prompts
+    return {'hose_prompts':hose_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

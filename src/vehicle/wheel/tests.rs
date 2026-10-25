@@ -87,6 +87,7 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         vehicles: Vec::new(),
         hit_collector: Default::default(),
         hits: Vec::new(),
+        ignored: Default::default(),
     };
     world.insert_box([0.0, -0.5, 0.0], [500.0, 0.5, 500.0]);
     let (chassis, _) = world.insert(

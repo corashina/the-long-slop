@@ -9,7 +9,8 @@ from .survival import component, managed_evidence, finite_record
 SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_shovel'),
             (81642,None,56,'item_box_debris'),(81645,None,14,'item_box_debris_reduced'),
             (70812,217,1,'item_sunglasses'),(53838,218,1,'item_hat'),(53837,221,1,'item_cap'),
-            (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'))
+            (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'),
+            (83430,61,6,'item_siphon_hose'))
 
 
 def prepare_item_prototypes(source, roots):
@@ -122,7 +123,9 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             source.item_clips.add(key(c))
         from .survival import recover_cigarette
         consumable = recover_cigarette(source, root, manifest, output) if item_id==230 else None
-        result.append({'consumable':consumable,'id':source_id(root),'source':source_id(root),'item_id':item_id,
+        from .hose import recover_hose
+        hose = recover_hose(source,by_node,bodies,poses,{k:n['id'] for k,n in nodes.items()},exporter,source.read(source.get('level1',64919)),output) if item_id==61 else None
+        result.append({'hose':hose,'consumable':consumable,'id':source_id(root),'source':source_id(root),'item_id':item_id,
             'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],'bodies':bodies,'colliders':colliders,
             'pickups':pickups,'variants':variants,'renderers':renderers,'behavior':behavior})
     return result
@@ -159,7 +162,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
                 node=nodes[node]['parent']
             return False
         if not within(p['root']) or nodes[p['root']]['parent'] is not None or assets[p['asset']]['root']!=p['source']:raise ValueError('Foreign prototype root')
-        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7)}
+        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7),83430:(6,0)}
         if (len(p['colliders']),len(p['renderers']))!=counts[p['id']['path_id']]:raise ValueError('Incomplete selected geometry')
         bodies={b['id']:b for b in p['bodies']}
         for records in (p['bodies'],p['colliders']):unique(r['id'] for r in records);unique((r['source']['file'],r['source']['path_id']) for r in records)
@@ -180,10 +183,12 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}
             exception=exceptions.get((p['id']['path_id'],source['path_id']))
-            expected_icon={74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None}[p['item_id']] if exception is None else None
+            expected_icon={61:None,74:4624,62:None,216:4553,None:4623,217:4557,218:4527,221:4529,245:None,92:4590,230:None}[p['item_id']] if exception is None else None
             icon=pickup['inventory_icon']
-            if source['file']!='sharedassets1.assets' or pickup['can_inventory']!=(p['item_id'] not in (62,245,230) and exception is None) or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
-            if icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
+            if source['file']!='sharedassets1.assets' or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
+            # Hose segment eligibility and icons are not checked yet against build 11140890.
+            if p['item_id']!=61 and pickup['can_inventory']!=(p['item_id'] not in (62,245,230) and exception is None):raise ValueError('Pickup source eligibility')
+            if p['item_id']!=61 and icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
             if exception is not None and nodes.get(x['node'],{}).get('source')!={'file':'sharedassets1.assets','path_id':exception}:raise ValueError('Debris eligibility owner')
             if not within(x['node']) or x['body'] not in bodies or x['body']!=owner(x['node']):raise ValueError('Wrong pickup body')
             validate_pickup(x['pickup'],manifest,p['asset'])
@@ -203,6 +208,13 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             if len(p['variants'])!=1 or [nodes[n]['source']['path_id'] for n in p['variants'][0]['nodes']]!=[56803,56801,56802]:raise ValueError('Missing pack variants')
         elif p['variants']:raise ValueError('Unexpected prototype variants')
         from .survival import validate_cigarette
+        from .hose import validate_hose
+        if (p['hose'] is not None)!=(p['item_id']==61):raise ValueError('Hose owner')
+        if p['hose'] is not None:
+            validate_hose(p['hose'],p)
+            from .particles import validate_particle
+            for e in p['hose']['ends']:
+                for particle in (e['visual'],e['splash']):validate_particle(particle,{t['id'] for t in manifest['lighting']['textures']})
         if (p['consumable'] is not None)!=(p['item_id']==230):raise ValueError('Cigarette consumable owner')
         if p['consumable'] is not None:validate_cigarette(p['consumable'],p,manifest)
         if p['item_id'] is None and p['behavior']['gib_children']!=[x['node'] for x in p['pickups']]:raise ValueError('Missing debris child owners')

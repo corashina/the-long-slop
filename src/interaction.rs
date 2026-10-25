@@ -9,6 +9,7 @@ pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
+mod hose;
 mod input;
 pub use input::InteractionOutcome;
 pub mod items;
@@ -132,6 +133,13 @@ struct OpeningState {
     valve: f32,
     particles: Option<FluidParticleReference>,
     contact: Option<fluid_contact::FluidContact>,
+    /// Fluid owner when it differs from `reference.tank`, the pose owner (hose ends).
+    borrowed_tank: Option<ItemId>,
+}
+impl OpeningState {
+    fn fluid_owner(&self) -> ItemId {
+        self.borrowed_tank.unwrap_or(self.reference.tank)
+    }
 }
 struct OpeningRules {
     id: OpeningId,
@@ -143,6 +151,7 @@ struct OpeningRules {
     angle_disabled: bool,
     spill_disabled: bool,
     tube_connected: bool,
+    cant_tube: bool,
     can_toggle: bool,
     can_tune: bool,
     tune_rate: f32,
@@ -160,6 +169,7 @@ impl From<&OpeningRecord> for OpeningRules {
             angle_disabled: opening.angle_disabled,
             spill_disabled: opening.spill_disabled,
             tube_connected: opening.tube_connected,
+            cant_tube: opening.cant_tube,
             can_toggle: opening.can_toggle,
             can_tune: opening.can_tune,
             tune_rate: opening.tune_rate,
@@ -249,6 +259,7 @@ pub struct InteractionState {
     pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
+    hoses: hose::HoseState,
     receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
     callback_nodes: Vec<NodeId>,
     seats: Vec<SeatState>,
@@ -421,6 +432,7 @@ impl InteractionState {
                         .unwrap(),
                     opening.id.0,
                 )),
+                borrowed_tank: None,
             });
         }
         let mut seats = Vec::with_capacity(reference.seats.len());
@@ -645,6 +657,10 @@ impl InteractionState {
                     .unwrap_or(0),
             ),
             openings,
+            hoses: hose::HoseState::new(
+                reference.fluid_rules.min_tube_vertical_height,
+                reference.fluid_rules.max_tube_vertical_height,
+            ),
             sounds: [None; 64],
             sound_count: 0,
             seats,
@@ -923,6 +939,7 @@ impl InteractionState {
             self.latched_mechanism = None;
         }
         self.carry.unregister_generated(id);
+        self.unregister_hose(id);
         for fits in self.slot_fits.values_mut() {
             fits.remove(&id);
         }
@@ -938,6 +955,11 @@ impl InteractionState {
         self.tank_rules.remove(&id);
         self.openings
             .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
+        for opening in &mut self.openings {
+            if opening.borrowed_tank == Some(id) {
+                opening.borrowed_tank = None;
+            }
+        }
         if self.fill_opening.is_some_and(|opening| {
             !self
                 .openings
@@ -1017,17 +1039,18 @@ impl InteractionState {
             },
         );
     }
+    /// A generated supply or container cap. Hose ends are not saved.
+    fn generated_cap(&self, cap: ItemId) -> Option<&OpeningState> {
+        if !self.source_supply_emission.contains_key(&cap) {
+            return None;
+        }
+        self.openings.iter().find(|o| o.reference.cap == cap)
+    }
     pub fn generated_opening(&self, cap: ItemId) -> Option<OpeningId> {
-        self.openings
-            .iter()
-            .find(|o| o.reference.cap == cap)
-            .map(|o| o.reference.id)
+        self.generated_cap(cap).map(|o| o.reference.id)
     }
     pub fn generated_valve(&self, cap: ItemId) -> Option<f32> {
-        self.openings
-            .iter()
-            .find(|opening| opening.reference.cap == cap)
-            .map(|opening| opening.valve)
+        self.generated_cap(cap).map(|opening| opening.valve)
     }
     pub fn restore_generated_valve(
         &mut self,
@@ -1044,6 +1067,59 @@ impl InteractionState {
             .ok_or_else(|| ReferenceError("Missing generated valve".into()))?;
         opening.valve = valve;
         Ok(())
+    }
+
+    /// Register a hose end opening. The segment owns the pose; it has no fluid.
+    fn register_hose_end(
+        &mut self,
+        segment: ItemId,
+        end: &crate::reference::HoseEnd,
+    ) -> Result<OpeningId, ReferenceError> {
+        let id = self.next_opening_id()?;
+        let o = &end.opening;
+        self.openings.push(OpeningState {
+            reference: OpeningRules {
+                id,
+                tank: segment,
+                cap: segment,
+                flow_liters_per_second: o.flow_liters_per_second,
+                flow_radius: o.flow_radius,
+                tilt_degrees: o.tilt_degrees,
+                angle_disabled: o.angle_disabled,
+                spill_disabled: o.spill_disabled,
+                tube_connected: o.tube_connected,
+                cant_tube: o.cant_tube,
+                can_toggle: false,
+                can_tune: false,
+                tune_rate: 0.0,
+                presentation: o.presentation.clone(),
+            },
+            local_pose: transform_pose(&end.pose),
+            tilt_axis: Vector::from_array(o.tilt_axis),
+            valve: 0.0,
+            flow: None,
+            fill_called: false,
+            empty_pour: false,
+            particles: Some(o.particles.clone()),
+            contact: Some(fluid_contact::FluidContact::new(
+                &o.particles,
+                &end.visual,
+                &end.splash,
+                id.0,
+            )),
+            borrowed_tank: None,
+        });
+        Ok(id)
+    }
+    fn next_opening_id(&self) -> Result<OpeningId, ReferenceError> {
+        self.openings
+            .iter()
+            .map(|opening| opening.reference.id.0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .map(OpeningId)
+            .ok_or_else(|| ReferenceError("Opening identity space exhausted".into()))
     }
 
     pub fn register_supply(&mut self, item: ItemId) {
@@ -1114,15 +1190,7 @@ impl InteractionState {
         let can_toggle = number(cap_record, "canToggle")? != 0.0;
         let can_tune = number(cap_record, "canTune")? != 0.0;
         let rules = OpeningRules {
-            id: OpeningId(
-                self.openings
-                    .iter()
-                    .map(|opening| opening.reference.id.0)
-                    .max()
-                    .unwrap_or(0)
-                    .checked_add(1)
-                    .ok_or_else(|| ReferenceError("Opening identity space exhausted".into()))?,
-            ),
+            id: self.next_opening_id()?,
             tank,
             cap,
             flow_liters_per_second: flow,
@@ -1131,6 +1199,7 @@ impl InteractionState {
             angle_disabled: number(cap_record, "noAngle")? != 0.0,
             spill_disabled: definition.no_pour,
             tube_connected: number(cap_record, "tube")? != 0.0,
+            cant_tube: number(cap_record, "canttube")? != 0.0,
             can_toggle,
             can_tune,
             tune_rate: number(cap_record, "tuneSpeed")? * reference.fluid_rules.fluid_tune_speed,
@@ -1168,6 +1237,7 @@ impl InteractionState {
             empty_pour: false,
             particles: None,
             contact: None,
+            borrowed_tank: None,
         });
         self.source_supply_emission.insert(
             cap,
@@ -1555,6 +1625,10 @@ impl InteractionState {
                         )));
                     }
                 }
+            } else if let Some(cap) = available.hose_cap
+                && let Some(held) = self.attach_held_hose(cap, items, physics)
+            {
+                action = Some(InteractionAction::Drop(held));
             }
         }
         if grab_input.pressed & keys::GRAB != 0
@@ -1820,6 +1894,12 @@ impl InteractionState {
         }
         self.mechanisms.sync(physics, false);
         items.sync_poses(physics);
+        let hose_input = hose::HoseInput {
+            held: self.held(),
+            coil: input.held & keys::RELOAD != 0,
+            drain: input.held & keys::PRIMARY != 0,
+        };
+        self.step_hoses(hose_input, dt, fluid_scale, items, physics);
         let mut filled_destination = None;
         if input.held & keys::PRIMARY != 0
             && available.actions.0 & ActionMask::FILL != 0
@@ -1867,57 +1947,20 @@ impl InteractionState {
                 opening.flow = Some((true, 1.));
                 opening.fill_called = true;
             }
-            let Some(particles) = opening.particles.as_ref() else {
-                continue;
-            };
-            let contact = opening.contact.as_mut().unwrap();
-            let Some(item) = items.get_mut(opening.reference.tank) else {
-                continue;
-            };
-            if item.inactive_pose.is_some() {
+            if opening.particles.is_none() {
                 continue;
             }
-            contact.update_response(particles);
-            let cap_pose = to_rapier(item.pose) * opening.local_pose;
+            let Some((item_pose, item)) = pour_source(opening, items) else {
+                continue;
+            };
+            let cap_pose = item_pose * opening.local_pose;
             let forward = cap_pose.rotation * opening.tilt_axis;
             let angle = forward.dot(Vector::Y).clamp(-1.0, 1.0).acos().to_degrees();
-            let mut emission_rate = 0.;
-            let mut emission_speed = 0.;
-            let mut poured = None;
-            let mut fractions = [0.; 6];
-            if let Some(fluid) = item.fluid.as_mut() {
-                let fill = (fluid.total() / fluid.capacity_liters).clamp(0.0, 1.0);
-                let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
-                let factor = if opening.reference.angle_disabled {
-                    1.0
-                } else {
-                    inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
-                        .max(inverse_lerp(90.0, 180.0, angle))
-                };
-                opening.empty_pour = fluid.total() <= 0.;
-                let emitting = opening.valve > 0.
-                    && !opening.reference.spill_disabled
-                    && !opening.reference.tube_connected
-                    && (opening.reference.angle_disabled || angle > threshold)
-                    && fluid.total() > 0.;
-                if emitting {
-                    let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
-                    let requested_liters = speed * dt * fluid_scale;
-                    let total = fluid.total();
-                    fractions = fluid
-                        .mixture()
-                        .quantities_liters
-                        .map(|amount| amount / total);
-                    let debited = spill(fluid, requested_liters);
-                    if debited > 0. {
-                        opening.flow = Some((false, speed));
-                    }
-                    poured = Some(speed * dt);
-                    emission_rate = particles.min_rate
-                        + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
-                    emission_speed = particles.max_speed * fill * factor;
-                }
-            }
+            let (emission_rate, emission_speed, poured, mut fractions) =
+                spill_step(opening, item.fluid.as_mut(), angle, dt, fluid_scale);
+            let particles = opening.particles.as_ref().unwrap();
+            let contact = opening.contact.as_mut().unwrap();
+            contact.update_response(particles);
             let view = to_rapier(player.view(physics).head_pose);
             let cap_center = view.translation + view.rotation * self.drink_collider_center;
             if poured.is_some() {
@@ -1953,13 +1996,13 @@ impl InteractionState {
                 }
                 if action.is_none() {
                     action = Some(InteractionAction::DrinkContact {
-                        source: opening.reference.tank,
+                        source: item.id,
                         poured_liters: contact.last_poured * fluid_scale,
                         fractions,
                     });
                 } else {
                     self.pending_drink_contacts.push((
-                        opening.reference.tank,
+                        item.id,
                         contact.last_poured * fluid_scale,
                         fractions,
                     ));
@@ -2070,6 +2113,67 @@ fn inverse_lerp(start: f32, end: f32, value: f32) -> f32 {
 }
 
 /// Source `GetCapString` reads `ls.l.g(nameText)`, not the serialized `nameString`.
+/// Pose of the opening's pose owner and the state of its fluid owner.
+/// An inactive pose owner does not pour.
+fn pour_source<'a>(
+    opening: &OpeningState,
+    items: &'a mut ItemStore,
+) -> Option<(Pose, &'a mut items::ItemState)> {
+    let pose_owner = items.get(opening.reference.tank)?;
+    if pose_owner.inactive_pose.is_some() {
+        return None;
+    }
+    let pose = to_rapier(pose_owner.pose);
+    Some((pose, items.get_mut(opening.fluid_owner())?))
+}
+
+/// Spill from `fluid` through `opening` at `angle` degrees from up.
+/// Returns emission rate, emission speed, poured liters, and fluid fractions.
+fn spill_step(
+    opening: &mut OpeningState,
+    fluid: Option<&mut crate::fluids::FluidContainer>,
+    angle: f32,
+    dt: f32,
+    fluid_scale: f32,
+) -> (f32, f32, Option<f32>, [f32; 6]) {
+    let mut result = (0., 0., None, [0.; 6]);
+    let (Some(fluid), Some(particles)) = (fluid, opening.particles.as_ref()) else {
+        return result;
+    };
+    let fill = (fluid.total() / fluid.capacity_liters).clamp(0.0, 1.0);
+    let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
+    let factor = if opening.reference.angle_disabled {
+        1.0
+    } else {
+        inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
+            .max(inverse_lerp(90.0, 180.0, angle))
+    };
+    opening.empty_pour = fluid.total() <= 0.;
+    let emitting = opening.valve > 0.
+        && !opening.reference.spill_disabled
+        && !opening.reference.tube_connected
+        && (opening.reference.angle_disabled || angle > threshold)
+        && fluid.total() > 0.;
+    if emitting {
+        let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
+        let requested_liters = speed * dt * fluid_scale;
+        let total = fluid.total();
+        result.3 = fluid
+            .mixture()
+            .quantities_liters
+            .map(|amount| amount / total);
+        let debited = spill(fluid, requested_liters);
+        if debited > 0. {
+            opening.flow = Some((false, speed));
+        }
+        result.2 = Some(speed * dt);
+        result.0 =
+            particles.min_rate + (particles.max_rate - particles.min_rate) * speed.clamp(0., 1.);
+        result.1 = particles.max_speed * fill * factor;
+    }
+    result
+}
+
 fn generated_presentation(
     has_name: bool,
     name_text: f32,
@@ -2135,5 +2239,132 @@ mod f15_fluid_containers {
         assert_eq!(slow_oil_amount(0.01, 2., modifier), 0.01 * 2. * modifier);
         assert_eq!(slow_oil_amount(0.00005, 2., modifier), 0.0001);
         assert_eq!(slow_oil_amount(0.01, 100., modifier), 0.01);
+    }
+}
+
+#[cfg(test)]
+mod hose_end_tests {
+    use super::*;
+    use crate::fluids::{FluidContainer, FluidEntry};
+    use crate::reference::{SourceId, Transform};
+
+    fn item(id: u32, position: [f32; 3], fluid: Option<FluidContainer>) -> items::ItemState {
+        let pose = VehiclePose {
+            position,
+            rotation: [0., 0., 0., 1.],
+        };
+        items::ItemState {
+            id: ItemId(id),
+            body: None,
+            inactive_pose: None,
+            location: ItemLocation::World,
+            pose,
+            local_pose: pose,
+            generated_condition: None,
+            temperature: None,
+            fluid,
+            food: None,
+            hit_sound: None,
+            removed: false,
+            pending_attachment: false,
+        }
+    }
+
+    fn end(borrowed_tank: Option<ItemId>) -> OpeningState {
+        OpeningState {
+            flow: None,
+            fill_called: false,
+            empty_pour: false,
+            reference: OpeningRules {
+                id: OpeningId(1),
+                tank: ItemId(1),
+                cap: ItemId(1),
+                flow_liters_per_second: 1.,
+                flow_radius: 0.02,
+                tilt_degrees: 90.,
+                angle_disabled: false,
+                spill_disabled: false,
+                tube_connected: false,
+                cant_tube: false,
+                can_toggle: false,
+                can_tune: false,
+                tune_rate: 0.,
+                presentation: FluidPresentation {
+                    has_name: false,
+                    name: String::new(),
+                    no_text: true,
+                },
+            },
+            local_pose: Pose::from_translation(Vector::new(0., 0., 0.1)),
+            tilt_axis: -Vector::Y,
+            valve: 1.,
+            particles: Some(FluidParticleReference {
+                source: SourceId {
+                    file: "test".into(),
+                    path_id: 1,
+                },
+                local_pose: Transform {
+                    translation: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                    scale: [1.; 3],
+                },
+                capacity: 8,
+                cone_degrees: 0.,
+                cone_radius: 0.,
+                lifetime_seconds: 1.,
+                radius: 0.01,
+                gravity_multiplier: 1.,
+                collision_mask: 0,
+                bounce: 0.,
+                dampen: 0.,
+                max_speed: 1.,
+                min_rate: 0.,
+                max_rate: 10.,
+            }),
+            contact: None,
+            borrowed_tank,
+        }
+    }
+
+    /// Pour from a fluid-less segment and return the borrowed tank total and the opening.
+    fn pour(borrowed_tank: Option<ItemId>) -> (f32, OpeningState) {
+        let fluid = FluidContainer::new(
+            10.,
+            &[FluidEntry {
+                fluid_type: 0,
+                amount: 5.,
+            }],
+        );
+        let mut items = ItemStore::from_states(vec![
+            item(1, [1., 2., 3.], None),
+            item(2, [50., 0., 0.], Some(fluid)),
+        ]);
+        let mut opening = end(borrowed_tank);
+        let (pose, state) = pour_source(&opening, &mut items).unwrap();
+        let cap_pose = pose * opening.local_pose;
+        assert_eq!(cap_pose.translation, Vector::new(1., 2., 3.1));
+        let angle = (cap_pose.rotation * opening.tilt_axis)
+            .dot(Vector::Y)
+            .acos()
+            .to_degrees();
+        spill_step(&mut opening, state.fluid.as_mut(), angle, 0.5, 1.);
+        let total = items
+            .get(ItemId(2))
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .total();
+        (total, opening)
+    }
+
+    #[test]
+    fn hose_end_pours_from_borrowed_tank_at_segment_pose() {
+        let (total, opening) = pour(Some(ItemId(2)));
+        assert!((total - 4.5).abs() < 1e-5);
+        assert!(opening.flow.is_some());
+        let (total, opening) = pour(None);
+        assert_eq!(total, 5.);
+        assert!(opening.flow.is_none());
     }
 }
