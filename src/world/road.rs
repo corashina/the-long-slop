@@ -553,7 +553,7 @@ fn empty_bounds() -> WorldBounds {
     }
 }
 
-fn bounds_radius(reference: &WorldReference) -> Result<f64, ReferenceError> {
+pub(crate) fn bounds_radius(reference: &WorldReference) -> Result<f64, ReferenceError> {
     let mut radius = 0.0_f64;
     for identity in &reference.road.prototypes {
         let prototype = reference
@@ -603,31 +603,9 @@ fn bounds_radius(reference: &WorldReference) -> Result<f64, ReferenceError> {
     }
     // Include the source control path even if a skin has no influence at its final control.
     radius = radius.max(reference.road.road_segment_length as f64);
-    let mut placement = 0.0_f64;
-    let side_extent = |side: &crate::reference::WorldBuildingSide| {
-        (side.min_xpos.abs().max(side.max_xpos.abs())) as f64
-    };
-    for side in &reference.buildings.default_sides {
-        placement = placement.max(side_extent(side));
-    }
-    for group in &reference.buildings.groups {
-        for selection in &group.types {
-            let sides = if selection.dont_use_default == 0 {
-                &reference.buildings.default_sides
-            } else {
-                &selection.sides
-            };
-            for side in sides {
-                let modifier = if selection.dont_use_default == 0 && selection.use_modifier != 0 {
-                    selection.x_dist_modifier.abs() as f64
-                } else {
-                    1.0
-                };
-                placement = placement.max(side_extent(side) * modifier);
-            }
-        }
-    }
-    Ok(radius + placement + reference.road.road_above_terrain.abs() as f64)
+    Ok(radius
+        + super::placement::building_offset(&reference.buildings)
+        + reference.road.road_above_terrain.abs() as f64)
 }
 
 fn turn_angle(error: f32, length: f32, limit: f32) -> f32 {

@@ -20,15 +20,11 @@ use std::{
 use super::renderer_pending::{PipelineContinuation, RendererOwner};
 
 const MIB: usize = 1024 * 1024;
-const MAX_ROADS: usize = 512;
-const MAX_NEAR: usize = 512;
-const MAX_DISTANT: usize = 256;
-const MAX_OBJECTS: usize = 32768;
 const MAX_PENDING: usize = 32;
 /// Focus movement in metres before the structure window refreshes.
 const STRUCTURE_REFRESH_DISTANCE: f32 = 1.0;
-const ACTIVE_CPU: usize = 256 * MIB;
-const ACTIVE_GPU: usize = 128 * MIB;
+pub(crate) const STAGING: usize = 32 * MIB;
+pub(crate) const CHECKPOINTS: usize = 16 * MIB;
 pub(crate) const PROTOTYPE_CPU: usize = 512 * MIB;
 pub(crate) const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -166,6 +162,7 @@ pub struct WorldStream {
     building_components: super::building_extras::BuildingComponents,
     reference: Arc<WorldReference>,
     pub(crate) distances: super::DrawDistances,
+    limits: super::stream_limits::StreamLimits,
     presentation: PresentationAllocation,
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
@@ -434,7 +431,7 @@ impl WorldStream {
             + self.roads.retained_index_bytes()
             + self.placements.retained_index_bytes()
             + saved.generation.placements.checkpoint_heap_bytes()
-            > 16 * MIB
+            > CHECKPOINTS
         {
             return Err(ReferenceError(
                 "Restored source history exceeds checkpoint budget".into(),
@@ -715,6 +712,15 @@ impl WorldStream {
                 "Source rule indices exceed prototype CPU budget".into(),
             ));
         }
+        let margin = road_light.influence_margin();
+        let limits = super::stream_limits::StreamLimits::new(world, &distances, margin)?;
+        if !limits.fits() {
+            return Err(ReferenceError(format!(
+                "Draw distance {} m does not fit. Largest: {} m",
+                distances.draw_distance,
+                super::stream_limits::StreamLimits::largest_fitting(world, margin)?
+            )));
+        }
         Ok(Self {
             required: Default::default(),
             lamp_material_choices: Vec::new(),
@@ -748,6 +754,7 @@ impl WorldStream {
             road_layers,
             reference: Arc::clone(world),
             distances,
+            limits,
             package_id: reference.content_base.clone(),
             generation_revision: 0,
             changes: super::ChangeRecords::default(),
@@ -758,8 +765,8 @@ impl WorldStream {
             change_bounds: None,
             imported_baselines: Vec::new(),
             road_light,
-            lights: Vec::with_capacity(MAX_ROADS),
-            wanted_lights: Vec::with_capacity(MAX_ROADS),
+            lights: Vec::with_capacity(limits.roads),
+            wanted_lights: Vec::with_capacity(limits.roads),
             origin: WorldOrigin::default(),
             request: WorldRequest {
                 session: NEXT_SESSION
@@ -804,9 +811,9 @@ impl WorldStream {
             next_road: 0,
             selected_roads: Vec::new(),
             next_geometry: 0,
-            wanted_roads: Vec::with_capacity(MAX_ROADS),
-            wanted_tiles: Vec::with_capacity(MAX_NEAR + 2 * MAX_DISTANT),
-            road_points: Vec::with_capacity(MAX_ROADS * super::ROAD_CONTROLS),
+            wanted_roads: Vec::with_capacity(limits.roads),
+            wanted_tiles: Vec::with_capacity(limits.tiles.iter().sum()),
+            road_points: Vec::with_capacity(limits.roads * super::ROAD_CONTROLS),
             structures: Vec::new(),
             trigger_roles: super::TriggerRoles::default(),
             structure_revision: 0,
@@ -821,7 +828,8 @@ impl WorldStream {
             saved_locations_pending: false,
             recipes: HashMap::new(),
             supplies: Vec::new(),
-            wanted_structures: Vec::with_capacity(MAX_OBJECTS),
+            // Grows with use. Capacity is charged as retained CPU.
+            wanted_structures: Vec::new(),
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_candidates: Vec::new(),
@@ -845,7 +853,7 @@ impl WorldStream {
             self.overlap = previous;
             return Err(error);
         }
-        if self.metrics().checkpoint_bytes > 16 * MIB {
+        if self.metrics().checkpoint_bytes > CHECKPOINTS {
             self.overlap = previous;
             return Err(ReferenceError(
                 "Source candidate history overlap exceeds its budget".into(),
@@ -911,13 +919,13 @@ impl WorldStream {
             ResourceBudget {
                 name: "World CPU",
                 used: active_cpu,
-                limit: ACTIVE_CPU,
+                limit: self.limits.active_cpu,
                 unit: "bytes",
             },
             ResourceBudget {
                 name: "World GPU",
                 used: active_gpu,
-                limit: ACTIVE_GPU,
+                limit: self.limits.active_gpu,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -935,7 +943,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Objects",
                 used: objects,
-                limit: MAX_OBJECTS,
+                limit: self.limits.objects,
                 unit: "objects",
             },
             ResourceBudget {
@@ -947,7 +955,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Staging",
                 used: staging,
-                limit: 32 * MIB,
+                limit: STAGING,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -959,7 +967,7 @@ impl WorldStream {
             ResourceBudget {
                 name: "Generation staging",
                 used: self.generation_pending_bytes() - self.binding_reserved,
-                limit: 32 * MIB - self.dependency_staging_reserve,
+                limit: STAGING - self.dependency_staging_reserve,
                 unit: "bytes",
             },
             ResourceBudget {
@@ -986,13 +994,14 @@ impl WorldStream {
             })
     }
     fn admit_generation(&mut self, bytes: usize) -> bool {
-        if bytes > 32 * MIB - self.dependency_staging_reserve
-            || self.metrics().active_cpu_bytes.saturating_add(bytes) > ACTIVE_CPU
+        if bytes > STAGING - self.dependency_staging_reserve
+            || self.metrics().active_cpu_bytes.saturating_add(bytes) > self.limits.active_cpu
         {
             self.failure = Some(format!(
-                "Source generation budget exceeded: CPU requested {} bytes, limit {ACTIVE_CPU} bytes; staging requested {bytes} bytes, limit {} bytes",
+                "Source generation budget exceeded: CPU requested {} bytes, limit {} bytes; staging requested {bytes} bytes, limit {} bytes",
                 self.metrics().active_cpu_bytes.saturating_add(bytes),
-                32 * MIB - self.dependency_staging_reserve
+                self.limits.active_cpu,
+                STAGING - self.dependency_staging_reserve
             ));
             return false;
         }
@@ -1002,12 +1011,12 @@ impl WorldStream {
     // Grass and synchronous published bindings drain without further resource loads.
     pub fn available_staging_bytes(&self) -> usize {
         self.available_dependency_staging_bytes().min(
-            (32 * MIB - self.dependency_staging_reserve)
+            (STAGING - self.dependency_staging_reserve)
                 .saturating_sub(self.generation_pending_bytes() - self.binding_reserved),
         )
     }
     pub fn available_dependency_staging_bytes(&self) -> usize {
-        (32 * MIB).saturating_sub(
+        STAGING.saturating_sub(
             self.presentation.staging_bytes
                 + self.generation_pending_bytes()
                 + self.overlap.pending_bytes,
@@ -1021,7 +1030,7 @@ impl WorldStream {
         reserve: usize,
         metadata: usize,
     ) -> Result<(), ReferenceError> {
-        if reserve == 0 || reserve >= 32 * MIB {
+        if reserve == 0 || reserve >= STAGING {
             return Err(ReferenceError(
                 "Invalid dependency staging reservation".into(),
             ));
@@ -1607,7 +1616,7 @@ impl WorldStream {
                 let helpers = count + startup.foundations.len();
                 let bytes = count * std::mem::size_of::<super::FoundationPoint>()
                     + helpers * std::mem::size_of::<TerrainFoundation>();
-                if self.metrics().active_cpu_bytes + bytes > ACTIVE_CPU {
+                if self.metrics().active_cpu_bytes + bytes > self.limits.active_cpu {
                     self.failure =
                         Some("Source color helper admission exceeds active CPU budget".into());
                     return;
@@ -1687,7 +1696,7 @@ impl WorldStream {
             room,
             self.seed,
             &mut self.wanted_structures,
-            MAX_OBJECTS,
+            self.limits.objects,
         ) {
             self.failure = Some(error.0);
         }
@@ -1752,7 +1761,9 @@ impl WorldStream {
             biome_override: source_override(&self.reference),
         };
         let current = self.props.placements().len();
-        let maximum = MAX_OBJECTS
+        let maximum = self
+            .limits
+            .objects
             .saturating_sub(metrics.generated_objects)
             .saturating_add(current);
         if let Err(error) = self.props.advance(
@@ -1802,7 +1813,11 @@ impl WorldStream {
             .retain_requests(&self.wanted_structures, &self.replay_roots);
         let metrics = self.metrics();
         let pending = 32usize.saturating_sub(metrics.pending_work);
-        let limit = 32usize.min(MAX_OBJECTS.saturating_sub(metrics.generated_objects));
+        let limit = 32usize.min(
+            self.limits
+                .objects
+                .saturating_sub(metrics.generated_objects),
+        );
         if limit == 0 {
             if !self
                 .contents
@@ -1810,19 +1825,22 @@ impl WorldStream {
                 .unwrap_or(false)
             {
                 self.failure = Some(format!(
-                    "Source content object budget exceeded: requested {}, limit {MAX_OBJECTS}",
-                    metrics.generated_objects + 1
+                    "Source content object budget exceeded: requested {}, limit {}",
+                    metrics.generated_objects + 1,
+                    self.limits.objects
                 ));
             }
             return;
         }
-        let reservation = self
-            .available_staging_bytes()
-            .min(ACTIVE_CPU.saturating_sub(metrics.active_cpu_bytes));
+        let reservation = self.available_staging_bytes().min(
+            self.limits
+                .active_cpu
+                .saturating_sub(metrics.active_cpu_bytes),
+        );
         if !self.admit_generation(reservation) {
             return;
         }
-        let available = (16 * MIB).saturating_sub(
+        let available = CHECKPOINTS.saturating_sub(
             self.roads.retained_index_bytes() + self.placements.retained_index_bytes(),
         );
         let replay_admission = self.contents.has_replay() || self.available_external_jobs() > 0;
@@ -2028,13 +2046,13 @@ impl WorldStream {
             self.replay_indices.clear();
             for bounds in bounds {
                 let (count, bytes) = self.changes.query_reservation(bounds);
-                if count > MAX_OBJECTS
+                if count > self.limits.objects
                     || bytes.saturating_mul(4) > self.available_staging_bytes()
                     || self
                         .metrics()
                         .active_cpu_bytes
                         .saturating_add(bytes.saturating_mul(4))
-                        > ACTIVE_CPU
+                        > self.limits.active_cpu
                 {
                     self.failure =
                         Some("Changed destination selection exceeds staging admission".into());
@@ -2048,7 +2066,7 @@ impl WorldStream {
                     }
                 }
             }
-            if self.replay_indices.len() > MAX_OBJECTS {
+            if self.replay_indices.len() > self.limits.objects {
                 self.failure = Some("Changed destination replay exceeds active admission".into());
                 return;
             }
@@ -2095,7 +2113,7 @@ impl WorldStream {
                     .metrics()
                     .active_cpu_bytes
                     .saturating_add(descriptor_bytes)
-                    > ACTIVE_CPU
+                    > self.limits.active_cpu
             {
                 return;
             }
@@ -2235,23 +2253,26 @@ impl WorldStream {
                     }))
             });
             self.planned_road_focus = self.road_focus;
-            if self.wanted_structures.len() > MAX_OBJECTS {
-                return Err(ReferenceError("Source object count exceeds8192".into()));
+            if self.wanted_structures.len() > self.limits.objects {
+                return Err(ReferenceError(format!(
+                    "Source object count exceeds {}",
+                    self.limits.objects
+                )));
             }
         }
         let buildings_changed = (force_structures || road_changed) && self.refresh_structures();
         self.terrain_context_dirty |= road_changed || buildings_changed;
         self.wanted_tiles.clear();
-        if self.wanted_structures.len() > MAX_OBJECTS {
+        if self.wanted_structures.len() > self.limits.objects {
             return Err(ReferenceError(format!(
-                "Source object count exceeds {MAX_OBJECTS}"
+                "Source object count exceeds {}",
+                self.limits.objects
             )));
         }
         for (tier, tile) in self.tiles.iter().enumerate() {
             let radius = tile.draw_distance as i64;
             let side = (radius * 2 + 1).max(4);
-            let count =
-                (((radius as f64 + 0.5).powi(2) * std::f32::consts::PI as f64) as usize).max(5);
+            let count = super::stream_limits::circle_tiles(*tile);
             let mut offsets = Vec::with_capacity((side * side) as usize);
             for z in 0..side {
                 for x in 0..side {
@@ -2282,7 +2303,7 @@ impl WorldStream {
                 .iter()
                 .filter(|k| k.layer == tier_layer(tier))
                 .count();
-            if active > if tier == 0 { MAX_NEAR } else { MAX_DISTANT } {
+            if active > self.limits.tiles[tier] {
                 return Err(ReferenceError(format!(
                     "Source terrain tier {tier} count budget"
                 )));
@@ -2392,15 +2413,19 @@ impl WorldStream {
             .metrics()
             .generated_objects
             .saturating_add(new_light + old_poles + new_pole);
-        if required > MAX_OBJECTS {
+        if required > self.limits.objects {
             self.failure = Some(format!(
-                "Source road {index} object budget exceeded: requested {required}, limit {MAX_OBJECTS}"
+                "Source road {index} object budget exceeded: requested {required}, limit {}",
+                self.limits.objects
             ));
             return;
         }
         if existing.is_none() {
-            if self.selected_roads.len() >= MAX_ROADS {
-                self.failure = Some("Selected road descriptors exceed 512 roads".into());
+            if self.selected_roads.len() >= self.limits.roads {
+                self.failure = Some(format!(
+                    "Selected road descriptors exceed {} roads",
+                    self.limits.roads
+                ));
                 return;
             }
             // Reserve retained output, vector overlap, the light identity, and pole placement before selection.
@@ -2447,13 +2472,16 @@ impl WorldStream {
             self.wanted_lights.push(index);
         }
         self.refresh_poles();
-        if self.metrics().generated_objects > MAX_OBJECTS {
-            self.failure = Some(format!("Source object count exceeds {MAX_OBJECTS}"));
+        if self.metrics().generated_objects > self.limits.objects {
+            self.failure = Some(format!(
+                "Source object count exceeds {}",
+                self.limits.objects
+            ));
             return;
         }
         if geometry {
-            if self.wanted_roads.len() == MAX_ROADS {
-                self.failure = Some("Source road count exceeds 512".into());
+            if self.wanted_roads.len() == self.limits.roads {
+                self.failure = Some(format!("Source road count exceeds {}", self.limits.roads));
                 return;
             }
             self.wanted_roads.push(index);
@@ -2632,7 +2660,7 @@ impl WorldStream {
             .active_cpu_bytes
             .saturating_add(pending_bytes + cache_bytes)
             .saturating_add(delta)
-            > ACTIVE_CPU
+            > self.limits.active_cpu
         {
             self.road_failure(ReferenceError(
                 "Road worker capacity exceeds CPU budget".into(),
@@ -2954,11 +2982,11 @@ impl WorldStream {
             || metrics
                 .active_cpu_bytes
                 .saturating_add(surface_render_cpu(&work.published.surface))
-                > ACTIVE_CPU
+                > self.limits.active_cpu
             || metrics
                 .active_gpu_bytes
                 .saturating_add(surface_render_bytes(&work.published.surface))
-                > ACTIVE_GPU
+                > self.limits.active_gpu
         {
             return Err(ReferenceError(
                 "Source renderer allocation exceeds its resource budget".into(),
@@ -3085,16 +3113,16 @@ impl WorldStream {
         let metrics = self.metrics();
         // Geometry and renderer staging were reserved before allocation. Rapier adds collision storage.
         let count = match work.published.key.layer {
-            WorldLayer::Road => (metrics.road_segments, MAX_ROADS),
-            WorldLayer::Terrain => (metrics.near_tiles, MAX_NEAR),
-            WorldLayer::DistantTerrain => (metrics.distant_tiles[0], MAX_DISTANT),
-            WorldLayer::DistantTerrain2 => (metrics.distant_tiles[1], MAX_DISTANT),
+            WorldLayer::Road => (metrics.road_segments, self.limits.roads),
+            WorldLayer::Terrain => (metrics.near_tiles, self.limits.tiles[0]),
+            WorldLayer::DistantTerrain => (metrics.distant_tiles[0], self.limits.tiles[1]),
+            WorldLayer::DistantTerrain2 => (metrics.distant_tiles[1], self.limits.tiles[2]),
             _ => unreachable!(),
         };
         if count.0 >= count.1
-            || metrics.checkpoint_bytes > 16 * MIB
-            || metrics.active_cpu_bytes > ACTIVE_CPU
-            || metrics.active_gpu_bytes > ACTIVE_GPU
+            || metrics.checkpoint_bytes > CHECKPOINTS
+            || metrics.active_cpu_bytes > self.limits.active_cpu
+            || metrics.active_gpu_bytes > self.limits.active_gpu
         {
             let error = ReferenceError(format!(
                 "Source geometry budget at {:?}",
@@ -3126,7 +3154,9 @@ impl WorldStream {
                 self.reference.collision_rules.layers[layer as usize],
                 0.6,
                 0.0,
-                ACTIVE_CPU.saturating_sub(metrics.active_cpu_bytes),
+                self.limits
+                    .active_cpu
+                    .saturating_sub(metrics.active_cpu_bytes),
             ) {
                 Ok((collider, collision_bytes)) => {
                     work.published.collider = Some(collider);
@@ -3247,7 +3277,10 @@ impl WorldStream {
         let x1 = ((swept.max[0] + size * 0.5) / size).floor() as i64;
         let z0 = ((-swept.max[2] + size * 0.5) / size).floor() as i64;
         let z1 = ((-swept.min[2] + size * 0.5) / size).floor() as i64;
-        if x1 < x0 || z1 < z0 || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > MAX_NEAR as i64 {
+        if x1 < x0
+            || z1 < z0
+            || (x1 - x0 + 1).saturating_mul(z1 - z0 + 1) > self.limits.tiles[0] as i64
+        {
             return false;
         }
         (x0..=x1).all(|x| {
@@ -3269,7 +3302,7 @@ impl WorldStream {
             + self.structure_helpers.count(&self.wanted_structures);
         let extra = required.saturating_sub(self.color_helpers.capacity())
             * std::mem::size_of::<TerrainFoundation>();
-        if self.metrics().active_cpu_bytes.saturating_add(extra) > ACTIVE_CPU {
+        if self.metrics().active_cpu_bytes.saturating_add(extra) > self.limits.active_cpu {
             self.failure = Some("Source helper context exceeds active CPU budget".into());
             return;
         }
@@ -3755,9 +3788,10 @@ impl WorldStream {
                 return Err(ReferenceError("Building supply prefix is preparing".into()));
             }
         }
-        if self.metrics().generated_objects + 1 + points.len() * 2 > MAX_OBJECTS {
+        if self.metrics().generated_objects + 1 + points.len() * 2 > self.limits.objects {
             return Err(ReferenceError(format!(
-                "Source object count exceeds {MAX_OBJECTS}"
+                "Source object count exceeds {}",
+                self.limits.objects
             )));
         }
         if self
@@ -3765,7 +3799,7 @@ impl WorldStream {
             .active_cpu_bytes
             .saturating_add(self.recipes[&placement.prototype].instance_bytes())
             .saturating_add(super::contents::placement_heap(placement))
-            > ACTIVE_CPU
+            > self.limits.active_cpu
         {
             return Err(ReferenceError(
                 "Source structure physics exceeds active CPU budget".into(),
@@ -3787,12 +3821,12 @@ impl WorldStream {
                 .saturating_add(binding_reservation)
                 .saturating_add(self.recipes[&placement.prototype].instance_bytes())
                 .saturating_add(super::contents::placement_heap(placement))
-                > ACTIVE_CPU
+                > self.limits.active_cpu
             || self
                 .metrics()
                 .generated_objects
                 .saturating_add(binding_objects)
-                > MAX_OBJECTS
+                > self.limits.objects
         {
             return Err(ReferenceError(
                 "Source generated bindings exceed admission budget".into(),
@@ -3811,7 +3845,7 @@ impl WorldStream {
             )?
         } else {
             let extra = super::StructureRecipe::reservation(prototype);
-            if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > ACTIVE_CPU
+            if self.metrics().active_cpu_bytes.saturating_add(extra * 2) > self.limits.active_cpu
                 || extra + binding_reservation > self.available_dependency_staging_bytes()
             {
                 return Err(ReferenceError(
