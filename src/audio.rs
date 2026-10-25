@@ -184,6 +184,7 @@ pub struct AudioState {
     sphere: Option<Ball>,
     impacts: impacts::ImpactState,
     rocks: ambience::RockAmbience,
+    zones: ambience::ZoneAmbience,
     world_interiors: interiors::WorldInteriors,
     footsteps: footsteps::FootstepState,
 }
@@ -314,6 +315,7 @@ impl AudioState {
             sphere,
             impacts: impacts::ImpactState::default(),
             rocks: ambience::RockAmbience::default(),
+            zones: ambience::ZoneAmbience::default(),
             world_interiors: interiors::WorldInteriors::new(reference.interiors.len()),
             footsteps: footsteps::FootstepState::default(),
             reference,
@@ -930,6 +932,7 @@ impl AudioState {
         self.removed.clear();
         self.impacts.reset();
         self.rocks.reset();
+        self.zones.reset();
         self.world_interiors.reset();
         self.footsteps = footsteps::FootstepState::default();
         for m in &mut self.mechanism_sounds {
@@ -1469,6 +1472,7 @@ pub enum AudioKind {
     Footstep = 15,
     StormInside = 16,
     MeleeHit = 17,
+    AmbienceZone = 19,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1571,6 +1575,11 @@ impl AmbientState {
             modifier: reference.modifier,
             only_modifier: reference.only_modifier,
         }
+    }
+
+    /// Source `ambienceZone`: a playing zone lowers the day and night ambient.
+    pub fn duck(&mut self, lerp: f32) {
+        self.only_modifier = self.only_modifier.min(1. - lerp);
     }
 
     /// `storm` is the source `sandStormAmbientDecrease * inSandStorm` of the previous step.

@@ -114,6 +114,9 @@ impl SpawnEvaluation<'_> {
                 self.random,
                 self.context,
             )?;
+            if let Some(item) = selection {
+                self.note_selection(item);
+            }
             let Some(item) = selection.and_then(|i| self.reference.catalog.items.get(i)) else {
                 continue;
             };

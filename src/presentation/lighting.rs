@@ -461,6 +461,20 @@ pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> [u3
         portable[1],
     ]
 }
+/// Shader cookie slot of a light: 0 none, then 1 + its index in `cookie_ids`.
+/// A spot light without a cookie uses the default spot cookie. None: the cookie is not bound.
+pub(crate) fn cookie_slot(ids: &[u32; 5], light: &crate::reference::LightReference) -> Option<f32> {
+    match light
+        .cookie
+        .or((light.kind == LightKind::Spot).then_some(ids[1]))
+    {
+        Some(id) => ids
+            .iter()
+            .position(|c| *c == id)
+            .map(|index| (index + 1) as f32),
+        None => Some(0.),
+    }
+}
 pub(crate) fn bind_lighting(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
@@ -610,17 +624,8 @@ pub(crate) fn bind_lighting(
             node,
             pose,
         });
-        let cookie = light
-            .cookie
-            .or((light.kind == LightKind::Spot).then_some(r.default_spot_cookie));
-        source.uniform.lights[index].cookie_rect = Vec4::new(
-            cookie
-                .and_then(|id| cookie_ids.iter().position(|c| *c == id))
-                .map_or(0., |index| (index + 1) as f32),
-            0.,
-            0.,
-            0.,
-        );
+        source.uniform.lights[index].cookie_rect =
+            Vec4::new(cookie_slot(&cookie_ids, light).unwrap_or(0.), 0., 0., 0.);
         source.uniform.lights[index].cookie_size = light.cookie_size;
         source.uniform.lights[index].mask = UVec4::new(
             light.culling_mask,
@@ -1212,6 +1217,7 @@ pub(crate) fn register_world_light(
     slot: usize,
     node: Entity,
     enabled: bool,
+    cookie: f32,
 ) -> Entity {
     let record = &light.record;
     let index = source.road_lamps.fixed_lights + slot;
@@ -1237,16 +1243,7 @@ pub(crate) fn register_world_light(
     });
     let half = record.full_cone_degrees.to_radians() * 0.5;
     source.uniform.lights[index] = GpuLight {
-        cookie_rect: Vec4::new(
-            if record.kind == LightKind::Spot {
-                2.
-            } else {
-                0.
-            },
-            0.,
-            0.,
-            0.,
-        ),
+        cookie_rect: Vec4::new(cookie, 0., 0., 0.),
         mask: UVec4::new(
             record.culling_mask,
             (half.cos() / half.sin()).to_bits(),

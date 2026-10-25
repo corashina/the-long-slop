@@ -2,7 +2,8 @@
 use bevy::prelude::*;
 
 use crate::presentation::lighting::{
-    RenderingState, SourceLighting, register_road_light, register_world_light, remove_road_light,
+    RenderingState, SourceLighting, cookie_ids, cookie_slot, register_road_light,
+    register_world_light, remove_road_light,
 };
 use crate::presentation::materials::SourceMaterial;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -334,6 +335,7 @@ pub(crate) fn finish_road_lamp_warmup(commands: &mut Commands, source: &mut Sour
 /// The source frame owns pole geometry. Receiver influence owns independent light proxies.
 pub(crate) fn sync_source_lamps(
     frame: &crate::world::WorldFrame<'_>,
+    reference: &crate::reference::ReferenceManifest,
     enabled: bool,
     source: &mut SourceLighting,
     commands: &mut Commands,
@@ -434,6 +436,9 @@ pub(crate) fn sync_source_lamps(
             let slot = source.road_lamps.allocation[index].ok_or_else(|| {
                 crate::reference::ReferenceError("Source lamp has no proxy admission".into())
             })?;
+            let cookie = cookie_slot(&cookie_ids(reference), &light.record).ok_or_else(|| {
+                crate::reference::ReferenceError("Source lamp cookie has no bound texture".into())
+            })?;
             let node = commands.spawn((pose, Visibility::Inherited)).id();
             let entity = register_world_light(
                 source,
@@ -442,6 +447,7 @@ pub(crate) fn sync_source_lamps(
                 slot,
                 node,
                 light.enabled && (light.biome.is_none() || enabled),
+                cookie,
             );
             source.road_lamps.source_proxies.push(SourceProxy {
                 id: light.id.clone(),
