@@ -75,6 +75,9 @@ pub struct WorldReference {
     pub exclusions: Vec<WorldExclusion>,
     #[serde(deserialize_with = "compact_vec")]
     pub material_textures: Vec<super::rendering::LightingTextureRecord>,
+    /// Lighting texture of each world Light cookie.
+    #[serde(deserialize_with = "compact_vec")]
+    pub light_cookies: Vec<WorldLightCookie>,
     pub pickup_hits: Vec<WorldPickupHit>,
     pub home_cable: HomeCableReference,
 }
@@ -85,6 +88,14 @@ pub struct WorldReference {
 pub struct HomeCableReference {
     pub root: NodeId,
     pub ropes: Vec<NodeId>,
+}
+
+/// Binds a world Light cookie source to its exported lighting spot cookie texture.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldLightCookie {
+    pub source: SourceId,
+    pub texture: u32,
 }
 
 /// Source hit sound of a world `pickupable` record with a `collideSound`.
@@ -140,6 +151,28 @@ pub struct WorldPrototypeReference {
     pub prefab_pose: Transform,
     #[serde(default, deserialize_with = "compact_vec")]
     pub interiors: Vec<WorldInteriorReference>,
+}
+
+impl WorldPrototypeReference {
+    /// A node pose relative to the prototype root, with the node's own local scale.
+    pub fn root_relative(&self, index: usize) -> (rapier3d::math::Pose, rapier3d::math::Vector) {
+        use rapier3d::math::{Pose, Rotation, Vector};
+        let nodes = &self.nodes;
+        let scale = Vector::from_array(nodes[index].transform.scale);
+        let mut pose = Pose::IDENTITY;
+        let mut node = index;
+        while let Some(parent) = nodes[node].parent {
+            let t = &nodes[node].transform;
+            let rotation = Rotation::from_array(t.rotation);
+            pose = Pose::from_parts(
+                Vector::from_array(t.translation)
+                    + rotation * (Vector::from_array(t.scale) * pose.translation),
+                rotation * pose.rotation,
+            );
+            node = parent as usize;
+        }
+        (pose, scale)
+    }
 }
 
 /// Source `interiorscript` of a world building. Doors are `usablescript` world mechanisms.
@@ -718,6 +751,30 @@ impl WorldReference {
             )?;
         }
         self.initialization.validate(self, &receipts)?;
+        for (index, cookie) in self.light_cookies.iter().enumerate() {
+            require(
+                self.light_cookies[..index]
+                    .iter()
+                    .all(|c| c.source != cookie.source)
+                    && manifest.lighting.lights.iter().any(|l| {
+                        l.kind == super::LightKind::Spot && l.cookie == Some(cookie.texture)
+                    })
+                    && manifest
+                        .lighting
+                        .textures
+                        .iter()
+                        .any(|t| t.id == cookie.texture && t.source == cookie.source),
+                &field(&cookie.source, "world light cookie"),
+            )?;
+        }
+        for r in self.records.iter().filter(|r| r.class_name == "Light") {
+            if let Some(WorldValue::Link(cookie)) = r.fields.get("m_Cookie") {
+                require(
+                    self.light_cookies.iter().any(|c| &c.source == cookie),
+                    &field(&r.source, "world light cookie binding"),
+                )?;
+            }
+        }
         for row in &self.mechanisms {
             let prototype = self
                 .prototypes

@@ -161,6 +161,7 @@ impl StartingArea {
                 .user_data(
                     flag | ((record.id.0 as u128) << 64)
                         | crate::vehicle::step_surface_bits(record.step_surface)
+                        | crate::vehicle::tag_bits(record.tag)
                         | item.map_or(0, |item| item.0 as u128 + 1),
                 );
             let owner = bodies[&record.body];
@@ -944,6 +945,18 @@ impl GarageRuntime {
     }
 
     fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let position = self
+            .stream
+            .origin
+            .absolute(self.area.player.body_pose(&self.physics).position);
+        // Source order: the zones duck the ambient before napszak reads it.
+        if let Some(audio) = &mut self.audio {
+            audio.sync_zones(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            self.ambient.duck(audio.zone_step(position));
+        }
         // napszakvaltakozas.FixedUpdate reads inSandStorm before the storms update.
         let storm = self.weather.influence().strength.clamp(0., 1.);
         let gains = self.ambient.gains(
@@ -954,10 +967,6 @@ impl GarageRuntime {
         );
         if let Some(audio) = &mut self.audio {
             use crate::audio::AudioKind;
-            let position = self
-                .stream
-                .origin
-                .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(AudioKind::AmbientNight, 0, gains[1], position);
             audio.source_loop(
@@ -994,6 +1003,22 @@ impl GarageRuntime {
             .advance_music_boxes(dt, |item, pitch, detune, chance| {
                 if let (Some(audio), Some(item)) = (audio.as_mut(), items.get(item)) {
                     audio.music_note(origin.absolute(item.pose.position), pitch, detune, chance);
+                }
+            });
+        // metalDetectorScript.Turn stops the beep of a detector that is off.
+        if let Some(audio) = audio.as_mut() {
+            audio.stop_survival_loops(crate::audio::AudioKind::MetalDetector);
+        }
+        self.stream
+            .advance_detectors(dt, items, &self.physics, |item, position, pitch, volume| {
+                if let Some(audio) = audio.as_mut() {
+                    audio.pitched_loop(
+                        crate::audio::AudioKind::MetalDetector,
+                        item.0,
+                        volume,
+                        Some(pitch),
+                        origin.absolute(position),
+                    );
                 }
             });
         for (index, owner) in self.light_owners.iter().enumerate() {
@@ -1193,6 +1218,7 @@ impl GarageRuntime {
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
                 if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                    && !self.stream.switch_detector(knob, &mut self.area.items)
                     && let Some((item, true)) =
                         self.stream
                             .radio_control(knob, direction, &mut self.area.items)

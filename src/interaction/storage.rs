@@ -376,6 +376,7 @@ impl StorageLocks {
         self.till_pickup.remove(&owner);
         self.drop_times.remove(&owner);
         let removed = items.get(owner).is_none_or(|o| o.removed);
+        let buried = items.get(owner).is_some_and(|o| o.buried);
         let mut departs = false;
         let mut changed = false;
         for index in self.source_volumes..self.volumes.len() {
@@ -397,6 +398,10 @@ impl StorageLocks {
                     departs = true;
                 } else {
                     self.unlock(item, items, physics)?;
+                    // Source mountStuff.Unstore: contents of a buried owner stay buried.
+                    if buried {
+                        super::buried::bury(item, items, physics);
+                    }
                 }
                 changed = true;
             }

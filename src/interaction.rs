@@ -1,4 +1,5 @@
 pub mod attachments;
+pub mod buried;
 pub mod carry;
 pub mod cigarettes;
 pub mod cleaning;
@@ -16,6 +17,7 @@ pub mod items;
 pub mod labels;
 pub(crate) mod level;
 pub mod mechanisms;
+pub mod melee;
 pub(crate) mod memory;
 pub mod parts;
 pub mod push;
@@ -106,8 +108,8 @@ pub enum Knob {
     Dial,
     Volume,
     Tuning,
-    /// BChangeAMFM: turned with use.
-    Band,
+    /// usablescript turned with use: radio BChangeAMFM, metal detector onOffButton.
+    Switch,
     /// musicboxscript use: rotateAble, turned with the mouse.
     Crank,
 }
@@ -226,6 +228,8 @@ struct SeatState {
 
 pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
+    pub buried: buried::BuriedItems,
+    pub melee: melee::MeleeState,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -580,6 +584,8 @@ impl InteractionState {
             .collect();
         Ok(Self {
             cleaning: cleaning::CleaningTools::new(reference)?,
+            buried: buried::BuriedItems::default(),
+            melee: melee::MeleeState::new(reference)?,
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -729,6 +735,9 @@ impl InteractionState {
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
         self.bodies.insert(id, handle);
         self.mechanisms.bind_body(id, handle);
+    }
+    pub fn player_body(&self) -> Option<RigidBodyHandle> {
+        self.player_body
     }
     pub fn bind_player_body(&mut self, handle: RigidBodyHandle) {
         self.player_body = Some(handle);
@@ -1419,6 +1428,10 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
+        // Source pickupable.CanPickup refuses IsBuried items.
+        if self.buried.is_buried(item, items, physics, self.player_body) {
+            return Err(ReferenceError("Item is buried".into()));
+        }
         self.carry.pickup(item, point, player, items, physics)?;
         self.storage.picked_up(item);
         Ok(())
@@ -1433,6 +1446,7 @@ impl InteractionState {
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.cleaning.reset_contact();
+        self.melee.rebase(shift);
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         self.attachments.rebase(shift);
@@ -1473,6 +1487,7 @@ impl InteractionState {
                 look_mouse: input.mouse,
             };
         }
+        self.buried.tick(dt);
         for opening in &mut self.openings {
             opening.flow = None;
             opening.fill_called = false;
@@ -1729,7 +1744,7 @@ impl InteractionState {
                             action = Some(InteractionAction::Crank(knob, look));
                         }
                     }
-                } else if let Some((knob, Knob::Band)) = self.dial_knob(&target, physics) {
+                } else if let Some((knob, Knob::Switch)) = self.dial_knob(&target, physics) {
                     if use_input.pressed & keys::USE != 0
                         || (use_input.pressed & keys::PRIMARY != 0 && availability.lmb_use)
                     {
@@ -2267,6 +2282,7 @@ mod hose_end_tests {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         }
     }
 

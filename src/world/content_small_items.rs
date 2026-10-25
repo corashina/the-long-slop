@@ -559,10 +559,12 @@ mod tests {
             ammo,
             glow,
             radio: None,
+            detector: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,
             held: false,
+            buried: false,
             attachment: None,
             mechanism: None,
         }

@@ -45,10 +45,14 @@ pub struct ObjectSnapshot {
     pub glow: Option<f32>,
     /// save_radioscript controls of a portable radio.
     pub radio: Option<crate::save::RadioSnapshot>,
+    /// Metal detector onOffButton turn state.
+    pub detector: Option<bool>,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,
     pub held: bool,
+    /// Source tosaveitemscript.buried.
+    pub buried: bool,
     pub attachment: Option<AttachmentSnapshot>,
     pub mechanism: Option<MechanismSnapshot>,
 }

@@ -57,6 +57,8 @@ pub struct ItemState {
     pub hit_sound: Option<HitSound>,
     pub removed: bool,
     pub pending_attachment: bool,
+    /// Source tosaveitemscript.buried: kinematic, no pickup, lifted by digging.
+    pub buried: bool,
 }
 
 pub struct ItemStore {
@@ -295,6 +297,7 @@ impl ItemStore {
                     }),
                 removed: false,
                 pending_attachment: false,
+                buried: false,
             });
         }
         let mut vehicle_tanks = Vec::with_capacity(reference.vehicles.len());
@@ -732,6 +735,7 @@ impl ItemStore {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         });
         self.membership_revision += 1;
         self.generated.insert(key, id);
@@ -773,6 +777,7 @@ impl ItemStore {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         });
         self.membership_revision += 1;
         Ok(())
@@ -809,6 +814,7 @@ impl ItemStore {
             hit_sound: None,
             removed: false,
             pending_attachment: false,
+            buried: false,
         });
         self.membership_revision += 1;
         self.dirty.insert(id);
@@ -865,10 +871,12 @@ impl ItemStore {
             ammo: None,
             glow: None,
             radio: None,
+            detector: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,
             held: false,
+            buried: state.buried,
             attachment: None,
             mechanism: None,
             pose: AbsolutePose {
@@ -919,6 +927,7 @@ impl ItemStore {
             *condition = snapshot.condition;
         }
         item.temperature = snapshot.temperature;
+        item.buried = snapshot.buried;
         if let Some(entries) = &snapshot.fluids {
             let fluid = item
                 .fluid

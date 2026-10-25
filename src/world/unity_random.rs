@@ -54,6 +54,12 @@ impl UnityRandom {
             min.wrapping_sub((word % (min as u32).wrapping_sub(max as u32)) as i32)
         }
     }
+    /// Uniform point in the unit disc (`insideUnitCircle`). The native draw order is not checked.
+    pub fn inside_unit_circle(&mut self) -> [f32; 2] {
+        let angle = self.value() * std::f32::consts::TAU;
+        let radius = self.value().sqrt();
+        [radius * angle.cos(), radius * angle.sin()]
+    }
     /// Native RVA ffc80 has two draws and no rejection branch.
     pub fn on_unit_sphere(&mut self) -> [f32; 3] {
         let u = self.value();

@@ -238,6 +238,18 @@ pub enum ColliderTag {
     Ignore,
     ContainsMetal,
 }
+/// `ColliderTag` values in declaration order.
+pub const COLLIDER_TAGS: [ColliderTag; 9] = [
+    ColliderTag::Flesh,
+    ColliderTag::Plant,
+    ColliderTag::Wood,
+    ColliderTag::Fire,
+    ColliderTag::Metal,
+    ColliderTag::Sand,
+    ColliderTag::Cobweb,
+    ColliderTag::Ignore,
+    ColliderTag::ContainsMetal,
+];
 
 /// Source footstep surface of a collider: `otherStepSoundScript.tip`, or tag `Wood` or `Sand`.
 /// The value is the collider user data code.
@@ -1186,7 +1198,7 @@ impl ReferenceManifest {
         AudioGameplayReference::from_value(&self.audio)?;
         self.sleep.validate(self)?;
         particles::validate_particles(self)?;
-        self.weather.validate()?;
+        self.weather.validate(self)?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(

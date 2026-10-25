@@ -489,6 +489,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::LampSync);
         super::lamps::sync_source_lamps(
             &stream.frame(),
+            reference,
             enabled,
             &mut self.lights,
             &mut self.commands,

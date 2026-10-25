@@ -184,6 +184,7 @@ pub struct AudioState {
     sphere: Option<Ball>,
     impacts: impacts::ImpactState,
     rocks: ambience::RockAmbience,
+    zones: ambience::ZoneAmbience,
     world_interiors: interiors::WorldInteriors,
     footsteps: footsteps::FootstepState,
 }
@@ -314,6 +315,7 @@ impl AudioState {
             sphere,
             impacts: impacts::ImpactState::default(),
             rocks: ambience::RockAmbience::default(),
+            zones: ambience::ZoneAmbience::default(),
             world_interiors: interiors::WorldInteriors::new(reference.interiors.len()),
             footsteps: footsteps::FootstepState::default(),
             reference,
@@ -930,6 +932,7 @@ impl AudioState {
         self.removed.clear();
         self.impacts.reset();
         self.rocks.reset();
+        self.zones.reset();
         self.world_interiors.reset();
         self.footsteps = footsteps::FootstepState::default();
         for m in &mut self.mechanism_sounds {
@@ -1468,6 +1471,9 @@ pub enum AudioKind {
     MusicBox = 14,
     Footstep = 15,
     StormInside = 16,
+    MeleeHit = 17,
+    MetalDetector = 18,
+    AmbienceZone = 19,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1496,6 +1502,17 @@ impl AudioState {
         }
     }
     pub fn source_loop(&mut self, kind: AudioKind, emitter: u32, gain: f32, position: [f64; 3]) {
+        self.pitched_loop(kind, emitter, gain, None, position);
+    }
+    /// A loop whose pitch the source sets each frame. `None` keeps the source pitch.
+    pub fn pitched_loop(
+        &mut self,
+        kind: AudioKind,
+        emitter: u32,
+        gain: f32,
+        pitch: Option<f32>,
+        position: [f64; 3],
+    ) {
         let b = self
             .reference
             .survival
@@ -1509,7 +1526,7 @@ impl AudioState {
             action: AudioAction::Update,
             clip: b.clips[0],
             gain,
-            pitch: b.pitch[0],
+            pitch: pitch.unwrap_or(b.pitch[0]),
             position,
         };
         if let Some(old) = self
@@ -1556,6 +1573,10 @@ impl AudioState {
         self.survival_loops
             .retain(|v| v.kind != AudioKind::Storm || storms.iter().any(|s| s.id.0 == v.emitter));
     }
+    /// Stops the loops of every emitter of a kind.
+    pub fn stop_survival_loops(&mut self, kind: AudioKind) {
+        self.survival_loops.retain(|v| v.kind != kind);
+    }
 }
 
 /// Day and night ambient channels, independent of particle effects.
@@ -1570,6 +1591,11 @@ impl AmbientState {
             modifier: reference.modifier,
             only_modifier: reference.only_modifier,
         }
+    }
+
+    /// Source `ambienceZone`: a playing zone lowers the day and night ambient.
+    pub fn duck(&mut self, lerp: f32) {
+        self.only_modifier = self.only_modifier.min(1. - lerp);
     }
 
     /// `storm` is the source `sandStormAmbientDecrease * inSandStorm` of the previous step.

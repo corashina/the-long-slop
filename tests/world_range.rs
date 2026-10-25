@@ -2,7 +2,7 @@
 use the_long_slop::{
     reference::ReferenceManifest,
     starting_area::GarageRuntime,
-    world::{RoadSequence, StreamLimits, terrain_evaluator},
+    world::{GameMode, RoadSequence, StreamLimits, terrain_evaluator},
 };
 
 const ROUTE: f64 = 30_000.;
@@ -10,7 +10,8 @@ const STEP: f64 = 250.;
 
 /// Points every `STEP` metres along the source road, with the road segment index.
 fn route(reference: &ReferenceManifest, seed: i32) -> Vec<([f64; 3], u32)> {
-    let mut sequence = RoadSequence::new(&reference.world, seed).unwrap();
+    let mut sequence =
+        RoadSequence::new(&reference.world, seed, GameMode::default().biome_override()).unwrap();
     let terrain = terrain_evaluator(&reference.world, seed);
     let first = sequence.advance(&terrain).unwrap();
     let mut points = vec![(first.position(), first.index)];
@@ -34,7 +35,7 @@ fn route(reference: &ReferenceManifest, seed: i32) -> Vec<([f64; 3], u32)> {
 }
 
 fn drive(reference: &ReferenceManifest, distance: f32) {
-    let mut run = GarageRuntime::new(reference, distance).unwrap();
+    let mut run = GarageRuntime::new(reference, GameMode::default(), distance).unwrap();
     let stream = &mut run.stream;
     let limits = stream.limits();
     let ahead = reference.world.road.gen_at_start;
@@ -88,7 +89,7 @@ fn drive(reference: &ReferenceManifest, distance: f32) {
 fn selection_stays_inside_limits_along_the_road() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    let largest = GarageRuntime::new(&reference, 500.)
+    let largest = GarageRuntime::new(&reference, GameMode::default(), 500.)
         .unwrap()
         .stream
         .largest_fitting()

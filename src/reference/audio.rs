@@ -1,7 +1,7 @@
 //! Selected source audio. Validation has a separate gameplay failure boundary.
 use super::{
     ColliderId, CurveKey, ItemId, LightControlId, MaterialSwitchReference, MechanismId, NodeId,
-    PartSlotId, ReferenceError, ReferenceManifest, SourceId, hash, ids, require,
+    PartSlotId, ReferenceError, ReferenceManifest, SourceId, Transform, hash, ids, require,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -214,7 +214,8 @@ record!(AudioReference {
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
     shared: AudioSharedReference, mixer_controls: AudioMixerControls,
     survival: Vec<SurvivalAudioReference>, collisions: CollisionAudioReference,
-    ambience: Vec<AmbienceReference>, footsteps: FootstepAudioReference
+    ambience: Vec<AmbienceReference>, ambience_zones: Vec<AmbienceZoneReference>,
+    footsteps: FootstepAudioReference
 });
 record!(CarTierReference { threshold: f32, clips: Vec<u32>, fixed_gain: Option<f32> });
 record!(CollisionAudioReference {
@@ -240,6 +241,53 @@ record!(AmbienceReference {
     prototype: SourceId, clips: Vec<u32>, phases: AmbiencePhases, interval: [f32; 2],
     chance: f32, gain: [f32; 2], pitch: [f32; 2], priority: u8, method: AudioMethod
 });
+// Source `ambienceZone`: a 2D loop with gain volume * InverseLerp(max_distance, min_distance, distance).
+// The pose is in the prototype root frame.
+record!(AmbienceZoneReference {
+    prototype: SourceId,
+    pose: Transform,
+    min_distance: f32,
+    max_distance: f32,
+    volume: f32,
+    clip: u32,
+    method: AudioMethod
+});
+/// Zones play through the one looped 2D survival row of kind 19.
+fn validate_zones(
+    zones: &[AmbienceZoneReference],
+    survival: &[SurvivalAudioReference],
+) -> Result<(), ReferenceError> {
+    let row = survival.iter().find(|b| b.kind == 19);
+    require(
+        zones.is_empty() == row.is_none()
+            && row.is_none_or(|b| {
+                b.role == "ambience_zone"
+                    && !b.one_shot
+                    && b.settings.r#loop
+                    && b.settings.spatial_blend == 0.
+            }),
+        "ambience zone playback",
+    )?;
+    for z in zones {
+        require(
+            values([z.min_distance, z.max_distance, z.volume])
+                && values(
+                    z.pose
+                        .translation
+                        .into_iter()
+                        .chain(z.pose.rotation)
+                        .chain(z.pose.scale),
+                )
+                && 0. <= z.min_distance
+                && z.min_distance < z.max_distance
+                && (0. ..=1.).contains(&z.volume)
+                && row.is_some_and(|b| b.clips.contains(&z.clip))
+                && method(&z.method),
+            "ambience zone",
+        )?;
+    }
+    Ok(())
+}
 
 fn values(v: impl IntoIterator<Item = f32>) -> bool {
     v.into_iter().all(f32::is_finite)
@@ -815,6 +863,17 @@ impl AudioReference {
                 "audio ambience",
             )?;
         }
+        for z in &self.ambience_zones {
+            require(
+                game.world
+                    .prototypes
+                    .iter()
+                    .any(|p| p.source == z.prototype)
+                    && clips.contains(&z.clip),
+                "ambience zone source",
+            )?;
+        }
+        validate_zones(&self.ambience_zones, &self.survival)?;
         let f = &self.footsteps;
         require(
             f.surfaces
@@ -952,7 +1011,16 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        require(r.bindings.len() == 18, "required audio roles")?;
+        // The ambience zone row exists only when the world has zones.
+        let zones = r
+            .bindings
+            .iter()
+            .filter(|b| b.kind == 19 && b.role == "ambience_zone" && !b.clips.is_empty())
+            .count();
+        require(
+            zones <= 1 && r.bindings.len() == 18 + zones,
+            "required audio roles",
+        )?;
         Ok(r)
     }
     pub fn binding(&self, kind: u32) -> &AudioGateBinding {
@@ -1032,5 +1100,38 @@ mod tests {
         .unwrap();
         assert_eq!(footsteps.surfaces[4].name, "wood");
         assert_eq!(footsteps.sand_layers, [17, 19]);
+    }
+
+    #[test]
+    fn ambience_zones_need_a_loop_row() {
+        let method = r#"{"class":"ambienceZone","method":"Upd","file":"managed/Assembly-CSharp.cs","line_start":1,"line_end":2,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#;
+        let zones: Vec<AmbienceZoneReference> = serde_json::from_str(&format!(
+            r#"[{{"prototype":{{"file":"sharedassets1.assets","path_id":49604}},
+            "pose":{{"translation":[0,0,0],"rotation":[0,0.7071068,0,0.7071068],"scale":[1,1,1]}},
+            "min_distance":200,"max_distance":1000,"volume":0.15,"clip":7,"method":{method}}}]"#
+        ))
+        .unwrap();
+        let curve = r#"{"keys":[{"time":0,"value":0,"in_tangent":0,"out_tangent":0,"in_weight":0,"out_weight":0,"weighted_mode":0}],"pre_wrap_mode":2,"post_wrap_mode":2,"rotation_order":4}"#;
+        let survival: Vec<SurvivalAudioReference> = serde_json::from_str(&format!(
+            r#"[{{"role":"ambience_zone","kind":19,"one_shot":false,
+            "source":{{"file":"sharedassets1.assets","path_id":144139}},
+            "audio_source":{{"file":"sharedassets1.assets","path_id":123024}},
+            "clips":[7],"gain":[1,1],"pitch":[1,1],"offset":[0,0,0],
+            "settings":{{"priority":128,"loop":true,"gain":1,"pitch":1,"min_distance":1,
+            "max_distance":500,"rolloff_mode":0,"spatial_blend":0,
+            "spatial_blend_curve":{curve},"rolloff_curve":{curve}}},
+            "mixer":1,"doppler":1,"pan":0,"method":{method}}}]"#
+        ))
+        .unwrap();
+        assert!(validate_zones(&zones, &survival).is_ok());
+        assert!(validate_zones(&[], &[]).is_ok());
+        assert!(validate_zones(&zones, &[]).is_err(), "missing row");
+        assert!(validate_zones(&[], &survival).is_err(), "row without zones");
+        let mut far = zones.clone();
+        far[0].min_distance = 1000.;
+        assert!(validate_zones(&far, &survival).is_err(), "empty range");
+        let mut spatial = survival.clone();
+        spatial[0].settings.spatial_blend = 1.;
+        assert!(validate_zones(&zones, &spatial).is_err(), "3D row");
     }
 }

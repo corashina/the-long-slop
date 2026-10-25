@@ -439,6 +439,7 @@ impl GarageRuntime {
                 .apply_inventory_command(command, reference, &mut self.physics)
                 .expect("checked inventory bindings");
         }
+        self.advance_melee(input, dt);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -604,6 +605,52 @@ impl GarageRuntime {
                 parts: &self.area.interaction.parts,
             },
         );
+    }
+    /// `weaponhandlingscript` and `meleeweaponscript` for a shovel in the right hand.
+    fn advance_melee(&mut self, input: FrameInput, dt: f32) {
+        use crate::interaction::melee::MeleeInput;
+        let interaction = &mut self.area.interaction;
+        let shovel = interaction.equipment.item().filter(|id| {
+            interaction
+                .carry
+                .rule(*id)
+                .is_some_and(|r| interaction.melee.is_shovel(&r.source))
+        });
+        let held = |key| input.held & key != 0;
+        let melee = MeleeInput {
+            pressed: input.pressed & keys::PRIMARY != 0,
+            released: input.released & keys::PRIMARY != 0,
+            held: held(keys::PRIMARY),
+            back: held(keys::BACK),
+            left: held(keys::LEFT),
+            right: held(keys::RIGHT),
+        };
+        let player = interaction.player_body();
+        interaction.melee.step(
+            melee,
+            dt,
+            shovel,
+            &mut self.area.items,
+            &mut self.physics,
+            &mut interaction.buried,
+            player,
+            self.area.origin,
+        );
+        self.area.pose.set_hand(interaction.melee.hand());
+        for sound in interaction.melee.take_sounds() {
+            if let Some(audio) = &mut self.audio {
+                audio.survival_event(crate::audio::SurvivalAudioEvent {
+                    session: audio.session,
+                    emitter: 0,
+                    kind: crate::audio::AudioKind::MeleeHit,
+                    action: crate::audio::AudioAction::Start,
+                    clip: sound.clip,
+                    gain: sound.gain,
+                    pitch: 1.,
+                    position: sound.position,
+                });
+            }
+        }
     }
     /// mainscript.PlayClipAtPoint for spray bottle clips.
     fn play_small_item_sounds(&mut self) {
