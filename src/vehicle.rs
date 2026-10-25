@@ -183,6 +183,8 @@ struct VehicleBody {
 
 pub struct PhysicsWorld {
     body_mass_override: Option<mass::BodyMassOverride>,
+    /// Locked item mass on non-vehicle bodies. `set_body_mass` adds it.
+    body_cargo: Vec<(RigidBodyHandle, f32)>,
     pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
     query_bounds: QueryBounds,
@@ -220,6 +222,7 @@ impl PhysicsWorld {
         let mut physics = Self {
             physics: rapier3d::prelude::PhysicsWorld::new(),
             body_mass_override: None,
+            body_cargo: Vec::with_capacity(mass::CARGO_BODIES),
             query_bounds: QueryBounds::default(),
             presentation_bodies: PresentationBodies::default(),
             chassis: Vec::with_capacity(vehicles),
@@ -359,6 +362,7 @@ impl PhysicsWorld {
         physics.gravity = Vector::ZERO;
         Self {
             body_mass_override: None,
+            body_cargo: Vec::new(),
             inactive_bodies: Default::default(),
             physics,
             query_bounds: QueryBounds::default(),

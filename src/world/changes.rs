@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub struct AttachmentSnapshot {
     pub owner: Option<ObjectKey>,
     pub slot: Option<SourceId>,
+    /// Storage lock: the source volume, or the prototype volume of a world owner.
+    pub volume: Option<SourceId>,
     pub local_pose: AbsolutePose,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -146,7 +148,8 @@ impl ChangeRecords {
         }
     }
     pub fn record(&mut self, key: ObjectKey, current: ObjectSnapshot, baseline: &ObjectSnapshot) {
-        if &current == baseline {
+        // An attachment owner keeps its record: its dependents can unload with it.
+        if &current == baseline && !self.has_attachment_dependents(&key) {
             self.forget(&key);
             return;
         }
@@ -518,6 +521,10 @@ pub(crate) fn capture(
 ) -> Option<ObjectSnapshot> {
     use crate::interaction::items::ItemLocation;
     use crate::vehicle::{from_rapier, to_rapier};
+    // A departing item keeps its locked record until it unloads.
+    if interaction.storage.departing(id) {
+        return None;
+    }
     let state = items.get(id)?;
     let mut snapshot = items.generated_snapshot(id, interaction.generated_valve(id))?;
     snapshot.mechanism = interaction.mechanisms.snapshot(id);
@@ -532,6 +539,10 @@ pub(crate) fn capture(
         snapshot.linear_velocity = body.linvel().to_array();
         snapshot.angular_velocity = body.angvel().to_array();
         snapshot.sleeping = body.is_sleeping();
+    }
+    if let ItemLocation::Locked { .. } = state.location {
+        snapshot.attachment = Some(locked_attachment(id, items, &interaction.storage)?);
+        return Some(snapshot);
     }
     let relation =
         match state.location {
@@ -569,6 +580,7 @@ pub(crate) fn capture(
         snapshot.attachment = Some(AttachmentSnapshot {
             owner: parent.map(|p| items.object_key(p)),
             slot,
+            volume: None,
             local_pose: AbsolutePose {
                 position: pose.position.map(f64::from),
                 rotation: pose.rotation,
@@ -576,6 +588,62 @@ pub(crate) fn capture(
         });
     }
     Some(snapshot)
+}
+
+/// A locked item attaches to its owner with the volume source and the pose to the owner.
+pub(crate) fn locked_attachment(
+    id: crate::reference::ItemId,
+    items: &crate::interaction::items::ItemStore,
+    storage: &crate::interaction::storage::StorageLocks,
+) -> Option<AttachmentSnapshot> {
+    let crate::interaction::items::ItemLocation::Locked { owner, volume } = items.get(id)?.location
+    else {
+        return None;
+    };
+    let pose = items.saved_local_pose(id, storage).ok()?;
+    Some(AttachmentSnapshot {
+        owner: Some(items.object_key(owner)),
+        slot: None,
+        volume: Some(storage.volume_source(volume)?.clone()),
+        local_pose: AbsolutePose {
+            position: pose.position.map(f64::from),
+            rotation: pose.rotation,
+        },
+    })
+}
+
+/// Source `Lock(_ignoreTime: true)`: locks a saved item at once into the bound volume of `owner`.
+/// No drop delay and no two-scan wait. The owner must be in place first.
+pub(crate) fn restore_lock(
+    id: crate::reference::ItemId,
+    owner: crate::reference::ItemId,
+    attachment: &AttachmentSnapshot,
+    items: &mut crate::interaction::items::ItemStore,
+    storage: &mut crate::interaction::storage::StorageLocks,
+    physics: &mut crate::vehicle::PhysicsWorld,
+) -> Result<(), crate::reference::ReferenceError> {
+    use crate::reference::ReferenceError;
+    use crate::vehicle::{from_rapier, to_rapier};
+    use rapier3d::math::{Pose, Rotation, Vector};
+    let slot = attachment
+        .volume
+        .as_ref()
+        .and_then(|volume| storage.owner_volume(owner, volume))
+        .ok_or_else(|| ReferenceError("Saved storage volume is not bound to its owner".into()))?;
+    if storage.stored(id) {
+        storage.unlock(id, items, physics)?;
+    }
+    let local = Pose::from_parts(
+        Vector::from_array(attachment.local_pose.position.map(|v| v as f32)),
+        Rotation::from_array(attachment.local_pose.rotation),
+    );
+    storage.lock_saved(id, slot, local, items, physics)?;
+    let state = items.get(id).unwrap();
+    let carrier = state.body.unwrap();
+    let pose = *physics.rapier().bodies[carrier].position() * to_rapier(state.local_pose);
+    items.get_mut(id).unwrap().pose = from_rapier(&pose);
+    physics.refresh_queries();
+    Ok(())
 }
 
 pub(crate) fn restore_motion(
@@ -610,6 +678,7 @@ impl ObjectSnapshot {
             + self.attachment.as_ref().map_or(0, |a| {
                 a.owner.as_ref().map_or(0, key_heap)
                     + a.slot.as_ref().map_or(0, |s| s.file.capacity())
+                    + a.volume.as_ref().map_or(0, |s| s.file.capacity())
             })
     }
 }

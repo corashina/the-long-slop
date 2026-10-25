@@ -98,6 +98,18 @@ impl SaveSnapshot {
                     "Unknown attachment slot",
                 )?;
             }
+            // The owner prototype is known when the owner record is its own placement.
+            let prototype = a.owner.as_ref().and_then(|owner| match owner {
+                ObjectKey::Generated(id) => self
+                    .world
+                    .changes
+                    .get(owner)
+                    .and_then(|c| c.replay.as_ref())
+                    .filter(|p| &p.id == id)
+                    .map(|p| &p.prototype),
+                ObjectKey::Imported(_) => None,
+            });
+            storage_volume(&reference.storage, a, prototype)?;
             links(a.owner.is_some() || a.slot.is_some(), "Empty attachment")
         };
         let pose = |p: &crate::world::AbsolutePose| {
@@ -385,10 +397,106 @@ impl SaveSnapshot {
         Ok(())
     }
 }
+/// A storage lock has an owner and no slot. Its volume is a source volume of an imported owner,
+/// or a prototype volume of a generated owner. `prototype` is the generated owner prototype if known.
+fn storage_volume(
+    storage: &r::StorageRecord,
+    a: &AttachmentSnapshot,
+    prototype: Option<&r::SourceId>,
+) -> Result<(), SaveError> {
+    let Some(volume) = &a.volume else {
+        return Ok(());
+    };
+    links(a.slot.is_none(), "Storage lock with a slot")?;
+    match a.owner.as_ref() {
+        Some(ObjectKey::Imported(owner)) => links(
+            storage
+                .volumes
+                .iter()
+                .any(|v| v.source == *volume && v.owner == *owner),
+            "Storage volume owner",
+        ),
+        Some(ObjectKey::Generated(_)) => links(
+            storage
+                .prototype_volumes
+                .iter()
+                .any(|v| v.source == *volume && prototype.is_none_or(|p| v.prototype == *p)),
+            "Storage volume prototype",
+        ),
+        None => Err(invalid("Storage lock without owner")),
+    }
+}
 fn descendant(child: &GeneratedId, parent: &GeneratedId) -> bool {
     child.layer == parent.layer
         && child.generator == parent.generator
         && child.unit == parent.unit
         && child.ordinal == parent.ordinal
         && child.children.starts_with(&parent.children)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::AbsolutePose;
+
+    fn id(path_id: i64) -> r::SourceId {
+        r::SourceId {
+            file: "world".into(),
+            path_id,
+        }
+    }
+    fn storage() -> r::StorageRecord {
+        r::StorageRecord {
+            policy: r::StoragePolicy {
+                settings_source: id(1),
+                default_setting: 2,
+                mount_mask: 1,
+                drop_delay_seconds: 1.0,
+                scan_interval_seconds: 1.5,
+            },
+            volumes: Vec::new(),
+            prototype_volumes: [10, 20]
+                .map(|path_id| r::PrototypeVolumeReference {
+                    prototype: id(path_id),
+                    source: id(path_id + 1),
+                    node: 0,
+                    center: [0.; 3],
+                    half_extents: [1.; 3],
+                    rotation: [0., 0., 0., 1.],
+                    storage_type: 0,
+                    usables: Vec::new(),
+                    dont_lock_if_owner_picked_up: false,
+                })
+                .into(),
+            flags: Vec::new(),
+            prototype_flags: Vec::new(),
+        }
+    }
+    fn lock(volume: i64, slot: Option<r::SourceId>) -> AttachmentSnapshot {
+        AttachmentSnapshot {
+            owner: Some(ObjectKey::Generated(GeneratedId {
+                layer: crate::world::WorldLayer::Building,
+                generator: id(1),
+                unit: [0, 0],
+                ordinal: 0,
+                children: Vec::new(),
+            })),
+            slot,
+            volume: Some(id(volume)),
+            local_pose: AbsolutePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+        }
+    }
+
+    #[test]
+    fn storage_lock_needs_no_slot_and_a_volume_of_the_owner_prototype() {
+        let storage = storage();
+        assert!(storage_volume(&storage, &lock(11, None), Some(&id(10))).is_ok());
+        assert!(storage_volume(&storage, &lock(21, None), None).is_ok());
+        assert!(storage_volume(&storage, &lock(11, Some(id(5))), Some(&id(10))).is_err());
+        assert!(storage_volume(&storage, &lock(21, None), Some(&id(10))).is_err());
+        assert!(storage_volume(&storage, &lock(30, None), None).is_err());
+    }
 }

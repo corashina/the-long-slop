@@ -134,6 +134,7 @@ impl WorldStream {
             } else {
                 self.changes.record(key.clone(), snapshot, baseline);
             }
+            self.retain_storage_owner(&key, reference, items, interaction, physics);
             if let crate::world::ObjectKey::Generated(_) = &key {
                 if let Some(owner) = self
                     .contents
@@ -162,6 +163,49 @@ impl WorldStream {
         }
     }
 
+    /// A generated storage owner needs a record while an item locks to it.
+    /// Its locked generated items unload with it and refer to it by key.
+    fn retain_storage_owner(
+        &mut self,
+        key: &ObjectKey,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        let Some(owner) = self
+            .changes
+            .get(key)
+            .and_then(|c| c.snapshot.as_ref())
+            .and_then(|s| s.attachment.as_ref())
+            .filter(|a| a.volume.is_some())
+            .and_then(|a| a.owner.as_ref())
+            .filter(|owner| matches!(owner, ObjectKey::Generated(_)))
+        else {
+            return;
+        };
+        if self.changes.get(owner).is_some() {
+            return;
+        }
+        let owner = owner.clone();
+        let Some(id) = items.resolve_key(&owner) else {
+            return;
+        };
+        let Some(snapshot) = changes::capture(id, items, interaction, physics, reference) else {
+            return;
+        };
+        self.changes.retain_dependency(owner.clone(), snapshot);
+        if let Some(content) = self
+            .contents
+            .active
+            .iter()
+            .chain(&self.static_controls)
+            .find(|c| c.item == Some(id))
+        {
+            self.changes
+                .set_replay(&owner, &content.origin, &content.content.placement.id);
+        }
+    }
     /// Bounds new owner payload, type-fit pairs, and existing vector/map reallocation.
     pub(super) fn binding_reservation(
         &self,
@@ -295,7 +339,17 @@ impl WorldStream {
                 items,
                 interaction,
                 physics,
-            ) {
+            )
+            .and_then(|()| {
+                bind_storage(
+                    &content,
+                    prototype,
+                    rapier3d::math::Pose::IDENTITY,
+                    &self.contents.rules,
+                    reference,
+                    interaction,
+                )
+            }) {
                 rollback(&mut content, instance, items, interaction, physics, wheels);
                 self.structures
                     .swap_remove(index)
@@ -467,9 +521,9 @@ impl WorldStream {
                     let BoundPickup {
                         id,
                         body,
+                        body_index,
                         rule,
                         layers,
-                        ..
                     } = bind_pickup(
                         content,
                         pickup,
@@ -572,6 +626,21 @@ impl WorldStream {
                         );
                     }
                     crate::world::content_mechanisms::sync(content, items, interaction, physics);
+                    let root = crate::world::placement::node_pose(
+                        prototype,
+                        prototype.bodies[body_index].node as usize,
+                    );
+                    bind_storage(
+                        content,
+                        prototype,
+                        rapier3d::math::Pose::from_parts(
+                            rapier3d::math::Vector::from_array(root.translation),
+                            rapier3d::math::Rotation::from_array(root.rotation),
+                        ),
+                        &self.contents.rules,
+                        reference,
+                        interaction,
+                    )?;
                     content.suspended_bodies.reserve(instance.bodies.len());
                     capture_baselines(content, reference, items, interaction, physics);
                     let state = items.get(id).unwrap();
@@ -899,16 +968,21 @@ impl WorldStream {
         items: &mut ItemStore,
         interaction: &mut InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
-    ) {
+    ) -> Result<(), ReferenceError> {
         let remove = self.reference.distances["ItemRemoveDist"];
         let freeze = self.reference.distances["ItemFreezeDist"];
         let unfreeze = self.reference.distances["ItemUnFreezeDist"];
         let mut index = 0;
         while index < self.contents.active.len() {
             let content = &self.contents.active[index];
+            // An item that left a storage lock with its owner unloads now.
+            let departing = content
+                .item
+                .is_some_and(|id| interaction.storage.departing(id));
             // Replay keeps its source pose until binding applies the destination snapshot.
             // Its caller owns cancellation, including intermediate deferred output.
-            if content.replay_only
+            if !departing
+                && content.replay_only
                 && !content.restored
                 && (content.item.is_none() || self.contents.replaying(&content.origin.id))
             {
@@ -976,7 +1050,7 @@ impl WorldStream {
             let removed = id
                 .and_then(|id| items.get(id))
                 .is_some_and(|item| item.removed);
-            if (distance < remove * remove || protected) && !removed {
+            if !departing && (distance < remove * remove || protected) && !removed {
                 if let Some(body) = id.and_then(|id| items.get(id)).and_then(|s| s.body) {
                     if !protected
                         && (content.content.buried
@@ -1013,6 +1087,29 @@ impl WorldStream {
                 continue;
             }
             let content = self.contents.remove_active(index);
+            if let Some(item) = content.item {
+                interaction.storage.departed(item);
+                // Restart: items that leave with this owner may sit before `index`.
+                if unbind_storage(
+                    item,
+                    &self.contents.active,
+                    items,
+                    interaction,
+                    physics,
+                    wheels,
+                )? {
+                    index = 0;
+                }
+            }
+            for item in content
+                .item
+                .into_iter()
+                .chain(content.bindings.iter().map(|b| b.item))
+            {
+                if interaction.storage.stored(item) {
+                    interaction.storage.unlock(item, items, physics)?;
+                }
+            }
             for binding in &content.bindings {
                 interaction.parts.remove_generated(binding.item);
             }
@@ -1067,6 +1164,7 @@ impl WorldStream {
             self.ready_structures
                 .retain(|id| *id != content.content.placement.id);
         }
+        Ok(())
     }
 }
 
@@ -1264,6 +1362,60 @@ fn capture_baselines(
     }
 }
 
+/// Binds the storage volumes and flags of a generated item.
+/// `item_root` is the item frame in the prototype root frame.
+fn bind_storage(
+    content: &super::super::contents::ContentInstance,
+    prototype: &crate::reference::WorldPrototypeReference,
+    item_root: rapier3d::math::Pose,
+    rules: &SourceRules,
+    reference: &ReferenceManifest,
+    interaction: &mut InteractionState,
+) -> Result<(), ReferenceError> {
+    let Some(item) = content.item else {
+        return Ok(());
+    };
+    interaction.storage.bind_world_volumes(
+        item,
+        &prototype.source,
+        item_root,
+        content.content.placement.scale,
+        |node| {
+            crate::world::content_mechanisms::node_item(
+                content,
+                prototype,
+                &reference.world,
+                rules,
+                node as usize,
+            )
+        },
+    )
+}
+
+/// Unbinds the storage of a generated item before it unloads.
+/// Active content roots locked to it leave with it. Other locked items unlock.
+/// Returns true if an item departs.
+pub(super) fn unbind_storage(
+    item: crate::reference::ItemId,
+    active: &[super::super::contents::ContentInstance],
+    items: &mut ItemStore,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+    wheels: &crate::interaction::wheels::WheelAssemblies,
+) -> Result<bool, ReferenceError> {
+    let parts = &interaction.parts;
+    interaction.storage.unbind_owner(
+        item,
+        |items, locked| {
+            active
+                .iter()
+                .any(|c| c.item == Some(locked) && !c.has_external_dependents(items, parts, wheels))
+        },
+        items,
+        physics,
+    )
+}
+
 pub(crate) fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, ReferenceError> {
     let f = pickup.fields;
     let mut position = vector(f, "recenterPos")?;
@@ -1382,6 +1534,7 @@ pub(crate) fn restore_item(
         return Ok(false);
     }
     let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
+    let volume = snapshot.attachment.as_ref().and_then(|a| a.volume.as_ref());
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
     if slot.is_some()
         && target_slot.is_none()
@@ -1417,7 +1570,7 @@ pub(crate) fn restore_item(
         if items.get(id).unwrap().location != ItemLocation::WheelSlot(wheel.id) {
             wheels.install(id, wheel.id, items, physics)?;
         }
-    } else if let Some(parent) = resolved {
+    } else if let Some(parent) = resolved.filter(|_| volume.is_none()) {
         if slot.is_none()
             && items.get(id).unwrap().location != ItemLocation::Attached(parent)
             && wheels.rules().iter().any(|r| r.item == id)
@@ -1426,7 +1579,10 @@ pub(crate) fn restore_item(
         }
     }
     if let (Some(parent_id), Some(attachment)) = (resolved, &snapshot.attachment) {
-        if attachment.slot.is_none() && !wheels.rules().iter().any(|r| r.item == id) {
+        if attachment.slot.is_none()
+            && volume.is_none()
+            && !wheels.rules().iter().any(|r| r.item == id)
+        {
             let parent = items.get(parent_id).unwrap();
             let Some(parent_body) = parent.body else {
                 return Ok(false);
@@ -1512,7 +1668,16 @@ pub(crate) fn restore_item(
     if let Some(mechanism) = snapshot.mechanism {
         interaction.mechanisms.restore(id, mechanism)?;
     }
-    if let (Some(parent), Some(attachment)) = (resolved, &snapshot.attachment) {
+    if let (Some(parent), Some(attachment), Some(_)) = (resolved, &snapshot.attachment, volume) {
+        changes::restore_lock(
+            id,
+            parent,
+            attachment,
+            items,
+            &mut interaction.storage,
+            physics,
+        )?;
+    } else if let (Some(parent), Some(attachment)) = (resolved, &snapshot.attachment) {
         let parent = items.get(parent).unwrap().clone();
         let local = crate::vehicle::VehiclePose {
             position: attachment.local_pose.position.map(|v| v as f32),

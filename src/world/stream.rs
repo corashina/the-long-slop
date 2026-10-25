@@ -4133,15 +4133,15 @@ impl WorldStream {
         items: &mut crate::interaction::items::ItemStore,
         interaction: &mut crate::interaction::InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
-    ) {
+    ) -> Result<(), ReferenceError> {
         if self.recovery.is_some()
             || self.plan_revision != self.request.revision
             || !self.supports(window(self.request.player, 3.0))
             || !self.supports(window(self.request.vehicle, 4.0))
         {
-            return;
+            return Ok(());
         }
-        self.retire_contents(physics, items, interaction, wheels);
+        self.retire_contents(physics, items, interaction, wheels)?;
         let mut index = 0;
         let mut retired_structure = false;
         while index < self.structures.len() {
@@ -4215,6 +4215,16 @@ impl WorldStream {
             {
                 let mut content = self.static_controls.swap_remove(i);
                 self.static_control_revision += 1;
+                if let Some(item) = content.item {
+                    content_bindings::unbind_storage(
+                        item,
+                        &self.contents.active,
+                        items,
+                        interaction,
+                        physics,
+                        wheels,
+                    )?;
+                }
                 content_bindings::rollback(
                     &mut content,
                     &instance,
@@ -4255,6 +4265,7 @@ impl WorldStream {
         if self.changes_prune_due && !retired_structure {
             self.prune_unloaded_changes(items);
         }
+        Ok(())
     }
 
     /// A recovery target selects a loading window, never a final chassis pose.

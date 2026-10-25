@@ -47,7 +47,8 @@ pub mod flashlights;
 pub use flashlights::*;
 pub mod storage;
 pub use storage::{
-    PrototypeVolumeReference, StorageFlag, StoragePolicy, StorageRecord, StorageVolumeReference,
+    PrototypeStorageFlag, PrototypeVolumeReference, StorageFlag, StoragePolicy, StorageRecord,
+    StorageVolumeReference,
 };
 pub mod small_items;
 pub use small_items::*;

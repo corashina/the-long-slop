@@ -11,6 +11,7 @@ pub struct StorageRecord {
     pub volumes: Vec<StorageVolumeReference>,
     pub prototype_volumes: Vec<PrototypeVolumeReference>,
     pub flags: Vec<StorageFlag>,
+    pub prototype_flags: Vec<PrototypeStorageFlag>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,10 +50,14 @@ pub struct PrototypeVolumeReference {
     pub prototype: SourceId,
     pub source: SourceId,
     pub node: u32,
+    /// Box centre in the prototype root frame, the frame of `WorldPrototypeBody::pose`.
     pub center: [f32; 3],
+    /// Half extents with the node chain scale applied.
     pub half_extents: [f32; 3],
+    /// Box rotation in the prototype root frame.
     pub rotation: [f32; 4],
     pub storage_type: u8,
+    /// Gate `usablescript` sources. Each is a world mechanism of the same prototype.
     pub usables: Vec<SourceId>,
     pub dont_lock_if_owner_picked_up: bool,
 }
@@ -61,6 +66,15 @@ pub struct PrototypeVolumeReference {
 #[serde(deny_unknown_fields)]
 pub struct StorageFlag {
     pub item: ItemId,
+    pub dont_mount: bool,
+    pub dont_mount_till_pickup: bool,
+}
+
+/// Pickupable flags of a world prototype root.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrototypeStorageFlag {
+    pub prototype: SourceId,
     pub dont_mount: bool,
     pub dont_mount_till_pickup: bool,
 }
@@ -109,12 +123,34 @@ impl StorageRecord {
                 "storage volume",
             )?;
         }
+        let world = &manifest.world;
         for volume in &self.prototype_volumes {
+            let prototype = world
+                .prototypes
+                .iter()
+                .find(|prototype| prototype.source == volume.prototype);
             require(
-                volume.center.iter().all(|value| value.is_finite())
+                prototype.is_some_and(|prototype| (volume.node as usize) < prototype.nodes.len())
+                    && volume.usables.iter().all(|usable| {
+                        world.mechanisms.iter().any(|mechanism| {
+                            mechanism.prototype == volume.prototype
+                                && mechanism.recipe.source == *usable
+                        })
+                    })
+                    && volume.center.iter().all(|value| value.is_finite())
                     && positive(&volume.half_extents)
                     && volume.rotation.iter().all(|value| value.is_finite()),
                 "storage prototype volume",
+            )?;
+        }
+        for flag in &self.prototype_flags {
+            require(
+                (flag.dont_mount || flag.dont_mount_till_pickup)
+                    && world
+                        .prototypes
+                        .iter()
+                        .any(|prototype| prototype.source == flag.prototype),
+                "storage prototype flag",
             )?;
         }
         for flag in &self.flags {
