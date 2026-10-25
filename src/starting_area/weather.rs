@@ -154,5 +154,8 @@ impl GarageRuntime {
                     .flatten()
             },
         );
+        self.lighting
+            .cycle
+            .compose_weather(&reference.weather, self.weather.influence());
     }
 }

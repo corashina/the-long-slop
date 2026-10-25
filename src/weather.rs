@@ -349,7 +349,7 @@ impl StormRandom {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::reference::{
         GradientReference, ManagedEvidence, ParticleReference, SourceId, StormReference, Transform,
@@ -390,7 +390,7 @@ mod tests {
             limits: Vec::new(),
         }
     }
-    fn reference() -> WeatherReference {
+    pub(crate) fn reference() -> WeatherReference {
         let gradient = || GradientReference {
             mode: 0,
             colors: Vec::new(),
