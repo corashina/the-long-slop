@@ -580,6 +580,8 @@ pub struct EngineReference {
     pub start_chance_interval_seconds: f32,
     pub auto_shift_clutch_rpm: f32,
     pub auto_shift_clutch_rpm_range: f32,
+    /// Source `enginescript.defSmokeRate`.
+    pub smoke_rate: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -619,6 +621,8 @@ pub struct FluidRulesReference {
     pub pour_speed: f32,
     pub slow_oil_modifier: f32,
     pub fluid_tune_speed: f32,
+    /// Source `mainscript.fluids[i].burnColor`, indexed by fluid type.
+    pub burn_colors: [[f32; 4]; 6],
     /// Source `ls.FillDefWW` default English text, indexed by `ls.w`.
     pub words: Vec<String>,
 }
@@ -853,6 +857,8 @@ pub struct VehicleReference {
     pub dont_ignite_with_throttle_in_automatic: bool,
     pub auto_move_min: f32,
     pub collision_gain: f32,
+    /// Source `carscript.psSmoke` systems, posed relative to `root`.
+    pub exhaust: Vec<ParticleReference>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -1816,6 +1822,8 @@ impl ReferenceManifest {
                     ])
                     && e.max_rpm_difference > 0.0
                     && e.start_chance_interval_seconds > 0.0
+                    && e.smoke_rate.is_finite()
+                    && e.smoke_rate >= 0.0
                     && e.globals.temperature_difference_modifier > 0.0
                     && e.globals.max_car_velocity > 0.0,
                 "engine scalar bounds",
@@ -1854,7 +1862,8 @@ impl ReferenceManifest {
                 self.fluid_rules.slow_oil_modifier,
                 self.fluid_rules.fluid_tune_speed,
             ]) && self.fluid_rules.pour_speed > 0.0
-                && !self.fluid_rules.words.is_empty(),
+                && !self.fluid_rules.words.is_empty()
+                && self.fluid_rules.burn_colors.iter().all(|c| finite(c)),
             "fluid rules",
         )?;
         require(
