@@ -229,6 +229,13 @@ public class stepSoundScript
         mainscript.PlayClipAtPoint(StepSoundClip, transform.position, StepSoundVolume * _modifier * stepSound, randomPitch: true, mainscript.AudioPriorities[3]); }
     }
 }
+public class interiorscript
+{
+    private void Start()
+    {
+        if (col == null) { col = GetComponent<Collider>(); }
+    }
+}
 public class steps
 {
     public static int sandLayer = 17;
@@ -284,8 +291,41 @@ class HitAudio(unittest.TestCase):
             [('stepSoundScript', 'Step'), ('fpscontroller', 'FixedUpdate'), ('fpscontroller', 'Grounded')])
         for old, new in [('num - 0.075f', 'num - 0.08f'), ('> 10f', '> 5f'), ('> 0.5f', '> 0.4f'), ('> chance', '>= chance'),
                 ('AudioPriorities[3]', 'AudioPriorities[4]'), ('CompareTag("Wood")', 'CompareTag("Plank")'), ('sandLayer2 = 19', 'sandLayer2 = 18'),
-                ('winter,\n        grass', 'grass,\n        winter'), ('if (grounded) { stepScript.Step', 'if (grounded) { stepScript.Jump')]:
+                ('winter,\n        grass', 'grass,\n        winter'), ('if (grounded) { stepScript.Step', 'if (grounded) { stepScript.Jump'),
+                ('col = GetComponent<Collider>();', 'col = GetComponentInChildren<Collider>();')]:
             with self.assertRaises(ValueError): self.evidence(HIT_SOURCE_TEXT.replace(old, new))
+
+    def test_world_interiors(self):
+        from tools.reference.audio import world_interiors
+        objects = {}
+        def add(path_id, type_name, data=None):
+            objects[path_id] = NS(assets_file=NS(source_container_path='f'), path_id=path_id, type=NS(name=type_name), data=data)
+            return {'m_FileID': 0, 'm_PathID': path_id}
+        empty = {'m_FileID': 0, 'm_PathID': 0}
+        door, outside = add(1, 'MonoBehaviour'), add(2, 'MonoBehaviour')
+        box, capsule = add(3, 'BoxCollider'), add(4, 'CapsuleCollider')
+        go = add(5, 'GameObject')
+        def interior(**change):
+            return {'col': box, 'm_GameObject': go, 'parent': empty, 'invert': 0, 'minDoorToMax': 1, 'maxAtengedes': 1.,
+                'useValue': 0, 'value': 0., 'doors': [door], 'invertindividual2': [], 'parentDoor': empty,
+                'removableDoor': 0, 'doorSlots': [], 'parentDoorSlot': empty, **change}
+        hall = add(6, 'MonoBehaviour', interior())
+        room = add(7, 'MonoBehaviour', interior(col=empty, parent=hall, parentDoor=door, doors=[], invertindividual2=[]))
+        source = NS(read=lambda o: o.data, resolve=lambda _, p: objects.get(p['m_PathID']),
+            transform_for=lambda o: o, components=lambda _: (None, [objects[1], objects[4], objects[3]]))
+        f = lambda i: {'file': 'f', 'path_id': i}
+        prototype = {'source': f(9), 'colliders': [{'source': f(3)}, {'source': f(4)}]}
+        mechanisms = [{'prototype': f(9), 'recipe': {'source': f(1)}}, {'prototype': f(8), 'recipe': {'source': f(2)}}]
+        readers = [objects[6], objects[7]]
+        self.assertEqual(world_interiors(source, prototype, readers, mechanisms, 'm'), [
+            {'collider': f(3), 'parent': None, 'invert': False, 'minimum_doors_to_max': 1, 'maximum_transmission': 1.,
+                'use_value': False, 'value': 0., 'doors': [f(1)], 'invert_doors': [False], 'parent_door': None, 'method': 'm'},
+            {'collider': f(4), 'parent': 0, 'invert': False, 'minimum_doors_to_max': 1, 'maximum_transmission': 1.,
+                'use_value': False, 'value': 0., 'doors': [], 'invert_doors': [], 'parent_door': f(1), 'method': 'm'}])
+        for change in [{'removableDoor': 1}, {'doorSlots': [door]}, {'parentDoorSlot': door}, {'doors': [outside]},
+                {'parentDoor': outside}, {'parent': outside}, {'invertindividual2': [1, 0]}, {'col': add(10, 'BoxCollider')}]:
+            objects[6].data = interior(**change)
+            with self.assertRaises(ValueError): world_interiors(source, prototype, readers, mechanisms, 'm')
 
     def test_footstep_record_and_errors(self):
         from tools.reference.audio import footstep_record, validate_footsteps

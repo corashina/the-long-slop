@@ -368,6 +368,35 @@ impl WorldStream {
             .and_then(|c| c.poses.get(node))
             .copied()
     }
+    /// The bound item of a door `usablescript` in a published structure.
+    pub fn door_item(
+        &self,
+        id: &crate::world::GeneratedId,
+        prototype: &crate::reference::WorldPrototypeReference,
+        door: &crate::reference::SourceId,
+    ) -> Option<crate::reference::ItemId> {
+        let row = self
+            .reference
+            .mechanisms
+            .iter()
+            .find(|r| r.prototype == prototype.source && r.recipe.source == *door)?;
+        let content = self
+            .contents
+            .active
+            .iter()
+            .chain(&self.static_controls)
+            .find(|c| &c.content.placement.id == id)?;
+        crate::world::content_mechanisms::node_item(
+            content,
+            prototype,
+            &self.reference,
+            &self.contents.rules,
+            row.node as usize,
+        )
+    }
+    pub fn world_reference(&self) -> &crate::reference::WorldReference {
+        &self.reference
+    }
     pub(super) fn sync_contents(
         &mut self,
         reference: &ReferenceManifest,

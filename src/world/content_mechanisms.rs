@@ -122,18 +122,7 @@ pub(super) fn bind(
         });
     }
     let item_for = |node: usize| -> Result<ItemId, ReferenceError> {
-        if node == 0 {
-            return Ok(root_item);
-        }
-        content
-            .bindings
-            .iter()
-            .find(|b| {
-                rules
-                    .root(&reference.world, &b.source)
-                    .is_ok_and(|s| *s == prototype.nodes[node].source)
-            })
-            .map(|b| b.item)
+        node_item(content, prototype, &reference.world, rules, node)
             .ok_or_else(|| ReferenceError("Generated control item missing".into()))
     };
     for row in reference
@@ -226,6 +215,27 @@ pub(super) fn bind(
             .push(interaction.mechanisms.node_pose(*n).unwrap())
     }
     Ok(())
+}
+/// The generated item of a prototype node: the root item for node 0, else the binding under the node.
+pub(super) fn node_item(
+    content: &ContentInstance,
+    prototype: &WorldPrototypeReference,
+    world: &WorldReference,
+    rules: &SourceRules,
+    node: usize,
+) -> Option<ItemId> {
+    if node == 0 {
+        return content.item;
+    }
+    content
+        .bindings
+        .iter()
+        .find(|b| {
+            rules
+                .root(world, &b.source)
+                .is_ok_and(|s| *s == prototype.nodes[node].source)
+        })
+        .map(|b| b.item)
 }
 pub(super) fn sync(
     content: &mut ContentInstance,

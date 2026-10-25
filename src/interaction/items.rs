@@ -1163,6 +1163,7 @@ mod world_sync_tests {
             bodies: Vec::new(),
             colliders: Vec::new(),
             prefab_pose: transform,
+            interiors: Vec::new(),
         }
     }
     fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {

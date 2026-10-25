@@ -1404,7 +1404,7 @@ fn publish_audio(
         }
     }
     if runtime.started && !runtime.paused {
-        audio.update_mixers(&runtime.area, time.delta_secs());
+        audio.update_mixers(&runtime.area, &runtime.stream, time.delta_secs());
     }
     for (id, db) in audio.mixer_outputs() {
         game_audio_mixer(id, db);
