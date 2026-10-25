@@ -60,7 +60,7 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 | W03 | Add biomes. [Terrain](crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
 | W04 | Expand buildings. [Generation](src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
-| W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
+| W06 | Add digging and detection. | L | Buried item state and save, shovel swing and digging, metal detector. [F10, F03] |
 | W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
 
 ## 4. More cars

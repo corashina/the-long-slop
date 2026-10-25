@@ -2,7 +2,7 @@
 import math
 from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
-from .collision import world_pose, quaternion_product, bake_points, geometry, step_surface
+from .collision import world_pose, quaternion_product, bake_points, geometry, step_surface, collider_tag
 from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
 from .caps import cap_flow, default_words, opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms
@@ -207,7 +207,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
                     'friction':friction,'restitution':restitution,'geometry':geometry(source,exporter,reader,node_readers[node],owner['pose'],owner['dynamic']),
-                    'step_surface':step_surface(source,objects[node]['game_object'])})
+                    'step_surface':step_surface(source,objects[node]['game_object']),'tag':collider_tag(source,objects[node]['game_object'])})
     tanks=[];openings=[]
     for node,group in components.items():
         if not nodes[node-1]['active']:continue

@@ -8,7 +8,7 @@ from .source import LibrarySource, key, source_id, vector
 from .library.reader import LibraryReader
 from .library.types import ObjectId
 from .gltf import GltfExporter, convert_bind_poses, converted_transform
-from .collision import geometry, step_surface, world_pose
+from .collision import geometry, step_surface, collider_tag, world_pose
 from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
@@ -28,7 +28,9 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Portable electronics (P09): compass, clock, radios, music box and their dials.
     'compassscript','simplecompassscript','clockscript','radioscript','musicboxscript','meterscript','mutatoscript','forgoszamlap',
     # Small item actions (P10): spirit level, spray bottle, boxes, wash spots, cigarette packs.
-    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript'}
+    'bubbleLevelScript','spricniscript','breakablescript','washtriggerscript','cigiscript',
+    # Digging and detection (W06): metal detector.
+    'metalDetectorScript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
@@ -645,7 +647,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                     role=recover_trigger_role(local,n['reader'],root,body_pose) if data['m_IsTrigger'] else None
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
-                        'step_surface':step_surface(source,n['game_object'])})
+                        'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         for node in hierarchy:
             for component in node['components']:selected.component_record(component)
         prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
