@@ -4,7 +4,7 @@ from .source import key, source_id, vector
 from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry, step_surface
 from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
-from .caps import default_words, opening_metadata
+from .caps import cap_flow, default_words, opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
@@ -204,29 +204,8 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         for reader in group.get('tankcapscript',[]):
             value=source.read(reader);tank=source.resolve(reader,value['Tank'])
             if tank is None or key(tank) not in item_components:raise ValueError(f'Cap tank outside selected roots: {key(reader)}')
-            particle=source.resolve(reader,value['ps'])
-            if particle is None or particle.type.name!='ParticleSystem':raise ValueError(f'Missing fluid emitter: {key(reader)}')
-            emitted=source.read(particle);emitter=source.transform_for(source.resolve(particle,emitted['m_GameObject']))
-            cap_pose=world_pose(source,node_readers[node]);emitter_pose=world_pose(source,emitter)
-            rotation=cap_pose['rotation'];inverse=(-rotation[0],-rotation[1],-rotation[2],rotation[3])
-            delta=[emitter_pose['translation'][axis]-cap_pose['translation'][axis] for axis in range(3)]
-            particle_pose={'translation':list(transform_point(delta,(0.,0.,0.),inverse,(1.,1.,1.))),
-                'rotation':list(quaternion_product(inverse,emitter_pose['rotation'])),
-                'scale':[emitter_pose['scale'][axis]/cap_pose['scale'][axis] for axis in range(3)]}
-            shape=emitted['ShapeModule'];collision=emitted['CollisionModule'];initial=emitted['InitialModule']
-            if shape['type']!=4 or collision['type']!=1 or not collision['enabled'] or emitted['moveWithTransform']!=2:
-                raise ValueError(f'Fluid particle motion differs: {key(reader)}')
             opening={'id':len(openings)+1,'source':source_id(reader),'tank':item_components[key(tank)],'cap':item_nodes[node],
-                'anchor':anchor(node),'flow_liters_per_second':value['radius']**2*math.pi*0.025*main['pourSpeed'],'tilt_degrees':value['defPourAngle'],
-                'tilt_axis':[0.,0.,-1.],'angle_disabled':bool(value['noAngle']),'spill_disabled':bool(value['noPour']),
-                'tube_connected':bool(value['tube']),'flow_radius':value['radius'],
-                'particles':{'source':source_id(particle),'local_pose':particle_pose,
-                    'capacity':initial['maxNumParticles'],'cone_degrees':shape['angle'],'cone_radius':shape['radius']['value'],
-                    'lifetime_seconds':initial['startLifetime']['scalar'],'radius':initial['startSize']['scalar']*0.5*collision['radiusScale'],
-                    'gravity_multiplier':initial['gravityModifier']['scalar'],'collision_mask':collision['collidesWith']['m_Bits'],
-                    'bounce':value['bounce'],'dampen':value['dampen'],
-                    'max_speed':value['maxSpeed'],'min_rate':value['minRate'],'max_rate':value['maxRate']}}
-            opening['can_toggle']=bool(value['canToggle'])
+                'anchor':anchor(node),**cap_flow(source,reader,node_readers[node],main['pourSpeed'])}
             opening.update(opening_metadata(source,reader,by_source,main['fluidTuneSpeed']))
             openings.append(opening)
             tank_record=next(t for t in tanks if t['item']==opening['tank'])
@@ -432,7 +411,8 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
     driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
     result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
-        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'words':default_words(source)},'player':player_record,'seats':seats,
+        'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],
+            'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,'seats':seats,
         'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
             'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM']}
