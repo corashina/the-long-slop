@@ -41,6 +41,9 @@ pub(crate) struct SpawnEvaluation<'a> {
     pub(super) initialization: super::spawn_state::SpawnInitialization,
     pub(super) deferred: Vec<(Placement, SourceId)>,
     pub(super) starts: Vec<(Placement, Option<super::spawn_starts::ConditionOverride>)>,
+    /// Test hook: selected catalog items without a prototype, by exclusion reason.
+    #[cfg(test)]
+    pub(super) drops: std::collections::HashMap<String, u32>,
 }
 impl<'a> SpawnEvaluation<'a> {
     pub fn new(
@@ -65,7 +68,20 @@ impl<'a> SpawnEvaluation<'a> {
             initialization: super::spawn_state::SpawnInitialization::default(),
             deferred: Vec::new(),
             starts: Vec::new(),
+            #[cfg(test)]
+            drops: std::collections::HashMap::new(),
         }
+    }
+    /// Test hook: counts a selected catalog item that has no prototype.
+    pub(super) fn note_selection(&mut self, item: usize) {
+        #[cfg(test)]
+        if let Some(item) = self.reference.catalog.items.get(item)
+            && item.prototype.is_none()
+        {
+            *self.drops.entry(item.exclusion.clone()).or_default() += 1;
+        }
+        #[cfg(not(test))]
+        let _ = item;
     }
     pub(super) fn admit_initialization(
         &mut self,
@@ -211,15 +227,19 @@ impl<'a> SpawnEvaluation<'a> {
         let target = if let Some(target) = optional(row, "G")? {
             Some(target)
         } else if selected.is_some() {
-            super::spawn_selection::select_named(
-                self.reference,
+            let reference = self.reference;
+            let item = super::spawn_selection::select_named(
+                reference,
                 text(row, "prefab")?,
                 flag(row, "isitem")?,
                 self.random,
                 self.context,
-            )?
-            .and_then(|i| self.reference.catalog.items.get(i))
-            .map(|i| &i.source)
+            )?;
+            if let Some(item) = item {
+                self.note_selection(item);
+            }
+            item.and_then(|i| reference.catalog.items.get(i))
+                .map(|i| &i.source)
         } else {
             None
         };

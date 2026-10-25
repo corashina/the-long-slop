@@ -432,22 +432,11 @@ impl SourceContents {
             self.cursors
                 .try_reserve_exact(1)
                 .map_err(|_| ReferenceError("Source cursor allocation failed".into()))?;
-            let mut callers = Vec::new();
-            if building.is_some() {
-                self.rules.children(
-                    reference,
-                    &p.prototype,
-                    "newRandomStuffSpawnScript",
-                    true,
-                    &mut callers,
-                )?;
-            }
-            let mut eligible = Vec::new();
-            for source in callers {
-                if !flag(self.rules.get(reference, source)?.fields, "dontSpawn")? {
-                    eligible.push(source.clone());
-                }
-            }
+            let eligible = if building.is_some() {
+                eligible_callers(reference, &self.rules, &p.prototype)?
+            } else {
+                Vec::new()
+            };
             self.cursors.push(Cursor {
                 replay_only,
                 deferred_batches: 0,
@@ -663,23 +652,14 @@ impl SourceContents {
                     if let Some(root) = &cursor.root {
                         evaluation.output.push(root.clone());
                     }
-                    let chance = if first {
-                        evaluation.building(parent, cursor.building.as_ref().unwrap())?
-                    } else {
-                        context.chance_bits.map(f32::from_bits)
-                    };
-                    if let Some(caller) = cursor.callers.get(cursor.next) {
-                        let f = self.rules.get(reference, caller)?.fields;
-                        evaluation.spawn(
-                            parent,
-                            caller,
-                            if flag(f, "buildingAffectsThis")? {
-                                chance
-                            } else {
-                                None
-                            },
-                        )?;
-                    }
+                    let chance = spawn_step(
+                        &mut evaluation,
+                        parent,
+                        cursor.building.as_ref().unwrap(),
+                        &cursor.callers,
+                        cursor.next,
+                        context.chance_bits.map(f32::from_bits),
+                    )?;
                     evaluation.finish_starts()?;
                     evaluation.check_staging(staging)?;
                     Ok((
@@ -1230,6 +1210,50 @@ impl SourceContents {
                 })
                 .sum::<usize>()
     }
+}
+/// Building callers in source order, without `dontSpawn` callers.
+pub(super) fn eligible_callers(
+    reference: &WorldReference,
+    rules: &SourceRules,
+    prototype: &SourceId,
+) -> Result<Vec<SourceId>, ReferenceError> {
+    let mut callers = Vec::new();
+    rules.children(
+        reference,
+        prototype,
+        "newRandomStuffSpawnScript",
+        true,
+        &mut callers,
+    )?;
+    let mut eligible = Vec::new();
+    for source in callers {
+        if !flag(rules.get(reference, source)?.fields, "dontSpawn")? {
+            eligible.push(source.clone());
+        }
+    }
+    Ok(eligible)
+}
+/// One building cursor step: the building entry at step 0, then caller `next` with the
+/// `buildingAffectsThis` chance. Returns the building chance for the next steps.
+pub(super) fn spawn_step(
+    evaluation: &mut SpawnEvaluation,
+    parent: &Placement,
+    building: &SourceId,
+    callers: &[SourceId],
+    next: usize,
+    chance: Option<f32>,
+) -> Result<Option<f32>, ReferenceError> {
+    let chance = if next == 0 {
+        evaluation.building(parent, building)?
+    } else {
+        chance
+    };
+    if let Some(caller) = callers.get(next) {
+        let f = evaluation.rules.get(evaluation.reference, caller)?.fields;
+        let affected = flag(f, "buildingAffectsThis")?;
+        evaluation.spawn(parent, caller, if affected { chance } else { None })?;
+    }
+    Ok(chance)
 }
 pub(crate) fn identity_heap(id: &GeneratedId) -> usize {
     id.generator.file.capacity()

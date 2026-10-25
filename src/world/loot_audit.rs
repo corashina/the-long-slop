@@ -593,4 +593,206 @@ mod tests {
             }
         }
     }
+
+    /// Counts of one building type over all samples: sum and sum of squares per spawn.
+    #[derive(Default)]
+    struct Tally {
+        sum: f64,
+        squares: f64,
+    }
+    impl Tally {
+        fn add(&mut self, n: u32) {
+            self.sum += n as f64;
+            self.squares += (n as f64).powi(2);
+        }
+    }
+
+    /// Runs each building type through the port spawn path (`contents::spawn_step` for each
+    /// caller) and compares the published counts with `expected`.
+    ///
+    /// Scope matches the calculator: `finish_starts` (manualStart saves) and deferred
+    /// partslotscript items are not run. With the staged export `finish_starts` published
+    /// nothing in 2,000 spawns of each type, and it took most of the run time.
+    /// "Never seen" needs 10 expected: at 5, a Poisson zero has 0.7% odds, and the run checks
+    /// hundreds of rows.
+    /// Bound: 4 sigma of the total count. The per-spawn variance is compound Poisson: the
+    /// expected rate times the observed E[c^2] / E[c] per spawn, and at least the binomial
+    /// p(1 - p). Box copies come in clumps, so a plain Poisson bound is too narrow; the sample
+    /// variance is too narrow when a rare clump is missed.
+    /// Run with `--release`: the run takes about 5 minutes, a debug build about 2.5 times more.
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn w05_loot_matches_source_rules() {
+        use super::super::contents::{eligible_callers, spawn_step};
+        use super::super::spawn_contents::SpawnEvaluation;
+        use super::super::{
+            AbsolutePose, GeneratedId, Placement, UnityRandom, WorldBounds, WorldLayer,
+        };
+        const SAMPLES: u32 = 2000;
+        const KNOWN_DROPS: [&str; 4] = [
+            "other_vehicle",
+            "actor_behavior",
+            "outside_selected_pools",
+            // The staged export predates the part item fix; a fresh export has none.
+            "unsupported_part_type",
+        ];
+        let start = std::time::Instant::now();
+        let reference = reference();
+        let rules = SourceRules::new(reference);
+        let context = SpawnContext {
+            current_car: 1,
+            peaceful_enemies: 0,
+            date: reference.spawn_context.date,
+            chance_bits: None,
+        };
+        let catalog = &reference.catalog.items;
+        let name = |prototype: &SourceId| {
+            reference
+                .prototypes
+                .iter()
+                .find(|p| &p.source == prototype)
+                .map_or("?".to_string(), |p| p.nodes[0].name.clone())
+        };
+        let mut failures = Vec::new();
+        for (type_index, kind) in reference.buildings.types.iter().enumerate() {
+            let type_start = std::time::Instant::now();
+            let expected = expected(reference, &rules, &kind.prototype, context).unwrap();
+            let building = rules
+                .component(reference, &kind.prototype, "buildingscript")
+                .unwrap()
+                .unwrap()
+                .source
+                .clone();
+            let callers = eligible_callers(reference, &rules, &kind.prototype).unwrap();
+            // Row key: catalog item name, unlisted prototype name, or drop reason.
+            let mut tallies: HashMap<String, Tally> = HashMap::new();
+            let mut pools = Vec::new();
+            for sample in 0..SAMPLES {
+                let parent = Placement {
+                    id: GeneratedId {
+                        layer: WorldLayer::Building,
+                        generator: reference.buildings.source.clone(),
+                        unit: [0; 2],
+                        ordinal: sample,
+                        children: Vec::new(),
+                    },
+                    prototype: kind.prototype.clone(),
+                    pose: AbsolutePose {
+                        position: [0.; 3],
+                        rotation: [0., 0., 0., 1.],
+                    },
+                    scale: [1.; 3],
+                    bounds: WorldBounds {
+                        min: [0.; 3],
+                        max: [0.; 3],
+                    },
+                    object_seed: sample as i32,
+                };
+                let seed = (type_index as u32 * SAMPLES + sample).wrapping_mul(0x9e37_79b9);
+                let mut random = UnityRandom::new(seed as i32);
+                pools.clear();
+                let mut e = SpawnEvaluation::new(
+                    reference,
+                    &rules,
+                    &mut random,
+                    context,
+                    &mut pools,
+                    usize::MAX,
+                );
+                e.staging = usize::MAX;
+                let mut chance = None;
+                for next in 0..callers.len().max(1) {
+                    chance =
+                        spawn_step(&mut e, &parent, &building, &callers, next, chance).unwrap();
+                }
+                let key = |prototype: &SourceId| match catalog
+                    .iter()
+                    .find(|i| i.prototype.as_ref() == Some(prototype))
+                {
+                    Some(item) => item.name.clone(),
+                    None => format!("[{}]", name(prototype)),
+                };
+                let mut counts: HashMap<String, u32> = HashMap::new();
+                for content in &e.output {
+                    *counts.entry(key(&content.placement.prototype)).or_default() += 1;
+                }
+                for (reason, n) in &e.drops {
+                    *counts.entry(format!("drop:{reason}")).or_default() += n;
+                }
+                for (key, n) in counts {
+                    tallies.entry(key).or_default().add(n);
+                }
+                // Rows absent in this sample count as 0, which adds nothing to the sums.
+            }
+            let mut rates: HashMap<String, f64> = HashMap::new();
+            for (i, p) in &expected.items {
+                *rates.entry(catalog[*i as usize].name.clone()).or_default() += p;
+            }
+            for (prototype, p) in &expected.unlisted {
+                *rates.entry(format!("[{}]", name(prototype))).or_default() += p;
+            }
+            for (reason, p) in &expected.dropped {
+                *rates.entry(format!("drop:{reason}")).or_default() += p;
+            }
+            let mut keys: Vec<&String> = rates.keys().chain(tallies.keys()).collect();
+            keys.sort();
+            keys.dedup();
+            keys.sort_by(|a, b| {
+                let rate = |k: &String| rates.get(k).copied().unwrap_or(0.);
+                rate(b).total_cmp(&rate(a))
+            });
+            let n = SAMPLES as f64;
+            let (mut total_expected, mut total_counted) = (0., 0.);
+            println!(
+                "type {} ({} callers): {:?}",
+                kind.type_id,
+                callers.len(),
+                type_start.elapsed()
+            );
+            println!(
+                "  {:<28} {:>10} {:>10} {:>9}  status",
+                "item", "expected", "counted", "4 sigma"
+            );
+            for key in keys {
+                let p = rates.get(key).copied().unwrap_or(0.);
+                let tally = tallies.get(key);
+                let sum = tally.map_or(0., |t| t.sum);
+                // Compound Poisson: expected rate times the observed E[c^2] / E[c] per spawn.
+                let clump = tally.map_or(1., |t| if t.sum > 0. { t.squares / t.sum } else { 1. });
+                let variance = (p * clump).max(p * (1. - p.min(1.)));
+                let bound = 4. * (n * variance).sqrt();
+                let exp = n * p;
+                let reason = key.strip_prefix("drop:");
+                if reason.is_none() {
+                    total_expected += exp;
+                    total_counted += sum;
+                }
+                let known = reason.is_some_and(|r| KNOWN_DROPS.contains(&r));
+                let status = if p < 1e-12 && sum > 0. {
+                    "UNEXPECTED"
+                } else if exp >= 20. && (sum - exp).abs() > bound {
+                    "OUT OF BOUND"
+                } else if exp >= 10. && sum == 0. && !known {
+                    "NEVER SEEN"
+                } else {
+                    ""
+                };
+                if !status.is_empty() {
+                    failures.push(format!("type {} {key}: {status}", kind.type_id));
+                }
+                println!("  {key:<28} {exp:>10.1} {sum:>10.0} {bound:>9.1}  {status}");
+            }
+            println!(
+                "  items per spawn: expected {:.3}, counted {:.3}",
+                total_expected / n,
+                total_counted / n
+            );
+        }
+        println!("loot audit: {:?}", start.elapsed());
+        assert!(
+            failures.is_empty(),
+            "loot mismatches:\n{}",
+            failures.join("\n")
+        );
+    }
 }
