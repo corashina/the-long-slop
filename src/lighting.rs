@@ -1537,6 +1537,7 @@ mod tests {
             flare_lerp_end: 0.8,
             biome_refresh_seconds: 1.,
             fog_modifier: 2.,
+            temperature_values: [0.; 3],
             desert_color: [1., 0., 0., 1.],
             sky_colors: [[0.3; 4]; 3],
             day_ground_colors: [[0.4; 4]; 3],

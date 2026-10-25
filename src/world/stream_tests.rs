@@ -476,7 +476,7 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
 #[ignore = "requires the installed source export"]
 fn terrain_sample_matches_published_ground() {
     let reference = reference();
-    let mut run = GarageRuntime::new(&reference).unwrap();
+    let mut run = GarageRuntime::new(&reference, crate::world::GameMode::default()).unwrap();
     prepare_ready(&mut run, &reference);
     let player = run.area.player.body_pose(&run.physics).position;
     let mut checked = 0;
