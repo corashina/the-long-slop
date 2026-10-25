@@ -389,7 +389,7 @@ class HitAudio(unittest.TestCase):
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
                 record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70), record('music_box', 14, True, [6], 128),
-                record('footstep', 15, True, [6], 55), record('melee_hit', 16, True, [6])]}
+                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6])]}
         validate_hit_audio(audio, set(range(1, 7)), [])
         for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14), (7, 'settings', {'priority': 100, 'spatial_blend': 1.})]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value
@@ -399,6 +399,17 @@ class HitAudio(unittest.TestCase):
         validate_hit_audio(audio, set(range(1, 7)), [{'collision_clip': 6, 'collision_gain': .5}])
         for hit in [{'collision_clip': 5, 'collision_gain': .5}, {'collision_clip': 6, 'collision_gain': float('nan')}]:
             with self.assertRaises(ValueError): validate_hit_audio(audio, set(range(1, 7)), [hit])
+
+    def test_storm_audio(self):
+        from tools.reference.audio import validate_storm_audio
+        def record(role, kind):
+            return {'role': role, 'kind': kind, 'one_shot': False, 'clips': [1], 'gain': [.5, .5], 'settings': {'loop': True}}
+        audio = {'survival': [record('storm', 6), record('storm_inside', 16)]}
+        validate_storm_audio(audio, {1})
+        for index, field, value in [(0, 'kind', 10), (1, 'one_shot', True), (0, 'settings', {'loop': False}), (1, 'clips', [2]), (0, 'gain', [.5, 1.])]:
+            changed = copy.deepcopy(audio); changed['survival'][index][field] = value
+            with self.assertRaises(ValueError): validate_storm_audio(changed, {1})
+        with self.assertRaises(ValueError): validate_storm_audio({'survival': audio['survival'][:1]}, {1})
 
     def test_world_pickup_hit_sources(self):
         from tools.reference.audio import pickup_hit_sources

@@ -84,7 +84,7 @@ impl Params {
     }
 }
 struct Binding {
-    _uniform: UniformBuffer<Params>,
+    uniform: UniformBuffer<Params>,
     group: BindGroup,
 }
 pub struct LutPass {
@@ -95,6 +95,7 @@ pub struct LutPass {
     _curves: Texture,
     bindings: [Binding; 33],
     pipeline: CachedRenderPipelineId,
+    tint: f32,
 }
 impl LutPass {
     pub fn new(
@@ -239,10 +240,7 @@ impl LutPass {
                     &curve_sampler,
                 )),
             );
-            Binding {
-                _uniform: uniform,
-                group,
-            }
+            Binding { uniform, group }
         });
         Ok(Self {
             texture,
@@ -252,7 +250,21 @@ impl LutPass {
             _curves: curves,
             bindings,
             pipeline,
+            tint: settings.tint,
         })
+    }
+    /// Replace the profile temperature. Each existing slice buffer takes a queue write; bake again after this.
+    pub fn set_temperature(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        temperature: f32,
+    ) {
+        let balance = Vec3::from_array(color_balance(temperature, self.tint)).extend(0.);
+        for binding in &mut self.bindings {
+            binding.uniform.get_mut().balance = balance;
+            binding.uniform.write_buffer(device, queue);
+        }
     }
     pub fn output(&self) -> &TextureView {
         &self.view

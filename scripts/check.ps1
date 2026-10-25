@@ -26,7 +26,7 @@ try {
     if ($Full -or $WebTest) {
         $suites = if ($Full) {
             @('audio', 'loading', 'input', 'menu', 'performance', 'save-storage', 'save-session',
-                'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution', 'terrain')
+                'save-bridge', 'http-compression', 'serve', 'world-assets', 'scene-resolution', 'terrain', 'game-mode')
         } else { $WebTest }
         $webFiles = @(foreach ($suite in $suites) {
             $file = "$root/tests/web/$suite.test.mjs"

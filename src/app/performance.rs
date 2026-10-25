@@ -21,5 +21,8 @@ pub(super) fn publish(drive: Res<Drive>) {
         counters.pending as u32,
         counters.render_cpu_bytes as f64,
         counters.render_gpu_bytes as f64,
+        runtime.weather.storms().len() as u32,
+        runtime.weather.influence().strength,
+        runtime.weather.particle_count() as u32,
     );
 }

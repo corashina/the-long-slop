@@ -12,6 +12,16 @@ pub fn biome(color: [f32; 4], override_index: Option<u8>) -> u8 {
     })
 }
 
+/// Source `GetTerrainColor`: a fixed biome forces the color and keeps alpha.
+pub fn forced_color(color: [f32; 4], override_index: Option<u8>) -> [f32; 4] {
+    match override_index {
+        Some(0) => [1.0, 0.0, 0.0, color[3]],
+        Some(1) => [0.0, 0.0, 1.0, color[3]],
+        Some(2) => [0.0, 1.0, 0.0, color[3]],
+        _ => color,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainTile {
     pub tier: usize,
@@ -400,23 +410,16 @@ impl TerrainSurfaceJob {
                         (reciprocal as f64 * p[2] as f64) as f32,
                     ]);
                     let grid = self.border[(i / n + 1) * side + i % n + 1];
-                    let mut color = context.evaluator.color(
+                    let color = context.evaluator.color(
                         [
                             (grid[0] as f64 + output.origin[0] as f32 as f64) as f32,
                             (grid[2] as f64 + (-output.origin[2]) as f32 as f64) as f32,
                         ],
                         p[1],
                     );
-                    if let Some(biome) = context.biome_override {
-                        let alpha = color[3];
-                        color = match biome {
-                            0 => [1.0, 0.0, 0.0, alpha],
-                            1 => [0.0, 0.0, 1.0, alpha],
-                            2 => [0.0, 1.0, 0.0, alpha],
-                            _ => color,
-                        };
-                    }
-                    output.colors.push(color);
+                    output
+                        .colors
+                        .push(forced_color(color, context.biome_override));
                     output.vertices[i][2] = -p[2];
                     output.normals[i][2] = -output.normals[i][2];
                     // Source missing tangent (1,0,0,1), reflected once.
