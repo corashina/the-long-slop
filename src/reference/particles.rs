@@ -231,28 +231,35 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
         }
     }
     for p in &m.particles {
-        p.validate_motion()?;
+        p.validate_selected()?;
+    }
+    Ok(())
+}
+impl ParticleReference {
+    /// Checks one exported outlet, splash, or player particle.
+    pub(super) fn validate_selected(&self) -> Result<(), ReferenceError> {
+        self.validate_motion()?;
         let check = |valid: bool, field: &str| {
             if valid {
                 Ok(())
             } else {
                 Err(ReferenceError(format!(
                     "Invalid particle {}:{} role {} field {field}",
-                    p.source.file, p.source.path_id, p.role
+                    self.source.file, self.source.path_id, self.role
                 )))
             }
         };
         let scalar = |field: &str| -> Result<f32, ReferenceError> {
-            check(p.scalars.contains_key(field), field)?;
-            let value = p.scalars[field];
+            check(self.scalars.contains_key(field), field)?;
+            let value = self.scalars[field];
             check(value.is_finite(), field)?;
             Ok(value)
         };
         for name in ["gameObject.active", "renderer.enabled"] {
-            check(p.flags.contains_key(name), name)?;
+            check(self.flags.contains_key(name), name)?;
         }
         for name in ["RotationModule", "EmissionModule"] {
-            check(p.module_flags.contains_key(name), name)?;
+            check(self.module_flags.contains_key(name), name)?;
         }
         check(scalar("ShapeModule.type")? == 4., "ShapeModule.type")?;
         for name in [
@@ -263,13 +270,13 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
             "InitialModule.gravityModifier",
             "SizeModule.curve",
         ] {
-            check(p.curves.contains_key(name), name)?;
+            check(self.curves.contains_key(name), name)?;
         }
         for name in ["InitialModule.startColor", "ColorModule.gradient"] {
-            check(p.colors.contains_key(name), name)?;
+            check(self.colors.contains_key(name), name)?;
         }
         for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
-            check(p.vectors.contains_key(name), name)?;
+            check(self.vectors.contains_key(name), name)?;
         }
         check(
             (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
@@ -307,16 +314,16 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
             (0. ..=2.).contains(&ring) && ring.fract() == 0.,
             "ringBufferMode",
         )?;
-        if p.module_flags["RotationModule"] {
+        if self.module_flags["RotationModule"] {
             check(
-                p.curves.contains_key("RotationModule.curve"),
+                self.curves.contains_key("RotationModule.curve"),
                 "RotationModule.curve",
             )?;
         }
-        if p.module_flags["EmissionModule"] {
+        if self.module_flags["EmissionModule"] {
             scalar("EmissionModule.m_BurstCount")?;
         }
-        if p.scalars.contains_key("EmissionModule.m_BurstCount") {
+        if self.scalars.contains_key("EmissionModule.m_BurstCount") {
             let bursts = scalar("EmissionModule.m_BurstCount")?;
             check(
                 (0. ..=1.).contains(&bursts) && bursts.fract() == 0.,
@@ -324,13 +331,13 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
             )?;
             if bursts == 1. {
                 let name = "EmissionModule.m_Bursts.0.countCurve";
-                check(p.curves.contains_key(name), name)?;
-                check(p.curves[name].scalar >= 0., name)?;
+                check(self.curves.contains_key(name), name)?;
+                check(self.curves[name].scalar >= 0., name)?;
             }
         }
-        if p.role == "urine" || p.role.starts_with("outlet_") {
+        if self.role == "urine" || self.role.starts_with("outlet_") {
             check(
-                p.module_flags.get("CollisionModule") == Some(&true),
+                self.module_flags.get("CollisionModule") == Some(&true),
                 "CollisionModule",
             )?;
             for name in [
@@ -338,15 +345,15 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
                 "CollisionModule.m_Dampen",
                 "CollisionModule.m_EnergyLossOnCollision",
             ] {
-                check(p.curves.contains_key(name), name)?;
-                check((0. ..=1.).contains(&p.curves[name].scalar), name)?;
+                check(self.curves.contains_key(name), name)?;
+                check((0. ..=1.).contains(&self.curves[name].scalar), name)?;
             }
             check(
-                p.curves["InitialModule.startLifetime"].scalar > 0.,
+                self.curves["InitialModule.startLifetime"].scalar > 0.,
                 "InitialModule.startLifetime.scalar",
             )?;
             check(
-                p.curves["InitialModule.startSize"].scalar > 0.,
+                self.curves["InitialModule.startSize"].scalar > 0.,
                 "InitialModule.startSize.scalar",
             )?;
             check(
@@ -365,16 +372,16 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
             check(scalar("outlet.maxRate")? >= min_rate, "outlet.maxRate")?;
             for index in 0..6 {
                 let name = format!("fluid.{index}");
-                check(p.vectors.contains_key(&name), &name)?;
+                check(self.vectors.contains_key(&name), &name)?;
                 scalar(&format!("fluid.{index}.alpha"))?;
             }
             check(
-                p.flags.contains_key("outlet.forceColor"),
+                self.flags.contains_key("outlet.forceColor"),
                 "outlet.forceColor",
             )?;
-            if p.flags["outlet.forceColor"] {
+            if self.flags["outlet.forceColor"] {
                 check(
-                    p.vectors.contains_key("outlet.forceColor"),
+                    self.vectors.contains_key("outlet.forceColor"),
                     "outlet.forceColor",
                 )?;
                 scalar("outlet.forceAlpha")?;
@@ -384,9 +391,9 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
                 )?;
             }
         }
-        p.validate_data(2)?;
+        self.validate_data(2)?;
+        Ok(())
     }
-    Ok(())
 }
 impl ParticleReference {
     pub fn validate_data(&self, simulation_space: u8) -> Result<(), ReferenceError> {

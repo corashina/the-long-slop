@@ -441,12 +441,21 @@ impl LightingRecord {
             "startup overrides",
         )?;
         sky(&self.skybox)?;
-        for particle in manifest.particles.iter().chain(
-            manifest
-                .item_prototypes
-                .iter()
-                .filter_map(|p| p.consumable.as_ref().map(|c| &c.ember.particle)),
-        ) {
+        let prototypes = manifest.item_prototypes.iter();
+        for particle in manifest
+            .particles
+            .iter()
+            .chain(
+                prototypes
+                    .clone()
+                    .filter_map(|p| p.consumable.as_ref().map(|c| &c.ember.particle)),
+            )
+            .chain(
+                prototypes
+                    .filter_map(|p| p.hose.as_ref())
+                    .flat_map(|h| h.ends.iter().flat_map(|e| [&e.visual, &e.splash])),
+            )
+        {
             for material in &particle.materials {
                 sky(material)?;
             }

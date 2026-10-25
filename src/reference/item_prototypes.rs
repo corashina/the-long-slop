@@ -7,6 +7,7 @@ pub struct PrototypeId(pub SourceId);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemPrototype {
+    pub hose: Option<HoseReference>,
     pub consumable: Option<CigaretteConsumptionReference>,
     pub id: PrototypeId,
     pub source: SourceId,
@@ -19,6 +20,154 @@ pub struct ItemPrototype {
     pub variants: Vec<PrototypeVariant>,
     pub renderers: Vec<PrototypeRenderer>,
     pub behavior: PrototypeBehavior,
+}
+
+pub const HOSE_SEGMENTS: usize = 6;
+
+/// Siphon hose (`tubescript` chain). Body ids are local prototype bodies.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoseReference {
+    /// Main `tubescript`.
+    pub source: SourceId,
+    /// Segment bodies in chain order.
+    pub segments: [BodyId; HOSE_SEGMENTS],
+    pub main: BodyId,
+    pub t1: BodyId,
+    pub t2: BodyId,
+    /// `tubescript.breakForce` per segment.
+    pub break_force: [f32; HOSE_SEGMENTS],
+    /// `tubescript.connectAnchor` per segment, in segment body space.
+    pub connect_anchor: [[f32; 3]; HOSE_SEGMENTS],
+    /// Ball joints from `segments[i]` to `segments[i + 1]`.
+    pub joints: [HoseJoint; HOSE_SEGMENTS - 1],
+    /// Ends on `t1` and `t2`.
+    pub ends: [HoseEnd; 2],
+    /// Bones are segment bodies.
+    pub skin: SkinnedMeshReference<NodeId, BodyId>,
+}
+
+/// Anchors are in their body space.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoseJoint {
+    pub body: BodyId,
+    pub connected_body: BodyId,
+    pub anchor: [f32; 3],
+    pub connected_anchor: [f32; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoseEnd {
+    pub body: BodyId,
+    /// Cap Transform node.
+    pub node: NodeId,
+    /// Cap pose in end body space.
+    pub pose: Transform,
+    pub opening: HoseOpening,
+    pub visual: ParticleReference,
+    pub splash: ParticleReference,
+}
+
+/// Hose end `tankcapscript`. Its fields match `OpeningRecord`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HoseOpening {
+    pub source: SourceId,
+    /// Source `Tank` is null. The attached cap supplies the tank.
+    pub tank: (),
+    pub flow_liters_per_second: f32,
+    pub tilt_degrees: f32,
+    pub tilt_axis: [f32; 3],
+    pub angle_disabled: bool,
+    pub spill_disabled: bool,
+    pub tube_connected: bool,
+    pub cant_tube: bool,
+    pub flow_radius: f32,
+    pub can_toggle: bool,
+    pub particles: FluidParticleReference,
+    pub valve: f32,
+    pub can_tune: bool,
+    pub tune_rate: f32,
+    pub presentation: FluidPresentation,
+    pub visuals: CapVisualReference,
+}
+
+impl HoseReference {
+    fn validate(&self, p: &ItemPrototype, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let segments = ids(self.segments.iter().copied(), "duplicate hose segment")?;
+        require(
+            checked(&self.source, self.source.path_id)
+                && self
+                    .segments
+                    .iter()
+                    .all(|s| p.bodies.iter().any(|b| b.id == *s)),
+            "hose segment bodies",
+        )?;
+        require(
+            self.joints
+                .iter()
+                .zip(self.segments.windows(2))
+                .all(|(j, pair)| {
+                    j.body == pair[0]
+                        && j.connected_body == pair[1]
+                        && finite(&j.anchor)
+                        && finite(&j.connected_anchor)
+                }),
+            "hose joint chain",
+        )?;
+        require(
+            [self.main, self.t1, self.t2]
+                .iter()
+                .all(|b| segments.contains(b))
+                && self.t1 != self.t2,
+            "hose main or end segment",
+        )?;
+        require(
+            finite(&self.break_force) && self.break_force.iter().all(|f| *f > 0.),
+            "hose break force",
+        )?;
+        require(
+            self.connect_anchor.iter().all(|a| finite(a)),
+            "hose connect anchor",
+        )?;
+        for (index, (e, body)) in self.ends.iter().zip([self.t1, self.t2]).enumerate() {
+            let o = &e.opening;
+            require(
+                e.body == body && p.within(m, e.node) && transform(&e.pose),
+                "hose end pose",
+            )?;
+            require(
+                checked(&o.source, o.source.path_id)
+                    && valid_tuning(o.valve, o.can_tune, o.tune_rate)
+                    && valid_flow(
+                        o.flow_liters_per_second,
+                        o.tilt_degrees,
+                        &o.tilt_axis,
+                        o.flow_radius,
+                        &o.particles,
+                    ),
+                "hose end opening",
+            )?;
+            validate_cap_visuals(&o.visuals, |node| p.within(m, node))?;
+            require(
+                e.visual.role == format!("outlet_hose_{}", index + 1)
+                    && e.splash.role == format!("splash_hose_{}", index + 1),
+                "hose end particle roles",
+            )?;
+            e.visual.validate_selected()?;
+            e.splash.validate_selected()?;
+        }
+        let skin = &self.skin;
+        require(
+            checked(&skin.source, skin.source.path_id)
+                && p.within(m, skin.node)
+                && skin.bones.iter().all(|b| segments.contains(b))
+                && skin.valid_streams(),
+            "hose skin",
+        )
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -137,7 +286,7 @@ impl PickupReference {
 pub fn validate_prototypes(m: &ReferenceManifest) -> Result<(), ReferenceError> {
     require(
         m.item_prototypes.iter().map(|p| p.id.0.path_id).eq([
-            75443, 51722, 61587, 81642, 81645, 70812, 53838, 53837, 63605, 63259, 54495,
+            75443, 51722, 61587, 81642, 81645, 70812, 53838, 53837, 63605, 63259, 54495, 83430,
         ]),
         "selected item prototypes",
     )?;
@@ -201,8 +350,11 @@ impl ItemPrototype {
             63605 => (Some(245), 1, None, false, false, Some(147259)),
             63259 => (Some(92), 1, Some(4590), true, false, Some(149587)),
             54495 => (Some(230), 1, None, false, false, Some(134670)),
+            // Hose segment inventory flags and icons are not checked against the source build.
+            83430 => (Some(61), 6, None, false, false, None),
             _ => return Err(ReferenceError("unknown item prototype".into())),
         };
+        let hose = item_id == Some(61);
         require(
             checked(&self.id.0, self.id.0.path_id)
                 && self.source == self.id.0
@@ -230,6 +382,7 @@ impl ItemPrototype {
             63605 => (12, 2),
             63259 => (3, 2),
             54495 => (1, 7),
+            83430 => (6, 0),
             _ => unreachable!(),
         };
         require(
@@ -319,23 +472,29 @@ impl ItemPrototype {
                     && checked(&p.pickup.source, p.pickup.source.path_id)
                     && self.body_for(m, Some(p.node)) == Some(p.body)
                     && bodies.contains(&p.body)
-                    && p.pickup.can_inventory == expected_inventory
+                    && (hose
+                        || (p.pickup.can_inventory == expected_inventory
+                            && p.pickup.inventory_icon.as_ref().map(|s| s.path_id)
+                                == expected_icon))
                     && p.pickup.can_hold_right_hand == hand
-                    && p.pickup.inventory_icon.as_ref().map(|s| s.path_id) == expected_icon
                     && pickup_source
                         .is_none_or(|s| checked(&p.pickup.source, s) && p.node == self.root)
                     && p.collision_gain.is_finite()
                     && p.collision_gain >= 0.
-                    && p.collision_clip.as_ref().is_some_and(|s| {
-                        checked(
-                            s,
-                            if matches!(item_id, Some(74 | 218 | 221 | 92 | 230)) {
-                                4270
-                            } else {
-                                4166
-                            },
-                        ) && clip_exists(m, s)
-                    }),
+                    && if hose {
+                        p.collision_clip.as_ref().is_none_or(|s| clip_exists(m, s))
+                    } else {
+                        p.collision_clip.as_ref().is_some_and(|s| {
+                            checked(
+                                s,
+                                if matches!(item_id, Some(74 | 218 | 221 | 92 | 230)) {
+                                    4270
+                                } else {
+                                    4166
+                                },
+                            ) && clip_exists(m, s)
+                        })
+                    },
                 "prototype pickup owner",
             )?;
             p.pickup.validate_links(m, self.asset)?;
@@ -364,7 +523,6 @@ impl ItemPrototype {
             self.renderers.iter().map(|r| &r.source),
             "duplicate prototype renderer",
         )?;
-        require(!self.renderers.is_empty(), "prototype renderers")?;
         for r in &self.renderers {
             r.state.validate_template()?;
             require(
@@ -519,6 +677,10 @@ impl ItemPrototype {
                 "debris child owners",
             )?,
             _ => {}
+        }
+        require(self.hose.is_some() == hose, "hose owner")?;
+        if let Some(h) = &self.hose {
+            h.validate(self, m)?;
         }
         require(
             self.consumable.is_some() == (item_id == Some(230)),
