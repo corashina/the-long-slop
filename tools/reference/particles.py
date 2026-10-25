@@ -76,6 +76,26 @@ def validate_particles_export(particles,manifest):
         for material in p['materials']:
             if any(t['texture'] not in textures for t in material['textures']):raise ValueError('Missing particle texture')
 
+# Modules that src/particles.rs runs. ShapeModule and EmissionModule feed emission; the others change live particles.
+EXHAUST_MODULES=frozenset({'InitialModule','ShapeModule','EmissionModule','VelocityModule','ForceModule',
+    'InheritVelocityModule','SizeModule','ColorModule','RotationModule','CollisionModule','UVModule'})
+
+def recover_exhaust(source,car_reader,car,owner,index,output):
+    """Read carscript.psSmoke. The runtime sets the rate, so the exported rate is 1."""
+    systems=[source.resolve(car_reader,pointer) for pointer in car['psSmoke']]
+    if not systems or any(s is None for s in systems):raise ValueError(f'Car needs exhaust particle systems: {source_id(car_reader)}')
+    result=[particle(source,s,f'exhaust_{index}_{i}',1.,output,owner) for i,s in enumerate(systems)]
+    for p in result:validate_exhaust(p)
+    return result
+
+def validate_exhaust(p):
+    unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in EXHAUST_MODULES)
+    if unsupported:raise ValueError(f"Unsupported exhaust particle modules {p['role']}: {unsupported}")
+    # The runtime plays a whole grid sheet over lifetime only.
+    if p['module_flags'].get('UVModule') and any(p['scalars'][f'UVModule.{k}']!=0 for k in ('mode','animationType','timeMode')):
+        raise ValueError(f"Unsupported exhaust texture sheet {p['role']}")
+    validate_particle_data(p,2)
+
 def relative_pose(source, root, owner):
     from .gltf import transform_point
     a=world_pose(source,owner);b=world_pose(source,root)

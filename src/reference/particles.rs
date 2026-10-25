@@ -231,162 +231,176 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
         }
     }
     for p in &m.particles {
-        p.validate_motion()?;
-        let check = |valid: bool, field: &str| {
-            if valid {
-                Ok(())
-            } else {
-                Err(ReferenceError(format!(
-                    "Invalid particle {}:{} role {} field {field}",
-                    p.source.file, p.source.path_id, p.role
-                )))
-            }
-        };
-        let scalar = |field: &str| -> Result<f32, ReferenceError> {
-            check(p.scalars.contains_key(field), field)?;
-            let value = p.scalars[field];
-            check(value.is_finite(), field)?;
-            Ok(value)
-        };
-        for name in ["gameObject.active", "renderer.enabled"] {
-            check(p.flags.contains_key(name), name)?;
-        }
-        for name in ["RotationModule", "EmissionModule"] {
-            check(p.module_flags.contains_key(name), name)?;
-        }
-        check(scalar("ShapeModule.type")? == 4., "ShapeModule.type")?;
-        for name in [
-            "InitialModule.startSize",
-            "InitialModule.startSpeed",
-            "InitialModule.startRotation",
-            "InitialModule.startLifetime",
-            "InitialModule.gravityModifier",
-            "SizeModule.curve",
-        ] {
-            check(p.curves.contains_key(name), name)?;
-        }
-        for name in ["InitialModule.startColor", "ColorModule.gradient"] {
-            check(p.colors.contains_key(name), name)?;
-        }
-        for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
-            check(p.vectors.contains_key(name), name)?;
-        }
-        check(
-            (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
-            "ShapeModule.angle",
-        )?;
-        check(
-            scalar("ShapeModule.radius.value")? >= 0.,
-            "ShapeModule.radius.value",
-        )?;
-        check(
-            (0. ..=1.).contains(&scalar("ShapeModule.radiusThickness")?),
-            "ShapeModule.radiusThickness",
-        )?;
-        check(
-            scalar("ShapeModule.randomPositionAmount")? >= 0.,
-            "ShapeModule.randomPositionAmount",
-        )?;
-        let layer = scalar("gameObject.layer")?;
-        check(
-            (0. ..=31.).contains(&layer) && layer.fract() == 0.,
-            "gameObject.layer",
-        )?;
-        let sort = scalar("renderer.m_SortMode")?;
-        check(
-            (0. ..=5.).contains(&sort) && sort.fract() == 0.,
-            "renderer.m_SortMode",
-        )?;
-        let min_size = scalar("renderer.m_MinParticleSize")?;
-        let max_size = scalar("renderer.m_MaxParticleSize")?;
-        check(min_size >= 0., "renderer.m_MinParticleSize")?;
-        check(max_size >= min_size, "renderer.m_MaxParticleSize")?;
-        scalar("renderer.m_SortingFudge")?;
-        let ring = scalar("ringBufferMode")?;
-        check(
-            (0. ..=2.).contains(&ring) && ring.fract() == 0.,
-            "ringBufferMode",
-        )?;
-        if p.module_flags["RotationModule"] {
-            check(
-                p.curves.contains_key("RotationModule.curve"),
-                "RotationModule.curve",
+        validate_particle(p)?;
+    }
+    for (v, vehicle) in m.vehicles.iter().enumerate() {
+        require(!vehicle.exhaust.is_empty(), "vehicle exhaust")?;
+        for (s, p) in vehicle.exhaust.iter().enumerate() {
+            require(
+                p.role == format!("exhaust_{v}_{s}"),
+                "exhaust particle role",
             )?;
+            validate_particle(p)?;
         }
-        if p.module_flags["EmissionModule"] {
-            scalar("EmissionModule.m_BurstCount")?;
-        }
-        if p.scalars.contains_key("EmissionModule.m_BurstCount") {
-            let bursts = scalar("EmissionModule.m_BurstCount")?;
-            check(
-                (0. ..=1.).contains(&bursts) && bursts.fract() == 0.,
-                "EmissionModule.m_BurstCount",
-            )?;
-            if bursts == 1. {
-                let name = "EmissionModule.m_Bursts.0.countCurve";
-                check(p.curves.contains_key(name), name)?;
-                check(p.curves[name].scalar >= 0., name)?;
-            }
-        }
-        if p.role == "urine" || p.role.starts_with("outlet_") {
-            check(
-                p.module_flags.get("CollisionModule") == Some(&true),
-                "CollisionModule",
-            )?;
-            for name in [
-                "CollisionModule.m_Bounce",
-                "CollisionModule.m_Dampen",
-                "CollisionModule.m_EnergyLossOnCollision",
-            ] {
-                check(p.curves.contains_key(name), name)?;
-                check((0. ..=1.).contains(&p.curves[name].scalar), name)?;
-            }
-            check(
-                p.curves["InitialModule.startLifetime"].scalar > 0.,
-                "InitialModule.startLifetime.scalar",
-            )?;
-            check(
-                p.curves["InitialModule.startSize"].scalar > 0.,
-                "InitialModule.startSize.scalar",
-            )?;
-            check(
-                scalar("CollisionModule.radiusScale")? > 0.,
-                "CollisionModule.radiusScale",
-            )?;
-            let mask = scalar("CollisionModule.collidesWith.m_Bits")?;
-            // Unity exports its unsigned layer mask through a floating-point map.
-            check(
-                mask >= 0. && mask <= u32::MAX as f32 && mask.fract() == 0.,
-                "CollisionModule.collidesWith.m_Bits",
-            )?;
-            check(scalar("outlet.maxSpeed")? >= 0., "outlet.maxSpeed")?;
-            let min_rate = scalar("outlet.minRate")?;
-            check(min_rate >= 0., "outlet.minRate")?;
-            check(scalar("outlet.maxRate")? >= min_rate, "outlet.maxRate")?;
-            for index in 0..6 {
-                let name = format!("fluid.{index}");
-                check(p.vectors.contains_key(&name), &name)?;
-                scalar(&format!("fluid.{index}.alpha"))?;
-            }
-            check(
-                p.flags.contains_key("outlet.forceColor"),
-                "outlet.forceColor",
-            )?;
-            if p.flags["outlet.forceColor"] {
-                check(
-                    p.vectors.contains_key("outlet.forceColor"),
-                    "outlet.forceColor",
-                )?;
-                scalar("outlet.forceAlpha")?;
-                check(
-                    (0. ..=1.).contains(&scalar("outlet.forceColorM")?),
-                    "outlet.forceColorM",
-                )?;
-            }
-        }
-        p.validate_data(2)?;
     }
     Ok(())
+}
+/// Checks one particle record that the runtime simulates in custom space.
+fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceError> {
+    p.validate_motion()?;
+    let check = |valid: bool, field: &str| {
+        if valid {
+            Ok(())
+        } else {
+            Err(ReferenceError(format!(
+                "Invalid particle {}:{} role {} field {field}",
+                p.source.file, p.source.path_id, p.role
+            )))
+        }
+    };
+    let scalar = |field: &str| -> Result<f32, ReferenceError> {
+        check(p.scalars.contains_key(field), field)?;
+        let value = p.scalars[field];
+        check(value.is_finite(), field)?;
+        Ok(value)
+    };
+    for name in ["gameObject.active", "renderer.enabled"] {
+        check(p.flags.contains_key(name), name)?;
+    }
+    for name in ["RotationModule", "EmissionModule"] {
+        check(p.module_flags.contains_key(name), name)?;
+    }
+    check(scalar("ShapeModule.type")? == 4., "ShapeModule.type")?;
+    for name in [
+        "InitialModule.startSize",
+        "InitialModule.startSpeed",
+        "InitialModule.startRotation",
+        "InitialModule.startLifetime",
+        "InitialModule.gravityModifier",
+        "SizeModule.curve",
+    ] {
+        check(p.curves.contains_key(name), name)?;
+    }
+    for name in ["InitialModule.startColor", "ColorModule.gradient"] {
+        check(p.colors.contains_key(name), name)?;
+    }
+    for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
+        check(p.vectors.contains_key(name), name)?;
+    }
+    check(
+        (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
+        "ShapeModule.angle",
+    )?;
+    check(
+        scalar("ShapeModule.radius.value")? >= 0.,
+        "ShapeModule.radius.value",
+    )?;
+    check(
+        (0. ..=1.).contains(&scalar("ShapeModule.radiusThickness")?),
+        "ShapeModule.radiusThickness",
+    )?;
+    check(
+        scalar("ShapeModule.randomPositionAmount")? >= 0.,
+        "ShapeModule.randomPositionAmount",
+    )?;
+    let layer = scalar("gameObject.layer")?;
+    check(
+        (0. ..=31.).contains(&layer) && layer.fract() == 0.,
+        "gameObject.layer",
+    )?;
+    let sort = scalar("renderer.m_SortMode")?;
+    check(
+        (0. ..=5.).contains(&sort) && sort.fract() == 0.,
+        "renderer.m_SortMode",
+    )?;
+    let min_size = scalar("renderer.m_MinParticleSize")?;
+    let max_size = scalar("renderer.m_MaxParticleSize")?;
+    check(min_size >= 0., "renderer.m_MinParticleSize")?;
+    check(max_size >= min_size, "renderer.m_MaxParticleSize")?;
+    scalar("renderer.m_SortingFudge")?;
+    let ring = scalar("ringBufferMode")?;
+    check(
+        (0. ..=2.).contains(&ring) && ring.fract() == 0.,
+        "ringBufferMode",
+    )?;
+    if p.module_flags["RotationModule"] {
+        check(
+            p.curves.contains_key("RotationModule.curve"),
+            "RotationModule.curve",
+        )?;
+    }
+    if p.module_flags["EmissionModule"] {
+        scalar("EmissionModule.m_BurstCount")?;
+    }
+    if p.scalars.contains_key("EmissionModule.m_BurstCount") {
+        let bursts = scalar("EmissionModule.m_BurstCount")?;
+        check(
+            (0. ..=1.).contains(&bursts) && bursts.fract() == 0.,
+            "EmissionModule.m_BurstCount",
+        )?;
+        if bursts == 1. {
+            let name = "EmissionModule.m_Bursts.0.countCurve";
+            check(p.curves.contains_key(name), name)?;
+            check(p.curves[name].scalar >= 0., name)?;
+        }
+    }
+    if p.role == "urine" || p.role.starts_with("outlet_") {
+        check(
+            p.module_flags.get("CollisionModule") == Some(&true),
+            "CollisionModule",
+        )?;
+        for name in [
+            "CollisionModule.m_Bounce",
+            "CollisionModule.m_Dampen",
+            "CollisionModule.m_EnergyLossOnCollision",
+        ] {
+            check(p.curves.contains_key(name), name)?;
+            check((0. ..=1.).contains(&p.curves[name].scalar), name)?;
+        }
+        check(
+            p.curves["InitialModule.startLifetime"].scalar > 0.,
+            "InitialModule.startLifetime.scalar",
+        )?;
+        check(
+            p.curves["InitialModule.startSize"].scalar > 0.,
+            "InitialModule.startSize.scalar",
+        )?;
+        check(
+            scalar("CollisionModule.radiusScale")? > 0.,
+            "CollisionModule.radiusScale",
+        )?;
+        let mask = scalar("CollisionModule.collidesWith.m_Bits")?;
+        // Unity exports its unsigned layer mask through a floating-point map.
+        check(
+            mask >= 0. && mask <= u32::MAX as f32 && mask.fract() == 0.,
+            "CollisionModule.collidesWith.m_Bits",
+        )?;
+        check(scalar("outlet.maxSpeed")? >= 0., "outlet.maxSpeed")?;
+        let min_rate = scalar("outlet.minRate")?;
+        check(min_rate >= 0., "outlet.minRate")?;
+        check(scalar("outlet.maxRate")? >= min_rate, "outlet.maxRate")?;
+        for index in 0..6 {
+            let name = format!("fluid.{index}");
+            check(p.vectors.contains_key(&name), &name)?;
+            scalar(&format!("fluid.{index}.alpha"))?;
+        }
+        check(
+            p.flags.contains_key("outlet.forceColor"),
+            "outlet.forceColor",
+        )?;
+        if p.flags["outlet.forceColor"] {
+            check(
+                p.vectors.contains_key("outlet.forceColor"),
+                "outlet.forceColor",
+            )?;
+            scalar("outlet.forceAlpha")?;
+            check(
+                (0. ..=1.).contains(&scalar("outlet.forceColorM")?),
+                "outlet.forceColorM",
+            )?;
+        }
+    }
+    p.validate_data(2)
 }
 impl ParticleReference {
     pub fn validate_data(&self, simulation_space: u8) -> Result<(), ReferenceError> {
