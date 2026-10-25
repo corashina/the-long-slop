@@ -58,11 +58,12 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 | W01 | Restore world range. [World](src/world.rs) | M | Raise draw distance and item spawn distance toward the original within the frame rate rule. Verify freeze distances. [I01-I03] |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
 | W03 | Add biomes. [Terrain](crates/terrain) | M | Biome selection, grass and winter terrain, edge of the world, winter color. [I05, I06, K10] |
-| W04 | Expand buildings. [Generation](src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
 | W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
 | W08 | Add grass tracks. [Grass](web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
+
+Check in the section test pass: power cables (W04). Re-export first. Check poles link to the next pole on curves and tilted poles, road buildings and the home link to a pole, and F3.
 
 ## 4. More cars
 
@@ -80,7 +81,7 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
-| X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids. [G01-G11, E04, C06] |
+| X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | Grow the save with each feature: items, buildings, wear, colors. [M13] |
