@@ -97,6 +97,13 @@ struct ManifestShell<'a> {
     file_catalog: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     items: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    world: WorldShell<'a>,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+struct WorldShell<'a> {
+    #[serde(borrow)]
+    draw_distance: &'a serde_json::value::RawValue,
 }
 
 #[wasm_bindgen]
@@ -107,7 +114,11 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue> {
+pub fn run(
+    reference_json: &[u8],
+    manifest_sha256: String,
+    draw_distance: f32,
+) -> Result<(), JsValue> {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Startup);
     console_error_panic_hook::set_once();
     let reference = Arc::new(
@@ -117,7 +128,7 @@ pub fn run(reference_json: &[u8], manifest_sha256: String) -> Result<(), JsValue
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, reference.world.draw_distance.default)
+    let mut runtime = GarageRuntime::new(&reference, draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,

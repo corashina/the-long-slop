@@ -17,6 +17,10 @@ macro_rules! distances {($($field:ident),* $(,)?) => {
                 $($field: r.minimum.$field + (r.maximum.$field - r.minimum.$field) * t,)*
             }
         }
+        /// True when `value` resolves to these distances.
+        pub fn matches(&self, r: &DrawDistanceReference, value: f32) -> bool {
+            Self::resolve(r, value) == *self
+        }
         #[cfg(test)]
         fn values(&self) -> [f32; 28] {
             [$(self.$field),*]
@@ -176,5 +180,14 @@ mod tests {
             bits(DrawDistances::resolve(&r, 1e6)),
             MAXIMUM.map(f32::to_bits)
         );
+    }
+
+    #[test]
+    fn matches_after_clamp() {
+        let r = reference();
+        let d = DrawDistances::resolve(&r, 2500.);
+        assert!(d.matches(&r, 2500.));
+        assert!(!d.matches(&r, 2600.));
+        assert!(DrawDistances::resolve(&r, 500.).matches(&r, 100.));
     }
 }

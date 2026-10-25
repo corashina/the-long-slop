@@ -8,7 +8,7 @@ async function record(payload){const hash=await crypto.subtle.digest('SHA-256',n
 function setup(overrides={}){
  const calls={commit:[],discard:[],write:[],status:[]};const runtime={capture:async()=>({schema_version:4}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
  const storage={read:async()=>await record({schema_version:4}),write:async save=>{calls.write.push(save);},...overrides.storage};
- const session=createSaveSession({runtime,storage,onStatus:status=>calls.status.push(status)});return {calls,session};
+ const session=createSaveSession({runtime,storage,drawDistance:()=>2500,onStatus:status=>calls.status.push(status)});return {calls,session};
 }
 test('canceled_preparation_discards_stale_candidate_without_commit',async()=>{
  const candidate=deferred();const {session,calls}=setup({runtime:{prepareNewGame:()=>candidate.promise}});const operation=session.newGame();session.cancel();assert.equal(session.pending,false);candidate.resolve(11);await operation;assert.deepEqual(calls.discard,[11]);assert.equal(calls.commit.length,0);

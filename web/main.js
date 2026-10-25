@@ -6,7 +6,8 @@ import {manifestStamp,createSaveStorage} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 export const saveRuntime=createSaveBridge();
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime});
+let drawDistance;
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>drawDistance});
 import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
@@ -166,6 +167,7 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ drawDistance=manifest.world.draw_distance.default;
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
  configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
@@ -187,7 +189,7 @@ async function load(){
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
- run(bytes,manifestHash);
+ run(bytes,manifestHash,drawDistance);
  cpuProfile.end('startup');
 }
 load().catch(error=>fail(error?.message??String(error)));
