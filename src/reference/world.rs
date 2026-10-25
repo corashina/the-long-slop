@@ -408,7 +408,6 @@ pub struct WorldTerrainReference {
 #[serde(deny_unknown_fields)]
 pub struct WorldGameSettings {
     pub source: SourceId,
-    pub biome: i32,
     #[serde(rename = "homesickMode")]
     pub homesick_mode: i32,
 }

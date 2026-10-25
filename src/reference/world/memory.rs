@@ -129,7 +129,7 @@ fields!(WorldStartupHole:component,filter,mesh,mesh_sha256,vertices);
 fields!(WorldNoiseReference:amplitude,frequency,lacunarity,octaves,persistence);
 fields!(WorldRoadReference:gen_at_start,gen_in_one_frame,source,prototypes,length,road_bone_num,road_bone_length,road_segment_length,road_above_terrain,width,scale,xmax_angle,ymax_angle,start_straight,straight_modifier,align_edge_of_the_world,aliign_road,align_buildings,force_homesick,def_point_range,def_point_step,add_point,building_bone_num,noises);
 fields!(WorldTerrainReference:source,prefabs,materials,textures,game_settings,tiles,edge_of_world,edge_of_world_gradient,edge_of_world_generation_dist,edge_of_world_warp_dist,edge_of_world_warp_offset,random_seed,seed);
-fields!(WorldGameSettings:source,biome,homesick_mode);
+fields!(WorldGameSettings:source,homesick_mode);
 fields!(WorldTileReference:tile_size,resolution,draw_distance,y_coord);
 fields!(WorldGeneratorReference:source,types,seedplus,no_spawn_chance,point_dist,chunk_dist,height_add,affected_by_road,affects_terrain,align_to_building,align_to_road,buildingspawn,wait_for_terrain);
 fields!(WorldObjectTypeReference:prototype,in_desert,in_grass,in_winter,affected_by_road,chance,max_dist_from_road,min_dist_from_building,min_dist_from_road);
