@@ -270,7 +270,9 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
     for name in ["RotationModule", "EmissionModule"] {
         check(p.module_flags.contains_key(name), name)?;
     }
-    check(scalar("ShapeModule.type")? == 4., "ShapeModule.type")?;
+    // Checked storm systems use shape type 2. Other selected systems use type 4.
+    let shape = if p.role.starts_with("storm_") { 2. } else { 4. };
+    check(scalar("ShapeModule.type")? == shape, "ShapeModule.type")?;
     for name in [
         "InitialModule.startSize",
         "InitialModule.startSpeed",

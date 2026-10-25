@@ -100,7 +100,7 @@ pub fn smoke_rate(running: bool, rpm: f32, max_rpm: f32, rate: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::fluids::FluidEntry;
     use crate::reference::{
@@ -185,7 +185,8 @@ mod tests {
         }
     }
 
-    fn smoke(capacity: u32, lifetime: f32) -> ParticleReference {
+    /// A cone system: 1 per second, start speed 5, size 1.
+    pub(crate) fn smoke(capacity: u32, lifetime: f32) -> ParticleReference {
         let gradient = || GradientReference {
             mode: 0,
             colors: Vec::new(),

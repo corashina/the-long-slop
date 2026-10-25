@@ -49,7 +49,7 @@ export function createPerformance(readWasmBytes,readRender){
    if(root.hidden||now-lastPaint<250)return false;
    lastPaint=now;return true;
   },
-  counters(steps,wheelContacts,bodies,colliders,roads,terrain,objects,jobs,pending,cpuBytes,gpuBytes){
+  counters(steps,wheelContacts,bodies,colliders,roads,terrain,objects,jobs,pending,cpuBytes,gpuBytes,storms,stormInfluence,stormParticles){
    const sample=timings.summary();
    values.textContent=(sample?
     'FPS: '+sample.fps.toFixed(0)+'\nFrame avg / worst: '+ms(sample.average)+' / '+ms(sample.worst)+' ms'+
@@ -57,6 +57,7 @@ export function createPerformance(readWasmBytes,readRender){
     'FPS: --\nFrame avg / worst: --\nPhysics / world CPU avg: --')+
     '\nPhysics steps/frame: '+steps+'\nWheel contacts: '+wheelContacts+'\nBodies / colliders: '+bodies+' / '+colliders+
     '\nRoads / terrain tiles: '+roads+' / '+terrain+'\nActive generated objects: '+objects+'\nJobs / queued work: '+jobs+' / '+pending+
+    '\nStorms / strongest influence / particles: '+storms+' / '+stormInfluence.toFixed(2)+' / '+stormParticles+
     '\nWASM: '+mib(readWasmBytes())+'\nJS heap: '+mib(performance.memory?.usedJSHeapSize)+
     '\nWorld render CPU reserve: '+mib(cpuBytes)+'\nWorld render GPU reserve: '+mib(gpuBytes)+renderLines(readRender());
   },

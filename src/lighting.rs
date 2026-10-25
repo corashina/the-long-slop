@@ -16,7 +16,7 @@ pub struct CloudOutput {
     pub speed: f32,
 }
 
-/// Source cycle signals. Angles use Unity Euler degrees; colors retain source channels.
+/// Clear-weather source signals. Angles use Unity Euler degrees; colors retain source channels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CycleOutput {
     pub phase: CyclePhase,
@@ -52,6 +52,18 @@ pub struct CycleOutput {
     pub shader_time_seconds: f64,
 }
 
+impl CycleOutput {
+    /// Source night weight: 0 by day, 1 at night. Dawn and dusk follow the phase progress.
+    pub fn night(&self) -> f32 {
+        match self.phase {
+            CyclePhase::Night => 1.,
+            CyclePhase::Day => 0.,
+            CyclePhase::Dawn => 1. - self.progress,
+            CyclePhase::Dusk => self.progress,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CycleAdvance {
     pub simulation_delta: f32,
@@ -68,6 +80,10 @@ pub struct CycleState {
     star_rotation: f32,
     previous_cycle_extra: f32,
     output: CycleOutput,
+    clear_output: CycleOutput,
+    reference: CycleReference,
+    sky_sample_time: f64,
+    sampled_sky: [f32; 4],
     terrain_color: [f32; 4],
     next_biome_refresh: f64,
 }
@@ -83,7 +99,11 @@ impl CycleState {
             cloud_coordinate: 0.,
             star_rotation: 0.,
             previous_cycle_extra: 0.,
+            clear_output: output.clone(),
+            sampled_sky: output.sky_tint,
             output,
+            reference: reference.clone(),
+            sky_sample_time: 0.,
             terrain_color: [0.; 4],
             next_biome_refresh: reference.biome_refresh_seconds as f64,
         }
@@ -129,6 +149,7 @@ impl CycleState {
         );
         self.output.grading_temperature = grading_temperature;
         self.set_sleep_progress(reference, advance.sleep_progress);
+        self.clear_output = self.output.clone();
         self.cycle_seconds = if cycle as f32 > reference.day_seconds + reference.night_seconds {
             0.
         } else {
@@ -161,17 +182,124 @@ impl CycleState {
             self.terrain_color,
         );
         self.output.grading_temperature = grading_temperature;
+        self.clear_output = self.output.clone();
+        self.sampled_sky = self.output.sky_tint;
+        self.sky_sample_time = self.elapsed_seconds;
     }
     /// Felho changes material speed at sleep endpoints without advancing time.
     pub fn set_sleep_progress(&mut self, r: &CycleReference, progress: Option<f32>) {
         let p = progress.unwrap_or(1.);
-        for (cloud, source) in self.output.clouds.iter_mut().zip(&r.clouds) {
+        for (index, (cloud, source)) in self.output.clouds.iter_mut().zip(&r.clouds).enumerate() {
             cloud.speed = if p < 0.5 {
                 lerp(source.mid_speed, source.max_speed, inverse_lerp(0., 0.5, p))
             } else {
                 lerp(source.min_speed, source.mid_speed, inverse_lerp(0.5, 1., p))
             };
+            self.clear_output.clouds[index].speed = cloud.speed;
         }
+    }
+
+    /// Compose from retained clear values. SetBiome samples sky tint once per source second.
+    pub fn compose_weather(
+        &mut self,
+        weather: &crate::reference::WeatherReference,
+        influence: crate::weather::StormInfluence,
+    ) {
+        self.output = self.clear_output.clone();
+        let w = influence.strength.clamp(0., 1.);
+        let r = &self.reference;
+        let s = &weather.storm;
+        let o = &mut self.output;
+        if self.elapsed_seconds >= self.sky_sample_time + f64::from(r.biome_refresh_seconds) {
+            self.sky_sample_time = self.elapsed_seconds;
+            self.sampled_sky = color_lerp(self.clear_output.sky_tint, s.sky_color, w);
+        }
+        if influence.id.is_none() || w == 0. {
+            return;
+        }
+        o.sky_tint = self.sampled_sky;
+        o.directional_intensity *= lerp(1., s.intensity_multipler, w);
+        o.ambient *= lerp(1., s.ambient_multipler, w);
+        let p = o.progress;
+        let biome = o.biome_color;
+        let cube = w * w * w;
+        let day_ground = color_lerp(
+            biome_color(&r.day_ground_colors, biome),
+            s.sky_ground_color,
+            w,
+        );
+        let night_ground = biome_color(&r.night_ground_colors, biome);
+        o.ground_color = match o.phase {
+            CyclePhase::Day => day_ground,
+            CyclePhase::Night => night_ground,
+            CyclePhase::Dawn => color_lerp(night_ground, day_ground, p),
+            CyclePhase::Dusk => color_lerp(day_ground, night_ground, p),
+        };
+        o.atmosphere_thickness = match o.phase {
+            CyclePhase::Night => 0.,
+            CyclePhase::Day => lerp(1., s.atmosphere_thickness, cube),
+            _ => lerp(
+                s.atmosphere_thickness,
+                self.clear_output.atmosphere_thickness,
+                (1. - cube).max(p),
+            ),
+        };
+        let day_density = lerp(
+            biome_float(&r.day_fog_densities, biome),
+            s.fog_density,
+            cube,
+        );
+        let night_density = biome_float(&r.night_fog_densities, biome);
+        let day_fog = color_lerp(biome_color(&r.day_fog_colors, biome), s.fog_color, w);
+        let night_fog = biome_color(&r.night_fog_colors, biome);
+        let (density, color) = match o.phase {
+            CyclePhase::Day => (day_density, day_fog),
+            CyclePhase::Night => (night_density, night_fog),
+            CyclePhase::Dawn => (
+                lerp(night_density, day_density, inverse_lerp(0., 0.5, p)),
+                color_lerp(night_fog, day_fog, inverse_lerp(0.5, 1., p)),
+            ),
+            CyclePhase::Dusk => (
+                lerp(day_density, night_density, inverse_lerp(0.5, 1., p)),
+                color_lerp(day_fog, night_fog, inverse_lerp(0., 0.5, p)),
+            ),
+        };
+        o.fog_density = density * r.fog_modifier;
+        o.fog_color = color;
+        for (cloud, source) in o.clouds.iter_mut().zip(&r.clouds) {
+            let day = color_lerp(source.day_color, s.cloud_color, w);
+            let transition = color_lerp(source.transition_color, s.cloud_color, w);
+            cloud.color = match o.phase {
+                CyclePhase::Day => day,
+                CyclePhase::Night => source.night_color,
+                CyclePhase::Dawn if p < 0.5 => {
+                    color_lerp(source.night_color, transition, inverse_lerp(0.3, 0.5, p))
+                }
+                CyclePhase::Dawn => color_lerp(transition, day, (p - 0.5) * 2.),
+                CyclePhase::Dusk if p < 0.5 => color_lerp(day, transition, p * 2.),
+                CyclePhase::Dusk => {
+                    color_lerp(transition, source.night_color, inverse_lerp(0.5, 0.7, p))
+                }
+            };
+        }
+        let day_flare = biome_float(&r.flare_day, biome) * (1. - w);
+        let night_flare = biome_float(&r.flare_night, biome);
+        o.flare_brightness = match o.phase {
+            CyclePhase::Day => day_flare,
+            CyclePhase::Night => night_flare,
+            CyclePhase::Dawn => lerp3(
+                night_flare,
+                biome_float(&r.flare_dawn, biome) * (1. - w),
+                day_flare,
+                o.flare_progress,
+            ),
+            CyclePhase::Dusk => lerp3(
+                day_flare,
+                biome_float(&r.flare_dusk, biome) * (1. - w),
+                night_flare,
+                o.flare_progress,
+            ),
+        };
     }
 
     pub fn needs_terrain_color(&self, dt: f64) -> bool {
@@ -1310,7 +1438,205 @@ pub fn spot_cookie_matrix(
 
 #[cfg(test)]
 mod tests {
-    use super::biome_float;
+    use super::*;
+    use crate::reference::{
+        AssetId, CloudReference, GradientAlpha, GradientColor, NodeId, ResourceReference,
+        ShaderReference, SkyGeometryReference, SkyMaterialReference, SourceId, Transform,
+    };
+    use crate::weather::{StormId, StormInfluence};
+
+    fn source() -> SourceId {
+        SourceId {
+            file: "level1".into(),
+            path_id: 1,
+        }
+    }
+    fn resource() -> ResourceReference {
+        ResourceReference {
+            source: source(),
+            path: String::new(),
+            sha256: String::new(),
+        }
+    }
+    fn material() -> SkyMaterialReference {
+        SkyMaterialReference {
+            source: source(),
+            shader: ShaderReference {
+                compiled_data: resource(),
+                source: source(),
+                path: String::new(),
+                sha256: String::new(),
+                name: String::new(),
+            },
+            source_data: resource(),
+            floats: Default::default(),
+            colors: Default::default(),
+            textures: Vec::new(),
+        }
+    }
+    fn gradient() -> GradientReference {
+        GradientReference {
+            mode: 0,
+            colors: vec![GradientColor {
+                time: 0.,
+                value: [1.; 4],
+            }],
+            alphas: vec![GradientAlpha {
+                time: 0.,
+                value: 1.,
+            }],
+        }
+    }
+    fn cloud() -> CloudReference {
+        CloudReference {
+            asset: AssetId(0),
+            node: NodeId(0),
+            material: material(),
+            day_color: [1.; 4],
+            transition_color: [0.5; 4],
+            night_color: [0.; 4],
+            min_speed: 1.,
+            mid_speed: 2.,
+            max_speed: 3.,
+            min_density: 0.,
+            max_density: 1.,
+        }
+    }
+    /// The start is in the day. The terrain color is zero, so biome values use index 2.
+    fn cycle() -> CycleReference {
+        CycleReference {
+            source: source(),
+            day_seconds: 1000.,
+            night_seconds: 1000.,
+            dawn_seconds: 100.,
+            dusk_seconds: 100.,
+            startup_offset_seconds: 500.,
+            color: gradient(),
+            atmosphere_thickness: gradient(),
+            day_intensity: 1.,
+            night_intensity: 0.1,
+            noon_intensity: 1.2,
+            day_ambient: 1.,
+            night_ambient: 0.2,
+            min_reflection: 0.,
+            max_reflection: 1.,
+            min_exposure: 0.5,
+            max_exposure: 1.,
+            day_angle_min: 10.,
+            day_angle_max: 170.,
+            day_yaw_degrees: 30.,
+            midnight_angle_dawn: -10.,
+            midnight_angle_dusk: 190.,
+            min_moon_angle: 20.,
+            max_moon_angle: 160.,
+            color_delay: 0.,
+            star_speed: 0.,
+            cloud_perlin_spread: 0.,
+            cloud_perlin_speed: 0.,
+            flare_lerp_start: 0.2,
+            flare_lerp_end: 0.8,
+            biome_refresh_seconds: 1.,
+            fog_modifier: 2.,
+            temperature_values: [0.; 3],
+            desert_color: [1., 0., 0., 1.],
+            sky_colors: [[0.3; 4]; 3],
+            day_ground_colors: [[0.4; 4]; 3],
+            night_ground_colors: [[0.1; 4]; 3],
+            day_fog_colors: [[0.6; 4]; 3],
+            night_fog_colors: [[0.2; 4]; 3],
+            day_fog_densities: [0.01; 3],
+            night_fog_densities: [0.02; 3],
+            temp_days: [30.; 3],
+            temp_nights: [10.; 3],
+            temp_add_noons: [5.; 3],
+            flare_dawn: [0.5; 3],
+            flare_day: [1.; 3],
+            flare_dusk: [0.5; 3],
+            flare_night: [0.; 3],
+            day_color: [1.; 4],
+            night_color: [0.; 4],
+            dawn_color: [0.5; 4],
+            dusk_color: [0.5; 4],
+            star_color_day: [0.; 4],
+            star_color_night: [1.; 4],
+            clouds: vec![cloud(), cloud()],
+            star_material: material(),
+            sky_resources: Vec::new(),
+            sun_flares: Vec::new(),
+            stars: Vec::new(),
+            sky_geometry: SkyGeometryReference {
+                asset: AssetId(0),
+                root: NodeId(0),
+                pose: Transform {
+                    translation: [0.; 3],
+                    rotation: [0., 0., 0., 1.],
+                    scale: [1.; 3],
+                },
+            },
+            cloud_shadow_cookie: 0,
+        }
+    }
+    fn advance(state: &mut CycleState, r: &CycleReference) {
+        state.advance(
+            r,
+            CycleAdvance {
+                simulation_delta: 1.,
+                cycle_extra: 0.,
+                cloud_scale: 1.,
+                sleep_progress: None,
+            },
+        );
+    }
+
+    #[test]
+    fn storm_blends_over_clear_cycle() {
+        let r = cycle();
+        let mut weather = crate::weather::tests::reference();
+        let s = &mut weather.storm;
+        s.fog_density = 0.5;
+        s.fog_color = [0.9, 0.8, 0.7, 1.];
+        s.sky_color = [0.7, 0.6, 0.5, 1.];
+        s.atmosphere_thickness = 3.;
+        s.intensity_multipler = 0.5;
+        s.ambient_multipler = 0.25;
+        let mut state = CycleState::new(&r);
+        advance(&mut state, &r);
+        let clear = state.output().clone();
+        assert_eq!(clear.phase, CyclePhase::Day);
+        state.compose_weather(&weather, StormInfluence::default());
+        assert_eq!(*state.output(), clear);
+
+        let full = StormInfluence {
+            id: Some(StormId(0)),
+            strength: 1.,
+        };
+        state.compose_weather(&weather, full);
+        let o = state.output();
+        assert_eq!(o.fog_color, weather.storm.fog_color);
+        assert_eq!(o.fog_density, 0.5 * r.fog_modifier);
+        assert_eq!(o.atmosphere_thickness, 3.);
+        assert_eq!(o.directional_intensity, clear.directional_intensity * 0.5);
+        assert_eq!(o.ambient, clear.ambient * 0.25);
+        assert_eq!(o.flare_brightness, 0.);
+        // Sky tint was sampled at zero influence in this refresh.
+        assert_eq!(o.sky_tint, clear.sky_tint);
+
+        // Next refresh at half weight: fog density uses the cubed weight.
+        advance(&mut state, &r);
+        state.compose_weather(
+            &weather,
+            StormInfluence {
+                strength: 0.5,
+                ..full
+            },
+        );
+        let o = state.output();
+        assert_eq!(o.fog_density, lerp(0.01, 0.5, 0.125) * r.fog_modifier);
+        assert_eq!(
+            o.sky_tint,
+            color_lerp(clear.sky_tint, weather.storm.sky_color, 0.5)
+        );
+    }
 
     #[test]
     fn grading_temperature_matches_lerp_float() {

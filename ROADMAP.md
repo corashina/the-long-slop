@@ -62,6 +62,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 5. Load a Mixed save with Winter set. The world must load as winter.
 6. Check the winter color: colder view in Winter, changes at biome borders in Mixed.
 7. Check F3 near the garage and on the road in Mixed while the color grading rebakes.
+8. Sandstorms (W07): run `cargo test --lib terrain_sample_matches_published_ground -- --ignored`. Spawn a storm near the player with a temporary hook (never commit it). Check sky, fog, light, sound, dust, wind on loose items, and that dust and wind stop inside buildings and cars. Check the F3 storm line and the frame rate in a storm.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
@@ -70,7 +71,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 | W04 | Expand buildings. [Generation](src/world/generation.rs) | L | Villages, big stops, maze, power cables, breakable lamps, random lights and doors. [I07-I09, I11-I13] |
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
-| W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
+| W07 | Add weather. | L | Saved sandstorm state, tumbleweeds, snowfall in the winter biome. [J02-J04] |
 
 ## 4. More cars
 

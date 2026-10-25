@@ -194,6 +194,9 @@ extern "C" {
         pending: u32,
         cpu_bytes: f64,
         gpu_bytes: f64,
+        storms: u32,
+        storm_influence: f32,
+        storm_particles: u32,
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
     pub fn game_measure_requested() -> bool;
