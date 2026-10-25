@@ -1410,6 +1410,13 @@ impl GarageRuntime {
             self.area.player.focus_position(&self.physics)
         };
         let absolute = self.stream.origin.absolute(focus);
+        // napszak refreshes CurrentColor under the player each second.
+        if self.lighting.cycle.needs_terrain_color(0.) {
+            let color = self.stream.terrain_color(absolute);
+            self.lighting
+                .cycle
+                .set_terrain_color(&reference.lighting.cycle, &color, 0.);
+        }
         self.stream.request_at(
             absolute,
             self.persistent_world.absolute_vehicle_position(
