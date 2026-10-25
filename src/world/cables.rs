@@ -200,27 +200,19 @@ impl BuildingCable {
     pub fn rope0(&self, pose: AbsolutePose, scale: [f32; 3]) -> [f64; 3] {
         self.world(&self.ropes[0], pose, scale).0
     }
-    /// Source `CheckCableConnections` and `ropeScript.Connect(target, k)`.
-    /// `poles` are ranges of `targets`. No pole in range: no output, the root stays inactive.
+    /// Source `ropeScript.Connect(target, k)` after `CheckCableConnections`.
+    /// No target: no output, the root stays inactive.
     pub fn connect(
         &self,
         pose: AbsolutePose,
         scale: [f32; 3],
-        targets: &[[f64; 3]],
-        poles: &[Range<usize>],
+        target: Option<[f64; 3]>,
         output: &mut Vec<NodeAppearance>,
     ) {
         output.clear();
-        let Some((pole, k)) = nearest_target(
-            self.rope0(pose, scale),
-            poles
-                .iter()
-                .enumerate()
-                .map(|(i, r)| (i as u32, &targets[r.clone()])),
-        ) else {
+        let Some(target) = target else {
             return;
         };
-        let target = targets[poles[pole as usize].start + k];
         output.push(NodeAppearance {
             node: self.root.clone(),
             primary: None,
@@ -402,35 +394,99 @@ impl CableRecipes {
     }
 }
 
-/// Resumable road pole search for one building cable. The buffers are reused.
+/// Resumable road pole search around one rope 0. The buffers are reused.
 #[derive(Default)]
-pub(crate) struct BuildingCableSearch {
-    placement: Option<Placement>,
-    bounds: Option<WorldBounds>,
+pub(crate) struct PoleSearch {
+    rope0: Option<[f64; 3]>,
     segments: Vec<u32>,
     next: usize,
     targets: Vec<[f64; 3]>,
     poles: Vec<Range<usize>>,
 }
+impl PoleSearch {
+    pub fn rope0(&self) -> Option<[f64; 3]> {
+        self.rope0
+    }
+    /// Source `CheckCableConnections` reads the roads that exist at `FStart`: use the prepared prefix.
+    pub fn start(&mut self, roads: &RoadIndex, rope0: [f64; 3]) {
+        assert_eq!(
+            roads.segments_in(range(rope0), roads.coverage(), &mut self.segments),
+            super::QueryStatus::Complete
+        );
+        self.next = 0;
+        self.targets.clear();
+        self.poles.clear();
+        self.rope0 = Some(rope0);
+    }
+    /// Replay at most `budget` road segments. True when every candidate is read.
+    pub fn step(
+        &mut self,
+        recipes: &CableRecipes,
+        world: &WorldReference,
+        roads: &mut RoadIndex,
+        budget: &mut usize,
+    ) -> Result<bool, ReferenceError> {
+        let Some(rope0) = self.rope0 else {
+            return Ok(false);
+        };
+        let bounds = range(rope0);
+        while let Some(&index) = self.segments.get(self.next) {
+            if *budget == 0 {
+                return Ok(false);
+            }
+            let segment = roads.prepare_segment(index, *budget)?;
+            *budget = budget.saturating_sub(roads.replay_work());
+            let Some(segment) = segment else {
+                return Ok(false);
+            };
+            self.next += 1;
+            if (0..3).all(|a| {
+                segment.bounds.min[a] <= bounds.max[a] && segment.bounds.max[a] >= bounds.min[a]
+            }) {
+                let start = self.targets.len();
+                recipes.targets(world, &segment, &mut self.targets);
+                self.poles.push(start..self.targets.len());
+            }
+        }
+        Ok(true)
+    }
+    /// The selected pole target, after `step` returns true.
+    pub fn target(&self) -> Option<[f64; 3]> {
+        let (pole, k) = nearest_target(
+            self.rope0?,
+            self.poles
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (i as u32, &self.targets[r.clone()])),
+        )?;
+        Some(self.targets[self.poles[pole as usize].start + k])
+    }
+    pub fn retained_bytes(&self) -> usize {
+        self.segments.capacity() * std::mem::size_of::<u32>()
+            + self.targets.capacity() * std::mem::size_of::<[f64; 3]>()
+            + self.poles.capacity() * std::mem::size_of::<Range<usize>>()
+    }
+}
+fn range(rope0: [f64; 3]) -> WorldBounds {
+    WorldBounds {
+        min: rope0.map(|v| v - CABLE_RANGE),
+        max: rope0.map(|v| v + CABLE_RANGE),
+    }
+}
+
+/// Resumable road pole search for one building cable.
+#[derive(Default)]
+pub(crate) struct BuildingCableSearch {
+    placement: Option<Placement>,
+    search: PoleSearch,
+}
 impl BuildingCableSearch {
     pub fn placement(&self) -> Option<&Placement> {
         self.placement.as_ref()
     }
-    /// Source `CheckCableConnections` reads the roads that exist at `FStart`: use the prepared prefix.
     pub fn start(&mut self, roads: &RoadIndex, cable: &BuildingCable, placement: Placement) {
-        let rope0 = cable.rope0(placement.pose, placement.scale);
-        let bounds = WorldBounds {
-            min: rope0.map(|v| v - CABLE_RANGE),
-            max: rope0.map(|v| v + CABLE_RANGE),
-        };
-        assert_eq!(
-            roads.segments_in(bounds, roads.coverage(), &mut self.segments),
-            super::QueryStatus::Complete
-        );
-        self.bounds = Some(bounds);
-        self.next = 0;
-        self.targets.clear();
-        self.poles.clear();
+        self.search
+            .start(roads, cable.rope0(placement.pose, placement.scale));
         self.placement = Some(placement);
     }
     /// Replay at most `budget` road segments.
@@ -443,26 +499,11 @@ impl BuildingCableSearch {
         budget: &mut usize,
         output: &mut Vec<NodeAppearance>,
     ) -> Result<Option<super::GeneratedId>, ReferenceError> {
-        let (Some(placement), Some(bounds)) = (&self.placement, self.bounds) else {
+        let Some(placement) = &self.placement else {
             return Ok(None);
         };
-        while let Some(&index) = self.segments.get(self.next) {
-            if *budget == 0 {
-                return Ok(None);
-            }
-            let segment = roads.prepare_segment(index, *budget)?;
-            *budget = budget.saturating_sub(roads.replay_work());
-            let Some(segment) = segment else {
-                return Ok(None);
-            };
-            self.next += 1;
-            if (0..3).all(|a| {
-                segment.bounds.min[a] <= bounds.max[a] && segment.bounds.max[a] >= bounds.min[a]
-            }) {
-                let start = self.targets.len();
-                recipes.targets(world, &segment, &mut self.targets);
-                self.poles.push(start..self.targets.len());
-            }
+        if !self.search.step(recipes, world, roads, budget)? {
+            return Ok(None);
         }
         let cable = recipes
             .building(&placement.prototype)
@@ -470,8 +511,7 @@ impl BuildingCableSearch {
         cable.connect(
             placement.pose,
             placement.scale,
-            &self.targets,
-            &self.poles,
+            self.search.target(),
             output,
         );
         Ok(self.placement.take().map(|p| p.id))
@@ -480,9 +520,7 @@ impl BuildingCableSearch {
         self.placement
             .as_ref()
             .map_or(0, super::contents::placement_heap)
-            + self.segments.capacity() * std::mem::size_of::<u32>()
-            + self.targets.capacity() * std::mem::size_of::<[f64; 3]>()
-            + self.poles.capacity() * std::mem::size_of::<Range<usize>>()
+            + self.search.retained_bytes()
     }
 }
 
@@ -526,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn building_cable_connects_to_a_pole_in_range() {
+    fn building_cable_aims_at_the_target() {
         let id = |path_id| SourceId {
             file: "level1".into(),
             path_id,
@@ -550,14 +588,8 @@ mod tests {
         let rope0 = cable.rope0(pose, scale);
         assert!((0..3).all(|i| (rope0[i] - [1000., 10., 1996.][i]).abs() < 1e-4));
         let offset = |d: [f64; 3]| std::array::from_fn(|i| rope0[i] + d[i]);
-        // Pole 0: target 0 at 55 m, target 1 at 50 m. Pole 1: target 0 at 250 m.
-        let targets = [
-            offset([33., 0., 44.]),
-            offset([30., 0., 40.]),
-            offset([150., 0., 200.]),
-        ];
         let mut output = Vec::new();
-        cable.connect(pose, scale, &targets, &[0..2, 2..3], &mut output);
+        cable.connect(pose, scale, Some(offset([30., 0., 40.])), &mut output);
         assert_eq!(output.len(), 2);
         assert_eq!((&output[0].node, output[0].active), (&id(2), Some(true)));
         let rope = &output[1];
@@ -567,11 +599,8 @@ mod tests {
         assert!((z - 0.5).abs() < 1e-5, "scale z is distance / 100");
         let forward = world_forward(yaw, rope.rotation.unwrap());
         assert!((forward - Vector::new(0.6, 0., 0.8)).length() < 1e-4);
-        cable.connect(pose, scale, &targets, &[2..3], &mut output);
-        assert!(
-            output.is_empty(),
-            "no pole under 200 m: the root stays inactive"
-        );
+        cable.connect(pose, scale, None, &mut output);
+        assert!(output.is_empty(), "no target: the root stays inactive");
     }
 
     #[test]

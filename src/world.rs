@@ -10,6 +10,8 @@ pub use changes::{
 pub use types::*;
 
 mod cables;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use cables::aim;
 mod lamps;
 mod source_lights;
 pub use source_lights::{WorldLight, required_world_lights};

@@ -39,6 +39,7 @@ class RopeFake:
     def resolve(self, owner, pointer): return self.objects.get(pointer['m_PathID'])
     def class_name(self, r): return r.name
     def transform_for(self, game_object): return self.root
+    def hierarchy(self, root, activate_root=False): return [{'reader': root}, {'reader': self.segment}]
 
 class RopeTests(unittest.TestCase):
     def test_rope_rule_record_keeps_rope_links(self):
@@ -54,3 +55,9 @@ class RopeTests(unittest.TestCase):
         nodes = [{'id': 433, 'source': {'file': 'level1', 'path_id': 2}}, {'id': 434, 'source': {'file': 'level1', 'path_id': 3}}]
         self.assertEqual(recover_home_cable(RopeFake(), nodes), {'root': 433, 'ropes': [434]})
         with self.assertRaises(ValueError): recover_home_cable(RopeFake(), nodes[:1])
+
+    def test_home_cable_keeps_inactive_rope_geometry(self):
+        from tools.reference.world import prepare_home_cable
+        source = RopeFake()
+        prepare_home_cable(source)
+        self.assertEqual(source.home_cable_geometry_nodes, {('level1', 2), ('level1', 3)})

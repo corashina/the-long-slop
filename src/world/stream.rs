@@ -183,6 +183,7 @@ pub struct WorldStream {
     /// Road building cables, one per wanted building root. Empty: no cable.
     building_cables: Vec<CableEntry>,
     cable_search: super::cables::BuildingCableSearch,
+    home_cable: super::cables::PoleSearch,
     lights: Vec<super::WorldLight>,
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
@@ -753,6 +754,7 @@ impl WorldStream {
             cables,
             building_cables: Vec::new(),
             cable_search: super::cables::BuildingCableSearch::default(),
+            home_cable: super::cables::PoleSearch::default(),
             lights: Vec::with_capacity(MAX_ROADS),
             wanted_lights: Vec::with_capacity(MAX_ROADS),
             origin: WorldOrigin::default(),
@@ -2155,6 +2157,29 @@ impl WorldStream {
             }
             self.replay_roots.push(origin.clone());
             break;
+        }
+    }
+    /// Source home `buildingscript.FStart`: the road pole target for home rope 0.
+    /// The search starts on the startup roads and replays at most 8 road segments per call.
+    pub fn home_cable_target(&mut self, rope0: [f64; 3]) -> (super::QueryStatus, Option<[f64; 3]>) {
+        if !self.initial_generation_ready || self.failure.is_some() {
+            return (super::QueryStatus::Pending, None);
+        }
+        if self.home_cable.rope0() != Some(rope0) {
+            self.home_cable.start(&self.roads, rope0);
+        }
+        let mut budget = 8;
+        let done =
+            self.home_cable
+                .step(&self.cables, &self.reference, &mut self.roads, &mut budget);
+        self.last_road_work += 8 - budget;
+        match done {
+            Ok(true) => (super::QueryStatus::Complete, self.home_cable.target()),
+            Ok(false) => (super::QueryStatus::Pending, None),
+            Err(error) => {
+                self.failure = Some(error.0);
+                (super::QueryStatus::Pending, None)
+            }
         }
     }
     pub fn spawn_boundaries(&self) -> &[super::SpawnBoundary] {
@@ -4847,6 +4872,7 @@ impl WorldStream {
                     .map(cable_entry_heap)
                     .sum::<usize>()
                 + self.cable_search.retained_bytes()
+                + self.home_cable.retained_bytes()
                 + self.road_candidates.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_roads.capacity() * std::mem::size_of::<u32>()
                 + self.wanted_lights.capacity() * std::mem::size_of::<u32>()

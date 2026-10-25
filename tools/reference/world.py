@@ -497,18 +497,27 @@ def recover_catalog(source, reader, selected, database):
         row['invalid_category_indices']=[i for i in row['categories'] or [] if i>=len(category_names)]
     return {'source':source_id(database),'items':items,'categories':sorted(categories,key=lambda c:c['index'])}
 
-def recover_home_cable(source, nodes):
-    """Map the home buildingscript connectToPole rope to manifest node ids."""
+def home_rope(source):
+    """The home buildingscript connectToPole ropeScript, its data and its root Transform."""
     home=source.get('level1',HOME_BUILDING)
     if source.class_name(home)!='buildingscript':raise ValueError(f'level1:{HOME_BUILDING} is not buildingscript')
     rope=source.resolve(home,source.read(home)['connectToPole'])
     if rope is None or source.class_name(rope)!='ropeScript':raise ValueError(f'level1:{HOME_BUILDING} connectToPole is not ropeScript')
     data=source.read(rope)
+    return rope,data,source.transform_for(source.resolve(rope,data['m_GameObject']))
+
+def prepare_home_cable(source):
+    """The home rope root is inactive until it connects. Keep the meshes of its subtree."""
+    _,_,root=home_rope(source)
+    source.home_cable_geometry_nodes={key(n['reader']) for n in source.hierarchy(root,activate_root=True)}
+
+def recover_home_cable(source, nodes):
+    """Map the home buildingscript connectToPole rope to manifest node ids."""
+    rope,data,root=home_rope(source)
     node_ids={(n['source']['file'],n['source']['path_id']):n['id'] for n in nodes}
     def node(transform, field):
         if transform is None or key(transform) not in node_ids:raise ValueError(f'{key(rope)} {field}: rope node is not exported')
         return node_ids[key(transform)]
-    root=source.transform_for(source.resolve(rope,data['m_GameObject']))
     return {'root':node(root,'m_GameObject'),'ropes':[node(source.resolve(rope,p),f'ropes[{i}]') for i,p in enumerate(data['ropes'])]}
 
 

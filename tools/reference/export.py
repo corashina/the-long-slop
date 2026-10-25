@@ -320,6 +320,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     particles=recover_particles(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
+    from .world import prepare_home_cable
+    prepare_home_cable(source)
     report = {}
     for name, readers in roots.items():
         report[name] = export_gltf((source,readers),output/f'{name}.gltf',library,list(roots).index(name)+1,name!='sky')
