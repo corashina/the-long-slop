@@ -28,6 +28,12 @@ class ExhaustExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"Unsupported exhaust particle modules exhaust_0_0: \['NoiseModule'\]"):
             validate_exhaust({'role': 'exhaust_0_0', 'module_flags': flags})
 
+    def test_texture_sheet_must_play_grid_over_lifetime(self):
+        flags = {'InitialModule': True, 'UVModule': True}
+        scalars = {'UVModule.mode': 0, 'UVModule.animationType': 1, 'UVModule.timeMode': 0}
+        with self.assertRaisesRegex(ValueError, 'Unsupported exhaust texture sheet'):
+            validate_exhaust({'role': 'exhaust_0_0', 'module_flags': flags, 'scalars': scalars})
+
 
 if __name__ == '__main__':
     unittest.main()

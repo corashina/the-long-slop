@@ -78,7 +78,7 @@ def validate_particles_export(particles,manifest):
 
 # Modules that src/particles.rs runs. ShapeModule and EmissionModule feed emission; the others change live particles.
 EXHAUST_MODULES=frozenset({'InitialModule','ShapeModule','EmissionModule','VelocityModule','ForceModule',
-    'InheritVelocityModule','SizeModule','ColorModule','RotationModule','CollisionModule'})
+    'InheritVelocityModule','SizeModule','ColorModule','RotationModule','CollisionModule','UVModule'})
 
 def recover_exhaust(source,car_reader,car,owner,index,output):
     """Read carscript.psSmoke. The runtime sets the rate, so the exported rate is 1."""
@@ -91,6 +91,9 @@ def recover_exhaust(source,car_reader,car,owner,index,output):
 def validate_exhaust(p):
     unsupported=sorted(k for k,v in p['module_flags'].items() if v and k not in EXHAUST_MODULES)
     if unsupported:raise ValueError(f"Unsupported exhaust particle modules {p['role']}: {unsupported}")
+    # The runtime plays a whole grid sheet over lifetime only.
+    if p['module_flags'].get('UVModule') and any(p['scalars'][f'UVModule.{k}']!=0 for k in ('mode','animationType','timeMode')):
+        raise ValueError(f"Unsupported exhaust texture sheet {p['role']}")
     validate_particle_data(p,2)
 
 def relative_pose(source, root, owner):
