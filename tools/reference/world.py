@@ -429,11 +429,25 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for identity,record in selected.records.items():
         if identity not in records:records[identity]=record
     world['records']=list(records.values())
+    bind_light_cookies(source,world)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
     project_runtime_receipts(world,world_probe.PROBE_ROOT)
     project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
+
+def bind_light_cookies(source, world):
+    """Bind each world Light cookie to the lighting spot cookie texture that renders it."""
+    textures={tuple(t['source'].values()):t['id'] for t in source.lighting_textures.values()}
+    spot={l['cookie'] for l in source.lighting_lights if l['kind']=='spot' and l['cookie'] is not None}
+    bindings={}
+    for r in world['records']:
+        cookie=r['fields'].get('m_Cookie') if r['class_name']=='Light' else None
+        if not cookie or cookie['kind']!='link':continue
+        identity=tuple(cookie['value'].values())
+        if r['fields']['m_Type']['value']!=0 or textures.get(identity) not in spot:raise ValueError(f"{r['source']} world light cookie has no lighting spot cookie texture")
+        bindings[identity]={'source':cookie['value'],'texture':textures[identity]}
+    world['light_cookies']=[bindings[i] for i in sorted(bindings)]
 
 def recover_catalog(source, reader, selected, database):
     """Read source initializer tables without retaining method bodies in runtime output."""
