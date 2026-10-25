@@ -367,3 +367,41 @@ fn incompatible_part_scan_allows_source_drop_instead_of_trapping_the_part() {
     assert_eq!(area.items.get(rear).unwrap().location, ItemLocation::World);
     assert_eq!(area.interaction.held(), None);
 }
+
+#[test]
+#[ignore = "requires the installed single-Lada export"]
+fn lada_hood_and_trunk_cross_fit_like_source_can_craft() {
+    let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
+    let r = ReferenceManifest::from_runtime_json(&bytes).unwrap();
+    let mut run = GarageRuntime::new(&r).unwrap();
+    let chassis = run.physics.chassis_handle(0);
+    let initial_mass = run.physics.rapier().bodies[chassis].mass();
+    let named = |name: &str| r.items.iter().find(|i| i.name == name).unwrap().id;
+    let slot = |item| r.part_slots.iter().find(|s| s.part == Some(item)).unwrap().id;
+    let (hood, trunk) = (named("Hood"), named("Trunk"));
+    let (hood_slot, trunk_slot) = (slot(hood), slot(trunk));
+    remove(&mut run, hood);
+    remove(&mut run, trunk);
+    // Source partslotscript.CanCraft matches maintipus and tipus, not the spawn slot.
+    install(&mut run, hood, trunk_slot);
+    install(&mut run, trunk, hood_slot);
+    assert_eq!(run.area.interaction.parts.slot_item(trunk_slot), Some(hood));
+    assert_eq!(run.area.interaction.parts.slot_item(hood_slot), Some(trunk));
+    assert_eq!(run.area.items.get(hood).unwrap().body, Some(chassis));
+    near(run.physics.rapier().bodies[chassis].mass(), initial_mass);
+    remove(&mut run, hood);
+    remove(&mut run, trunk);
+    let (door, door_slot) = (named("FRDoor"), slot(named("FRDoor")));
+    remove(&mut run, door);
+    assert_eq!(
+        run.area
+            .interaction
+            .parts
+            .can_install(hood, door_slot, &run.area.items),
+        Err(InteractionBlock::Incompatible)
+    );
+    install(&mut run, door, door_slot);
+    install(&mut run, hood, hood_slot);
+    install(&mut run, trunk, trunk_slot);
+    near(run.physics.rapier().bodies[chassis].mass(), initial_mass);
+}

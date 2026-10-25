@@ -38,9 +38,10 @@ All tasks are done. Run this test pass on Tomasz's PC next:
 
 ## 2. Car parts and repair
 
+Section test pass: run the ignored export tests in `tests/garage_parts.rs`. In the browser, swap hood and trunk, and repair rust and dirt.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| R01 | Complete repair rules. [Conditions](../src/conditions.rs), [parts](../src/interaction/parts.rs) | M | Repair values per condition type, covered-part rules, cross-fitting where the original allows it. [C01-C03] |
 | R02 | Complete electronics. | M | Battery and alternator load for every powered part. Verify coolant fan and thermostat. [C08, C09] |
 | R03 | Add the siphon hose. [Fluids](../src/fluids.rs) | L | Attach to caps, coil, and move fluid between tanks. [C04] |
 | R04 | Add fire and burning fluids. | M | Fire and embers, burnt-fluid smoke color. [F17, C05] |
