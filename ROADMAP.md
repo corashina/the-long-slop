@@ -62,7 +62,6 @@ All tasks are done. Run this test pass on Tomasz's PC after section 1:
 | W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Shovel holes, buried items, metal detector. [F10, F03] |
 | W07 | Add weather. | L | Sandstorms and their saved state, tumbleweeds, snowfall in the winter biome. [J01-J04] |
-| W08 | Add grass tracks. [Grass](web/grass.js) | M | Grass painter and regrowth after tracks. [I15] |
 
 ## 4. More cars
 
