@@ -31,7 +31,7 @@ def recover_weather(source, output):
     if prefab is None:raise ValueError('Storm database link missing')
     root=source.transform_for(prefab);storm=component(source,root,'sandstormscript');d=source.read(storm)
     if key(storm)!=STORM:raise ValueError('Storm database link differs')
-    result={'source':source_id(scheduler),'min_interval_seconds':sd['minTime'],'max_interval_seconds':sd['maxTime'],'spawn_radius':sd['radius'],
+    result={'source':source_id(scheduler),'prefab_id':sd['prefabid'],'min_interval_seconds':sd['minTime'],'max_interval_seconds':sd['maxTime'],'spawn_radius':sd['radius'],
         'storm':{'source':source_id(storm),'biome':d['biome'],**{snake(k):d[k] for k in STORM_FIELDS},
             **{snake(k):rgba(d[k]) for k in STORM_COLORS},
             'day_color1':gradient(d['dayColor1']),'day_color2':gradient(d['dayColor2']),'wind_lm':d['windLm']['m_Bits'],
@@ -45,7 +45,7 @@ def recover_weather(source, output):
 
 def validate_weather_export(weather, manifest):
     pair=array(number,2);textures={t['id'] for t in manifest['lighting']['textures']}
-    record(weather,{'source':source_shape,'min_interval_seconds':number,'max_interval_seconds':number,'spawn_radius':number,
+    record(weather,{'source':source_shape,'prefab_id':u32,'min_interval_seconds':number,'max_interval_seconds':number,'spawn_radius':number,
         'storm':lambda s:record(s,{'source':source_shape,'biome':integer(0,255),**dict.fromkeys(map(snake,STORM_FIELDS),number),
             **dict.fromkeys(map(snake,STORM_COLORS),array(number,4)),'day_color1':validate_gradient,'day_color2':validate_gradient,
             'wind_lm':u32,'current_force':array(number,3),'next_force':array(number,3),'distance_lerp':number,

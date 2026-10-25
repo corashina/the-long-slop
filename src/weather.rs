@@ -1,6 +1,7 @@
 //! Source sandstorm simulation on the fixed step. Presentation reads this state and does not advance it.
 use crate::particles::ParticleState;
 use crate::reference::WeatherReference;
+use crate::save::{StormSnapshot, WeatherSnapshot};
 use crate::vehicle::PhysicsWorld;
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{Ball, Collider, ColliderHandle, QueryFilter, RigidBodyHandle};
@@ -61,7 +62,10 @@ pub struct Storm {
 pub struct WeatherState {
     storms: Vec<Storm>,
     influence: StormInfluence,
-    next_spawn_time: f64,
+    /// Source lastTime.
+    last_spawn_time: f64,
+    /// Source nextTime: the wait from lastTime to the next spawn.
+    wait: f32,
     next_id: u32,
     random: StormRandom,
     origin: [f64; 3],
@@ -71,14 +75,15 @@ pub struct WeatherState {
 impl WeatherState {
     pub fn new(reference: &WeatherReference, seed: u64) -> Self {
         let mut random = StormRandom(seed ^ 0x7374_6f72_6d73_0001);
-        let next_spawn_time = random.range(
+        let wait = random.range(
             reference.min_interval_seconds,
             reference.max_interval_seconds,
-        ) as f64;
+        );
         Self {
             storms: Vec::new(),
             influence: StormInfluence::default(),
-            next_spawn_time,
+            last_spawn_time: 0.,
+            wait,
             next_id: 0,
             random,
             origin: [0.; 3],
@@ -92,7 +97,40 @@ impl WeatherState {
         self.influence
     }
     pub fn next_spawn_time(&self) -> f64 {
-        self.next_spawn_time
+        self.last_spawn_time + self.wait as f64
+    }
+
+    /// Source save_sandstorm. `now` is the simulation time that `advance` reads.
+    pub fn snapshot(&self, reference: &WeatherReference, now: f64) -> WeatherSnapshot {
+        WeatherSnapshot {
+            since_spawn: (now - self.last_spawn_time) as f32,
+            wait: self.wait,
+            storms: self
+                .storms
+                .iter()
+                .map(|storm| StormSnapshot {
+                    position: storm.absolute_position,
+                    yaw: storm.yaw_degrees,
+                    prefab: reference.prefab_id,
+                    life: storm.life,
+                    size: storm.size,
+                    speed: storm.speed,
+                    direction: storm.direction,
+                })
+                .collect(),
+        }
+    }
+
+    /// Source load: storms start with saved values and do not draw new ones.
+    /// Wind targets, gust force and particles start empty and rebuild.
+    pub fn restore(&mut self, reference: &WeatherReference, now: f64, saved: &WeatherSnapshot) {
+        self.last_spawn_time = now - saved.since_spawn as f64;
+        self.wait = saved.wait;
+        self.storms.clear();
+        self.influence = StormInfluence::default();
+        for storm in &saved.storms {
+            self.push_storm(reference, storm);
+        }
     }
 
     /// Call when bodies enter the world. Wind scans then do not grow target buffers.
@@ -115,23 +153,49 @@ impl WeatherState {
 
     pub fn spawn_at(&mut self, reference: &WeatherReference, position: [f64; 3]) -> StormId {
         let r = &reference.storm;
-        let id = StormId(self.next_id);
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .expect("storm ID space exhausted");
         // SpawnAt draws prefab yaw before Start calls FStart: size, direction, then speed.
         let yaw_degrees = self.random.range(0., 360.);
         let size = self.random.range(r.size_range[0], r.size_range[1]);
         let angle = self.random.range(0., std::f32::consts::TAU);
         let speed = self.random.range(r.speed_range[0], r.speed_range[1]);
+        self.push_storm(
+            reference,
+            &StormSnapshot {
+                position,
+                yaw: yaw_degrees,
+                prefab: reference.prefab_id,
+                life: r.life,
+                size,
+                speed,
+                direction: [angle.cos(), angle.sin()],
+            },
+        )
+    }
+
+    /// Source Start with started set: the storm keeps the given values.
+    fn push_storm(&mut self, reference: &WeatherReference, saved: &StormSnapshot) -> StormId {
+        let r = &reference.storm;
+        let &StormSnapshot {
+            position,
+            yaw: yaw_degrees,
+            life,
+            size,
+            speed,
+            direction,
+            ..
+        } = saved;
+        let id = StormId(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("storm ID space exhausted");
         self.storms.push(Storm {
             id,
             absolute_position: position,
             yaw_degrees,
             size,
-            life: r.life,
-            direction: [angle.cos(), angle.sin()],
+            life,
+            direction,
             speed,
             previous_distance: 0.,
             life_strength: 0.,
@@ -181,12 +245,12 @@ impl WeatherState {
         {
             return;
         }
-        if now >= self.next_spawn_time {
-            self.next_spawn_time = now
-                + self.random.range(
-                    reference.min_interval_seconds,
-                    reference.max_interval_seconds,
-                ) as f64;
+        if now >= self.next_spawn_time() {
+            self.last_spawn_time = now;
+            self.wait = self.random.range(
+                reference.min_interval_seconds,
+                reference.max_interval_seconds,
+            );
             let angle = self.random.range(0., std::f32::consts::TAU);
             let mut position = player_absolute;
             position[0] += (angle.cos() * reference.spawn_radius) as f64;
@@ -470,6 +534,7 @@ pub(crate) mod tests {
         };
         WeatherReference {
             source: source(),
+            prefab_id: 0,
             min_interval_seconds: 1200.,
             max_interval_seconds: 5400.,
             spawn_radius: 15000.,
@@ -597,6 +662,38 @@ pub(crate) mod tests {
         assert!((d - 15000.).abs() < 0.2, "{d}");
         assert!((0.5..=1.5).contains(&storm.size));
         assert!((3. ..=12.).contains(&storm.speed));
+    }
+
+    #[test]
+    fn save_keeps_timer_and_storms() {
+        let r = reference();
+        let mut weather = WeatherState::new(&r, 5);
+        let first = weather.next_spawn_time();
+        weather.advance(&r, first, 0.5, [10., 0., 0.], |_| (0., DESERT));
+        weather.spawn_at(&r, [-40., 3., 25.]);
+        let now = first + 30.;
+        weather.advance(&r, now, 0.5, [10., 0., 0.], |_| (0., DESERT));
+        let saved = weather.snapshot(&r, now);
+        assert_eq!(saved.since_spawn, 30.);
+        assert_eq!(saved.storms.len(), 2);
+        // A load starts at another time. The wait and storms do not draw new values.
+        let mut loaded = WeatherState::new(&r, 9);
+        loaded.restore(&r, 100., &saved);
+        assert_eq!(loaded.snapshot(&r, 100.), saved);
+        assert_eq!(loaded.next_spawn_time(), 100. - 30. + saved.wait as f64);
+        let storm = &loaded.storms()[1];
+        assert!(storm.targets.is_empty() && storm.particles[0].particles().is_empty());
+        loaded.advance(&r, 101., 1., [10., 0., 0.], |_| (0., DESERT));
+        let storm = &loaded.storms()[1];
+        let before = saved.storms[1];
+        assert_eq!(
+            (storm.size, storm.speed, storm.direction),
+            (before.size, before.speed, before.direction)
+        );
+        assert_eq!(
+            storm.absolute_position[0],
+            before.position[0] + (before.direction[0] * before.speed) as f64
+        );
     }
 
     /// Storm reference with emitting dust systems and flat day colors.

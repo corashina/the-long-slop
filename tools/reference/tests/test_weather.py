@@ -18,7 +18,7 @@ def weather():
         'day_color1': GRADIENT, 'day_color2': GRADIENT, 'wind_lm': 1, 'current_force': [0., 0., 0.], 'next_force': [0., 0., 0.],
         'distance_lerp': 0., 'size_range': [.5, 1.5], 'speed_range': [3., 12.], 'wind_time_range': [.1, 1.5],
         'wind_scan_seconds': 1., 'wind_bounds_range': [1., 30.]}
-    return {'source': {'file': 'level1', 'path_id': 1}, 'min_interval_seconds': 1200., 'max_interval_seconds': 5400., 'spawn_radius': 15000.,
+    return {'source': {'file': 'level1', 'path_id': 1}, 'prefab_id': 0, 'min_interval_seconds': 1200., 'max_interval_seconds': 5400., 'spawn_radius': 15000.,
         'storm': storm, 'evidence': {'assembly_sha256': 'a', 'methods': ['m']}, 'particles': [particle('storm_big'), particle('storm_small')]}
 
 
@@ -34,6 +34,7 @@ class WeatherExportTests(unittest.TestCase):
             'non-finite value': broken(lambda w: w['storm'].update(radius=float('nan'))),
             'reversed schedule': broken(lambda w: w.update(min_interval_seconds=6000.)),
             'zero schedule': broken(lambda w: w.update(min_interval_seconds=0.)),
+            'negative prefab id': broken(lambda w: w.update(prefab_id=-1)),
             'zero radius': broken(lambda w: w.update(spawn_radius=0.)),
             'missing particle': broken(lambda w: w['particles'].pop()),
             'wrong particle role': broken(lambda w: w['particles'][1].update(role='urine')),
