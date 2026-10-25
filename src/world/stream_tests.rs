@@ -727,7 +727,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn roadside_owner_controls_keep_state_until_owner_retirement() {
+fn roadside_owner_controls_keep_state_after_owner_retirement() {
     let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
@@ -855,7 +855,6 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
         .changes
         .record(sibling_key.clone(), sibling_changed, &sibling_baseline);
     run.stream.request_at([10000., 0., 0.], [10000., 0., 0.]);
-    run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&key).is_some());
     assert!(run.stream.changes.get(&supply_key).is_some());
     run.stream.request_at([0.; 3], [0.; 3]);
@@ -877,14 +876,14 @@ fn roadside_owner_controls_keep_state_until_owner_retirement() {
     );
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(run.area.items.resolve_key(&supply_key).is_none());
-    assert!(run.stream.changes.get(&key).is_none());
-    assert!(run.stream.changes.get(&supply_key).is_none());
+    assert!(run.stream.changes.get(&key).is_some());
+    assert!(run.stream.changes.get(&supply_key).is_some());
     assert!(run.stream.changes.get(&sibling_key).is_some());
 }
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn roadside_lamp_state_expires_with_its_source_owner() {
+fn roadside_lamp_state_survives_its_source_owner() {
     let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
@@ -935,7 +934,6 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
             .unwrap()
     );
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
-    run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&lamps[0].0).is_some());
     let garage_local = run.stream.origin.local(garage_player);
     move_player(&mut run, garage_local);
@@ -989,8 +987,8 @@ fn roadside_lamp_state_expires_with_its_source_owner() {
         .sync_lamp_bindings(&run.area.items, &mut run.area.interaction, &mut run.physics)
         .unwrap();
     assert!(!run.stream.lamp_bindings.iter().any(|b| b.parent == site.id));
-    for (key, _) in lamps {
-        assert!(run.stream.changes.get(&key).is_none());
+    for (key, _) in lamps.iter().take(1) {
+        assert!(run.stream.changes.get(key).is_some());
     }
 }
 
@@ -2701,7 +2699,7 @@ fn roadside_loot(
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
+fn roadside_edits_survive_retirement_and_save_reload() {
     let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let (placement, id) = roadside_loot(&mut run, &reference, 810);
@@ -2731,8 +2729,8 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
         .unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
     assert!(
-        run.stream.changes.get(&key).is_none(),
-        "distant abandoned edit must expire after retirement"
+        run.stream.changes.get(&key).is_some(),
+        "distant abandoned edit must stay after retirement"
     );
     run.stream.capture_changes(
         &reference,
@@ -2747,9 +2745,9 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
         &run.physics,
         &[],
     );
-    assert!(saved.changes.get(&key).is_none());
+    assert!(saved.changes.get(&key).is_some());
     eprintln!(
-        "roadside expiry records/bytes: {:?} -> {:?}",
+        "roadside retirement records/bytes: {:?} -> {:?}",
         before,
         (
             run.stream.changes.len(),
@@ -2764,9 +2762,12 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
     )
     .unwrap();
     run.stream.restore_save(&saved).unwrap();
-    assert!(run.stream.changes.get(&key).is_none());
+    assert_eq!(
+        run.stream.changes.get(&key).and_then(|c| c.replay.as_ref()),
+        saved.changes.get(&key).and_then(|c| c.replay.as_ref())
+    );
     assert!(
-        !run.stream
+        run.stream
             .changes
             .iter()
             .any(|(_, c)| c.instance.as_ref() == Some(&placement.id))
@@ -2775,7 +2776,7 @@ fn roadside_expired_edits_do_not_return_after_capture_or_save_reload() {
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
+fn roadside_unresolved_attachment_keeps_retired_parent() {
     use super::super::{AttachmentSnapshot, ChangeRecords, ObjectKey};
     let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
@@ -2850,7 +2851,6 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
 
     run.stream.request.player = [10000., 0., 0.];
     run.stream.request.vehicle = [10000., 0., 0.];
-    run.stream.changes_prune_due = false;
     run.stream
         .retire_contents(
             &mut run.physics,
@@ -2861,7 +2861,6 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
         .unwrap();
     assert!(run.area.items.resolve_key(&parent_key).is_none());
     assert!(run.stream.changes.get(&parent_key).is_some());
-    run.stream.prune_unloaded_changes(&run.area.items);
     assert!(run.stream.changes.get(&parent_key).is_some());
     assert!(run.stream.changes.get(&child_key).is_some());
     assert!(run.stream.changes.get(&internal_key).is_some());
@@ -2889,70 +2888,11 @@ fn roadside_unresolved_attachment_keeps_retired_parent_until_release() {
             "missing attachment chain key {key:?}"
         );
     }
-
-    run.stream.changes.remove(child_key.clone());
-    assert!(!run.stream.changes.has_attachment_dependents(&internal_key));
-    run.stream.prune_unloaded_changes(&run.area.items);
-    assert!(run.stream.changes.get(&parent_key).is_none());
-    assert!(run.stream.changes.get(&child_key).is_none());
-    assert!(run.stream.changes.get(&internal_key).is_none());
 }
 
 #[test]
 #[ignore = "requires the installed source export"]
-fn roadside_retirement_batch_sweeps_changes_once() {
-    let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    prepare_ready(&mut run, &reference);
-    for structure in std::mem::take(&mut run.stream.structures) {
-        structure.retire(&mut run.physics, &mut run.stream.trigger_roles);
-    }
-    for ordinal in [817, 818] {
-        run.stream.structures.push(super::super::StructureInstance {
-            fixed_decoration: false,
-            cpu_bytes: 0,
-            placement: replay_placement(&decoration_source(84448), ordinal, [9000.; 3]),
-            bodies: Vec::new(),
-            colliders: Vec::new(),
-        });
-    }
-    run.stream.changes_prune_due = true;
-    let scans = run.stream.change_prune_scans;
-    for remaining in [1, 0] {
-        run.stream
-            .retire_structures(
-                &mut run.physics,
-                &mut run.area.items,
-                &mut run.area.interaction,
-                &mut run.wheels,
-            )
-            .unwrap();
-        assert_eq!(run.stream.structures.len(), remaining);
-        assert_eq!(run.stream.change_prune_scans, scans);
-    }
-    run.stream
-        .retire_structures(
-            &mut run.physics,
-            &mut run.area.items,
-            &mut run.area.interaction,
-            &mut run.wheels,
-        )
-        .unwrap();
-    assert_eq!(run.stream.change_prune_scans, scans + 1);
-    run.stream
-        .retire_structures(
-            &mut run.physics,
-            &mut run.area.items,
-            &mut run.area.interaction,
-            &mut run.wheels,
-        )
-        .unwrap();
-    assert_eq!(run.stream.change_prune_scans, scans + 1);
-}
-
-#[test]
-#[ignore = "requires the installed source export"]
-fn roadside_consumed_tombstone_survives_until_source_departure() {
+fn roadside_consumed_tombstone_survives_departure() {
     use super::super::ObjectKey;
     let reference = reference();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
@@ -2978,7 +2918,6 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
         &run.area.interaction,
         &run.physics,
     );
-    run.stream.changes_prune_due = false;
     run.stream
         .retire_contents(
             &mut run.physics,
@@ -3003,11 +2942,10 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
             &mut run.wheels,
         )
         .unwrap();
-    run.stream.prune_unloaded_changes(&run.area.items);
-    assert!(run.stream.changes.get(&distant_key).is_none());
+    assert!(run.stream.changes.get(&distant_key).is_some());
     assert!(
-        run.stream.changes.get(&key).is_none(),
-        "consumed source must reset after departure"
+        run.stream.changes.get(&key).unwrap().snapshot.is_none(),
+        "consumed source stays consumed after departure"
     );
 }
 
@@ -3037,93 +2975,6 @@ fn parked_car_keeps_nearby_item_dynamic() {
         .expect("parked car keeps item");
     let body = run.area.items.get(id).unwrap().body.unwrap();
     assert!(run.physics.rapier().bodies[body].is_dynamic());
-}
-
-#[test]
-fn roadside_expiry_requires_both_sites_outside_both_foci() {
-    use super::super::{ObjectChange, changes::roadside_change_expired};
-    let source = decoration_source(84448);
-    let mut change = ObjectChange {
-        snapshot: Some(replay_snapshot([1000., 9000., 0.])),
-        replay: Some(replay_placement(&source, 820, [0., -9000., 0.])),
-        instance: None,
-    };
-    let radius = 188.57f32;
-    let far = [5000., 0., 0.];
-    for site in [[0., 0., 0.], [1000., 0., 0.]] {
-        for focus in 0..2 {
-            let mut foci = [far; 2];
-            foci[focus] = site;
-            assert!(!roadside_change_expired(&change, foci, radius * radius));
-            foci[focus] = [site[0], 0., f64::from(radius)];
-            assert!(roadside_change_expired(&change, foci, radius * radius));
-            foci[focus][2] -= 0.001;
-            assert!(!roadside_change_expired(&change, foci, radius * radius));
-        }
-    }
-    change.snapshot = None;
-    assert!(roadside_change_expired(
-        &change,
-        [[1000., 0., 0.]; 2],
-        radius * radius
-    ));
-    change.replay = None;
-    assert!(!roadside_change_expired(&change, [far; 2], radius * radius));
-}
-
-#[test]
-#[ignore = "requires the installed source export"]
-fn roadside_pruning_compacts_indices_without_stale_replay_access() {
-    use super::super::ObjectKey;
-    let reference = reference();
-    let mut run = GarageRuntime::new_default(&reference).unwrap();
-    let source = decoration_source(84448);
-    let baseline = replay_snapshot([9000.; 3]);
-    let mut keys = Vec::new();
-    for (ordinal, position) in [(821, [9000.; 3]), (822, [0.; 3])] {
-        let p = replay_placement(&source, ordinal, position);
-        let key = ObjectKey::Generated(p.id.clone());
-        let mut snapshot = replay_snapshot(position);
-        snapshot.condition = 0.25;
-        run.stream.changes.record(key.clone(), snapshot, &baseline);
-        run.stream.changes.set_replay(&key, &p, &p.id);
-        keys.push(key);
-    }
-    run.stream.select_changed_destinations();
-    assert!(!run.stream.replay_indices.is_empty());
-    let before = (
-        run.stream.changes.len(),
-        run.stream.changes.retained_bytes(),
-        run.stream.changes.revision(),
-    );
-    run.stream.prune_unloaded_changes(&run.area.items);
-    assert!(run.stream.replay_indices.is_empty());
-    assert!(run.stream.replay_query.is_empty());
-    assert!(run.stream.replay_roots.is_empty());
-    assert!(run.stream.change_bounds.is_none());
-    assert!(run.stream.changes.get(&keys[0]).is_none());
-    assert!(run.stream.changes.get(&keys[1]).is_some());
-    assert!(run.stream.changes.retained_bytes() < before.1);
-    assert!(run.stream.changes.revision() > before.2);
-    run.stream.origin.offset = [4096., 100., -4096.];
-    run.stream.select_changed_destinations();
-    let actual: Vec<_> = run
-        .stream
-        .replay_indices
-        .iter()
-        .map(|&i| run.stream.changes.get_indexed(i).0.clone())
-        .collect();
-    assert_eq!(actual, vec![keys[1].clone()]);
-    assert_eq!(actual, old_replay_keys(&run.stream));
-    eprintln!(
-        "roadside compaction records/bytes/revision: {:?} -> {:?}",
-        before,
-        (
-            run.stream.changes.len(),
-            run.stream.changes.retained_bytes(),
-            run.stream.changes.revision()
-        )
-    );
 }
 
 fn roadside_stamp(reference: &ReferenceManifest) -> crate::save::SourceStamp {
@@ -3638,9 +3489,8 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             &mut loaded.wheels,
         )
         .unwrap();
-    loaded.stream.prune_unloaded_changes(&loaded.area.items);
     assert!(loaded.area.items.resolve_key(&keys[1]).is_none());
-    assert!(loaded.stream.changes.get(&keys[1]).is_none());
+    assert!(loaded.stream.changes.get(&keys[1]).is_some());
     let mut reset = GarageRuntime::from_save(
         &reference,
         &stamp,
@@ -3932,10 +3782,9 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             &mut reset.wheels,
         )
         .unwrap();
-    reset.stream.prune_unloaded_changes(&reset.area.items);
     for key in &keys {
         assert!(reset.area.items.resolve_key(key).is_none());
-        assert!(reset.stream.changes.get(key).is_none());
+        assert!(reset.stream.changes.get(key).is_some());
     }
     let revisit_local = reset.stream.origin.local(focus);
     move_player(&mut reset, revisit_local);
@@ -3955,12 +3804,12 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
         .area
         .items
         .resolve_key(&keys[1])
-        .expect("source loot respawns after full departure");
+        .expect("dropped loot returns after full departure");
     assert_eq!(
         reset.area.items.get(revisited).unwrap().location,
         ItemLocation::World
     );
-    assert!(reset.stream.changes.get(&keys[1]).is_none());
+    assert!(reset.stream.changes.get(&keys[1]).is_some());
 }
 fn roadside_views(stream: &WorldStream) -> [super::super::RequiredView; 1] {
     let [x, y, z] = stream.origin.local(stream.request.player);

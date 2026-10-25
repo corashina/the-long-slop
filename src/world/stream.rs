@@ -9,7 +9,7 @@ use super::{
 use crate::reference::{ReferenceError, ReferenceManifest, SourceId, WorldReference};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -230,11 +230,6 @@ pub struct WorldStream {
     presentation_changes: Vec<content_index::ContentSlot>,
     presentation_lamp_changes: Vec<usize>,
     saved_item_protection: Vec<super::ObjectKey>,
-    change_dependencies: Vec<super::ObjectKey>,
-    external_dependencies: HashSet<super::ObjectKey>,
-    changes_prune_due: bool,
-    #[cfg(test)]
-    change_prune_scans: usize,
     saved_locations_pending: bool,
     recipes: HashMap<SourceId, super::StructureRecipe>,
     supplies: Vec<PublishedSupply>,
@@ -361,30 +356,6 @@ impl WorldStream {
                 changes.set_replay(&key, &owner.origin, &owner.content.placement.id);
             }
         }
-        let mut dependencies = HashSet::new();
-        super::changes::external_attachment_chain(&changes, &mut dependencies);
-        let radius = self.distances.item_remove_dist;
-        changes.retain(|key, change| {
-            items.resolve_key(key).is_some()
-                || required.contains(key)
-                || self.saved_item_protection.contains(key)
-                || dependencies.contains(key)
-                || change.snapshot.as_ref().is_some_and(|s| s.held)
-                || change.instance.as_ref().is_some_and(|id| {
-                    self.contents
-                        .active
-                        .iter()
-                        .chain(&self.static_controls)
-                        .any(|c| &c.content.placement.id == id)
-                        || self.supplies.iter().any(|s| &s.key == id)
-                        || self.lamp_bindings.iter().any(|l| &l.parent == id)
-                })
-                || !super::changes::roadside_change_expired(
-                    change,
-                    [self.request.player, self.request.vehicle],
-                    radius * radius,
-                )
-        });
         let boxes = self
             .contents
             .boxes
@@ -875,11 +846,6 @@ impl WorldStream {
             presentation_changes: Vec::new(),
             presentation_lamp_changes: Vec::new(),
             saved_item_protection: Vec::new(),
-            change_dependencies: Vec::new(),
-            external_dependencies: HashSet::new(),
-            changes_prune_due: true,
-            #[cfg(test)]
-            change_prune_scans: 0,
             saved_locations_pending: false,
             recipes: HashMap::new(),
             supplies: Vec::new(),
@@ -1718,7 +1684,6 @@ impl WorldStream {
         }
         // Planning also forces refreshes. Movement starts from the last completed refresh.
         self.structure_focus = points;
-        self.changes_prune_due = true;
         for placement in self
             .props
             .placements()
@@ -4368,45 +4333,6 @@ impl WorldStream {
             }
         }
     }
-    pub(crate) fn invalidate_changed_selection(&mut self) {
-        self.replay_indices.clear();
-        self.replay_query.clear();
-        self.replay_roots.clear();
-        self.change_bounds = None;
-    }
-    pub(crate) fn prune_unloaded_changes(&mut self, items: &crate::interaction::items::ItemStore) {
-        #[cfg(test)]
-        {
-            self.change_prune_scans += 1;
-        }
-        super::changes::external_attachment_chain(&self.changes, &mut self.external_dependencies);
-        let radius = self.distances.item_remove_dist;
-        let foci = [self.request.player, self.request.vehicle];
-        let dependencies = &self.external_dependencies;
-        let saved = &self.saved_item_protection;
-        let controls = &self.static_controls;
-        let supplies = &self.supplies;
-        let lamps = &self.lamp_bindings;
-        let contents = &self.contents.active;
-        if self.changes.retain(|key, change| {
-            matches!(key, super::ObjectKey::Imported(_))
-                || items.resolve_key(key).is_some()
-                || saved.contains(key)
-                || dependencies.contains(key)
-                || change.snapshot.as_ref().is_some_and(|s| s.held)
-                || change.instance.as_ref().is_some_and(|id| {
-                    controls.iter().any(|c| &c.content.placement.id == id)
-                        || contents.iter().any(|c| &c.content.placement.id == id)
-                        || supplies.iter().any(|s| &s.key == id)
-                        || lamps.iter().any(|l| &l.parent == id)
-                })
-                || !super::changes::roadside_change_expired(change, foci, radius * radius)
-        }) {
-            self.invalidate_changed_selection();
-        }
-        self.external_dependencies.clear();
-        self.changes_prune_due = false;
-    }
     pub fn changes(&self) -> &super::ChangeRecords {
         &self.changes
     }
@@ -4428,7 +4354,6 @@ impl WorldStream {
         }
         self.retire_contents(physics, items, interaction, wheels)?;
         let mut index = 0;
-        let mut retired_structure = false;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
             let radius = self.distances.building_gen_dist;
@@ -4469,30 +4394,6 @@ impl WorldStream {
             }
             let instance = self.structures.swap_remove(index);
             self.structure_revision = self.structure_revision.wrapping_add(1);
-            self.change_dependencies.clear();
-            for content in self
-                .static_controls
-                .iter()
-                .filter(|c| c.content.placement.id == instance.placement.id)
-            {
-                for item in content
-                    .item
-                    .into_iter()
-                    .chain(content.bindings.iter().map(|b| b.item))
-                {
-                    self.change_dependencies.push(items.object_key(item));
-                }
-            }
-            for supply in self
-                .supplies
-                .iter()
-                .filter(|s| s.key == instance.placement.id)
-            {
-                if let Some((tank, cap)) = supply.items {
-                    self.change_dependencies.push(items.object_key(tank));
-                    self.change_dependencies.push(items.object_key(cap));
-                }
-            }
             if let Some(i) = self
                 .static_controls
                 .iter()
@@ -4536,19 +4437,7 @@ impl WorldStream {
                 }
             }
             instance.retire(physics, &mut self.trigger_roles);
-            let revision = self.changes.revision();
-            for key in self.change_dependencies.drain(..) {
-                self.changes.forget(&key);
-            }
-            if self.changes.revision() != revision {
-                self.invalidate_changed_selection();
-            }
-            self.changes_prune_due = true;
-            retired_structure = true;
             break;
-        }
-        if self.changes_prune_due && !retired_structure {
-            self.prune_unloaded_changes(items);
         }
         Ok(())
     }
@@ -5018,20 +4907,6 @@ impl WorldStream {
                     .map(super::WorldLight::heap_bytes)
                     .sum::<usize>()
                 + self.structures.capacity() * std::mem::size_of::<super::StructureInstance>()
-                + self.change_dependencies.capacity() * std::mem::size_of::<super::ObjectKey>()
-                + self
-                    .change_dependencies
-                    .iter()
-                    .map(super::changes::key_heap)
-                    .sum::<usize>()
-                + self.external_dependencies.capacity().saturating_mul(2)
-                    * (std::mem::size_of::<super::ObjectKey>() + 1)
-                + 16
-                + self
-                    .external_dependencies
-                    .iter()
-                    .map(super::changes::key_heap)
-                    .sum::<usize>()
                 + self.saved_item_protection.capacity() * std::mem::size_of::<super::ObjectKey>()
                 + self
                     .saved_item_protection

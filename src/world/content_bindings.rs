@@ -930,38 +930,6 @@ impl WorldStream {
             .find(|c| &c.content.placement.id == id)
             .is_none_or(|c| c.item.is_none() || c.restored)
     }
-    fn forget_expired_retired_item_change(&mut self, key: &ObjectKey, radius_squared: f32) {
-        let Some(change) = self.changes.get(key) else {
-            return;
-        };
-        if self.saved_item_protection.contains(key)
-            || self.changes.has_attachment_dependents(key)
-            || change
-                .snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.held)
-            || changes::external_attachment(change, &self.changes)
-            || change.instance.as_ref().is_some_and(|id| {
-                self.contents
-                    .active
-                    .iter()
-                    .chain(&self.static_controls)
-                    .any(|content| &content.content.placement.id == id)
-                    || self.supplies.iter().any(|supply| &supply.key == id)
-                    || self.lamp_bindings.iter().any(|lamp| &lamp.parent == id)
-            })
-            || !changes::roadside_change_expired(
-                change,
-                [self.request.player, self.request.vehicle],
-                radius_squared,
-            )
-        {
-            return;
-        }
-        if self.changes.forget(key) {
-            self.invalidate_changed_selection();
-        }
-    }
     /// Squared distance to the nearest source important object: the player and every car.
     fn important_distance(&self, position: [f64; 3]) -> f32 {
         [self.request.player, self.request.vehicle]
@@ -1125,7 +1093,6 @@ impl WorldStream {
                     .remove_generated(item, &content.nodes);
             }
             for binding in &content.bindings {
-                let key = items.object_key(binding.item);
                 wheels.remove_generated(binding.item);
                 if let Some(instance) = self
                     .structures
@@ -1140,10 +1107,8 @@ impl WorldStream {
                 items.get_mut(binding.item).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(binding.item);
-                self.forget_expired_retired_item_change(&key, remove * remove);
             }
             if let Some(id) = content.item {
-                let key = items.object_key(id);
                 if let Some(instance) = self
                     .structures
                     .iter()
@@ -1157,7 +1122,6 @@ impl WorldStream {
                 items.get_mut(id).unwrap().location =
                     crate::interaction::items::ItemLocation::World;
                 items.remove_generated(id);
-                self.forget_expired_retired_item_change(&key, remove * remove);
             }
             self.wanted_structures
                 .retain(|p| p.id != content.content.placement.id);
