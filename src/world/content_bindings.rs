@@ -77,11 +77,8 @@ impl WorldStream {
             if items.get(id).and_then(|i| i.body).is_some_and(|b| {
                 physics.rapier().bodies[b].body_type()
                     == rapier3d::prelude::RigidBodyType::KinematicPositionBased
-            }) && self
-                .contents
-                .active
-                .iter()
-                .any(|c| c.item == Some(id) && !c.content.buried)
+            }) && items.get(id).is_some_and(|i| !i.buried)
+                && self.contents.active.iter().any(|c| c.item == Some(id))
             {
                 if let Some(previous) = self.changes.get(&key).and_then(|c| c.snapshot.as_ref()) {
                     snapshot.linear_velocity = previous.linear_velocity;
@@ -1050,14 +1047,17 @@ impl WorldStream {
             let removed = id
                 .and_then(|id| items.get(id))
                 .is_some_and(|item| item.removed);
+            let buried = id
+                .and_then(|id| items.get(id))
+                .is_some_and(|item| item.buried);
             if !departing && (distance < remove * remove || protected) && !removed {
                 if let Some(body) = id.and_then(|id| items.get(id)).and_then(|s| s.body) {
                     if !protected
-                        && (content.content.buried
+                        && (buried
                             || distance >= freeze * freeze
                             || distance < unfreeze * unfreeze)
                     {
-                        let kind = if content.content.buried || distance >= freeze * freeze {
+                        let kind = if buried || distance >= freeze * freeze {
                             rapier3d::prelude::RigidBodyType::KinematicPositionBased
                         } else {
                             rapier3d::prelude::RigidBodyType::Dynamic
@@ -1222,6 +1222,7 @@ fn bind_pickup(
     if !child {
         state.fluid = content.content.fluid.clone();
         state.generated_condition = Some(content.content.condition);
+        state.buried = content.content.buried;
     }
     state.local_pose =
         from_rapier(&(physics.rapier().bodies[body].position().inverse() * to_rapier(state.pose)));

@@ -49,6 +49,8 @@ pub struct ObjectSnapshot {
     pub angular_velocity: [f32; 3],
     pub sleeping: bool,
     pub held: bool,
+    /// Source tosaveitemscript.buried.
+    pub buried: bool,
     pub attachment: Option<AttachmentSnapshot>,
     pub mechanism: Option<MechanismSnapshot>,
 }
