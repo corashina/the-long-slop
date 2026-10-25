@@ -2850,6 +2850,34 @@ fn roadside_consumed_tombstone_survives_until_source_departure() {
 }
 
 #[test]
+#[ignore = "requires the installed source export"]
+fn parked_car_keeps_nearby_item_dynamic() {
+    let reference = reference();
+    let mut run = GarageRuntime::new_default(&reference).unwrap();
+    let (placement, id) = roadside_loot(&mut run, &reference, 813);
+    let key = run.area.items.object_key(id);
+    let far = [10000., 0., 0.];
+    run.stream.request.player = far;
+    run.stream.request.vehicle = far;
+    run.stream.request_cars([far, placement.pose.position]);
+    run.stream
+        .retire_contents(
+            &mut run.physics,
+            &mut run.area.items,
+            &mut run.area.interaction,
+            &mut run.wheels,
+        )
+        .unwrap();
+    let id = run
+        .area
+        .items
+        .resolve_key(&key)
+        .expect("parked car keeps item");
+    let body = run.area.items.get(id).unwrap().body.unwrap();
+    assert!(run.physics.rapier().bodies[body].is_dynamic());
+}
+
+#[test]
 fn roadside_expiry_requires_both_sites_outside_both_foci() {
     use super::super::{ObjectChange, changes::roadside_change_expired};
     let source = decoration_source(84448);

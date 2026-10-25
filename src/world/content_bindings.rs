@@ -962,6 +962,14 @@ impl WorldStream {
             self.invalidate_changed_selection();
         }
     }
+    /// Squared distance to the nearest source important object: the player and every car.
+    fn important_distance(&self, position: [f64; 3]) -> f32 {
+        [self.request.player, self.request.vehicle]
+            .into_iter()
+            .chain(self.cars.iter().copied())
+            .map(|p| crate::world::contents::distance(p, position))
+            .fold(f32::INFINITY, f32::min)
+    }
     pub(super) fn retire_contents(
         &mut self,
         physics: &mut PhysicsWorld,
@@ -1000,10 +1008,7 @@ impl WorldStream {
             let offset =
                 crate::world::placement::rotate(pose.rotation, content.content.distance_offset);
             let position = std::array::from_fn(|i| pose.position[i] + offset[i] as f64);
-            let mut distance = [self.request.player, self.request.vehicle]
-                .into_iter()
-                .map(|p| crate::world::contents::distance(p, position))
-                .fold(f32::INFINITY, f32::min);
+            let mut distance = self.important_distance(position);
             let local_item = |item| {
                 content.item == Some(item) || content.bindings.iter().any(|b| b.item == item)
             };
@@ -1034,12 +1039,7 @@ impl WorldStream {
                 if let Some(item) = items.get(binding.item) {
                     protected |= protected_location(item.location);
                     let position = self.origin.absolute(item.pose.position);
-                    distance = distance.min(
-                        [self.request.player, self.request.vehicle]
-                            .into_iter()
-                            .map(|p| crate::world::contents::distance(p, position))
-                            .fold(f32::INFINITY, f32::min),
-                    );
+                    distance = distance.min(self.important_distance(position));
                 }
             }
             protected |= content.has_external_dependents(items, &interaction.parts, wheels);

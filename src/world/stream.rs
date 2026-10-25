@@ -182,6 +182,8 @@ pub struct WorldStream {
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
     request: WorldRequest,
+    /// Absolute positions of every car, as source important objects.
+    cars: Vec<[f64; 3]>,
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
@@ -769,6 +771,7 @@ impl WorldStream {
                 player: [0.0; 3],
                 vehicle: [0.0; 3],
             },
+            cars: Vec::new(),
             recovery: None,
             recovery_search: None,
             roads,
@@ -1288,6 +1291,11 @@ impl WorldStream {
         self.admissions.remove(source);
         self.recipes.remove(source);
         Ok(())
+    }
+    /// Sets every car position for item freeze and removal.
+    pub fn request_cars(&mut self, cars: impl IntoIterator<Item = [f64; 3]>) {
+        self.cars.clear();
+        self.cars.extend(cars);
     }
     pub fn request_at(&mut self, player: [f64; 3], vehicle: [f64; 3]) {
         if self.recovery.is_some() {

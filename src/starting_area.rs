@@ -1424,6 +1424,10 @@ impl GarageRuntime {
                 self.vehicle,
             ),
         );
+        let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
+        let cars = (0..physics.vehicle_count())
+            .map(|index| world.absolute_vehicle_position(physics, &origin, index));
+        self.stream.request_cars(cars);
         self.persistent_world
             .sync(
                 reference,
