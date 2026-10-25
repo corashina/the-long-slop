@@ -23,6 +23,7 @@ mod props;
 pub use props::{PropCandidate, PropGenerator};
 pub mod spawn_state;
 pub(crate) mod unity_random;
+pub(crate) use placement::place_point;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
     FoundationPoint, PlacementIndex, PlacementIndexSnapshot, SupplyDefinition, SupplyFluid,
@@ -103,6 +104,8 @@ impl WorldOrigin {
     }
 }
 
+#[cfg(test)]
+mod loot_audit;
 mod spawn_contents;
 mod spawn_initialization;
 mod spawn_rules;

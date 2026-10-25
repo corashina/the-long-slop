@@ -3,8 +3,8 @@ use super::spawn_rules::*;
 use super::{AbsolutePose, GeneratedId, RoadSegment, WorldBounds, WorldFrame, WorldLayer};
 use crate::reference::{
     LightId, LightKind, LightReference, ReferenceError, ReferenceManifest, RoadLampReference,
-    ShadowReference, SourceId, Transform, WorldPrototypeReference, WorldReference,
-    WorldSourceRecord, WorldValue,
+    ShadowReference, SourceId, Transform, WorldFields, WorldLightCookie, WorldPrototypeReference,
+    WorldReference, WorldSourceRecord, WorldValue,
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 
@@ -234,12 +234,31 @@ pub(crate) fn light_record(
     world: &WorldReference,
     id: &SourceId,
 ) -> Result<LightReference, ReferenceError> {
-    let f = &record(world, id)?.fields;
-    if optional(f, "m_Cookie")?.is_some() {
-        return Err(ReferenceError(
-            "World lamp cookie requires its checked texture binding".into(),
-        ));
-    }
+    light(&record(world, id)?.fields, id, &world.light_cookies)
+}
+/// Resolves a source Light component. Only a spot cookie has an exported lighting texture binding.
+fn light(
+    f: &WorldFields,
+    id: &SourceId,
+    cookies: &[WorldLightCookie],
+) -> Result<LightReference, ReferenceError> {
+    let cookie = match optional(f, "m_Cookie")? {
+        Some(source) => Some(
+            cookies
+                .iter()
+                .find(|c| &c.source == source)
+                .ok_or_else(|| {
+                    ReferenceError("World lamp cookie requires its checked texture binding".into())
+                })?
+                .texture,
+        ),
+        None => None,
+    };
+    let kind = match integer(f, "m_Type")? {
+        0 => LightKind::Spot,
+        2 if cookie.is_none() => LightKind::Point,
+        _ => return Err(ReferenceError("Unresolved world lamp type".into())),
+    };
     let c = fields(value(f, "m_Color")?)?;
     let shadows = fields(value(f, "m_Shadows")?)?;
     let mask = match value(fields(value(f, "m_CullingMask")?)?, "m_Bits")? {
@@ -255,11 +274,7 @@ pub(crate) fn light_record(
             rotation: [0., 0., 0., 1.],
             scale: [1.; 3],
         },
-        kind: match integer(f, "m_Type")? {
-            0 => LightKind::Spot,
-            2 => LightKind::Point,
-            _ => return Err(ReferenceError("Unresolved world lamp type".into())),
-        },
+        kind,
         color: [
             number(c, "r")?,
             number(c, "g")?,
@@ -282,7 +297,7 @@ pub(crate) fn light_record(
             resolution: integer(shadows, "m_Resolution")?,
             custom_resolution: integer(shadows, "m_CustomResolution")?,
         },
-        cookie: None,
+        cookie,
         cookie_size: number(f, "m_CookieSize")?,
     })
 }
@@ -409,4 +424,50 @@ pub fn required_world_lights(
         }
     }
     output.truncate(count);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_light_cookie_resolves_to_its_lighting_texture() {
+        // Source flashlight Spot Light (sharedassets1.assets:123692) fields.
+        let number = |name: &str, v: f64| serde_json::json!({"name": name, "value": {"kind": "number", "value": v}});
+        let integer = |name: &str, v: i64| serde_json::json!({"name": name, "value": {"kind": "integer", "value": v}});
+        let cookie = SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id: 990,
+        };
+        let fields: WorldFields = serde_json::from_value(serde_json::json!([
+            {"name": "m_Color", "value": {"kind": "record", "value": [
+                number("a", 1.), number("b", 1.), number("g", 1.), number("r", 1.)]}},
+            {"name": "m_Cookie", "value": {"kind": "link", "value": cookie}},
+            number("m_CookieSize", 10.),
+            {"name": "m_CullingMask", "value": {"kind": "record", "value": [
+                integer("m_Bits", 4294967295)]}},
+            integer("m_Enabled", 1),
+            number("m_InnerSpotAngle", 62.188602447509766),
+            number("m_Intensity", 1.5),
+            number("m_Range", 15.),
+            {"name": "m_Shadows", "value": {"kind": "record", "value": [
+                number("m_Bias", 0.05), integer("m_CustomResolution", -1),
+                number("m_NearPlane", 0.2), number("m_NormalBias", 0.4),
+                integer("m_Resolution", -1), number("m_Strength", 1.), integer("m_Type", 1)]}},
+            number("m_SpotAngle", 80.),
+            integer("m_Type", 0),
+        ]))
+        .unwrap();
+        let id = SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id: 123692,
+        };
+        let bindings = [WorldLightCookie {
+            source: cookie,
+            texture: 4,
+        }];
+        let record = light(&fields, &id, &bindings).unwrap();
+        assert_eq!((record.kind, record.cookie), (LightKind::Spot, Some(4)));
+        assert!(light(&fields, &id, &[]).is_err());
+    }
 }

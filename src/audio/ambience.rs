@@ -1,8 +1,8 @@
-//! Source rock heat sounds: `soundplayscript.Update` and `PlaySound`.
+//! Source rock heat sounds (`soundplayscript`) and ambience zones (`ambienceZone`).
 use super::{AudioAction, AudioKind, AudioState, SurvivalAudioEvent, xorshift};
 use crate::lighting::{CycleOutput, CyclePhase};
-use crate::reference::AmbienceReference;
-use crate::world::{GeneratedId, StructureInstance};
+use crate::reference::{AmbienceReference, AmbienceZoneReference};
+use crate::world::{GeneratedId, StructureInstance, place_point};
 use std::collections::HashMap;
 
 const CAPACITY: usize = 256;
@@ -113,6 +113,161 @@ impl RockAmbience {
             let gain = a.gain[0] + (a.gain[1] - a.gain[0]) * xorshift(random);
             emit(t.position, a.clips[index], gain);
         }
+    }
+}
+
+const ZONE_CAPACITY: usize = 16;
+
+struct Zone {
+    id: GeneratedId,
+    zone: usize,
+    position: [f64; 3],
+    playing: bool,
+    seen: bool,
+}
+
+/// One source zone per published placement. The slot index is the loop emitter.
+pub struct ZoneAmbience {
+    slots: [Option<Zone>; ZONE_CAPACITY],
+    revision: Option<u64>,
+}
+
+impl Default for ZoneAmbience {
+    fn default() -> Self {
+        Self {
+            slots: std::array::from_fn(|_| None),
+            revision: None,
+        }
+    }
+}
+
+/// The result of one source `FixedUpdate` for one zone slot.
+#[derive(Debug, PartialEq)]
+enum ZoneStep {
+    Idle,
+    Play {
+        gain: f32,
+        lerp: f32,
+        position: [f64; 3],
+    },
+    Stop,
+}
+
+impl ZoneAmbience {
+    pub fn reset(&mut self) {
+        self.slots = std::array::from_fn(|_| None);
+        self.revision = None;
+    }
+    /// Matches the zones to the published structures. Calls `stop` for each removed playing zone.
+    fn sync(
+        &mut self,
+        revision: u64,
+        structures: &[StructureInstance],
+        zones: &[AmbienceZoneReference],
+        mut stop: impl FnMut(u32),
+    ) {
+        if self.revision == Some(revision) {
+            return;
+        }
+        self.revision = Some(revision);
+        for z in self.slots.iter_mut().flatten() {
+            z.seen = false;
+        }
+        for s in structures {
+            let p = &s.placement;
+            for (i, zone) in zones.iter().enumerate() {
+                if zone.prototype != p.prototype {
+                    continue;
+                }
+                let slots = &mut self.slots;
+                if let Some(z) = slots
+                    .iter_mut()
+                    .flatten()
+                    .find(|z| z.zone == i && z.id == p.id)
+                {
+                    z.seen = true;
+                } else if let Some(slot) = slots.iter_mut().find(|z| z.is_none()) {
+                    *slot = Some(Zone {
+                        id: p.id.clone(),
+                        zone: i,
+                        position: place_point(p.pose, p.scale, zone.pose.translation),
+                        playing: false,
+                        seen: true,
+                    });
+                }
+            }
+        }
+        for (emitter, slot) in self.slots.iter_mut().enumerate() {
+            if slot.as_ref().is_some_and(|z| !z.seen) && slot.take().is_some_and(|z| z.playing) {
+                stop(emitter as u32);
+            }
+        }
+    }
+    /// Source order: a stopped zone starts on this step and sets its gain on the next step.
+    fn step(
+        &mut self,
+        slot: usize,
+        zones: &[AmbienceZoneReference],
+        listener: [f64; 3],
+    ) -> ZoneStep {
+        let Some(z) = &mut self.slots[slot] else {
+            return ZoneStep::Idle;
+        };
+        let zone = &zones[z.zone];
+        let d = (0..3)
+            .map(|i| (z.position[i] - listener[i]).powi(2))
+            .sum::<f64>()
+            .sqrt() as f32;
+        // Mathf.InverseLerp(maxDist, minDist, distance).
+        let lerp =
+            ((d - zone.max_distance) / (zone.min_distance - zone.max_distance)).clamp(0., 1.);
+        if z.playing {
+            if lerp == 0. {
+                z.playing = false;
+                return ZoneStep::Stop;
+            }
+            return ZoneStep::Play {
+                gain: zone.volume * lerp,
+                lerp,
+                position: z.position,
+            };
+        }
+        z.playing = lerp > 0.;
+        ZoneStep::Idle
+    }
+}
+
+impl AudioState {
+    pub fn sync_zones(&mut self, revision: u64, structures: &[StructureInstance]) {
+        let loops = &mut self.survival_loops;
+        self.zones.sync(
+            revision,
+            structures,
+            &self.reference.ambience_zones,
+            |emitter| loops.retain(|v| v.kind != AudioKind::AmbienceZone || v.emitter != emitter),
+        );
+    }
+    /// Plays the zones near `listener`. Returns the largest playing lerp for the ambient duck.
+    pub fn zone_step(&mut self, listener: [f64; 3]) -> f32 {
+        let mut duck = 0f32;
+        for slot in 0..ZONE_CAPACITY {
+            match self
+                .zones
+                .step(slot, &self.reference.ambience_zones, listener)
+            {
+                ZoneStep::Idle => {}
+                ZoneStep::Play {
+                    gain,
+                    lerp,
+                    position,
+                } => {
+                    duck = duck.max(lerp);
+                    self.source_loop(AudioKind::AmbienceZone, slot as u32, gain, position);
+                }
+                ZoneStep::Stop => self.stop_survival_loop(AudioKind::AmbienceZone, slot as u32),
+            }
+        }
+        duck
     }
 }
 
@@ -298,5 +453,88 @@ mod tests {
         assert_eq!(timer(&state).0, 5., "kept timers keep their state");
         state.sync(3, &[], &[rock()], 9.);
         assert!(state.timers.is_empty());
+    }
+
+    fn zone() -> AmbienceZoneReference {
+        let method =
+            r#"{"class":"c","method":"m","file":"f","line_start":1,"line_end":2,"sha256":""}"#;
+        serde_json::from_str(&format!(
+            r#"{{"prototype":{{"file":"s","path_id":7}},
+            "pose":{{"translation":[0,0,0],"rotation":[0,0,0,1],"scale":[1,1,1]}},
+            "min_distance":200,"max_distance":1000,"volume":0.5,"clip":3,"method":{method}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn zone_follows_source_lerp_and_order() {
+        let zones = [zone()];
+        let mut state = ZoneAmbience::default();
+        let mut stops = 0;
+        state.sync(1, &[structure(0, 7)], &zones, |_| stops += 1);
+        let mut step = |d: f64| state.step(0, &zones, [d, 0., 0.]);
+        assert_eq!(step(1200.), ZoneStep::Idle, "no start at lerp 0");
+        assert_eq!(
+            step(600.),
+            ZoneStep::Idle,
+            "starts; gain from the next step"
+        );
+        let play = |gain, lerp| ZoneStep::Play {
+            gain,
+            lerp,
+            position: [0.; 3],
+        };
+        assert_eq!(step(600.), play(0.25, 0.5));
+        assert_eq!(step(0.), play(0.5, 1.));
+        assert_eq!(step(1200.), ZoneStep::Stop);
+        assert_eq!(step(1200.), ZoneStep::Idle);
+        step(0.);
+        state.sync(2, &[], &zones, |_| stops += 1);
+        assert_eq!(stops, 1, "a removed playing zone stops");
+        assert_eq!(state.step(0, &zones, [0.; 3]), ZoneStep::Idle);
+    }
+
+    #[test]
+    fn duck_recovers_at_source_rate() {
+        let reference: crate::reference::AmbientReference = serde_json::from_str(
+            r#"{"source":{"file":"level1","path_id":1},"day_volume":[1,1],
+            "night_volume":[1,1],"modifier":1,"only_modifier":1,"recovery_per_second":0.1}"#,
+        )
+        .unwrap();
+        let cycle = CycleOutput {
+            phase: CyclePhase::Day,
+            progress: 0.,
+            cycle_seconds: 0.,
+            directional_euler_degrees: [0.; 3],
+            directional_color: [0.; 4],
+            directional_intensity: 0.,
+            ambient: 0.,
+            reflection_intensity: 0.,
+            sky_exposure: 0.,
+            sky_tint: [0.; 4],
+            ground_color: [0.; 4],
+            atmosphere_thickness: 0.,
+            fog_density: 0.,
+            fog_color: [0.; 4],
+            roadside_enabled: false,
+            biome_color: [1., 0., 0., 0.],
+            ambient_temperature: 0.,
+            clouds: Default::default(),
+            cloud_noise_coordinate: 0.,
+            cloud_noise: 0.,
+            star_color: [0.; 4],
+            star_rotation_degrees: 0.,
+            flare_progress: 0.,
+            flare_brightness: 0.,
+            shader_time_seconds: 0.,
+            grading_temperature: None,
+        };
+        let mut ambient = crate::audio::AmbientState::new(&reference);
+        ambient.duck(0.5);
+        assert_eq!(ambient.only_modifier, 0.5);
+        ambient.duck(0.2);
+        assert_eq!(ambient.only_modifier, 0.5, "the duck keeps the minimum");
+        assert_eq!(ambient.gains(&reference, &cycle, 0., 1.), [0.5; 2]);
+        assert!((ambient.only_modifier - 0.6).abs() < 1e-6);
     }
 }

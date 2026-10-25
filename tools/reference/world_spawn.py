@@ -2,7 +2,7 @@
 import copy
 from . import world_probe
 from .source import key, source_id
-from .world import Selection, RULE_CLASSES, EDIBLE_COMPONENTS, selected_actions, _source_root, source_material, export_world_prototypes
+from .world import Selection, RULE_CLASSES, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
 
 
 def extend_spawn_closure(source, reader, output, world):
@@ -60,10 +60,7 @@ def extend_spawn_closure(source, reader, output, world):
         reason='other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else ''
         excluded_actions=selected_actions(source,scripts,actions)
         root_parts=[source.read(c) for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='partscript']
-        matches=[slot['source'] for slot in world['part_scope_slots'] if any((not slot['main_types'] or not p['maintipus'] or set(slot['main_types'])&set(p['maintipus'])) and set(slot['part_types'])&set(p['tipus']) for p in root_parts)]
-        if root_parts and not matches:
-            if any(p['maintipus'] for p in root_parts):reason=reason or 'unsupported_part_type'
-            else:excluded_actions=sorted(set(excluded_actions)|{'part_attachment'})
+        matches,excluded_actions=part_scope(root_parts,world['part_scope_slots'],excluded_actions)
         scopes[identity]=(reason,excluded_actions)
         for row in items_by_root.get(identity,[]):
             if row['index'] in required:

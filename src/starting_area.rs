@@ -945,6 +945,18 @@ impl GarageRuntime {
     }
 
     fn advance_ambient(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let position = self
+            .stream
+            .origin
+            .absolute(self.area.player.body_pose(&self.physics).position);
+        // Source order: the zones duck the ambient before napszak reads it.
+        if let Some(audio) = &mut self.audio {
+            audio.sync_zones(
+                self.stream.structure_revision(),
+                self.stream.frame().structures,
+            );
+            self.ambient.duck(audio.zone_step(position));
+        }
         // napszakvaltakozas.FixedUpdate reads inSandStorm before the storms update.
         let storm = self.weather.influence().strength.clamp(0., 1.);
         let gains = self.ambient.gains(
@@ -955,10 +967,6 @@ impl GarageRuntime {
         );
         if let Some(audio) = &mut self.audio {
             use crate::audio::AudioKind;
-            let position = self
-                .stream
-                .origin
-                .absolute(self.area.player.body_pose(&self.physics).position);
             audio.source_loop(AudioKind::AmbientDay, 0, gains[0], position);
             audio.source_loop(AudioKind::AmbientNight, 0, gains[1], position);
             audio.source_loop(

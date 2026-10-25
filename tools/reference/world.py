@@ -42,6 +42,14 @@ def selected_actions(source, scripts, actions):
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
 
+def part_scope(parts, slots, excluded_actions):
+    """Return matching slot sources. A part without a slot spawns loose and cannot attach."""
+    matches=[slot['source'] for slot in slots if any(
+        (not slot['main_types'] or not p['maintipus'] or set(slot['main_types']) & set(p['maintipus']))
+        and set(slot['part_types']) & set(p['tipus']) for p in parts)]
+    if parts and not matches:excluded_actions=sorted(set(excluded_actions) | {'part_attachment'})
+    return matches,excluded_actions
+
 def required_record(source, owner, fields):
     """Check required fields and all their links before opening a dependent record."""
     identity = f'{key(owner)[0]}:{key(owner)[1]}'
@@ -305,13 +313,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                 classes={source.class_name(c) for c in scripts}
                 result=('other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else '',selected_actions(source,scripts,actions))
                 parts=[source.read(c) for c in root_scripts if source.class_name(c)=='partscript']
-                matches=[slot['source'] for slot in part_scope_slots if any(
-                    (not slot['main_types'] or not p['maintipus'] or set(slot['main_types']) & set(p['maintipus']))
-                    and set(slot['part_types']) & set(p['tipus']) for p in parts)]
-                part_matches[key(root)]=matches
-                if parts and not matches:
-                    if any(p['maintipus'] for p in parts):result=(result[0] or 'unsupported_part_type',result[1])
-                    else:result=(result[0],sorted(set(result[1]) | {'part_attachment'}))
+                part_matches[key(root)],excluded_actions=part_scope(parts,part_scope_slots,result[1])
+                result=(result[0],excluded_actions)
             scope_cache[key(root)]=result
         return scope_cache[key(root)]
     def startup_hierarchy(root):
@@ -438,11 +441,25 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for identity,record in selected.records.items():
         if identity not in records:records[identity]=record
     world['records']=list(records.values())
+    bind_light_cookies(source,world)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
     project_runtime_receipts(world,world_probe.PROBE_ROOT)
     project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
+
+def bind_light_cookies(source, world):
+    """Bind each world Light cookie to the lighting spot cookie texture that renders it."""
+    textures={tuple(t['source'].values()):t['id'] for t in source.lighting_textures.values()}
+    spot={l['cookie'] for l in source.lighting_lights if l['kind']=='spot' and l['cookie'] is not None}
+    bindings={}
+    for r in world['records']:
+        cookie=r['fields'].get('m_Cookie') if r['class_name']=='Light' else None
+        if not cookie or cookie['kind']!='link':continue
+        identity=tuple(cookie['value'].values())
+        if r['fields']['m_Type']['value']!=0 or textures.get(identity) not in spot:raise ValueError(f"{r['source']} world light cookie has no lighting spot cookie texture")
+        bindings[identity]={'source':cookie['value'],'texture':textures[identity]}
+    world['light_cookies']=[bindings[i] for i in sorted(bindings)]
 
 def recover_catalog(source, reader, selected, database):
     """Read source initializer tables without retaining method bodies in runtime output."""
