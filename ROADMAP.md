@@ -68,11 +68,13 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 11. Set a draw distance that does not fit (above about 5500 m). New game must refuse it and name the largest value. Reload: the slider keeps the last value that started.
 12. Check the slider is locked in the pause menu. Check far terrain, buildings and fog at 2500 m against the original.
 13. Run `cargo test --test world_range -- --ignored --nocapture`. Peaks must stay below the limits.
+14. World population (W05): run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture` (about 5 min plus build). All 11 building types must pass. The `unsupported_part_type` drops must be gone.
+15. Check loot in a few building types: gas and oil cans, beer, barrels, buckets and the WC now spawn. Flashlights in loot must not stop the world, and their beams show the cookie on walls and terrain.
+16. Near the Mansion: the crow sound fades in from 1000 m to full at 200 m, and the day and night ambience fades out by the same amount. Check F3 near the Mansion.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
-| W05 | Complete world population. | L | Loot rules for every building type, roadside car condition, ambience zones. [I14, C07, L02] |
 | W06 | Add digging and detection. | L | Buried item state and save, shovel swing and digging, metal detector. [F10, F03] |
 | W07 | Add weather. | L | Tumbleweeds, snowfall in the winter biome. [J03, J04] |
 
@@ -81,7 +83,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V01 | Add a general vehicle loader. [Vehicles](docs/vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
-| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. [B02-B04, B06, B07, L06] |
+| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
 | V03 | Add buses. | XL | Diesel rules, three buses, doors, door lamps, bus trailer. [B05, B08-B11] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle, sled. [B12-B14] |
 | V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
