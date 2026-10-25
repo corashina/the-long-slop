@@ -2,7 +2,7 @@
 use super::{AbsolutePose, ObjectKey, Placement, WorldBounds};
 use crate::reference::SourceId;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -346,23 +346,6 @@ impl ChangeRecords {
         self.revision = self.revision.wrapping_add(1);
         true
     }
-    pub(crate) fn retain(
-        &mut self,
-        mut keep: impl FnMut(&ObjectKey, &ObjectChange) -> bool,
-    ) -> bool {
-        let revision = self.revision;
-        let mut index = 0;
-        while index < self.records.len() {
-            let (key, change) = &self.records[index];
-            if keep(key, change) {
-                index += 1;
-            } else {
-                let key = key.clone();
-                self.forget(&key);
-            }
-        }
-        self.revision != revision
-    }
     pub fn get(&self, key: impl std::borrow::Borrow<ObjectKey>) -> Option<&ObjectChange> {
         self.identities
             .get(key.borrow())
@@ -455,58 +438,6 @@ impl ChangeRecords {
 }
 fn attachment_owner(snapshot: &ObjectSnapshot) -> Option<&ObjectKey> {
     snapshot.attachment.as_ref()?.owner.as_ref()
-}
-/// Both source and destination must leave both horizontal focus windows.
-pub(crate) fn roadside_change_expired(
-    change: &ObjectChange,
-    foci: [[f64; 3]; 2],
-    radius_squared: f32,
-) -> bool {
-    let Some(source) = &change.replay else {
-        return false;
-    };
-    foci.into_iter().all(|focus| {
-        super::contents::distance(focus, source.pose.position) >= radius_squared
-            && change.snapshot.as_ref().is_none_or(|snapshot| {
-                super::contents::distance(focus, snapshot.pose.position) >= radius_squared
-            })
-    })
-}
-pub(crate) fn external_attachment(change: &ObjectChange, records: &ChangeRecords) -> bool {
-    change
-        .snapshot
-        .as_ref()
-        .and_then(|s| s.attachment.as_ref())
-        .is_some_and(|attachment| {
-            attachment.owner.as_ref().is_none_or(|owner| {
-                records.get(owner).is_none_or(|parent| {
-                    change.instance.is_none() || parent.instance != change.instance
-                })
-            })
-        })
-}
-/// Keep each external child and every recorded owner up to the root.
-pub(crate) fn external_attachment_chain(
-    records: &ChangeRecords,
-    dependencies: &mut HashSet<ObjectKey>,
-) {
-    dependencies.clear();
-    for (key, change) in records.iter() {
-        if !external_attachment(change, records) {
-            continue;
-        }
-        let mut next = Some(key);
-        while let Some(key) = next {
-            if !dependencies.insert(key.clone()) {
-                break;
-            }
-            next = records
-                .get(key)
-                .and_then(|record| record.snapshot.as_ref())
-                .and_then(|snapshot| snapshot.attachment.as_ref())
-                .and_then(|attachment| attachment.owner.as_ref());
-        }
-    }
 }
 pub(crate) fn key_heap(key: &ObjectKey) -> usize {
     match key {

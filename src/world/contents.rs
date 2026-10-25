@@ -358,7 +358,6 @@ impl SourceContents {
         replays: &[Placement],
         cables: &[(GeneratedId, Vec<super::NodeAppearance>)],
         focus: [[f64; 3]; 2],
-        available_index_bytes: usize,
         limit: usize,
         pending: usize,
         staging: usize,
@@ -380,7 +379,7 @@ impl SourceContents {
             if remaining == 0 || available == 0 {
                 return Ok(());
             }
-            if !self.advance_deferred(reference, available_index_bytes, remaining, available)? {
+            if !self.advance_deferred(reference, remaining, available)? {
                 return Ok(());
             }
         }
@@ -489,7 +488,6 @@ impl SourceContents {
                 cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
                 0,
                 SpawnPhase::ComponentStart,
-                available_index_bytes,
                 staging,
                 &cursor.inputs,
                 |random, context, pools, initialization, staging| {
@@ -657,7 +655,6 @@ impl SourceContents {
                 source,
                 cursor.next as u32,
                 SpawnPhase::SynchronousAndStarts,
-                available_index_bytes,
                 staging,
                 &cursor.inputs,
                 |random, context, pools, initialization, staging| {
@@ -745,7 +742,6 @@ impl SourceContents {
     fn advance_deferred(
         &mut self,
         reference: &WorldReference,
-        available_index_bytes: usize,
         limit: usize,
         staging: usize,
     ) -> Result<bool, ReferenceError> {
@@ -786,7 +782,6 @@ impl SourceContents {
             source,
             batch.next as u32,
             SpawnPhase::ComponentStart,
-            available_index_bytes,
             staging,
             &batch.inputs,
             |random, context, pools, initialization, staging| {
@@ -1503,7 +1498,6 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
-                usize::MAX,
                 1,
                 1,
                 1,
@@ -1539,7 +1533,6 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
-                16 * 1024 * 1024,
                 128,
                 128,
                 32 * 1024 * 1024,
@@ -1606,7 +1599,6 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
-                16 * 1024 * 1024,
                 1,
                 1,
                 staging - 1,
@@ -1627,7 +1619,6 @@ mod tests {
                 &[],
                 &[],
                 [[0.; 3]; 2],
-                16 * 1024 * 1024,
                 1,
                 1,
                 staging,

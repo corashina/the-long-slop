@@ -75,10 +75,12 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 18. Dig a buried item up with the shovel. It must lift, become loose, and then allow pickup. A buried item must refuse pickup. Save and load with an item buried and one dug up.
 19. Metal detector (W06): turn it on and off with use. Check the beep pitch and volume and the needle near metal, buried metal, and behind a wall. Save and load with it on. Check F3 while it scans.
 20. Tumbleweeds (W07): check they spawn near the player, roll in gusts, stop near walls, and save with the world. Check F3 with several tumbleweeds.
+21. Long trips (W02): run `cargo test --release --lib w02_ -- --ignored --nocapture`. Note the printed bytes per km and the 5,000 km estimate. Above 200 MB, compact spawn boundaries.
+22. Also run the roadside tests: `cargo test --lib roadside_ -- --ignored`. Far edits, consumed items and lamp states must stay after their area unloads.
+23. In the browser: drop an item, drive about 10 km out and back, save and reload. The item stays where it was dropped. Check F3 before and after the drive.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| W02 | Complete long-distance travel. | XL | Distant revisits, memory limits, far object records, and their saved state. [I04] |
 
 ## 4. More cars
 

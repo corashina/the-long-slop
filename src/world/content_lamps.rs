@@ -76,16 +76,6 @@ impl WorldStream {
             let binding = self.lamp_bindings.swap_remove(i);
             interaction.remove_generated_light(binding.control);
             self.lamp_binding_revision += 1;
-            if binding.portable {
-                // The item change owns portable lamp state.
-                continue;
-            }
-            let mut key = binding.parent;
-            key.children.push((binding.source, 0));
-            if self.changes.forget(&ObjectKey::Generated(key)) {
-                self.invalidate_changed_selection();
-            }
-            self.changes_prune_due = true;
         }
         loop {
             let next = self

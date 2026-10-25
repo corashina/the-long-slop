@@ -1089,14 +1089,6 @@ pub struct PlacementIndexSnapshot {
     foundations: Vec<FoundationPoint>,
     supplies: Vec<SupplyPoint>,
 }
-impl PlacementIndexSnapshot {
-    pub(crate) fn checkpoint_heap_bytes(&self) -> usize {
-        self.blocks
-            .iter()
-            .map(|b| checkpoint_heap(&b.checkpoint))
-            .sum()
-    }
-}
 impl PlacementIndex {
     pub fn coverage(&self) -> u32 {
         self.sequence.state.next_building
