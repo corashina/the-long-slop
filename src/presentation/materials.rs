@@ -1893,7 +1893,7 @@ impl LampMaterialChoice {
 pub(crate) fn prepare_lamp_materials(
     mut commands: Commands,
     reference: Res<crate::app::RuntimeReference>,
-    drive: Res<crate::app::Drive>,
+    sim: Res<super::sim_frame::SimFrameResource>,
     mut source: ResMut<super::lighting::SourceLighting>,
     mut originals: ResMut<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<SourceMaterial>>,
@@ -1926,7 +1926,7 @@ pub(crate) fn prepare_lamp_materials(
     let source = &mut *source;
     let far = Transform::from_translation(Vec3::splat(1_000_000.));
     for target in &mut source.lamp_materials {
-        let output = &drive.runtime.lighting.material_outputs()[target.output_index];
+        let output = &sim.frame.lamp_materials[target.output_index];
         let mut keys = Vec::new();
         for state in reference
             .0
@@ -2040,7 +2040,7 @@ pub(crate) fn prepare_lamp_materials(
 /// Select cached handles. Gameplay does not allocate materials or mesh variants.
 pub(crate) fn sync_lamp_materials(
     mut commands: Commands,
-    drive: Res<crate::app::Drive>,
+    sim: Res<super::sim_frame::SimFrameResource>,
     mut source: ResMut<super::lighting::SourceLighting>,
     receivers: Query<&MeshMaterial3d<SourceMaterial>>,
 ) {
@@ -2048,7 +2048,7 @@ pub(crate) fn sync_lamp_materials(
         return;
     }
     for target in &mut source.lamp_materials {
-        let output = &drive.runtime.lighting.material_outputs()[target.output_index];
+        let output = &sim.frame.lamp_materials[target.output_index];
         let key = (output.asset, output.material_index);
         let choice = target
             .choices

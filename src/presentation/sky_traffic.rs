@@ -1,7 +1,8 @@
 //! Scene instances of the sky traffic planes. Planes have no bodies.
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
-use crate::app::{Drive, RuntimeReference};
+use super::sim_frame::SimFrameResource;
+use crate::app::RuntimeReference;
 use crate::reference::{NodeId, SourceId};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
@@ -59,7 +60,7 @@ fn descends(mut entity: Entity, root: Entity, parents: &Query<&ChildOf>) -> bool
 pub(crate) fn sync(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut sky: ResMut<SkyTrafficVisuals>,
@@ -74,23 +75,20 @@ pub(crate) fn sync(
         return;
     }
     let manifest = &reference.0;
-    let runtime = &drive.runtime;
-    let planes = runtime.sky().planes();
+    let planes = &frame.frame.planes;
     let sky = &mut *sky;
     sky.instances.retain(|id, instance| {
         let keep = planes
             .iter()
-            .any(|p| p.id == *id && p.prefab == instance.prefab);
+            .any(|p| p.id == *id && p.prefab as usize == instance.prefab);
         if !keep {
             commands.entity(instance.root).despawn();
         }
         keep
     });
-    let anchor = runtime.sky_anchor(manifest);
-    let origin = runtime.stream.origin.offset;
-    let anchor = Vec3::from_array(std::array::from_fn(|i| (anchor[i] - origin[i]) as f32));
+    let anchor = Vec3::from_array(frame.frame.state.sky_anchor);
     for plane in planes {
-        let prefab = &manifest.sky.prefabs[plane.prefab];
+        let prefab = &manifest.sky.prefabs[plane.prefab as usize];
         let Some(instance) = sky.instances.get_mut(&plane.id) else {
             let Some((_, handle)) = visuals.gltfs.iter().find(|(id, _)| *id == prefab.asset) else {
                 continue;
@@ -123,7 +121,7 @@ pub(crate) fn sync(
                 plane.id,
                 SkyInstance {
                     root,
-                    prefab: plane.prefab,
+                    prefab: plane.prefab as usize,
                     ready: false,
                     bound: false,
                     shown: false,
@@ -195,8 +193,8 @@ pub(crate) fn sync(
         }
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
             transform.set_if_neq(
-                Transform::from_translation(anchor + Vec3::from_array(plane.offset.to_array()))
-                    .with_rotation(Quat::from_array(plane.heading.to_array())),
+                Transform::from_translation(anchor + Vec3::from_array(plane.offset))
+                    .with_rotation(Quat::from_array(plane.heading)),
             );
         }
         // Source fedoscript: rot.Rotate(rotaxis * rotspeed * deltaTime) in local space.
@@ -205,7 +203,7 @@ pub(crate) fn sync(
         {
             let axis = Vec3::from_array(spin.axis);
             let speed = f64::from(spin.degrees_per_second * axis.length());
-            let degrees = (speed * runtime.simulation_seconds) % 360.;
+            let degrees = (speed * frame.frame.state.simulation_seconds) % 360.;
             transform.rotation =
                 base * Quat::from_axis_angle(axis.normalize(), (degrees as f32).to_radians());
         }

@@ -12,6 +12,8 @@ fn frame_round_trips() {
         seq_consumed: 42,
         state: StateBlock {
             simulation_seconds: 12.5,
+            origin: [1., 2., 3.],
+            cycle_elapsed_seconds: 40.,
             alpha: 0.25,
             time_scale: 2.,
             flags: StateBlock::STARTED | StateBlock::SEATED,
@@ -20,6 +22,8 @@ fn frame_round_trips() {
             body_pose: row(7.),
             body_root: row(8.),
             joint_scale: 0.01,
+            sky_anchor: [0., 300., 0.],
+            ember_light: 8,
             pad: 0,
         },
         previous: vec![row(1.), row(4.)],
@@ -32,6 +36,37 @@ fn frame_round_trips() {
             },
         ],
         joints: vec![row(9.)],
+        cigarettes: vec![CigaretteRow {
+            item: 7,
+            blend: 0.5,
+            color: [1., 0.5, 0., 1.],
+            light_intensity: 2.,
+        }],
+        planes: vec![PlaneRow {
+            id: 3,
+            prefab: 1,
+            offset: [10., 0., 5.],
+            heading: [0., 0., 0., 1.],
+        }],
+        lighting: FrameLighting {
+            cycle: crate::lighting::CycleOutput {
+                progress: 0.3,
+                grading_temperature: Some(5.),
+                ..Default::default()
+            },
+            road_lamp: LightOutput {
+                id: crate::reference::LightId(4),
+                enabled: true,
+                intensity: 1.5,
+            },
+        },
+        lights: vec![LightOutput::default()],
+        lamp_materials: Vec::new(),
+        control_poses: Vec::new(),
+        node_visibility: vec![crate::lighting::NodeVisibilityOutput {
+            node: crate::reference::NodeId(2),
+            visible: true,
+        }],
         valves: vec![ValveRow {
             opening: 4,
             valve: 0.5,

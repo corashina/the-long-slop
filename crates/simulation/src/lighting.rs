@@ -1,15 +1,16 @@
 //! Source cycle outputs retain Unity units.
 use crate::reference::{CycleReference, GradientReference};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CyclePhase {
     Dawn,
+    #[default]
     Day,
     Dusk,
     Night,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CloudOutput {
     pub color: [f32; 4],
     pub density: f32,
@@ -17,7 +18,7 @@ pub struct CloudOutput {
 }
 
 /// Clear-weather source signals. Angles use Unity Euler degrees; colors retain source channels.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CycleOutput {
     pub phase: CyclePhase,
     pub progress: f32,
@@ -648,19 +649,19 @@ fn native_cloud_noise(x: f32) -> f32 {
     value / 1.483_f32
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LightOutput {
     pub id: crate::reference::LightId,
     pub enabled: bool,
     pub intensity: f32,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LampMaterialOutput {
     pub renderer: crate::reference::NodeId,
     pub asset: crate::reference::AssetId,
     pub material_index: u32,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ControlPoseOutput {
     pub node: crate::reference::NodeId,
     pub local_pose: crate::reference::Transform,
@@ -769,7 +770,7 @@ impl HeadlightState {
         self.energy
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NodeVisibilityOutput {
     pub node: crate::reference::NodeId,
     pub visible: bool,

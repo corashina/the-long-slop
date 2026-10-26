@@ -95,7 +95,17 @@ pub const BUILD_ID: u32 = 11_140_890;
 macro_rules! id {
     ($name:ident, $inner:ty) => {
         #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Serialize,
+            Deserialize,
         )]
         #[serde(transparent)]
         pub struct $name(pub $inner);
@@ -129,7 +139,7 @@ pub struct SourceHash {
     pub sha256: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
     pub translation: [f32; 3],
