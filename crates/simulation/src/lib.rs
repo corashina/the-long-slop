@@ -3,6 +3,7 @@
 
 pub mod animation;
 pub mod audio;
+pub mod boundary;
 pub mod conditions;
 #[cfg(target_arch = "wasm32")]
 pub mod cpu_profile;
