@@ -95,6 +95,7 @@ pub(crate) fn sync_lighting(
     transforms: Query<&GlobalTransform>,
     mut scene: ResMut<SourceSceneLighting>,
     status: Res<RendererStateHandle>,
+    instances: Option<Res<super::world::instances::SourceInstances>>,
 ) {
     scene.0 = None;
     if status.failure().is_some() {
@@ -109,7 +110,18 @@ pub(crate) fn sync_lighting(
         return;
     }
     origin.0 = drive.runtime.area.origin;
-    match scene_value(&assets, &visuals, &master, &drive, &reference, &transforms) {
+    let car = instances
+        .as_deref()
+        .and_then(|instances| followed_probe(&drive, &reference, instances));
+    match scene_value(
+        &assets,
+        &visuals,
+        &master,
+        &drive,
+        &reference,
+        &transforms,
+        car,
+    ) {
         Ok(mut value) => {
             if activation.scene != epoch.0 {
                 activation.scene = epoch.0;
@@ -147,6 +159,27 @@ pub(crate) fn sync_lighting(
         }
     }
 }
+/// The probe node entity and influence box of the world car the player last sat in.
+/// None: the garage Lada probe. V03 bridge: Task 9 makes the start Lada copy the fallback.
+fn followed_probe(
+    drive: &Drive,
+    reference: &RuntimeReference,
+    instances: &super::world::instances::SourceInstances,
+) -> Option<(Entity, [f32; 3], [f32; 3])> {
+    let key = drive.runtime.vehicle.as_ref()?;
+    let crate::world::ObjectKey::Generated(id) = key else {
+        return None;
+    };
+    let crate::starting_area::VehicleRecord::World(index) = drive.runtime.vehicles.get(key)?.record
+    else {
+        return None;
+    };
+    let prototype = &reference.0.world.prototypes[index];
+    let probe = prototype.vehicle.as_ref()?.probe.as_ref()?;
+    let node = prototype.nodes[probe.node as usize].gltf_node as usize;
+    let entity = *instances.nodes_of(id)?.get(node)?;
+    Some((entity, probe.bounds_size, probe.bounds_offset))
+}
 fn scene_value(
     assets: &LightingAssets,
     visuals: &ReferenceVisuals,
@@ -154,6 +187,7 @@ fn scene_value(
     drive: &Drive,
     reference: &RuntimeReference,
     transforms: &Query<&GlobalTransform>,
+    car: Option<(Entity, [f32; 3], [f32; 3])>,
 ) -> Result<SceneLighting, String> {
     if !drive
         .runtime
@@ -171,19 +205,26 @@ fn scene_value(
     let mut centers = [Vec4::ZERO; PROBE_COUNT];
     let mut sizes = [Vec4::ZERO; PROBE_COUNT];
     for (index, probe) in assets.record.probes.iter().enumerate() {
-        let entity = visuals
-            .nodes
-            .get(&probe.node)
-            .ok_or("Missing bound probe node")?;
+        // The probe follows the car the player last sat in.
+        let (entity, size, offset) = match car {
+            Some(car) => car,
+            None => (
+                *visuals
+                    .nodes
+                    .get(&probe.node)
+                    .ok_or("Missing bound probe node")?,
+                probe.bounds_size,
+                probe.bounds_offset,
+            ),
+        };
         let position = transforms
-            .get(*entity)
+            .get(entity)
             .map_err(|_| "Missing probe world transform")?
             .translation();
         if !position.is_finite() {
             return Err("Nonfinite probe world position".into());
         }
-        let (center, extents) =
-            probe_influence_bounds(position.to_array(), probe.bounds_size, probe.bounds_offset);
+        let (center, extents) = probe_influence_bounds(position.to_array(), size, offset);
         positions[index] = position;
         centers[index] = Vec3::from_array(center).extend(0.);
         sizes[index] = Vec3::from_array(extents).extend(0.);

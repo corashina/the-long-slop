@@ -1794,6 +1794,20 @@ impl WorldReference {
                     && plate.material_source == shared.material.source
             }),
             &format!("{f} plate font/material"),
+        )?;
+        // V03 bridge: capture targets use the shared probe record. Task 9 moves it to the car.
+        require(
+            p.vehicle
+                .iter()
+                .filter_map(|v| v.probe.as_ref())
+                .all(|probe| {
+                    manifest
+                        .render_lighting
+                        .probes
+                        .iter()
+                        .all(|s| probe.matches(s))
+                }),
+            &format!("{f} reflection probe"),
         )
     }
 }

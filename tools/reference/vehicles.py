@@ -12,6 +12,7 @@ from .particles import recover_exhaust
 from .wheel_effects import recover_wheel_effects, effect_gains
 from .player_movement import seat_view
 from .plates import prototype_plates
+from .render_lighting import probe_settings
 
 ENGINE_FIELDS = {'start_chance':'startChance','starter_rpm':'starterRpm','starter_rpm_lerp':'starterRpmLerp',
     'idle_rpm':'alapRpm','max_rpm':'maxRpm','shutdown_rpm':'shutdownRpm','max_torque_nm':'maxNm',
@@ -179,6 +180,15 @@ def light_records(source, proto, car_reader, car, asset, material_indices):
     return controllers,switch
 
 
+def probe_record(source, proto):
+    """The car's realtime ReflectionProbe, or None. Its node is a prototype node index."""
+    probes=[(i,c) for i,n in enumerate(proto.hierarchy) for c in n['components'] if c.type.name=='ReflectionProbe']
+    if len(probes)>1:raise ValueError(f'{key(proto.hierarchy[0]["reader"])} has more than one reflection probe')
+    if not probes:return None
+    node,reader=probes[0]
+    return {'source':source_id(reader),'node':node,**probe_settings(key(reader),source.read(reader))}
+
+
 def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices, output):
     """`vehicle` record of a world prototype whose root has carscript, else None.
 
@@ -246,5 +256,5 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),
         'seats':seats,'lights':lights,'light_switch':light_switch,'instruments':instruments,
-        'plates':prototype_plates(source,proto),
+        'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

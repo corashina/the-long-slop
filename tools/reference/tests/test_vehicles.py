@@ -78,6 +78,11 @@ def car_fixture():
         component(text, 'MeshRenderer', dict(m_SortingLayer=0, m_SortingOrder=3))
         plates.append(component(plate, 'MonoBehaviour', dict(text=ptr(tmp), S='', same=0,
             sameAsThis=ptr(plates[same] if same is not None else None)), 'rendszamscript'))
+    component(node(root), 'ReflectionProbe', dict(m_Mode=1, m_RefreshMode=1, m_TimeSlicingMode=1, m_Resolution=64,
+        m_HDR=True, m_BoxProjection=False, m_UseOcclusionCulling=False, m_BakedTexture=ptr(None),
+        m_CustomBakedTexture=ptr(None), m_Enabled=1, m_BoxSize=dict(x=6., y=2.5, z=6.), m_BoxOffset=dict(x=0., y=0., z=1.),
+        m_BlendDistance=1., m_IntensityMultiplier=1., m_Importance=1, m_NearClip=.3, m_FarClip=100.,
+        m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
     data[car.path_id].update(speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
         WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), carType=1, startingTime=1.,
@@ -129,6 +134,10 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(rear['sorting'], [0, 3])
         self.assertEqual(rear['layout']['bounds'], [1., .2])
         self.assertEqual(front['font_source'], rear['font_source'])
+        # The reflection probe record is on the car prototype.
+        probe = vehicle['probe']
+        self.assertEqual(hierarchy[probe['node']]['components'][0].type.name, 'ReflectionProbe')
+        self.assertEqual((probe['bounds_size'], probe['near'], probe['mask']), ([6., 2.5, 6.], .3, 1))
         engines, radiators = part_records(source, hierarchy)
         self.assertEqual(len(engines), 1)
         engine = engines[0]
