@@ -17,7 +17,11 @@ pub(super) fn frame(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     frame_with(run, reference, FrameInput::default());
 }
 
-fn frame_with(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInput) {
+pub(super) fn frame_with(
+    run: &mut GarageRuntime,
+    reference: &ReferenceManifest,
+    input: FrameInput,
+) {
     let mut claim = CLAIM.take();
     let focus = run
         .stream
