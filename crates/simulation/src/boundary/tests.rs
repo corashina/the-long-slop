@@ -14,6 +14,8 @@ fn frame_round_trips() {
             simulation_seconds: 12.5,
             origin: [1., 2., 3.],
             cycle_elapsed_seconds: 40.,
+            session: 3,
+            selection_revision: 9,
             alpha: 0.25,
             time_scale: 2.,
             flags: StateBlock::STARTED | StateBlock::SEATED,
@@ -24,6 +26,8 @@ fn frame_round_trips() {
             joint_scale: 0.01,
             sky_anchor: [0., 300., 0.],
             ember_light: 8,
+            motion_revision: 2,
+            far_plane: 1500.,
             pad: 0,
         },
         previous: vec![row(1.), row(4.)],
@@ -112,6 +116,24 @@ fn frame_round_trips() {
             },
             Change::PlayerRig(vec![crate::reference::NodeId(5)]),
             Change::Retire(Handle(0)),
+            Change::HomeCable(vec![RopeAim {
+                node: crate::reference::NodeId(9),
+                rotation: [0., 0., 0., 1.],
+                scale_z: 0.4,
+            }]),
+            Change::FollowedCar(Some((
+                crate::world::GeneratedId {
+                    layer: crate::world::WorldLayer::Startup,
+                    generator: crate::reference::SourceId {
+                        file: "level0".into(),
+                        path_id: 5,
+                    },
+                    unit: [1, -2],
+                    ordinal: 4,
+                    children: Vec::new(),
+                },
+                6,
+            ))),
             Change::Failure("stream".into()),
         ],
     };

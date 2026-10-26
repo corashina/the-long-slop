@@ -2,12 +2,14 @@
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use simulation::boundary::{
-    Change, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, SimFrame, SpawnData,
+    Change, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, RopeAim, SimFrame,
+    SpawnData,
 };
 use simulation::conditions::ConditionState;
 use simulation::reference::{ConditionId, ItemId, NodeId};
 use simulation::starting_area::spawned::SpawnedItem;
 use simulation::vehicle::VehiclePose;
+use simulation::world::GeneratedId;
 use std::collections::HashMap;
 
 /// One particle group of the frame: kind, kind ids and source.
@@ -30,6 +32,10 @@ pub(crate) struct SimFrameResource {
     conditions: HashMap<ConditionId, ConditionState>,
     /// Owners whose condition changed since the visuals last read them.
     pub changed_conditions: Vec<ConditionId>,
+    /// Home cable aims waiting for the reference visuals.
+    pub home_cable: Option<Vec<RopeAim>>,
+    /// The world car the player last sat in, else the start car: id and prototype.
+    pub followed_car: Option<(GeneratedId, u32)>,
 }
 
 impl SimFrameResource {
@@ -60,6 +66,8 @@ impl SimFrameResource {
                     retired(*handle);
                 }
                 Change::PlayerRig(joints) => self.rig.clone_from(joints),
+                Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),
+                Change::FollowedCar(car) => self.followed_car.clone_from(car),
                 Change::Failure(_) => {}
             }
         }
