@@ -396,7 +396,6 @@ pub(super) fn start_pack_poses(
     reference: &ReferenceManifest,
     startup: &crate::world::StartupTerrain,
     origin: [f64; 3],
-    vehicle: usize,
 ) -> Result<Vec<(VehiclePose, u32)>, ReferenceError> {
     let local = |pose: VehiclePose| VehiclePose {
         position: std::array::from_fn(|i| (pose.position[i] as f64 - origin[i]) as f32),
@@ -407,14 +406,8 @@ pub(super) fn start_pack_poses(
         let pose = crate::world::source_world_pose(&reference.world, startup, &v.transform, &[])?;
         packs.push((local(pose), v.ammo.count));
     }
-    // Source DestroyOthers keeps only the selected start car group.
-    let car = &reference.vehicles[vehicle].source;
-    for v in reference
-        .acquisition
-        .startup_packs
-        .iter()
-        .filter(|v| &v.vehicle == car)
-    {
+    // The export keeps only the packs of the selected start car groups.
+    for v in &reference.acquisition.startup_packs {
         let parent = v
             .group_pose
             .parent

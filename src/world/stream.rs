@@ -617,12 +617,6 @@ impl WorldStream {
             self.select_changed_destinations();
         }
     }
-    pub fn select_source_car(&mut self, car_id: i32) {
-        if self.contents.state.context.current_car != car_id {
-            self.contents.state.context.current_car = car_id;
-            self.revise_selection();
-        }
-    }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn lod_owner(&self, source: &SourceId) -> Option<&SourceId> {
         self.contents
@@ -4469,9 +4463,6 @@ impl WorldStream {
     }
     pub fn changes(&self) -> &super::ChangeRecords {
         &self.changes
-    }
-    pub(crate) fn changes_mut(&mut self) -> &mut super::ChangeRecords {
-        &mut self.changes
     }
 
     /// Retire only after the replacement collision windows support both receivers.

@@ -45,8 +45,6 @@ struct Slot {
     compatible: Vec<ItemId>,
     mount_pose: Pose,
     detach_pose: Option<Pose>,
-    /// The vehicle whose hierarchy holds the slot.
-    vehicle: Option<usize>,
 }
 pub struct PartAttachments {
     scan_mask: u32,
@@ -57,10 +55,7 @@ pub struct PartAttachments {
     slot_indices: HashMap<PartSlotId, usize>,
     collider_slots: HashMap<ColliderId, PartSlotId>,
     wheel_covers: HashMap<ItemId, PartSlotId>,
-    /// Chassis body per vehicle.
-    chassis: Vec<BodyId>,
     bound: bool,
-    plate_mass: Vec<(ItemId, f32)>,
 }
 impl PartAttachments {
     pub(crate) fn restore_save(
@@ -99,7 +94,7 @@ impl PartAttachments {
             }
         }
         for i in 0..self.parts.len() {
-            let body = self.physical_body(i, items, physics);
+            let body = self.physical_body(i, items);
             for &(id, _, _) in &self.parts[i].members {
                 items.set_body(id, Some(body)).unwrap();
             }
@@ -199,20 +194,11 @@ impl PartAttachments {
             let members: Vec<_> = r
                 .items
                 .iter()
-                .filter(|x| {
-                    ancestry(x.node) == Some(i) && !r.plates.plates.iter().any(|p| p.item == x.id)
-                })
+                .filter(|x| ancestry(x.node) == Some(i))
                 .map(|x| (x.id, x.node, x.mass_kg))
                 .collect();
             let mut shapes = Vec::new();
             for id in &p.colliders {
-                if r.plates
-                    .plates
-                    .iter()
-                    .any(|plate| plate.colliders.contains(id))
-                {
-                    continue;
-                }
                 let c = r
                     .colliders
                     .iter()
@@ -274,18 +260,6 @@ impl PartAttachments {
                         })
                     })
                     .collect::<Result<_, ReferenceError>>()?,
-                vehicle: {
-                    let mut node = Some(s.node);
-                    let mut vehicle = None;
-                    while let Some(id) = node {
-                        vehicle = r.vehicles.iter().position(|v| v.root == id);
-                        if vehicle.is_some() {
-                            break;
-                        }
-                        node = r.nodes.iter().find(|n| n.id == id).and_then(|n| n.parent);
-                    }
-                    vehicle
-                },
                 reference: s.clone(),
                 part: s
                     .part
@@ -316,14 +290,7 @@ impl PartAttachments {
             slots,
             slot_indices,
             collider_slots,
-            chassis: r.vehicles.iter().map(|v| v.body).collect(),
             bound: false,
-            plate_mass: r
-                .plates
-                .plates
-                .iter()
-                .map(|p| (p.item, p.mass_kg))
-                .collect(),
             wheel_covers: r
                 .wheel_parts
                 .iter()
@@ -488,7 +455,6 @@ impl PartAttachments {
             .collect();
         self.slot_indices.insert(reference.id, self.slots.len());
         self.slots.push(Slot {
-            vehicle: None,
             scan_shapes,
             part: None,
             mount_node,
@@ -917,7 +883,7 @@ impl PartAttachments {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) {
-        let body = self.physical_body(root, items, physics);
+        let body = self.physical_body(root, items);
         let delta = pose * old.inverse();
         let inverse = physics.rapier().bodies[body].position().inverse();
         for (i, p) in self.parts.iter().enumerate() {
@@ -1058,31 +1024,18 @@ impl PartAttachments {
             {
                 continue;
             }
-            let body = self.physical_body(i, items, physics);
+            let body = self.physical_body(i, items);
             let inverse = physics.rapier().bodies[body].position().inverse();
             for &(id, _, _) in &self.parts[i].members {
                 let state = items.set_body(id, Some(body)).unwrap();
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &self.parts[i].shapes {
-                let vehicle = physics
-                    .vehicle_of(body)
-                    .map(|key| crate::vehicle::garage_vehicle_index(key).expect("garage car"));
-                let local = if let Some(vehicle) = vehicle {
-                    let chassis = self.chassis[vehicle];
-                    m.body_local_pose(shape.body, chassis)
+                let vehicle = physics.vehicle_of(body).is_some();
+                let local = inverse
+                    * m.body_pose(shape.body)
                         .map(|pose| pose * shape.shape)
-                        .unwrap_or_else(|| {
-                            m.node_local_pose(self.parts[i].reference.node, chassis)
-                                .unwrap()
-                                * shape.part_local
-                        })
-                } else {
-                    inverse
-                        * m.body_pose(shape.body)
-                            .map(|pose| pose * shape.shape)
-                            .unwrap_or(self.parts[i].pose * shape.part_local)
-                };
+                        .unwrap_or(self.parts[i].pose * shape.part_local);
                 let h = shape.handle.unwrap();
 
                 if physics.rapier().colliders[h].parent() != Some(body) {
@@ -1099,7 +1052,7 @@ impl PartAttachments {
                     if c.is_enabled() != enabled {
                         crate::vehicle::set_collider_enabled(c, enabled);
                     }
-                    if vehicle.is_some() {
+                    if vehicle {
                         c.user_data |= VEHICLE_COLLIDER_FLAG;
                     } else {
                         c.user_data &= !VEHICLE_COLLIDER_FLAG;
@@ -1113,7 +1066,6 @@ impl PartAttachments {
         &self,
         mut i: usize,
         items: &ItemStore,
-        physics: &PhysicsWorld,
     ) -> RigidBodyHandle {
         loop {
             let p = &self.parts[i];
@@ -1121,9 +1073,7 @@ impl PartAttachments {
                 return p.body.unwrap();
             };
             let Some(owner) = self.slots[s].reference.owner else {
-                return physics.chassis_handle(&crate::vehicle::garage_vehicle_key(
-                    self.slots[s].vehicle.expect("vehicle slot"),
-                ));
+                return p.body.unwrap();
             };
             if let Some(&parent) = self.indices.get(&owner) {
                 i = parent;
@@ -1180,19 +1130,7 @@ impl PartAttachments {
             let body = self.parts[i]
                 .body
                 .ok_or_else(|| error("Part bodies are not bound"))?;
-            let mounted_plate_mass: f32 = self
-                .plate_mass
-                .iter()
-                .filter(|(id, _)| {
-                    items.get(*id).is_some_and(|item| {
-                        matches!(item.location, ItemLocation::Attached(_))
-                            && item.body == Some(body)
-                    })
-                })
-                .map(|(_, mass)| *mass)
-                .sum();
-            let mass = (mounted_plate_mass
-                + self.parts[i].assembly_dry_mass
+            let mass = (self.parts[i].assembly_dry_mass
                 + self.parts[i]
                     .assembly_fluids
                     .iter()

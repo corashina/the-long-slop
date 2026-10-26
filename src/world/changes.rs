@@ -86,7 +86,6 @@ pub struct ChangeRecords {
     #[serde(skip)]
     region_bytes: usize,
     /// Car-side state of car objects. A car takes its state back when it spawns.
-    /// V03 bridge: old garage cars use their bridge key. Task 9 removes it.
     #[serde(serialize_with = "pairs")]
     vehicles: BTreeMap<ObjectKey, crate::starting_area::VehicleState>,
     /// The rim object of each wheel slot of car objects, in wheel order.

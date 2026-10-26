@@ -20,7 +20,7 @@ impl SaveSnapshot {
         let ids = IdentityMap::new(reference)?;
         self.validate_world(reference)?;
         identity::unsigned(&self.progress.start_attempts)?;
-        self.validate_object_states(reference)?;
+        self.validate_object_states()?;
         let mut items = HashMap::new();
         for item in &self.items {
             let id = ids.item(&item.instance)?;
@@ -57,15 +57,7 @@ impl SaveSnapshot {
             )?;
             absolute(&item.pose)?;
             local(&item.local_pose)?;
-            data(
-                item.temperature.is_none_or(f32::is_finite),
-                "Item temperature",
-            )?;
-            links(
-                item.temperature.is_some()
-                    == reference.vehicles.iter().any(|v| id == v.engine.item),
-                "Item temperature owner",
-            )?;
+            links(item.temperature.is_none(), "Item temperature owner")?;
             let tank = reference.tanks.iter().find(|tank| tank.item == id);
             match (&item.fluids, tank) {
                 (Some(entries), Some(tank)) => data(
@@ -98,16 +90,13 @@ impl SaveSnapshot {
             &self.cigarettes,
         )?;
         crate::starting_area::hose::validate_save(reference, &self.spawned)?;
-        let parents = self.validate_attachments(reference, &ids, &items)?;
-        self.validate_player(reference, &ids, &items, &parents)?;
+        self.validate_attachments(reference, &ids, &items)?;
+        self.validate_player(reference, &ids, &items)?;
         self.validate_needs(reference)?;
         self.validate_inventory(reference, &ids, &items)?;
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
-        if let Some(radio) = &self.radio {
-            data(unit(radio.tuning) && unit(radio.volume), "Radio controls")?;
-        }
         validate_weather(&reference.weather, &self.weather)?;
         crate::conditions::validate_surfaces(reference, &self.conditions)?;
         crate::interaction::cleaning::validate_tools(reference, &self.conditions.tools)?;
@@ -139,42 +128,21 @@ impl SaveSnapshot {
     }
 
     /// Car, engine and radiator states in the world records, and the last seated car.
-    fn validate_object_states(&self, reference: &ReferenceManifest) -> Result<(), SaveError> {
-        use crate::vehicle::garage_vehicle_index;
-        let garage = |key: &crate::world::ObjectKey| -> Result<Option<usize>, SaveError> {
-            garage_vehicle_index(key)
-                .map(|index| {
-                    links(index < reference.vehicles.len(), "Garage car identity").map(|_| index)
-                })
-                .transpose()
-        };
+    fn validate_object_states(&self) -> Result<(), SaveError> {
         if let Some(key) = &self.progress.selected_vehicle {
-            garage(key)?;
+            links(
+                matches!(key, crate::world::ObjectKey::Generated(_)),
+                "Selected car identity",
+            )?;
         }
         let changes = &self.world.changes;
-        for (key, state) in changes.vehicles() {
+        // The binder checks the car record when the car spawns.
+        for (_, state) in changes.vehicles() {
             data(
                 state.trip_m.is_finite() && state.trip_m >= 0.,
                 "Trip distance",
             )?;
             data(state.requested_headlights <= 2, "Requested headlights")?;
-            // V03 bridge: old garage cars check their record here. The binder checks world
-            // cars when they spawn. Task 9 removes it.
-            if let Some(index) = garage(key)? {
-                let source = &reference.vehicles[index];
-                let odometer = &source.instruments.odometer;
-                let distance = odometer.initial_value + (state.trip_m / 1000.) as f32;
-                let displayed = if odometer.use_multiplier {
-                    distance * odometer.multiplier
-                } else {
-                    distance
-                };
-                data(
-                    distance.is_finite() && displayed.is_finite(),
-                    "Instrument distance",
-                )?;
-                data(state.gear < source.gear_ratios.len(), "Vehicle gear")?;
-            }
         }
         for (_, e) in changes.engines() {
             super::identity::unsigned(&e.start_draw)?;
@@ -210,18 +178,8 @@ impl SaveSnapshot {
         ids: &IdentityMap,
         items: &HashMap<r::ItemId, &'a ItemSnapshot>,
     ) -> Result<HashMap<r::ItemId, r::ItemId>, SaveError> {
-        let vehicle_item = |index: usize| {
-            reference
-                .items
-                .iter()
-                .find(|item| item.node == reference.vehicles[index].root)
-                .map(|i| i.id)
-                .ok_or_else(|| invalid("Missing vehicle item"))
-        };
         let mut parents = HashMap::new();
         let mut part_slots = HashMap::new();
-        let mut wheel_slots = HashMap::new();
-        let mut tires = HashMap::new();
         let mut linked_parts = HashSet::new();
         for attachment in &self.attachments.parts {
             let id = *ids
@@ -261,145 +219,13 @@ impl SaveSnapshot {
                         },
                     "Part location conflicts with slot",
                 )?;
-                parents.insert(
-                    item,
-                    slot.owner.map(Ok).unwrap_or_else(|| {
-                        let mut node = slot.node;
-                        let index = loop {
-                            if let Some(index) =
-                                reference.vehicles.iter().position(|v| v.root == node)
-                            {
-                                break index;
-                            }
-                            node = reference
-                                .nodes
-                                .iter()
-                                .find(|n| n.id == node)
-                                .and_then(|n| n.parent)
-                                .ok_or_else(|| invalid("Part slot vehicle"))?;
-                        };
-                        vehicle_item(index)
-                    })?,
-                );
+                parents.insert(item, slot.owner.ok_or_else(|| invalid("Part slot owner"))?);
             }
         }
         links(
             part_slots.len() == reference.part_slots.len(),
             "Missing part slot",
         )?;
-        for attachment in &self.attachments.wheels {
-            let id = *ids
-                .wheel_slots
-                .get(&attachment.slot)
-                .ok_or_else(|| invalid("Unknown wheel slot"))?;
-            links(
-                wheel_slots.insert(id, attachment.rim.as_ref()).is_none(),
-                "Duplicate wheel slot",
-            )?;
-            let delta =
-                (f64::from(attachment.rotation) - f64::from(attachment.previous_rotation)).abs();
-            let vehicle_index = reference
-                .vehicles
-                .iter()
-                .position(|v| v.wheel_slots.contains(&id))
-                .ok_or_else(|| invalid("Wheel slot vehicle"))?;
-            let vehicle = &reference.vehicles[vehicle_index];
-            let largest_ratio = vehicle
-                .gear_ratios
-                .iter()
-                .fold(0_f64, |m, r| m.max(f64::from(r.abs())))
-                * f64::from(vehicle.final_drive_ratio.abs());
-            data(
-                delta * 60. / f64::from(crate::simulation::FIXED_DT) <= f64::from(f32::MAX)
-                    && f64::from(attachment.rpm.abs()) * largest_ratio <= f64::from(f32::MAX),
-                "Wheel derived RPM",
-            )?;
-            data(attachment.rotation.is_finite(), "Wheel rotation")?;
-            data(attachment.rpm.is_finite(), "Wheel RPM")?;
-            data(
-                attachment.previous_rotation.is_finite(),
-                "Previous wheel rotation",
-            )?;
-            if let Some(instance) = &attachment.rim {
-                let item = ids.item(instance)?;
-                links(linked_parts.insert(item), "Rim has multiple owners")?;
-                let slot = reference
-                    .wheel_slots
-                    .iter()
-                    .find(|slot| slot.id == id)
-                    .unwrap();
-                let part = reference
-                    .wheel_parts
-                    .iter()
-                    .find(|part| part.item == item)
-                    .ok_or_else(|| invalid("Unknown rim"))?;
-                links(
-                    matches!(
-                        reference.items.iter().find(|i| i.id == item).unwrap().kind,
-                        r::ItemKind::Rim
-                    ) && fits(
-                        &slot.rim_main_types,
-                        &slot.rim_types,
-                        &part.main_types,
-                        &part.part_types,
-                    ),
-                    "Incompatible wheel slot",
-                )?;
-                links(
-                    items[&item].location
-                        == ItemLocationSave::WheelSlot {
-                            slot: attachment.slot.clone(),
-                        },
-                    "Rim location conflicts with slot",
-                )?;
-                parents.insert(item, vehicle_item(vehicle_index)?);
-            }
-        }
-        links(
-            wheel_slots.len() == reference.wheel_slots.len(),
-            "Missing wheel slot",
-        )?;
-        for attachment in &self.attachments.tires {
-            let rim = ids.item(&attachment.rim)?;
-            let tire = ids.item(&attachment.tire)?;
-            links(
-                tires.insert(rim, tire).is_none() && linked_parts.insert(tire),
-                "Duplicate tire ownership",
-            )?;
-            let rim_part = reference
-                .wheel_parts
-                .iter()
-                .find(|p| p.item == rim)
-                .ok_or_else(|| invalid("Unknown rim"))?;
-            let tire_part = reference
-                .wheel_parts
-                .iter()
-                .find(|p| p.item == tire)
-                .ok_or_else(|| invalid("Unknown tire"))?;
-            links(
-                matches!(
-                    reference.items.iter().find(|i| i.id == rim).unwrap().kind,
-                    r::ItemKind::Rim
-                ) && matches!(
-                    reference.items.iter().find(|i| i.id == tire).unwrap().kind,
-                    r::ItemKind::Tire
-                ) && fits(
-                    &rim_part.tire_main_types,
-                    &rim_part.tire_types,
-                    &tire_part.main_types,
-                    &tire_part.part_types,
-                ),
-                "Incompatible tire and rim",
-            )?;
-            links(
-                items[&tire].location
-                    == ItemLocationSave::Attached {
-                        owner: attachment.rim.clone(),
-                    },
-                "Tire location conflicts with rim",
-            )?;
-            parents.insert(tire, rim);
-        }
         for (&id, item) in items {
             let source_item = reference.items.iter().find(|i| i.id == id).unwrap();
             let detachable = reference.parts.iter().any(|part| part.item == id)
@@ -421,19 +247,10 @@ impl SaveSnapshot {
                         == Some(&item.instance),
                     "Unlisted part attachment",
                 )?,
-                ItemLocationSave::WheelSlot { slot } => links(
-                    ids.wheel_slots
-                        .get(slot)
-                        .and_then(|slot| wheel_slots.get(slot))
-                        .copied()
-                        .flatten()
-                        == Some(&item.instance),
-                    "Unlisted wheel attachment",
-                )?,
                 ItemLocationSave::Attached { owner } => {
                     let owner = ids.item(owner)?;
                     if matches!(source_item.kind, r::ItemKind::Tire) {
-                        links(tires.get(&owner) == Some(&id), "Unlisted tire attachment")?;
+                        links(tire_fits(reference, owner, id), "Incompatible tire and rim")?;
                     } else {
                         links(
                             source_item.attached_to == Some(owner),
@@ -502,7 +319,6 @@ impl SaveSnapshot {
         reference: &ReferenceManifest,
         ids: &IdentityMap,
         items: &HashMap<r::ItemId, &ItemSnapshot>,
-        parents: &HashMap<r::ItemId, r::ItemId>,
     ) -> Result<(), SaveError> {
         let p = &self.player;
         absolute(&p.pose)?;
@@ -524,32 +340,6 @@ impl SaveSnapshot {
         if let Some(seat) = &p.seat {
             local(&seat.local_pose)?;
             match &seat.owner {
-                // V03 bridge: an old garage car seat has a seat record. Task 9 removes it.
-                SeatOwnerSnapshot::Vehicle { vehicle }
-                    if crate::vehicle::garage_vehicle_index(vehicle).is_some() =>
-                {
-                    let vehicle_index = crate::vehicle::garage_vehicle_index(vehicle).unwrap();
-                    links(
-                        vehicle_index < reference.vehicles.len()
-                            && Some(vehicle) == self.progress.selected_vehicle.as_ref(),
-                        "Selected seat vehicle",
-                    )?;
-                    let seat_id = ids
-                        .seats
-                        .get(&seat.source)
-                        .ok_or_else(|| invalid("Unknown seat"))?;
-                    let source = reference.seats.iter().find(|s| s.id == *seat_id).unwrap();
-                    let mut root = source.item;
-                    while let Some(parent) = parents.get(&root) {
-                        root = *parent;
-                    }
-                    links(
-                        reference.items.iter().any(|item| {
-                            item.id == root && item.node == reference.vehicles[vehicle_index].root
-                        }),
-                        "Seat is detached from vehicle",
-                    )?;
-                }
                 // A world car seat binds with its car. The seat binding checks the source.
                 SeatOwnerSnapshot::Vehicle { vehicle } => {
                     links(
@@ -958,11 +748,6 @@ impl SaveSnapshot {
                     && unit(saved.energy),
                 "Lamp controller state",
             )?;
-            match (&source.cabin_input, saved.cabin_mode) {
-                (Some(input), Some(mode)) => data(mode < input.modes.len(), "Cabin mode")?,
-                (None, None) => (),
-                _ => return Err(invalid("Cabin mode owner")),
-            }
             let mut poses = HashSet::new();
             for pose in &saved.switch_poses {
                 let node = ids
@@ -1131,6 +916,21 @@ fn fits(
         || part_main.is_empty()
         || slot_main.iter().any(|tag| part_main.contains(tag)))
         && slot_types.iter().any(|tag| part_types.contains(tag))
+}
+/// Source rim item `rim` accepts source tire item `tire`.
+fn tire_fits(reference: &ReferenceManifest, rim: r::ItemId, tire: r::ItemId) -> bool {
+    let part = |id| reference.wheel_parts.iter().find(|p| p.item == id);
+    let kind = |id| reference.items.iter().find(|i| i.id == id).map(|i| &i.kind);
+    let (Some(rim_part), Some(tire_part)) = (part(rim), part(tire)) else {
+        return false;
+    };
+    matches!(kind(rim), Some(r::ItemKind::Rim))
+        && fits(
+            &rim_part.tire_main_types,
+            &rim_part.tire_types,
+            &tire_part.main_types,
+            &tire_part.part_types,
+        )
 }
 fn invalid(detail: &str) -> SaveError {
     SaveError::InvalidLinks(detail.into())

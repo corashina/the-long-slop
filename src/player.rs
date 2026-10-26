@@ -18,7 +18,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
-use crate::reference::{ItemId, PlayerPoseReference, PlayerReference, SeatId, SeatReference};
+use crate::reference::{ItemId, PlayerPoseReference, PlayerReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 
@@ -74,9 +74,6 @@ pub struct ExitReference {
 }
 
 impl ExitReference {
-    pub fn from_reference(player: &PlayerReference, seat: &SeatReference) -> Self {
-        Self::new(player, seat.exit_distance, seat.min_exit_angle_degrees)
-    }
     fn new(player: &PlayerReference, distance: f32, minimum_look_angle_degrees: f32) -> Self {
         Self {
             distance,
@@ -113,19 +110,6 @@ pub struct SeatValues {
 }
 
 impl SeatValues {
-    pub fn car(player: &PlayerReference, seat: &SeatReference) -> Self {
-        Self {
-            yaw_limits_degrees: seat.yaw_limits_degrees,
-            yaw_unlimited: false,
-            look_instead_of_lean: false,
-            pitch_limits_degrees: seat.pitch_limits_degrees,
-            default_pitch_degrees: seat.default_pitch_degrees,
-            driver: seat.driver,
-            driving2: seat.driving2,
-            show_sleep_text: seat.show_sleep_text,
-            exit: ExitReference::from_reference(player, seat),
-        }
-    }
     /// Driver roles come from the seat record. The exit distance is the player value.
     pub(crate) fn item(
         player: &PlayerReference,
@@ -153,8 +137,6 @@ impl SeatValues {
 }
 
 struct Occupancy {
-    /// Car seat record. Item seats have none.
-    id: Option<SeatId>,
     /// The item that holds the seat. Its part cannot be taken while the player sits on it.
     item: ItemId,
     /// Main seatscript of an item seat. Car seats have none.
@@ -179,7 +161,6 @@ pub struct PlayerState {
     feet: ColliderHandle,
     clearance_shapes: [rapier3d::parry::shape::Ball; 10],
     pose: Pose,
-    seats: Vec<SeatReference>,
     occupancy: Option<Occupancy>,
     collisions: Vec<CharacterCollision>,
     yaw: f32,
@@ -198,7 +179,6 @@ impl PlayerState {
     pub(crate) fn restore_save(
         &mut self,
         saved: &crate::save::PlayerSnapshot,
-        ids: &crate::save::IdentityMap,
         origin: &crate::world::WorldOrigin,
         physics: &mut PhysicsWorld,
     ) -> Result<(), crate::save::SaveError> {
@@ -214,25 +194,7 @@ impl PlayerState {
         self.movement_speed = MovementSpeed::default();
         self.running = saved.running;
         // A world item or world car seat waits for its binding. See `restore_item_seat`.
-        self.occupancy = match saved.seat.as_ref().map(|record| (record, &record.owner)) {
-            // V03 bridge: an old garage car seat restores at once. Task 9 removes it.
-            Some((record, crate::save::SeatOwnerSnapshot::Vehicle { vehicle }))
-                if crate::vehicle::garage_vehicle_index(vehicle).is_some() =>
-            {
-                let id = ids.seats[&record.source];
-                let seat = self.seats.iter().find(|s| s.id == id).unwrap();
-                Some(Occupancy {
-                    id: Some(id),
-                    item: seat.item,
-                    source: None,
-                    body: physics.chassis_handle(vehicle),
-                    owner: SeatOwner::Vehicle(vehicle.clone()),
-                    local_pose: to_rapier(crate::save::local_pose(&record.local_pose)),
-                    values: SeatValues::car(&self.reference, seat),
-                })
-            }
-            Some(_) | None => None,
-        };
+        self.occupancy = None;
         if let Some(seat) = &self.occupancy {
             self.pose = *physics.rapier().bodies[seat.body].position() * seat.local_pose;
         }
@@ -313,7 +275,6 @@ impl PlayerState {
                 rapier3d::parry::shape::Ball::new(reference.posture.clearance[i].sphere.radius)
             }),
             pose,
-            seats: Vec::new(),
             occupancy: None,
             collisions: Vec::with_capacity(20),
             yaw: yaw_from_rotation(pose.rotation),
@@ -331,7 +292,6 @@ impl PlayerState {
 
     pub fn capture_save(
         &self,
-        ids: &crate::save::IdentityMap,
         origin: &crate::world::WorldOrigin,
         physics: &PhysicsWorld,
         carry: Option<crate::save::CarrySnapshot>,
@@ -356,15 +316,8 @@ impl PlayerState {
                 .occupancy
                 .as_ref()
                 .map(|seat| {
-                    let (owner, source) = match (&seat.owner, seat.id) {
-                        // V03 bridge: old garage car seats have a seat record. Task 9 removes it.
-                        (SeatOwner::Vehicle(vehicle), Some(id)) => (
-                            crate::save::SeatOwnerSnapshot::Vehicle {
-                                vehicle: vehicle.clone(),
-                            },
-                            crate::save::identity::source_key(&ids.seats, id)?,
-                        ),
-                        (SeatOwner::Vehicle(vehicle), None) => (
+                    let (owner, source) = match &seat.owner {
+                        SeatOwner::Vehicle(vehicle) => (
                             crate::save::SeatOwnerSnapshot::Vehicle {
                                 vehicle: vehicle.clone(),
                             },
@@ -375,7 +328,7 @@ impl PlayerState {
                                     crate::save::SaveError::InvalidLinks("Car seat source".into())
                                 })?,
                         ),
-                        (SeatOwner::Item(item), None) => (
+                        SeatOwner::Item(item) => (
                             crate::save::SeatOwnerSnapshot::Item { item: item.clone() },
                             seat.source
                                 .as_ref()
@@ -384,11 +337,8 @@ impl PlayerState {
                                     crate::save::SaveError::InvalidLinks("Item seat source".into())
                                 })?,
                         ),
-                        _ => {
-                            return Err(crate::save::SaveError::InvalidLinks("Seat owner".into()));
-                        }
                     };
-                    Ok(crate::save::SeatSnapshot {
+                    Ok::<_, crate::save::SaveError>(crate::save::SeatSnapshot {
                         owner,
                         source,
                         local_pose: crate::save::LocalPose {
@@ -405,16 +355,6 @@ impl PlayerState {
             carry,
         })
     }
-    /// Bind seats once at setup. Driver identity comes from the recovered seat record.
-    pub fn configure_seats(&mut self, seats: &[SeatReference]) {
-        assert!(
-            self.occupancy.is_none(),
-            "cannot replace occupied seat records"
-        );
-        self.seats.clear();
-        self.seats.extend_from_slice(seats);
-    }
-
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
     pub fn step_view(&mut self, input: FrameInput, context: PlayerStepContext, dt: f32) {
         if !dt.is_finite() || dt <= 0.0 {
@@ -746,26 +686,6 @@ impl PlayerState {
         });
         physics.refresh_queries();
     }
-    /// The seat pose places the source sitPos root relative to the chassis.
-    pub fn enter(&mut self, id: SeatId, pose: VehiclePose, physics: &mut PhysicsWorld) -> bool {
-        if self.occupancy.is_some() {
-            return false;
-        }
-        let Some(seat) = self.seats.iter().find(|seat| seat.id == id) else {
-            return false;
-        };
-        let vehicle = crate::vehicle::garage_vehicle_key(seat.vehicle);
-        let occupancy = Occupancy {
-            id: Some(id),
-            item: seat.item,
-            source: None,
-            body: physics.chassis_handle(&vehicle),
-            owner: SeatOwner::Vehicle(vehicle),
-            local_pose: to_rapier(pose),
-            values: SeatValues::car(&self.reference, seat),
-        };
-        self.occupy(occupancy, physics)
-    }
     /// Sit on a world item seat. A car copy owns its seats as a vehicle.
     /// The pose places sitPos relative to the owner body.
     pub(crate) fn enter_item_seat(
@@ -812,7 +732,6 @@ impl PlayerState {
         pose: VehiclePose,
     ) -> Occupancy {
         Occupancy {
-            id: None,
             item,
             source: Some(seat.source.clone()),
             owner,
@@ -911,10 +830,6 @@ impl PlayerState {
         physics.edit_body(self.body, |body| body.set_position(candidate, false));
         physics.refresh_queries();
         true
-    }
-    /// The occupied car seat. Item seats return `None`.
-    pub fn seat(&self) -> Option<SeatId> {
-        self.occupancy.as_ref().and_then(|seat| seat.id)
     }
     pub fn seated(&self) -> bool {
         self.occupancy.is_some()

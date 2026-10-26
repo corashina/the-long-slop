@@ -363,6 +363,13 @@ impl WorldStream {
         items.mark_dirty(item);
         Some((item, click))
     }
+    /// The radio of a knob collider.
+    pub fn knob_radio(&self, knob: ColliderId) -> Option<&RadioState> {
+        self.radio_bindings
+            .iter()
+            .find(|b| b.knobs.iter().any(|(k, _)| *k == knob))
+            .map(|b| &b.state)
+    }
     /// The controls saved with a radio item.
     pub(super) fn radio_value(&self, item: ItemId) -> Option<crate::save::RadioSnapshot> {
         self.radio_bindings
@@ -370,14 +377,14 @@ impl WorldStream {
             .find(|b| b.item == item)
             .map(|b| b.state.capture_save())
     }
-    /// Bound world radios (portable and car radios) with their radioscript, controls and
-    /// electronics output.
+    /// Bound world radios (portable and car radios) with their radioscript, controls,
+    /// electronics output and parent placement. A car radio has the car as parent.
     pub fn portable_radios(
         &self,
-    ) -> impl Iterator<Item = (ItemId, &SourceId, &RadioState, f32)> + Clone {
+    ) -> impl Iterator<Item = (ItemId, &SourceId, &RadioState, f32, &GeneratedId)> + Clone {
         self.radio_bindings
             .iter()
-            .map(|b| (b.item, &b.script, &b.state, b.output))
+            .map(|b| (b.item, &b.script, &b.state, b.output, &b.parent))
     }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn radio(&self, parent: &GeneratedId) -> Option<&RadioBinding> {

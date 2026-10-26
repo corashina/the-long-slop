@@ -1596,11 +1596,7 @@ pub(crate) fn restore_item(
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
     // A world car slot mounts its rim from the car slot record.
     let world_wheel = slot.and_then(|source| interaction.resolve_wheel_slot(resolved, source));
-    if slot.is_some()
-        && target_slot.is_none()
-        && world_wheel.is_none()
-        && !slot.is_some_and(|source| reference.wheel_slots.iter().any(|s| &s.source == source))
-    {
+    if slot.is_some() && target_slot.is_none() && world_wheel.is_none() {
         return Ok(false);
     }
     let current = items.get(id).unwrap().location;
@@ -1625,12 +1621,6 @@ pub(crate) fn restore_item(
         interaction
             .parts
             .mount_mechanism(id, &mut interaction.mechanisms);
-    } else if let Some(wheel) =
-        slot.and_then(|source| reference.wheel_slots.iter().find(|s| &s.source == source))
-    {
-        if items.get(id).unwrap().location != ItemLocation::WheelSlot(wheel.id) {
-            wheels.install(id, wheel.id, items, physics)?;
-        }
     } else if let Some(parent) = resolved.filter(|_| volume.is_none()) {
         if slot.is_none()
             && items.get(id).unwrap().location != ItemLocation::Attached(parent)

@@ -1,12 +1,10 @@
 use super::*;
-use crate::reference::{
-    AnchorId, ItemId, SourceId, WheelColliderReference, WheelHubReference, WheelSlotId,
-    WheelSlotReference,
-};
+use crate::reference::{ItemId, WheelColliderReference, WheelHubReference};
 use crate::simulation::{DriveInput, FIXED_DT};
 use crate::vehicle::body::{VehicleBody, VehicleControls, VehicleWheel};
 use crate::vehicle::query_bounds::QueryBounds;
-use crate::vehicle::{DriveTorques, PhysicsWorld, garage_vehicle_key};
+use crate::vehicle::{DriveTorques, PhysicsWorld};
+use crate::world::ObjectKey;
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
 // Exported Lada values (Steam build 11140890).
@@ -24,18 +22,18 @@ const RIM: WheelAssembly = WheelAssembly::Rim {
     mass_kg: 10.0,
 };
 
-fn lada_slot(steer: bool, drive: bool) -> WheelSlotReference {
-    WheelSlotReference {
-        id: WheelSlotId(0),
-        source: SourceId {
-            file: "fixture".into(),
-            path_id: 0,
-        },
-        anchor: AnchorId(0),
-        mount_anchor: AnchorId(0),
-        wheel: ItemId(0),
-        tire: ItemId(0),
-        rim: ItemId(0),
+/// One Lada wheel: its collider and drive rules.
+struct Slot {
+    collider: WheelColliderReference,
+    rules: VehicleWheel,
+}
+
+fn garage_vehicle_key(_: u8) -> ObjectKey {
+    ObjectKey::Imported(ItemId(1))
+}
+
+fn lada_slot(steer: bool, drive: bool) -> Slot {
+    Slot {
         collider: WheelColliderReference {
             radius: 0.3,
             suspension_distance: 0.3,
@@ -61,21 +59,19 @@ fn lada_slot(steer: bool, drive: bool) -> WheelSlotReference {
             rotational_damping: 0.25,
             force_application_distance_m: 0.0,
         },
-        steer,
-        drive,
-        brake: true,
-        handbrake: steer,
-        sideways_stiffness_modifier: 0.0,
-        hub: WheelHubReference {
-            radius_m: 0.04,
-            mass_kg: 5.0,
-            forward_stiffness: 0.1,
-            sideways_stiffness: 1.0,
+        rules: VehicleWheel {
+            steer,
+            drive,
+            brake: true,
+            handbrake: steer,
+            sideways_stiffness_modifier: 0.0,
+            hub: WheelHubReference {
+                radius_m: 0.04,
+                mass_kg: 5.0,
+                forward_stiffness: 0.1,
+                sideways_stiffness: 1.0,
+            },
         },
-        tire_condition_range: [1, 4],
-        rim_condition_range: [1, 4],
-        rim_main_types: Vec::new(),
-        rim_types: Vec::new(),
     }
 }
 
@@ -103,14 +99,14 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         ColliderBuilder::cuboid(0.8, 0.25, 2.0).mass(960.0),
     );
     let corners = [(-0.7, -1.2), (-0.7, 1.2), (0.7, 1.2), (0.7, -1.2)];
-    let references: [WheelSlotReference; 4] =
+    let references: [Slot; 4] =
         std::array::from_fn(|i| lada_slot(i == 0 || i == 3, i == 1 || i == 2));
     let mounts: Vec<_> = (0..4)
         .map(|i| {
             (
                 Vector::new(corners[i].0, 0.0, corners[i].1),
                 &references[i].collider,
-                VehicleWheel::from_slot(&references[i]),
+                references[i].rules,
             )
         })
         .collect();
@@ -172,13 +168,13 @@ fn friction_curve_follows_source_points() {
 #[test]
 fn profiles_follow_source_wheel_support() {
     let slot = lada_slot(false, true);
-    let new = resolve_profile(&VehicleWheel::from_slot(&slot), &SLIP, TIRE);
+    let new = resolve_profile(&slot.rules, &SLIP, TIRE);
     assert_eq!(
         (new.forward_stiffness, new.sideways_stiffness),
         (1.25, 1.25)
     );
     let worn = resolve_profile(
-        &VehicleWheel::from_slot(&slot),
+        &slot.rules,
         &SLIP,
         WheelAssembly::Tire {
             radius_m: 0.3,
@@ -190,12 +186,12 @@ fn profiles_follow_source_wheel_support() {
         (worn.forward_stiffness, worn.sideways_stiffness),
         (0.75, 0.75)
     );
-    let rim = resolve_profile(&VehicleWheel::from_slot(&slot), &SLIP, RIM);
+    let rim = resolve_profile(&slot.rules, &SLIP, RIM);
     assert_eq!(
         (rim.radius, rim.forward_stiffness, rim.sideways_stiffness),
         (0.2, 0.4, 0.3)
     );
-    let hub = resolve_profile(&VehicleWheel::from_slot(&slot), &SLIP, WheelAssembly::Hub);
+    let hub = resolve_profile(&slot.rules, &SLIP, WheelAssembly::Hub);
     assert_eq!(
         (hub.radius, hub.forward_stiffness, hub.sideways_stiffness),
         (0.04, 0.1, 1.0)
@@ -208,7 +204,7 @@ fn brake_holds_a_wheel_and_motor_overcomes_it() {
     let slot = lada_slot(false, true);
     let mut wheel = WheelState::new(
         Vector::ZERO,
-        resolve_profile(&VehicleWheel::from_slot(&slot), &SLIP, TIRE),
+        resolve_profile(&slot.rules, &SLIP, TIRE),
         0.135,
     );
     let frame = WheelFrame {

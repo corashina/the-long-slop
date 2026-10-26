@@ -6,9 +6,6 @@ pub fn display_name<'a>(
     items: &'a crate::interaction::items::ItemStore,
     id: ItemId,
 ) -> &'a str {
-    if reference.plates.plates.iter().any(|plate| plate.item == id) {
-        return "License plate";
-    }
     let Some(item) = reference.items.iter().find(|item| item.id == id) else {
         return items.name(id).unwrap_or("");
     };
@@ -57,13 +54,7 @@ pub fn display_name<'a>(
                 crate::reference::TurnAction::InteriorLight => "Cabin light",
                 crate::reference::TurnAction::ToggleHomeLight { .. } => "Light switch",
             }),
-        ItemKind::Door => {
-            if crate::starting_area::body_vehicle(reference, item.body).is_some() {
-                "Car door"
-            } else {
-                item.name.as_str()
-            }
-        }
+        ItemKind::Door => item.name.as_str(),
         ItemKind::Hood => "Hood",
         ItemKind::Trunk => "Trunk",
         ItemKind::Engine => "Engine",
@@ -71,17 +62,7 @@ pub fn display_name<'a>(
         ItemKind::Tire => "Tire",
         ItemKind::Rim => "Rim",
         ItemKind::Wheel => "Wheel",
-        ItemKind::Seat => {
-            if reference
-                .seats
-                .iter()
-                .any(|seat| seat.item == id && seat.driver)
-            {
-                "Driver seat"
-            } else {
-                "Seat"
-            }
-        }
+        ItemKind::Seat => "Seat",
         ItemKind::Cap => {
             if reference
                 .openings
@@ -90,30 +71,9 @@ pub fn display_name<'a>(
             {
                 return "Water tap";
             }
-            let tank = reference
-                .openings
-                .iter()
-                .find(|opening| opening.cap == id)
-                .map(|opening| opening.tank);
-            let engines = || reference.vehicles.iter().map(|vehicle| &vehicle.engine);
-            if engines().any(|engine| tank == Some(engine.fuel_tank)) {
-                "Fuel cap"
-            } else if engines().any(|engine| tank == Some(engine.oil_tank)) {
-                "Oil cap"
-            } else if engines().any(|engine| tank == Some(engine.coolant_tank)) {
-                "Coolant cap"
-            } else {
-                "Container cap"
-            }
+            "Container cap"
         }
         ItemKind::Container => {
-            if reference
-                .vehicles
-                .iter()
-                .any(|vehicle| vehicle.body == item.body)
-            {
-                return "Fuel tank";
-            }
             if let Some(tank) = reference.tanks.iter().find(|tank| tank.item == id) {
                 if tank
                     .fluids

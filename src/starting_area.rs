@@ -14,10 +14,7 @@ use crate::simulation::{
     keys,
     powertrain::{Powertrain, PowertrainParts},
 };
-use crate::vehicle::{
-    PhysicsWorld, VEHICLE_COLLIDER_FLAG, VehiclePose, collider_builder, garage_vehicle_index,
-    garage_vehicle_key, to_rapier,
-};
+use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, to_rapier};
 use crate::world::{DEFAULT_SEED, ObjectKey, WorldStream};
 use rapier3d::prelude::{
     ActiveEvents, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder, RigidBodyHandle,
@@ -32,28 +29,8 @@ mod weather;
 pub use survival::DrinkResult;
 pub(crate) use survival::active_part as active_food_part;
 
-struct CompoundCollider {
-    handle: crate::vehicle::ColliderHandle,
-    body: BodyId,
-    root: BodyId,
-    fixed_pose: rapier3d::math::Pose,
-    shape_pose: rapier3d::math::Pose,
-}
-
-impl CompoundCollider {
-    fn local_pose(&self, interaction: &InteractionState) -> rapier3d::math::Pose {
-        interaction
-            .mechanisms
-            .body_local_pose(self.body, self.root)
-            .unwrap_or(self.fixed_pose)
-            * self.shape_pose
-    }
-}
-
 pub struct StartingArea {
     pub conditions: crate::conditions::ConditionStore,
-    pub plates: crate::plates::PlateState,
-    _plate_draw: crate::plates::StartupDraw,
     pub bodies: HashMap<BodyId, RigidBodyHandle>,
     pub items: ItemStore,
     pub interaction: InteractionState,
@@ -68,7 +45,6 @@ pub struct StartingArea {
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
     pub cigarettes: cigarettes::CigaretteRuntime,
-    compound_colliders: Vec<CompoundCollider>,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
 
@@ -78,24 +54,11 @@ impl StartingArea {
         physics: &mut PhysicsWorld,
         origin: [f64; 3],
     ) -> Result<Self, ReferenceError> {
-        let mut plate_draw = crate::plates::StartupDraw::new(DEFAULT_SEED);
-        let plates =
-            crate::plates::PlateState::new(&reference.plates, &mut |a, b| plate_draw.draw(a, b))?;
         let conditions = crate::conditions::ConditionStore::new(reference)?;
         let mut items = ItemStore::new(reference)?;
         let mut interaction = InteractionState::new(reference)?;
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
-        let mut compound_colliders = Vec::new();
-        for (index, vehicle) in reference.vehicles.iter().enumerate() {
-            bodies.insert(
-                vehicle.body,
-                physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)),
-            );
-        }
         for body in &reference.bodies {
-            if reference.vehicles.iter().any(|v| v.body == body.id) {
-                continue;
-            }
             let pose = VehiclePose {
                 position: std::array::from_fn(|i| body.pose.translation[i] - origin[i] as f32),
                 rotation: body.pose.rotation,
@@ -121,25 +84,12 @@ impl StartingArea {
             bodies.insert(body.id, handle);
         }
         for record in &reference.colliders {
-            if reference
-                .vehicles
-                .iter()
-                .any(|v| v.colliders.contains(&record.id))
-            {
-                continue;
-            }
             let item = reference
                 .action_bindings
                 .iter()
                 .find(|binding| binding.collider == record.id)
                 .and_then(|binding| binding.use_owner)
                 .or_else(|| collider_item(reference, record.node));
-            let vehicle = body_vehicle(reference, record.body);
-            let flag = if vehicle.is_some() {
-                VEHICLE_COLLIDER_FLAG
-            } else {
-                0
-            };
             let hit_sound = item.is_some_and(|id| {
                 reference
                     .items
@@ -164,99 +114,16 @@ impl StartingArea {
                     InteractionTestMode::And,
                 ))
                 .user_data(
-                    flag | ((record.id.0 as u128) << 64)
+                    ((record.id.0 as u128) << 64)
                         | crate::vehicle::step_surface_bits(record.step_surface)
                         | crate::vehicle::tag_bits(record.tag)
                         | item.map_or(0, |item| item.0 as u128 + 1),
                 );
-            let owner = bodies[&record.body];
-            let mut collider = builder.build();
-            let local = *collider.position();
-            let physical_parent = match vehicle
-                .map(|v| physics.chassis_handle(&crate::vehicle::garage_vehicle_key(v)))
-            {
-                Some(chassis) if owner != chassis => {
-                    collider.set_position(
-                        physics.rapier().bodies[chassis].position().inverse()
-                            * *physics.rapier().bodies[owner].position()
-                            * local,
-                    );
-                    chassis
-                }
-                _ => owner,
-            };
-
-            let handle = physics.insert_collider_with_parent(collider, physical_parent);
-            if physical_parent != owner {
-                let source = reference
-                    .bodies
-                    .iter()
-                    .find(|body| body.id == record.body)
-                    .unwrap();
-                let root = reference.vehicles[vehicle.unwrap()].body;
-                let parent = reference
-                    .bodies
-                    .iter()
-                    .find(|body| body.id == root)
-                    .unwrap();
-                compound_colliders.push(CompoundCollider {
-                    handle,
-                    body: record.body,
-                    root,
-                    fixed_pose: to_rapier(VehiclePose {
-                        position: parent.pose.translation,
-                        rotation: parent.pose.rotation,
-                    })
-                    .inverse()
-                        * to_rapier(VehiclePose {
-                            position: source.pose.translation,
-                            rotation: source.pose.rotation,
-                        }),
-                    shape_pose: local,
-                });
-            }
+            physics.insert_collider_with_parent(builder.build(), bodies[&record.body]);
         }
-        // The vehicle constructor owns these shapes. Add only their aim identity.
-        physics.edit_colliders(|_, collider| {
-            if collider
-                .parent()
-                .is_some_and(|parent| reference.vehicles.iter().any(|v| bodies[&v.body] == parent))
-            {
-                let source = (collider.user_data >> 64) as u32;
-                if let Some(record) = reference
-                    .colliders
-                    .iter()
-                    .find(|record| record.id.0 == source)
-                {
-                    let item = reference
-                        .action_bindings
-                        .iter()
-                        .find(|binding| binding.collider == record.id)
-                        .and_then(|binding| binding.use_owner)
-                        .or_else(|| collider_item(reference, record.node));
-                    collider.user_data = (collider.user_data & !(u32::MAX as u128))
-                        | item.map_or(0, |id| id.0 as u128 + 1);
-                }
-            }
-        });
         for (&id, &handle) in &bodies {
             items.bind_body(id, handle);
             interaction.bind_body(id, handle);
-        }
-        for slot in &reference.wheel_slots {
-            let builder = rapier3d::prelude::ColliderBuilder::ball(slot.collider.radius)
-                .sensor(true)
-                .enabled(false)
-                .density(0.0)
-                .user_data(
-                    VEHICLE_COLLIDER_FLAG
-                        | crate::vehicle::SLOT_SENSOR_FLAG
-                        | ((slot.id.0 as u128) << crate::interaction::wheels::SLOT_ID_SHIFT)
-                        | (slot.wheel.0 as u128 + 1),
-                );
-
-            let handle = physics.insert_collider(builder);
-            interaction.bind_wheel_sensor(handle, slot.rim, physics);
         }
         for (handle, collider) in physics.rapier().colliders.iter() {
             let id = crate::reference::ColliderId((collider.user_data >> 64) as u32);
@@ -266,14 +133,7 @@ impl StartingArea {
         }
         interaction.rebase(origin.map(|v| v as f32));
         interaction.sync_mechanisms(physics);
-        for collider in &compound_colliders {
-            let local = collider.local_pose(&interaction);
-            physics.edit_collider(collider.handle, |collider| {
-                collider.set_position_wrt_parent(local)
-            });
-        }
         interaction.parts.bind(&mut items, physics)?;
-        interaction.attachments.bind(&mut items, physics)?;
         interaction.storage.bind(physics)?;
         interaction.sync_parts(&mut items, physics)?;
         let starter = reference.survival.starter_food;
@@ -303,7 +163,7 @@ impl StartingArea {
         physics.refresh_queries();
         items.sync_poses(physics);
         let spawn = &reference.area.player_spawn;
-        let mut player = PlayerState::new(
+        let player = PlayerState::new(
             &reference.player,
             &reference.clothing.pose,
             VehiclePose {
@@ -312,7 +172,6 @@ impl StartingArea {
             },
             physics,
         );
-        player.configure_seats(&reference.seats);
         interaction.bind_player_body(player.body_handle());
         let attachments = reference
             .bodies
@@ -361,7 +220,7 @@ impl StartingArea {
             .bodies
             .iter()
             .filter_map(|body| {
-                if !body.dynamic || reference.vehicles.iter().any(|v| v.body == body.id) {
+                if !body.dynamic {
                     return None;
                 }
                 let tanks: Vec<_> = reference
@@ -413,9 +272,6 @@ impl StartingArea {
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
-            plates,
-            _plate_draw: plate_draw,
-            compound_colliders,
             portable_mass,
         })
     }
@@ -471,41 +327,6 @@ impl StartingArea {
                 physics.set_body_mass(*handle, mass);
                 *current = mass;
             }
-        }
-    }
-    pub fn sync_compound(&self, physics: &mut PhysicsWorld) {
-        for record in &self.compound_colliders {
-            let user_data = physics.rapier().colliders[record.handle].user_data;
-            if self
-                .interaction
-                .attachments
-                .owns_collider(crate::reference::ColliderId((user_data >> 64) as u32))
-            {
-                continue;
-            }
-            if physics.rapier().colliders[record.handle]
-                .parent()
-                .is_some_and(|body| !physics.body_active(body))
-            {
-                continue;
-            }
-            if physics.rapier().colliders[record.handle]
-                .parent()
-                .and_then(|parent| physics.vehicle_of(parent))
-                .is_none()
-                || self
-                    .interaction
-                    .storage
-                    .owns_collider(user_data, &self.items)
-            {
-                continue;
-            }
-            let local = record.local_pose(&self.interaction);
-            physics.edit_collider(record.handle, |collider| {
-                if collider.position_wrt_parent() != Some(&local) {
-                    collider.set_position_wrt_parent(local);
-                }
-            });
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
@@ -566,28 +387,7 @@ impl StartingArea {
     }
 }
 
-/// Returns the vehicle whose chassis owns the body or one of its parents.
-pub fn body_vehicle(reference: &ReferenceManifest, mut id: BodyId) -> Option<usize> {
-    loop {
-        if let Some(index) = reference.vehicles.iter().position(|v| v.body == id) {
-            return Some(index);
-        }
-        id = reference
-            .bodies
-            .iter()
-            .find(|body| body.id == id)
-            .and_then(|body| body.parent_body)?;
-    }
-}
-
 pub fn collider_item(reference: &ReferenceManifest, mut node: NodeId) -> Option<ItemId> {
-    if let Some(seat) = reference
-        .seats
-        .iter()
-        .find(|seat| seat.hit_nodes.contains(&node))
-    {
-        return Some(seat.item);
-    }
     loop {
         if let Some(item) = reference.items.iter().find(|item| item.node == node) {
             return Some(item.id);
@@ -600,85 +400,8 @@ pub fn collider_item(reference: &ReferenceManifest, mut node: NodeId) -> Option<
     }
 }
 
-pub fn initial_vehicle_poses(
-    reference: &ReferenceManifest,
-) -> Result<Vec<VehiclePose>, ReferenceError> {
-    reference
-        .vehicles
-        .iter()
-        .map(|vehicle| node_pose(reference, vehicle.root))
-        .collect()
-}
-
-/// The car record that a car copy reads each step.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VehicleRecord {
-    /// V03 bridge: old garage car index in `reference.vehicles`. Task 9 removes it.
-    Garage(usize),
-    /// Index of the car prototype in `reference.world.prototypes`.
-    World(usize),
-}
-
-impl VehicleRecord {
-    pub fn gearbox(
-        self,
-        reference: &ReferenceManifest,
-    ) -> crate::simulation::drivetrain::Gearbox<'_> {
-        match self {
-            Self::Garage(index) => (&reference.vehicles[index]).into(),
-            Self::World(index) => self::world_vehicle(reference, index).into(),
-        }
-    }
-    /// Gauges of the record. A world car without gauges has none.
-    pub fn instruments(
-        self,
-        reference: &ReferenceManifest,
-    ) -> Option<&crate::reference::InstrumentReference> {
-        match self {
-            Self::Garage(index) => Some(&reference.vehicles[index].instruments),
-            Self::World(index) => self::world_vehicle(reference, index).instruments.as_ref(),
-        }
-    }
-    /// Source `carscript.psSmoke` systems of the record.
-    pub fn exhaust(self, reference: &ReferenceManifest) -> &[crate::reference::ParticleReference] {
-        match self {
-            Self::Garage(index) => &reference.vehicles[index].exhaust,
-            Self::World(index) => &self::world_vehicle(reference, index).exhaust,
-        }
-    }
-    /// Car sounds of the record.
-    pub fn audio(
-        self,
-        reference: &ReferenceManifest,
-    ) -> Option<&crate::reference::CarAudioReference> {
-        match self {
-            Self::Garage(index) => reference.vehicles[index].audio.as_ref(),
-            Self::World(index) => self::world_vehicle(reference, index).audio.as_ref(),
-        }
-    }
-    /// Source `talajnezo` records and `carscript` effect gains of the record.
-    pub fn wheel_effects(
-        self,
-        reference: &ReferenceManifest,
-    ) -> (
-        &[crate::reference::WheelEffectsReference],
-        &crate::reference::EffectGains,
-    ) {
-        match self {
-            Self::Garage(index) => {
-                let v = &reference.vehicles[index];
-                (&v.wheel_effects, &v.effect_gains)
-            }
-            Self::World(index) => {
-                let v = self::world_vehicle(reference, index);
-                (&v.wheel_effects, &v.effect_gains)
-            }
-        }
-    }
-}
-
 /// The vehicle record of car prototype `index`. The binder adds runtimes only for car prototypes.
-fn world_vehicle(
+pub(crate) fn world_vehicle(
     reference: &ReferenceManifest,
     index: usize,
 ) -> &crate::reference::WorldVehicleReference {
@@ -707,6 +430,8 @@ pub(crate) struct WorldCarParts {
     pub lights: Vec<crate::simulation::car_lights::CarLightLinks>,
     /// The item of the `carscript.InteractSwitchLights` usable.
     pub light_switch: Option<ItemId>,
+    /// The item of the `carscript.InteractHandbrake` usable.
+    pub handbrake_lever: Option<ItemId>,
     /// Plate label texts in `WorldVehicleReference::plates` order.
     pub plates: Vec<String>,
 }
@@ -725,7 +450,8 @@ pub struct VehicleState {
 
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
 pub struct VehicleRuntime {
-    pub record: VehicleRecord,
+    /// Index of the car prototype in `reference.world.prototypes`.
+    pub prototype: usize,
     pub ignition: IgnitionState,
     pub handbrake: bool,
     /// Distance this vehicle has driven, in meters.
@@ -740,9 +466,8 @@ pub struct VehicleRuntime {
     pub electronics_enabled: bool,
     /// Gauge state. The presentation advances it each frame.
     pub instruments: Option<crate::simulation::instruments::InstrumentState>,
-    /// Light controllers of a world car. V03 bridge: old garage cars keep them in
-    /// `LightingState`. Task 9 removes it.
-    pub lights: Option<crate::simulation::car_lights::CarLights>,
+    /// Light controllers of the car.
+    pub lights: crate::simulation::car_lights::CarLights,
     /// Brake input of the last step. The brake lamps read it.
     brake: f32,
     pub wheel_effects: crate::wheel_effects::WheelEffects,
@@ -753,13 +478,13 @@ pub struct VehicleRuntime {
     previous: [f64; 3],
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
-    /// Requested headlight state of a world car. V03 bridge: old garage cars keep it in
-    /// `LightingState`. Task 9 moves every car here.
+    /// Requested headlight state: off, low or high.
     pub requested_headlights: u8,
-    /// The item of the `carscript.InteractSwitchLights` usable of a world car.
+    /// The item of the `carscript.InteractSwitchLights` usable.
     pub(crate) light_switch: Option<ItemId>,
-    /// Plate label texts of a world car, in `WorldVehicleReference::plates` order.
-    /// V03 bridge: old garage cars keep them in `StartingArea::plates`. Task 9 removes it.
+    /// The item of the `carscript.InteractHandbrake` usable.
+    pub(crate) handbrake_lever: Option<ItemId>,
+    /// Plate label texts, in `WorldVehicleReference::plates` order.
     pub plates: Vec<String>,
 }
 
@@ -772,7 +497,7 @@ impl VehicleRuntime {
         parts: WorldCarParts,
     ) -> Self {
         Self {
-            record: VehicleRecord::World(prototype),
+            prototype,
             handbrake: record.handbrake,
             trip_m: 0.0,
             ignition: IgnitionState::default(),
@@ -787,10 +512,7 @@ impl VehicleRuntime {
                 .instruments
                 .as_ref()
                 .map(crate::simulation::instruments::InstrumentState::new),
-            lights: Some(crate::simulation::car_lights::CarLights::new(
-                record,
-                parts.lights,
-            )),
+            lights: crate::simulation::car_lights::CarLights::new(record, parts.lights),
             brake: 0.,
             wheel_effects: crate::wheel_effects::WheelEffects::new(
                 &record.wheel_effects,
@@ -803,8 +525,16 @@ impl VehicleRuntime {
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
+            handbrake_lever: parts.handbrake_lever,
             plates: parts.plates,
         }
+    }
+    /// The vehicle record of the car prototype.
+    pub fn record<'a>(
+        &self,
+        reference: &'a ReferenceManifest,
+    ) -> &'a crate::reference::WorldVehicleReference {
+        world_vehicle(reference, self.prototype)
     }
     /// A hash of the state that the car copy presents: gauges, lamp materials and node
     /// visibility. It changes when the presentation must sync.
@@ -818,13 +548,11 @@ impl VehicleRuntime {
             }
             (s.lamp_bits, s.digits_lit).hash(&mut h);
         }
-        if let Some(lights) = &self.lights {
-            for m in lights.materials() {
-                m.choice.map(|c| (c.light, c.state, c.on)).hash(&mut h);
-            }
-            for v in lights.visibility() {
-                v.hash(&mut h);
-            }
+        for m in self.lights.materials() {
+            m.choice.map(|c| (c.light, c.state, c.on)).hash(&mut h);
+        }
+        for v in self.lights.visibility() {
+            v.hash(&mut h);
         }
         h.finish()
     }
@@ -840,8 +568,9 @@ impl VehicleRuntime {
     ) -> Option<&'a crate::reference::MaterialLink> {
         if let Some(choice) = self
             .lights
-            .as_ref()
-            .and_then(|l| l.materials().iter().find(|m| m.node == node))
+            .materials()
+            .iter()
+            .find(|m| m.node == node)
             .and_then(|m| m.choice)
         {
             return choice.link(record);
@@ -878,19 +607,10 @@ impl VehicleRuntime {
             return Some(state == self.requested_headlights as usize);
         }
         self.lights
-            .as_ref()?
             .visibility()
             .iter()
             .find(|(n, _)| *n == node)
             .map(|(_, visible)| *visible)
-    }
-    /// Requested headlight state: off, low or high.
-    pub fn headlights(&self, lighting: &crate::lighting::LightingState) -> u8 {
-        match self.record {
-            // V03 bridge: old garage cars keep the request in `LightingState`. Task 9 removes it.
-            VehicleRecord::Garage(index) => lighting.headlights(index),
-            VehicleRecord::World(_) => self.requested_headlights,
-        }
     }
     pub fn state(&self) -> VehicleState {
         VehicleState {
@@ -909,68 +629,8 @@ impl VehicleRuntime {
         self.trip_m = state.trip_m;
         self.requested_headlights = state.requested_headlights;
     }
-    /// V03 bridge: runtime of an old garage car. Task 9 removes it.
-    fn new(
-        reference: &ReferenceManifest,
-        index: usize,
-        vehicle: &crate::reference::VehicleReference,
-        bodies: Vec<RigidBodyHandle>,
-    ) -> Result<Self, ReferenceError> {
-        let mut recovery_bounds = crate::reference::Bounds {
-            min: [f32::MAX; 3],
-            max: [f32::MIN; 3],
-        };
-        for id in &vehicle.colliders {
-            let record = reference
-                .colliders
-                .iter()
-                .find(|record| record.id == *id)
-                .expect("vehicle shape");
-            if record.sensor || !record.enabled {
-                continue;
-            }
-            let aabb = collider_builder(&record.geometry)?.build().compute_aabb();
-            for i in 0..3 {
-                recovery_bounds.min[i] = recovery_bounds.min[i].min(aabb.mins[i]);
-                recovery_bounds.max[i] = recovery_bounds.max[i].max(aabb.maxs[i]);
-            }
-        }
-        Ok(Self {
-            record: VehicleRecord::Garage(index),
-            handbrake: vehicle.handbrake,
-            trip_m: 0.0,
-            ignition: IgnitionState::default(),
-            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle.into()),
-            exhaust: crate::exhaust::ExhaustState::new(
-                &vehicle.exhaust,
-                vehicle.source.path_id as u64,
-            ),
-            fuel_tank: Some(vehicle.engine.fuel_tank),
-            starter_delay_seconds: vehicle.engine.starter_delay_seconds,
-            electronics_enabled: vehicle.engine.electronics_enabled,
-            instruments: Some(crate::simulation::instruments::InstrumentState::new(
-                &vehicle.instruments,
-            )),
-            lights: None,
-            brake: 0.,
-            wheel_effects: crate::wheel_effects::WheelEffects::new(
-                &vehicle.wheel_effects,
-                &reference.skid,
-                vehicle.source.path_id as u64,
-            ),
-            recovery_bounds,
-            bodies,
-            previous: [0.0; 3],
-            powertrain: Powertrain::default(),
-            requested_headlights: 0,
-            light_switch: None,
-            plates: Vec::new(),
-        })
-    }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod engine_tests;
 mod inventory;
 #[cfg(test)]
 mod world_car_tests;
@@ -1026,7 +686,6 @@ pub struct GarageRuntime {
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
-    light_owners: Vec<Option<ItemId>>,
 }
 
 impl GarageRuntime {
@@ -1067,20 +726,13 @@ impl GarageRuntime {
     ) -> Result<Self, ReferenceError> {
         let distances =
             crate::world::DrawDistances::resolve(&reference.world.draw_distance, draw_distance);
-        let mut physics = PhysicsWorld::new(reference, &initial_vehicle_poses(reference)?)?;
+        let mut physics = PhysicsWorld::new(reference);
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
         let mut stream = WorldStream::new(reference, seed, mode, distances)?;
-        stream.select_source_car(reference.vehicles[0].spawn_car_id);
         if stream_world {
-            stream.request_at(
-                reference.area.player_spawn.translation.map(f64::from),
-                physics
-                    .snapshot(&crate::vehicle::garage_vehicle_key(0))
-                    .pose
-                    .position
-                    .map(f64::from),
-            );
+            let spawn = reference.area.player_spawn.translation.map(f64::from);
+            stream.request_at(spawn, spawn);
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
         wheels.refresh_conditions(&area.conditions, &area.items);
@@ -1130,24 +782,6 @@ impl GarageRuntime {
             urine_splash,
             0x70697373,
         );
-        let vehicles = reference
-            .vehicles
-            .iter()
-            .enumerate()
-            .map(|(index, vehicle)| {
-                let bodies = area
-                    .bodies
-                    .iter()
-                    .filter(|(id, _)| body_vehicle(reference, **id) == Some(index))
-                    .map(|(_, handle)| *handle)
-                    .filter(|handle| *handle != physics.chassis_handle(&garage_vehicle_key(index)))
-                    .collect();
-                Ok((
-                    garage_vehicle_key(index),
-                    VehicleRuntime::new(reference, index, vehicle, bodies)?,
-                ))
-            })
-            .collect::<Result<_, ReferenceError>>()?;
         let mut run = Self {
             driving_assists: reference.driving.default_assists,
             urine,
@@ -1177,10 +811,9 @@ impl GarageRuntime {
             startup_aligned: false,
             lighting,
             distances,
-            vehicles,
-            powertrain: PowertrainParts::from_garage(reference),
-            // V03 bridge: the old garage car starts selected. Task 9 removes it.
-            vehicle: Some(garage_vehicle_key(0)),
+            vehicles: BTreeMap::new(),
+            powertrain: PowertrainParts::default(),
+            vehicle: None,
             paused: false,
             started: false,
             attempts: 0,
@@ -1189,32 +822,12 @@ impl GarageRuntime {
             aim: ResolvedAim::default(),
             wheels,
             driving_input: crate::simulation::input::KeyboardDriving::new(
-                reference.vehicles[0].keyboard_steering_rate,
+                reference.driving.keyboard_steering_rate,
                 reference.driving.pedal_rate,
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
-            light_owners: reference
-                .lighting
-                .controllers
-                .iter()
-                .map(|control| {
-                    let mut node = Some(control.node);
-                    while let Some(id) = node {
-                        if let Some(part) = reference.parts.iter().find(|part| part.node == id) {
-                            return Some(part.item);
-                        }
-                        node = reference
-                            .nodes
-                            .iter()
-                            .find(|node| node.id == id)
-                            .unwrap()
-                            .parent;
-                    }
-                    None
-                })
-                .collect(),
         };
         run.refresh_powertrains();
         Ok(run)
@@ -1236,19 +849,6 @@ impl GarageRuntime {
         self.area
             .interaction
             .completed_action(InteractionAction::LightControl(control));
-        if let Some(index) = reference
-            .lighting
-            .controllers
-            .iter()
-            .find(|c| c.id == control && c.kind == crate::reference::LightControllerKind::Headlight)
-            .and_then(|c| c.vehicle)
-        {
-            self.car_switch_sound(
-                reference,
-                &garage_vehicle_key(index),
-                VehicleRecord::Garage(index),
-            );
-        }
         self.notice = "";
     }
 
@@ -1360,12 +960,6 @@ impl GarageRuntime {
                     );
                 }
             });
-        for (index, owner) in self.light_owners.iter().enumerate() {
-            self.lighting.set_controller_mounted(
-                index,
-                owner.is_none_or(|item| self.area.items.mounted(item)),
-            );
-        }
         self.lighting.advance_fades(&reference.lighting, dt);
     }
 
@@ -1383,11 +977,6 @@ impl GarageRuntime {
             || ((input.held & keys::USE != 0
                 || (input.held & keys::PRIMARY != 0 && availability.lmb_use))
                 && availability.actions.0 & crate::interaction::feedback::ActionMask::CRANK != 0)
-            || (input.held & keys::PRIMARY != 0
-                && availability.lmb_use
-                && availability
-                    .item
-                    .is_some_and(|id| self.area.interaction.mechanisms.radio_tunable(id)))
             || (input.held & (keys::ROTATE | keys::TRANSLATE) != 0 && picked_up)
             || (input.held & keys::USE != 0
                 && availability
@@ -1596,12 +1185,10 @@ impl GarageRuntime {
         if let Some(action) = self.area.interaction.mechanisms.take_control_action() {
             match action {
                 crate::interaction::mechanisms::ControlAction::ToggleHandbrake(lever) => {
-                    if let Some(vehicle) = reference
-                        .items
-                        .iter()
-                        .find(|item| item.id == lever)
-                        .and_then(|item| body_vehicle(reference, item.body))
-                        && let Some(vehicle) = self.vehicles.get_mut(&garage_vehicle_key(vehicle))
+                    if let Some(vehicle) = self
+                        .vehicles
+                        .values_mut()
+                        .find(|v| v.handbrake_lever == Some(lever))
                     {
                         vehicle.handbrake = !vehicle.handbrake;
                     }
@@ -1611,28 +1198,13 @@ impl GarageRuntime {
                         self.car_switch_sound(reference, &key, record);
                     }
                 }
-                crate::interaction::mechanisms::ControlAction::Radio(control) => {
-                    if let Some(audio) = &mut self.audio {
-                        audio.radio_control(control);
-                    }
-                }
                 _ => {}
-            }
-        }
-        for (index, control) in reference.lighting.controllers.iter().enumerate() {
-            if control.cabin_input.is_some() {
-                let doors = self
-                    .area
-                    .interaction
-                    .cabin_door_values(index, &self.area.items);
-                self.lighting
-                    .update_cabin(&reference.lighting, index, doors);
             }
         }
         self.area.sync_portable_mass(&mut self.physics);
         if seated
             && input.pressed & keys::USE != 0
-            && matches!(action, None | Some(InteractionAction::Seat(_)))
+            && matches!(action, None | Some(InteractionAction::Seat))
             && self.area.interaction.dragging_mechanism().is_none()
             && self.area.interaction.tuning_opening().is_none()
         {
@@ -1666,20 +1238,14 @@ impl GarageRuntime {
             .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
         self.apply_hazards(reference);
         self.area.sync_attachments(&mut self.physics, true);
-        self.area.sync_compound(&mut self.physics);
         self.area
             .interaction
             .sync_parts(&mut self.area.items, &mut self.physics)
             .expect("bound parts");
-        if let Some(vehicle) = self.area.player.seat_vehicle() {
-            if self.vehicle.as_ref() != Some(vehicle) {
-                self.vehicle = Some(vehicle.clone());
-            }
-            // V03 bridge: old garage cars select their source car. Task 9 removes it.
-            if let Some(index) = garage_vehicle_index(vehicle) {
-                self.stream
-                    .select_source_car(reference.vehicles[index].spawn_car_id);
-            }
+        if let Some(vehicle) = self.area.player.seat_vehicle()
+            && self.vehicle.as_ref() != Some(vehicle)
+        {
+            self.vehicle = Some(vehicle.clone());
         }
         let vehicle_input = if previous_seat != self.area.player.seat_body() {
             self.clear_driving_input();
@@ -1697,28 +1263,15 @@ impl GarageRuntime {
             },
             vehicle_input.held,
         );
-        let selected = self.vehicle.as_ref().and_then(garage_vehicle_index);
+        // Source `carscript` cycles off, low, high.
         if (driving || self.area.player.driving2())
             && input.pressed & keys::LIGHTS != 0
             && let Some(key) = self.vehicle.clone()
-            && let Some(record) = self.vehicles.get(&key).map(|v| v.record)
-        {
-            self.car_switch_sound(reference, &key, record);
-        }
-        if (driving || self.area.player.driving2())
-            && input.pressed & keys::LIGHTS != 0
-            && let Some(selected) = selected
-        {
-            self.lighting
-                .cycle_headlights(&reference.lighting, selected);
-        }
-        // A world car keeps its request on its runtime. Source `carscript` cycles off, low, high.
-        if (driving || self.area.player.driving2())
-            && input.pressed & keys::LIGHTS != 0
-            && selected.is_none()
-            && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
+            && let Some(vehicle) = self.vehicles.get_mut(&key)
         {
             vehicle.cycle_headlights();
+            let prototype = vehicle.prototype;
+            self.car_switch_sound(reference, &key, prototype);
         }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
@@ -1738,8 +1291,8 @@ impl GarageRuntime {
         }
         self.vehicles = vehicles;
         for (key, vehicle) in &self.vehicles {
-            if let (ObjectKey::Generated(id), Some(lights)) = (key, &vehicle.lights) {
-                self.stream.set_car_lights(id, lights.lights());
+            if let ObjectKey::Generated(id) = key {
+                self.stream.set_car_lights(id, vehicle.lights.lights());
             }
         }
         self.step_loose_engines(reference);
@@ -1766,7 +1319,6 @@ impl GarageRuntime {
         self.sample_survival_speed(reference);
         self.area.interaction.sync_mechanisms(&mut self.physics);
         self.area.sync_attachments(&mut self.physics, false);
-        self.area.sync_compound(&mut self.physics);
         self.area
             .interaction
             .sync_parts(&mut self.area.items, &mut self.physics)
@@ -1801,7 +1353,7 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
-            audio.hits(&self.area, &self.physics, FIXED_DT);
+            audio.hits(reference, &self.area, &self.vehicles, &self.physics, FIXED_DT);
             let stream = &mut self.stream;
             let biome_override = stream.mode().biome_override();
             audio.footsteps(
@@ -1962,10 +1514,11 @@ impl GarageRuntime {
             key,
             vehicle,
             vehicle
-                .record
-                .instruments(reference)
+                .record(reference)
+                .instruments
+                .as_ref()
                 .expect("car with gauges"),
-            vehicle.headlights(&self.lighting),
+            vehicle.requested_headlights,
         )
     }
     /// Advances the gauges of every car by render time `dt`. `initialize` jumps to the targets.
@@ -1980,7 +1533,6 @@ impl GarageRuntime {
             area,
             physics,
             powertrain,
-            lighting,
             distances,
             ..
         } = self;
@@ -1988,7 +1540,7 @@ impl GarageRuntime {
         let focus = rapier3d::math::Vector::from_array(area.player.focus_position(physics));
         let seated = area.player.seat_vehicle();
         for (key, vehicle) in vehicles.iter_mut() {
-            let Some(r) = vehicle.record.instruments(reference) else {
+            let Some(r) = vehicle.record(reference).instruments.as_ref() else {
                 continue;
             };
             let position = physics.rapier().bodies[physics.chassis_handle(key)].translation();
@@ -2005,7 +1557,7 @@ impl GarageRuntime {
                 key,
                 vehicle,
                 r,
-                vehicle.headlights(lighting),
+                vehicle.requested_headlights,
             );
             let Some(state) = vehicle.instruments.as_mut() else {
                 continue;
@@ -2018,20 +1570,14 @@ impl GarageRuntime {
         }
     }
 
-    /// Steps the light controllers of a world car.
+    /// Steps the light controllers of a car.
     fn advance_car_lights(
         &self,
         reference: &ReferenceManifest,
         key: &ObjectKey,
         vehicle: &mut VehicleRuntime,
     ) {
-        let VehicleRecord::World(index) = vehicle.record else {
-            return;
-        };
-        let Some(lights) = vehicle.lights.as_mut() else {
-            return;
-        };
-        let record = world_vehicle(reference, index);
+        let record = world_vehicle(reference, vehicle.prototype);
         let input = crate::simulation::car_lights::CarLightInput {
             requested: vehicle.requested_headlights,
             ignition: vehicle.ignition.ignition,
@@ -2040,7 +1586,7 @@ impl GarageRuntime {
         };
         let (items, mechanisms) = (&self.area.items, &self.area.interaction.mechanisms);
         let root = items.resolve_key(key);
-        lights.advance(
+        vehicle.lights.advance(
             record,
             input,
             |item| root.is_some_and(|root| item == root || items.descends(item, root)),
@@ -2069,19 +1615,15 @@ impl GarageRuntime {
             if !audio.car_audible((pose.translation - listener).length()) {
                 continue;
             }
-            let mixer = match (vehicle.record, key) {
-                // V03 bridge: old garage cars use the global audio routes. Task 9 removes it.
-                (VehicleRecord::Garage(index), _) => audio.garage_car_mixer(index),
-                (VehicleRecord::World(index), ObjectKey::Generated(placement)) => {
-                    world_vehicle(reference, index)
-                        .audio
-                        .as_ref()
-                        .and_then(|a| a.route.as_ref())
-                        .map(|route| audio.world_car_mixer(route, placement))
-                }
-                _ => None,
+            let record = vehicle.record(reference);
+            let mixer = match key {
+                ObjectKey::Generated(placement) => record
+                    .audio
+                    .as_ref()
+                    .map(|a| audio.world_car_mixer(&a.route, placement)),
+                ObjectKey::Imported(_) => None,
             };
-            if let Some(car) = vehicle.record.audio(reference) {
+            if let Some(car) = record.audio.as_ref() {
                 let active = self.physics.body_active(chassis);
                 audio.car_sound(
                     key,
@@ -2133,9 +1675,9 @@ impl GarageRuntime {
         &mut self,
         reference: &ReferenceManifest,
         key: &ObjectKey,
-        record: VehicleRecord,
+        prototype: usize,
     ) {
-        car_switch_sound(&mut self.audio, &self.physics, reference, key, record);
+        car_switch_sound(&mut self.audio, &self.physics, reference, key, prototype);
     }
 
     /// Advances exhaust smoke every step, so old smoke ages out when the engine stops.
@@ -2186,7 +1728,8 @@ impl GarageRuntime {
         key: &ObjectKey,
         vehicle: &mut VehicleRuntime,
     ) {
-        let (references, gains) = vehicle.record.wheel_effects(reference);
+        let record = world_vehicle(reference, vehicle.prototype);
+        let (references, gains) = (&record.wheel_effects, &record.effect_gains);
         let chassis = self.physics.chassis_handle(key);
         let body = &self.physics.rapier().bodies[chassis];
         // The chassis body frame is the car root node: reference validation requires it.
@@ -2238,11 +1781,6 @@ impl GarageRuntime {
         driving: bool,
         controls: crate::simulation::input::DrivingControls,
     ) {
-        // V03 bridge: lights and audio still read the old garage car record. Task 9 removes it.
-        let garage = match vehicle.record {
-            VehicleRecord::Garage(index) => Some(index),
-            VehicleRecord::World(_) => None,
-        };
         let chassis = self.physics.chassis_handle(key);
         let chassis_active = self.physics.body_active(chassis);
         let climate = self.engine_climate(reference);
@@ -2260,7 +1798,8 @@ impl GarageRuntime {
         if !chassis_active && !engine_active {
             return;
         }
-        let gearbox = vehicle.record.gearbox(reference);
+        let gearbox: crate::simulation::drivetrain::Gearbox =
+            world_vehicle(reference, vehicle.prototype).into();
         let snapshot = self.physics.snapshot(key);
         let speed = snapshot.speed_mps;
         let driving = driving && chassis_active;
@@ -2376,7 +1915,7 @@ impl GarageRuntime {
                 &self.physics,
                 reference,
                 key,
-                vehicle.record,
+                vehicle.prototype,
             );
         }
         if chassis_active
@@ -2419,30 +1958,6 @@ impl GarageRuntime {
             steer: pushed.unwrap_or(controls.steer),
             handbrake: vehicle.handbrake as u8 as f32,
         };
-        // V03 bridge: only old garage cars have light controllers. Task 9 adds world car lights.
-        if let Some(index) = garage {
-            let electronics = reference
-                .lighting
-                .controllers
-                .iter()
-                .find(|c| {
-                    c.kind == crate::reference::LightControllerKind::Rear
-                        && c.vehicle == Some(index)
-                })
-                .expect("validated rear lights");
-            let electronics_fine = electronics.electronics_source.is_none()
-                || electronics.electronics_output > electronics.electronics_threshold;
-            self.lighting.update_vehicle(
-                &reference.lighting,
-                index,
-                crate::lighting::VehicleLightSample {
-                    local_ignition: vehicle.ignition.ignition && electronics_fine,
-                    brake,
-                    gear_ratio: gearbox.gear_ratios[gear],
-                    electronics_output: electronics.electronics_output,
-                },
-            );
-        }
         if chassis_active {
             self.physics.apply_vehicle_forces(
                 key,
@@ -2647,53 +2162,6 @@ impl GarageRuntime {
                 .temperature = Some(part.state.temperature);
         }
     }
-    /// Engine part of item `item`, mounted or not.
-    #[cfg(test)]
-    pub(crate) fn engine_part(&self, item: ItemId) -> &crate::simulation::powertrain::EnginePart {
-        self.powertrain.engine(item).expect("engine part")
-    }
-    #[cfg(test)]
-    pub(crate) fn engine_part_mut(
-        &mut self,
-        item: ItemId,
-    ) -> &mut crate::simulation::powertrain::EnginePart {
-        self.powertrain.engine_mut(item).expect("engine part")
-    }
-    /// V03 bridge: runtime of old garage car `index`. Task 9 removes it.
-    #[cfg(test)]
-    pub(crate) fn garage_car(&self, index: usize) -> &VehicleRuntime {
-        &self.vehicles[&garage_vehicle_key(index)]
-    }
-    /// V03 bridge: runtime of old garage car `index`. Task 9 removes it.
-    #[cfg(test)]
-    pub(crate) fn garage_car_mut(&mut self, index: usize) -> &mut VehicleRuntime {
-        self.vehicles
-            .get_mut(&garage_vehicle_key(index))
-            .expect("old garage car")
-    }
-    /// V03 bridge: steps old garage car `index` alone. Task 9 removes it.
-    #[cfg(test)]
-    pub(crate) fn step_garage_car(
-        &mut self,
-        reference: &ReferenceManifest,
-        index: usize,
-        input: FrameInput,
-        driving: bool,
-        controls: crate::simulation::input::DrivingControls,
-    ) {
-        self.refresh_powertrains();
-        let key = garage_vehicle_key(index);
-        let mut vehicle = self.vehicles.remove(&key).expect("old garage car");
-        self.step_vehicle(reference, &key, &mut vehicle, input, driving, controls);
-        self.vehicles.insert(key, vehicle);
-    }
-    /// V03 bridge: old garage index of the selected car. Task 9 removes it.
-    pub(crate) fn garage_index(&self) -> usize {
-        self.vehicle
-            .as_ref()
-            .and_then(garage_vehicle_index)
-            .expect("V03 bridge: old garage car selected")
-    }
     pub fn world_supported(&self) -> bool {
         if self.restore_pending()
             || !self.startup_aligned
@@ -2754,12 +2222,7 @@ impl GarageRuntime {
         self.area
             .player
             .align_startup(startup.player_offset, &mut self.physics);
-        let packs = cigarettes::start_pack_poses(
-            reference,
-            startup,
-            self.area.origin,
-            self.garage_index(),
-        )?;
+        let packs = cigarettes::start_pack_poses(reference, startup, self.area.origin)?;
         for (pose, count) in packs {
             self.spawn_pack(reference, pose, count)?;
         }
@@ -2778,12 +2241,12 @@ impl GarageRuntime {
 pub(crate) fn use_light_switch(
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
     switch: ItemId,
-) -> Option<(ObjectKey, VehicleRecord)> {
+) -> Option<(ObjectKey, usize)> {
     let (key, vehicle) = vehicles
         .iter_mut()
         .find(|(_, v)| v.light_switch == Some(switch))?;
     vehicle.cycle_headlights();
-    Some((key.clone(), vehicle.record))
+    Some((key.clone(), vehicle.prototype))
 }
 
 /// Car sound inputs of engine part `part`. None: the part has no sounds or no item.
@@ -2817,11 +2280,14 @@ fn car_switch_sound(
     physics: &PhysicsWorld,
     reference: &ReferenceManifest,
     key: &ObjectKey,
-    record: VehicleRecord,
+    prototype: usize,
 ) {
     let (Some(audio), Some(shot)) = (
         audio.as_mut(),
-        record.audio(reference).and_then(|a| a.switch.as_ref()),
+        world_vehicle(reference, prototype)
+            .audio
+            .as_ref()
+            .and_then(|a| a.switch.as_ref()),
     ) else {
         return;
     };

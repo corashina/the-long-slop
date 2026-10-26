@@ -6,7 +6,6 @@ use super::{
 use crate::{
     app::{Drive, RuntimeReference},
     plates::layout::{GlyphMesh, layout_text, sdf_parameters},
-    reference::ItemId,
 };
 use bevy::{
     asset as bevy_asset, ecs as bevy_ecs, image as bevy_image, reflect as bevy_reflect,
@@ -136,16 +135,11 @@ impl Material for PlateTextMaterial {
         Ok(())
     }
 }
-struct Binding {
-    item: ItemId,
-    mesh: Handle<Mesh>,
-    revision: u64,
-}
 #[derive(Resource)]
 pub struct PlateTextStatus {
-    pub instance: u64,
     state: RenderingState,
-    bindings: Vec<Binding>,
+    /// A sample label mesh. It warms the shared material pipeline.
+    sample: Option<Handle<Mesh>>,
     /// Root entities of the source instances of world car copies that show their plates.
     world: Vec<Entity>,
     material: Option<Handle<PlateTextMaterial>>,
@@ -153,9 +147,8 @@ pub struct PlateTextStatus {
 impl Default for PlateTextStatus {
     fn default() -> Self {
         Self {
-            instance: 1,
             state: RenderingState::Loading,
-            bindings: Vec::new(),
+            sample: None,
             world: Vec::new(),
             material: None,
         }
@@ -166,7 +159,7 @@ impl PlateTextStatus {
         self.state == RenderingState::Ready
     }
     pub(crate) fn bound(&self) -> bool {
-        self.bindings.len() == 2
+        self.material.is_some()
     }
     pub fn failure(&self) -> Option<&str> {
         if let RenderingState::Failed(e) = &self.state {
@@ -259,10 +252,29 @@ pub fn bind_plate_text(world: &mut World) {
         world.resource_mut::<PlateTextStatus>().state = RenderingState::Failed(e);
     }
 }
+/// The first plate label of the car prototypes: its layout and source layer. Reference
+/// validation gives every label the shared font, material and layer.
+fn sample_plate(
+    reference: &crate::reference::ReferenceManifest,
+) -> Option<(&crate::reference::PlateLayoutReference, usize)> {
+    reference.world.prototypes.iter().find_map(|prototype| {
+        let plate = prototype.vehicle.as_ref()?.plates.first()?;
+        let layer = prototype.nodes[plate.text_node as usize].layer;
+        Some((&plate.layout, usize::from(layer)))
+    })
+}
+/// Builds the shared plate material and a sample label that warms its pipeline.
 fn bind(world: &mut World) -> Result<(), String> {
     if !world.resource::<PlateTextStatus>().bound() {
         let reference = &world.resource::<RuntimeReference>().0;
         let record = &reference.plates;
+        let Some((layout, layer)) = sample_plate(reference) else {
+            world.resource_mut::<PlateTextStatus>().state = RenderingState::Ready;
+            return Ok(());
+        };
+        if layer >= 32 {
+            return Err("Missing plate source layer".into());
+        }
         let source = world.resource::<SourceMaterials>();
         let texture = |slot: &str| {
             record
@@ -279,7 +291,7 @@ fn bind(world: &mut World) -> Result<(), String> {
         ) else {
             return Ok(());
         };
-        let p = sdf_parameters(&record.material, &record.plates[0].layout);
+        let p = sdf_parameters(&record.material, layout);
         let f = &record.material.floats;
         let surface = PlateSurface {
             atlas,
@@ -315,142 +327,28 @@ fn bind(world: &mut World) -> Result<(), String> {
                 specular: Vec4::from_array(record.material.colors["_SpecColor"]),
             },
         };
-        let mut prepared = Vec::new();
-        let mut receiver_mask = None;
-        for plate in &record.plates {
-            let node = world.resource::<ReferenceVisuals>().nodes[&plate.text_node];
-            let extras = world
-                .get::<bevy::gltf::GltfExtras>(node)
-                .ok_or("Missing plate text extras")?;
-            let flags: serde_json::Value =
-                serde_json::from_str(&extras.value).map_err(|e| e.to_string())?;
-            let sorting_layer = i16::try_from(
-                flags["sorting_layer"]
-                    .as_i64()
-                    .ok_or("Missing plate sorting layer")?,
-            )
+        let glyphs = layout_text(&record.font, layout, &record.material, "AAA-000")
             .map_err(|e| e.to_string())?;
-            let sorting_order = i16::try_from(
-                flags["sorting_order"]
-                    .as_i64()
-                    .ok_or("Missing plate sorting order")?,
-            )
-            .map_err(|e| e.to_string())?;
-            let sort = sort_data(record, sorting_layer, sorting_order)?;
-            let layer = flags["layer"]
-                .as_u64()
-                .filter(|l| *l < 32)
-                .ok_or("Missing plate source layer")? as usize;
-            let mask = 1u32 << layer;
-            if receiver_mask.is_some_and(|previous| previous != mask) {
-                return Err("Shared plate source layer mismatch".into());
-            }
-            receiver_mask = Some(mask);
-            let text = world
-                .resource::<Drive>()
-                .runtime
-                .area
-                .plates
-                .text(plate.item)
-                .ok_or("Missing plate text")?;
-            let glyphs = layout_text(&record.font, &plate.layout, &record.material, text)
-                .map_err(|e| e.to_string())?;
-            let revision = world
-                .resource::<Drive>()
-                .runtime
-                .area
-                .plates
-                .revision(plate.item)
-                .unwrap();
-            prepared.push((
-                plate.item,
-                node,
-                mesh(glyphs),
-                revision,
-                text.to_owned(),
-                layer,
-                sort,
-            ));
-        }
         let material = world
             .resource_mut::<Assets<PlateTextMaterial>>()
             .add(PlateTextMaterial {
                 surface,
                 lighting: SourceExtension {
                     lod_fade: 1.,
-                    receiver_mask: receiver_mask.unwrap(),
+                    receiver_mask: 1 << layer,
                     surface: Default::default(),
                 },
             });
-        let mut bindings = Vec::new();
-        for (item, node, mesh, revision, text, layer, sort) in prepared {
-            let handle = world.resource_mut::<Assets<Mesh>>().add(mesh);
-            world.spawn((
-                Name::new(format!("Plate text {text}")),
-                Mesh3d(handle.clone()),
-                MeshMaterial3d(material.clone()),
-                Transform::IDENTITY,
-                Visibility::Inherited,
-                bevy::camera::visibility::RenderLayers::layer(layer),
-                ChildOf(node),
-                sort,
-                bevy::render::batching::NoAutomaticBatching,
-            ));
-            super::materials::warm_retained_material(
-                world,
-                handle.id(),
-                material.id().untyped(),
-                "source plate text".into(),
-            );
-            bindings.push(Binding {
-                item,
-                mesh: handle,
-                revision,
-            });
-            info!("Source plate text: item {} label {text}", item.0);
-        }
+        let sample = world.resource_mut::<Assets<Mesh>>().add(mesh(glyphs));
+        super::materials::warm_retained_material(
+            world,
+            sample.id(),
+            material.id().untyped(),
+            "source plate text".into(),
+        );
         let mut status = world.resource_mut::<PlateTextStatus>();
-        status.bindings = bindings;
+        status.sample = Some(sample);
         status.material = Some(material);
-        info!("Source plate text: two labels, one atlas, one material");
-    } else {
-        let mut changes = Vec::new();
-        let reference = &world.resource::<RuntimeReference>().0.plates;
-        let state = &world.resource::<Drive>().runtime.area.plates;
-        for b in &world.resource::<PlateTextStatus>().bindings {
-            let revision = state.revision(b.item).unwrap();
-            if revision == b.revision {
-                continue;
-            }
-            let p = reference.plates.iter().find(|p| p.item == b.item).unwrap();
-            changes.push((
-                b.item,
-                b.mesh.id(),
-                revision,
-                mesh(
-                    layout_text(
-                        &reference.font,
-                        &p.layout,
-                        &reference.material,
-                        state.text(b.item).unwrap(),
-                    )
-                    .map_err(|e| e.to_string())?,
-                ),
-            ));
-        }
-        for (item, id, revision, value) in changes {
-            world
-                .resource_mut::<Assets<Mesh>>()
-                .insert(id, value)
-                .map_err(|e| e.to_string())?;
-            world
-                .resource_mut::<PlateTextStatus>()
-                .bindings
-                .iter_mut()
-                .find(|b| b.item == item)
-                .unwrap()
-                .revision = revision;
-        }
     }
     if !world.resource::<PlateTextStatus>().ready() {
         super::materials::seal_plate_materials(world);
@@ -460,17 +358,8 @@ fn bind(world: &mut World) -> Result<(), String> {
     }
     Ok(())
 }
-pub fn reset_plate_text(world: &mut World) {
-    let mut status = world.resource_mut::<PlateTextStatus>();
-    status.instance += 1;
-    status.state = RenderingState::Loading;
-    for b in &mut status.bindings {
-        b.revision = u64::MAX;
-    }
-}
 /// Shows the plate labels of each shown world car copy. A copy binds once; its labels leave
-/// with its instance. The garage plate bind warmed the shared pipeline.
-/// V03 bridge: the shared material comes from the garage plate bind. Task 9 moves it here.
+/// with its instance. The sample label of `bind` warmed the shared pipeline.
 pub fn bind_world_plate_text(world: &mut World) {
     if !world.resource::<PlateTextStatus>().ready() {
         return;
@@ -543,6 +432,9 @@ fn world_labels(
     }
     let reference = &world.resource::<RuntimeReference>().0;
     let vehicles = &world.resource::<Drive>().runtime.vehicles;
+    let Some(material) = status.material.clone() else {
+        return Ok(None);
+    };
     let Some((root, prototype, nodes, texts)) =
         instances
             .shown()
@@ -567,7 +459,6 @@ fn world_labels(
     };
     let record = &reference.plates;
     let prototype = &reference.world.prototypes[prototype];
-    let material = status.material.clone().ok_or("Missing plate material")?;
     let receiver_mask = world
         .resource::<Assets<PlateTextMaterial>>()
         .get(&material)
@@ -588,7 +479,7 @@ fn world_labels(
         let glyphs = layout_text(&record.font, &plate.layout, &record.material, text)
             .map_err(|e| e.to_string())?;
         labels.push(WorldLabel {
-            node: nodes[node.gltf_node as usize],
+            node: nodes[node.gltf_node as usize].ok_or("Plate node is not spawned")?,
             mesh: mesh(glyphs),
             layer,
             sort: sort_data(record, plate.sorting[0], plate.sorting[1])?,
@@ -603,12 +494,7 @@ fn world_labels(
 }
 pub fn plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
     let status = world.resource::<PlateTextStatus>();
-    if let Some(material) = &status.material {
-        pairs.extend(
-            status
-                .bindings
-                .iter()
-                .map(|b| (b.mesh.id(), material.id().untyped())),
-        );
+    if let (Some(material), Some(sample)) = (&status.material, &status.sample) {
+        pairs.push((sample.id(), material.id().untyped()));
     }
 }

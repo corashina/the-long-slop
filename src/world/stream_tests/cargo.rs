@@ -82,7 +82,6 @@ fn r05_cargo_locks_in_trunk() {
     let before = relative(&run, carrier, run.area.items.get(can).unwrap().pose);
 
     // Drive out along the road for about 200 m.
-    run.area.player.configure_seats(&reference.seats);
     assert!(enter(&mut run, &reference));
     let start = run.stream.origin.absolute(
         run.physics

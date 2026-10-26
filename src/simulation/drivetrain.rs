@@ -6,7 +6,7 @@ use super::{
 };
 use crate::reference::{
     DrivingAssists, DrivingReference, DrivingVehicleReference, EnginePartReference,
-    VehicleReference, WorldVehicleReference,
+    WorldVehicleReference,
 };
 use crate::vehicle::DriveTorques;
 
@@ -22,19 +22,6 @@ pub struct Gearbox<'a> {
 }
 impl<'a> From<&'a WorldVehicleReference> for Gearbox<'a> {
     fn from(v: &'a WorldVehicleReference) -> Self {
-        Self {
-            driving: &v.driving,
-            gear_ratios: &v.gear_ratios,
-            gear_free_run: &v.gear_free_run,
-            final_drive_ratio: v.final_drive_ratio,
-            auto_move_min: v.auto_move_min,
-            dont_ignite_with_throttle_in_automatic: v.dont_ignite_with_throttle_in_automatic,
-        }
-    }
-}
-/// V03 bridge: gear values of an old garage car. Task 9 removes it.
-impl<'a> From<&'a VehicleReference> for Gearbox<'a> {
-    fn from(v: &'a VehicleReference) -> Self {
         Self {
             driving: &v.driving,
             gear_ratios: &v.gear_ratios,

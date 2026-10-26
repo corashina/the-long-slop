@@ -3,7 +3,6 @@ mod performance;
 pub(crate) mod save;
 use crate::browser::*;
 use crate::interaction::labels::display_name;
-use crate::presentation::instruments::InstrumentVisuals;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
@@ -285,7 +284,6 @@ fn setup(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
 ) {
-    commands.insert_resource(InstrumentVisuals::default());
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     if let Err(error) =
@@ -357,9 +355,6 @@ fn check_ready(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
     mut visuals: ResMut<ReferenceVisuals>,
-    mut instruments: ResMut<InstrumentVisuals>,
-    gltf_materials: Res<Assets<bevy::gltf::GltfMaterial>>,
-    mut standard_materials: ResMut<Assets<StandardMaterial>>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
     mut renderer: presentation::readiness::RendererReadinessAccess,
@@ -367,7 +362,7 @@ fn check_ready(
         Res<presentation::lighting::SourceLighting>,
         Res<presentation::fixed_assets::SourceFixedAssets>,
     ),
-    mut materials: ResMut<presentation::materials::SourceMaterials>,
+    materials: Res<presentation::materials::SourceMaterials>,
     plates: (
         Res<presentation::plates::PlateTextStatus>,
         Res<presentation::particles::ParticleRender>,
@@ -454,26 +449,6 @@ fn check_ready(
             &primitives,
         ) {
             Ok(true) => {
-                match instruments.bind(
-                    &reference.0,
-                    &visuals.nodes,
-                    &primitives,
-                    &visuals.gltfs,
-                    &gltfs,
-                    &gltf_materials,
-                    &mut standard_materials,
-                    &mut materials,
-                ) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        return false;
-                    }
-                    Err(e) => {
-                        game_failure(&e.to_string());
-                        visuals.failed = true;
-                        return false;
-                    }
-                }
                 match &lighting.state {
                     presentation::lighting::RenderingState::Loading => {
                         return false;
@@ -494,7 +469,7 @@ fn check_ready(
                 {
                     return false;
                 }
-                if !instruments.prepared || !plates.ready() || !particles.prepared() {
+                if !plates.ready() || !particles.prepared() {
                     return false;
                 }
                 true
@@ -963,50 +938,11 @@ pub(crate) fn sync_imported(
     };
     presentation::reference::sync_caps(&drive.runtime.area, dt, &mut caps, &mut visibility);
 }
-fn sync_instruments(
-    reference: Res<RuntimeReference>,
-    mut drive: ResMut<Drive>,
-    mut visuals: ResMut<InstrumentVisuals>,
-    imported: Res<ReferenceVisuals>,
-    mut transforms: Query<&mut Transform, Without<DriveCamera>>,
-    mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
-) {
+fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let drive = &mut *drive;
-    let run = &drive.runtime;
-    // Source `coolantTankscript.Cool`: Fan.Rotate(0, 0, selectedFanSpeed * dt) in local space.
-    if imported.bound && run.started && !run.paused {
-        // V03 bridge: fans of old garage cars. Task 7 moves them to the car binder.
-        for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
-            let Some(node) = vehicle.engine.radiator.fan_node else {
-                continue;
-            };
-            let speed = run
-                .engine_output(&crate::vehicle::garage_vehicle_key(index))
-                .fan_speed;
-            if speed != 0.
-                && let Ok(mut transform) = transforms.get_mut(imported.nodes[&node])
-            {
-                transform.rotate_local_z((speed * drive.render_delta_seconds).to_radians());
-            }
-        }
-    }
-    if run.started && !run.paused {
+    if drive.runtime.started && !drive.runtime.paused {
         let dt = drive.render_delta_seconds;
         drive.runtime.advance_instruments(&reference.0, dt, false);
-    }
-    visuals.update(
-        &reference.0,
-        &drive.runtime.vehicles,
-        &mut transforms,
-        &mut materials,
-    );
-    if let Some(audio) = &drive.runtime.audio {
-        visuals.update_radio(
-            audio.radio_frame.power,
-            audio.radio.tuning,
-            &mut transforms,
-            &mut materials,
-        );
     }
 }
 fn active_camera(drive: &Drive) -> Transform {
@@ -1189,6 +1125,16 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         &runtime.physics,
         runtime.survival.output(),
     );
+    // The radio knob hint shows the volume or frequency of the aimed radio.
+    if let Some(radio) = runtime
+        .aim
+        .use_target
+        .as_ref()
+        .and_then(|t| runtime.area.interaction.dial_knob(t, &runtime.physics))
+        .and_then(|(knob, _)| runtime.stream.knob_radio(knob))
+    {
+        game_radio_feedback(radio.volume, radio.frequency(), radio.am);
+    }
     let info = runtime
         .area
         .interaction
@@ -1446,15 +1392,8 @@ fn publish_audio(
         for &id in &route.voices {
             game_audio_route(id, audio.route_mixers[index]);
         }
-        // Car hit sounds use the route of their vehicle.
-        if let Some(vehicle) = audio.route_vehicles[index] {
-            game_audio_route(0x5000_0000 + vehicle, audio.route_mixers[index]);
-        }
     }
     for signal in &audio.signals {
-        if audio.reference.radio.voices.contains(&signal.id) {
-            continue;
-        }
         game_audio_voice(
             signal.id,
             signal.playing,
@@ -1515,13 +1454,12 @@ fn publish_audio(
             radio.secondary.next_clip.unwrap_or(0),
         )
     };
-    send(audio.reference.radio.emitter, audio.radio_frame);
     let cutoff = audio.reference.radio.electronics_cutoff;
     let items = &runtime.area.items;
     let radios = runtime
         .stream
         .portable_radios()
-        .filter_map(|(id, script, state, output)| {
+        .filter_map(|(id, script, state, output, _)| {
             items
                 .get(id)
                 .filter(|item| item.inactive_pose.is_none())
@@ -1532,7 +1470,7 @@ fn publish_audio(
     }
     let slots = audio.portable_radio_slots.iter().flatten();
     for (slot, id) in slots.enumerate() {
-        let Some((item, (_, _, state, output))) = id.and_then(|id| {
+        let Some((item, (_, _, state, output, parent))) = id.and_then(|id| {
             items
                 .get(id)
                 .zip(runtime.stream.portable_radios().find(|r| r.0 == id))
@@ -1549,6 +1487,23 @@ fn publish_audio(
                 .broadcasts
                 .frame(state, audio.game_seconds, output, cutoff),
         );
+        // Source `audioBasedOnInteriorsensscript`: a car radio plays through its car mixer.
+        let car = runtime.vehicles.iter().find_map(|(key, car)| match key {
+            crate::world::ObjectKey::Generated(id) if id == parent => car
+                .record(&reference.0)
+                .audio
+                .as_ref()
+                .map(|a| &a.route),
+            _ => None,
+        });
+        let group = slot / crate::audio::PORTABLE_RADIO_SLOTS;
+        for (k, voice) in audio.reference.portable_radios[group].voices.iter().enumerate() {
+            let mixer = car.map_or(voice.mixer, |route| audio.world_car_mixer(route, parent));
+            game_audio_route(
+                crate::audio::PORTABLE_RADIO_EMITTER + slot as u32 * 4 + k as u32 + 1,
+                mixer,
+            );
+        }
     }
     game_audio_end();
 }

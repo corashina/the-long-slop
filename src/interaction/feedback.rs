@@ -198,14 +198,7 @@ impl InteractionState {
             }
             if self.mechanisms.contains(t.item) {
                 a.context = FeedbackContext::Mechanism;
-                if self.mechanisms.radio_tunable(t.item) {
-                    a.context = if self.mechanisms.radio_volume(t.item) {
-                        FeedbackContext::RadioVolume
-                    } else {
-                        FeedbackContext::RadioTuning
-                    };
-                    a.actions.0 |= ActionMask::TUNE | ActionMask::SCROLL;
-                } else if self.mechanisms.turn_state(t.item).is_some() {
+                if self.mechanisms.turn_state(t.item).is_some() {
                     a.actions.0 |= ActionMask::SWITCH;
                     if self.mechanisms.primary_switch(t.item) {
                         a.actions.0 |= ActionMask::PRIMARY_SWITCH;
@@ -231,11 +224,10 @@ impl InteractionState {
                     a.actions.0 |= ActionMask::TUNE;
                 }
             }
-            if (self.seats.iter().any(|s| s.item == t.item)
-                || self
-                    .item_seats
-                    .get(&t.collider)
-                    .is_some_and(|seat| seat.can_sit(physics)))
+            if self
+                .item_seats
+                .get(&t.collider)
+                .is_some_and(|seat| seat.can_sit(physics))
                 && !player.seated()
             {
                 a.actions.0 |= ActionMask::ENTER;
@@ -296,18 +288,6 @@ impl InteractionState {
                     {
                         a.actions.0 |= ActionMask::PICKUP;
                     }
-                    ItemLocation::Attached(_)
-                        if self.attachments.target(t.item).is_some()
-                            && self.carry.allows_pickup(t.item, player.seated(), true)
-                            && self.attachments.loose_body(t.item).is_some_and(|body| {
-                                self.carry
-                                    .can_acquire(t.item, t.point, player, body, physics)
-                                    .is_ok()
-                            }) =>
-                    {
-                        a.actions.0 |= ActionMask::DISMOUNT;
-                        a.context = FeedbackContext::Part;
-                    }
                     ItemLocation::PartSlot(_)
                         if self.parts.can_remove(t.item, player, items).is_ok()
                             && self.parts.loose_body(t.item).is_some_and(|body| {
@@ -353,9 +333,6 @@ impl InteractionState {
             {
                 let fits = match slot {
                     SlotTarget::Part(slot) => self.parts.can_install(held, slot, items).is_ok(),
-                    SlotTarget::Attachment(target) => {
-                        self.attachments.can_mount(held, target, items).is_ok()
-                    }
                     SlotTarget::Wheel(_) | SlotTarget::Tire(_) => {
                         self.wheel_installation_block(aim, items).is_none()
                     }

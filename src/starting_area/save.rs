@@ -253,12 +253,9 @@ impl GarageRuntime {
         candidate
             .wheels
             .refresh_conditions(&candidate.area.conditions, &candidate.area.items);
-        candidate.wheels.restore_save(
-            &ids,
-            &saved.attachments,
-            &mut candidate.area.items,
-            &mut candidate.physics,
-        )?;
+        candidate
+            .wheels
+            .restore_save(&mut candidate.area.items, &mut candidate.physics)?;
         candidate.area.interaction.parts.restore_save(
             &ids,
             &saved.attachments.parts,
@@ -314,7 +311,7 @@ impl GarageRuntime {
                 protected.push(crate::world::ObjectKey::Generated(id.clone()));
             }
         }
-        if let Some(seat) = saved.player.seat.as_ref().filter(|s| world_seat(s)) {
+        if let Some(seat) = saved.player.seat.as_ref() {
             protected.push(seat_owner_key(seat).clone());
         }
         for item in &saved.items {
@@ -351,7 +348,7 @@ impl GarageRuntime {
         candidate.restore_cigarettes(&saved.cigarettes);
         candidate.stream.request_at(
             saved.player.pose.position,
-            selected_vehicle_position(reference, saved),
+            selected_vehicle_position(saved),
         );
         candidate.persistent_world = PersistentWorld::restore(saved, &ids)?;
         finalize::RestoreFinalizer {
@@ -364,7 +361,6 @@ impl GarageRuntime {
         .initial(reference, &ids, saved)?;
         candidate.area.player.restore_save(
             &saved.player,
-            &ids,
             &candidate.stream.origin,
             &mut candidate.physics,
         )?;
@@ -413,55 +409,12 @@ impl GarageRuntime {
             .sync_equipment(reference, &mut candidate.physics);
         candidate.area.items.sync_poses(&candidate.physics);
         candidate.vehicle = saved.progress.selected_vehicle.clone();
-        candidate.restore_object_states()?;
         candidate.driving_assists = saved.driving_assists;
         candidate.attempts = crate::save::identity::unsigned(&saved.progress.start_attempts)?;
-        let mounted: Vec<_> = candidate
-            .light_owners
-            .iter()
-            .map(|owner| owner.is_none_or(|item| candidate.area.items.mounted(item)))
-            .collect();
-        let mut signals = Vec::with_capacity(candidate.vehicles.len());
-        let mut headlights = Vec::with_capacity(candidate.vehicles.len());
-        for (key, vehicle) in &candidate.vehicles {
-            let Some(index) = crate::vehicle::garage_vehicle_index(key) else {
-                continue;
-            };
-            let electronics = reference
-                .lighting
-                .controllers
-                .iter()
-                .find(|c| {
-                    c.kind == crate::reference::LightControllerKind::Rear
-                        && c.vehicle == Some(index)
-                })
-                .ok_or_else(|| {
-                    SaveError::ReconstructionFailure("Missing vehicle electronics".into())
-                })?;
-            signals.push(crate::lighting::VehicleLightSample {
-                local_ignition: vehicle.ignition.ignition
-                    && (electronics.electronics_source.is_none()
-                        || electronics.electronics_output > electronics.electronics_threshold),
-                brake: 0.,
-                gear_ratio: reference.vehicles[index].gear_ratios[vehicle.drivetrain.gear()],
-                electronics_output: electronics.electronics_output,
-            });
-            headlights.push(vehicle.requested_headlights);
-        }
-        candidate.lighting.restore_save(
-            &reference.lighting,
-            &ids,
-            &saved.lighting,
-            &mounted,
-            &signals,
-            &headlights,
-        )?;
+        candidate
+            .lighting
+            .restore_save(&reference.lighting, &ids, &saved.lighting)?;
         candidate.area.commit_poses(&candidate.physics, true);
-        match (&mut candidate.audio, &saved.radio) {
-            (Some(audio), Some(radio)) => audio.radio.restore_save(radio)?,
-            (None, None) => (),
-            _ => return Err(SaveError::InvalidLinks("Radio owner".into())),
-        }
         candidate.refresh_powertrains();
         // Car sounds sync each engine's running edge on their first step.
         if let Some(audio) = &mut candidate.audio {
@@ -485,7 +438,7 @@ impl GarageRuntime {
             ids: IdentityMap::new(reference)?,
             ready: false,
             motion: saved.bodies.clone(),
-            seat: saved.player.seat.clone().filter(world_seat),
+            seat: saved.player.seat.clone(),
         });
         candidate.clear_input();
         candidate.paused = true;
@@ -512,7 +465,6 @@ impl GarageRuntime {
         let mut ids = IdentityMap::new(reference)?;
         ids.bind_generated(&self.area.items);
         let origin = &self.stream.origin;
-        let (wheels, tires) = self.wheels.capture_save(&ids, &self.physics)?;
         let mut required: Vec<_> = self
             .pending_restore
             .iter()
@@ -567,7 +519,6 @@ impl GarageRuntime {
             source: source.clone(),
             world,
             player: self.area.player.capture_save(
-                &ids,
                 origin,
                 &self.physics,
                 // Spawned items save in the world, so the hand saves empty.
@@ -599,8 +550,6 @@ impl GarageRuntime {
             )?,
             attachments: AttachmentsSnapshot {
                 parts: self.area.interaction.parts.capture_save(&ids)?,
-                wheels,
-                tires,
             },
             mechanisms: self.area.interaction.capture_save(&ids)?,
             progress: ProgressSnapshot {
@@ -608,7 +557,6 @@ impl GarageRuntime {
                 start_attempts: self.attempts.to_string(),
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
-            radio: self.audio.as_ref().map(|audio| audio.radio.capture_save()),
             view: ViewSnapshot { camera: view },
             spawned: self
                 .area
@@ -639,13 +587,7 @@ impl GarageRuntime {
     /// into `changes`.
     fn keep_object_states(&self, changes: &mut crate::world::ChangeRecords) {
         for (key, vehicle) in &self.vehicles {
-            let mut state = vehicle.state();
-            // V03 bridge: old garage cars keep the headlight request in `LightingState`.
-            // Task 9 removes it.
-            if let Some(index) = crate::vehicle::garage_vehicle_index(key) {
-                state.requested_headlights = self.lighting.headlights(index);
-            }
-            changes.keep_vehicle(key.clone(), state);
+            changes.keep_vehicle(key.clone(), vehicle.state());
         }
         for (key, rims) in self.wheels.world_slots() {
             changes.keep_wheel_slots(key.clone(), rims);
@@ -660,38 +602,6 @@ impl GarageRuntime {
             changes.keep_radiator(self.area.items.object_key(part.item), part.fan_on);
         }
     }
-    /// Gives the live cars and parts their saved state. Before the stream binds, only the
-    /// old garage cars and their parts are live (V03 bridge). The binder restores world objects.
-    fn restore_object_states(&mut self) -> Result<(), SaveError> {
-        let changes = self.stream.changes_mut();
-        for (key, vehicle) in &mut self.vehicles {
-            let Some(state) = changes.take_vehicle(key) else {
-                continue;
-            };
-            vehicle.restore(&state);
-            vehicle.ignition.clear_input();
-        }
-        for part in self.powertrain.engines_mut() {
-            if let Some(state) = changes.take_engine(&self.area.items.object_key(part.item)) {
-                part.state.restore_save(&state)?;
-            }
-        }
-        for part in self.powertrain.radiators_mut() {
-            if let Some(fan_on) = changes.take_radiator(&self.area.items.object_key(part.item)) {
-                part.fan_on = fan_on;
-            }
-        }
-        Ok(())
-    }
-}
-/// A seat that waits for its world item or world car binding.
-fn world_seat(seat: &SeatSnapshot) -> bool {
-    match &seat.owner {
-        SeatOwnerSnapshot::Item { .. } => true,
-        SeatOwnerSnapshot::Vehicle { vehicle } => {
-            crate::vehicle::garage_vehicle_index(vehicle).is_none()
-        }
-    }
 }
 fn seat_owner_key(seat: &SeatSnapshot) -> &crate::world::ObjectKey {
     match &seat.owner {
@@ -700,25 +610,10 @@ fn seat_owner_key(seat: &SeatSnapshot) -> &crate::world::ObjectKey {
     }
 }
 /// Saved position of the last seated car. The player position if it has none.
-fn selected_vehicle_position(reference: &ReferenceManifest, saved: &SaveSnapshot) -> [f64; 3] {
+fn selected_vehicle_position(saved: &SaveSnapshot) -> [f64; 3] {
     let Some(key) = &saved.progress.selected_vehicle else {
         return saved.player.pose.position;
     };
-    // V03 bridge: an old garage chassis saves as a source body, or stays at its source pose.
-    // Task 9 removes it.
-    if let Some(index) = crate::vehicle::garage_vehicle_index(key) {
-        let record = reference
-            .bodies
-            .iter()
-            .find(|b| b.id == reference.vehicles[index].body)
-            .expect("validated garage chassis");
-        let source = SourceKey::from(&record.source);
-        return saved
-            .bodies
-            .iter()
-            .find(|b| matches!(&b.identity, BodyIdentity::Source { source: s } if *s == source))
-            .map_or(record.pose.translation.map(f64::from), |b| b.pose.position);
-    }
     saved
         .world
         .changes
@@ -737,7 +632,6 @@ impl StartingArea {
     ) -> Result<Vec<BodySnapshot>, SaveError> {
         let mut records = Vec::new();
         let mut captured = HashSet::new();
-        // V03 bridge: old garage chassis bodies save as source bodies. Task 9 removes them.
         for item in self.items.iter() {
             if !matches!(
                 item.location,

@@ -61,17 +61,13 @@ pub struct SkidReference {
 }
 
 pub(super) fn validate(m: &ReferenceManifest) -> Result<(), ReferenceError> {
-    let garage = m
-        .vehicles
-        .iter()
-        .map(|v| (&v.effect_gains, &v.wheel_effects[..], 4));
     let world = m
         .world
         .prototypes
         .iter()
         .filter_map(|p| p.vehicle.as_ref())
         .map(|v| (&v.effect_gains, &v.wheel_effects[..], v.wheels.len()));
-    for (g, wheels, count) in garage.chain(world) {
+    for (g, wheels, count) in world {
         require(
             wheels.len() == count
                 && finite(&[

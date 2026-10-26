@@ -79,9 +79,11 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
                 doors: Vec::new(),
             }],
             light_switch: Some(SWITCH),
+            handbrake_lever: None,
             owner: ItemId(1),
             wheel_slots: &[],
             wheel_part_mass: 0.,
+            tanks: Vec::new(),
         },
         &prototype,
         &crate::wheel_effects::tests::skid(),
@@ -98,9 +100,8 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     // Headlights: off, low, high. Each request fades the old state out and the new one in.
     let lit = |vehicle: &VehicleRuntime, node: u32| {
         let light = vehicle
+            
             .lights
-            .as_ref()
-            .unwrap()
             .lights()
             .iter()
             .find(|l| l.node == node);
@@ -113,9 +114,8 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
                 ..Default::default()
             };
             vehicle
+                
                 .lights
-                .as_mut()
-                .unwrap()
                 .advance(record, input, |_| true, |_| 0., FIXED_DT);
         }
     };
@@ -124,7 +124,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     vehicle.requested_headlights = 1;
     step_lights(vehicle, 0.5);
     assert_eq!((lit(vehicle, 2), lit(vehicle, 3)), (2., 0.));
-    let renderer = vehicle.lights.as_ref().unwrap().materials()[0];
+    let renderer = vehicle.lights.materials()[0];
     assert_eq!(
         renderer.choice.unwrap().link(record).unwrap().gltf_material,
         1
@@ -204,9 +204,11 @@ fn light_switch_click_toggles_world_car_headlights() {
                 doors: Vec::new(),
             }],
             light_switch: Some(SWITCH),
+            handbrake_lever: None,
             owner: ItemId(1),
             wheel_slots: &[],
             wheel_part_mass: 0.,
+            tanks: Vec::new(),
         },
         &prototype,
         &crate::wheel_effects::tests::skid(),
@@ -224,7 +226,7 @@ fn light_switch_click_toggles_world_car_headlights() {
     let mut states = Vec::new();
     for _ in 0..3 {
         let (car, record) = use_light_switch(&mut vehicles, SWITCH).unwrap();
-        assert_eq!((car, record), (key.clone(), VehicleRecord::World(0)));
+        assert_eq!((car, record), (key.clone(), 0));
         states.push(vehicles[&key].requested_headlights);
     }
     assert_eq!(states, [1, 2, 0]);
@@ -238,15 +240,13 @@ fn light_switch_click_toggles_world_car_headlights() {
             ..Default::default()
         };
         vehicle
+            
             .lights
-            .as_mut()
-            .unwrap()
             .advance(record, input, |_| true, |_| 0., FIXED_DT);
     }
     let low = vehicle
+        
         .lights
-        .as_ref()
-        .unwrap()
         .lights()
         .iter()
         .find(|l| l.node == 2)

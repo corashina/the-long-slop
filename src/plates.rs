@@ -1,16 +1,6 @@
-//! Retained source plate script state. Activation follows record order.
+//! Source plate text draws of world car copies.
 pub mod layout;
-use crate::reference::{ItemId, PlateRecord, ReferenceError};
-struct Label {
-    item: ItemId,
-    text: String,
-    same: bool,
-    same_as: Option<ItemId>,
-    revision: u64,
-}
-pub struct PlateState {
-    labels: Vec<Label>,
-}
+use crate::reference::ReferenceError;
 /// One `rendszamscript` label at startup. `same_as` is the index of the linked label.
 pub struct StartupLabel<'a> {
     pub text: &'a str,
@@ -68,91 +58,6 @@ pub fn startup_texts(
         }
     }
     Ok(result)
-}
-impl PlateState {
-    pub fn new(
-        record: &PlateRecord,
-        draw: &mut dyn FnMut(i32, i32) -> i32,
-    ) -> Result<Self, ReferenceError> {
-        for (i, p) in record.plates.iter().enumerate() {
-            if record.plates[..i].iter().any(|o| o.item == p.item) {
-                return Err(ReferenceError("duplicate plate item".into()));
-            }
-        }
-        let labels = record
-            .plates
-            .iter()
-            .map(|p| {
-                Ok(StartupLabel {
-                    text: &p.initial_text,
-                    same: p.initial_same,
-                    same_as: p
-                        .same_as
-                        .map(|id| {
-                            record
-                                .plates
-                                .iter()
-                                .position(|o| o.item == id)
-                                .ok_or_else(|| ReferenceError("missing shared plate".into()))
-                        })
-                        .transpose()?,
-                })
-            })
-            .collect::<Result<Vec<_>, ReferenceError>>()?;
-        let texts = startup_texts(&labels, draw)?;
-        Ok(Self {
-            labels: record
-                .plates
-                .iter()
-                .zip(texts)
-                .map(|(p, (text, same))| Label {
-                    item: p.item,
-                    revision: u64::from(text != p.initial_text),
-                    text,
-                    same,
-                    same_as: p.same_as,
-                })
-                .collect(),
-        })
-    }
-    pub fn text(&self, item: ItemId) -> Option<&str> {
-        self.labels
-            .iter()
-            .find(|l| l.item == item)
-            .map(|l| l.text.as_str())
-    }
-    pub fn revision(&self, item: ItemId) -> Option<u64> {
-        self.labels
-            .iter()
-            .find(|l| l.item == item)
-            .map(|l| l.revision)
-    }
-    pub fn set(&mut self, item: ItemId, text: &str) -> Result<(), ReferenceError> {
-        let mut index = self
-            .labels
-            .iter()
-            .position(|l| l.item == item)
-            .ok_or_else(|| ReferenceError("unknown plate item".into()))?;
-        // Set updates this label. Updated invokes Same on its linked label.
-        for step in 0..self.labels.len() {
-            let label = &mut self.labels[index];
-            if label.text != text {
-                label.text.clear();
-                label.text.push_str(text);
-                label.revision += 1;
-            }
-            if step > 0 {
-                label.same = true;
-            }
-            let Some(next) = label.same_as else { break };
-            index = self
-                .labels
-                .iter()
-                .position(|l| l.item == next)
-                .ok_or_else(|| ReferenceError("missing shared plate".into()))?;
-        }
-        Ok(())
-    }
 }
 /// Plate texts of one world car copy, in `plates` order. `seed` comes from the copy's object key,
 /// so each copy draws its own texts and a reload draws the same texts.

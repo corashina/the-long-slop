@@ -123,6 +123,16 @@ pub(super) fn bind(
                     .light_switch
                     .as_ref()
                     .and_then(|s| node_item(s.usable)),
+                handbrake_lever: world
+                    .mechanisms
+                    .iter()
+                    .find(|m| {
+                        m.prototype == prototype.source
+                            && m.recipe.turn.as_ref().is_some_and(|t| {
+                                matches!(t.action, crate::reference::TurnAction::ToggleHandbrake)
+                            })
+                    })
+                    .and_then(|m| node_item(m.node)),
                 owner,
                 wheel_slots: &wheel_slots,
                 // The record mass holds the wheel parts of the prototype.
@@ -131,6 +141,15 @@ pub(super) fn bind(
                     .iter()
                     .filter_map(|b| wheels.part_mass(b.item))
                     .sum(),
+                tanks: std::iter::once(owner)
+                    .chain(content.bindings.iter().map(|b| b.item))
+                    .filter(|&id| items.get(id).is_some_and(|i| i.fluid.is_some()))
+                    .fold(Vec::new(), |mut tanks, id| {
+                        if !tanks.contains(&id) {
+                            tanks.push(id);
+                        }
+                        tanks
+                    }),
             },
             prototype,
             skid,
@@ -302,12 +321,16 @@ pub(crate) struct CarCopy<'a> {
     pub lights: Vec<CarLightLinks>,
     /// The item of the `carscript.InteractSwitchLights` usable.
     pub light_switch: Option<ItemId>,
+    /// The item of the `carscript.InteractHandbrake` usable.
+    pub handbrake_lever: Option<ItemId>,
     /// The car root item.
     pub owner: ItemId,
     /// One slot per record wheel, in wheel order.
     pub wheel_slots: &'a [WorldWheelSlot],
     /// Mass of the prototype wheel parts. The record mass holds it.
     pub wheel_part_mass: f32,
+    /// Prototype `tankscript` items. Their fluid adds to the chassis mass.
+    pub tanks: Vec<ItemId>,
 }
 
 /// Makes the chassis a vehicle and adds its car runtime and wheel slots with the retired
@@ -322,7 +345,7 @@ pub(crate) fn spawn(
     wheels: &mut WheelAssemblies,
     items: &mut ItemStore,
     changes: &mut ChangeRecords,
-) -> Result<Vec<crate::reference::WheelSlotId>, ReferenceError> {
+) -> Result<Vec<crate::interaction::wheels::WheelSlotId>, ReferenceError> {
     let record = prototype
         .vehicle
         .as_ref()
@@ -346,6 +369,7 @@ pub(crate) fn spawn(
             electronics: copy.electronics,
             lights: copy.lights,
             light_switch: copy.light_switch,
+            handbrake_lever: copy.handbrake_lever,
             plates,
         },
     );
@@ -367,6 +391,7 @@ pub(crate) fn spawn(
         key,
         copy.owner,
         record.mass_kg - copy.wheel_part_mass,
+        copy.tanks,
         copy.wheel_slots,
         saved,
         physics,
@@ -456,7 +481,7 @@ pub(crate) fn retire_vehicle(
     wheels: &mut WheelAssemblies,
     changes: &mut ChangeRecords,
 ) -> Vec<(
-    crate::reference::WheelSlotId,
+    crate::interaction::wheels::WheelSlotId,
     Option<rapier3d::prelude::ColliderHandle>,
 )> {
     if let Some(runtime) = vehicles.remove(key) {
@@ -531,9 +556,11 @@ mod tests {
                 electronics: None,
                 lights: Vec::new(),
                 light_switch: None,
+                handbrake_lever: None,
                 owner: item,
                 wheel_slots,
                 wheel_part_mass,
+                tanks: vec![item],
             },
             prototype,
             &crate::wheel_effects::tests::skid(),
@@ -1021,14 +1048,15 @@ mod tests {
             s.items.get(s.rim).unwrap().body,
             Some(s.physics.chassis_handle(&key))
         );
-        assert!((mass(&s) - 820.).abs() < 1e-3, "{}", mass(&s));
+        // 820 kg dry chassis with its wheel plus 40 L of fuel.
+        assert!((mass(&s) - 860.).abs() < 1e-3, "{}", mass(&s));
 
         // Remove: the car sits on the hub and loses the wheel mass.
         let slot = s.wheels.slot_for_item(s.rim).unwrap();
         assert_eq!(s.wheels.slot_owner(slot), Some(s.root));
         s.wheels.remove(slot, &mut s.items, &mut s.physics).unwrap();
         assert_eq!(tire(&s), WheelAssembly::Hub);
-        assert!((mass(&s) - 795.).abs() < 1e-3, "{}", mass(&s));
+        assert!((mass(&s) - 835.).abs() < 1e-3, "{}", mass(&s));
         assert_ne!(
             s.items.get(s.rim).unwrap().body,
             Some(s.physics.chassis_handle(&key))
@@ -1039,7 +1067,7 @@ mod tests {
             .install(s.rim, slot, &mut s.items, &mut s.physics)
             .unwrap();
         assert!(matches!(tire(&s), WheelAssembly::Tire { .. }));
-        assert!((mass(&s) - 820.).abs() < 1e-3);
+        assert!((mass(&s) - 860.).abs() < 1e-3);
 
         // Save and load: the slot keeps its rim.
         let mut loaded = save(&s, ChangeRecords::default());
@@ -1060,7 +1088,7 @@ mod tests {
             s.items.get(s.rim).unwrap().location,
             crate::interaction::items::ItemLocation::World
         );
-        assert!((mass(&s) - 795.).abs() < 1e-3);
+        assert!((mass(&s) - 835.).abs() < 1e-3);
 
         // Retire: the change records keep the slot rims for the respawn.
         let mut s = s;

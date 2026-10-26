@@ -29,7 +29,6 @@ impl RestoreFinalizer<'_> {
             .sync(reference, self.area, self.wheels, self.stream, self.physics)?;
         self.area.interaction.sync_mechanisms(self.physics);
         self.area.sync_attachments(self.physics, false);
-        self.area.sync_compound(self.physics);
         self.area
             .interaction
             .sync_parts(&mut self.area.items, self.physics)?;

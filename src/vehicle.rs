@@ -12,7 +12,6 @@ pub(crate) use body::tests as body_fixture;
 /// A 820 kg box car prototype with four wheels, for native tests.
 #[cfg(test)]
 pub(crate) use body::tests::car as car_prototype_fixture;
-pub use body::{garage_vehicle_index, garage_vehicle_key};
 use presentation_bodies::{BodyPresentationState, PresentationBodies};
 use query_bounds::QueryBounds;
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -253,6 +252,13 @@ impl PhysicsWorld {
     }
 
     /// Returns the vehicle whose chassis is `body`.
+    /// Maximum steer angle of the vehicle on chassis `body`, in radians.
+    pub fn max_steer(&self, body: RigidBodyHandle) -> Option<f32> {
+        self.vehicles
+            .values()
+            .find(|vehicle| vehicle.chassis == body)
+            .map(|vehicle| vehicle.max_steer)
+    }
     pub fn vehicle_of(&self, body: RigidBodyHandle) -> Option<&ObjectKey> {
         if !self.chassis.contains(&body) {
             return None;
@@ -404,23 +410,6 @@ impl PhysicsWorld {
             origin,
         )
     }
-    pub(crate) fn restore_wheel_save(
-        &mut self,
-        vehicle: &ObjectKey,
-        index: usize,
-        saved: &crate::save::WheelAttachment,
-    ) {
-        let vehicle = self.vehicles.get_mut(vehicle).expect("Unknown vehicle");
-        let wheel = &mut vehicle.wheels.wheels_mut()[index];
-        wheel.angle = saved.rotation;
-        wheel.omega = saved.rpm * std::f32::consts::TAU / 60.0;
-        wheel.previous_angle = saved.previous_rotation;
-    }
-    pub(crate) fn wheel_save_state(&self, vehicle: &ObjectKey, index: usize) -> (f32, f32, f32) {
-        let wheel = &self.vehicle(vehicle).wheels.wheels()[index];
-        (wheel.angle, wheel.rpm(), wheel.previous_angle)
-    }
-
     /// Source WheelCollider rpm, radius and isGrounded of one wheel slot.
     pub fn wheel_motion(&self, vehicle: &ObjectKey, wheel: usize) -> (f32, f32, bool) {
         let w = &self.vehicle(vehicle).wheels.wheels()[wheel];

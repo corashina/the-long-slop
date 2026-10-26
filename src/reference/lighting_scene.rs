@@ -234,13 +234,12 @@ impl LightingRecord {
                 && self.lights[1..].iter().all(|light| !light.enabled),
             "lighting startup light selection",
         )?;
-        let mut probe_nodes = HashSet::new();
         for probe in &self.probes {
             require(
-                identities.insert(probe.source.clone()) && probe_nodes.insert(probe.node),
+                identities.insert(probe.source.clone()),
                 "duplicate lighting probe",
             )?;
-            probe.validate(nodes)?;
+            probe.validate()?;
         }
         self.postprocessing.validate(&textures)?;
         require(

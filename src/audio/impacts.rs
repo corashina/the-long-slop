@@ -7,6 +7,9 @@ use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::HashSet;
 
+type Vehicles =
+    std::collections::BTreeMap<crate::world::ObjectKey, crate::starting_area::VehicleRuntime>;
+
 /// Played item hit gain. `None` below the source minimum or for a loose item in an interior.
 pub fn item_hit_gain(
     speed: f32,
@@ -53,21 +56,20 @@ fn item_hit(
 pub struct ImpactState {
     /// Items that the last interior test found in an interior.
     interior: HashSet<ItemId>,
-    vehicle_gains: Vec<f32>,
     wait: f32,
 }
 
 #[derive(Clone, Copy)]
 enum Side {
     Item(ItemId),
-    Car(usize),
+    /// A car chassis: its source `collisionSoundM` and its emitter.
+    Car(f32, u32),
     Other,
 }
 
 impl ImpactState {
-    pub fn bind(&mut self, game: &ReferenceManifest) {
+    pub fn bind(&mut self) {
         self.interior = HashSet::with_capacity(256);
-        self.vehicle_gains = game.vehicles.iter().map(|v| v.collision_gain).collect();
         self.reset();
     }
     pub fn reset(&mut self) {
@@ -102,16 +104,21 @@ impl ImpactState {
     }
 }
 
-fn side(physics: &PhysicsWorld, handle: crate::vehicle::ColliderHandle) -> Side {
+fn side(
+    game: &ReferenceManifest,
+    vehicles: &Vehicles,
+    physics: &PhysicsWorld,
+    handle: crate::vehicle::ColliderHandle,
+) -> Side {
     let Some(collider) = physics.rapier().colliders.get(handle) else {
         return Side::Other;
     };
-    if let Some(vehicle) = collider
+    if let Some((key, car)) = collider
         .parent()
         .and_then(|b| physics.vehicle_of(b))
-        .and_then(crate::vehicle::garage_vehicle_index)
+        .and_then(|key| vehicles.get_key_value(key))
     {
-        return Side::Car(vehicle);
+        return Side::Car(car.record(game).collision_gain, key.seed() as u32);
     }
     match (collider.user_data & u32::MAX as u128) as u32 {
         0 => Side::Other,
@@ -121,7 +128,14 @@ fn side(physics: &PhysicsWorld, handle: crate::vehicle::ColliderHandle) -> Side 
 
 impl AudioState {
     /// Emits hit sounds for the contacts of the last physics step.
-    pub fn hits(&mut self, area: &StartingArea, physics: &PhysicsWorld, dt: f32) {
+    pub fn hits(
+        &mut self,
+        game: &ReferenceManifest,
+        area: &StartingArea,
+        vehicles: &Vehicles,
+        physics: &PhysicsWorld,
+        dt: f32,
+    ) {
         let rules = &self.reference.collisions;
         let ball = Ball::new(rules.interior_radius);
         let colliders = &self.colliders;
@@ -154,7 +168,7 @@ impl AudioState {
                 .is_some_and(|s| s.location == ItemLocation::Held)
         };
         for hit in physics.hits() {
-            let sides = hit.colliders.map(|h| side(physics, h));
+            let sides = hit.colliders.map(|h| side(game, vehicles, physics, h));
             let position = std::array::from_fn(|i| area.origin[i] + f64::from(hit.point[i]));
             for (this, other) in [(sides[0], sides[1]), (sides[1], sides[0])] {
                 let (kind, emitter, clip, gain, pitch) = match this {
@@ -169,7 +183,7 @@ impl AudioState {
                         };
                         (AudioKind::ItemHit, 0, clip, gain, 1.)
                     }
-                    Side::Car(vehicle) => {
+                    Side::Car(gain, emitter) => {
                         if let Side::Item(id) = other
                             && self.impacts.interior(id, held(id))
                         {
@@ -178,13 +192,12 @@ impl AudioState {
                         let sample = self.sample();
                         let [low, high] = self.reference.shared.random_pitch;
                         let pitch = low + (high - low) * self.sample();
-                        let gain = self.impacts.vehicle_gains[vehicle];
                         let Some((clip, gain)) =
                             car_hit(hit.speed, gain, &self.reference.collisions, sample)
                         else {
                             continue;
                         };
-                        (AudioKind::CarHit, vehicle as u32, clip, gain, pitch)
+                        (AudioKind::CarHit, emitter, clip, gain, pitch)
                     }
                     Side::Other => continue,
                 };

@@ -250,7 +250,7 @@ enum Owner {
     /// One particle system of the car with chassis `car`.
     Car {
         system: CarSystem,
-        record: crate::starting_area::VehicleRecord,
+        prototype: usize,
         car: rapier3d::prelude::RigidBodyHandle,
     },
     /// Storm dust; `Group::source` is big (0) or small (1).
@@ -272,13 +272,14 @@ enum CarSystem {
 fn car_particle(
     reference: &crate::reference::ReferenceManifest,
     system: CarSystem,
-    record: crate::starting_area::VehicleRecord,
+    prototype: usize,
     source: usize,
 ) -> &crate::reference::ParticleReference {
+    let record = crate::starting_area::world_vehicle(reference, prototype);
     match system {
-        CarSystem::Exhaust => &record.exhaust(reference)[source],
+        CarSystem::Exhaust => &record.exhaust[source],
         CarSystem::Wheel => {
-            let w = &record.wheel_effects(reference).0[source / 8];
+            let w = &record.wheel_effects[source / 8];
             match source % 8 {
                 0 => w.dust.as_ref().expect("wheel dust group"),
                 system => &w.grass[system - 1],
@@ -287,15 +288,15 @@ fn car_particle(
         CarSystem::Skid => &reference.skid.particles[source],
     }
 }
-/// The `Group::source` ids of every car system of `record`.
+/// The `Group::source` ids of every car system of the car prototype.
 fn car_systems(
     reference: &crate::reference::ReferenceManifest,
-    record: crate::starting_area::VehicleRecord,
+    prototype: usize,
 ) -> impl Iterator<Item = (CarSystem, usize)> + '_ {
-    let exhaust = (0..record.exhaust(reference).len()).map(|i| (CarSystem::Exhaust, i));
+    let record = crate::starting_area::world_vehicle(reference, prototype);
+    let exhaust = (0..record.exhaust.len()).map(|i| (CarSystem::Exhaust, i));
     let wheels = record
-        .wheel_effects(reference)
-        .0
+        .wheel_effects
         .iter()
         .enumerate()
         .flat_map(|(wheel, w)| {
@@ -638,7 +639,7 @@ fn sync_particles(
             );
         }
     }
-    // Car copies come and go. A retired car frees its groups for the next copy of its record.
+    // Car copies come and go. A retired car frees its groups for the next copy of its prototype.
     let physics = &drive.runtime.physics;
     for g in &mut state.groups {
         if let Owner::Car { car, .. } = g.owner {
@@ -647,10 +648,10 @@ fn sync_particles(
     }
     for (key, vehicle) in &drive.runtime.vehicles {
         let car = physics.chassis_handle(key);
-        for (system, source) in car_systems(&reference.0, vehicle.record) {
+        for (system, source) in car_systems(&reference.0, vehicle.prototype) {
             let owner = Owner::Car {
                 system,
-                record: vehicle.record,
+                prototype: vehicle.prototype,
                 car,
             };
             if state
@@ -663,7 +664,7 @@ fn sync_particles(
             if let Some(g) = state.groups.iter_mut().find(|g| {
                 !g.active
                     && g.source == source
-                    && matches!(g.owner, Owner::Car { system: s, record, .. } if s == system && record == vehicle.record)
+                    && matches!(g.owner, Owner::Car { system: s, prototype, .. } if s == system && prototype == vehicle.prototype)
             }) {
                 g.owner = owner;
                 g.active = true;
@@ -673,7 +674,7 @@ fn sync_particles(
                 &mut state,
                 owner,
                 source,
-                car_particle(&reference.0, system, vehicle.record, source),
+                car_particle(&reference.0, system, vehicle.prototype, source),
                 &lighting,
                 &mut commands,
                 &mut materials,
@@ -722,9 +723,9 @@ fn sync_particles(
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
-            Owner::Car { system, record, .. } => {
-                car_particle(&reference.0, system, record, g.source)
-            }
+            Owner::Car {
+                system, prototype, ..
+            } => car_particle(&reference.0, system, prototype, g.source),
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],

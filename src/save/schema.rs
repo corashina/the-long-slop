@@ -38,10 +38,6 @@ pub struct SaveSnapshot {
     pub mechanisms: MechanismsSnapshot,
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
-    /// save_radioscript controls of the garage Lada radio; absent only when the audio export
-    /// is unavailable. World car radios save in their world change records.
-    /// V03 bridge: Task 9 removes this field with the garage Lada.
-    pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
     /// Runtime item prototype copies.
@@ -191,7 +187,7 @@ pub struct SeatSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SeatOwnerSnapshot {
-    /// A car. V03 bridge: old garage cars use their bridge key. Task 9 removes it.
+    /// A car.
     Vehicle {
         #[serde(with = "super::identity::lossless")]
         vehicle: crate::world::ObjectKey,
@@ -263,9 +259,6 @@ pub enum ItemLocationSave {
     PartSlot {
         slot: SourceKey,
     },
-    WheelSlot {
-        slot: SourceKey,
-    },
     Attached {
         owner: InstanceId,
     },
@@ -283,29 +276,12 @@ pub enum ItemLocationSave {
 #[serde(deny_unknown_fields)]
 pub struct AttachmentsSnapshot {
     pub parts: Vec<PartAttachment>,
-    pub wheels: Vec<WheelAttachment>,
-    pub tires: Vec<TireAttachment>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartAttachment {
     pub slot: SourceKey,
     pub part: Option<InstanceId>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WheelAttachment {
-    pub slot: SourceKey,
-    pub rim: Option<InstanceId>,
-    pub rotation: f32,
-    pub rpm: f32,
-    pub previous_rotation: f32,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TireAttachment {
-    pub rim: InstanceId,
-    pub tire: InstanceId,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -331,7 +307,7 @@ pub struct OpeningSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgressSnapshot {
-    /// The last seated car. V03 bridge: old garage cars use their bridge key. Task 9 removes it.
+    /// The last seated car.
     #[serde(with = "super::identity::lossless")]
     pub selected_vehicle: Option<crate::world::ObjectKey>,
     pub start_attempts: String,
@@ -361,7 +337,6 @@ pub struct ControllerSnapshot {
     pub energy: f32,
     pub enabled: bool,
     pub on: bool,
-    pub cabin_mode: Option<usize>,
     pub switch_motion: Option<SwitchMotionSave>,
     pub switch_poses: Vec<SwitchPoseSnapshot>,
 }
@@ -495,26 +470,3 @@ mod g04_ordered_state {
     }
 }
 
-#[cfg(test)]
-impl SaveSnapshot {
-    /// V03 bridge: saved state of old garage car `index`. Task 9 removes it.
-    pub(crate) fn garage_vehicle(&self, index: usize) -> &crate::starting_area::VehicleState {
-        self.world
-            .changes
-            .vehicle(&crate::vehicle::garage_vehicle_key(index))
-            .expect("garage car state")
-    }
-    /// V03 bridge: saved engine state of old garage car `index`. Task 9 removes it.
-    pub(crate) fn garage_engine(
-        &self,
-        reference: &crate::reference::ReferenceManifest,
-        index: usize,
-    ) -> &EngineSnapshot {
-        self.world
-            .changes
-            .engine(&crate::world::ObjectKey::Imported(
-                reference.vehicles[index].engine.item,
-            ))
-            .expect("garage engine state")
-    }
-}

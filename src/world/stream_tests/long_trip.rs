@@ -88,7 +88,6 @@ fn w02_long_trip_keeps_far_edits() {
     const LENGTH: f64 = 20_000.;
     let (reference, mut run) = garage_controls::load_garage();
     let stamp = roadside_stamp(&reference);
-    run.area.player.configure_seats(&reference.seats);
     assert!(enter(&mut run, &reference));
     let path = road_path(&run, &reference, LENGTH, 250.);
     let start = history(&run);
@@ -228,7 +227,6 @@ fn w02_long_trip_keeps_far_edits() {
 #[ignore = "requires the installed source export"]
 fn w02_garage_can_returns_after_far_trip() {
     let (reference, mut run) = garage_controls::load_garage();
-    run.area.player.configure_seats(&reference.seats);
     assert!(enter(&mut run, &reference));
     let path = road_path(&run, &reference, 3_200., 250.);
     let can = reference

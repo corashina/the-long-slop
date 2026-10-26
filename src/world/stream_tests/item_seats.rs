@@ -59,7 +59,6 @@ fn item_seat_follows_item_body() {
         run.area.player.seat_owner(),
         Some(&SeatOwner::Item(owner.clone()))
     );
-    assert_eq!(run.area.player.seat(), None);
     let start = run.physics.rapier().bodies[body].translation();
     run.physics.edit_body(body, |b| {
         b.set_linvel(Vector::new(1., 0., 0.), true);

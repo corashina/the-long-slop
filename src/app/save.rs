@@ -261,7 +261,6 @@ fn process_request(
             }
             crate::browser::game_loading();
             crate::presentation::view_frame::restart_scene(world);
-            crate::presentation::plates::reset_plate_text(world);
             Ok(String::new())
         }
         "Capture" | "Prepare" | "PrepareNewGame" => {

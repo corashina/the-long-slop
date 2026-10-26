@@ -1,11 +1,11 @@
 use super::{
     InteractionAction, InteractionState, ResolvedAim,
     items::{ItemLocation, ItemStore},
-    wheels::WheelAssemblies,
+    wheels::{WheelAssemblies, WheelSlotId},
 };
 use crate::{
     player::PlayerState,
-    reference::{ItemId, ReferenceError, WheelSlotId},
+    reference::{ItemId, ReferenceError},
     vehicle::PhysicsWorld,
 };
 

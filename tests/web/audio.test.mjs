@@ -5,7 +5,7 @@ import {webcrypto} from 'node:crypto';
 import {createAudio} from '../../web/audio.js';
 import {configureAssetCatalog} from '../../web/world-assets.js';
 import {MenuState,ACTIONS,captureWithAudio} from '../../web/menu.js';
-import {spatialValues,VoiceBank} from '../../web/audio/voices.js';
+import {spatialValues,VoiceBank,PORTABLE_RADIO_EMITTER} from '../../web/audio/voices.js';
 import {ClipCache} from '../../web/audio/clips.js';
 import {installAudioBridge} from '../../web/audio.js';
 const manifest=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.json',import.meta.url)));
@@ -49,12 +49,12 @@ test('removed_owner_rejects_pending_decode',async()=>{let complete;class Slow ex
 function radioSamples(id){const clip=raw.clips.find(c=>c.id===id),bytes=readFileSync(new URL('../../web/assets/'+clip.path,import.meta.url));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);}
 function radioSetup(Context=Fake){const a=setup(Context);globalThis.fetch=async url=>{const clip=raw.clips.find(c=>manifest.content_base+c.path===url);return new Response(radioSamples(clip.id));};return a;}
 const recording=raw.radio.stations[0].music[0];
-function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(raw.radio.emitter,[0,0,0],[0,0,0,1],true);for(const id of raw.radio.voices)a.emitter(raw.voices.find(v=>v.id===id).emitter,[0,0,0],[0,0,0,1],true);a.radio(raw.radio.emitter,{power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
+function radioFrame(a,offset=0,clip=recording){a.begin(a.session,true,false,offset);a.emitter(PORTABLE_RADIO_EMITTER,[0,0,0],[0,0,0,1],true);a.radio(PORTABLE_RADIO_EMITTER,{power:true,am:false,frequency:89.2,volume:.1,staticGain:0,primary:{clip,offsetSeconds:offset,gain:.1,nextClip:null},secondary:{clip:null,offsetSeconds:0,gain:0,nextClip:null}});a.finish();}
 async function radioLoaded(a){await Promise.all([...a.cache.radioPending.values()].map(e=>e.task));await loaded(a);}
 test('radio_resume_reuses_playback',async()=>{
  class Wav extends Fake {decodeAudioData(bytes){const v=new DataView(bytes),channels=v.getUint16(22,true),rate=v.getUint32(24,true),bits=v.getUint16(34,true);let data=0;for(let i=12;i+8<=bytes.byteLength;){const n=v.getUint32(i+4,true);if(v.getUint32(i,true)===0x61746164)data=n;i+=8+n+(n&1);}return Promise.resolve({duration:data/(rate*channels*bits/8),numberOfChannels:channels});}}
  const a=radioSetup(Wav);a.unlock();await settle();radioFrame(a,2);await radioLoaded(a);radioFrame(a,2);
- const voice=a.bank.voices.get(raw.radio.voices[1]),source=voice.source;
+ const voice=a.bank.voices.get(PORTABLE_RADIO_EMITTER+2),source=voice.source;
  assert.ok(source);assert.equal(voice.offset,2);
  a.pause();assert.equal(voice.source,null);assert.ok(source.stopped);
  a.unlock();await settle();radioFrame(a,2);await radioLoaded(a);

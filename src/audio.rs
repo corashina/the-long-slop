@@ -149,14 +149,9 @@ pub struct AudioState {
     pub current_interior: Option<usize>,
     pub sensor: SensorLatch,
     pub route_mixers: Vec<u32>,
-    /// Vehicle index of each car route, for car hit sounds.
-    pub route_vehicles: Vec<Option<u32>>,
-    /// The Lada radio's controls.
-    pub radio: crate::simulation::radio::RadioState,
     pub broadcasts: crate::simulation::radio::RadioBroadcasts,
     /// World radios holding the browser's voice slots, per voice group.
     pub portable_radio_slots: Vec<[Option<ItemId>; PORTABLE_RADIO_SLOTS]>,
-    pub radio_frame: crate::simulation::radio::RadioFrame,
     queue: [Option<AudioEvent>; 64],
     length: usize,
     sequence: u32,
@@ -246,7 +241,6 @@ impl AudioState {
                 .map(|(i, v)| (v.collider, i))
                 .collect(),
             route_mixers: reference.routes.iter().map(|r| r.main_mixer).collect(),
-            route_vehicles: vec![None; reference.routes.len()],
             outside_mixer: reference
                 .mixers
                 .iter()
@@ -257,13 +251,11 @@ impl AudioState {
                 .iter()
                 .find(|m| m.name == "CarSounds")
                 .map_or(0, |m| m.id),
-            radio: crate::simulation::radio::RadioState::lada(&reference.radio),
             broadcasts: crate::simulation::radio::RadioBroadcasts::new(
                 &reference.radio,
                 &reference.clips,
                 [0, 0],
             ),
-            radio_frame: crate::simulation::radio::RadioFrame::default(),
             portable_radio_slots: vec![
                 [None; PORTABLE_RADIO_SLOTS];
                 reference.portable_radios.len()
@@ -442,21 +434,7 @@ impl AudioState {
             .collect();
         self.control_items = game.mechanisms.iter().map(|m| (m.id, m.item)).collect();
         self.collider_nodes = game.colliders.iter().map(|c| (c.id, c.node)).collect();
-        self.impacts.bind(game);
-        for (route, vehicle) in self.reference.routes.iter().zip(&mut self.route_vehicles) {
-            let inside = |root| {
-                route.interiors.iter().any(|id| {
-                    self.reference.interiors.iter().any(|i| {
-                        i.id == *id && crate::reference::clothing::descendant(game, i.node, root)
-                    })
-                })
-            };
-            *vehicle = route
-                .has_car
-                .then(|| game.vehicles.iter().position(|v| inside(v.root)))
-                .flatten()
-                .map(|v| v as u32);
-        }
+        self.impacts.bind();
         self.sensor.hits.reserve(game.colliders.len());
         for (i, r) in self.reference.routes.iter().enumerate() {
             self.route_sensors[i].0 = game
@@ -520,12 +498,6 @@ impl AudioState {
         self.sequence = self.sequence.wrapping_add(1);
         let position = if let Some(at) = at {
             at
-        } else if b.trigger == "radio_power_band" {
-            let voice = &self.reference.voices[self.voice_indices[&self.reference.radio.voices[0]]];
-            self.positions
-                .get(&voice.emitter)
-                .copied()
-                .unwrap_or([0.; 3])
         } else {
             self.positions.get(&b.emitter).copied().unwrap_or([0.; 3])
         };
@@ -788,7 +760,6 @@ impl AudioState {
             &self.reference.clips,
             [0, 0],
         );
-        self.radio_frame = crate::simulation::radio::RadioFrame::default();
         self.portable_radio_slots.fill([None; PORTABLE_RADIO_SLOTS]);
         self.session = session;
         self.queue.fill(None);
@@ -864,12 +835,6 @@ impl AudioState {
     ) {
         self.game_seconds += f64::from(dt);
         self.broadcasts.advance(self.game_seconds);
-        self.radio_frame = self.broadcasts.frame(
-            &self.radio,
-            self.game_seconds,
-            self.reference.radio.electronics_output,
-            self.reference.radio.electronics_cutoff,
-        );
         for (&id, &(anchor, local)) in &self.emitter_anchors {
             let mut world = anchor
                 .and_then(|node| area.interaction.mechanisms.node_pose(node))
@@ -1019,19 +984,6 @@ impl AudioState {
             .and_then(|id| self.control_items.get(&id))
             .and_then(|&id| area.interaction.mechanisms.value(id, true))
             .unwrap_or(1.)
-    }
-    pub fn radio_control(&mut self, control: crate::simulation::radio::RadioControl) {
-        if !self.owner_alive(self.reference.radio.emitter) {
-            return;
-        }
-        let on = self.radio.on;
-        let am = self.radio.am;
-        self.radio.control(control);
-        if (on != self.radio.on || am != self.radio.am)
-            && let Some(id) = self.reference.radio.click_binding
-        {
-            self.emit(id, 1., self.game_seconds);
-        }
     }
     /// Keeps each playing world radio in its slot and gives free slots of its voice group to
     /// the nearest playing radios within the group's maximum voice distance.
@@ -1302,13 +1254,6 @@ impl AudioState {
     /// Whether a player sensor hit is an interior that `inside` accepts.
     fn player_inside(&self, inside: impl Fn(usize) -> bool) -> bool {
         self.sensor.sensed && self.sensor.hits.iter().flatten().any(|&i| inside(i))
-    }
-    /// V03 bridge: the route mixer of old garage car `index`. Task 9 removes it.
-    pub fn garage_car_mixer(&self, index: usize) -> Option<u32> {
-        self.route_vehicles
-            .iter()
-            .position(|v| *v == Some(index as u32))
-            .map(|route| self.route_mixers[route])
     }
     /// Source `audioBasedOnInteriorsensscript` of a world car: the car mixer while the player
     /// is in one of its interiors, else the outside mixer.

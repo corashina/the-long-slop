@@ -66,15 +66,10 @@ def vehicle_globals(source) -> dict:
         'outside_temperature_modifier':main['outsideTempM'],'min_steam_temperature':main['minSteamTemp']}
 
 
-def component_mass(source, components) -> float:
-    """massScript mass plus initial tankscript fluid of one node."""
-    total=0.
-    for reader in components:
-        if reader.type.name!='MonoBehaviour':continue
-        name=source.class_name(reader)
-        if name=='massScript':total+=source.read(reader)['mass']
-        elif name=='tankscript':total+=sum(f['amount'] for f in source.read(reader)['F']['fluids'])
-    return total
+def dry_mass(source, components) -> float:
+    """massScript mass of one node. The runtime adds tank fluids at 1 kg per liter."""
+    return sum(source.read(r)['mass'] for r in components
+        if r.type.name=='MonoBehaviour' and source.class_name(r)=='massScript')
 
 
 def seat_fields(source, reader, value, car_reader) -> dict:
@@ -239,7 +234,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     tanks=[c for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='tankscript']
     return {'source':source_id(car_reader),'body':body,'car_type':car['carType'],
         'colliders':[i for i,c in enumerate(colliders) if c['body']==body and c['enabled']],
-        'mass_kg':sum(component_mass(source,n['components']) for n in hierarchy if n['active']),
+        'mass_kg':sum(dry_mass(source,n['components']) for n in hierarchy if n['active']),
         'serialized_mass_kg':source.read(rigidbody)['m_Mass'],
         'fuel_tank':0 if tanks else None,'electronics':proto.link(car_reader,car['electronics']),
         'starter_delay_seconds':car['startingTime'],'driving':car_driving(car),'handbrake':bool(car['BhandBrake']),

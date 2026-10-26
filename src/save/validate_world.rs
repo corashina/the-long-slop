@@ -102,8 +102,7 @@ impl SaveSnapshot {
             if let Some(slot) = &a.slot {
                 links(
                     sources.contains(slot)
-                        || reference.part_slots.iter().any(|s| &s.source == slot)
-                        || reference.wheel_slots.iter().any(|s| &s.source == slot),
+                        || reference.part_slots.iter().any(|s| &s.source == slot),
                     "Unknown attachment slot",
                 )?;
             }
@@ -289,17 +288,8 @@ impl SaveSnapshot {
             }),
             "Generated carry record",
         )?;
-        // V03 bridge: only old garage cars select the source spawn car. Task 9 removes it.
-        let garage = self
-            .progress
-            .selected_vehicle
-            .as_ref()
-            .and_then(crate::vehicle::garage_vehicle_index);
         links(
-            reference.vehicles.iter().enumerate().any(|(index, v)| {
-                v.spawn_car_id == self.world.spawn.context.current_car
-                    && garage.is_none_or(|g| g == index)
-            }),
+            self.world.spawn.context.current_car == crate::world::START_CAR,
             "Selected source spawn car",
         )?;
         for record in &self.attachments.parts {
@@ -316,28 +306,6 @@ impl SaveSnapshot {
                 links(
                     slots.insert((slot.owner.map(ObjectKey::Imported), slot.source.clone())),
                     "Duplicate cross-source part slot",
-                )?;
-            }
-        }
-        for record in &self.attachments.wheels {
-            if record.rim.is_some() {
-                let slot_id = ids
-                    .wheel_slots
-                    .get(&record.slot)
-                    .ok_or_else(|| invalid("Unknown source wheel slot"))?;
-                let vehicle = reference
-                    .vehicles
-                    .iter()
-                    .find(|v| v.wheel_slots.contains(slot_id))
-                    .unwrap();
-                let owner = reference
-                    .items
-                    .iter()
-                    .find(|i| i.node == vehicle.root)
-                    .map(|i| ObjectKey::Imported(i.id));
-                links(
-                    slots.insert((owner, record.slot.source_id()?)),
-                    "Duplicate cross-source wheel slot",
                 )?;
             }
         }

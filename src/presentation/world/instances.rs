@@ -195,14 +195,16 @@ impl SourceInstances {
     }
     /// Ready visible instances: root entity, placement, prototype index and node entities by
     /// glTF node.
-    pub(crate) fn shown(&self) -> impl Iterator<Item = (Entity, &Placement, usize, &[Entity])> {
+    pub(crate) fn shown(
+        &self,
+    ) -> impl Iterator<Item = (Entity, &Placement, usize, &[Option<Entity>])> {
         self.instances
             .iter()
             .filter(|i| i.ready && i.visible && !i.retirement.started())
             .map(|i| (i.root, &i.placement, i.prototype, i.nodes.as_slice()))
     }
     /// Node entities by glTF node of the instance of world object `id`.
-    pub(crate) fn nodes_of(&self, id: &crate::world::GeneratedId) -> Option<&[Entity]> {
+    pub(crate) fn nodes_of(&self, id: &crate::world::GeneratedId) -> Option<&[Option<Entity>]> {
         self.instances
             .iter()
             .find(|i| i.placement.id == *id && !i.retirement.started())
@@ -1095,21 +1097,14 @@ impl SourceInstances {
             }
         }
         // World car gauges and lamps change on a still car too. Sync a car copy only when
-        // its presented state changed.
+        // its presented state changed. The sync records the signature once bindings are ready.
         for (key, vehicle) in vehicles {
-            if !matches!(
-                vehicle.record,
-                crate::starting_area::VehicleRecord::World(_)
-            ) {
-                continue;
-            }
             let Some(owners) = self.bodies.get(&physics.chassis_handle(key)) else {
                 continue;
             };
             let signature = vehicle.presentation_signature();
             for &index in owners {
                 if self.instances[index].car_signature != signature {
-                    self.instances[index].car_signature = signature;
                     self.selection.push(index);
                 }
             }
@@ -1146,6 +1141,9 @@ impl SourceInstances {
                 let handle = published.bodies.get(record.body as usize)?;
                 Some((record, vehicles.get(physics.vehicle_of(*handle)?)?))
             });
+            if let Some((_, vehicle)) = car {
+                instance.car_signature = vehicle.presentation_signature();
+            }
             if !instance.caps_bound {
                 for cap in content.caps() {
                     crate::presentation::reference::bind_generated_cap(

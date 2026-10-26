@@ -207,19 +207,31 @@ fn assert_car_resting(run: &GarageRuntime, stage: &str) {
     );
 }
 
-pub(super) fn enter(run: &mut GarageRuntime, reference: &ReferenceManifest) -> bool {
-    let seat = reference.seats.iter().find(|s| s.driver).unwrap();
-    let anchor = reference
-        .anchors
-        .iter()
-        .find(|a| a.id == seat.anchor)
-        .unwrap();
-    run.area.player.enter(
-        seat.id,
-        VehiclePose {
-            position: anchor.transform.translation,
-            rotation: anchor.transform.rotation,
-        },
+/// Sits in the driver seat of the start Lada copy.
+pub(super) fn enter(run: &mut GarageRuntime, _reference: &ReferenceManifest) -> bool {
+    use crate::player::SeatOwner;
+    let Some(key) = run.vehicles.keys().find(|key| {
+        matches!(key, crate::world::ObjectKey::Generated(id)
+            if id.layer == crate::world::WorldLayer::Startup)
+    }) else {
+        return false;
+    };
+    let Some(seat) = run.physics.rapier().colliders.iter().find_map(|(handle, _)| {
+        run.area
+            .interaction
+            .item_seat(handle)
+            .filter(|seat| seat.owner == SeatOwner::Vehicle(key.clone()) && seat.seat.driver)
+            .map(|seat| (seat.body, seat.seat.clone(), seat.seat_item, seat.pose))
+    }) else {
+        return false;
+    };
+    let (body, record, seat_item, pose) = seat;
+    run.area.player.enter_item_seat(
+        SeatOwner::Vehicle(key.clone()),
+        body,
+        &record,
+        seat_item,
+        pose,
         &mut run.physics,
     )
 }
@@ -334,7 +346,6 @@ fn p04_drive_out_and_return() {
     assert_returned(&run, &before, &all, &enabled, "after the walk");
 
     // Drive out along the road and park at each point.
-    run.area.player.configure_seats(&reference.seats);
     assert!(enter(&mut run, &reference));
     let started = std::time::Instant::now();
     for pair in points.windows(2) {

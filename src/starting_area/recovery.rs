@@ -165,7 +165,6 @@ pub(super) fn transport_prepared(
     let delta = move_car(physics, vehicle, bodies, plan.vehicle);
     area.interaction.sync_mechanisms(physics);
     area.sync_attachments(physics, false);
-    area.sync_compound(physics);
     area.interaction
         .sync_parts(&mut area.items, physics)
         .expect("bound parts");

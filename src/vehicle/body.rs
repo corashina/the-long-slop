@@ -1,18 +1,15 @@
 //! Vehicles keyed by world object. A vehicle is a chassis body with a wheel set.
-use rapier3d::math::{Rotation, Vector};
-use rapier3d::prelude::{
-    ActiveEvents, ColliderHandle, Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder,
-    RigidBodyHandle,
-};
+use rapier3d::math::Vector;
+use rapier3d::prelude::{ActiveEvents, ColliderHandle, RigidBodyHandle};
 
 use super::wheel::{self, WheelAssembly, WheelSlip};
 use super::{
     PhysicsWorld, VEHICLE_COLLIDER_FLAG, VehiclePose, WheelMount, WheelSet, WheelTorques,
-    collider_builder, set_collider_enabled, solver_groups, step_surface_bits, tag_bits, to_rapier,
+    set_collider_enabled, to_rapier,
 };
 use crate::reference::{
-    ItemId, ReferenceError, ReferenceManifest, VehicleReference, WheelColliderReference,
-    WheelHubReference, WheelSlotReference, WorldPrototypeReference,
+    ReferenceError, ReferenceManifest, WheelColliderReference, WheelHubReference,
+    WorldPrototypeReference,
 };
 use crate::world::ObjectKey;
 
@@ -25,20 +22,6 @@ pub(super) struct VehicleWheel {
     pub drive: bool,
     pub brake: bool,
     pub handbrake: bool,
-}
-
-impl VehicleWheel {
-    /// V03 bridge: a wheel of the old garage car record. Task 9 removes it.
-    pub(super) fn from_slot(slot: &WheelSlotReference) -> Self {
-        Self {
-            hub: slot.hub,
-            sideways_stiffness_modifier: slot.sideways_stiffness_modifier,
-            steer: slot.steer,
-            drive: slot.drive,
-            brake: slot.brake,
-            handbrake: slot.handbrake,
-        }
-    }
 }
 
 /// Steering and brake values of one vehicle.
@@ -119,46 +102,15 @@ impl VehicleBody {
     }
 }
 
-/// V03 bridge: first key of the old garage cars, counted down. Task 9 removes it.
-const GARAGE_KEY_BASE: u32 = u32::MAX;
-/// V03 bridge: garage car count limit for the key range.
-const GARAGE_KEYS: u32 = 16;
-
-/// V03 bridge: key of old garage car `index`. Task 9 removes it.
-pub fn garage_vehicle_key(index: usize) -> ObjectKey {
-    ObjectKey::Imported(ItemId(GARAGE_KEY_BASE - index as u32))
-}
-
-/// V03 bridge: index of an old garage car key. Task 9 removes it.
-pub fn garage_vehicle_index(key: &ObjectKey) -> Option<usize> {
-    match key {
-        ObjectKey::Imported(ItemId(id)) if GARAGE_KEY_BASE - id < GARAGE_KEYS => {
-            Some((GARAGE_KEY_BASE - id) as usize)
-        }
-        _ => None,
-    }
-}
-
 impl PhysicsWorld {
-    /// V03 bridge: builds the old garage cars of `reference.vehicles` with keys from
-    /// [`garage_vehicle_key`]. Poses follow that order. Task 9 removes it.
-    pub fn new(
-        reference: &ReferenceManifest,
-        poses: &[VehiclePose],
-    ) -> Result<Self, ReferenceError> {
-        if poses.len() != reference.vehicles.len() {
-            return Err(ReferenceError("Expected one pose per vehicle".into()));
-        }
+    /// An empty world with capacity for the reference bodies. World cars add vehicles later.
+    pub fn new(reference: &ReferenceManifest) -> Self {
         let mut physics = Self::empty(
-            poses.len(),
+            0,
             reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
         );
-        for (index, (vehicle, pose)) in reference.vehicles.iter().zip(poses).enumerate() {
-            let vehicle = garage_vehicle(reference, vehicle, *pose, &mut physics)?;
-            physics.insert_vehicle(garage_vehicle_key(index), vehicle);
-        }
         physics.refresh_queries();
-        Ok(physics)
+        physics
     }
 
     /// Makes an existing world instance root body a vehicle. `colliders` are the live
@@ -249,106 +201,13 @@ impl PhysicsWorld {
     }
 }
 
-/// V03 bridge: the old garage car with its own chassis body. Task 9 removes it.
-fn garage_vehicle(
-    reference: &ReferenceManifest,
-    vehicle: &VehicleReference,
-    pose: VehiclePose,
-    physics: &mut PhysicsWorld,
-) -> Result<VehicleBody, ReferenceError> {
-    let source_body = reference
-        .bodies
-        .iter()
-        .find(|body| body.id == vehicle.body)
-        .ok_or_else(|| ReferenceError("Missing chassis body".into()))?;
-    let chassis = physics.insert_body(
-        RigidBodyBuilder::dynamic()
-            .pose(to_rapier(pose))
-            .linear_damping(source_body.linear_damping)
-            .angular_damping(source_body.angular_damping)
-            .ccd_enabled(true),
-    );
-    for id in &vehicle.colliders {
-        let collider = reference
-            .colliders
-            .iter()
-            .find(|record| record.id == *id)
-            .ok_or_else(|| ReferenceError(format!("Missing vehicle collider {}", id.0)))?;
-        let builder = collider_builder(&collider.geometry)?
-            .friction(collider.friction)
-            .restitution(collider.restitution)
-            .sensor(collider.sensor)
-            .enabled(collider.enabled)
-            .solver_groups(solver_groups(collider.enabled))
-            .collision_groups(InteractionGroups::new(
-                Group::from_bits_truncate(collider.membership),
-                Group::from_bits_truncate(collider.filter),
-                InteractionTestMode::And,
-            ))
-            .density(if collider.sensor { 0.0 } else { 1.0 })
-            .active_events(ActiveEvents::COLLISION_EVENTS)
-            .user_data(
-                VEHICLE_COLLIDER_FLAG
-                    | ((id.0 as u128) << 64)
-                    | step_surface_bits(collider.step_surface)
-                    | tag_bits(collider.tag),
-            );
-        physics.insert_collider_with_parent(builder, chassis);
-    }
-    physics.recompute_body_mass(chassis);
-    let geometry_mass = physics.rapier().bodies[chassis].mass();
-    if geometry_mass <= 0.0 || geometry_mass >= vehicle.mass_kg {
-        return Err(ReferenceError(
-            "Invalid car collision volume or mass".into(),
-        ));
-    }
-    physics.edit_body(chassis, |body| {
-        body.set_additional_mass(vehicle.mass_kg - geometry_mass, true)
-    });
-    physics.recompute_body_mass(chassis);
-    let mut wheels = Vec::with_capacity(vehicle.wheel_slots.len());
-    for id in &vehicle.wheel_slots {
-        let wheel = reference
-            .wheel_slots
-            .iter()
-            .find(|record| record.id == *id)
-            .ok_or_else(|| ReferenceError(format!("Missing wheel slot {}", id.0)))?;
-        let anchor = reference
-            .anchors
-            .iter()
-            .find(|record| record.id == wheel.anchor)
-            .ok_or_else(|| ReferenceError(format!("Missing wheel anchor {}", wheel.anchor.0)))?;
-        let rotation = Rotation::from_array(anchor.transform.rotation);
-        let connection = Vector::from_array(anchor.transform.translation)
-            + rotation * Vector::from_array(wheel.collider.center);
-        wheels.push((connection, wheel));
-    }
-    let mounts: Vec<_> = wheels
-        .iter()
-        .map(|(connection, wheel)| (*connection, &wheel.collider, VehicleWheel::from_slot(wheel)))
-        .collect();
-    Ok(VehicleBody::new(
-        chassis,
-        WheelSlip {
-            tire: vehicle.wheel_slip,
-            rim: vehicle.rim_slip,
-        },
-        &mounts,
-        VehicleControls {
-            max_steer_degrees: vehicle.max_steer_degrees,
-            brake_torque_nm: vehicle.brake_torque_nm,
-            handbrake_torque_nm: vehicle.handbrake_torque_nm,
-            handbrake: vehicle.handbrake,
-        },
-    ))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::simulation::{DriveInput, FIXED_DT};
     use crate::vehicle::DriveTorques;
-    use rapier3d::prelude::ColliderBuilder;
+    use crate::reference::ItemId;
+    use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
     use serde_json::json;
 
     /// A 820 kg box car prototype with four wheels. The front wheels steer, the rear wheels drive.

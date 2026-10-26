@@ -19,6 +19,8 @@ pub struct ProbeActivation {
     pub checks: u32,
     pub distance_squared: [f32; PROBE_COUNT],
     scene: u32,
+    /// A car carries the probe. Without one the probe is off.
+    followed: bool,
     elapsed: f32,
     last_check: f32,
 }
@@ -29,6 +31,7 @@ impl Default for ProbeActivation {
             checks: 0,
             distance_squared: [0.; PROBE_COUNT],
             scene: 0,
+            followed: false,
             elapsed: 0.,
             last_check: 0.,
         }
@@ -113,32 +116,33 @@ pub(crate) fn sync_lighting(
     let car = instances
         .as_deref()
         .and_then(|instances| followed_probe(&drive, &reference, instances));
+    let player = Vec3::from_array(
+        drive
+            .runtime
+            .area
+            .player
+            .body_pose(&drive.runtime.physics)
+            .position,
+    );
     match scene_value(
         &assets,
-        &visuals,
         &master,
         &drive,
         &reference,
         &transforms,
+        player,
         car,
     ) {
         Ok(mut value) => {
-            if activation.scene != epoch.0 {
+            if activation.scene != epoch.0 || activation.followed != car.is_some() {
                 activation.scene = epoch.0;
-                activation.enabled = [true; PROBE_COUNT];
+                activation.followed = car.is_some();
+                activation.enabled = [car.is_some(); PROBE_COUNT];
                 activation.elapsed = 0.;
                 activation.last_check = 0.;
                 activation.checks = 0;
             }
             activation.elapsed += drive.render_delta_seconds;
-            let player = Vec3::from_array(
-                drive
-                    .runtime
-                    .area
-                    .player
-                    .body_pose(&drive.runtime.physics)
-                    .position,
-            );
             for index in 0..PROBE_COUNT {
                 activation.distance_squared[index] =
                     player.distance_squared(value.probe_position[index]);
@@ -146,7 +150,10 @@ pub(crate) fn sync_lighting(
             // ReflectionDisableDistance checks registered probes every five seconds.
             if activation.elapsed - activation.last_check >= 5. {
                 activation.last_check = activation.elapsed;
-                activation.enabled = activation.distance_squared.map(|distance| distance < 2500.);
+                let followed = activation.followed;
+                activation.enabled = activation
+                    .distance_squared
+                    .map(|distance| followed && distance < 2500.);
                 activation.checks += 1;
             }
             for index in 0..PROBE_COUNT {
@@ -160,33 +167,40 @@ pub(crate) fn sync_lighting(
     }
 }
 /// The probe node entity and influence box of the world car the player last sat in.
-/// None: the garage Lada probe. V03 bridge: Task 9 makes the start Lada copy the fallback.
+/// Without one, the start Lada copy.
 fn followed_probe(
     drive: &Drive,
     reference: &RuntimeReference,
     instances: &super::world::instances::SourceInstances,
 ) -> Option<(Entity, [f32; 3], [f32; 3])> {
-    let key = drive.runtime.vehicle.as_ref()?;
-    let crate::world::ObjectKey::Generated(id) = key else {
-        return None;
+    let vehicles = &drive.runtime.vehicles;
+    let (id, vehicle) = match drive.runtime.vehicle.as_ref() {
+        Some(key) => match key {
+            crate::world::ObjectKey::Generated(id) => (id, vehicles.get(key)?),
+            _ => return None,
+        },
+        None => vehicles.iter().find_map(|(key, vehicle)| match key {
+            crate::world::ObjectKey::Generated(id)
+                if id.layer == crate::world::WorldLayer::Startup =>
+            {
+                Some((id, vehicle))
+            }
+            _ => None,
+        })?,
     };
-    let crate::starting_area::VehicleRecord::World(index) = drive.runtime.vehicles.get(key)?.record
-    else {
-        return None;
-    };
-    let prototype = &reference.0.world.prototypes[index];
+    let prototype = &reference.0.world.prototypes[vehicle.prototype];
     let probe = prototype.vehicle.as_ref()?.probe.as_ref()?;
     let node = prototype.nodes[probe.node as usize].gltf_node as usize;
-    let entity = *instances.nodes_of(id)?.get(node)?;
+    let entity = (*instances.nodes_of(id)?.get(node)?)?;
     Some((entity, probe.bounds_size, probe.bounds_offset))
 }
 fn scene_value(
     assets: &LightingAssets,
-    visuals: &ReferenceVisuals,
     master: &super::lighting::SourceLighting,
     drive: &Drive,
     reference: &RuntimeReference,
     transforms: &Query<&GlobalTransform>,
+    player: Vec3,
     car: Option<(Entity, [f32; 3], [f32; 3])>,
 ) -> Result<SceneLighting, String> {
     if !drive
@@ -205,22 +219,18 @@ fn scene_value(
     let mut centers = [Vec4::ZERO; PROBE_COUNT];
     let mut sizes = [Vec4::ZERO; PROBE_COUNT];
     for (index, probe) in assets.record.probes.iter().enumerate() {
-        // The probe follows the car the player last sat in.
-        let (entity, size, offset) = match car {
-            Some(car) => car,
-            None => (
-                *visuals
-                    .nodes
-                    .get(&probe.node)
-                    .ok_or("Missing bound probe node")?,
-                probe.bounds_size,
-                probe.bounds_offset,
+        // The probe follows the car the player last sat in. Without a car it waits at the player.
+        let (position, size, offset) = match car {
+            Some((entity, size, offset)) => (
+                transforms
+                    .get(entity)
+                    .map_err(|_| "Missing probe world transform")?
+                    .translation(),
+                size,
+                offset,
             ),
+            None => (player, probe.bounds_size, probe.bounds_offset),
         };
-        let position = transforms
-            .get(entity)
-            .map_err(|_| "Missing probe world transform")?
-            .translation();
         if !position.is_finite() {
             return Err("Nonfinite probe world position".into());
         }

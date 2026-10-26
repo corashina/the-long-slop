@@ -13,7 +13,7 @@ pub struct WorldVehicleReference {
     pub car_type: i32,
     /// Enabled chassis colliders.
     pub colliders: Vec<u32>,
-    /// Source `massScript` masses and initial fluids of active nodes.
+    /// Source `massScript` masses of active nodes. Tank fluids add at runtime.
     pub mass_kg: f32,
     pub serialized_mass_kg: f32,
     /// Root `tankscript` node.
@@ -146,22 +146,13 @@ pub struct WorldWheelReference {
     pub sideways_stiffness_modifier: f32,
 }
 
-/// A primary `seatscript`. `hit_nodes` holds its node and the nodes of seats that name it `mainseat`.
+/// The driver roles of a primary `seatscript`. The seat itself binds from the prototype.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldSeatReference {
     pub source: SourceId,
-    pub node: u32,
-    pub sit_node: u32,
-    pub hit_nodes: Vec<u32>,
     pub driver: bool,
     pub driving2: bool,
-    pub yaw_limits_degrees: [f32; 2],
-    pub min_exit_angle_degrees: f32,
-    pub exit_height: f32,
-    pub show_sleep_text: bool,
-    pub default_pitch_degrees: f32,
-    pub pitch_limits_degrees: [f32; 2],
 }
 
 /// A `headlightscript` (headlight or cabin) or `rearlights` controller.
@@ -319,8 +310,7 @@ pub struct CarAudioReference {
     pub switch: Option<CarShotReference>,
     /// One entry per wheel, in wheel effect order.
     pub wheels: Vec<WheelSoundsReference>,
-    /// World cars only. V03 bridge: old garage cars use the global audio routes.
-    pub route: Option<CarRouteReference>,
+    pub route: CarRouteReference,
 }
 
 /// Source `carscript.SHornSound`. Pitch follows the ambient temperature.
@@ -521,23 +511,6 @@ impl WorldVehicleReference {
                 b.nodes([&w.node, &w.slot, &w.mount])
                     && w.collider.valid()
                     && w.sideways_stiffness_modifier.is_finite(),
-            )?;
-        }
-        for (i, seat) in self.seats.iter().enumerate() {
-            check(
-                s,
-                &format!("vehicle seat {i}"),
-                b.nodes([&seat.node, &seat.sit_node])
-                    && !seat.hit_nodes.is_empty()
-                    && b.nodes(&seat.hit_nodes)
-                    && finite(&seat.yaw_limits_degrees)
-                    && finite(&seat.pitch_limits_degrees)
-                    && finite(&[
-                        seat.min_exit_angle_degrees,
-                        seat.exit_height,
-                        seat.default_pitch_degrees,
-                    ])
-                    && seat.yaw_limits_degrees[0] <= seat.yaw_limits_degrees[1],
             )?;
         }
         for (i, light) in self.lights.iter().enumerate() {

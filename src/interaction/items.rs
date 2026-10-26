@@ -9,8 +9,8 @@ use rapier3d::prelude::RigidBodyHandle;
 use crate::fluids::{FluidContainer, FluidEntry, VehicleFluids, validate_fluid_entries};
 use crate::reference::{
     BodyId, FoodReference, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest,
-    WheelSlotId,
 };
+use super::wheels::WheelSlotId;
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +67,6 @@ pub struct ItemStore {
     indices: BevyHashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
     names: Vec<String>,
-    vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
     generated: BevyHashMap<GeneratedId, ItemId>,
     membership_revision: u64,
@@ -132,9 +131,6 @@ impl ItemStore {
                 ItemLocationSave::Equipped => ItemLocation::Equipped,
                 ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
                 ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
-                ItemLocationSave::WheelSlot { slot } => {
-                    ItemLocation::WheelSlot(ids.wheel_slots[slot])
-                }
             };
             state.pending_attachment = matches!(
                 record.location,
@@ -275,11 +271,7 @@ impl ItemStore {
                 pose,
                 local_pose,
                 generated_condition: None,
-                temperature: reference
-                    .vehicles
-                    .iter()
-                    .find(|vehicle| vehicle.engine.item == item.id)
-                    .map(|vehicle| vehicle.engine.initial_temperature),
+                temperature: None,
                 fluid,
                 food: (item.id == reference.survival.starter_food).then_some(FoodState {
                     prototype_index: sausage,
@@ -297,16 +289,6 @@ impl ItemStore {
                 pending_attachment: false,
                 buried: false,
             });
-        }
-        for slot in &reference.wheel_slots {
-            for id in [slot.wheel, slot.rim] {
-                if let Some(index) = indices.get(&id) {
-                    states[*index].location = ItemLocation::WheelSlot(slot.id);
-                }
-            }
-            if let Some(index) = indices.get(&slot.tire) {
-                states[*index].location = ItemLocation::Attached(slot.rim);
-            }
         }
         for slot in &reference.part_slots {
             if let Some(id) = slot.part {
@@ -330,18 +312,6 @@ impl ItemStore {
                 .checked_add(1)
                 .ok_or_else(|| ReferenceError("Item identity space exhausted".into()))?,
             origin: WorldOrigin::default(),
-            vehicle_items: reference
-                .vehicles
-                .iter()
-                .map(|vehicle| {
-                    reference
-                        .items
-                        .iter()
-                        .find(|i| i.node == vehicle.root)
-                        .expect("vehicle item")
-                        .id
-                })
-                .collect(),
             slot_owners: reference
                 .part_slots
                 .iter()
@@ -403,6 +373,19 @@ impl ItemStore {
             let location = match item.location {
                 ItemLocation::World => ItemLocationSave::World,
                 ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::WheelSlot(_) => ItemLocationSave::GeneratedAttachment {
+                    attachment: crate::world::changes::capture(
+                        id,
+                        self,
+                        interaction,
+                        physics,
+                        reference,
+                    )
+                    .and_then(|s| s.attachment)
+                    .ok_or_else(|| {
+                        crate::save::SaveError::InvalidLinks("Missing wheel slot identity".into())
+                    })?,
+                },
                 ItemLocation::PartSlot(slot) if !ids.part_slots.values().any(|id| *id == slot) => {
                     ItemLocationSave::GeneratedAttachment {
                         attachment: crate::world::changes::capture(
@@ -424,9 +407,6 @@ impl ItemStore {
                 ItemLocation::Equipped => ItemLocationSave::Equipped,
                 ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
                     slot: source_key(&ids.part_slots, slot)?,
-                },
-                ItemLocation::WheelSlot(slot) => ItemLocationSave::WheelSlot {
-                    slot: source_key(&ids.wheel_slots, slot)?,
                 },
                 ItemLocation::Attached(owner)
                     if matches!(
@@ -576,7 +556,6 @@ impl ItemStore {
                     .copied()
                     .flatten()
                     .is_some_and(&owns),
-                ItemLocation::WheelSlot(_) => self.vehicle_items.iter().any(|item| owns(*item)),
                 _ => false,
             }
         })
@@ -616,9 +595,6 @@ impl ItemStore {
     }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
-            if self.vehicle_items.contains(&id) {
-                return true;
-            }
             match self.get(id).map(|i| i.location) {
                 Some(ItemLocation::PartSlot(slot)) => {
                     if let Some(Some(owner)) = self.slot_owners.get(&slot) {
@@ -977,7 +953,6 @@ impl ItemStore {
             states,
             body_ids: Vec::new(),
             names: Vec::new(),
-            vehicle_items: Vec::new(),
             slot_owners: HashMap::new(),
             generated: BevyHashMap::new(),
             membership_revision: 0,

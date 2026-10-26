@@ -2,11 +2,8 @@
 use std::collections::BTreeMap;
 
 use crate::interaction::items::ItemStore;
-use crate::reference::{
-    EnginePartReference, EngineReference, ItemId, RadiatorPartReference, ReferenceManifest,
-};
+use crate::reference::{EnginePartReference, ItemId, RadiatorPartReference};
 use crate::simulation::engine::EngineState;
-use crate::vehicle::garage_vehicle_index;
 use crate::world::ObjectKey;
 
 /// An engine part item and its source `enginescript` record and state.
@@ -68,21 +65,6 @@ pub struct PowertrainParts {
 }
 
 impl PowertrainParts {
-    /// V03 bridge: the engine and radiator of each old garage car. Task 9 removes it.
-    /// The old coolant tank item is the radiator item, as in the old engine rules.
-    pub fn from_garage(reference: &ReferenceManifest) -> Self {
-        let mut parts = Self::default();
-        for vehicle in &reference.vehicles {
-            let e = &vehicle.engine;
-            parts.register_engine(EnginePart::new(e.item, garage_engine(e), Some(e.oil_tank)));
-            parts.register_radiator(RadiatorPart::new(
-                e.coolant_tank,
-                garage_radiator(e),
-                Some(e.coolant_tank),
-            ));
-        }
-        parts
-    }
     pub fn register_engine(&mut self, part: EnginePart) {
         self.engines.insert(part.item, part);
     }
@@ -96,10 +78,6 @@ impl PowertrainParts {
     }
     /// The engine and radiator mounted on car `key`: the parts whose mount chain reaches its root item.
     pub fn mounted_on(&self, items: &ItemStore, key: &ObjectKey) -> Powertrain {
-        // V03 bridge: old garage car slots have no owner item. Task 9 removes it.
-        if garage_vehicle_index(key).is_some() {
-            return self.mounted(|item| items.mounted(item));
-        }
         let root = items.resolve_key(key);
         self.mounted(|item| root.is_some_and(|root| items.descends(item, root)))
     }
@@ -147,67 +125,6 @@ impl PowertrainParts {
                 .radiator
                 .and_then(|item| self.radiators.get_mut(&item)),
         )
-    }
-}
-
-/// V03 bridge: old garage engine record in the engine part form. Task 9 removes it.
-fn garage_engine(e: &EngineReference) -> EnginePartReference {
-    EnginePartReference {
-        source: e.source.clone(),
-        // Old records have no prototype node. Runtime rules do not read it.
-        node: 0,
-        oil_tank: None,
-        start_chance: e.start_chance,
-        starter_rpm: e.starter_rpm,
-        starter_rpm_lerp: e.starter_rpm_lerp,
-        idle_rpm: e.idle_rpm,
-        max_rpm: e.max_rpm,
-        shutdown_rpm: e.shutdown_rpm,
-        max_torque_nm: e.max_torque_nm,
-        starting_push_force: e.starting_push_force,
-        consumption_modifier: e.consumption_modifier,
-        oil_consumption_modifier: e.oil_consumption_modifier,
-        engine_brake_modifier: e.engine_brake_modifier,
-        rpm_change_modifier: e.rpm_change_modifier,
-        engine_start_time_modifier: e.engine_start_time_modifier,
-        heat_gain_min: e.heat_gain_min,
-        heat_gain_max: e.heat_gain_max,
-        heat_loss: e.heat_loss,
-        initial_temperature: e.initial_temperature,
-        heat_loss_speed_modifier: e.heat_loss_speed_modifier,
-        optimal_temperature: e.optimal_temperature,
-        fuel_consumption: e.fuel_consumption,
-        two_stroke: e.two_stroke,
-        torque_curve: e.torque_curve.clone(),
-        max_rpm_difference: e.max_rpm_difference,
-        torque_modifier: e.torque_modifier,
-        oil_fluid: e.oil_fluid,
-        no_overheat: e.no_overheat,
-        kickstart: e.kickstart,
-        start_chance_interval_seconds: e.start_chance_interval_seconds,
-        auto_shift_clutch_rpm: e.auto_shift_clutch_rpm,
-        auto_shift_clutch_rpm_range: e.auto_shift_clutch_rpm_range,
-        smoke_rate: e.smoke_rate,
-        audio: e.audio.clone(),
-    }
-}
-
-/// V03 bridge: old garage radiator record in the radiator part form. Task 9 removes it.
-fn garage_radiator(e: &EngineReference) -> RadiatorPartReference {
-    let r = &e.radiator;
-    RadiatorPartReference {
-        source: r.source.clone(),
-        node: 0,
-        coolant_tank: None,
-        fan_node: r.fan_node.map(|n| n.0),
-        thermostat_range: r.thermostat_range,
-        fan_temperature_on: r.fan_temperature_on,
-        fan_temperature_off: r.fan_temperature_off,
-        fan_on_when_engine_runs: r.fan_on_when_engine_runs,
-        max_value: r.max_value,
-        max_fan_value: r.max_fan_value,
-        max_fan_speed: r.max_fan_speed,
-        max_fluid_loss: r.max_fluid_loss,
     }
 }
 

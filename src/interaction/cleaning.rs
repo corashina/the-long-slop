@@ -595,14 +595,6 @@ impl CleaningTools {
             .installed_part_slot
             .and_then(|slot| parts.slot_item(slot))
             .or_else(|| {
-                b.installed_wheel_slot.and_then(|slot| {
-                    items
-                        .iter()
-                        .find(|i| i.location == ItemLocation::WheelSlot(slot))
-                        .map(|i| i.id)
-                })
-            })
-            .or_else(|| {
                 b.installed_tire_slot.and_then(|rim| {
                     items
                         .iter()
@@ -637,12 +629,6 @@ impl CleaningTools {
                     return parts
                         .slot_item(slot)
                         .and_then(|i| self.item_conditions.get(&i).copied());
-                }
-                if let Some(slot) = b.installed_wheel_slot {
-                    return items
-                        .iter()
-                        .find(|i| i.location == ItemLocation::WheelSlot(slot))
-                        .and_then(|i| self.item_conditions.get(&i.id).copied());
                 }
                 if let Some(rim) = b.installed_tire_slot {
                     return items
