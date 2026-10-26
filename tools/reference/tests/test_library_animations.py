@@ -42,6 +42,20 @@ class AnimationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Missing'):resolve_path(8,{7:[('a',a)]})
         self.assertEqual(resolve_path(7,{7:[('a',a)]}),('a',a))
 
+    def test_streamed_quaternion_and_constant_tracks(self):
+        # The bat wing clip layout: streamed curves first, then dense, then constant, in binding order.
+        q=[(i,(0.,0.,.5),v) for i,v in enumerate((0.,0.,0.,1.))]
+        frames=[(-math.inf,q),(0.,q),(1.,[(i,(0.,0.,0.),v) for i,v in enumerate((0.,.5,0.,.75))]),(math.inf,[])]
+        source,reader,catalog=fixture([binding(2),binding(1),binding(3)],frames=frames,constant=(1.,2.,3.,.5,.5,.5),streamed_count=4)
+        record=decode_clip(source,reader,catalog)
+        rotation,position,scale=record.tracks
+        self.assertEqual([(t.binding['attribute'],t.binding['dimension'],t.binding['curve_offset'],t.binding['storage'],t.interpolation)
+                          for t in record.tracks],[(2,4,0,'streamed','CUBIC'),(1,3,4,'constant','CONSTANT'),(3,3,7,'constant','CONSTANT')])
+        self.assertEqual((rotation.times,rotation.values),((0.,1.),((0.,0.,0.,1.),(0.,.5,0.,.75))))
+        self.assertEqual(rotation.coefficients[0],((0.,0.,.5),)*4)
+        self.assertEqual((position.times,position.values,position.coefficients),((0.,1.),((1.,2.,3.),)*2,()))
+        self.assertEqual(scale.values,((.5,.5,.5),)*2)
+
     def package_fixture(self, morph=False):
         from types import MethodType
         from tools.reference.tests.test_library_models import Fixture, ptr

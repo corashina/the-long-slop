@@ -9,6 +9,7 @@ pub mod cpu_profile;
 pub mod damage;
 pub mod exhaust;
 pub mod fluids;
+pub mod flyers;
 #[cfg(target_arch = "wasm32")]
 pub mod host;
 pub mod interaction;

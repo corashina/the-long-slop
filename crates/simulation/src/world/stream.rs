@@ -185,6 +185,8 @@ pub struct WorldStream {
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
+    /// Session date as year, month, day. It decides date rules for the whole game.
+    date: [i32; 3],
     mode: super::GameMode,
     /// The picked start car. Only its start placement spawns.
     start_car: super::StartCar,
@@ -414,6 +416,7 @@ impl WorldStream {
                 placements: self.placements.capture_index(),
             },
             seed: self.seed,
+            date: self.date,
             start_car: self.start_car,
             changes,
             spawn: self.contents.state.capture_history(),
@@ -678,6 +681,7 @@ impl WorldStream {
         Self::new(
             reference,
             seed,
+            reference.world.spawn_context.date,
             super::GameMode::default(),
             super::DrawDistances::resolve(r, r.default),
         )
@@ -685,6 +689,7 @@ impl WorldStream {
     pub fn new(
         reference: &ReferenceManifest,
         seed: i32,
+        date: [i32; 3],
         mode: super::GameMode,
         distances: super::DrawDistances,
     ) -> Result<Self, ReferenceError> {
@@ -741,7 +746,7 @@ impl WorldStream {
         }
         let start_car = mode.start_car.pick(world, &mut super::menu_random());
         let mut contents =
-            super::contents::SourceContents::new(world, start_car.current_car(reference)?);
+            super::contents::SourceContents::new(world, start_car.current_car(reference)?, date);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
@@ -824,6 +829,7 @@ impl WorldStream {
             bus_door_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
+            date,
             mode,
             start_car,
             biome_materials,
