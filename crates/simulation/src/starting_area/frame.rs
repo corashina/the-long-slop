@@ -110,6 +110,7 @@ impl GarageRuntime {
         self.fill_particles(reference, frame);
         self.fill_conditions(reference, frame);
         self.fill_followed_car(frame);
+        self.fill_hud(reference, frame);
         frame.budgets.clear();
         if !self.started {
             let stream = &self.stream;

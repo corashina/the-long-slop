@@ -32,6 +32,13 @@ fn frame_round_trips() {
             seat_car: PoseRow::default(),
             prepared_roads: 12,
         },
+        hud: HudBlock {
+            hp: 80.,
+            slots: [0, 7, 0, 0],
+            absolute: [1e6, 2., 3.],
+            flags: HudBlock::CAR,
+            ..HudBlock::default()
+        },
         previous: vec![row(1.), row(4.)],
         current: vec![row(2.), row(5.)],
         items: vec![
@@ -140,6 +147,12 @@ fn frame_round_trips() {
                 },
                 6,
             ))),
+            Change::Feedback(Box::new(Feedback {
+                name: "Jerry can".into(),
+                amount: 4.5,
+                quantities: [4.5, 0., 0., 0., 0., 0.],
+                ..Feedback::default()
+            })),
             Change::Failure("stream".into()),
         ],
     };

@@ -2,13 +2,12 @@ pub(crate) use simulation::cpu_profile;
 mod performance;
 pub(crate) mod save;
 use crate::browser::*;
-use crate::interaction::labels::display_name;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
-use crate::reference::{ItemId, OpeningId, ReferenceManifest};
+use crate::reference::ReferenceManifest;
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -17,7 +16,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
-use simulation::boundary::{PoseRow, StateBlock};
+use simulation::boundary::{HudBlock, PoseRow, StateBlock};
 use simulation::host::{game_cpu_clear_input, game_now};
 use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
@@ -45,7 +44,6 @@ pub(crate) struct Drive {
     pub render_delta_seconds: f32,
     skip_elapsed: bool,
     pub(crate) ready: bool,
-    last_feedback: Option<FeedbackStamp>,
     last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
@@ -57,31 +55,6 @@ impl Drive {
         }
         pose
     }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct FeedbackStamp {
-    actions: u32,
-    context: u32,
-    light_control: u32,
-    lmb_use: bool,
-    prompts: u8,
-    computer: u8,
-    item: Option<ItemId>,
-    opening: Option<OpeningId>,
-    carrying: bool,
-    notice: &'static str,
-    amount: u32,
-    empty: bool,
-    capacity: f32,
-    percents: [u32; 6],
-    order: u32,
-    condition: u32,
-    held: Option<ItemId>,
-    throw_charge: u32,
-    throw_active: bool,
-    rpm: u32,
-    engine_flags: [bool; 5],
 }
 
 /// Manifest fields the browser shell reads. Copies them without parsing the world records.
@@ -200,7 +173,6 @@ pub fn run(
             render_delta_seconds: 0.,
             skip_elapsed: false,
             ready: false,
-            last_feedback: None,
             last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
@@ -1103,248 +1075,112 @@ fn publish_loading(
     }
 }
 
-fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let state = &drive.runtime.area.inventory;
-    let stamp = (
-        state.slots.map(|id| id.map_or(0, |id| id.0)),
-        state.selected,
-        state.swap_progress.to_bits(),
-    );
+fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
+    let hud = sim.frame.hud;
+    let state = sim.frame.state;
+    let stamp = (hud.slots, hud.selected as u8, hud.swap_progress.to_bits());
     if drive.last_inventory != Some(stamp) {
         game_inventory(
-            stamp.1 as u32,
-            stamp.0[0],
-            stamp.0[1],
-            stamp.0[2],
-            stamp.0[3],
-            f32::from_bits(stamp.2),
+            hud.selected,
+            hud.slots[0],
+            hud.slots[1],
+            hud.slots[2],
+            hud.slots[3],
+            hud.swap_progress,
         );
         drive.last_inventory = Some(stamp);
     }
-    let needs = drive.runtime.needs_output();
     game_survival(
-        needs.needs.hp,
-        needs.needs.food,
-        needs.needs.water,
-        needs.needs.bowel,
-        needs.bladder_liters,
-        needs.opacity,
-        needs.dead,
-        needs.look_scale,
-        needs.menu_due,
+        hud.hp,
+        hud.food,
+        hud.water,
+        hud.bowel,
+        hud.bladder,
+        hud.opacity,
+        hud.flags & HudBlock::DEAD != 0,
+        hud.look_scale,
+        hud.flags & HudBlock::MENU_DUE != 0,
     );
-    let sleep = drive.runtime.sleep.output();
     game_sleep(
-        sleep.phase as u32,
-        sleep.eligible,
-        sleep.show_hint,
-        sleep.charge,
-        sleep.cooldown_remaining,
-        sleep.progress,
+        hud.sleep_phase,
+        hud.flags & HudBlock::SLEEP_ELIGIBLE != 0,
+        hud.flags & HudBlock::SLEEP_HINT != 0,
+        hud.sleep_charge,
+        hud.cooldown_remaining,
+        hud.sleep_progress,
     );
-    let runtime = &drive.runtime;
-    let Some(key) = runtime.vehicle.as_ref() else {
+    if hud.flags & HudBlock::CAR == 0 {
+        return;
+    }
+    let seated = state.flags & StateBlock::SEATED != 0;
+    game_update(
+        hud.speed_kmh,
+        (drive.camera == CameraMode::Cockpit || !seated) as u32,
+        hud.focus[0],
+        hud.focus[1],
+        hud.focus[2],
+        hud.contacts,
+        drive.frame_steps,
+        hud.surfaces,
+        hud.colliders,
+        hud.absolute[0],
+        hud.absolute[1],
+        hud.absolute[2],
+        hud.origin[0],
+        hud.origin[1],
+        hud.origin[2],
+        hud.rebases,
+        hud.trip_m,
+        f64::from(state.prepared_roads),
+        hud.fuel,
+        state.flags & StateBlock::PAUSED != 0,
+        state.flags & StateBlock::STARTED != 0,
+        hud.flags & HudBlock::AUTOSAVE_SAFE != 0 && drive.input.held & keys::GRAB == 0,
+        seated,
+    );
+    if hud.flags & HudBlock::RADIO != 0 {
+        game_radio_feedback(
+            hud.radio_volume,
+            hud.radio_frequency,
+            hud.flags & HudBlock::RADIO_AM != 0,
+        );
+    }
+    let Some(f) = sim.feedback.take() else {
         return;
     };
-    let current = &runtime.vehicles[key];
-    let snapshot = runtime.physics.snapshot(key);
-    let position = runtime.area.player.focus_position(&runtime.physics);
-    let absolute = runtime.stream.origin.absolute(position);
-    let origin = runtime.stream.origin.offset;
-    let contacts = runtime
-        .physics
-        .wheel_contacts(key)
-        .enumerate()
-        .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
-    let fuel = current
-        .fuel_tank
-        .and_then(|tank| runtime.area.items.get(tank))
-        .and_then(|item| item.fluid.as_ref())
-        .map_or(0.0, |fluid| fluid.finite_total());
-    game_update(
-        snapshot.speed_mps * 3.6,
-        (drive.camera == CameraMode::Cockpit || !runtime.area.player.seated()) as u32,
-        position[0],
-        position[1],
-        position[2],
-        contacts,
-        drive.frame_steps,
-        runtime.stream.frame().surfaces.len() as u32,
-        runtime.physics.collider_count() as u32,
-        absolute[0],
-        absolute[1],
-        absolute[2],
-        origin[0],
-        origin[1],
-        origin[2],
-        runtime.rebases,
-        current.trip_m,
-        runtime.stream.metrics().prepared_roads as f64,
-        fuel,
-        runtime.paused,
-        runtime.started,
-        runtime.autosave_safe(drive.input.held & keys::GRAB != 0),
-        runtime.area.player.seated(),
+    game_feedback(
+        f.actions,
+        f.context,
+        &f.name,
+        &f.notice,
+        f.carrying,
+        f.amount,
+        f.capacity,
+        f.has_name,
+        f.no_text,
+        &f.fluid_name,
+        f.condition,
+        &f.held_name,
+        f.throw_charge,
+        f.throw_active,
+        f.rpm,
+        f.ignition,
+        f.running,
+        f.starter,
+        f.seated,
+        f.handbrake,
+        f.quantities[0],
+        f.quantities[1],
+        f.quantities[2],
+        f.quantities[3],
+        f.quantities[4],
+        f.quantities[5],
+        f.order,
+        f.light_control,
+        f.lmb_use,
+        f.prompts.into(),
+        f.computer.into(),
     );
-    let available = runtime.area.interaction.available_actions(
-        &runtime.aim,
-        &runtime.area.player,
-        &runtime.area.items,
-        &runtime.physics,
-        runtime.survival.output(),
-    );
-    // The radio knob hint shows the volume or frequency of the aimed radio.
-    if let Some(radio) = runtime
-        .aim
-        .use_target
-        .as_ref()
-        .and_then(|t| runtime.area.interaction.dial_knob(t, &runtime.physics))
-        .and_then(|(knob, _)| runtime.stream.knob_radio(knob))
-    {
-        game_radio_feedback(radio.volume, radio.frequency(), radio.am);
-    }
-    let info = runtime
-        .area
-        .interaction
-        .feedback(&available, &runtime.area.items, &reference.0);
-    let (mut amount, mut capacity, quantities, order, fluid_name, has_name, mut no_text) = info
-        .fluid
-        .as_ref()
-        .map_or((0., 0., [0.; 6], 0, info.name, false, true), |f| {
-            (
-                f.amount,
-                f.capacity,
-                f.quantities,
-                f.order,
-                f.presentation.name.as_str(),
-                f.presentation.has_name,
-                f.presentation.no_text,
-            )
-        });
-    let paint = runtime
-        .area
-        .interaction
-        .paint_feedback(&runtime.aim, &reference.0);
-    if let Some((quantity, maximum)) = paint {
-        amount = quantity;
-        capacity = maximum;
-        no_text = false;
-    }
-    let condition = available
-        .item
-        .and_then(|id| {
-            runtime.area.conditions.item_quality(id).or_else(|| {
-                runtime
-                    .area
-                    .items
-                    .get(id)
-                    .and_then(|i| i.generated_condition)
-            })
-        })
-        .unwrap_or(-1.0);
-    let held = runtime.area.interaction.held();
-    let notice = if !runtime.notice.is_empty() {
-        runtime.notice
-    } else if let Some(block) = runtime.aim.installation_block.or(runtime.aim.grab_block) {
-        block.notice()
-    } else {
-        ""
-    };
-    let engine = runtime.engine_output(key);
-    let rpm = engine.rpm;
-    let stamp = FeedbackStamp {
-        condition: condition.to_bits(),
-        held,
-        throw_charge: runtime.area.interaction.throw_charge().to_bits(),
-        throw_active: runtime.area.interaction.throw_active(),
-        rpm: rpm.to_bits(),
-        engine_flags: [
-            current.ignition.ignition,
-            engine.running,
-            engine.starter,
-            runtime.area.player.seated(),
-            current.handbrake,
-        ],
-        actions: info.actions.0
-            | if runtime.needs_output().dead || runtime.sleeping() {
-                0
-            } else {
-                runtime.area.cigarettes.actions(
-                    runtime
-                        .area
-                        .interaction
-                        .equipment
-                        .item()
-                        .or(runtime.area.interaction.held()),
-                )
-            },
-        context: if paint.is_some() {
-            crate::interaction::feedback::FeedbackContext::Paint as u32
-        } else {
-            info.context as u32
-        },
-        light_control: available.light_control.map_or(0, |id| id.0),
-        lmb_use: available.lmb_use,
-        prompts: available.prompts | runtime.stream.refill_prompt(),
-        computer: runtime.computer_prompt(),
-        item: available.item,
-        opening: available.opening,
-        carrying: info.carrying,
-        notice,
-        amount: if paint.is_some() {
-            amount.round() as u32
-        } else {
-            (amount * 10.).round() as u32
-        },
-        empty: amount <= 0.05,
-        capacity,
-        percents: std::array::from_fn(|i| {
-            let p = if amount > 0. {
-                quantities[i] / amount * 100.
-            } else {
-                0.
-            };
-            if p >= 1. { p.round() as u32 } else { u32::MAX }
-        }),
-        order,
-    };
-    if drive.last_feedback != Some(stamp) {
-        game_feedback(
-            stamp.actions,
-            stamp.context,
-            info.name,
-            stamp.notice,
-            stamp.carrying,
-            amount,
-            capacity,
-            has_name,
-            no_text,
-            fluid_name,
-            condition,
-            held.map(|id| display_name(&reference.0, &runtime.area.items, id))
-                .unwrap_or(""),
-            runtime.area.interaction.throw_charge(),
-            runtime.area.interaction.throw_active(),
-            rpm,
-            current.ignition.ignition,
-            engine.running,
-            engine.starter,
-            runtime.area.player.seated(),
-            current.handbrake,
-            quantities[0],
-            quantities[1],
-            quantities[2],
-            quantities[3],
-            quantities[4],
-            quantities[5],
-            stamp.order,
-            stamp.light_control,
-            stamp.lmb_use,
-            stamp.prompts.into(),
-            stamp.computer.into(),
-        );
-        drive.last_feedback = Some(stamp);
-    }
 }
 
 fn publish_audio(

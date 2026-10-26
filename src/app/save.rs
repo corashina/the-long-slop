@@ -245,7 +245,6 @@ fn process_request(
             drive.ready = false;
             drive.runtime.paused = true;
             drive.skip_elapsed = true;
-            drive.last_feedback = None;
             drive.runtime.advance_instruments(&reference, 0., true);
             // The new runtime starts a new frame stream: drop the old pose index and tables.
             let mut sim = SimFrameResource::default();

@@ -28,6 +28,7 @@ mod frame;
 mod frame_particles;
 mod home_cable;
 pub mod hose;
+mod hud;
 mod reach;
 pub mod spawned;
 mod survival;
@@ -758,6 +759,8 @@ pub struct GarageRuntime {
     home_cable_session: Option<u64>,
     /// The followed car the renderer last received.
     followed_car: Option<(crate::world::GeneratedId, u32)>,
+    /// The feedback the renderer last received.
+    last_feedback: Option<hud::FeedbackStamp>,
 }
 
 impl GarageRuntime {
@@ -916,6 +919,7 @@ impl GarageRuntime {
             conditions_sent: false,
             home_cable_session: None,
             followed_car: None,
+            last_feedback: None,
         };
         run.refresh_powertrains();
         Ok(run)

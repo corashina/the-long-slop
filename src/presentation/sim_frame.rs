@@ -2,8 +2,8 @@
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use simulation::boundary::{
-    Change, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, RopeAim, SimFrame,
-    SpawnData,
+    Change, Feedback, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, RopeAim,
+    SimFrame, SpawnData,
 };
 use simulation::conditions::ConditionState;
 use simulation::reference::{ConditionId, ItemId, NodeId};
@@ -36,6 +36,8 @@ pub(crate) struct SimFrameResource {
     pub home_cable: Option<Vec<RopeAim>>,
     /// The world car the player last sat in, else the start car: id and prototype.
     pub followed_car: Option<(GeneratedId, u32)>,
+    /// Feedback waiting for the HUD.
+    pub feedback: Option<Box<Feedback>>,
 }
 
 impl SimFrameResource {
@@ -68,6 +70,7 @@ impl SimFrameResource {
                 Change::PlayerRig(joints) => self.rig.clone_from(joints),
                 Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),
                 Change::FollowedCar(car) => self.followed_car.clone_from(car),
+                Change::Feedback(feedback) => self.feedback = Some(feedback.clone()),
                 Change::Failure(_) => {}
             }
         }
