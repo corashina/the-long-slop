@@ -132,6 +132,11 @@ impl SpawnEvaluation<'_> {
                         self.random
                             .range(number(f, "soundMinTime")?, number(f, "soundMaxTime")?);
                     }
+                    "attachgripscript" => {
+                        if self.mark_started(&parent.id, source) {
+                            self.spawn_grip(&parent, source)?;
+                        }
+                    }
                     "busdooropenscript" => {
                         if self.mark_started(&parent.id, source) {
                             let speed = self
@@ -158,6 +163,45 @@ impl SpawnEvaluation<'_> {
         self.bake_lamps()?;
         self.bake_cables();
         Ok(())
+    }
+    /// Source `attachgripscript.FStart`: the grip prefab spawns at the grip point of the trailer.
+    fn spawn_grip(&mut self, parent: &Placement, source: &SourceId) -> Result<(), ReferenceError> {
+        let Some(grip) = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| p.source == parent.prototype)
+            .and_then(|p| p.trailer.as_ref())
+            .map(|t| &t.grip)
+            .filter(|g| &g.source == source)
+        else {
+            return Ok(());
+        };
+        let pose = super::placement::place_pose(
+            parent.pose,
+            parent.scale,
+            crate::reference::Transform {
+                translation: grip.position,
+                rotation: [0., 0., 0., 1.],
+                scale: [1.; 3],
+            },
+        );
+        let mut id = parent.id.clone();
+        id.children.push((source.clone(), 0));
+        let child = self.placement(grip.prototype.clone(), id, pose)?;
+        self.push(super::spawn_contents::SpawnedContent {
+            inputs: super::spawn_state::SpawnInitialization::default(),
+            placement: child,
+            appearance: Vec::new(),
+            cable: Vec::new(),
+            lights: Vec::new(),
+            fluid: None,
+            tanks: Vec::new(),
+            condition: 1.,
+            buried: false,
+            distance_offset: [0.; 3],
+            ammo: None,
+        })
     }
     pub(super) fn mark_started(&mut self, parent: &GeneratedId, source: &SourceId) -> bool {
         if self

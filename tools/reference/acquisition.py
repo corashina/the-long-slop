@@ -244,26 +244,20 @@ def recover_acquisition(source, manifest):
                 'buried':bool(d['buried']), 'car':ptr(save,d,'car'), 'fixed_in_car':pd['fixedInCar']}
     boxp = prototypes[62]
     spawn=source.get('sharedassets1.assets',158204);sd=source.read(spawn)
-    broken=source.get('sharedassets1.assets',135113);bd=source.read(broken)
+    broken=source.get('sharedassets1.assets',135113)
     mount=source.resolve(spawn,sd['mount']);md=source.read(mount)
     box_root=source.get('sharedassets1.assets',51722)
     save=component(source,box_root,'tosaveitemscript');saved=source.read(save)
-    break_fields={'health':'health','decrease_after_attack':'decreaseAfterAttack','only_decrease_above':'onlyDecreaseAfterAttackIfAbove',
-        'decrease_above_health':'onlyDecreaseAfterAttackIfAboveHealth','mass_modifier':'massModifier','only_velocity':'onlyVelocity',
-        'no_trigger':'noTrigger','no_collider':'noCollider','no_destroy':'noDestroy','no_gib':'noGib','destroyed':'destroyed'}
-    bool_fields={'decrease_after_attack','only_decrease_above','only_velocity','no_trigger','no_collider','no_destroy','no_gib','destroyed'}
     box={'prototype':boxp['id'], 'source':source_id(spawn), 'table':box_table,
         'disable_spawn':bool(sd['disableSpawn']), 'spawn_before_open':bool(sd['spawnBeforeOpen']),
         'spawned':bool(sd['spawned']), 'opened':bool(sd['opened']), 'spawn_position':pose(source.resolve(spawn,sd['spawnPos']) or box_root),
         'authored_spawn_position':ptr(spawn,sd,'spawnPos'), 'breakable':source_id(broken), 'save':source_id(save),
-        'break_rules':{k:bool(bd[v]) if k in bool_fields else bd[v] for k,v in break_fields.items()},
         'mount':{'source':source_id(mount),'parent_save':ptr(mount,md,'parentTosave'),'collider':ptr(mount,md,'col'),
                  'only_manual':bool(md['onlyManual']),'no_physics_lock':bool(md['noPhysicsLock']),
                  'dont_lock_if_picked_up':bool(md['dontLockIfPickedUp'])},
         'release':[{'owner':source_id(broken),'method':'Break','target':source_id(save),'target_method':'PreDestroy'},
                    {'owner':source_id(save),'method':'PreDestroy','target':source_id(mount),'target_method':'Unstore'}],
-        'debris':boxp['behavior']['debris'], 'reduced_debris':boxp['behavior']['reduced_debris'],
-        'clips':boxp['behavior']['clips'], 'disabled_starter_boxes':[], 'content_counts':[]}
+        'disabled_starter_boxes':[], 'content_counts':[]}
     if saved['physlocks'] != [sd['mount']]:raise ValueError('Box release mount link differs')
     for pid in range(79792,79800):
         r=source.get('level1',pid);d=source.read(r);go=source.resolve(r,d['m_GameObject'])
@@ -529,20 +523,21 @@ def _validate_acquisition(a, manifest):
 
 
 def _validate_objects(a,manifest,prototype,table):
-    b=a['box'];_shape(b,'prototype source table disable_spawn spawn_before_open spawned opened spawn_position authored_spawn_position breakable save break_rules mount release debris reduced_debris clips disabled_starter_boxes content_counts')
+    b=a['box'];_shape(b,'prototype source table disable_spawn spawn_before_open spawned opened spawn_position authored_spawn_position breakable save mount release disabled_starter_boxes content_counts')
     p=prototype(b['prototype'],62);behavior=p['behavior']
-    for f in ('source','breakable','save','debris','reduced_debris'):_source(b[f])
-    if b['source']!=behavior['spawn'] or b['breakable']!=behavior['breakable'] or b['debris']!=behavior['debris'] or b['reduced_debris']!=behavior['reduced_debris']:
+    for f in ('source','breakable','save'):_source(b[f])
+    if b['source']!=behavior['spawn'] or b['breakable']!=behavior['breakable']:
         raise ValueError('Box behavior links differ')
-    prototype(b['debris']);prototype(b['reduced_debris']);table(b['table']);_pose(b['spawn_position'])
+    # The box breakables record holds its break rules, gibs and clips.
+    record=[r for r in manifest['breakables'] if r['source']==b['breakable']]
+    gibs=[{'file':'sharedassets1.assets','path_id':pid} for pid in (81642,81645)]
+    if len(record)!=1 or [record[0][f] for f in ('health','no_trigger','no_gib','gib','reduced_gib')]!=[7.,True,False,*gibs]:
+        raise ValueError('Box breakables record differs')
+    table(b['table']);_pose(b['spawn_position'])
     if b['spawn_position']!=CHECKED_POSES[0]:raise ValueError('Box spawn pose owner differs')
     for f in ('disable_spawn','spawn_before_open','spawned','opened'):_boolean(b[f])
     if [b[f] for f in ('disable_spawn','spawn_before_open','spawned','opened')]!=[False,True,False,False] or b['authored_spawn_position'] is not None:
         raise ValueError('Box spawn guards differ')
-    r=b['break_rules'];_shape(r,'health decrease_after_attack only_decrease_above decrease_above_health mass_modifier only_velocity no_trigger no_collider no_destroy no_gib destroyed')
-    for f in ('health','decrease_above_health','mass_modifier'):_number(r[f])
-    for f in set(r)-{'health','decrease_above_health','mass_modifier'}:_boolean(r[f])
-    if r!=BOX_BREAK:raise ValueError('Box break thresholds differ')
     m=b['mount'];_shape(m,'source parent_save collider only_manual no_physics_lock dont_lock_if_picked_up')
     for f in ('source','parent_save','collider'):_source(m[f])
     for f in ('only_manual','no_physics_lock','dont_lock_if_picked_up'):_boolean(m[f])
@@ -551,7 +546,6 @@ def _validate_objects(a,manifest,prototype,table):
     for e in _list(b['release']):
         _shape(e,'owner method target target_method');_source(e['owner']);_source(e['target'])
     if b['release']!=BOX_RELEASE:raise ValueError('Box release method or target differs')
-    if b['clips']!=behavior['clips']:raise ValueError('Box clip links differ')
     for c in _list(b['disabled_starter_boxes']):
         _shape(c,'source instance disable_spawn');_source(c['source']);_source(c['instance']);_boolean(c['disable_spawn'])
     if b['disabled_starter_boxes']!=DISABLED_BOXES:raise ValueError('Disabled starter Box source differs')
@@ -646,18 +640,6 @@ SUPPORTED_PREFABS = {('sharedassets1.assets', 32825): ('sharedassets1.assets', 7
  ('sharedassets1.assets', 20649): ('sharedassets1.assets', 63259),
  ('sharedassets1.assets', 11985): ('sharedassets1.assets', 54495),
  ('sharedassets1.assets', 41097): ('sharedassets1.assets', 83430)}
-
-BOX_BREAK = {'health': 7.0,
- 'decrease_after_attack': False,
- 'only_decrease_above': False,
- 'decrease_above_health': 0.0,
- 'mass_modifier': 0.0,
- 'only_velocity': False,
- 'no_trigger': True,
- 'no_collider': False,
- 'no_destroy': False,
- 'no_gib': False,
- 'destroyed': False}
 
 BOX_RELEASE = [{'owner': {'file': 'sharedassets1.assets', 'path_id': 135113},
   'method': 'Break',

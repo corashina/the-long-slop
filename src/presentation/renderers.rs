@@ -28,6 +28,9 @@ pub struct RendererMeshes {
     pub attribute_bytes: usize,
     meshes: HashMap<(AssetId<Mesh>, [u32; 8]), Handle<Mesh>>,
 }
+/// Renderer record from the manifest. The player glTF has no renderer extras.
+#[derive(Component)]
+pub struct AuthoredRenderer(pub RendererRecord);
 #[derive(serde::Deserialize)]
 struct RendererExtras {
     source_renderer: RendererRecord,
@@ -40,7 +43,7 @@ pub fn bind_renderer_meshes(
     visuals: Res<ReferenceVisuals>,
     mut meshes: ResMut<Assets<Mesh>>,
     primitives: Query<
-        (Entity, &ChildOf, &Mesh3d),
+        (Entity, &ChildOf, &Mesh3d, Option<&AuthoredRenderer>),
         (
             With<GltfMaterialExtras>,
             Without<SourceRenderer>,
@@ -58,22 +61,25 @@ pub fn bind_renderer_meshes(
     // Wait before changing any handle. All variants are made in one startup pass.
     if primitives
         .iter()
-        .any(|(_, _, mesh)| !meshes.contains(mesh.0.id()))
+        .any(|(_, _, mesh, _)| !meshes.contains(mesh.0.id()))
     {
         return;
     }
     let state = &mut *state;
     let variants = &mut state.meshes;
     let mut bytes = 0;
-    for (entity, parent, mesh) in &primitives {
-        let record = extras
-            .get(parent.parent())
-            .map_err(|error| error.to_string())
-            .and_then(|extras| {
-                serde_json::from_str::<RendererExtras>(&extras.value)
-                    .map(|value| value.source_renderer)
-                    .map_err(|error| error.to_string())
-            });
+    for (entity, parent, mesh, authored) in &primitives {
+        let record = match authored {
+            Some(authored) => Ok(authored.0.clone()),
+            None => extras
+                .get(parent.parent())
+                .map_err(|error| error.to_string())
+                .and_then(|extras| {
+                    serde_json::from_str::<RendererExtras>(&extras.value)
+                        .map(|value| value.source_renderer)
+                        .map_err(|error| error.to_string())
+                }),
+        };
         let record = match record {
             Ok(record) => record,
             Err(error) => {

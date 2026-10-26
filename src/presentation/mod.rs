@@ -10,6 +10,7 @@ pub mod gpu_prepare;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod player_body;
 pub mod reference;
 pub mod save;
 mod shadow_batch;

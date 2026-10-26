@@ -797,7 +797,7 @@ mod tests {
     }
 
     /// V03 bus pool: each `bus` category item exports as a car prototype with a vehicle
-    /// record. The trailer bus (`utanfutoscript`, PR 4) stays `other_vehicle`. The building
+    /// record, or a trailer record for the trailer bus (`utanfutoscript`). The building
     /// audit above then counts the buses at the source rates.
     #[test]
     #[ignore = "requires the installed source export"]
@@ -825,18 +825,14 @@ mod tests {
         assert!(!items.is_empty());
         for index in items {
             let item = &catalog.items[index as usize];
-            if item.name.to_lowercase().contains("utanfuto") {
-                assert_eq!(item.exclusion, "other_vehicle", "{}", item.name);
-                continue;
-            }
             let prototype = item
                 .prototype
                 .as_ref()
                 .unwrap_or_else(|| panic!("{} has no prototype: {}", item.name, item.exclusion));
             let car = reference.prototypes.iter().find(|p| &p.source == prototype);
             assert!(
-                car.is_some_and(|p| p.vehicle.is_some()),
-                "{} has no vehicle record",
+                car.is_some_and(|p| p.vehicle.is_some() || p.trailer.is_some()),
+                "{} has no vehicle or trailer record",
                 item.name
             );
         }

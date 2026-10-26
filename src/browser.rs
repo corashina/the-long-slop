@@ -301,10 +301,26 @@ extern "C" {
     pub fn game_actions() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingAssists)]
     pub fn game_driving_assists() -> u32;
+    /// Pending `DrivingSettings` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
+    pub fn game_driving_settings() -> Option<String>;
+    /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
+    #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
+    pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);
     #[wasm_bindgen(js_namespace = window, js_name = gameBiome)]
     pub fn game_biome() -> u32;
+    /// `steer` to `handbrake` are the last `DrivingControls` (steer positive left).
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
-    pub fn game_driving_state(gear: i32, assists: u32, seated: bool);
+    pub fn game_driving_state(
+        gear: i32,
+        assists: u32,
+        seated: bool,
+        steer: f32,
+        throttle: f32,
+        brake: f32,
+        clutch: f32,
+        handbrake: f32,
+    );
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
     pub fn game_update(
         speed: f32,
@@ -328,6 +344,8 @@ extern "C" {
         fuel: f32,
         paused: bool,
         started: bool,
+        autosave_safe: bool,
+        seated: bool,
     );
     #[wasm_bindgen(js_namespace=window,js_name=gameInventory)]
     pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);

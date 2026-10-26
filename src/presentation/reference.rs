@@ -80,6 +80,7 @@ pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &Referenc
                     | AssetUsage::RoadLampPrototype
                     | AssetUsage::SkyPrototype
                     | AssetUsage::ItemPrototype
+                    | AssetUsage::PlayerPrototype
             )
         })
         .count();
@@ -97,21 +98,13 @@ pub fn spawn_scenes(
     visuals: &mut ReferenceVisuals,
     gltfs: &Assets<bevy::gltf::Gltf>,
 ) {
-    for (asset, (_, handle)) in reference
-        .assets
-        .iter()
-        .filter(|asset| {
-            matches!(
-                asset.usage,
-                AssetUsage::UniqueScene
-                    | AssetUsage::RoadLampPrototype
-                    | AssetUsage::SkyPrototype
-                    | AssetUsage::ItemPrototype
-            )
-        })
-        .zip(&visuals.handles)
-    {
-        if asset.usage != AssetUsage::UniqueScene {
+    // Admission can reorder the handles. Find each handle by its asset.
+    for (asset, handle) in &visuals.gltfs {
+        if !reference
+            .assets
+            .iter()
+            .any(|a| a.id == *asset && a.usage == AssetUsage::UniqueScene)
+        {
             continue;
         }
         commands

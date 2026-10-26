@@ -125,6 +125,7 @@ impl SourceFixedAssets {
                         | AssetUsage::RoadLampPrototype
                         | AssetUsage::SkyPrototype
                         | AssetUsage::ItemPrototype
+                        | AssetUsage::PlayerPrototype
                 )
             })
             .map(|a| Root {

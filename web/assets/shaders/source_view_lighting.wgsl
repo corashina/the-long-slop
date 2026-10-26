@@ -20,6 +20,7 @@ struct LightingUniform {
     probe_extents: array<vec4<f32>, 1>,
     source_time: vec4<f32>,
     clip_from_world: mat4x4<f32>,
+    // x=near, y=far, z=player_model `_Dist` of this view
     near_far: vec4<f32>,
     sun_shadow: SunShadow,
 }

@@ -1,9 +1,10 @@
-//! Source `headlightscript` (headlight and cabin) and `rearlights` controllers of one world car.
+//! Source `headlightscript` (headlight and cabin) and `rearlights` controllers of one world car
+//! or trailer.
 //! Outputs name prototype nodes. The presentation maps them to the car instance.
 use crate::lighting::HeadlightState;
 use crate::reference::{
     ItemId, LampSignal, LightControllerKind, MaterialLink, WorldLampStateReference,
-    WorldVehicleReference,
+    WorldLightReference,
 };
 
 /// Source electronics cutoff of the rear lights and the high beam.
@@ -36,9 +37,9 @@ pub struct CarMaterialOutput {
 }
 
 impl MaterialChoice {
-    /// The material link of this choice in `record`.
-    pub fn link(self, record: &WorldVehicleReference) -> Option<&MaterialLink> {
-        let lamp = &record.lights[self.light as usize].states[self.state as usize];
+    /// The material link of this choice in `records`.
+    pub fn link(self, records: &[WorldLightReference]) -> Option<&MaterialLink> {
+        let lamp = &records[self.light as usize].states[self.state as usize];
         if self.on {
             lamp.on_material.as_ref().or(lamp.off_material.as_ref())
         } else {
@@ -89,13 +90,13 @@ pub struct CarLightLinks {
 }
 
 impl CarLights {
-    /// `links` follow `record.lights`.
-    pub fn new(record: &WorldVehicleReference, links: Vec<CarLightLinks>) -> Self {
+    /// `links` follow `records`.
+    pub fn new(records: &[WorldLightReference], links: Vec<CarLightLinks>) -> Self {
         let mut lights: Vec<CarLightOutput> = Vec::new();
         let mut materials: Vec<CarMaterialOutput> = Vec::new();
         let mut visibility = Vec::new();
-        let mut controllers = Vec::with_capacity(record.lights.len());
-        for (index, (light, links)) in record.lights.iter().zip(links).enumerate() {
+        let mut controllers = Vec::with_capacity(records.len());
+        for (index, (light, links)) in records.iter().zip(links).enumerate() {
             let mut light_slots = Vec::with_capacity(light.states.len());
             let mut renderer_slots = Vec::with_capacity(light.states.len());
             for (state_index, lamp) in light.states.iter().enumerate() {
@@ -122,7 +123,7 @@ impl CarLights {
                     state: state_index as u16,
                     on: light.startup_on,
                 };
-                let initial = startup.link(record).map(|_| startup);
+                let initial = startup.link(records).map(|_| startup);
                 renderer_slots.push(
                     lamp.renderers
                         .iter()
@@ -167,19 +168,19 @@ impl CarLights {
     /// a cabin door usable value.
     pub fn advance(
         &mut self,
-        record: &WorldVehicleReference,
+        records: &[WorldLightReference],
         input: CarLightInput,
         mounted: impl Fn(ItemId) -> bool,
         door: impl Fn(ItemId) -> f32,
         dt: f32,
     ) {
         for index in 0..self.controllers.len() {
-            let reference = &record.lights[index];
+            let reference = &records[index];
             let c = &mut self.controllers[index];
             match c.kind {
                 LightControllerKind::Rear => {
                     let powered = c.electronics.is_none_or(|e| e > ELECTRONICS_CUTOFF);
-                    self.refresh_rear(record, index, input, input.ignition && powered);
+                    self.refresh_rear(records, index, input, input.ignition && powered);
                 }
                 LightControllerKind::Headlight | LightControllerKind::Cabin => {
                     if !dt.is_finite() || dt <= 0. {
@@ -188,7 +189,7 @@ impl CarLights {
                     if c.kind == LightControllerKind::Headlight {
                         if c.owner.is_some_and(|owner| !mounted(owner)) {
                             c.state.unmount();
-                            self.refresh_dark(record, index);
+                            self.refresh_dark(records, index);
                             continue;
                         }
                         c.state.request(input.requested);
@@ -205,7 +206,7 @@ impl CarLights {
                         c.state.request(u8::from(on));
                     }
                     c.state.update(dt);
-                    self.refresh_fade(record, index);
+                    self.refresh_fade(records, index);
                 }
                 _ => {}
             }
@@ -213,8 +214,8 @@ impl CarLights {
     }
 
     /// Source cabin switch: the next cabin mode of every cabin controller.
-    pub fn cycle_cabin(&mut self, record: &WorldVehicleReference) {
-        for (c, r) in self.controllers.iter_mut().zip(&record.lights) {
+    pub fn cycle_cabin(&mut self, records: &[WorldLightReference]) {
+        for (c, r) in self.controllers.iter_mut().zip(records) {
             if let Some(cabin) = &r.cabin
                 && !cabin.modes.is_empty()
             {
@@ -223,6 +224,16 @@ impl CarLights {
         }
     }
 
+    /// A hash of the lamp materials and node visibility. It changes when the presentation must sync.
+    pub fn signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        for m in &self.materials {
+            m.choice.map(|c| (c.light, c.state, c.on)).hash(&mut h);
+        }
+        self.visibility.hash(&mut h);
+        h.finish()
+    }
     pub fn lights(&self) -> &[CarLightOutput] {
         &self.lights
     }
@@ -235,12 +246,12 @@ impl CarLights {
 
     fn refresh_rear(
         &mut self,
-        record: &WorldVehicleReference,
+        records: &[WorldLightReference],
         index: usize,
         input: CarLightInput,
         ignition: bool,
     ) {
-        let states = &record.lights[index].states;
+        let states = &records[index].states;
         let count = states.len();
         for step in 0..count {
             // Source order: forward with ignition, backward without.
@@ -263,8 +274,8 @@ impl CarLights {
         }
     }
 
-    fn refresh_dark(&mut self, record: &WorldVehicleReference, index: usize) {
-        for (state, lamp) in record.lights[index].states.iter().enumerate() {
+    fn refresh_dark(&mut self, records: &[WorldLightReference], index: usize) {
+        for (state, lamp) in records[index].states.iter().enumerate() {
             for &slot in &self.controllers[index].lights[state] {
                 self.lights[slot].enabled = false;
                 self.lights[slot].intensity = 0.;
@@ -273,11 +284,11 @@ impl CarLights {
         }
     }
 
-    fn refresh_fade(&mut self, record: &WorldVehicleReference, index: usize) {
+    fn refresh_fade(&mut self, records: &[WorldLightReference], index: usize) {
         let c = &self.controllers[index];
         let energy = c.state.energy() * c.electronics.unwrap_or(1.);
         let current = c.state.refreshed_state();
-        let states = &record.lights[index].states;
+        let states = &records[index].states;
         // Clear other states first. Shared source renderers then select the current state.
         for (state, lamp) in states.iter().enumerate() {
             if state == current {
