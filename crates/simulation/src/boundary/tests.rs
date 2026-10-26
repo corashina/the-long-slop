@@ -24,7 +24,7 @@ fn frame_round_trips() {
             joint_scale: 0.01,
             sky_anchor: [0., 300., 0.],
             ember_light: 8,
-            pad: 0,
+            dead_weight: 0.5,
         },
         previous: vec![row(1.), row(4.)],
         current: vec![row(2.), row(5.)],
@@ -36,6 +36,7 @@ fn frame_round_trips() {
             },
         ],
         joints: vec![row(9.)],
+        ragdoll: vec![row(10.)],
         cigarettes: vec![CigaretteRow {
             item: 7,
             blend: 0.5,

@@ -1,5 +1,6 @@
 //! First-person player body: character 0 of the player prototype (source "Visible body" mode 2).
 //! The skin joints are children of `CharacterRoot` and take the `BodyState` pose. The GPU skins the meshes.
+//! The body hides while the ragdoll shows.
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use super::renderers::AuthoredRenderer;
@@ -39,8 +40,8 @@ impl PlayerBody {
 }
 
 #[derive(serde::Deserialize)]
-struct Identity {
-    reference_id: Option<SourceId>,
+pub(super) struct Identity {
+    pub reference_id: Option<SourceId>,
 }
 
 /// Bind the player nodes. Remove the primitives of all renderers except character 0.
@@ -173,9 +174,13 @@ pub(crate) fn sync(
             return;
         }
         body.shown = true;
-        if let Ok((_, mut visibility, _)) = nodes.get_mut(scene) {
-            *visibility = Visibility::Inherited;
-        }
+    }
+    if let Ok((_, mut visibility, _)) = nodes.get_mut(scene) {
+        visibility.set_if_neq(if frame.frame.ragdoll.is_empty() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
     if let Ok((mut transform, _, _)) = nodes.get_mut(player) {
         let scale = transform.scale;

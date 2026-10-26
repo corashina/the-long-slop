@@ -4,6 +4,7 @@ use crate::boundary::{CigaretteRow, Handle, PlaneRow, PoseRow, SimFrame, StateBl
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
+use crate::vehicle::VehiclePose;
 
 impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
@@ -22,6 +23,12 @@ impl GarageRuntime {
                 flags |= flag;
             }
         }
+        let needs = self.needs_output();
+        let dead_weight = if needs.dead {
+            (needs.death_seconds as f32 / reference.survival.death_seconds).clamp(0., 1.)
+        } else {
+            0.
+        };
         let area = &self.area;
         let stored_items = area.inventory.slots.map(|id| {
             id.filter(|id| {
@@ -59,7 +66,7 @@ impl GarageRuntime {
             joint_scale: area.body.joint_scale(),
             sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
-            pad: 0,
+            dead_weight,
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -110,6 +117,23 @@ impl GarageRuntime {
             .extend_from_slice(lighting.visibility_outputs());
         self.frame_poses
             .fill(reference, &self.area, &self.physics, frame);
+        frame.ragdoll.clear();
+        if area.ragdoll.active() {
+            frame
+                .ragdoll
+                .extend(reference.clothing.ragdoll.bodies.iter().map(|b| {
+                    area.ragdoll.node_pose(&self.physics, b.node).map_or_else(
+                        PoseRow::default,
+                        |f| {
+                            let pose = VehiclePose {
+                                position: f.position.to_array(),
+                                rotation: f.rotation.to_array(),
+                            };
+                            PoseRow::new(pose, PoseRow::VISIBLE)
+                        },
+                    )
+                }));
+        }
     }
     /// The renderer dropped a retired pose handle.
     pub fn release_pose(&mut self, handle: Handle) {

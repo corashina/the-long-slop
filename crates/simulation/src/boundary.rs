@@ -136,8 +136,8 @@ pub struct StateBlock {
     pub sky_anchor: [f32; 3],
     /// Cigarette that owns the ember light, as `ItemId + 1`. 0 is none.
     pub ember_light: u32,
-    /// Keeps the block free of implicit padding.
-    pub pad: u32,
+    /// `DeadV` weight: death seconds over the survival death seconds, 0 to 1. 0 while alive.
+    pub dead_weight: f32,
 }
 
 impl StateBlock {
@@ -241,6 +241,8 @@ pub struct SimFrame {
     pub valves: Vec<ValveRow>,
     /// Player body joints relative to `CharacterRoot`.
     pub joints: Vec<PoseRow>,
+    /// World poses of the ragdoll bodies in `RagdollReference::bodies` order. Empty while the ragdoll is inactive.
+    pub ragdoll: Vec<PoseRow>,
     pub cigarettes: Vec<CigaretteRow>,
     pub planes: Vec<PlaneRow>,
     pub lighting: FrameLighting,
@@ -285,6 +287,7 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.items);
     put_rows(out, &frame.valves);
     put_rows(out, &frame.joints);
+    put_rows(out, &frame.ragdoll);
     put_rows(out, &frame.cigarettes);
     put_rows(out, &frame.planes);
     put(out, &frame.lighting);
@@ -305,6 +308,7 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.items)?;
     take_rows(&mut rest, &mut frame.valves)?;
     take_rows(&mut rest, &mut frame.joints)?;
+    take_rows(&mut rest, &mut frame.ragdoll)?;
     take_rows(&mut rest, &mut frame.cigarettes)?;
     take_rows(&mut rest, &mut frame.planes)?;
     frame.lighting = take_value(&mut rest)?;
