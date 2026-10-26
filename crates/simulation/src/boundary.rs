@@ -182,6 +182,88 @@ pub struct ValveRow {
     pub valve: f32,
 }
 
+/// HUD values of one tick.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct HudBlock {
+    pub cooldown_remaining: f64,
+    /// Player focus in world space.
+    pub absolute: [f64; 3],
+    pub origin: [f64; 3],
+    pub trip_m: f64,
+    pub hp: f32,
+    pub food: f32,
+    pub water: f32,
+    pub bowel: f32,
+    pub bladder: f32,
+    pub opacity: f32,
+    pub look_scale: f32,
+    pub sleep_phase: u32,
+    pub sleep_charge: f32,
+    pub sleep_progress: f32,
+    pub flags: u32,
+    pub speed_kmh: f32,
+    /// Player focus in stream space.
+    pub focus: [f32; 3],
+    /// Wheel contact bits.
+    pub contacts: u32,
+    pub surfaces: u32,
+    pub colliders: u32,
+    pub rebases: u32,
+    pub fuel: f32,
+    pub radio_volume: f32,
+    pub radio_frequency: f32,
+    /// Inventory slot items, as `ItemId`. 0 is empty.
+    pub slots: [u32; 4],
+    pub selected: u32,
+    pub swap_progress: f32,
+}
+
+impl HudBlock {
+    pub const DEAD: u32 = 1;
+    pub const MENU_DUE: u32 = 1 << 1;
+    pub const SLEEP_ELIGIBLE: u32 = 1 << 2;
+    pub const SLEEP_HINT: u32 = 1 << 3;
+    /// Safe for autosave when the grab key is up.
+    pub const AUTOSAVE_SAFE: u32 = 1 << 4;
+    /// A current car exists. The car values and feedback are set.
+    pub const CAR: u32 = 1 << 5;
+    /// The player aims at a radio knob.
+    pub const RADIO: u32 = 1 << 6;
+    pub const RADIO_AM: u32 = 1 << 7;
+}
+
+/// Interaction feedback text and values. Sent when they change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Feedback {
+    pub actions: u32,
+    pub context: u32,
+    pub name: String,
+    pub notice: String,
+    pub carrying: bool,
+    pub amount: f32,
+    pub capacity: f32,
+    pub has_name: bool,
+    pub no_text: bool,
+    pub fluid_name: String,
+    pub condition: f32,
+    pub held_name: String,
+    pub throw_charge: f32,
+    pub throw_active: bool,
+    pub rpm: f32,
+    pub ignition: bool,
+    pub running: bool,
+    pub starter: bool,
+    pub seated: bool,
+    pub handbrake: bool,
+    pub quantities: [f32; 6],
+    pub order: u32,
+    pub light_control: u32,
+    pub lmb_use: bool,
+    pub prompts: u8,
+    pub computer: u8,
+}
+
 /// Use and limit of one world budget.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -372,6 +454,7 @@ pub enum Change {
     HomeCable(Vec<RopeAim>),
     /// The world car the player last sat in, else the start car: id and prototype.
     FollowedCar(Option<(GeneratedId, u32)>),
+    Feedback(Box<Feedback>),
     Failure(String),
 }
 
@@ -389,6 +472,7 @@ pub struct SimFrame {
     /// The last command sequence the simulation consumed.
     pub seq_consumed: u64,
     pub state: StateBlock,
+    pub hud: HudBlock,
     /// Poses at the step before `current`, indexed by handle.
     pub previous: Vec<PoseRow>,
     pub current: Vec<PoseRow>,
@@ -448,6 +532,7 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     out.clear();
     out.extend_from_slice(&frame.seq_consumed.to_le_bytes());
     out.extend_from_slice(bytemuck::bytes_of(&frame.state));
+    out.extend_from_slice(bytemuck::bytes_of(&frame.hud));
     put_rows(out, &frame.previous);
     put_rows(out, &frame.current);
     put_rows(out, &frame.items);
@@ -476,6 +561,7 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     let mut rest = bytes;
     frame.seq_consumed = u64::from_le_bytes(take(&mut rest, 8)?.try_into().expect("8 bytes"));
     frame.state = bytemuck::pod_read_unaligned(take(&mut rest, size_of::<StateBlock>())?);
+    frame.hud = bytemuck::pod_read_unaligned(take(&mut rest, size_of::<HudBlock>())?);
     take_rows(&mut rest, &mut frame.previous)?;
     take_rows(&mut rest, &mut frame.current)?;
     take_rows(&mut rest, &mut frame.items)?;
