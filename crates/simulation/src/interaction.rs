@@ -1418,6 +1418,9 @@ impl InteractionState {
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
     }
+    pub fn opening_valves(&self) -> impl Iterator<Item = (OpeningId, f32)> + '_ {
+        self.openings.iter().map(|o| (o.reference.id, o.valve))
+    }
     pub fn opening_valve(&self, id: OpeningId) -> f32 {
         self.openings
             .iter()
