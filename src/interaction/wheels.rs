@@ -297,12 +297,13 @@ impl WheelAssemblies {
                 .iter()
                 .find(|body| body.id == mount.body)
                 .ok_or_else(|| error("Missing wheel mount body"))?;
-            let rest = record.suspension_distance * (1.0 - record.target_position);
+            let rest =
+                record.collider.suspension_distance * (1.0 - record.collider.target_position);
             let hub = chassis_pose
                 * Pose::from_translation(
                     Vector::from_array(anchor.transform.translation)
                         + Rotation::from_array(anchor.transform.rotation)
-                            * Vector::from_array(record.center)
+                            * Vector::from_array(record.collider.center)
                         - Vector::Y * rest,
                 );
             let compatible = reference
