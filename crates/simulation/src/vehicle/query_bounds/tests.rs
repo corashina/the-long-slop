@@ -736,6 +736,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         drive: false,
         brake: false,
         handbrake: false,
+        pedal: false,
         sideways_stiffness_modifier: 1.0,
         hub: WheelHubReference {
             radius_m: 0.1,

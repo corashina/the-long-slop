@@ -506,6 +506,10 @@ pub struct VehicleRuntime {
     pub kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
     /// Source `carscript` balance state. It is not saved. Recovery resets it.
     pub balance: crate::simulation::balance::BalanceState,
+    /// Source `bikepedalscript` state. It is not saved.
+    pub pedals: crate::simulation::pedals::PedalState,
+    /// Total pedal turn in degrees, modulo 360. The presentation poses the pedal nodes from it.
+    pub pedal_angle: f32,
 }
 
 impl VehicleRuntime {
@@ -555,6 +559,8 @@ impl VehicleRuntime {
             plates: parts.plates,
             kmh_slots: Vec::new(),
             balance: Default::default(),
+            pedals: Default::default(),
+            pedal_angle: 0.,
         }
     }
     /// The vehicle record of the car prototype.
@@ -576,6 +582,7 @@ impl VehicleRuntime {
             }
             (s.lamp_bits, s.digits_lit).hash(&mut h);
         }
+        self.pedal_angle.to_bits().hash(&mut h);
         if let Some(l) = &self.lever {
             let (t, r) = (l.translation.to_array(), l.rotation.to_array());
             for v in t.iter().chain(&r) {
@@ -2001,7 +2008,16 @@ impl GarageRuntime {
         {
             lever.shift(&reference.driving.lever, last_gear, gear);
         }
-        let throttle = drivetrain.throttle;
+        let record = world_vehicle(reference, vehicle.prototype);
+        // Source `carscript.ControlStuff`: pedals are off while the engine runs.
+        let pedaling = driving
+            && record.pedals.is_some()
+            && !engine.is_some_and(|engine| engine.state.output().running);
+        let throttle = if record.no_gas_while_pedaling && pedaling {
+            0.
+        } else {
+            drivetrain.throttle
+        };
         let brake = drivetrain.brake;
         vehicle.brake = brake;
         let car_controls = chassis_active
@@ -2154,16 +2170,68 @@ impl GarageRuntime {
             );
         }
         if chassis_active {
-            self.physics.apply_vehicle_forces(
-                key,
-                drive,
-                if engine.is_some() {
-                    crate::simulation::drivetrain::transmitted_torques(output, gearbox, gear)
-                } else {
-                    Default::default()
-                },
-            );
+            let mut torques = if engine.is_some() {
+                crate::simulation::drivetrain::transmitted_torques(output, gearbox, gear)
+            } else {
+                Default::default()
+            };
+            if let Some(pedals) = &record.pedals {
+                if driving {
+                    vehicle.pedals.disabled = output.running;
+                }
+                let disabled = vehicle.pedals.disabled;
+                torques.pedal_nm =
+                    self.step_pedals(reference, key, vehicle, pedals, disabled, controls.throttle);
+            }
+            self.physics.apply_vehicle_forces(key, drive, torques);
         }
+    }
+
+    /// Source `bikepedalscript.Update()`. Returns the motor torque of each pedal wheel.
+    /// `running`: source `disabled`. `throttle`: source `inputscript.throttle`.
+    fn step_pedals(
+        &self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        vehicle: &mut VehicleRuntime,
+        pedals: &crate::reference::PedalsReference,
+        running: bool,
+        throttle: f32,
+    ) -> Option<f32> {
+        use crate::simulation::pedals;
+        let record = world_vehicle(reference, vehicle.prototype);
+        let seated = self.area.player.seat_vehicle() == Some(key)
+            && self.area.player.seat_source() == Some(&record.seats[pedals.seat as usize].source);
+        let mut rpms = [0.; pedals::MAX_WHEELS];
+        for (rpm, wheel) in rpms.iter_mut().zip(&pedals.driven_wheels) {
+            *rpm = self.physics.wheel_motion(key, *wheel as usize).0;
+        }
+        let mounted = pedals
+            .driven_slots
+            .iter()
+            .filter(|slot| {
+                record.wheels.iter().enumerate().any(|(i, wheel)| {
+                    wheel.slot == **slot && self.physics.wheel_assembly(key, i).has_rim()
+                })
+            })
+            .count();
+        let player = &reference.player;
+        let step = pedals::step(
+            pedals,
+            player.pedaling_nm,
+            player.pedaling_rpm,
+            &mut vehicle.pedals,
+            seated,
+            throttle,
+            &rpms[..pedals.driven_wheels.len()],
+            mounted,
+            running,
+            FIXED_DT,
+        );
+        if step.angle != 0. {
+            vehicle.pedal_angle = (vehicle.pedal_angle + step.angle) % 360.;
+        }
+        step.torque
     }
 
     /// Source breakablescript: contacts and hazard triggers of this step, then Break in break order.

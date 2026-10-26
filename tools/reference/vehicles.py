@@ -57,6 +57,38 @@ def balance_record(car: dict) -> dict | None:
         'use_angle_limit':bool(car['balanceUseAngleLimit']),**{field:car[unity] for field,unity in BALANCE_FIELDS.items()}}
 
 
+def pedal_record(source, proto, car_reader, car, wheels, seats) -> dict | None:
+    """carscript.bikepedal (bikepedalscript). None for a null link.
+
+    `driven_wheels` index `wheels`. `seat` indexes `seats`. `driven_slots` are partslotscript
+    prototype node ids, as wheel `slot`: a slot with a part is a mounted driven wheel.
+    `pedals`, `pedals_inverse`, `feet_holders` and `axes` are prototype node ids.
+    """
+    reader=source.resolve(car_reader,car['bikepedal'])
+    if reader is None:return None
+    if source.class_name(reader)!='bikepedalscript':raise ValueError(f'{key(car_reader)} bikepedal is not a bikepedalscript')
+    proto.node(reader)
+    value=source.read(reader)
+    def targets(field):
+        found=[source.resolve(reader,p) for p in value[field]]
+        if any(r is None for r in found):raise ValueError(f'{key(reader)} {field} has a null link')
+        return found
+    wheel_index={(w['source']['file'],w['source']['path_id']):i for i,w in enumerate(wheels)}
+    driven=[wheel_index.get(key(w)) for w in targets('WHDriven')]
+    if None in driven:raise ValueError(f'{key(reader)} driven wheel is not a car wheel')
+    slots=targets('DrivenWheelSlots')
+    if any(source.class_name(s)!='partslotscript' for s in slots):raise ValueError(f'{key(reader)} driven wheel slot is not a partslotscript')
+    seat=source.resolve(reader,value['seat'])
+    seat_index=next((i for i,s in enumerate(seats) if seat is not None and s['source']==source_id(seat)),None)
+    if seat_index is None:raise ValueError(f'{key(reader)} seat is not a primary car seat')
+    nodes=lambda field:[proto.node(r) for r in targets(field)]
+    return {'source':source_id(reader),'driven_wheels':driven,'driven_slots':[proto.node(s) for s in slots],'seat':seat_index,
+        'pedals':nodes('pedals'),'pedals_inverse':nodes('pedalsInverse'),'feet_holders':nodes('pedalFeetHolder'),
+        'axes':nodes('Axis'),'axis_index':list(value['pedalAxisIndex']),'ratio':value['ratio'],
+        'speed_modifier':value['pedalingSpeedModifier'],'input_debounce':value['pedalInputDebounce'],
+        'gas_tap':value['gas_tap'],'player_use':bool(value['playerUse'])}
+
+
 def engine_fields(engine: dict) -> dict:
     """enginescript values. The car and mounted parts add tanks, starter delay and electronics."""
     return {**{field:engine[unity] for field,unity in ENGINE_FIELDS.items()},
@@ -329,7 +361,8 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'key_steer_multiplier':car['keySteerSensMultiplier'],
         # Source carscript.ledOilTestTwoStrokeDefault: the oil LED follows the two-stroke mix.
         'oil_led_two_stroke':bool(car['ledOilTestTwoStrokeDefault']),
-        'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        'seats':seats,'pedals':pedal_record(source,proto,car_reader,car,wheels,seats),
+        'no_gas_while_pedaling':bool(car['noGasWhilePedaling']),'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

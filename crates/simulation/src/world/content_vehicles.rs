@@ -679,6 +679,7 @@ mod tests {
                 DriveTorques {
                     motor_nm: 1600.,
                     engine_brake_nm: 0.,
+                    pedal_nm: None,
                 },
             );
             physics.step_physics();
