@@ -5,6 +5,7 @@ use crate::reference::{
     Bounds, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
     WorldPrototypeReference, WorldReference,
 };
+use crate::simulation::car_lights::CarLightLinks;
 use crate::simulation::powertrain::{EnginePart, PowertrainParts, RadiatorPart};
 use crate::starting_area::VehicleRuntime;
 use crate::vehicle::PhysicsWorld;
@@ -60,11 +61,40 @@ pub(super) fn bind(
             .iter()
             .position(|p| p.source == prototype.source)
             .ok_or_else(|| ReferenceError("Car prototype missing".into()))?;
-        let electronics = record
-            .electronics
-            .map(|node| electronics_output(world, rules, prototype, node))
-            .transpose()?
-            .flatten();
+        let electronics_of = |node: Option<u32>| -> Result<Option<f32>, ReferenceError> {
+            Ok(node
+                .map(|node| electronics_output(world, rules, prototype, node))
+                .transpose()?
+                .flatten())
+        };
+        // The nearest item that holds a node: a part, a usable or the car root.
+        let owner_item = |node: u32| {
+            let mut cursor = Some(node);
+            while let Some(n) = cursor {
+                if let Some(item) = node_item(n) {
+                    return Some(item);
+                }
+                cursor = prototype.nodes.get(n as usize).and_then(|n| n.parent);
+            }
+            None
+        };
+        let lights = record
+            .lights
+            .iter()
+            .map(|light| {
+                Ok(CarLightLinks {
+                    electronics: electronics_of(light.electronics)?,
+                    owner: owner_item(light.node).filter(|item| Some(*item) != content.item),
+                    doors: light
+                        .cabin
+                        .iter()
+                        .flat_map(|c| &c.door_slots)
+                        .map(|&node| owner_item(node))
+                        .collect(),
+                })
+            })
+            .collect::<Result<Vec<_>, ReferenceError>>()?;
+        let electronics = electronics_of(record.electronics)?;
         spawn(
             CarCopy {
                 key: ObjectKey::Generated(content.content.placement.id.clone()),
@@ -79,6 +109,7 @@ pub(super) fn bind(
                     .collect(),
                 fuel_tank: record.fuel_tank.and_then(node_item),
                 electronics,
+                lights,
             },
             prototype,
             physics,
@@ -174,6 +205,8 @@ pub(crate) struct CarCopy<'a> {
     pub fuel_tank: Option<ItemId>,
     /// `carscript.electronics` output. None: the car has no electronics.
     pub electronics: Option<f32>,
+    /// Links of each record light controller.
+    pub lights: Vec<CarLightLinks>,
 }
 
 /// Makes the chassis a vehicle and adds its car runtime with the retired state of its key.
@@ -202,6 +235,7 @@ pub(crate) fn spawn(
             recovery_bounds: chassis_bounds(physics, copy.colliders),
             bodies: copy.bodies,
             electronics: copy.electronics,
+            lights: copy.lights,
         },
     );
     if let Some(state) = changes.take_vehicle(&key) {
@@ -345,6 +379,7 @@ mod tests {
                 bodies: Vec::new(),
                 fuel_tank: Some(item),
                 electronics: None,
+                lights: Vec::new(),
             },
             prototype,
             physics,

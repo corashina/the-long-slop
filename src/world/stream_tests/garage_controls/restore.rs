@@ -179,7 +179,7 @@ fn g10_control_restore_has_no_side_effects() {
         audio.radio.on && initial.electronics_output > initial.electronics_cutoff
     );
     let r = &reference.vehicles[0].instruments;
-    let sample = restored.instrument_sample(&reference, 0);
+    let sample = restored.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0));
     let mut visual = InstrumentState::new(r);
     visual.initialize_from_sample(r, sample);
     assert!(
@@ -192,8 +192,8 @@ fn g10_control_restore_has_no_side_effects() {
         needle_angle(&r.needles[temperature], sample.temperature)
     );
     let expected = (
-        visual.needle_angles,
-        visual.digit_angles,
+        visual.needle_angles.clone(),
+        visual.digit_angles.clone(),
         visual.lamp_bits,
         visual.digits_lit,
     );

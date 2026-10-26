@@ -689,6 +689,30 @@ impl HeadlightState {
             state_count: reference.states.len(),
         }
     }
+    /// Startup state of a world car `headlightscript` or `rearlights` controller.
+    pub fn world(reference: &crate::reference::WorldLightReference) -> Self {
+        Self {
+            current_state: reference.current_state,
+            requested_state: reference.requested_state,
+            energy: reference.energy,
+            enabled: reference.enabled,
+            on: reference.startup_on,
+            refreshed_state: reference.current_state,
+            energy_move: reference.energy_move,
+            state_count: reference.states.len(),
+        }
+    }
+    /// Source `headlightscript` with its part removed: dark, and lit again from state 0.
+    pub fn unmount(&mut self) {
+        self.current_state = 0;
+        self.refreshed_state = 0;
+        self.energy = 0.;
+        self.enabled = true;
+    }
+    /// The state that the last refresh shows.
+    pub fn refreshed_state(&self) -> usize {
+        self.refreshed_state
+    }
     pub fn capture_save(&self, source: crate::save::SourceKey) -> crate::save::ControllerSnapshot {
         crate::save::ControllerSnapshot {
             source,
@@ -1262,10 +1286,7 @@ impl LightingState {
             if control.kind == crate::reference::LightControllerKind::Headlight
                 && !self.mounted[index]
             {
-                state.current_state = 0;
-                state.refreshed_state = 0;
-                state.energy = 0.;
-                state.enabled = true;
+                state.unmount();
                 self.refresh_fade(reference, index);
                 continue;
             }

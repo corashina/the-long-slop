@@ -10,7 +10,6 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::{ItemId, OpeningId, ReferenceManifest};
-use crate::simulation::instruments::InstrumentState;
 use crate::simulation::{FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
@@ -30,7 +29,6 @@ pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 pub(crate) struct Drive {
     pub runtime: GarageRuntime,
     /// Gauge state per vehicle.
-    instruments: Vec<InstrumentState>,
     input: FrameInput,
     frame_input: FrameInput,
     pub(crate) clock: StepClock,
@@ -155,11 +153,6 @@ pub fn run(
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
-            instruments: reference
-                .vehicles
-                .iter()
-                .map(|vehicle| InstrumentState::new(&vehicle.instruments))
-                .collect(),
             runtime,
             input: FrameInput::default(),
             frame_input: FrameInput::default(),
@@ -1002,16 +995,13 @@ fn sync_instruments(
             }
         }
     }
-    for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
-        let r = &vehicle.instruments;
-        let sample = run.instrument_sample(&reference.0, index);
-        if run.started && !run.paused {
-            drive.instruments[index].update(r, sample, drive.render_delta_seconds);
-        }
+    if run.started && !run.paused {
+        let dt = drive.render_delta_seconds;
+        drive.runtime.advance_instruments(&reference.0, dt, false);
     }
     visuals.update(
         &reference.0,
-        &drive.instruments,
+        &drive.runtime.vehicles,
         &mut transforms,
         &mut materials,
     );

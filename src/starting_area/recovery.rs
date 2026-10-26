@@ -374,12 +374,18 @@ mod tests {
         move_car(&mut physics, &keys[0], &[chassis[0], door], target);
         let car = physics.snapshot(&keys[0]).pose;
         for i in 0..3 {
-            assert!((car.position[i] - target.position[i]).abs() < 1e-4, "{car:?}");
+            assert!(
+                (car.position[i] - target.position[i]).abs() < 1e-4,
+                "{car:?}"
+            );
         }
         // The door keeps its place relative to the chassis.
         let local = physics.rapier().bodies[chassis[0]].position().inverse()
             * physics.rapier().bodies[door].translation();
-        assert!((local - Vector::new(1.0, 0.0, 0.0)).length() < 1e-4, "{local:?}");
+        assert!(
+            (local - Vector::new(1.0, 0.0, 0.0)).length() < 1e-4,
+            "{local:?}"
+        );
         assert_eq!(*physics.rapier().bodies[chassis[1]].position(), other);
     }
 }

@@ -374,7 +374,9 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
             b.node(node.0) && b.material(on) && b.material(off)
         }
     };
-    switch(&r.backlight)
+    // Gauge state keeps lamp bits in one u32.
+    r.lamps.len() <= 32
+        && switch(&r.backlight)
         && r.needles.iter().all(|n| {
             b.node(n.node.0)
                 && switch(&n.backlight)

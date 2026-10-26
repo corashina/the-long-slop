@@ -291,24 +291,32 @@ impl InstrumentVisuals {
         self.bound = true;
         Ok(true)
     }
-    /// `states` follow the order of the manifest vehicles.
+    /// Dashboards of the old garage cars read their car runtimes.
     pub fn update(
         &mut self,
         reference: &ReferenceManifest,
-        states: &[InstrumentState],
+        vehicles: &std::collections::BTreeMap<
+            crate::world::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
         transforms: &mut Query<&mut Transform, Without<super::camera::DriveCamera>>,
         materials: &mut Query<&mut MeshMaterial3d<SourceMaterial>>,
     ) {
         if !self.prepared {
             return;
         }
-        for ((dashboard, vehicle), state) in self
+        for (index, (dashboard, vehicle)) in self
             .dashboards
             .iter_mut()
             .zip(&reference.vehicles)
-            .zip(states)
+            .enumerate()
         {
-            dashboard.update(&vehicle.instruments, state, transforms, materials);
+            if let Some(state) = vehicles
+                .get(&crate::vehicle::garage_vehicle_key(index))
+                .and_then(|v| v.instruments.as_ref())
+            {
+                dashboard.update(&vehicle.instruments, state, transforms, materials);
+            }
         }
     }
 

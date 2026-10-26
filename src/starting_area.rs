@@ -629,6 +629,16 @@ impl VehicleRecord {
             Self::World(index) => self::world_vehicle(reference, index).into(),
         }
     }
+    /// Gauges of the record. A world car without gauges has none.
+    pub fn instruments(
+        self,
+        reference: &ReferenceManifest,
+    ) -> Option<&crate::reference::InstrumentReference> {
+        match self {
+            Self::Garage(index) => Some(&reference.vehicles[index].instruments),
+            Self::World(index) => self::world_vehicle(reference, index).instruments.as_ref(),
+        }
+    }
     /// Source `carscript.psSmoke` systems of the record.
     pub fn exhaust(self, reference: &ReferenceManifest) -> &[crate::reference::ParticleReference] {
         match self {
@@ -664,6 +674,8 @@ pub(crate) struct WorldCarParts {
     pub bodies: Vec<RigidBodyHandle>,
     /// `carscript.electronics` output. None: the car has no electronics.
     pub electronics: Option<f32>,
+    /// Links of each record light controller.
+    pub lights: Vec<crate::simulation::car_lights::CarLightLinks>,
 }
 
 /// Car-side state of a car copy. The world change records keep it while the car is retired
@@ -693,6 +705,13 @@ pub struct VehicleRuntime {
     pub starter_delay_seconds: f32,
     /// Car electronics allow ignition.
     pub electronics_enabled: bool,
+    /// Gauge state. The presentation advances it each frame.
+    pub instruments: Option<crate::simulation::instruments::InstrumentState>,
+    /// Light controllers of a world car. V03 bridge: old garage cars keep them in
+    /// `LightingState`. Task 9 removes it.
+    pub lights: Option<crate::simulation::car_lights::CarLights>,
+    /// Brake input of the last step. The brake lamps read it.
+    brake: f32,
     /// V03 bridge: wheel effects of old garage cars only. Task 9a adds world car records.
     pub wheel_effects: Option<crate::wheel_effects::WheelEffects>,
     recovery_bounds: crate::reference::Bounds,
@@ -726,12 +745,29 @@ impl VehicleRuntime {
             electronics_enabled: parts
                 .electronics
                 .is_none_or(|output| output > ELECTRONICS_CUTOFF),
+            instruments: record
+                .instruments
+                .as_ref()
+                .map(crate::simulation::instruments::InstrumentState::new),
+            lights: Some(crate::simulation::car_lights::CarLights::new(
+                record,
+                parts.lights,
+            )),
+            brake: 0.,
             wheel_effects: None,
             recovery_bounds: parts.recovery_bounds,
             bodies: parts.bodies,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
             requested_headlights: 0,
+        }
+    }
+    /// Requested headlight state: off, low or high.
+    pub fn headlights(&self, lighting: &crate::lighting::LightingState) -> u8 {
+        match self.record {
+            // V03 bridge: old garage cars keep the request in `LightingState`. Task 9 removes it.
+            VehicleRecord::Garage(index) => lighting.headlights(index),
+            VehicleRecord::World(_) => self.requested_headlights,
         }
     }
     pub fn state(&self) -> VehicleState {
@@ -790,6 +826,11 @@ impl VehicleRuntime {
             fuel_tank: Some(vehicle.engine.fuel_tank),
             starter_delay_seconds: vehicle.engine.starter_delay_seconds,
             electronics_enabled: vehicle.engine.electronics_enabled,
+            instruments: Some(crate::simulation::instruments::InstrumentState::new(
+                &vehicle.instruments,
+            )),
+            lights: None,
+            brake: 0.,
             wheel_effects: Some(crate::wheel_effects::WheelEffects::new(
                 &vehicle.wheel_effects,
                 &reference.skid,
@@ -807,6 +848,8 @@ impl VehicleRuntime {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod engine_tests;
 mod inventory;
+#[cfg(test)]
+mod world_car_tests;
 pub use inventory::InventoryFrame;
 mod save;
 
@@ -964,25 +1007,23 @@ impl GarageRuntime {
             0x70697373,
         );
         let vehicles = reference
-                .vehicles
-                .iter()
-                .enumerate()
-                .map(|(index, vehicle)| {
-                    let bodies = area
-                        .bodies
-                        .iter()
-                        .filter(|(id, _)| body_vehicle(reference, **id) == Some(index))
-                        .map(|(_, handle)| *handle)
-                        .filter(|handle| {
-                            *handle != physics.chassis_handle(&garage_vehicle_key(index))
-                        })
-                        .collect();
-                    Ok((
-                        garage_vehicle_key(index),
-                        VehicleRuntime::new(reference, index, vehicle, bodies)?,
-                    ))
-                })
-                .collect::<Result<_, ReferenceError>>()?;
+            .vehicles
+            .iter()
+            .enumerate()
+            .map(|(index, vehicle)| {
+                let bodies = area
+                    .bodies
+                    .iter()
+                    .filter(|(id, _)| body_vehicle(reference, **id) == Some(index))
+                    .map(|(_, handle)| *handle)
+                    .filter(|handle| *handle != physics.chassis_handle(&garage_vehicle_key(index)))
+                    .collect();
+                Ok((
+                    garage_vehicle_key(index),
+                    VehicleRuntime::new(reference, index, vehicle, bodies)?,
+                ))
+            })
+            .collect::<Result<_, ReferenceError>>()?;
         let mut run = Self {
             driving_assists: reference.driving.default_assists,
             urine,
@@ -1556,6 +1597,7 @@ impl GarageRuntime {
         for (key, vehicle) in &mut vehicles {
             let driven = driving && self.vehicle.as_ref() == Some(key);
             self.step_vehicle(reference, key, vehicle, vehicle_input, driven, controls);
+            self.advance_car_lights(reference, key, vehicle);
             self.advance_exhaust(reference, key, vehicle);
             self.advance_wheel_effects(reference, key, vehicle);
         }
@@ -1801,33 +1843,94 @@ impl GarageRuntime {
         );
     }
 
+    /// Gauge inputs of car `key`.
     pub fn instrument_sample(
         &self,
         reference: &ReferenceManifest,
-        index: usize,
+        key: &ObjectKey,
     ) -> crate::simulation::instruments::InstrumentSample {
-        let amount = |id: ItemId| {
-            self.area
-                .items
-                .get(id)
-                .and_then(|i| i.fluid.as_ref())
-                .map_or(0., |f| f.finite_total())
-        };
-        let key = garage_vehicle_key(index);
-        let state = &self.vehicles[&key];
-        let r = &reference.vehicles[index].instruments;
-        let engine = self.mounted_engine(&key);
-        crate::simulation::instruments::InstrumentSample {
-            speed_kmh: self.physics.snapshot(&key).speed_mps * 3.6,
-            fuel_liters: state.fuel_tank.map_or(0., amount),
-            oil_liters: engine.and_then(|e| e.oil_tank).map_or(0., amount),
-            temperature: engine.map_or(0., |e| e.state.output().temperature),
-            rpm: engine.map_or(0., |e| e.state.output().rpm),
-            headlights: self.lighting.headlights(index),
-            local_ignition: state.ignition.ignition
-                && r.electronics_output > r.electronics_off_threshold,
-            distance_m: state.trip_m,
+        let vehicle = &self.vehicles[key];
+        instrument_sample(
+            &self.area.items,
+            &self.physics,
+            &self.powertrain,
+            key,
+            vehicle,
+            vehicle
+                .record
+                .instruments(reference)
+                .expect("car with gauges"),
+            vehicle.headlights(&self.lighting),
+        )
+    }
+    /// Advances the gauges of every car by render time `dt`. `initialize` jumps to the targets.
+    pub fn advance_instruments(
+        &mut self,
+        reference: &ReferenceManifest,
+        dt: f32,
+        initialize: bool,
+    ) {
+        let Self {
+            vehicles,
+            area,
+            physics,
+            powertrain,
+            lighting,
+            ..
+        } = self;
+        for (key, vehicle) in vehicles.iter_mut() {
+            let Some(r) = vehicle.record.instruments(reference) else {
+                continue;
+            };
+            let sample = instrument_sample(
+                &area.items,
+                physics,
+                powertrain,
+                key,
+                vehicle,
+                r,
+                vehicle.headlights(lighting),
+            );
+            let Some(state) = vehicle.instruments.as_mut() else {
+                continue;
+            };
+            if initialize {
+                state.initialize_from_sample(r, sample);
+            } else {
+                state.update(r, sample, dt);
+            }
         }
+    }
+
+    /// Steps the light controllers of a world car.
+    fn advance_car_lights(
+        &self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        vehicle: &mut VehicleRuntime,
+    ) {
+        let VehicleRecord::World(index) = vehicle.record else {
+            return;
+        };
+        let Some(lights) = vehicle.lights.as_mut() else {
+            return;
+        };
+        let record = world_vehicle(reference, index);
+        let input = crate::simulation::car_lights::CarLightInput {
+            requested: vehicle.requested_headlights,
+            ignition: vehicle.ignition.ignition,
+            brake: vehicle.brake,
+            gear_ratio: record.gear_ratios[vehicle.drivetrain.gear()],
+        };
+        let (items, mechanisms) = (&self.area.items, &self.area.interaction.mechanisms);
+        let root = items.resolve_key(key);
+        lights.advance(
+            record,
+            input,
+            |item| root.is_some_and(|root| item == root || items.descends(item, root)),
+            |item| mechanisms.value(item, false).unwrap_or(0.),
+            FIXED_DT,
+        );
     }
 
     /// Advances exhaust smoke every step, so old smoke ages out when the engine stops.
@@ -1989,6 +2092,7 @@ impl GarageRuntime {
         let gear = drivetrain.gear;
         let throttle = drivetrain.throttle;
         let brake = drivetrain.brake;
+        vehicle.brake = brake;
         let car_controls = chassis_active
             && (driving
                 || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(key)));
@@ -2465,6 +2569,39 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, true);
         self.startup_aligned = true;
         Ok(true)
+    }
+}
+
+/// Gauge inputs of car `key` with gauges `r`. `headlights` is its requested headlight state.
+pub(crate) fn instrument_sample(
+    items: &crate::interaction::items::ItemStore,
+    physics: &PhysicsWorld,
+    powertrain: &PowertrainParts,
+    key: &ObjectKey,
+    vehicle: &VehicleRuntime,
+    r: &crate::reference::InstrumentReference,
+    headlights: u8,
+) -> crate::simulation::instruments::InstrumentSample {
+    let amount = |id: ItemId| {
+        items
+            .get(id)
+            .and_then(|i| i.fluid.as_ref())
+            .map_or(0., |f| f.finite_total())
+    };
+    let engine = vehicle
+        .powertrain
+        .engine
+        .and_then(|item| powertrain.engine(item));
+    crate::simulation::instruments::InstrumentSample {
+        speed_kmh: physics.snapshot(key).speed_mps * 3.6,
+        fuel_liters: vehicle.fuel_tank.map_or(0., amount),
+        oil_liters: engine.and_then(|e| e.oil_tank).map_or(0., amount),
+        temperature: engine.map_or(0., |e| e.state.output().temperature),
+        rpm: engine.map_or(0., |e| e.state.output().rpm),
+        headlights,
+        local_ignition: vehicle.ignition.ignition
+            && r.electronics_output > r.electronics_off_threshold,
+        distance_m: vehicle.trip_m,
     }
 }
 

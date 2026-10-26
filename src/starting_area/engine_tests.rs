@@ -81,7 +81,7 @@ fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
             .unwrap()
             .restore_entries(&source_entries);
     }
-    let sample = run.instrument_sample(&reference, 0);
+    let sample = run.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0));
     assert!(sample.local_ignition);
     assert_eq!(sample.fuel_liters, 0.);
     assert_eq!(sample.oil_liters, 0.);
@@ -119,7 +119,7 @@ fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
                 amount: 10.,
             }]);
     }
-    let sample = run.instrument_sample(&reference, 0);
+    let sample = run.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0));
     assert_eq!(sample.fuel_liters, 10.);
     assert_eq!(sample.oil_liters, 10.);
     let fuel_needle = instruments
@@ -314,7 +314,7 @@ fn ignition_and_attachment() {
     assert!(!run.garage_car(0).ignition.ignition);
     step(&mut run, &reference, tap);
     assert!(run.garage_car(0).ignition.ignition);
-    let sample = run.instrument_sample(&reference, 0);
+    let sample = run.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0));
     assert!(sample.local_ignition);
     assert_eq!(sample.rpm, 0.);
     assert_eq!(sample.temperature, 0.);
@@ -574,7 +574,10 @@ fn active_chassis_preserves_inactive_detached_engine() {
     };
     step(&mut run, &reference, tap);
     assert!(!run.garage_car(0).ignition.ignition);
-    assert!(!run.instrument_sample(&reference, 0).local_ignition);
+    assert!(
+        !run.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0))
+            .local_ignition
+    );
     run.physics.edit_body(chassis, |body| body.sleep());
     run.step_garage_car(
         &reference,
@@ -587,7 +590,10 @@ fn active_chassis_preserves_inactive_detached_engine() {
         },
     );
     assert!(run.garage_car(0).ignition.ignition);
-    assert!(run.instrument_sample(&reference, 0).local_ignition);
+    assert!(
+        run.instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0))
+            .local_ignition
+    );
     assert!(!run.physics.rapier().bodies[chassis].is_sleeping());
     let brake = reference
         .lighting
@@ -1104,9 +1110,16 @@ fn garage_engine_remove_restore_continue() {
         step(&mut run, &reference, tap);
         step(&mut loaded, &reference, tap);
         assert_eq!(run.garage_car(0).ignition.ignition, expected);
-        assert_eq!(loaded.instrument_sample(&reference, 0).rpm, 0.);
         assert_eq!(
-            loaded.instrument_sample(&reference, 0).local_ignition,
+            loaded
+                .instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0))
+                .rpm,
+            0.
+        );
+        assert_eq!(
+            loaded
+                .instrument_sample(&reference, &crate::vehicle::garage_vehicle_key(0))
+                .local_ignition,
             expected
         );
         compare(&run, &loaded);

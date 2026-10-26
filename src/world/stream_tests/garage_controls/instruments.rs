@@ -117,8 +117,8 @@ fn g10_instrument_lighting_matrix() {
                         assert_eq!(state.lamp_bits & (1 << i) != 0, expected, "{}", lamp.signal);
                     }
                     let baseline = (
-                        state.needle_angles,
-                        state.digit_angles,
+                        state.needle_angles.clone(),
+                        state.digit_angles.clone(),
                         state.lamp_bits,
                         state.digits_lit,
                     );
