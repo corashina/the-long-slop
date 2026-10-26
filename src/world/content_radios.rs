@@ -411,6 +411,7 @@ mod tests {
             fluids: None,
             valve: None,
             lamp: None,
+            lamp_broken: None,
             dial: None,
             ammo: None,
             glow: None,

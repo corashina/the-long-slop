@@ -441,7 +441,7 @@ impl GarageRuntime {
                 .apply_inventory_command(command, reference, &mut self.physics)
                 .expect("checked inventory bindings");
         }
-        self.advance_melee(input, dt);
+        self.advance_melee(reference, input, dt);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -643,7 +643,7 @@ impl GarageRuntime {
         );
     }
     /// `weaponhandlingscript` and `meleeweaponscript` for a shovel in the right hand.
-    fn advance_melee(&mut self, input: FrameInput, dt: f32) {
+    fn advance_melee(&mut self, reference: &ReferenceManifest, input: FrameInput, dt: f32) {
         use crate::interaction::melee::MeleeInput;
         let interaction = &mut self.area.interaction;
         let shovel = interaction.equipment.item().filter(|id| {
@@ -669,6 +669,8 @@ impl GarageRuntime {
             &mut self.area.items,
             &mut self.physics,
             &mut interaction.buried,
+            &mut self.stream.breakables,
+            &reference.breakables,
             player,
             self.area.origin,
         );
