@@ -259,12 +259,6 @@ impl SaveSnapshot {
                     }
                     parents.insert(id, owner);
                 }
-                ItemLocationSave::Locked { owner, volume } => {
-                    let owner = ids.item(owner)?;
-                    links(items.contains_key(&owner), "Missing storage owner")?;
-                    storage_volume_owner(&reference.storage.volumes, volume, owner)?;
-                    parents.insert(id, owner);
-                }
                 ItemLocationSave::GeneratedAttachment { .. }
                 | ItemLocationSave::World
                 | ItemLocationSave::Held
@@ -1002,59 +996,3 @@ fn timestamp(value: &str) -> bool {
 
 #[path = "validate_world.rs"]
 mod world;
-/// The saved volume exists and belongs to the saved owner.
-fn storage_volume_owner(
-    volumes: &[r::StorageVolumeReference],
-    volume: &SourceKey,
-    owner: r::ItemId,
-) -> Result<(), SaveError> {
-    let record = volumes
-        .iter()
-        .find(|v| SourceKey::from(&v.source) == *volume)
-        .ok_or_else(|| invalid("Unknown storage volume"))?;
-    links(record.owner == owner, "Storage volume owner")
-}
-
-#[cfg(test)]
-mod storage_tests {
-    use super::*;
-
-    fn volume(path_id: i64, owner: u32) -> r::StorageVolumeReference {
-        r::StorageVolumeReference {
-            source: r::SourceId {
-                file: "level".into(),
-                path_id,
-            },
-            node: r::NodeId(0),
-            owner: r::ItemId(owner),
-            collider: r::ColliderId(0),
-            center: [0.; 3],
-            half_extents: [1.; 3],
-            storage_type: 0,
-            only_manual: false,
-            no_physics_lock: false,
-            owner_pickup: None,
-            dont_lock_if_owner_picked_up: false,
-            slots: Vec::new(),
-            usables: Vec::new(),
-            active: true,
-        }
-    }
-
-    #[test]
-    fn locked_volume_must_belong_to_the_owner() {
-        let volumes = [volume(10, 1), volume(20, 2)];
-        let key = |path_id: i64| {
-            SourceKey::from(&r::SourceId {
-                file: "level".into(),
-                path_id,
-            })
-        };
-        assert!(storage_volume_owner(&volumes, &key(20), r::ItemId(2)).is_ok());
-        assert!(matches!(
-            storage_volume_owner(&volumes, &key(20), r::ItemId(1)),
-            Err(SaveError::InvalidLinks(_))
-        ));
-        assert!(storage_volume_owner(&volumes, &key(30), r::ItemId(1)).is_err());
-    }
-}

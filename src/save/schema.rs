@@ -262,11 +262,6 @@ pub enum ItemLocationSave {
     Attached {
         owner: InstanceId,
     },
-    /// Physics lock in a storage volume. `local_pose` is the pose to the owner.
-    Locked {
-        owner: InstanceId,
-        volume: SourceKey,
-    },
     GeneratedAttachment {
         #[serde(with = "super::identity::lossless")]
         attachment: crate::world::AttachmentSnapshot,

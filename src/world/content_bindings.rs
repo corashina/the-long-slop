@@ -1447,6 +1447,13 @@ fn bind_storage(
                 node as usize,
             )
         },
+        |source| {
+            content
+                .slots
+                .iter()
+                .find(|s| s.source == *source)
+                .map(|s| s.slot)
+        },
     )
 }
 

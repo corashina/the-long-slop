@@ -134,7 +134,6 @@ impl StartingArea {
         interaction.rebase(origin.map(|v| v as f32));
         interaction.sync_mechanisms(physics);
         interaction.parts.bind(&mut items, physics)?;
-        interaction.storage.bind(physics)?;
         interaction.sync_parts(&mut items, physics)?;
         let starter = reference.survival.starter_food;
         if let Some(food) = items.get(starter).and_then(|item| item.food) {
@@ -1152,7 +1151,10 @@ impl GarageRuntime {
                             .radio_control(knob, direction, &mut self.area.items)
                     && let (Some(audio), Some(item)) = (&mut self.audio, self.area.items.get(item))
                 {
-                    audio.radio_click_at(item.pose.position);
+                    let origin = self.area.origin;
+                    audio.radio_click_at(std::array::from_fn(|i| {
+                        origin[i] + f64::from(item.pose.position[i])
+                    }));
                 }
             }
             Some(InteractionAction::Crank(knob, look)) => {
