@@ -303,4 +303,38 @@ mod tests {
             assert_eq!((output.rpm, output.torque_nm), (0., 0.));
         }
     }
+
+    /// Source fuel rule: the tank mix must match the engine `FuelConsumption` mix. Diesel is
+    /// data only: fluid 5 (`fluidenum.diesel`).
+    #[test]
+    fn diesel_engine_starts_on_diesel_and_not_on_petrol() {
+        const PETROL: u8 = 0;
+        const DIESEL: u8 = 5;
+        let world = |tank: u8| {
+            let (mut items, mut parts) = world();
+            items.get_mut(FUEL[0]).unwrap().fluid = Some(FluidContainer::new(
+                10.,
+                &[FluidEntry {
+                    fluid_type: tank,
+                    amount: 5.,
+                }],
+            ));
+            parts.engine_mut(ENGINE).unwrap().record.fuel_consumption = [0., 0., 0., 0., 0., 1.];
+            (items, parts)
+        };
+        let (mut items, mut parts) = world(DIESEL);
+        let output = run(&mut items, &mut parts, 0);
+        assert!(
+            output.running && output.fuel_suitability == 1.,
+            "{output:?}"
+        );
+
+        let (mut items, mut parts) = world(PETROL);
+        let output = run(&mut items, &mut parts, 0);
+        assert!(
+            !output.running && output.fuel_suitability == 0.,
+            "{output:?}"
+        );
+        assert_eq!(output.torque_nm, 0.);
+    }
 }
