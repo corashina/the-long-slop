@@ -22,6 +22,8 @@ pub mod lod;
 
 pub mod node_plan;
 
+pub mod gpu_props;
+
 pub mod instances;
 
 pub mod runtime;

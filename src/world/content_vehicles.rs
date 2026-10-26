@@ -9,7 +9,7 @@ use crate::reference::{
     WorldPrototypeReference, WorldReference,
 };
 use crate::simulation::car_lights::CarLightLinks;
-use crate::simulation::powertrain::{EnginePart, PowertrainParts, RadiatorPart};
+use crate::simulation::powertrain::{EnginePart, GaugePart, PowertrainParts, RadiatorPart};
 use crate::starting_area::VehicleRuntime;
 use crate::vehicle::PhysicsWorld;
 use crate::world::changes::ChangeRecords;
@@ -159,6 +159,19 @@ pub(super) fn bind(
             items,
             changes,
         )?;
+        // carscript.kmhmeters slots: (row, slot) pairs.
+        let mut kmh_slots = Vec::new();
+        for (row, k) in record.kmh_meters.iter().enumerate() {
+            for source in &k.slots {
+                let slot = content
+                    .slots
+                    .iter()
+                    .find(|s| &s.source == source)
+                    .ok_or_else(|| ReferenceError("Car gauge slot is not bound".into()))?;
+                kmh_slots.push((row, slot.slot));
+            }
+        }
+        vehicles.get_mut(&key).unwrap().kmh_slots = kmh_slots;
         for ((id, source), slot) in ids.into_iter().zip(slot_sources).zip(&wheel_slots) {
             interaction.register_wheel_slot(id, owner, source, slot, wheels.rules());
         }
@@ -180,6 +193,28 @@ pub(super) fn bind(
         };
         let coolant_tank = record.coolant_tank.and_then(node_item);
         register_radiator(item, record, coolant_tank, items, powertrain, changes);
+    }
+    for record in &prototype.gauges {
+        // The gauge part: the nearest item at or above the meter node.
+        let mut cursor = Some(record.node);
+        let mut item = None;
+        while let Some(n) = cursor {
+            item = node_item(n);
+            if item.is_some() {
+                break;
+            }
+            cursor = prototype.nodes.get(n as usize).and_then(|n| n.parent);
+        }
+        let Some(item) = item else {
+            continue;
+        };
+        let mut part = GaugePart::new(item, record.clone(), content.content.placement.id.clone());
+        if let Some(saved) = changes.take_gauge(&items.object_key(item))
+            && !part.state.restore_save(record, &saved)
+        {
+            return Err(ReferenceError("Saved gauge values do not fit the gauge".into()));
+        }
+        powertrain.register_gauge(part);
     }
     Ok(())
 }
@@ -456,7 +491,7 @@ pub(super) fn retire(
     }
 }
 
-/// Keeps the engine and radiator state of `item` and removes its parts.
+/// Keeps the engine, radiator and gauge state of `item` and removes its parts.
 pub(crate) fn retire_parts(
     item: ItemId,
     items: &ItemStore,
@@ -468,6 +503,9 @@ pub(crate) fn retire_parts(
     }
     if let Some(part) = powertrain.radiator(item) {
         changes.keep_radiator(items.object_key(item), part.fan_on);
+    }
+    if let Some(part) = powertrain.gauge(item) {
+        changes.keep_gauge(items.object_key(item), part.state.capture_save());
     }
     powertrain.remove(item);
 }

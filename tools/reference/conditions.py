@@ -411,7 +411,6 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
                 'wash_on_shoot':bool(d['washOnShoot']),'chance_to_start_disabled':chance,'particles':effects})
     washes={key(source.get(w['source']['file'],w['source']['path_id'])):w['id'] for w in result['washes']}
     slots={key(source.get(s['source']['file'],s['source']['path_id'])):s['id'] for s in source.condition_part_slots}
-    wheels={(w['source']['file'],w['source']['path_id']):w['id'] for w in source.condition_wheel_slots}
     anchors={a['id']:a for a in source.condition_anchors}
     tire_slots={}
     for part in source.condition_wheel_parts:
@@ -431,13 +430,13 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
         slot=ancestor(node,'partslotscript');wash=ancestor(node,'washtriggerscript')
         if not any((direct,explicit,forwarded,slot,wash)):continue
         slot_id=key(slot) if slot else None
-        if slot and sum(slot_id in table for table in (slots,wheels,tire_slots))!=1:
+        if slot and sum(slot_id in table for table in (slots,tire_slots))!=1:
             raise ValueError(f'{key(slot)} installed_slot ownership unresolved or ambiguous')
         result['collider_bindings'].append({'collider':collider['id'],'source':collider['source'],
             'ancestor_condition':cid(direct,'ancestor_condition'),'pickup_condition':cid(explicit,'pickup_condition'),
             'forwarded_condition':cid(forwarded,'forwarded_condition'),
             'installed_slot_source':sid(slot),'installed_part_slot':slots.get(slot_id),
-            'installed_wheel_slot':wheels.get(slot_id),'installed_tire_slot':tire_slots.get(slot_id),'wash':washes[key(wash)] if wash else None})
+            'installed_tire_slot':tire_slots.get(slot_id),'wash':washes[key(wash)] if wash else None})
     source.condition_record=result
     physics=source.get('globalgamemanagers',10)
     queries_hit_triggers=source.read(physics)['m_QueriesHitTriggers']

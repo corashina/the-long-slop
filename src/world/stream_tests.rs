@@ -11,6 +11,8 @@ mod item_seats;
 mod long_trip;
 #[path = "stream_tests/sled.rs"]
 mod sled;
+#[path = "stream_tests/two_cars.rs"]
+mod two_cars;
 
 use super::*;
 use crate::starting_area::GarageRuntime;
@@ -1392,6 +1394,7 @@ fn replay_index_query_matches_old_order_and_exact_bounds() {
         [
             "bus_doors",
             "engines",
+            "gauges",
             "radiators",
             "records",
             "vehicles",

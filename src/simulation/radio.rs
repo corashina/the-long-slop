@@ -433,7 +433,7 @@ mod a09_save {
                 "kind": "game", "selected": method, "music_start": method, "talk_start": method,
                 "multiplayer": method
             },
-            "click_binding": null, "stations": [], "methods": [], "tuning_repeat_seconds": 0.1,
+            "stations": [], "methods": [], "tuning_repeat_seconds": 0.1,
             "holiday_ranges": [[0, 0, 0, 0], [0, 0, 0, 0]]
         }))
         .unwrap()

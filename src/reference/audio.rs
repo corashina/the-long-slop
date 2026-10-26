@@ -70,7 +70,7 @@ record!(RadioClockReference {
 record!(RadioAudioReference {
     constants: BTreeMap<String, f32>, fm_tolerance: f32, am_tolerance: f32,
     electronics_cutoff: f32, time_correction_seconds: f32, late_seek_margin_seconds: f32,
-    custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
+    custom_gain: f32, clock: RadioClockReference, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
     tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
 });
 // radioscript SS, SC and SC2 settings shared by the world radios in `sources` (portable and car radios).
@@ -574,7 +574,6 @@ impl AudioReference {
                 ])
                 && r.fm_tolerance > 0.0
                 && r.am_tolerance > 0.0
-                && r.click_binding.is_none_or(|b| bindings.contains(&b))
                 && r.methods.iter().all(method),
             "audio radio",
         )?;
@@ -955,6 +954,7 @@ impl AudioGameplayReference {
             (16, "storm_inside"),
             (17, "melee_hit"),
             (18, "metal_detector"),
+            (21, "radio_click"),
         ] {
             require(
                 r.bindings
@@ -984,7 +984,7 @@ impl AudioGameplayReference {
         };
         let (zones, sleds) = (optional(19, "ambience_zone"), optional(20, "sled"));
         require(
-            zones <= 1 && sleds <= 1 && r.bindings.len() == 18 + zones + sleds,
+            zones <= 1 && sleds <= 1 && r.bindings.len() == 19 + zones + sleds,
             "required audio roles",
         )?;
         Ok(r)

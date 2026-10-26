@@ -6,7 +6,7 @@ import math
 from .source import key, source_id
 from .wheels import wheel_collider_record
 from .driving import car_driving, road_wheels, hub_record, wheel_graphics
-from .instruments import instrument_record
+from .instruments import instrument_record, gauge_limits, Meters
 from .lighting import vehicle_light_links, vehicle_states
 from .particles import recover_exhaust
 from .wheel_effects import recover_wheel_effects, effect_gains
@@ -107,15 +107,46 @@ class Prototype:
         return [self.node(r) for p in pointers if (r:=self.source.resolve(owner,p))]
 
 
-def part_records(source, hierarchy) -> tuple[list, list]:
-    """Engine and radiator records of every enginescript and coolantTankscript node."""
+def gauge_records(source, proto, asset, material_indices) -> list:
+    """Gauge part records: each meterscript on a part node that is not a built-in car meter."""
+    source=proto.source
+    built_in={key(source.resolve(c,p)) for _,c in proto.scripts('carscript') for p in source.read(c)['meters'] if p['m_PathID']}
+    build=Meters(source,proto.nodes,asset,material_indices)
+    records=[]
+    for node,reader in proto.scripts('meterscript'):
+        if key(reader) in built_in:continue
+        # The meter belongs to the nearest partscript node at or above it.
+        current=proto.hierarchy[node]['reader'];part=False
+        while current is not None and key(current) in proto.nodes:
+            if any(c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID'] and source.class_name(c)=='partscript'
+                   for c in proto.hierarchy[proto.nodes[key(current)]]['components']):
+                part=True;break
+            current=source.resolve(current,source.read(current)['m_Father'])
+        if part:records.append(build.gauge(reader,node))
+    return records
+
+
+def kmh_meters(source, proto, car_reader, car) -> list:
+    """carscript.kmhmeters: gauge slots and how their meters read."""
+    rows=[]
+    for k in car['kmhmeters']:
+        slots=[source.resolve(car_reader,p) for p in k['slots'] if p['m_PathID']]
+        for slot in slots:
+            if source.class_name(slot)!='partslotscript':raise ValueError(f'{key(car_reader)} kmhmeters slot is not a partslotscript')
+            proto.node(slot)
+        rows.append({'force':bool(k['force']),'modifier':k['modifier'],'types':list(k['types']),'slots':[source_id(s) for s in slots]})
+    return rows
+
+
+def part_records(source, hierarchy, asset, material_indices) -> tuple[list, list, list]:
+    """Engine, radiator and gauge records of the part nodes of one prototype."""
     proto=Prototype(source,hierarchy)
     engines=[{'source':source_id(reader),'node':node,'oil_tank':proto.link(reader,value['T']),**engine_fields(value)}
         for node,reader in proto.scripts('enginescript') for value in (source.read(reader),)]
     radiators=[{'source':source_id(reader),'node':node,'coolant_tank':proto.link(reader,value['coolant']),
         'fan_node':proto.link(reader,value['Fan']),**radiator_fields(value)}
         for node,reader in proto.scripts('coolantTankscript') for value in (source.read(reader),)]
-    return engines,radiators
+    return engines,radiators,gauge_records(source,proto,asset,material_indices)
 
 
 def material_link(source, owner, pointer, asset, material_indices):
@@ -220,7 +251,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         if value['mainseat']['m_PathID']:continue
         seats.append({'source':source_id(reader),**seat_fields(source,reader,value,car_reader)})
     lights,light_switch=light_records(source,proto,car_reader,car,asset,material_indices)
-    instruments=instrument_record(source,hierarchy[0]['reader'],proto.nodes,asset,material_indices)
+    instruments=instrument_record(source,car_reader,proto.nodes,asset,material_indices)
     tanks=[c for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='tankscript']
     return {'source':source_id(car_reader),'body':body,'car_type':car['carType'],
         'colliders':[i for i,c in enumerate(colliders) if c['body']==body and c['enabled']],
@@ -241,5 +272,6 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),
         'seats':seats,'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

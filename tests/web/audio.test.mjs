@@ -10,7 +10,7 @@ import {ClipCache} from '../../web/audio/clips.js';
 import {installAudioBridge} from '../../web/audio.js';
 const manifest=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.json',import.meta.url)));
 const raw=manifest.audio;
-const binding=raw.bindings.find(b=>b.id===raw.radio.click_binding);
+const binding=raw.bindings[0];
 const samples=readFileSync(new URL('../../web/assets/'+raw.clips.find(c=>c.id===binding.clips[0]).path,import.meta.url));
 const param=()=>({value:0,setValueAtTime(v){this.value=v;}});
 class Node {constructor(){this.gain=param();this.pan=param();this.frequency=param();this.Q=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ','orientationX','orientationY','orientationZ'])this[n]=param();}connect(){}disconnect(){}start(t,o=0){this.offset=o;Fake.starts.push(this);}stop(time){if(time>0)this.stopTime=time;else this.stopped=true;}}

@@ -1,13 +1,12 @@
 //! Source `mountStuff` physics locks. Any loose item can lock to a storage volume.
-//! Source volumes bind at startup. World prototype volumes bind while their owner streams in.
+//! World prototype volumes bind while their owner streams in.
 use super::{
     items::{ItemLocation, ItemStore},
     mechanisms::MechanismState,
     parts::PartAttachments,
 };
 use crate::reference::{
-    ColliderGeometry, ColliderId, ItemId, PartSlotId, PrototypeStorageFlag, ReferenceError,
-    ReferenceManifest, SourceId,
+    ItemId, PartSlotId, PrototypeStorageFlag, ReferenceError, ReferenceManifest, SourceId,
 };
 use crate::vehicle::{PhysicsWorld, VEHICLE_COLLIDER_FLAG, from_rapier, to_rapier};
 use rapier3d::math::{Pose, Rotation, Vector};
@@ -33,15 +32,9 @@ struct Locked {
 }
 /// Where a volume gets its world pose.
 enum Frame {
-    /// Source volume: a reference collider, bound at startup.
-    Collider {
-        id: ColliderId,
-        handle: Option<ColliderHandle>,
-        source: SourceId,
-    },
-    /// World volume: the box pose relative to the owner item, and its prototype volume record.
+    /// The box pose relative to the owner item, and its prototype volume record.
     Owner { local: Pose, record: u16 },
-    /// Free world volume slot.
+    /// Free volume slot.
     Free,
 }
 struct Volume {
@@ -68,7 +61,7 @@ impl Volume {
             active: false,
             only_manual: false,
             dont_lock_if_owner_picked_up: false,
-            slots: Vec::new(),
+            slots: Vec::with_capacity(4),
             usables: Vec::with_capacity(4),
             frame: Frame::Free,
             shape: SharedShape::ball(0.0),
@@ -90,13 +83,14 @@ struct PrototypeVolume {
     only_manual: bool,
     /// Prototype node of each gate usable.
     usables: Vec<u32>,
+    /// Source of each gate part slot.
+    slots: Vec<SourceId>,
     dont_lock_if_owner_picked_up: bool,
 }
 pub struct StorageLocks {
     locked: Vec<Locked>,
-    /// Source volumes first, at fixed indices. World volumes reuse free slots after them.
+    /// Bound volumes. A freed slot is reused.
     volumes: Vec<Volume>,
-    source_volumes: usize,
     free: Vec<u16>,
     prototype_volumes: Vec<PrototypeVolume>,
     prototype_flags: Vec<PrototypeStorageFlag>,
@@ -115,59 +109,9 @@ pub struct StorageLocks {
     elapsed: f32,
     last_scan: f32,
     startup_frame: u8,
-    bound: bool,
 }
 impl StorageLocks {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        let mut volumes = Vec::with_capacity(reference.storage.volumes.len() + WORLD_CAPACITY);
-        for record in &reference.storage.volumes {
-            let collider = reference
-                .colliders
-                .iter()
-                .find(|c| c.id == record.collider)
-                .ok_or_else(|| error("Missing storage collider"))?;
-            let shape = match &collider.geometry {
-                ColliderGeometry::Convex { points } => {
-                    let vertices: Vec<_> = points.iter().copied().map(Vector::from_array).collect();
-                    SharedShape::convex_hull(&vertices)
-                        .ok_or_else(|| error("Invalid storage box vertices"))?
-                }
-                ColliderGeometry::Box { half_extents, .. } => {
-                    SharedShape::cuboid(half_extents[0], half_extents[1], half_extents[2])
-                }
-                _ => return Err(error("Storage bounds must be a box")),
-            };
-            let usables = record
-                .usables
-                .iter()
-                .map(|source| {
-                    reference
-                        .mechanisms
-                        .iter()
-                        .find(|m| m.source == *source)
-                        .map(|m| m.item)
-                        .ok_or_else(|| error("Missing storage usable"))
-                })
-                .collect::<Result<Vec<_>, ReferenceError>>()?;
-            volumes.push(Volume {
-                owner: record.owner,
-                storage_type: record.storage_type,
-                active: record.active,
-                only_manual: record.only_manual,
-                dont_lock_if_owner_picked_up: record.dont_lock_if_owner_picked_up,
-                slots: record.slots.clone(),
-                usables,
-                frame: Frame::Collider {
-                    id: record.collider,
-                    handle: None,
-                    source: record.source.clone(),
-                },
-                shape,
-                gates_closed: false,
-                previous: Vec::with_capacity(SCAN_CAPACITY),
-                current: Vec::with_capacity(SCAN_CAPACITY),
-            });
-        }
         let world = &reference.world;
         let prototype_volumes = reference
             .storage
@@ -197,13 +141,17 @@ impl StorageLocks {
                     storage_type: record.storage_type,
                     only_manual: record.only_manual,
                     usables,
+                    slots: record.slots.clone(),
                     dont_lock_if_owner_picked_up: record.dont_lock_if_owner_picked_up,
                 })
             })
             .collect::<Result<Vec<_>, ReferenceError>>()?;
         let flags = &reference.storage.flags;
-        let mut locks =
-            Self::with_volumes(volumes, reference.items.len(), &reference.storage.policy);
+        let mut locks = Self::with_volumes(
+            Vec::with_capacity(WORLD_CAPACITY),
+            reference.items.len(),
+            &reference.storage.policy,
+        );
         locks.prototype_volumes = prototype_volumes;
         locks.prototype_flags = reference.storage.prototype_flags.clone();
         locks.part_usables = reference
@@ -229,7 +177,6 @@ impl StorageLocks {
     ) -> Self {
         Self {
             locked: Vec::with_capacity(items),
-            source_volumes: volumes.len(),
             volumes,
             free: Vec::with_capacity(WORLD_CAPACITY),
             prototype_volumes: Vec::new(),
@@ -247,33 +194,12 @@ impl StorageLocks {
             elapsed: 0.0,
             last_scan: 0.0,
             startup_frame: 0,
-            bound: false,
         }
-    }
-    pub fn bind(&mut self, physics: &PhysicsWorld) -> Result<(), ReferenceError> {
-        if self.bound {
-            return Ok(());
-        }
-        for volume in &mut self.volumes {
-            let Frame::Collider { id, handle, .. } = &mut volume.frame else {
-                continue;
-            };
-            *handle = physics
-                .rapier()
-                .colliders
-                .iter()
-                .find(|(_, c)| ColliderId((c.user_data >> 64) as u32) == *id)
-                .map(|(h, _)| h);
-            if handle.is_none() {
-                return Err(error("Missing storage volume binding"));
-            }
-        }
-        self.bound = true;
-        Ok(())
     }
     /// Binds the storage volumes and flags of a generated item of `prototype`.
     /// `item_root` is the item frame in the prototype root frame, before `scale`.
     /// `usable_item` maps a prototype node to its generated mechanism item.
+    /// `slot` maps a `partslotscript` source to the generated part slot of this item.
     pub fn bind_world_volumes(
         &mut self,
         item: ItemId,
@@ -281,6 +207,7 @@ impl StorageLocks {
         item_root: Pose,
         scale: [f32; 3],
         usable_item: impl Fn(u32) -> Option<ItemId>,
+        slot: impl Fn(&SourceId) -> Option<PartSlotId>,
     ) -> Result<(), ReferenceError> {
         if self
             .volumes
@@ -300,6 +227,9 @@ impl StorageLocks {
                 .any(|node| usable_item(*node).is_none())
             {
                 return Err(error("Missing world storage usable item"));
+            }
+            if record.slots.iter().any(|source| slot(source).is_none()) {
+                return Err(error("Missing world storage slot"));
             }
         }
         if let Some(flag) = self
@@ -344,6 +274,10 @@ impl StorageLocks {
             volume
                 .usables
                 .extend(record.usables.iter().filter_map(|node| usable_item(*node)));
+            volume.slots.clear();
+            volume
+                .slots
+                .extend(record.slots.iter().filter_map(|source| slot(source)));
             volume.frame = Frame::Owner {
                 local: root.inverse() * Pose::from_parts(center, record.rotation),
                 record: record_index as u16,
@@ -379,7 +313,7 @@ impl StorageLocks {
         let buried = items.get(owner).is_some_and(|o| o.buried);
         let mut departs = false;
         let mut changed = false;
-        for index in self.source_volumes..self.volumes.len() {
+        for index in 0..self.volumes.len() {
             if matches!(self.volumes[index].frame, Frame::Free)
                 || self.volumes[index].owner != owner
             {
@@ -409,6 +343,7 @@ impl StorageLocks {
             slot.frame = Frame::Free;
             slot.active = false;
             slot.usables.clear();
+            slot.slots.clear();
             slot.previous.clear();
             slot.current.clear();
             self.free.push(volume);
@@ -426,10 +361,9 @@ impl StorageLocks {
     pub fn departed(&mut self, item: ItemId) {
         self.departing.retain(|i| *i != item);
     }
-    /// The source id of a bound volume: the source volume, or the prototype volume record.
+    /// The prototype volume source of a bound volume.
     pub fn volume_source(&self, volume: u16) -> Option<&SourceId> {
         match &self.volumes.get(volume as usize)?.frame {
-            Frame::Collider { source, .. } => Some(source),
             Frame::Owner { record, .. } => Some(&self.prototype_volumes[*record as usize].source),
             Frame::Free => None,
         }
@@ -514,6 +448,19 @@ impl StorageLocks {
                     })
             })
     }
+    /// The world pose of a bound volume box.
+    fn pose(volume: &Volume, items: &ItemStore, physics: &PhysicsWorld) -> Option<Pose> {
+        let Frame::Owner { local, .. } = &volume.frame else {
+            return None;
+        };
+        let owner = items.get(volume.owner)?;
+        let body = physics.rapier().bodies.get(owner.body?)?;
+        Some(*body.position() * to_rapier(owner.local_pose) * *local)
+    }
+    /// The world pose of the box of bound volume `volume`.
+    pub fn volume_pose(&self, volume: u16, items: &ItemStore, physics: &PhysicsWorld) -> Option<Pose> {
+        Self::pose(self.volumes.get(volume as usize)?, items, physics)
+    }
     /// Clears `current`, then fills it with the items that overlap the volume.
     fn scan_volume(
         volume: &mut Volume,
@@ -522,23 +469,8 @@ impl StorageLocks {
         mount_mask: u32,
     ) {
         volume.current.clear();
-        let pose = match &volume.frame {
-            Frame::Collider { handle, .. } => {
-                match handle.and_then(|h| physics.rapier().colliders.get(h)) {
-                    Some(collider) => *collider.position(),
-                    None => return,
-                }
-            }
-            Frame::Owner { local, .. } => {
-                let Some(owner) = items.get(volume.owner) else {
-                    return;
-                };
-                let Some(body) = owner.body.and_then(|b| physics.rapier().bodies.get(b)) else {
-                    return;
-                };
-                *body.position() * to_rapier(owner.local_pose) * *local
-            }
-            Frame::Free => return,
+        let Some(pose) = Self::pose(volume, items, physics) else {
+            return;
         };
         let predicate = |_, collider: &rapier3d::prelude::Collider| {
             collider.is_enabled()
@@ -831,7 +763,7 @@ impl StorageLocks {
         occupied: Option<RigidBodyHandle>,
         dt: f32,
     ) -> Result<bool, ReferenceError> {
-        if !self.bound || !dt.is_finite() || dt < 0.0 {
+        if !dt.is_finite() || dt < 0.0 {
             return Err(error("Invalid storage initialization frame"));
         }
         if self.initialization_ready() {
@@ -863,7 +795,7 @@ impl StorageLocks {
         occupied: Option<RigidBodyHandle>,
         dt: f32,
     ) -> Result<bool, ReferenceError> {
-        if !self.bound || !dt.is_finite() || dt < 0.0 {
+        if !dt.is_finite() || dt < 0.0 {
             return Err(error("Invalid storage step"));
         }
         self.elapsed += dt;
@@ -977,15 +909,8 @@ mod tests {
         );
         body
     }
-    fn volume(physics: &mut PhysicsWorld, parent: RigidBodyHandle, owner: ItemId) -> Volume {
-        let id = 200 + owner.0;
-        let handle = physics.insert_collider_with_parent(
-            ColliderBuilder::cuboid(1.0, 1.0, 1.0)
-                .sensor(true)
-                .density(0.0)
-                .user_data(user_data(owner, id)),
-            parent,
-        );
+    /// A 1 m half-extent volume at the owner origin.
+    fn volume(owner: ItemId) -> Volume {
         Volume {
             owner,
             storage_type: 0,
@@ -994,13 +919,9 @@ mod tests {
             dont_lock_if_owner_picked_up: false,
             slots: Vec::new(),
             usables: Vec::new(),
-            frame: Frame::Collider {
-                id: ColliderId(id),
-                handle: Some(handle),
-                source: SourceId {
-                    file: "level".into(),
-                    path_id: id as i64,
-                },
+            frame: Frame::Owner {
+                local: Pose::IDENTITY,
+                record: 0,
             },
             shape: SharedShape::cuboid(1.0, 1.0, 1.0),
             gates_closed: true,
@@ -1028,11 +949,10 @@ mod tests {
         if nested {
             let crate_body = body(&mut physics, 0.5, 3.0, BOX);
             item(&mut items, BOX, crate_body);
-            volumes.push(volume(&mut physics, crate_body, BOX));
+            volumes.push(volume(BOX));
         }
-        volumes.push(volume(&mut physics, carrier, CARRIER));
+        volumes.push(volume(CARRIER));
         let mut locks = StorageLocks::with_volumes(volumes, 8, &policy());
-        locks.bound = true;
         // The carrier body overlaps the box volume. Source heavy owners carry `dontMount`.
         locks.dont_mount.insert(CARRIER);
         Rig {
@@ -1078,7 +998,6 @@ mod tests {
         let jar = body(&mut physics, -0.3, 1.0, JAR);
         item(&mut items, JAR, jar);
         let mut locks = StorageLocks::with_volumes(Vec::new(), 8, &policy());
-        locks.bound = true;
         locks.prototype_volumes.push(PrototypeVolume {
             prototype: prototype(),
             source: prototype_volume(),
@@ -1089,6 +1008,7 @@ mod tests {
             storage_type: 0,
             only_manual: false,
             usables: Vec::new(),
+            slots: Vec::new(),
             dont_lock_if_owner_picked_up: true,
         });
         locks.prototype_flags.push(PrototypeStorageFlag {
@@ -1269,85 +1189,13 @@ mod tests {
     }
 
     #[test]
-    fn saved_lock_round_trip_restores_owner_pose_and_mass() {
-        use crate::save::{InstanceId, ItemLocationSave, LocalPose, SourceKey};
-        let mut original = rig(false);
-        let shape = original.collider(CAN);
-        original.scan(0.0);
-        original.scan(1.5);
-        assert!(matches!(
-            original.location(CAN),
-            ItemLocation::Locked { .. }
-        ));
-        let world = original.world(shape);
-        let pose = original
-            .items
-            .saved_local_pose(CAN, &original.locks)
-            .unwrap();
-        let source = SourceKey {
-            file: "level".into(),
-            path_id: "7".into(),
-        };
-        let saved = (
-            ItemLocationSave::Locked {
-                owner: InstanceId::Initial {
-                    source: source.clone(),
-                },
-                volume: source,
-            },
-            LocalPose {
-                position: pose.position,
-                rotation: pose.rotation,
-            },
-        );
-        let json = serde_json::to_string(&saved).unwrap();
-        let parsed: (ItemLocationSave, LocalPose) = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, saved);
-
-        // Load with a moved carrier and the can body elsewhere. No scan and no drop delay.
-        let mut loaded = rig(false);
-        let carrier_pose = Pose::from_parts(
-            Vector::new(0.0, 1.0, 0.0),
-            rapier3d::math::Rotation::from_rotation_y(0.5),
-        );
-        let carrier = loaded.carrier;
-        loaded
-            .physics
-            .edit_body(carrier, |body| body.set_position(carrier_pose, false));
-        let can_body = loaded.items.get(CAN).unwrap().body.unwrap();
-        loaded.physics.edit_body(can_body, |body| {
-            body.set_position(Pose::from_translation(Vector::new(5.0, 0.0, 0.0)), false)
-        });
-        loaded.locks.mark_dropped(CAN);
-        loaded
-            .locks
-            .lock_saved(
-                CAN,
-                0,
-                to_rapier(crate::save::local_pose(&parsed.1)),
-                &mut loaded.items,
-                &mut loaded.physics,
-            )
-            .unwrap();
-        assert_eq!(
-            loaded.location(CAN),
-            ItemLocation::Locked {
-                owner: CARRIER,
-                volume: 0
-            }
-        );
-        assert!(close(&loaded.world(shape), &(carrier_pose * world)));
-        assert!((loaded.mass(carrier) - 12.0).abs() < 1e-4);
-    }
-
-    #[test]
     fn world_volume_locks_on_its_owner_and_unbinds_without_leaks() {
         let mut rig = world_rig();
         let box_body = rig.carrier;
         let can_body = rig.items.get(CAN).unwrap().body.unwrap();
         let jar_body = rig.items.get(JAR).unwrap().body.unwrap();
         rig.locks
-            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         rig.locks.volumes[0].gates_closed = true;
         assert!(rig.locks.dont_mount.contains(&BOX), "prototype flag");
@@ -1389,7 +1237,7 @@ mod tests {
         let other_body = body(&mut rig.physics, 5.0, 4.0, OTHER);
         item(&mut rig.items, OTHER, other_body);
         rig.locks
-            .bind_world_volumes(OTHER, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(OTHER, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         assert_eq!(rig.locks.volumes.len(), 1);
         assert_eq!(rig.locks.volumes[0].owner, OTHER);
@@ -1402,7 +1250,7 @@ mod tests {
     fn locked_world_rig() -> Rig {
         let mut rig = world_rig();
         rig.locks
-            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         rig.locks.volumes[0].gates_closed = true;
         rig.scan(0.0);
@@ -1444,7 +1292,7 @@ mod tests {
             .edit_body(carrier, |body| body.set_position(owner_pose, false));
         loaded
             .locks
-            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         loaded.locks.mark_dropped(CAN);
         changes::restore_lock(
@@ -1497,7 +1345,7 @@ mod tests {
     fn held_owner_releases_when_flagged() {
         let mut rig = world_rig();
         rig.locks
-            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         rig.locks.volumes[0].gates_closed = true;
         rig.scan(0.0);
@@ -1519,9 +1367,7 @@ mod tests {
         // Outside the carrier volume, inside the box volume.
         let can = body(&mut physics, 1.3, 2.0, CAN);
         item(&mut items, CAN, can);
-        let source = volume(&mut physics, carrier, CARRIER);
-        let mut locks = StorageLocks::with_volumes(vec![source], 8, &policy());
-        locks.bound = true;
+        let mut locks = StorageLocks::with_volumes(vec![volume(CARRIER)], 8, &policy());
         locks.dont_mount.insert(CARRIER);
         locks.prototype_volumes.push(PrototypeVolume {
             prototype: prototype(),
@@ -1533,10 +1379,11 @@ mod tests {
             storage_type: 0,
             only_manual: false,
             usables: Vec::new(),
+            slots: Vec::new(),
             dont_lock_if_owner_picked_up: false,
         });
         locks
-            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None)
+            .bind_world_volumes(BOX, &prototype(), Pose::IDENTITY, [1.0; 3], |_| None, |_| None)
             .unwrap();
         locks.volumes[1].gates_closed = true;
         let mut rig = Rig {

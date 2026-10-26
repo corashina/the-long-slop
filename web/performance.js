@@ -29,7 +29,9 @@ export class FrameTimings {
 function renderLines(audit){
  if(!audit?.graph)return '';
  const view=audit.graph.views[0],sum=values=>values.reduce((a,b)=>a+b,0);
- return '\nDraws shadow / surface: '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4]);
+ const [rows,visible,draws]=view.props;
+ return '\nDraws shadow / surface: '+sum(view.shadow_issued)+' / '+(view.surface[2]+view.surface[4])+
+  '\nGPU props rows / visible / indirect draws: '+rows+' / '+visible+' / '+draws;
 }
 
 export function createPerformance(readWasmBytes,readRender,readDrawDistance){

@@ -123,9 +123,9 @@ impl ItemStore {
             let state = self.get_mut(ids.item(&record.instance)?).unwrap();
             state.location = match &record.location {
                 // `GarageRuntime::from_save` locks saved items after their bodies bind.
-                ItemLocationSave::World
-                | ItemLocationSave::GeneratedAttachment { .. }
-                | ItemLocationSave::Locked { .. } => ItemLocation::World,
+                ItemLocationSave::World | ItemLocationSave::GeneratedAttachment { .. } => {
+                    ItemLocation::World
+                }
                 ItemLocationSave::Held => ItemLocation::Held,
                 ItemLocationSave::Stored { slot } => ItemLocation::Stored(*slot),
                 ItemLocationSave::Equipped => ItemLocation::Equipped,
@@ -138,7 +138,6 @@ impl ItemStore {
             );
             // A saved lock pose is relative to the owner, not to the item body.
             let locked = match &record.location {
-                ItemLocationSave::Locked { .. } => true,
                 ItemLocationSave::GeneratedAttachment { attachment } => attachment.volume.is_some(),
                 _ => false,
             };
@@ -433,13 +432,8 @@ impl ItemStore {
                 ItemLocation::Attached(owner) => ItemLocationSave::Attached {
                     owner: ids.item_instance(owner)?,
                 },
-                // A world owner volume has no fixed source key. It saves with the generated owner.
-                ItemLocation::Locked { owner, .. }
-                    if matches!(
-                        self.object_key(owner),
-                        crate::world::ObjectKey::Generated(_)
-                    ) =>
-                {
+                // Storage volumes belong to world owners. A lock saves with the generated owner.
+                ItemLocation::Locked { .. } => {
                     ItemLocationSave::GeneratedAttachment {
                         attachment: crate::world::changes::capture(
                             id,
@@ -456,21 +450,6 @@ impl ItemStore {
                         })?,
                     }
                 }
-                ItemLocation::Locked { owner, volume } => ItemLocationSave::Locked {
-                    owner: ids.item_instance(owner)?,
-                    volume: crate::save::SourceKey::from(
-                        &reference
-                            .storage
-                            .volumes
-                            .get(volume as usize)
-                            .ok_or_else(|| {
-                                crate::save::SaveError::InvalidLinks(
-                                    "Unknown storage volume".into(),
-                                )
-                            })?
-                            .source,
-                    ),
-                },
             };
             let local_pose = self.saved_local_pose(id, &interaction.storage)?;
             records.push(ItemSnapshot {
@@ -1243,6 +1222,7 @@ mod world_sync_tests {
             vehicle: None,
             engines: Vec::new(),
             radiators: Vec::new(),
+            gauges: Vec::new(),
             sled: None,
         }
     }

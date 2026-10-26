@@ -3,6 +3,7 @@ pub mod car_lights;
 pub mod dials;
 pub mod drivetrain;
 pub mod engine;
+pub mod gauges;
 pub mod ignition;
 pub mod input;
 pub mod instruments;

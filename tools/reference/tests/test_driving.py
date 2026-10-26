@@ -25,47 +25,33 @@ class DrivingSourceTests(unittest.TestCase):
             cls.wheels.extend(cls.source.get(*identity) for identity in sorted(identities))
 
     def test_missing_driving_records_fail_without_promotion(self):
-        from tools.reference.driving import recover_driving
+        from tools.reference.driving import recover_driving, car_driving, hub_record
         source = self.source
-        car = self.cars[0]
         original = source.read
-        for owner, field in [(car,'gear'),(car,'kerekagyType')]:
-            def missing(reader):
-                value = original(reader)
-                if key(reader)==key(owner):
-                    value=deepcopy(value);del value[field]
-                return value
-            with self.subTest(field=field), patch.object(source,'read',side_effect=missing), patch('tools.reference.export.promote_reference') as promote:
-                from tools.reference.export import derive_reference
-                with TemporaryDirectory() as directory, patch('tools.reference.library.reader.LibraryReader',return_value=source.library), patch('tools.reference.source.LibrarySource',return_value=source), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected',side_effect=lambda *_:recover_driving(source,self.cars,self.wheels)):
-                    with self.assertRaises((KeyError,ValueError)):
-                        derive_reference(source.library.snapshot,source.library.receipt,Path(directory)/'reference')
-                promote.assert_not_called()
-        def invalid_hub(reader):
-            value=original(reader)
-            if key(reader)==key(car):value=deepcopy(value);value['kerekagyType']=999
+        clutch_toggle = source.get('level0',18636)
+        def missing(reader):
+            value = original(reader)
+            if key(reader)==key(clutch_toggle):
+                value=deepcopy(value);del value['def']
             return value
-        with patch.object(source,'read',side_effect=invalid_hub):
-            with self.assertRaises(ValueError):recover_driving(source,self.cars,self.wheels)
+        with patch.object(source,'read',side_effect=missing), patch('tools.reference.export.promote_reference') as promote:
+            from tools.reference.export import derive_reference
+            with TemporaryDirectory() as directory, patch('tools.reference.library.reader.LibraryReader',return_value=source.library), patch('tools.reference.source.LibrarySource',return_value=source), patch('tools.reference.library.storage.check_space'), patch('tools.reference.export._export_selected',side_effect=lambda *_:recover_driving(source)):
+                with self.assertRaises((KeyError,ValueError)):
+                    derive_reference(source.library.snapshot,source.library.receipt,Path(directory)/'reference')
+            promote.assert_not_called()
+        car = original(self.cars[0])
+        hubs = original(source.get('level1',64919))['kerekagyProperties']
+        with self.assertRaises(ValueError):hub_record(hubs,dict(car,kerekagyType=999))
+        with self.assertRaises(ValueError):car_driving(dict(car,gear=len(car['gears'])))
         from tools.reference.wheels import wheel_collider_record
         value=deepcopy(original(self.wheels[0]));del value['m_Mass']
         with self.assertRaises(KeyError):wheel_collider_record(value)
 
-
-        clutch_toggle=source.get('level0',18636)
         def disabled_clutch(reader):
             value=original(reader)
             if key(reader)==key(clutch_toggle):value=deepcopy(value);value['def']=0
             return value
         with patch.object(source,'read',side_effect=disabled_clutch):
-            result=recover_driving(source,self.cars,self.wheels)
+            result=recover_driving(source)
             self.assertEqual(result['global']['default_assists'],{'automatic_clutch':False,'automatic_gears':False})
-
-        graphic = source.get('level1',77841)
-        def unresolved_graphic(reader):
-            value=original(reader)
-            if key(reader)==key(graphic):
-                value=deepcopy(value);value['car']['m_PathID']=0
-            return value
-        with patch.object(source,'read',side_effect=unresolved_graphic):
-            with self.assertRaises(ValueError):recover_driving(source,self.cars,self.wheels)

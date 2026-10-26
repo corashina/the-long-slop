@@ -1028,11 +1028,26 @@ impl AudioState {
             }
         }
     }
-    /// radioscript.TurnRadio and the band switch on a portable radio share Cturned.
-    pub fn radio_click_at(&mut self, position: [f32; 3]) {
-        if let Some(id) = self.reference.radio.click_binding {
-            self.emit_at(id, 1., self.game_seconds, Some(position));
-        }
+    /// radioscript.TurnRadio and the band switch share Cturned, played at the radio.
+    pub fn radio_click_at(&mut self, position: [f64; 3]) {
+        let b = self
+            .reference
+            .survival
+            .iter()
+            .find(|b| b.kind == AudioKind::RadioClick as u32)
+            .expect("validated survival playback");
+        let (clip, gain, [low, high]) = (b.clips[0], b.gain[0], b.pitch);
+        let pitch = low + (high - low) * self.sample();
+        self.survival_event(SurvivalAudioEvent {
+            session: self.session,
+            emitter: 0,
+            kind: AudioKind::RadioClick,
+            action: AudioAction::Start,
+            clip,
+            gain,
+            pitch,
+            position,
+        });
     }
     fn slot(&self, slot: crate::reference::PartSlotId, area: &StartingArea) -> f32 {
         area.interaction
@@ -1310,6 +1325,7 @@ pub enum AudioKind {
     MetalDetector = 18,
     AmbienceZone = 19,
     Sled = 20,
+    RadioClick = 21,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]

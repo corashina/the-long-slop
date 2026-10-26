@@ -8,6 +8,7 @@ mod lod;
 mod memory;
 use super::{
     AssetId, AssetRecord, AssetUsage, ColliderGeometry, EngineGlobals, EnginePartReference,
+    GaugePartReference,
     LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference, ReferenceError,
     ReferenceManifest, SourceHash, SourceId, Transform, WorldVehicleReference, finite, hash,
     require, transform,
@@ -162,6 +163,9 @@ pub struct WorldPrototypeReference {
     pub engines: Vec<EnginePartReference>,
     #[serde(default)]
     pub radiators: Vec<RadiatorPartReference>,
+    /// Gauge part meters. Node ids are prototype node indices.
+    #[serde(default)]
+    pub gauges: Vec<GaugePartReference>,
     pub sled: Option<SledReference>,
 }
 
@@ -1827,6 +1831,14 @@ fn vehicle_valid(p: &WorldPrototypeReference, asset: &AssetRecord) -> Result<(),
     for r in &p.radiators {
         r.validate(p.nodes.len())?;
     }
+    for g in &p.gauges {
+        g.validate(PrototypeBounds {
+            nodes: p.nodes.len(),
+            bodies: p.bodies.len(),
+            colliders: p.colliders.len(),
+            asset,
+        })?;
+    }
     Ok(())
 }
 /// Interior colliders, doors and parents resolve inside the prototype.
@@ -2174,7 +2186,8 @@ mod tests {
                 "wheel_effects": [{"source": src(16), "pose": pose, "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []}],
                 "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "seats": [{"source": src(13), "driver": true, "driving2": true}],
-                "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": []
+                "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
+                "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             },
             "engines": [crate::reference::engine_part_fixture()],
             "radiators": [{"source": src(15), "node": 2, "coolant_tank": null, "fan_node": 3, "thermostat_range": [80.0, 90.0], "fan_temperature_on": 95.0, "fan_temperature_off": 90.0, "fan_on_when_engine_runs": false, "max_value": 1.0, "max_fan_value": 1.0, "max_fan_speed": 1.0, "max_fluid_loss": 1.0}]

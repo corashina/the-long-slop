@@ -1,4 +1,4 @@
-//! R05: a loose item locks in the Lada trunk and rides with the car.
+//! R05: a loose item locks in the trunk of the start Lada copy and rides with the car.
 use super::drive_out::{enter, park, place_car, road_points, settle};
 use crate::{
     interaction::items::ItemLocation,
@@ -23,20 +23,36 @@ fn relative(
 fn r05_cargo_locks_in_trunk() {
     let (reference, mut run) = super::garage_controls::load_garage();
     settle(&mut run, &reference, 2.);
-    let volume = reference
-        .storage
-        .volumes
+    let key = run
+        .vehicles
+        .keys()
+        .find(|key| {
+            matches!(key, crate::world::ObjectKey::Generated(id)
+                if id.layer == crate::world::WorldLayer::Startup)
+        })
+        .expect("start Lada copy")
+        .clone();
+    let owner = run.area.items.resolve_key(&key).expect("start Lada item");
+    let lada = reference
+        .world
+        .startup
         .iter()
-        .position(|v| v.storage_type == 3)
+        .find_map(|s| s.prototype.clone().filter(|_| s.group == "StartCar02"))
+        .expect("start Lada prototype");
+    let trunk = reference
+        .storage
+        .prototype_volumes
+        .iter()
+        .find(|v| v.prototype == lada && v.storage_type == 3)
         .expect("Lada trunk volume");
-    let trunk = &reference.storage.volumes[volume];
-    for slot in &trunk.slots {
-        assert!(
-            run.area.interaction.parts.slot_item(*slot).is_some(),
-            "trunk slot {slot:?} is empty"
-        );
-    }
-    let carrier = run.area.items.get(trunk.owner).unwrap().body.unwrap();
+    assert!(!trunk.slots.is_empty(), "trunk gate slots");
+    let volume = run
+        .area
+        .interaction
+        .storage
+        .owner_volume(owner, &trunk.source)
+        .expect("bound trunk volume");
+    let carrier = run.area.items.get(owner).unwrap().body.unwrap();
     let can = reference
         .tanks
         .iter()
@@ -52,15 +68,12 @@ fn r05_cargo_locks_in_trunk() {
     let empty = run.physics.rapier().bodies[carrier].mass();
 
     // Put the can in the middle of the trunk box.
-    let target = *run
-        .physics
-        .rapier()
-        .colliders
-        .iter()
-        .find(|(_, c)| (c.user_data >> 64) as u32 == trunk.collider.0)
-        .expect("bound trunk collider")
-        .1
-        .position();
+    let target = run
+        .area
+        .interaction
+        .storage
+        .volume_pose(volume, &run.area.items, &run.physics)
+        .expect("trunk pose");
     run.physics.edit_body(body, |b| {
         b.set_position(target, true);
         b.set_linvel(Vector::ZERO, true);
@@ -69,10 +82,7 @@ fn r05_cargo_locks_in_trunk() {
     run.physics.refresh_queries();
     // Two 1.5 s scans must see the can.
     settle(&mut run, &reference, 4.);
-    let locked = ItemLocation::Locked {
-        owner: trunk.owner,
-        volume: volume as u16,
-    };
+    let locked = ItemLocation::Locked { owner, volume };
     assert_eq!(run.area.items.get(can).unwrap().location, locked);
     let loaded = run.physics.rapier().bodies[carrier].mass();
     assert!(

@@ -93,9 +93,6 @@ def runtime_resources(manifest):
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
-    for v in manifest.get('vehicles',[]):
-        collect(v.get('exhaust',[]))
-        collect([[w['dust'],w['grass']] for w in v.get('wheel_effects',[])])
     collect(manifest.get('skid',{}).get('particles',[]))
     for item in manifest.get('render_lighting', {}).get('dependencies', []):
         collect({'path':item['file'],'sha256':item['sha256']})
@@ -110,17 +107,13 @@ def runtime_resources(manifest):
     return list(resources.values())
 
 
-# Start cars in manifest order: root GameObject, starter field, and starter GameObject.
-CARS={'lada':(17687,'StartCar02',206)}
-
-
 def validate_runtime_paths(manifest):
     assets = manifest.get('assets', [])
     world = manifest.get('world')
     if not world or not world.get('prototypes'):
         raise ValueError('Missing required source world dependency')
     from .item_prototypes import SELECTED
-    expected = {f'reference/{name}.gltf' for name in ('home',*CARS,'items','road_lamp','sky','food','player',*(p[3] for p in SELECTED))}
+    expected = {f'reference/{name}.gltf' for name in ('home','items','road_lamp','sky','food','player',*(p[3] for p in SELECTED))}
     prototype_ids={p['asset'] for p in world['prototypes']}
     material_ids={p['asset'] for p in world['painting_materials']}
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
@@ -262,19 +255,16 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .conditions import prepare_conditions, prepare_cleaning_roots, bind_condition_audio
     from .visibility import recover_camera_visibility
     from .ui import export_ui
-    from .instruments import recover_instruments
     from .audio import recover_audio
     from .render_lighting import prepare_startup_lighting, recover_lighting as recover_render_lighting
     if output.resolve().is_relative_to(source.root.resolve()):
         raise ValueError('Keep generated files outside the source installation')
     def transform(go):return source.transform_for(source.get('level1',go))
-    roots = {'home':[source.get('level1',21400)], **{name:[transform(go)] for name,(go,_,_) in CARS.items()},
+    roots = {'home':[source.get('level1',21400)],
         'items':[transform(go) for go in (13023,13027,18878,13019,15637)]}
     spare=source.get('level1',71403)
     from .flashlights import prepare_flashlight_roots, validate_flashlight_mesh_export
     prepare_flashlight_roots(source, roots)
-    from .storage import prepare_storage_roots
-    prepare_storage_roots(source)
     prepare_cleaning_roots(source, roots)
     roots['items'].append(source.transform_for(source.resolve(spare,source.read(spare)['m_GameObject'])))
     roots['items'].append(transform(3542))
@@ -284,30 +274,14 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .weather import recover_weather, validate_weather_export
     prepare_food(source, roots)
     food_roots=roots.pop('food')
-    prefab=source.get('sharedassets1.assets',82556)
-    scene_paths=[n['path'] for n in source.hierarchy(roots['lada'][0])]
-    prefab_paths=[n['path'] for n in source.hierarchy(prefab)]
-    if scene_paths != prefab_paths or len(scene_paths)!=697:
-        raise ValueError('Selected scene Lada differs from the required prefab hierarchy')
+    from .world import LADA
+    prefab=source.get(*LADA)
     if source.read(source.get('level1',64896))['FirstHome']['m_PathID']!=21400:
         raise ValueError('Selected home link differs from the required home')
-    starters=source.read(source.get('level1',64898))
-    for name,(go,field,starter) in CARS.items():
-        if starters[field]['m_PathID']!=starter or source.read(roots[name][0])['m_Father']['m_PathID']!=source.transform_for(source.get('level1',starter)).path_id:
-            raise ValueError(f'Selected {name} starter link differs from the required car')
-    # Mirror glass uses the source material for disabled mirrors.
-    main = source.get('level1', 64919)
-    glass = source.resolve(main, source.read(main)['noMirrorMaterial'])
-    source.mirror_renderers = {}
-    for node in [n for name in CARS for n in source.hierarchy(roots[name][0], activate_root=True)]:
-        for reader in node['components']:
-            if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
-                data = source.read(reader)['M']
-                if data['R']['m_PathID'] and data['C']['m_PathID']:
-                    source.mirror_renderers[key(source.resolve(reader, data['R']))] = glass
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)
+    source.lighting_probe_prototype=prefab
     source.lighting_root_assets={key(root):i for i,readers in enumerate(roots.values(),1) for root in readers}
     _,pole=road_source(source)
     clouds=source.get('level1',27217)
@@ -315,7 +289,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     source.lighting_pole_root=key(pole)
     source.lighting_root_assets[key(pole)]=len(roots)+1
     source.lighting_root_assets[key(clouds)]=len(roots)+2
-    source.lighting_cars=[roots[name][0] for name in CARS]
     recover_lighting(source,[root for readers in roots.values() for root in readers],output)
     prepare_startup_lighting(source,[root for readers in roots.values() for root in readers])
     source.render_lighting=recover_render_lighting(source,[root for readers in roots.values() for root in readers],output)
@@ -349,7 +322,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
         raise ValueError(f'Incomplete parameter recovery: {parameters["errors"]}')
     hashes=[{'file':record.file.removeprefix('TheLongDrive_Data/'),'sha256':record.sha256}
             for record in snapshot.files if record.file.startswith('TheLongDrive_Data/')]
-    manifest=build_manifest(source,roots,report,hashes,library,list(CARS),output)
+    manifest=build_manifest(source,roots,report,hashes,library,prefab,output)
     (output/'driving-evidence.json').write_text(json.dumps(source.driving_evidence,indent=2,allow_nan=False),encoding='utf-8')
     from .plates import plate_source_evidence
     (output/'plate-evidence.json').write_text(json.dumps(plate_source_evidence(source,manifest['plates']),indent=2,allow_nan=False),encoding='utf-8')
@@ -388,9 +361,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
-    for index,name in enumerate(CARS):
-        manifest['vehicles'][index]['instruments']=recover_instruments(source,manifest,report,name,roots[name][0])
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if (name not in CARS or name == 'lada') and not name.startswith('item_') and name!='player'},manifest,library,output,report)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith('item_') and name!='player'},manifest,library,output)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
     from .acquisition import recover_acquisition, validate_acquisition
     manifest['acquisition'] = recover_acquisition(source, manifest)

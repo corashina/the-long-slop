@@ -265,7 +265,7 @@ impl SaveSnapshot {
                         )?;
                     }
                 }
-                ItemLocationSave::Attached { owner } | ItemLocationSave::Locked { owner, .. } => {
+                ItemLocationSave::Attached { owner } => {
                     edges.insert(key, ObjectKey::Imported(ids.item(owner)?));
                 }
                 _ => (),
@@ -383,8 +383,7 @@ impl SaveSnapshot {
         Ok(())
     }
 }
-/// A storage lock has an owner and no slot. Its volume is a source volume of an imported owner,
-/// or a prototype volume of a generated owner. `prototype` is the generated owner prototype if known.
+/// A storage lock has an owner and no slot. Its volume is a prototype volume of a generated owner. `prototype` is the generated owner prototype if known.
 fn storage_volume(
     storage: &r::StorageRecord,
     a: &AttachmentSnapshot,
@@ -395,13 +394,7 @@ fn storage_volume(
     };
     links(a.slot.is_none(), "Storage lock with a slot")?;
     match a.owner.as_ref() {
-        Some(ObjectKey::Imported(owner)) => links(
-            storage
-                .volumes
-                .iter()
-                .any(|v| v.source == *volume && v.owner == *owner),
-            "Storage volume owner",
-        ),
+        Some(ObjectKey::Imported(_)) => Err(invalid("Storage volume owner")),
         Some(ObjectKey::Generated(_)) => links(
             storage
                 .prototype_volumes
@@ -440,7 +433,6 @@ mod tests {
                 drop_delay_seconds: 1.0,
                 scan_interval_seconds: 1.5,
             },
-            volumes: Vec::new(),
             prototype_volumes: [10, 20]
                 .map(|path_id| r::PrototypeVolumeReference {
                     prototype: id(path_id),
@@ -452,6 +444,7 @@ mod tests {
                     storage_type: 0,
                     only_manual: false,
                     usables: Vec::new(),
+                    slots: Vec::new(),
                     dont_lock_if_owner_picked_up: false,
                 })
                 .into(),

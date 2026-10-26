@@ -103,8 +103,8 @@ def wheel_graphics(source, nodes, road):
     return graphics
 
 
-def recover_driving(source, car_readers, wheel_readers):
-    """Resolve selected cars and wheel owners; fail on missing records or links."""
+def recover_driving(source):
+    """Resolve the shared driving controls; fail on missing records or links."""
     bodies, methods, minimum, text = checked_methods(source)
     drive = bodies['public void DriveStuff()']
     rates = [float(value) for value in re.findall(r'B(?:Gas|Brake|Clutch) = Mathf.MoveTowards\([^;]+Time.deltaTime \* ([\d.]+)f\);',drive)]
@@ -149,32 +149,7 @@ def recover_driving(source, car_readers, wheel_readers):
     global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'keyboard_steering_rate':steering_rate, 'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
             'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings}
-    main_reader=source.get('level1',64919)
-    if source.class_name(main_reader)!='mainscript':raise ValueError('Driving hub owner differs')
-    hubs=source.read(main_reader)['kerekagyProperties']
-    cars={};vehicles=[];owners={};graphics={}
-    for reader in car_readers:
-        if source.class_name(reader)!='carscript':raise ValueError('Driving car owner differs')
-        value=source.read(reader);identity=key(reader);cars[identity]=(reader,value)
-        vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':car_driving(value)})
-        road=road_wheels(source,reader,value)
-        if len(road)!=4 or any(k in owners for k in road):raise ValueError('Driving car must own four wheels')
-        owners.update({k:identity for k in road})
-        transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
-        graphics.update(wheel_graphics(source,source.hierarchy(transform,activate_root=True),road))
-    if {key(r) for r in wheel_readers}!=set(owners) or len(wheel_readers)!=len(owners):
-        raise ValueError('Driving wheel selection differs from car roles')
-    slots=[]
-    for reader in wheel_readers:
-        identity=key(reader);car_reader,car=cars[owners[identity]]
-        graphic,raw=graphics[identity]
-        linked_car=source.resolve(graphic,raw['car']);slot=source.resolve(graphic,raw['slot'])
-        if linked_car is None or key(linked_car)!=key(car_reader) or slot is None:
-            raise ValueError('Unresolved driving wheel hub link')
-        slots.append({'source':source_id(slot),'collider_source':source_id(reader),'graphics_source':source_id(graphic),
-            'vehicle_source':source_id(car_reader),'hub_source':source_id(main_reader),'hub_index':car['kerekagyType'],
-            'sideways_stiffness_modifier':raw['sideStiffnessModifier'],'hub':hub_record(hubs,car)})
-    return {'global':global_record,'vehicles':vehicles,'slots':slots,'keyboard_steering_rate':steering_rate,
+    return {'global':global_record,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,
             'steering_source':source_id(slider),'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},

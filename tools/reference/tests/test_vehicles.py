@@ -90,7 +90,8 @@ def car_fixture():
         forceAutomaticTransmission=0, BhandBrake=1, kerekagyType=0, differentialRatio=4., steerAngle=35.,
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
         dontIgniteWithThorttleInAutomatic=0, collisionSoundM=1., psSmoke=[], groundSoundM=.5,
-        springSoundM=2., springPitchM=3., slideAngle=20., maxSlideVolumeSpeed=10.)
+        springSoundM=2., springPitchM=3., slideAngle=20., maxSlideVolumeSpeed=10.,
+        meters=[], kmhmeters=[], lowFuelValue=5., lowOilValue=1., ledOilTestRpm=600., ledBatteryTestRpm=800.)
     def transform_for(reader):
         return records[(reader.assets_file.source_container_path, data[reader.path_id]['transform']['m_PathID'])]
     source = NS(read=lambda reader: data[reader.path_id], class_name=lambda reader: reader.cls,
@@ -125,6 +126,8 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         self.assertIsNone(vehicle['instruments'])
+        self.assertEqual(vehicle['kmh_meters'], [])
+        self.assertEqual(vehicle['gauge_limits']['electronics_output'], 1.)
         # Plate labels come from the car prototype, with prototype node ids.
         front, rear = vehicle['plates']
         self.assertIsNone(front['same_as'])
@@ -137,7 +140,7 @@ class VehicleRecordTests(unittest.TestCase):
         probe = vehicle['probe']
         self.assertEqual(hierarchy[probe['node']]['components'][0].type.name, 'ReflectionProbe')
         self.assertEqual((probe['bounds_size'], probe['near'], probe['mask']), ([6., 2.5, 6.], .3, 1))
-        engines, radiators = part_records(source, hierarchy)
+        engines, radiators, gauges = part_records(source, hierarchy, 5, {})
         self.assertEqual(len(engines), 1)
         engine = engines[0]
         self.assertEqual(hierarchy[engine['node']]['components'][-1].cls, 'enginescript')
@@ -145,6 +148,7 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(engine['fuel_consumption'], [0, 0, 1., 0, 0, 0])
         # A missing radiator is accepted.
         self.assertEqual(radiators, [])
+        self.assertEqual(gauges, [])
 
     def test_prototype_without_carscript_has_no_vehicle(self):
         source, hierarchy, bodies, colliders = car_fixture()

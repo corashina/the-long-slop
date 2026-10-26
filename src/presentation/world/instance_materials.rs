@@ -1,5 +1,6 @@
 //! Generated renderer materials retain source identity and per-instance LOD inputs.
 use super::{
+    gpu_props::linear_color,
     pipelines::{PipelineTicket, WorldPipelines},
     shared_materials::{MaterialIdentity, SharedMaterialKey},
 };
@@ -148,16 +149,18 @@ impl InstanceMaterials<'_> {
         reflected: bool,
         source_position: Vec3,
         view: GrassView,
+        gpu: bool,
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
         let mut sort = None;
         let mut shared = None;
-        let key = |material| SharedMaterialKey {
+        let key = |material, gpu| SharedMaterialKey {
             session,
             material,
             layer,
             receive,
             reflected,
+            gpu,
         };
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
         {
@@ -178,17 +181,33 @@ impl InstanceMaterials<'_> {
                 ),
                 "Hidden/Amplify Impostors/Octahedron Impostor"
                 | "Impostors/Custom/Colored Barrels" => {
-                    InstanceMaterial::Impostor(self.impostors.add(ImpostorMaterial::from_source(
+                    // An entity impostor holds its fade and source position, so only rows share it.
+                    if gpu {
+                        let key = key(MaterialIdentity::Impostor(id.clone()), true);
+                        if let Some(binding) = self.cache.generated.acquire(&key) {
+                            return Ok(Some(RendererMaterial {
+                                visible: binding.visible,
+                                sort,
+                                shared: Some(key),
+                            }));
+                        }
+                        shared = Some(key);
+                    }
+                    let mut material = ImpostorMaterial::from_source(
                         record,
                         &self.cache.world_textures,
                         mask,
                         receive,
                         reflected,
-                        source_position,
-                    )?))
+                        if gpu { Vec3::ZERO } else { source_position },
+                    )?;
+                    if gpu {
+                        material.use_gpu_props();
+                    }
+                    InstanceMaterial::Impostor(self.impostors.add(material))
                 }
                 "Standard (Specular setup)" => {
-                    let key = key(MaterialIdentity::Specular(id.clone()));
+                    let key = key(MaterialIdentity::Specular(id.clone()), gpu);
                     if let Some(binding) = self.cache.generated.acquire(&key) {
                         return Ok(Some(RendererMaterial {
                             visible: binding.visible,
@@ -197,12 +216,15 @@ impl InstanceMaterials<'_> {
                         }));
                     }
                     shared = Some(key);
-                    let material = SpecularMaterial::from_source(
+                    let mut material = SpecularMaterial::from_source(
                         record,
                         &self.cache.world_textures,
                         mask,
                         reflected,
                     )?;
+                    if gpu {
+                        material.use_gpu_props();
+                    }
                     InstanceMaterial::Specular(self.specular.add(material))
                 }
                 name => {
@@ -225,8 +247,8 @@ impl InstanceMaterials<'_> {
             sort = self
                 .cache
                 .sort_data(identity, renderer, primitive.submesh)?;
-            if sort.is_none() {
-                let key = key(MaterialIdentity::Primary(identity.0, identity.1));
+            if sort.is_none() && self.cache.shareable_generated_primary(identity) {
+                let key = key(MaterialIdentity::Primary(identity.0, identity.1), gpu);
                 if let Some(binding) = self.cache.generated.acquire(&key) {
                     return Ok(Some(RendererMaterial {
                         visible: binding.visible,
@@ -234,16 +256,13 @@ impl InstanceMaterials<'_> {
                         shared: Some(key),
                     }));
                 }
-                if self.cache.shareable_generated_primary(identity) {
-                    shared = Some(key);
-                }
+                shared = Some(key);
             }
-            InstanceMaterial::Primary(self.primary.add(materials::authored_material(
-                identity,
-                reflected,
-                mask,
-                &self.cache,
-            )))
+            let mut material = materials::authored_material(identity, reflected, mask, &self.cache);
+            if shared.as_ref().is_some_and(|key| key.gpu) {
+                material.extension.use_gpu_props();
+            }
+            InstanceMaterial::Primary(self.primary.add(material))
         };
         match &visible {
             InstanceMaterial::Primary(h) => {
@@ -278,6 +297,7 @@ impl InstanceMaterials<'_> {
         let Some(key) = binding.shared.take() else {
             return;
         };
+        assert!(!key.gpu, "GPU prop materials stay shared");
         let Self {
             cache,
             primary,
@@ -294,7 +314,7 @@ impl InstanceMaterials<'_> {
                     let material = specular.get(handle).unwrap().clone();
                     InstanceMaterial::Specular(specular.add(material))
                 }
-                _ => unreachable!("Only immutable primary and specular bindings are shared"),
+                _ => unreachable!("Only entity primary and specular bindings become private"),
             };
             SharedBinding { visible }
         });
@@ -306,17 +326,18 @@ impl InstanceMaterials<'_> {
         color: [f32; 4],
     ) -> Result<(), ReferenceError> {
         self.make_private(binding);
+        let linear = linear_color(color);
         let color = Color::srgba(color[0], color[1], color[2], color[3]);
         match &binding.visible {
             InstanceMaterial::Primary(h) => {
                 if let Some(mut m) = self.primary.get_mut(h) {
                     m.base.base_color = color;
-                    m.extension.surface.set_color(color);
+                    m.extension.surface.set_color(linear);
                 }
             }
             InstanceMaterial::Specular(h) => {
                 if let Some(mut m) = self.specular.get_mut(h) {
-                    m.set_color(color);
+                    m.set_color(color, linear);
                 }
             }
             _ => {
@@ -327,7 +348,29 @@ impl InstanceMaterials<'_> {
         }
         Ok(())
     }
-    pub fn fade(&mut self, binding: &RendererMaterial, fade: f32, source_position: Vec3) {
+    /// Linear row color of a GPU prop: the condition color, else the shared material color.
+    pub fn row_color(
+        &self,
+        binding: &RendererMaterial,
+        color: Option<[f32; 4]>,
+    ) -> Result<Vec4, ReferenceError> {
+        let material = match &binding.visible {
+            InstanceMaterial::Primary(h) => {
+                self.primary.get(h).map(|m| m.extension.surface.color())
+            }
+            InstanceMaterial::Specular(h) => self.specular.get(h).map(SpecularMaterial::color),
+            // The impostor shaders do not read a color.
+            InstanceMaterial::Impostor(_) if color.is_none() => Some(Vec4::ONE),
+            _ => {
+                return Err(ReferenceError(
+                    "Condition color requires its checked shader property".into(),
+                ));
+            }
+        };
+        Ok(color.map_or_else(|| material.expect("bound GPU prop material"), linear_color))
+    }
+    /// Entity LOD fade. `sync` keeps the impostor source position.
+    pub fn fade(&mut self, binding: &RendererMaterial, fade: f32) {
         if binding.shared.is_some() {
             assert_eq!(
                 fade, 1.,
@@ -349,7 +392,6 @@ impl InstanceMaterials<'_> {
             InstanceMaterial::Impostor(h) => {
                 if let Some(mut m) = self.impostors.get_mut(h) {
                     m.uniform.lod.x = fade;
-                    m.uniform.source_position = source_position.extend(0.);
                 }
             }
             InstanceMaterial::Grass(h) => {
@@ -433,6 +475,10 @@ pub fn ready(ticket: &Option<PipelineTicket>) -> Result<bool, ReferenceError> {
 }
 
 impl RendererMaterial {
+    /// The renderer is a GPU prop row: its shared material reads the row buffers.
+    pub fn gpu_props(&self) -> bool {
+        self.shared.as_ref().is_some_and(|key| key.gpu)
+    }
     pub fn apply_sort(&self, entity: Entity, commands: &mut Commands) {
         if let Some(sort) = self.sort {
             commands

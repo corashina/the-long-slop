@@ -6,6 +6,9 @@
     pbr_bindings,
     mesh_view_bindings,
 }
+#ifdef SOURCE_GPU_PROPS
+#import bevy_pbr::{pbr_types, pbr_functions}
+#endif
 
 #import source_float_store::half4
 
@@ -111,10 +114,32 @@ fn fragment(
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
 #endif
+#ifdef SOURCE_GPU_PROPS
+    @location(13) @interpolate(flat) source_fade: f32,
+    @location(14) @interpolate(flat) source_color: vec4<f32>,
+#endif
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
-    if !source_lod_keep(in.position.xy, bitcast<f32>(receiver.y)) { discard; }
+#ifdef SOURCE_GPU_PROPS
+    let lod_fade = source_fade;
+    let color = source_color;
+#else
+    let lod_fade = bitcast<f32>(receiver.y);
+    let color = source.color;
+#endif
+    if !source_lod_keep(in.position.xy, lod_fade) { discard; }
+#ifdef SOURCE_GPU_PROPS
+    // Same fields as pbr_input_from_vertex_output, without the mesh uniform flags.
+    var pbr = pbr_types::pbr_input_new();
+    pbr.is_orthographic = mesh_view_bindings::view.clip_from_view[3].w == 1.0;
+    pbr.V = pbr_functions::calculate_view(in.world_position, pbr.is_orthographic);
+    pbr.frag_coord = in.position;
+    pbr.world_position = in.world_position;
+    pbr.world_normal = pbr_functions::prepare_world_normal(in.world_normal, false, is_front);
+    pbr.N = normalize(pbr.world_normal);
+#else
     var pbr = pbr_input_from_vertex_output(in, is_front, false);
+#endif
     var uv = vec2(0.0);
 #ifdef VERTEX_UVS_A
     uv = in.uv;
@@ -134,13 +159,13 @@ fn fragment(
     }
 #endif
     let main = sample_source(0u, uv, detail_uv, offset);
-    var albedo = main.rgb * source.color.rgb;
-    var alpha = main.a * source.color.a;
+    var albedo = main.rgb * color.rgb;
+    var alpha = main.a * color.a;
 #ifdef VERTEX_COLORS
     // Target-generated terrain keeps its linear vertex colors. Authored source materials do not use this bit.
     if source_flag(11u) { albedo *= in.color.rgb; alpha *= in.color.a; }
 #endif
-    if source_flag(5u) { alpha = source.color.a; }
+    if source_flag(5u) { alpha = color.a; }
     if source_flag(9u) && alpha < source.factors.w { discard; }
     let mask = sample_source(7u, uv, detail_uv, offset).a;
     if source_flag(1u) {
@@ -196,7 +221,7 @@ fn fragment(
     // Glossy-off unity_IndirectSpecColor is RGB0 in the fixed source profile.
     if source_flag(3u) { light += sample_source(4u, uv, detail_uv, offset).rgb * source.emission.rgb; }
     var base_alpha = output_alpha;
-    if source.flags.z == 1u { light = source.color.rgb; base_alpha = 1.0; }
+    if source.flags.z == 1u { light = color.rgb; base_alpha = 1.0; }
     out.color = vec4(mix(lighting.fog_color_density.xyz,light,fog),base_alpha);
 #ifdef SOURCE_REPLACEMENT
     out.color = half4(out.color);

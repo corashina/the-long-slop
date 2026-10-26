@@ -234,10 +234,12 @@ def recover_lights_and_probes(source, roots):
                     'depth_bias':shadows['m_Bias'],'normal_bias':shadows['m_NormalBias'],
                     'near':shadows['m_NearPlane']}})
         else:
-            if node is None:raise ValueError(f'{identity} missing probe node')
-            probes.append({'source':source_id(reader),**probe_settings(identity,data)})
-    if len(probes)!=len(source.lighting_cars):
-        raise ValueError('Each selected source car requires one registered local probe')
+            raise ValueError(f'{identity} reflection probes belong to the car prototypes')
+    # The car prototype probe holds the shared capture settings. The runtime moves it to the last seated car.
+    car_probes=[c for node in source.hierarchy(source.lighting_probe_prototype,activate_root=True)
+        for c in node['components'] if c.type.name=='ReflectionProbe']
+    if len(car_probes)!=1:raise ValueError('The car prototype requires one reflection probe')
+    probes.append({'source':source_id(car_probes[0]),**probe_settings(key(car_probes[0]),source.read(car_probes[0]))})
     if any(light['enabled'] for light in lights[1:]):
         raise ValueError('The selected startup profile contains an unresolved enabled local light')
     return lights,probes
