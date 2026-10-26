@@ -488,14 +488,14 @@ impl Play {
     }
 
     fn release_handbrake(&mut self) {
-        if self.run.vehicles[0].handbrake {
+        if self.run.garage_car(0).handbrake {
             self.tap(keys::SPACE);
         }
     }
 
     fn park(&mut self) {
         self.brake();
-        if !self.run.vehicles[0].handbrake {
+        if !self.run.garage_car(0).handbrake {
             self.tap(keys::SPACE);
         }
         self.idle(50);
@@ -503,7 +503,7 @@ impl Play {
 
     fn start_engine(&mut self) {
         for _ in 0..300 {
-            if self.run.vehicles[0].engine_output.running {
+            if self.run.garage_car(0).engine_output.running {
                 break;
             }
             self.hold(keys::IGNITION, 1);
@@ -514,7 +514,7 @@ impl Play {
         });
         self.idle(50);
         assert!(
-            self.run.vehicles[0].engine_output.running,
+            self.run.garage_car(0).engine_output.running,
             "engine did not start"
         );
     }
@@ -771,7 +771,7 @@ fn p11_starting_area_loop() {
             ));
         }
     }
-    if play.run.vehicles[0].handbrake {
+    if play.run.garage_car(0).handbrake {
         play.tap(keys::SPACE);
     }
     play.start_engine();
@@ -790,7 +790,7 @@ fn p11_starting_area_loop() {
     let furthest = play.car_absolute();
     println!(
         "far point: engine running {}, fuel {} L",
-        play.run.vehicles[0].engine_output.running,
+        play.run.garage_car(0).engine_output.running,
         play.tank(fuel_tank)
     );
     println!(
@@ -878,7 +878,7 @@ fn p11_starting_area_loop() {
     assert!((reloaded - fuel).abs() < 1., "fuel {fuel} -> {reloaded}");
 
     // Continue: start if needed and reverse back out with normal input.
-    if !play.run.vehicles[0].engine_output.running {
+    if !play.run.garage_car(0).engine_output.running {
         play.start_engine();
     }
     let start = play.car_absolute();

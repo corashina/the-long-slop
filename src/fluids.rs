@@ -220,10 +220,11 @@ impl From<&TankReference> for FluidContainer {
     }
 }
 
+/// Tanks of one engine step. A missing tank skips its rules.
 pub struct VehicleFluids<'a> {
-    pub fuel: &'a mut FluidContainer,
-    pub sump: &'a mut FluidContainer,
-    pub coolant: &'a mut FluidContainer,
+    pub fuel: Option<&'a mut FluidContainer>,
+    pub sump: Option<&'a mut FluidContainer>,
+    pub coolant: Option<&'a mut FluidContainer>,
 }
 
 /// Both helpers receive amounts after caller sleep scaling.

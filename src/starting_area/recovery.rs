@@ -21,6 +21,7 @@ impl GarageRuntime {
         self.recovery_bodies.push(chassis);
         let inverse = self.physics.rapier().bodies[chassis].position().inverse();
         let held = self.area.interaction.held();
+        let bounds = &self.vehicles[&crate::vehicle::garage_vehicle_key(vehicle)].recovery_bounds;
         for (&id, &handle) in &self.area.bodies {
             if body_vehicle(reference, id) == Some(vehicle)
                 && !self.recovery_bodies.contains(&handle)
@@ -43,16 +44,11 @@ impl GarageRuntime {
             let point = inverse * body.position().translation;
             let cargo = body.is_enabled()
                 && body.is_dynamic()
-                && (0..3).all(|axis| {
-                    point[axis] >= self.vehicles[vehicle].recovery_bounds.min[axis]
-                        && point[axis] <= self.vehicles[vehicle].recovery_bounds.max[axis]
-                });
-            let dormant_cargo = self.persistent_world.recovery_cargo(
-                &self.physics,
-                handle,
-                vehicle,
-                &self.vehicles[vehicle].recovery_bounds,
-            );
+                && (0..3)
+                    .all(|axis| point[axis] >= bounds.min[axis] && point[axis] <= bounds.max[axis]);
+            let dormant_cargo =
+                self.persistent_world
+                    .recovery_cargo(&self.physics, handle, vehicle, bounds);
             if item.body == Some(chassis) || cargo || dormant_cargo {
                 self.recovery_bodies.push(handle);
             }
@@ -66,7 +62,7 @@ impl GarageRuntime {
             &self.recovery_bodies,
             &self.recovery_held_bodies,
             pose,
-            self.vehicle,
+            self.garage_index(),
         )
     }
     pub fn advance_recovery(
@@ -76,9 +72,10 @@ impl GarageRuntime {
         if !self.recovering {
             return Ok(false);
         }
-        self.collect_recovery_ownership(reference, self.vehicle);
+        // V03 bridge: recovery moves an old garage car. Task 9 removes it.
+        let vehicle = self.garage_index();
+        self.collect_recovery_ownership(reference, vehicle);
         let origin = self.stream.origin;
-        let vehicle = self.vehicle;
         let area = &self.area;
         let persistent = &self.persistent_world;
         let bodies = &self.recovery_bodies;

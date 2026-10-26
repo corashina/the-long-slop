@@ -243,7 +243,7 @@ fn w02_garage_can_returns_after_far_trip() {
     let body = run.area.items.get(can).unwrap().body.unwrap();
     let car = run
         .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+        .snapshot(run.vehicle.as_ref().unwrap())
         .pose
         .position;
     run.physics.edit_body(body, |body| {

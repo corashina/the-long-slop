@@ -34,8 +34,8 @@ fn g10_control_restore_has_no_side_effects() {
         .restore(control.item, state)
         .unwrap();
     run.lighting.cycle_headlights(&reference.lighting, 0);
-    run.vehicles[0].handbrake = !run.vehicles[0].handbrake;
-    let vehicle = &mut run.vehicles[0];
+    run.garage_car_mut(0).handbrake = !run.garage_car(0).handbrake;
+    let vehicle = run.garage_car_mut(0);
     vehicle.ignition.ignition = true;
     let mut engine = vehicle.engine.capture_save();
     engine.rpm = 725.;

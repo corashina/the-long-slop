@@ -1,7 +1,7 @@
-//! Installed Lada engine rules at the fixed gameplay step.
+//! Engine part rules at the fixed gameplay step.
 
 use crate::fluids::{FluidContainer, FluidMixture, VehicleFluids, suitability};
-use crate::reference::{EngineReference, TorqueCurve};
+use crate::reference::{EngineGlobals, EnginePartReference, RadiatorPartReference, TorqueCurve};
 use crate::save::{EngineSnapshot, SaveError, identity::unsigned};
 
 const RUN_GRACE_SECONDS: f32 = 0.2;
@@ -45,10 +45,9 @@ fn temperature_change(
     speed: f32,
     transfer: f32,
     input: EngineInput,
-    reference: &EngineReference,
+    globals: &EngineGlobals,
     dt: f32,
 ) -> f32 {
-    let globals = &reference.globals;
     let difference = ((input.ambient_temperature - temperature)
         / globals.temperature_difference_modifier)
         .abs()
@@ -92,6 +91,16 @@ pub struct InstalledEngineInput {
     pub free_run: bool,
     pub speed_kmh: f32,
     pub radiator_condition: Option<u8>,
+    /// Car electronics allow ignition.
+    pub electronics_enabled: bool,
+}
+
+/// The records one engine step reads: the mounted engine and radiator parts and the world globals.
+#[derive(Clone, Copy)]
+pub struct EngineRecords<'a> {
+    pub engine: &'a EnginePartReference,
+    pub radiator: Option<&'a RadiatorPartReference>,
+    pub globals: &'a EngineGlobals,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -196,10 +205,21 @@ impl EngineState {
         };
         Ok(self.last_output)
     }
-    pub fn new(reference: &EngineReference) -> Self {
+    /// No engine part is mounted: no rpm, no torque, no starter.
+    pub fn stop(&mut self) -> EngineOutput {
+        self.rpm = 0.0;
+        self.supplied_fuel = 0.0;
+        self.last_run_time = self.elapsed - RUN_GRACE_SECONDS;
+        self.last_output = EngineOutput {
+            temperature: self.temperature,
+            ..Default::default()
+        };
+        self.last_output
+    }
+    pub fn new(initial_temperature: f32) -> Self {
         Self {
             rpm: 0.0,
-            temperature: reference.initial_temperature,
+            temperature: initial_temperature,
             elapsed: 0.0,
             last_run_time: -1.0,
             last_start_chance_time: 0.0,
@@ -218,7 +238,7 @@ impl EngineState {
         &mut self,
         input: EngineInput,
         fluids: VehicleFluids<'_>,
-        reference: &EngineReference,
+        records: EngineRecords<'_>,
         mut start_sample: impl FnMut(u64) -> f32,
         dt: f32,
     ) -> EngineOutput {
@@ -226,15 +246,28 @@ impl EngineState {
             return self.last_output;
         }
         self.elapsed += dt;
+        let EngineRecords {
+            engine: reference,
+            radiator,
+            globals,
+        } = records;
+        let VehicleFluids {
+            fuel,
+            sump,
+            mut coolant,
+        } = fluids;
         let installed = input.installed.unwrap_or_default();
         let required = FluidMixture {
             quantities_liters: reference.fuel_consumption,
         };
-        if input.installed.is_some() {
+        // A missing oil tank skips the oil rules.
+        if input.installed.is_some()
+            && let Some(sump) = sump.as_deref()
+        {
             self.oil_penalty = inverse_lerp(
-                fluids.sump.capacity_liters * 0.3,
+                sump.capacity_liters * 0.3,
                 0.0,
-                fluids.sump.mixture().amount(reference.oil_fluid as usize),
+                sump.mixture().amount(reference.oil_fluid as usize),
             )
             .powi(3);
         }
@@ -244,7 +277,7 @@ impl EngineState {
             && self.heat_penalty < 0.99
             && self.fuel_suitability > 0.3
             && self.random_start <= reference.start_chance;
-        let ignition = installed.ignition && reference.electronics_enabled;
+        let ignition = installed.ignition && installed.electronics_enabled;
         let min_supplied = inverse_lerp(0.0, reference.max_rpm, reference.idle_rpm);
         if ignition && can_run {
             self.supplied_fuel = lerp(
@@ -257,15 +290,16 @@ impl EngineState {
             self.supplied_fuel = 0.0;
         }
         let running = self.running();
-        self.fuel_suitability = suitability(fluids.fuel, &required);
+        // A missing fuel tank supplies no fuel.
+        self.fuel_suitability = fuel.as_deref().map_or(0.0, |f| suitability(f, &required));
         let fuel_suitability = self.fuel_suitability;
-        let consumed_fuel = if running {
+        let consumed_fuel = if running && let Some(fuel) = fuel {
             let removed = drain(
-                fluids.fuel,
+                fuel,
                 self.supplied_fuel
                     * dt
                     * input.sleep_modifier
-                    * reference.globals.fuel_consumption
+                    * globals.fuel_consumption
                     * lerp(
                         required.total() * 0.2,
                         required.total(),
@@ -273,7 +307,7 @@ impl EngineState {
                     ),
             );
             // Source Fuel.Upd also runs when supplied fuel is zero.
-            fluids.fuel.cleanup_one();
+            fuel.cleanup_one();
             removed
         } else {
             0.0
@@ -305,8 +339,7 @@ impl EngineState {
             }
         }
         let next_rpm = lerp(target_rpm, installed.wheel_rpm, clutch);
-        self.rpm += (next_rpm - self.rpm)
-            .clamp(-reference.globals.rpm_change, reference.globals.rpm_change)
+        self.rpm += (next_rpm - self.rpm).clamp(-globals.rpm_change, globals.rpm_change)
             * reference.rpm_change_modifier
             * dt;
         let mut rpm_difference = self.rpm - target_rpm;
@@ -329,7 +362,7 @@ impl EngineState {
             } else {
                 inverse_lerp(0.0, reference.max_rpm_difference, rpm_difference)
             };
-        let bounds = reference.globals.car_temperature_bounds;
+        let bounds = globals.car_temperature_bounds;
         self.temperature = self.temperature.clamp(bounds[0], bounds[1]);
         if reference.no_overheat {
             self.temperature = self.temperature.min(reference.optimal_temperature[2]);
@@ -356,38 +389,43 @@ impl EngineState {
             installed.speed_kmh * reference.heat_loss_speed_modifier,
             reference.heat_loss,
             input,
-            reference,
+            globals,
             dt,
         );
-        if input.installed.is_some() && self.rpm > 10.0 && fluids.sump.total() > 0.0 {
+        if input.installed.is_some()
+            && self.rpm > 10.0
+            && let Some(sump) = sump
+            && sump.total() > 0.0
+        {
             drain(
-                fluids.sump,
-                reference.globals.oil_consumption
+                sump,
+                globals.oil_consumption
                     * reference.oil_consumption_modifier
                     * inverse_lerp(0.0, reference.max_rpm, self.rpm)
                     * dt
                     * input.sleep_modifier,
             );
-            fluids.sump.cleanup_one();
+            sump.cleanup_one();
         }
+        // A missing radiator or coolant tank skips the coolant rules.
         if installed.radiator_condition.is_some()
-            && self.temperature > reference.globals.min_steam_temperature
+            && self.temperature > globals.min_steam_temperature
+            && let Some(coolant) = coolant.as_deref_mut()
         {
             drain(
-                fluids.coolant,
-                reference.globals.coolant_evaporate_rate / 60.0
+                coolant,
+                globals.coolant_evaporate_rate / 60.0
                     * dt
                     * input.sleep_modifier
-                    * inverse_lerp(
-                        reference.globals.min_steam_temperature,
-                        bounds[1],
-                        self.temperature,
-                    ),
+                    * inverse_lerp(globals.min_steam_temperature, bounds[1], self.temperature),
             );
         }
         let mut fan_speed = 0.0;
-        if running && let Some(condition) = installed.radiator_condition {
-            let radiator = &reference.radiator;
+        if running
+            && let Some(condition) = installed.radiator_condition
+            && let Some(radiator) = radiator
+            && let Some(coolant) = coolant
+        {
             let condition = usize::from(condition.min(4));
             let value_factor = [1.0, 0.75, 0.5, 0.25, 0.125][condition];
             let fan_value = radiator.max_fan_value * [1.0, 0.9, 0.8, 0.7, 0.6][condition];
@@ -395,7 +433,7 @@ impl EngineState {
             let mut speed = installed.speed_kmh;
             if self.temperature > radiator.fan_temperature_on || radiator.fan_on_when_engine_runs {
                 self.fan_on = true;
-                speed = (speed + fan_value).clamp(fan_value, reference.globals.max_car_velocity);
+                speed = (speed + fan_value).clamp(fan_value, globals.max_car_velocity);
             } else if self.temperature < radiator.fan_temperature_off {
                 self.fan_on = false;
             }
@@ -407,26 +445,21 @@ impl EngineState {
                 radiator.thermostat_range[1],
                 self.temperature,
             );
-            let total = fluids.coolant.total();
+            let total = coolant.total();
             let water_blood = if total > 0.0 {
-                fluids
-                    .coolant
-                    .mixture()
-                    .amount(3)
-                    .max(fluids.coolant.mixture().amount(4))
-                    / total
+                coolant.mixture().amount(3).max(coolant.mixture().amount(4)) / total
             } else {
                 0.0
             };
             let cooling = radiator.max_value
                 * value_factor
                 * thermostat
-                * inverse_lerp(0.0, fluids.coolant.capacity_liters * 0.5, total)
+                * inverse_lerp(0.0, coolant.capacity_liters * 0.5, total)
                 * water_blood.clamp(0.5, 1.0);
             self.temperature +=
-                temperature_change(self.temperature, speed, cooling, input, reference, dt);
+                temperature_change(self.temperature, speed, cooling, input, globals, dt);
             drain(
-                fluids.coolant,
+                coolant,
                 leak / 60.0 * dt * thermostat * input.sleep_modifier,
             );
         }
@@ -463,7 +496,13 @@ mod tests {
         let source = &reference.vehicles[0].engine;
         assert_eq!(source.source.file, "level1");
         assert_eq!(source.source.path_id, 68282);
-        let mut engine = EngineState::new(source);
+        let parts = crate::simulation::powertrain::PowertrainParts::from_garage(&reference);
+        let records = EngineRecords {
+            engine: &parts.engine(0).record,
+            radiator: Some(&parts.radiator(0).record),
+            globals: &reference.world.vehicle_globals,
+        };
+        let mut engine = EngineState::new(source.initial_temperature);
         let mut state = engine.capture_save();
         state.elapsed = 1.;
         state.last_run_time = 1.;
@@ -486,11 +525,11 @@ mod tests {
         let output = engine.step(
             EngineInput::default(),
             VehicleFluids {
-                fuel: &mut fuel,
-                sump: &mut sump,
-                coolant: &mut coolant,
+                fuel: Some(&mut fuel),
+                sump: Some(&mut sump),
+                coolant: Some(&mut coolant),
             },
-            source,
+            records,
             |_| panic!("no starter"),
             0.02,
         );
@@ -541,11 +580,11 @@ mod tests {
                 ..Default::default()
             },
             VehicleFluids {
-                fuel: &mut fuel,
-                sump: &mut sump,
-                coolant: &mut coolant,
+                fuel: Some(&mut fuel),
+                sump: Some(&mut sump),
+                coolant: Some(&mut coolant),
             },
-            source,
+            records,
             |_| panic!("no starter"),
             0.02,
         );

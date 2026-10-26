@@ -36,7 +36,7 @@ fn installed_source() -> (ReferenceManifest, SourceStamp) {
 }
 
 fn step(run: &mut GarageRuntime, reference: &ReferenceManifest, input: FrameInput) {
-    run.step_vehicle(reference, 0, input, true, Default::default());
+    run.step_garage_car(reference, 0, input, true, Default::default());
 }
 
 fn fluid_entries(quantities: [f32; 6], order: &[u8]) -> Vec<crate::fluids::FluidEntry> {
@@ -57,7 +57,7 @@ fn g04_instrument_sample_keeps_nonfinite_fluid_bits_and_recovers() {
 
     let (reference, _) = installed_source();
     let mut run = GarageRuntime::new_default(&reference).unwrap();
-    run.vehicles[0].ignition.ignition = true;
+    run.garage_car_mut(0).ignition.ignition = true;
     let vehicle = &reference.vehicles[0];
     let instruments = &vehicle.instruments;
     let mut state = InstrumentState::new(instruments);
@@ -157,13 +157,13 @@ fn ignition_and_attachment() {
         ..Default::default()
     };
     step(&mut run, &reference, tap);
-    assert!(run.vehicles[0].ignition.ignition);
+    assert!(run.garage_car(0).ignition.ignition);
     step(&mut run, &reference, tap);
-    assert!(!run.vehicles[0].ignition.ignition);
+    assert!(!run.garage_car(0).ignition.ignition);
     for _ in 0..(source.starter_delay_seconds / FIXED_DT).ceil() as usize + 2 {
         step(&mut run, &reference, held);
     }
-    assert!(run.vehicles[0].ignition.starter);
+    assert!(run.garage_car(0).ignition.starter);
     step(
         &mut run,
         &reference,
@@ -172,30 +172,34 @@ fn ignition_and_attachment() {
             ..Default::default()
         },
     );
-    assert!(run.vehicles[0].ignition.starter);
+    assert!(run.garage_car(0).ignition.starter);
     step(&mut run, &reference, FrameInput::default());
-    assert!(!run.vehicles[0].ignition.starter);
+    assert!(!run.garage_car(0).ignition.starter);
     run.clear_input();
-    assert!(run.vehicles[0].ignition.ignition);
-    assert!(!run.vehicles[0].engine_output.starter);
+    assert!(run.garage_car(0).ignition.ignition);
+    assert!(!run.garage_car(0).engine_output.starter);
     // Seed a running state. Sampling and run-decision order belong to Task 3.
-    let mut mechanical = run.vehicles[0].engine.capture_save();
-    run.vehicles[0].ignition.ignition = true;
+    let mut mechanical = run.garage_car(0).engine.capture_save();
+    run.garage_car_mut(0).ignition.ignition = true;
     mechanical.rpm = 2000.;
     mechanical.elapsed = 1.;
     mechanical.last_run_time = 1.;
     mechanical.supplied_fuel = 0.4;
     mechanical.random_start = 0.;
-    run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&mechanical).unwrap();
+    run.garage_car_mut(0).engine_output = run
+        .garage_car_mut(0)
+        .engine
+        .restore_save(&mechanical)
+        .unwrap();
     step(&mut run, &reference, FrameInput::default());
-    assert!(run.vehicles[0].engine_output.running);
+    assert!(run.garage_car(0).engine_output.running);
     let engine_slot = reference
         .part_slots
         .iter()
         .find(|slot| slot.part == Some(source.item))
         .unwrap()
         .id;
-    let engine_before = run.vehicles[0].engine.capture_save();
+    let engine_before = run.garage_car(0).engine.capture_save();
     let item_before = run.area.items.get(source.item).unwrap().clone();
     let fuel_before = run.area.items.get(source.fuel_tank).unwrap().fluid.clone();
     let oil_before = run.area.items.get(source.oil_tank).unwrap().fluid.clone();
@@ -229,7 +233,7 @@ fn ignition_and_attachment() {
     assert_eq!(item.id, item_before.id);
     assert_eq!(item.temperature, item_before.temperature);
     assert_eq!(item.fluid, item_before.fluid);
-    assert_eq!(run.vehicles[0].engine.capture_save(), engine_before);
+    assert_eq!(run.garage_car(0).engine.capture_save(), engine_before);
     assert_eq!(
         run.area.items.get(source.fuel_tank).unwrap().fluid,
         fuel_before
@@ -243,7 +247,7 @@ fn ignition_and_attachment() {
         coolant_before
     );
     step(&mut run, &reference, FrameInput::default());
-    let output = run.vehicles[0].engine_output;
+    let output = run.garage_car(0).engine_output;
     assert!(output.running, "detached engine retains run grace");
     assert!(output.rpm > 0., "detached engine retains residual RPM");
     assert_eq!(output.torque_nm, 0.);
@@ -278,17 +282,17 @@ fn ignition_and_attachment() {
         .restore_entries(&[]);
     step(&mut run, &reference, tap);
     assert_eq!(
-        run.vehicles[0].engine_output.oil_penalty,
+        run.garage_car(0).engine_output.oil_penalty,
         engine_before.oil_penalty
     );
-    assert!(!run.vehicles[0].ignition.ignition);
+    assert!(!run.garage_car(0).ignition.ignition);
     step(&mut run, &reference, tap);
-    assert!(run.vehicles[0].ignition.ignition);
+    assert!(run.garage_car(0).ignition.ignition);
     let sample = run.instrument_sample(&reference, 0);
     assert!(sample.local_ignition);
     assert_eq!(sample.rpm, 0.);
     assert_eq!(sample.temperature, 0.);
-    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
+    assert_eq!(run.garage_car(0).engine_output.torque_nm, 0.);
     let saved = run
         .capture_save(
             &reference,
@@ -307,11 +311,11 @@ fn ignition_and_attachment() {
     )
     .unwrap();
     assert!(restored.paused);
-    assert!(restored.vehicles[0].ignition.ignition);
-    assert!(!restored.vehicles[0].ignition.starter);
-    assert!(!restored.vehicles[0].engine_output.starter);
+    assert!(restored.garage_car(0).ignition.ignition);
+    assert!(!restored.garage_car(0).ignition.starter);
+    assert!(!restored.garage_car(0).engine_output.starter);
     assert_eq!(
-        restored.vehicles[0].engine.capture_save(),
+        restored.garage_car(0).engine.capture_save(),
         saved.vehicles[0].engine
     );
     let ids = IdentityMap::new(&reference).unwrap();
@@ -351,11 +355,11 @@ fn ignition_and_attachment() {
         .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     let loose = run.area.items.get(source.item).unwrap().body.unwrap();
     assert_ne!(loose, chassis);
-    let before = run.vehicles[0].engine.capture_save();
+    let before = run.garage_car(0).engine.capture_save();
     let chassis_velocity = run.physics.rapier().bodies[chassis].linvel();
     run.physics.inactive_bodies.insert(chassis);
     step(&mut run, &reference, FrameInput::default());
-    let after = run.vehicles[0].engine.capture_save();
+    let after = run.garage_car(0).engine.capture_save();
     assert!(after.elapsed > before.elapsed);
     assert!(after.rpm > 0.);
     assert_eq!(
@@ -364,24 +368,24 @@ fn ignition_and_attachment() {
     );
     run.physics.inactive_bodies.insert(loose);
     step(&mut run, &reference, FrameInput::default());
-    assert_eq!(run.vehicles[0].engine.capture_save(), after);
+    assert_eq!(run.garage_car(0).engine.capture_save(), after);
     run.physics.inactive_bodies.remove(&loose);
     for _ in 0..20 {
         step(&mut run, &reference, FrameInput::default());
     }
-    assert!(!run.vehicles[0].engine_output.running);
-    assert!(run.vehicles[0].engine_output.rpm < output.rpm);
-    assert_eq!(run.vehicles[0].engine.capture_save().supplied_fuel, 0.);
+    assert!(!run.garage_car(0).engine_output.running);
+    assert!(run.garage_car(0).engine_output.rpm < output.rpm);
+    assert_eq!(run.garage_car(0).engine.capture_save().supplied_fuel, 0.);
     // Chassis commands do not start a detached engine.
     run.physics.inactive_bodies.remove(&chassis);
     for _ in 0..(source.starter_delay_seconds / FIXED_DT).ceil() as usize + 2 {
         step(&mut run, &reference, held);
     }
-    assert!(run.vehicles[0].ignition.starter);
-    assert!(!run.vehicles[0].engine_output.starter);
-    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
+    assert!(run.garage_car(0).ignition.starter);
+    assert!(!run.garage_car(0).engine_output.starter);
+    assert_eq!(run.garage_car(0).engine_output.torque_nm, 0.);
     run.clear_input();
-    let engine_before_install = run.vehicles[0].engine.capture_save();
+    let engine_before_install = run.garage_car(0).engine.capture_save();
     let item_before_install = run.area.items.get(source.item).unwrap().clone();
     run.area
         .interaction
@@ -401,7 +405,10 @@ fn ignition_and_attachment() {
         .interaction
         .sync_parts(&mut run.area.items, &mut run.physics)
         .unwrap();
-    assert_eq!(run.vehicles[0].engine.capture_save(), engine_before_install);
+    assert_eq!(
+        run.garage_car(0).engine.capture_save(),
+        engine_before_install
+    );
     let item = run.area.items.get(source.item).unwrap();
     assert_eq!(item.id, item_before_install.id);
     assert_eq!(item.temperature, item_before_install.temperature);
@@ -415,15 +422,19 @@ fn active_chassis_preserves_inactive_detached_engine() {
     let (reference, _) = installed_source();
     let source = &reference.vehicles[0].engine;
     let mut run = GarageRuntime::new_default(&reference).unwrap();
-    let mut mechanical = run.vehicles[0].engine.capture_save();
+    let mut mechanical = run.garage_car(0).engine.capture_save();
     mechanical.rpm = 2000.;
     mechanical.temperature = 80.;
     mechanical.elapsed = 1.;
     mechanical.last_run_time = 1.;
     mechanical.supplied_fuel = 0.4;
     mechanical.random_start = 0.;
-    run.vehicles[0].ignition.ignition = true;
-    run.vehicles[0].engine_output = run.vehicles[0].engine.restore_save(&mechanical).unwrap();
+    run.garage_car_mut(0).ignition.ignition = true;
+    run.garage_car_mut(0).engine_output = run
+        .garage_car_mut(0)
+        .engine
+        .restore_save(&mechanical)
+        .unwrap();
     step(&mut run, &reference, FrameInput::default());
     run.area
         .interaction
@@ -440,7 +451,7 @@ fn active_chassis_preserves_inactive_detached_engine() {
         .sync_parts(&mut run.area.items, &mut run.physics)
         .unwrap();
     step(&mut run, &reference, FrameInput::default());
-    assert!(run.vehicles[0].engine_output.running);
+    assert!(run.garage_car(0).engine_output.running);
     let loose = run.area.items.get(source.item).unwrap().body.unwrap();
     let chassis = run
         .physics
@@ -450,7 +461,7 @@ fn active_chassis_preserves_inactive_detached_engine() {
     run.physics.inactive_bodies.insert(loose);
     assert!(run.physics.body_active(chassis));
     assert!(!run.physics.body_active(loose));
-    let before = run.vehicles[0].engine.capture_save();
+    let before = run.garage_car(0).engine.capture_save();
     let contents = [
         source.item,
         source.fuel_tank,
@@ -467,10 +478,10 @@ fn active_chassis_preserves_inactive_detached_engine() {
         ..Default::default()
     };
     step(&mut run, &reference, tap);
-    assert!(!run.vehicles[0].ignition.ignition);
+    assert!(!run.garage_car(0).ignition.ignition);
     assert!(!run.instrument_sample(&reference, 0).local_ignition);
     run.physics.edit_body(chassis, |body| body.sleep());
-    run.step_vehicle(
+    run.step_garage_car(
         &reference,
         0,
         tap,
@@ -480,7 +491,7 @@ fn active_chassis_preserves_inactive_detached_engine() {
             ..Default::default()
         },
     );
-    assert!(run.vehicles[0].ignition.ignition);
+    assert!(run.garage_car(0).ignition.ignition);
     assert!(run.instrument_sample(&reference, 0).local_ignition);
     assert!(!run.physics.rapier().bodies[chassis].is_sleeping());
     let brake = reference
@@ -517,11 +528,11 @@ fn active_chassis_preserves_inactive_detached_engine() {
             },
         );
     }
-    assert!(run.vehicles[0].ignition.starter);
-    assert!(!run.vehicles[0].engine_output.starter);
-    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
-    assert_eq!(run.vehicles[0].engine_output.brake_torque_nm, 0.);
-    assert_eq!(run.vehicles[0].engine.capture_save(), before);
+    assert!(run.garage_car(0).ignition.starter);
+    assert!(!run.garage_car(0).engine_output.starter);
+    assert_eq!(run.garage_car(0).engine_output.torque_nm, 0.);
+    assert_eq!(run.garage_car(0).engine_output.brake_torque_nm, 0.);
+    assert_eq!(run.garage_car(0).engine.capture_save(), before);
     for (id, temperature, fluid) in contents {
         let item = run.area.items.get(id).unwrap();
         assert_eq!(item.temperature, temperature);
@@ -545,13 +556,13 @@ fn interval_draws_preserve_attempts_and_cancellation() {
     for _ in 0..180 {
         step(&mut run, &reference, held);
     }
-    let state = run.vehicles[0].engine.capture_save();
+    let state = run.garage_car(0).engine.capture_save();
     assert!(state.start_draw.parse::<u64>().unwrap() >= 2);
     assert_eq!(run.attempts, attempts);
-    assert!(run.vehicles[0].engine_output.starter);
+    assert!(run.garage_car(0).engine_output.starter);
     run.clear_input();
-    assert!(!run.vehicles[0].engine_output.starter);
-    assert_eq!(run.vehicles[0].engine.capture_save(), state);
+    assert!(!run.garage_car(0).engine_output.starter);
+    assert_eq!(run.garage_car(0).engine.capture_save(), state);
     assert_eq!(run.attempts, attempts);
 }
 
@@ -601,23 +612,23 @@ fn garage_engine_remove_restore_continue() {
     };
     let compare = |run: &GarageRuntime, loaded: &GarageRuntime| {
         assert_eq!(
-            run.vehicles[0].engine.capture_save(),
-            loaded.vehicles[0].engine.capture_save()
+            run.garage_car(0).engine.capture_save(),
+            loaded.garage_car(0).engine.capture_save()
         );
         assert_eq!(
-            run.vehicles[0].ignition.ignition,
-            loaded.vehicles[0].ignition.ignition
+            run.garage_car(0).ignition.ignition,
+            loaded.garage_car(0).ignition.ignition
         );
         assert_eq!(
-            run.vehicles[0].ignition.starter,
-            loaded.vehicles[0].ignition.starter
+            run.garage_car(0).ignition.starter,
+            loaded.garage_car(0).ignition.starter
         );
         assert_eq!(
-            run.vehicles[0].drivetrain.gear(),
-            loaded.vehicles[0].drivetrain.gear()
+            run.garage_car(0).drivetrain.gear(),
+            loaded.garage_car(0).drivetrain.gear()
         );
-        assert_eq!(run.vehicles[0].handbrake, loaded.vehicles[0].handbrake);
-        assert_eq!(run.vehicles[0].trip_m, loaded.vehicles[0].trip_m);
+        assert_eq!(run.garage_car(0).handbrake, loaded.garage_car(0).handbrake);
+        assert_eq!(run.garage_car(0).trip_m, loaded.garage_car(0).trip_m);
         let expected = contents(run);
         let actual = contents(loaded);
         for item in expected {
@@ -631,7 +642,7 @@ fn garage_engine_remove_restore_continue() {
         }
     };
     let install = |run: &mut GarageRuntime| {
-        let before = run.vehicles[0].engine.capture_save();
+        let before = run.garage_car(0).engine.capture_save();
         let items = contents(run);
         run.area
             .interaction
@@ -652,7 +663,7 @@ fn garage_engine_remove_restore_continue() {
             .sync_parts(&mut run.area.items, &mut run.physics)
             .unwrap();
         assert!(run.area.items.mounted(source.item));
-        assert_eq!(run.vehicles[0].engine.capture_save(), before);
+        assert_eq!(run.garage_car(0).engine.capture_save(), before);
         for item in items {
             let after = contents(run)
                 .into_iter()
@@ -674,7 +685,8 @@ fn garage_engine_remove_restore_continue() {
         .restore_entries(&[]);
     for _ in 0..600 {
         step(&mut run, &reference, held);
-        if run.vehicles[0]
+        if run
+            .garage_car(0)
             .engine
             .capture_save()
             .start_draw
@@ -685,9 +697,9 @@ fn garage_engine_remove_restore_continue() {
             break;
         }
     }
-    assert!(!run.vehicles[0].engine_output.running);
+    assert!(!run.garage_car(0).engine_output.running);
     assert!(
-        run.vehicles[0]
+        run.garage_car(0)
             .engine
             .capture_save()
             .start_draw
@@ -713,13 +725,13 @@ fn garage_engine_remove_restore_continue() {
     // Start through the production fixed vehicle step, with installed source rates.
     for _ in 0..600 {
         step(&mut run, &reference, held);
-        if run.vehicles[0].engine_output.running {
+        if run.garage_car(0).engine_output.running {
             break;
         }
     }
-    assert!(run.vehicles[0].engine_output.running);
-    assert!(run.vehicles[0].ignition.starter);
-    let before_remove = run.vehicles[0].engine.capture_save();
+    assert!(run.garage_car(0).engine_output.running);
+    assert!(run.garage_car(0).ignition.starter);
+    let before_remove = run.garage_car(0).engine.capture_save();
     assert!(before_remove.elapsed > 0. && before_remove.start_draw.parse::<u64>().unwrap() > 0);
     let before_items = contents(&run);
     run.area
@@ -742,7 +754,7 @@ fn garage_engine_remove_restore_continue() {
         .sync_parts(&mut run.area.items, &mut run.physics)
         .unwrap();
     assert!(!run.area.items.mounted(source.item));
-    assert_eq!(run.vehicles[0].engine.capture_save(), before_remove);
+    assert_eq!(run.garage_car(0).engine.capture_save(), before_remove);
     for item in before_items {
         let detached = contents(&run)
             .into_iter()
@@ -752,12 +764,12 @@ fn garage_engine_remove_restore_continue() {
         assert_eq!(detached.temperature, item.temperature);
     }
     step(&mut run, &reference, held);
-    assert!(run.vehicles[0].engine_output.running);
-    assert_eq!(run.vehicles[0].engine_output.torque_nm, 0.);
-    assert_eq!(run.vehicles[0].engine_output.brake_torque_nm, 0.);
-    assert!(!run.vehicles[0].engine_output.starter);
-    assert!(run.vehicles[0].ignition.starter);
-    assert!(run.vehicles[0].engine.capture_save().elapsed > before_remove.elapsed);
+    assert!(run.garage_car(0).engine_output.running);
+    assert_eq!(run.garage_car(0).engine_output.torque_nm, 0.);
+    assert_eq!(run.garage_car(0).engine_output.brake_torque_nm, 0.);
+    assert!(!run.garage_car(0).engine_output.starter);
+    assert!(run.garage_car(0).ignition.starter);
+    assert!(run.garage_car(0).engine.capture_save().elapsed > before_remove.elapsed);
     let saved = run
         .capture_save(
             &reference,
@@ -789,10 +801,10 @@ fn garage_engine_remove_restore_continue() {
     // Full capture is blocked until world restore finishes. Read restored owners directly.
     assert_eq!(ids.vehicles[0], saved.vehicles[0].instance);
     assert_eq!(
-        loaded.vehicles[0].ignition.ignition,
+        loaded.garage_car(0).ignition.ignition,
         saved.vehicles[0].ignition
     );
-    let restored_engine = loaded.vehicles[0].engine.capture_save();
+    let restored_engine = loaded.garage_car(0).engine.capture_save();
     assert_eq!(
         restored_engine.start_draw,
         saved.vehicles[0].engine.start_draw
@@ -802,8 +814,8 @@ fn garage_engine_remove_restore_continue() {
         saved.vehicles[0].engine.temperature
     );
     assert_eq!(restored_engine, saved.vehicles[0].engine);
-    assert!(!loaded.vehicles[0].ignition.starter);
-    assert!(!loaded.vehicles[0].engine_output.starter);
+    assert!(!loaded.garage_car(0).ignition.starter);
+    assert!(!loaded.garage_car(0).engine_output.starter);
     let restored_items = contents(&loaded);
     for item in &restored_items {
         let original = saved
@@ -878,7 +890,7 @@ fn garage_engine_remove_restore_continue() {
     for expected in [false, true] {
         step(&mut run, &reference, tap);
         step(&mut loaded, &reference, tap);
-        assert_eq!(run.vehicles[0].ignition.ignition, expected);
+        assert_eq!(run.garage_car(0).ignition.ignition, expected);
         assert_eq!(loaded.instrument_sample(&reference, 0).rpm, 0.);
         assert_eq!(
             loaded.instrument_sample(&reference, 0).local_ignition,
@@ -892,21 +904,21 @@ fn garage_engine_remove_restore_continue() {
         step(&mut loaded, &reference, FrameInput::default());
         compare(&run, &loaded);
         for state in [&run, &loaded] {
-            assert_eq!(state.vehicles[0].engine_output.torque_nm, 0.);
-            assert_eq!(state.vehicles[0].engine_output.brake_torque_nm, 0.);
+            assert_eq!(state.garage_car(0).engine_output.torque_nm, 0.);
+            assert_eq!(state.garage_car(0).engine_output.brake_torque_nm, 0.);
         }
-        let state = run.vehicles[0].engine.capture_save();
-        if !run.vehicles[0].engine_output.running
-            && run.vehicles[0].engine_output.rpm <= source.shutdown_rpm
+        let state = run.garage_car(0).engine.capture_save();
+        if !run.garage_car(0).engine_output.running
+            && run.garage_car(0).engine_output.rpm <= source.shutdown_rpm
             && state.elapsed - state.last_start_chance_time
                 > source.start_chance_interval_seconds * source.engine_start_time_modifier
         {
             break;
         }
     }
-    assert!(!run.vehicles[0].engine_output.running);
-    assert!(run.vehicles[0].engine_output.rpm <= source.shutdown_rpm);
-    assert_eq!(run.vehicles[0].engine.capture_save().supplied_fuel, 0.);
+    assert!(!run.garage_car(0).engine_output.running);
+    assert!(run.garage_car(0).engine_output.rpm <= source.shutdown_rpm);
+    assert_eq!(run.garage_car(0).engine.capture_save().supplied_fuel, 0.);
     let fuel_after = run
         .area
         .items
@@ -943,13 +955,13 @@ fn garage_engine_remove_restore_continue() {
         step(&mut run, &reference, held);
         step(&mut loaded, &reference, held);
         compare(&run, &loaded);
-        if run.vehicles[0].engine_output.running {
+        if run.garage_car(0).engine_output.running {
             break;
         }
     }
-    assert!(run.vehicles[0].engine_output.running);
-    assert!(loaded.vehicles[0].engine_output.running);
-    let final_engine = loaded.vehicles[0].engine.capture_save();
+    assert!(run.garage_car(0).engine_output.running);
+    assert!(loaded.garage_car(0).engine_output.running);
+    let final_engine = loaded.garage_car(0).engine.capture_save();
     assert!(
         final_engine.start_draw.parse::<u64>().unwrap()
             > saved.vehicles[0].engine.start_draw.parse::<u64>().unwrap()

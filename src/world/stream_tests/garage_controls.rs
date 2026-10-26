@@ -128,10 +128,10 @@ fn aim_handbrake(reference: &ReferenceManifest, run: &mut GarageRuntime) -> Item
 fn g10_handbrake_press_priority() {
     let (reference, mut run) = load_garage();
     let lever = aim_handbrake(&reference, &mut run);
-    let initial_handbrake = run.vehicles[0].handbrake;
+    let initial_handbrake = run.garage_car(0).handbrake;
     press(&mut run, &reference, keys::USE);
     assert_eq!(run.aim.use_target.unwrap().item, lever);
-    let after_e_press = run.vehicles[0].handbrake;
+    let after_e_press = run.garage_car(0).handbrake;
     assert_eq!(after_e_press, !initial_handbrake);
     run.step(
         &reference,
@@ -140,7 +140,7 @@ fn g10_handbrake_press_priority() {
             ..FrameInput::default()
         },
     );
-    assert_eq!(run.vehicles[0].handbrake, after_e_press);
+    assert_eq!(run.garage_car(0).handbrake, after_e_press);
     run.step(
         &reference,
         FrameInput {
@@ -148,12 +148,12 @@ fn g10_handbrake_press_priority() {
             ..FrameInput::default()
         },
     );
-    assert_eq!(run.vehicles[0].handbrake, after_e_press);
+    assert_eq!(run.garage_car(0).handbrake, after_e_press);
 
     let (reference, mut run) = load_garage();
     aim_handbrake(&reference, &mut run);
     press(&mut run, &reference, keys::PRIMARY);
-    let after_lmb_press = run.vehicles[0].handbrake;
+    let after_lmb_press = run.garage_car(0).handbrake;
     assert_eq!(after_lmb_press, !initial_handbrake);
     run.step(
         &reference,
@@ -162,7 +162,7 @@ fn g10_handbrake_press_priority() {
             ..FrameInput::default()
         },
     );
-    let after_held_frame = run.vehicles[0].handbrake;
+    let after_held_frame = run.garage_car(0).handbrake;
     assert_eq!(after_held_frame, after_lmb_press);
     run.step(
         &reference,
@@ -171,12 +171,12 @@ fn g10_handbrake_press_priority() {
             ..FrameInput::default()
         },
     );
-    assert_eq!(run.vehicles[0].handbrake, after_lmb_press);
+    assert_eq!(run.garage_car(0).handbrake, after_lmb_press);
 
     let (reference, mut run) = load_garage();
     aim_handbrake(&reference, &mut run);
     press(&mut run, &reference, keys::USE | keys::PRIMARY);
-    let after_combined_press = run.vehicles[0].handbrake;
+    let after_combined_press = run.garage_car(0).handbrake;
     assert_eq!(after_combined_press, !initial_handbrake);
 
     let (reference, mut run) = load_garage();
@@ -202,7 +202,7 @@ fn g10_handbrake_press_priority() {
         run.area.interaction.held(),
     ));
     press(&mut run, &reference, keys::PRIMARY);
-    let after_reserved_lmb = run.vehicles[0].handbrake;
+    let after_reserved_lmb = run.garage_car(0).handbrake;
     assert_eq!(after_reserved_lmb, initial_handbrake);
 }
 

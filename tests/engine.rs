@@ -341,11 +341,23 @@ fn ignition_save_ownership_and_cancellation() {
         held: true,
         ..Default::default()
     };
-    game.vehicles[0].ignition.step(held, delay, true, delay);
-    game.vehicles[0].ignition.step(held, delay, true, 0.02);
-    game.vehicles[0].engine_output.starter = true;
-    assert!(game.vehicles[0].ignition.starter);
-    let mechanics = game.vehicles[0].engine.capture_save();
+    game.vehicles
+        .get_mut(&garage_vehicle_key(0))
+        .unwrap()
+        .ignition
+        .step(held, delay, true, delay);
+    game.vehicles
+        .get_mut(&garage_vehicle_key(0))
+        .unwrap()
+        .ignition
+        .step(held, delay, true, 0.02);
+    game.vehicles
+        .get_mut(&garage_vehicle_key(0))
+        .unwrap()
+        .engine_output
+        .starter = true;
+    assert!(game.vehicles[&garage_vehicle_key(0)].ignition.starter);
+    let mechanics = game.vehicles[&garage_vehicle_key(0)].engine.capture_save();
     let saved = game
         .capture_save(
             &reference,
@@ -367,15 +379,27 @@ fn ignition_save_ownership_and_cancellation() {
     )
     .unwrap();
     assert!(loaded.paused);
-    assert!(loaded.vehicles[0].ignition.ignition);
-    assert!(!loaded.vehicles[0].ignition.starter);
-    assert!(!loaded.vehicles[0].engine_output.starter);
-    assert_eq!(loaded.vehicles[0].engine.capture_save(), mechanics);
+    assert!(loaded.vehicles[&garage_vehicle_key(0)].ignition.ignition);
+    assert!(!loaded.vehicles[&garage_vehicle_key(0)].ignition.starter);
+    assert!(
+        !loaded.vehicles[&garage_vehicle_key(0)]
+            .engine_output
+            .starter
+    );
+    assert_eq!(
+        loaded.vehicles[&garage_vehicle_key(0)]
+            .engine
+            .capture_save(),
+        mechanics
+    );
     game.clear_input();
-    assert!(game.vehicles[0].ignition.ignition);
-    assert!(!game.vehicles[0].ignition.starter);
-    assert!(!game.vehicles[0].engine_output.starter);
-    assert_eq!(game.vehicles[0].engine.capture_save(), mechanics);
+    assert!(game.vehicles[&garage_vehicle_key(0)].ignition.ignition);
+    assert!(!game.vehicles[&garage_vehicle_key(0)].ignition.starter);
+    assert!(!game.vehicles[&garage_vehicle_key(0)].engine_output.starter);
+    assert_eq!(
+        game.vehicles[&garage_vehicle_key(0)].engine.capture_save(),
+        mechanics
+    );
     let mut obsolete = json.clone();
     obsolete["vehicles"][0]["engine"]["ignition"] = true.into();
     assert!(SaveSnapshot::from_json(&serde_json::to_vec(&obsolete).unwrap()).is_err());
@@ -392,15 +416,22 @@ fn ignition_save_ownership_and_cancellation() {
     }
 }
 
+use the_long_slop::vehicle::garage_vehicle_key;
 use the_long_slop::{
     fluids::VehicleFluids,
-    reference::EngineReference,
-    simulation::engine::{EngineInput, EngineOutput, EngineState, InstalledEngineInput},
+    reference::{EngineGlobals, EnginePartReference, EngineReference, RadiatorPartReference},
+    simulation::engine::{
+        EngineInput, EngineOutput, EngineRecords, EngineState, InstalledEngineInput,
+    },
+    simulation::powertrain::PowertrainParts,
 };
 
 #[derive(Clone)]
 struct EngineRig {
     engine: EngineState,
+    record: EnginePartReference,
+    radiator: RadiatorPartReference,
+    globals: EngineGlobals,
     fuel: FluidContainer,
     sump: FluidContainer,
     coolant: FluidContainer,
@@ -410,8 +441,12 @@ impl EngineRig {
         let source = &reference.vehicles[0].engine;
         let container =
             |id| FluidContainer::from(reference.tanks.iter().find(|tank| tank.item == id).unwrap());
+        let parts = PowertrainParts::from_garage(reference);
         Self {
-            engine: EngineState::new(source),
+            engine: EngineState::new(source.initial_temperature),
+            record: parts.engine(0).record.clone(),
+            radiator: parts.radiator(0).record.clone(),
+            globals: reference.world.vehicle_globals.clone(),
             fuel: container(source.fuel_tank),
             sump: container(source.oil_tank),
             coolant: container(source.coolant_tank),
@@ -420,18 +455,25 @@ impl EngineRig {
     fn step(
         &mut self,
         source: &EngineReference,
-        input: EngineInput,
+        mut input: EngineInput,
         sample: impl FnMut(u64) -> f32,
         dt: f32,
     ) -> EngineOutput {
+        if let Some(installed) = &mut input.installed {
+            installed.electronics_enabled = source.electronics_enabled;
+        }
         self.engine.step(
             input,
             VehicleFluids {
-                fuel: &mut self.fuel,
-                sump: &mut self.sump,
-                coolant: &mut self.coolant,
+                fuel: Some(&mut self.fuel),
+                sump: Some(&mut self.sump),
+                coolant: Some(&mut self.coolant),
             },
-            source,
+            EngineRecords {
+                engine: &self.record,
+                radiator: Some(&self.radiator),
+                globals: &self.globals,
+            },
             sample,
             dt,
         )
@@ -539,7 +581,7 @@ fn engine_draws_and_restore() {
     rig.engine.clear_input();
     assert_eq!(rig.engine.capture_save(), saved);
     let mut restored = rig.clone();
-    restored.engine = EngineState::new(source);
+    restored.engine = EngineState::new(source.initial_temperature);
     restored.engine.restore_save(&saved).unwrap();
     let mut next = None;
     let mut loaded_next = None;
@@ -999,7 +1041,10 @@ fn engine_fluids_and_cooling() {
         reference.world.draw_distance.default,
     )
     .unwrap();
-    game.vehicles[0].engine = rig.engine.clone();
+    game.vehicles
+        .get_mut(&garage_vehicle_key(0))
+        .unwrap()
+        .engine = rig.engine.clone();
     for (id, fluid) in [
         (source.fuel_tank, &rig.fuel),
         (source.oil_tank, &rig.sump),
@@ -1024,7 +1069,10 @@ fn engine_fluids_and_cooling() {
     )
     .unwrap();
     let mut continued = EngineRig {
-        engine: loaded.vehicles[0].engine.clone(),
+        engine: loaded.vehicles[&garage_vehicle_key(0)].engine.clone(),
+        record: rig.record.clone(),
+        radiator: rig.radiator.clone(),
+        globals: rig.globals.clone(),
         fuel: loaded
             .area
             .items

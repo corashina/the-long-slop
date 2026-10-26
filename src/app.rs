@@ -574,7 +574,10 @@ fn read_input(
     let runtime = &drive.runtime;
     let assists = runtime.driving_assists;
     game_driving_state(
-        runtime.vehicles[runtime.vehicle].drivetrain.gear() as i32 - 1,
+        runtime
+            .vehicle
+            .as_ref()
+            .map_or(0, |key| runtime.vehicles[key].drivetrain.gear() as i32 - 1),
         assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
         runtime.area.player.driving(),
     );
@@ -982,11 +985,14 @@ fn sync_instruments(
     let run = &drive.runtime;
     // Source `coolantTankscript.Cool`: Fan.Rotate(0, 0, selectedFanSpeed * dt) in local space.
     if imported.bound && run.started && !run.paused {
-        for (vehicle, state) in reference.0.vehicles.iter().zip(&run.vehicles) {
+        // V03 bridge: fans of old garage cars. Task 7 moves them to the car binder.
+        for (index, vehicle) in reference.0.vehicles.iter().enumerate() {
             let Some(node) = vehicle.engine.radiator.fan_node else {
                 continue;
             };
-            let speed = state.engine_output.fan_speed;
+            let speed = run.vehicles[&crate::vehicle::garage_vehicle_key(index)]
+                .engine_output
+                .fan_speed;
             if speed != 0.
                 && let Ok(mut transform) = transforms.get_mut(imported.nodes[&node])
             {
@@ -1025,7 +1031,7 @@ fn active_camera(drive: &Drive) -> Transform {
             drive
                 .runtime
                 .physics
-                .snapshot(&crate::vehicle::garage_vehicle_key(drive.runtime.vehicle))
+                .snapshot(drive.runtime.vehicle.as_ref().unwrap())
                 .pose,
         )
     } else {
@@ -1146,21 +1152,22 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         sleep.progress,
     );
     let runtime = &drive.runtime;
-    let current = &runtime.vehicles[runtime.vehicle];
-    let key = crate::vehicle::garage_vehicle_key(runtime.vehicle);
-    let snapshot = runtime.physics.snapshot(&key);
+    let Some(key) = runtime.vehicle.as_ref() else {
+        return;
+    };
+    let current = &runtime.vehicles[key];
+    let snapshot = runtime.physics.snapshot(key);
     let position = runtime.area.player.focus_position(&runtime.physics);
     let absolute = runtime.stream.origin.absolute(position);
     let origin = runtime.stream.origin.offset;
     let contacts = runtime
         .physics
-        .wheel_contacts(&key)
+        .wheel_contacts(key)
         .enumerate()
         .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
-    let fuel = runtime
-        .area
-        .items
-        .get(reference.0.vehicles[runtime.vehicle].engine.fuel_tank)
+    let fuel = current
+        .fuel_tank
+        .and_then(|tank| runtime.area.items.get(tank))
         .and_then(|item| item.fluid.as_ref())
         .map_or(0.0, |fluid| fluid.finite_total());
     game_update(
@@ -1240,11 +1247,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     } else {
         ""
     };
-    let rpm = if runtime
-        .area
-        .items
-        .mounted(reference.0.vehicles[runtime.vehicle].engine.item)
-    {
+    let rpm = if runtime.mounted_engine(key).is_some() {
         current.engine_output.rpm
     } else {
         0.

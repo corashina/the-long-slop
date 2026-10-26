@@ -281,25 +281,14 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         origin: &WorldOrigin,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
     ) -> [f64; 3] {
         self.records
             .iter()
-            .find(|r| {
-                r.handle
-                    == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
-                    && r.state.is_some()
-            })
+            .find(|r| r.handle == Some(physics.chassis_handle(vehicle)) && r.state.is_some())
             .and_then(|r| r.state)
             .map_or_else(
-                || {
-                    origin.absolute(
-                        physics
-                            .snapshot(&crate::vehicle::garage_vehicle_key(vehicle))
-                            .pose
-                            .position,
-                    )
-                },
+                || origin.absolute(physics.snapshot(vehicle).pose.position),
                 |s| s.pose.position,
             )
     }
@@ -402,8 +391,8 @@ impl PersistentWorld {
         let mut important = std::mem::take(&mut self.important);
         important.clear();
         important.push(stream.focus());
-        for index in 0..physics.vehicle_count() {
-            important.push(self.absolute_vehicle_position(physics, &stream.origin, index));
+        for key in physics.vehicle_keys() {
+            important.push(self.absolute_vehicle_position(physics, &stream.origin, key));
         }
         let held = area
             .items

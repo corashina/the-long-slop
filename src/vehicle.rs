@@ -242,6 +242,10 @@ impl PhysicsWorld {
     pub fn vehicle_count(&self) -> usize {
         self.vehicles.len()
     }
+    /// Vehicle keys in no fixed order.
+    pub fn vehicle_keys(&self) -> impl Iterator<Item = &ObjectKey> {
+        self.vehicles.keys()
+    }
 
     /// Returns the vehicle whose chassis is `body`.
     pub fn vehicle_of(&self, body: RigidBodyHandle) -> Option<&ObjectKey> {

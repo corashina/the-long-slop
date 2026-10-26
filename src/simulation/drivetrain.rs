@@ -4,7 +4,7 @@ use super::{
     input::DrivingControls,
     keys,
 };
-use crate::reference::{DrivingAssists, DrivingReference, VehicleReference};
+use crate::reference::{DrivingAssists, DrivingReference, EnginePartReference, VehicleReference};
 use crate::vehicle::DriveTorques;
 
 #[derive(Clone, Debug)]
@@ -47,7 +47,7 @@ impl DrivetrainState {
         controls: DrivingControls,
         edges: u32,
         assists: DrivingAssists,
-        engine: Option<EngineOutput>,
+        engine: Option<(EngineOutput, &EnginePartReference)>,
         ignition: bool,
         wheel_rpm: f32,
         direction: f32,
@@ -68,7 +68,7 @@ impl DrivetrainState {
         let mut ignition_request = false;
         if controlled
             && automatic
-            && let Some(engine) = engine
+            && let Some((engine, part)) = engine
         {
             // AutoShift: direction and input inversion precede torque selection.
             let direction =
@@ -112,16 +112,13 @@ impl DrivetrainState {
                         }
                     {
                         let mut current = torque(
-                            &vehicle.engine.torque_curve,
+                            &part.torque_curve,
                             wheel_rpm.abs() * vehicle.final_drive_ratio * ratio.abs(),
                         );
                         if current == 0. {
                             current = torque(
-                                &vehicle.engine.torque_curve,
-                                vehicle.engine.max_rpm.abs()
-                                    * 0.5
-                                    * vehicle.final_drive_ratio
-                                    * ratio.abs(),
+                                &part.torque_curve,
+                                part.max_rpm.abs() * 0.5 * vehicle.final_drive_ratio * ratio.abs(),
                             );
                         }
                         if current > maximum {
@@ -142,15 +139,10 @@ impl DrivetrainState {
                 depression = depression.max(brake);
             }
             depression = depression.max(
-                ((vehicle.engine.auto_shift_clutch_rpm - engine.rpm)
-                    / vehicle.engine.auto_shift_clutch_rpm_range)
+                ((part.auto_shift_clutch_rpm - engine.rpm) / part.auto_shift_clutch_rpm_range)
                     .clamp(0., 1.),
             );
-            if vehicle.engine.kickstart
-                && !engine.running
-                && self.wheel_rpm > vehicle.engine.shutdown_rpm
-                && ignition
-            {
+            if part.kickstart && !engine.running && self.wheel_rpm > part.shutdown_rpm && ignition {
                 depression = 0.;
             }
         }

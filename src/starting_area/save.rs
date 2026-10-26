@@ -389,12 +389,17 @@ impl GarageRuntime {
             .area
             .sync_equipment(reference, &mut candidate.physics);
         candidate.area.items.sync_poses(&candidate.physics);
-        candidate.vehicle = ids
-            .vehicles
-            .iter()
-            .position(|id| *id == saved.progress.selected_vehicle)
-            .expect("validated selected vehicle");
-        for (index, vehicle) in candidate.vehicles.iter_mut().enumerate() {
+        // V03 bridge: the save lists old garage cars by index. Task 8 removes it.
+        candidate.vehicle = Some(crate::vehicle::garage_vehicle_key(
+            ids.vehicles
+                .iter()
+                .position(|id| *id == saved.progress.selected_vehicle)
+                .expect("validated selected vehicle"),
+        ));
+        for (key, vehicle) in &mut candidate.vehicles {
+            let Some(index) = crate::vehicle::garage_vehicle_index(key) else {
+                continue;
+            };
             let record = saved
                 .vehicles
                 .iter()
@@ -416,7 +421,10 @@ impl GarageRuntime {
             .collect();
         let mut signals = Vec::with_capacity(candidate.vehicles.len());
         let mut headlights = Vec::with_capacity(candidate.vehicles.len());
-        for (index, vehicle) in candidate.vehicles.iter().enumerate() {
+        for (key, vehicle) in &candidate.vehicles {
+            let Some(index) = crate::vehicle::garage_vehicle_index(key) else {
+                continue;
+            };
             let electronics = reference
                 .lighting
                 .controllers
@@ -462,7 +470,7 @@ impl GarageRuntime {
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
             audio.restore_engine(
-                candidate.vehicles[audio.vehicle_index]
+                candidate.vehicles[&crate::vehicle::garage_vehicle_key(audio.vehicle_index)]
                     .engine_output
                     .running,
             );
@@ -581,7 +589,9 @@ impl GarageRuntime {
             vehicles: self
                 .vehicles
                 .iter()
-                .enumerate()
+                .filter_map(|(key, vehicle)| {
+                    crate::vehicle::garage_vehicle_index(key).map(|index| (index, vehicle))
+                })
                 .map(|(index, vehicle)| {
                     Ok(VehicleSnapshot {
                         instance: ids.vehicles[index].clone(),
@@ -625,7 +635,7 @@ impl GarageRuntime {
             },
             mechanisms: self.area.interaction.capture_save(&ids)?,
             progress: ProgressSnapshot {
-                selected_vehicle: ids.vehicles[self.vehicle].clone(),
+                selected_vehicle: ids.vehicles[self.garage_index()].clone(),
                 start_attempts: self.attempts.to_string(),
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,

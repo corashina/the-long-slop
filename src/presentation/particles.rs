@@ -693,7 +693,12 @@ fn sync_particles(
                     .particles(tool, g.source),
             )
         } else if let Owner::Exhaust(vehicle) = g.owner {
-            Some(drive.runtime.vehicles[vehicle].exhaust.particles(g.source))
+            // V03 bridge: exhaust of old garage cars. Task 7 moves it to the car binder.
+            Some(
+                drive.runtime.vehicles[&crate::vehicle::garage_vehicle_key(vehicle)]
+                    .exhaust
+                    .particles(g.source),
+            )
         } else if let Owner::Storm(id) = g.owner {
             Some(
                 weather

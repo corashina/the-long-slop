@@ -226,7 +226,7 @@ impl PreparedPresentation {
                 mode,
                 candidate
                     .physics
-                    .snapshot(&crate::vehicle::garage_vehicle_key(candidate.vehicle))
+                    .snapshot(candidate.vehicle.as_ref().unwrap())
                     .pose,
             )
         } else {

@@ -519,10 +519,7 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     use crate::simulation::{FrameInput, keys};
     use rapier3d::math::Vector;
     let original_player = run.area.player.body_pose(&run.physics).position;
-    let original_car = run
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-        .pose;
+    let original_car = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     let size = run.stream.tiles[0].size as f32;
     let boundary = size * 0.5;
     let key = SurfaceKey {
@@ -587,14 +584,14 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         0.,
     ]);
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), pose);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), pose);
     run.stream.request_at(
         run.stream
             .origin
             .absolute(run.area.player.focus_position(&run.physics)),
         run.stream.origin.absolute(
             run.physics
-                .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+                .snapshot(run.vehicle.as_ref().unwrap())
                 .pose
                 .position,
         ),
@@ -602,16 +599,12 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     prepare_ready(run, reference);
     run.sync_world_activity(reference).unwrap();
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), pose);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), pose);
     assert_eq!(
-        run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-            .pose,
+        run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose,
         pose
     );
-    let chassis = run
-        .physics
-        .chassis_handle(&crate::vehicle::garage_vehicle_key(run.vehicle));
+    let chassis = run.physics.chassis_handle(run.vehicle.as_ref().unwrap());
     assert!(
         run.physics.body_active(chassis),
         "vehicle must be active for the swept guard"
@@ -630,24 +623,19 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         !run.world_supported(),
         "vehicle swept support includes its next step: pose={:?} velocity={:?} origin={:?} boundary={}",
         run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .snapshot(run.vehicle.as_ref().unwrap())
             .pose
             .position,
         run.physics.rapier().bodies[chassis].linvel(),
         run.stream.origin.offset,
         boundary
     );
-    let before = run
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-        .pose;
+    let before = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     for _ in 0..4 {
         run.step(reference, FrameInput::default());
     }
     assert_eq!(
-        run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-            .pose,
+        run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose,
         before,
         "vehicle must stop before unresolved collision"
     );
@@ -656,7 +644,7 @@ fn swept_boundaries(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     run.step(reference, FrameInput::default());
     assert!(
         run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .snapshot(run.vehicle.as_ref().unwrap())
             .pose
             .position[0]
             > before.position[0] + 0.01,
@@ -922,7 +910,7 @@ fn roadside_lamp_state_survives_its_source_owner() {
         .absolute(run.area.player.focus_position(&run.physics));
     let garage_car = run.stream.origin.absolute(
         run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .snapshot(run.vehicle.as_ref().unwrap())
             .pose
             .position,
     );
@@ -935,13 +923,10 @@ fn roadside_lamp_state_survives_its_source_owner() {
     ];
     let local = run.stream.origin.local(focus);
     move_player(&mut run, local);
-    let mut car = run
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-        .pose;
+    let mut car = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     car.position = run.stream.origin.local(focus);
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), car);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), car);
     run.stream.request_at(focus, focus);
     let mut claim = None;
     for _ in 0..300 {
@@ -974,7 +959,7 @@ fn roadside_lamp_state_survives_its_source_owner() {
     move_player(&mut run, garage_local);
     car.position = run.stream.origin.local(garage_car);
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), car);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), car);
     run.stream.request_at(garage_player, garage_car);
     for _ in 0..300 {
         let required = roadside_views(&run.stream);
@@ -3053,10 +3038,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     prepare_ready(&mut run, &reference);
     let garage_player = run.area.player.body_pose(&run.physics).position;
-    let garage_car = run
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-        .pose;
+    let garage_car = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     let mut sequence = super::super::BuildingSequence::new(&reference.world, run.stream.seed());
     let site = (0..4)
         .filter_map(|_| sequence.next())
@@ -3070,14 +3052,11 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     ];
     let local = run.stream.origin.local(focus);
     move_player(&mut run, local);
-    let mut car = run
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
-        .pose;
+    let mut car = run.physics.snapshot(run.vehicle.as_ref().unwrap()).pose;
     car.position = run.stream.origin.local(focus);
     car.position[0] += 5.;
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), car);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), car);
     run.stream.request_at(focus, focus);
     let mut claim = None;
     let mut held = None;
@@ -3157,7 +3136,7 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     let travel: [f32; 3] = std::array::from_fn(|i| garage_player[i] - local[i]);
     move_player(&mut run, garage_player);
     run.physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), garage_car);
+        .reset_preserving_wheels(run.vehicle.as_ref().unwrap(), garage_car);
     for id in [held, stored, source_part] {
         let body = run.area.items.get(id).unwrap().body.unwrap();
         let mut pose = *run.physics.rapier().bodies[body].position();
@@ -3524,12 +3503,12 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     move_player(&mut loaded, far_local);
     let mut car = loaded
         .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(loaded.vehicle))
+        .snapshot(loaded.vehicle.as_ref().unwrap())
         .pose;
     car.position = far_local;
     loaded
         .physics
-        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(loaded.vehicle), car);
+        .reset_preserving_wheels(loaded.vehicle.as_ref().unwrap(), car);
     loaded.stream.request_at(far, far);
     loaded
         .stream
@@ -3818,15 +3797,11 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     );
     let reset_far_local = reset.stream.origin.local(far);
     move_player(&mut reset, reset_far_local);
-    let mut reset_car = reset
-        .physics
-        .snapshot(&crate::vehicle::garage_vehicle_key(reset.vehicle))
-        .pose;
+    let mut reset_car = reset.physics.snapshot(reset.vehicle.as_ref().unwrap()).pose;
     reset_car.position = reset_far_local;
-    reset.physics.reset_preserving_wheels(
-        &crate::vehicle::garage_vehicle_key(reset.vehicle),
-        reset_car,
-    );
+    reset
+        .physics
+        .reset_preserving_wheels(reset.vehicle.as_ref().unwrap(), reset_car);
     reset.stream.request_at(far, far);
     reset
         .stream
@@ -3844,10 +3819,9 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
     let revisit_local = reset.stream.origin.local(focus);
     move_player(&mut reset, revisit_local);
     reset_car.position = revisit_local;
-    reset.physics.reset_preserving_wheels(
-        &crate::vehicle::garage_vehicle_key(reset.vehicle),
-        reset_car,
-    );
+    reset
+        .physics
+        .reset_preserving_wheels(reset.vehicle.as_ref().unwrap(), reset_car);
     reset.stream.request_at(focus, focus);
     for _ in 0..300 {
         let required = roadside_views(&reset.stream);

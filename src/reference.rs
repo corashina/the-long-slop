@@ -84,7 +84,9 @@ pub const BUILD_ID: u32 = 11_140_890;
 
 macro_rules! id {
     ($name:ident, $inner:ty) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(pub $inner);
     };

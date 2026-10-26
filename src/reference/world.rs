@@ -2058,9 +2058,7 @@ mod tests {
                 "seats": [{"source": src(13), "node": 3, "sit_node": 3, "hit_nodes": [3], "driver": true, "driving2": true, "yaw_limits_degrees": [-179.0, 179.0], "min_exit_angle_degrees": 65.0, "exit_height": 1.0, "show_sleep_text": false, "default_pitch_degrees": 0.0, "pitch_limits_degrees": [-89.0, 89.0]}],
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": []
             },
-            "engines": [{"source": src(14), "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false,
-                "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
-                "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0}],
+            "engines": [crate::reference::engine_part_fixture()],
             "radiators": [{"source": src(15), "node": 2, "coolant_tank": null, "fan_node": 3, "thermostat_range": [80.0, 90.0], "fan_temperature_on": 95.0, "fan_temperature_off": 90.0, "fan_on_when_engine_runs": false, "max_value": 1.0, "max_fan_value": 1.0, "max_fan_speed": 1.0, "max_fluid_loss": 1.0}]
         });
         let asset = AssetRecord {

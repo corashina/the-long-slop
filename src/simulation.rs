@@ -3,6 +3,7 @@ pub mod dials;
 pub mod metal_detector;
 pub mod drivetrain;
 pub mod engine;
+pub mod powertrain;
 pub mod ignition;
 pub mod input;
 pub mod instruments;

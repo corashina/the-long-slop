@@ -66,8 +66,6 @@ pub struct ItemStore {
     states: Vec<ItemState>,
     indices: BevyHashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
-    /// Fuel, sump, and coolant state indices per vehicle.
-    vehicle_tanks: Vec<[usize; 3]>,
     names: Vec<String>,
     vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
@@ -300,32 +298,6 @@ impl ItemStore {
                 buried: false,
             });
         }
-        let mut vehicle_tanks = Vec::with_capacity(reference.vehicles.len());
-        for vehicle in &reference.vehicles {
-            let ids = [
-                vehicle.engine.fuel_tank,
-                vehicle.engine.oil_tank,
-                vehicle.engine.coolant_tank,
-            ];
-            let mut tanks = [0; 3];
-            for (index, id) in ids.iter().enumerate() {
-                tanks[index] = *indices
-                    .get(id)
-                    .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
-                if states[tanks[index]].fluid.is_none() {
-                    return Err(ReferenceError(format!(
-                        "Missing engine fluid container {}",
-                        id.0
-                    )));
-                }
-            }
-            if tanks[0] == tanks[1] || tanks[0] == tanks[2] || tanks[1] == tanks[2] {
-                return Err(ReferenceError(
-                    "Engine tanks must have distinct item IDs".into(),
-                ));
-            }
-            vehicle_tanks.push(tanks);
-        }
         for slot in &reference.wheel_slots {
             for id in [slot.wheel, slot.rim] {
                 if let Some(index) = indices.get(&id) {
@@ -378,7 +350,6 @@ impl ItemStore {
             states,
             indices,
             body_ids,
-            vehicle_tanks,
             names: reference
                 .items
                 .iter()
@@ -979,17 +950,11 @@ impl ItemStore {
         self.membership_revision += 1;
         self.dirty.remove(&id);
         self.indices.remove(&id);
-        let last = self.states.len() - 1;
         self.states.swap_remove(index);
         self.names.swap_remove(index);
         self.body_ids.swap_remove(index);
         if index < self.states.len() {
             self.indices.insert(self.states[index].id, index);
-        }
-        for tank in self.vehicle_tanks.iter_mut().flatten() {
-            if *tank == last {
-                *tank = index;
-            }
         }
     }
 
@@ -1011,7 +976,6 @@ impl ItemStore {
             indices: states.iter().enumerate().map(|(i, s)| (s.id, i)).collect(),
             states,
             body_ids: Vec::new(),
-            vehicle_tanks: Vec::new(),
             names: Vec::new(),
             vehicle_items: Vec::new(),
             slot_owners: HashMap::new(),
@@ -1065,28 +1029,35 @@ impl ItemStore {
         Some((first, second))
     }
 
-    pub fn vehicle_fluids(&mut self, vehicle: usize) -> Result<VehicleFluids<'_>, ReferenceError> {
-        for index in self.vehicle_tanks[vehicle] {
-            self.dirty.insert(self.states[index].id);
+    /// Fuel, oil, and coolant tanks of one engine step. A missing or repeated tank is `None`.
+    pub fn engine_fluids(&mut self, tanks: [Option<ItemId>; 3]) -> VehicleFluids<'_> {
+        let index = tanks.map(|id| id.and_then(|id| self.indices.get(&id).copied()));
+        for i in index.into_iter().flatten() {
+            self.dirty.insert(self.states[i].id);
         }
-        let [fuel, sump, coolant] = self
-            .states
-            .get_disjoint_mut(self.vehicle_tanks[vehicle])
-            .map_err(|_| ReferenceError("Engine tank bindings overlap".into()))?;
-        Ok(VehicleFluids {
-            fuel: fuel
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing fuel state".into()))?,
-            sump: sump
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing sump state".into()))?,
-            coolant: coolant
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing coolant state".into()))?,
-        })
+        let mut order = [0, 1, 2];
+        order.sort_by_key(|k| index[*k].unwrap_or(usize::MAX));
+        let mut found: [Option<&mut FluidContainer>; 3] = [None, None, None];
+        let mut rest = self.states.as_mut_slice();
+        let mut offset = 0;
+        for k in order {
+            let Some(i) = index[k] else { break };
+            if i < offset {
+                continue;
+            }
+            let (state, tail) = std::mem::take(&mut rest)[i - offset..]
+                .split_first_mut()
+                .expect("indexed state");
+            found[k] = state.fluid.as_mut();
+            rest = tail;
+            offset = i + 1;
+        }
+        let [fuel, sump, coolant] = found;
+        VehicleFluids {
+            fuel,
+            sump,
+            coolant,
+        }
     }
 
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {

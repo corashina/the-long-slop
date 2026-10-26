@@ -188,8 +188,11 @@ fn installed_spawn_alignment_and_settling() {
     let settled_position = run.stream.origin.absolute(settled.pose.position);
     run.sync_world_activity(&reference).unwrap();
     assert_eq!(
-        run.persistent_world
-            .absolute_vehicle_position(&run.physics, &run.stream.origin, 0),
+        run.persistent_world.absolute_vehicle_position(
+            &run.physics,
+            &run.stream.origin,
+            &the_long_slop::vehicle::garage_vehicle_key(0),
+        ),
         settled_position,
         "first activity update must retain the aligned live pose"
     );

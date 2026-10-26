@@ -86,7 +86,7 @@ fn r05_cargo_locks_in_trunk() {
     assert!(enter(&mut run, &reference));
     let start = run.stream.origin.absolute(
         run.physics
-            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .snapshot(run.vehicle.as_ref().unwrap())
             .pose
             .position,
     );

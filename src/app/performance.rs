@@ -8,10 +8,12 @@ pub(super) fn publish(drive: Res<Drive>) {
     }
     let runtime = &drive.runtime;
     let counters = runtime.stream.performance_counters();
-    let key = crate::vehicle::garage_vehicle_key(runtime.vehicle);
+    let contacts = runtime.vehicle.as_ref().map_or(0, |key| {
+        runtime.physics.wheel_contacts(key).filter(|v| *v).count() as u32
+    });
     game_performance_counters(
         drive.frame_steps,
-        runtime.physics.wheel_contacts(&key).filter(|v| *v).count() as u32,
+        contacts,
         runtime.physics.rapier().bodies.len() as u32,
         runtime.physics.collider_count() as u32,
         counters.roads as u32,

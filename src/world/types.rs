@@ -27,7 +27,7 @@ pub struct GeneratedId {
     pub ordinal: u32,
     pub children: Vec<(SourceId, u32)>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ObjectKey {
     Imported(ItemId),
