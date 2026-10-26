@@ -202,6 +202,7 @@ extern "C" {
         storms: u32,
         storm_influence: f32,
         storm_particles: u32,
+        entities: u32,
     );
     #[wasm_bindgen(js_namespace = window, js_name = gameMeasureRequested)]
     pub fn game_measure_requested() -> bool;

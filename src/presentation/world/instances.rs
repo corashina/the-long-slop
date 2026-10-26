@@ -2,7 +2,8 @@
 use super::{
     grass_jobs::GrassJobs,
     instance_materials::{InstanceMaterial, InstanceMaterials, RendererMaterial, ready},
-    lod::LodGroup,
+    lod::{LodInstance, LodOwner, LodSchedule, LodTable},
+    node_plan::{NodePlan, anchor_local},
     pipelines::{PipelineTicket, WorldPipelines},
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
@@ -38,7 +39,19 @@ struct Renderer {
     ticket: Option<PipelineTicket>,
     shadow: bool,
     lod_state: Option<(bool, f32)>,
+    // The static node chain of the renderer is active. Spawned nodes carry their own visibility.
+    active: bool,
     settings: Option<GrassSettings>,
+}
+impl Renderer {
+    fn show(&self, commands: &mut Commands) {
+        let visible = self.active && self.lod_state.is_none_or(|(visible, _)| visible);
+        commands.entity(self.entity).insert(if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
 }
 struct Instance {
     retirement: crate::world::renderer_pending::RendererRetirement,
@@ -56,7 +69,10 @@ struct Instance {
     food: Option<crate::reference::ItemId>,
     session: u64,
     root: Entity,
-    nodes: Vec<Entity>,
+    // Entity of each spawned glTF node. Static nodes have none.
+    nodes: Vec<Option<Entity>>,
+    // Nearest spawned ancestor of each glTF node. `None` is the root.
+    anchors: Vec<Option<u32>>,
     active_nodes: Vec<bool>,
     // Local render frame; retain double precision across distant rebases.
     worlds: Vec<DMat4>,
@@ -65,13 +81,54 @@ struct Instance {
     // VehiclePose changes position and rotation. Retain the original composed scales.
     scales: Vec<(Vec3, Vec3)>,
     renderers: Vec<Renderer>,
-    lods: Vec<LodGroup>,
+    lod: LodInstance,
+    plan: Arc<NodePlan>,
     ready: bool,
     cpu: usize,
     gpu: usize,
     objects: usize,
     visible: bool,
     origin: [f64; 3],
+}
+impl Instance {
+    fn entity(&self, node: usize) -> Result<Entity, ReferenceError> {
+        self.nodes[node]
+            .ok_or_else(|| ReferenceError("Generated node writer targets a static node".into()))
+    }
+    /// World matrix of the nearest spawned ancestor of a glTF node.
+    fn anchor_world(&self, node: usize, origin: crate::world::WorldOrigin) -> DMat4 {
+        self.anchors[node].map_or_else(
+            || local_root(&self.placement, origin),
+            |anchor| self.worlds[anchor as usize],
+        )
+    }
+    /// Writes a dynamic glTF node pose given relative to its glTF parent.
+    fn write_local(
+        &self,
+        transforms: &mut super::runtime::WorldRoots,
+        node: usize,
+        local: Transform,
+        origin: crate::world::WorldOrigin,
+    ) -> Result<(), ReferenceError> {
+        let entity = self.entity(node)?;
+        let parent = self.plan.parents[node]
+            .filter(|&parent| Some(parent) != self.anchors[node])
+            .map(|parent| {
+                (
+                    self.anchor_world(node, origin),
+                    self.worlds[parent as usize],
+                )
+            });
+        if let Ok(mut transform) = transforms.get_mut(entity) {
+            transform.set_if_neq(anchor_local(parent, local));
+        }
+        Ok(())
+    }
+}
+impl LodOwner for Instance {
+    fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
+        (!self.retirement.started()).then_some((&mut self.lod, &self.worlds))
+    }
 }
 #[derive(Resource, Default)]
 pub struct SourceInstances {
@@ -85,6 +142,7 @@ pub struct SourceInstances {
     content_instances: HashMap<ContentSlot, Vec<usize>>,
     lamp_instances: HashMap<usize, Vec<usize>>,
     selection: InstanceSelection,
+    lods: LodSchedule,
     cache_bytes: usize,
 }
 impl SourceInstances {
@@ -110,6 +168,7 @@ impl SourceInstances {
                 .sum::<usize>()
             + self.contents.retained_bytes()
             + self.selection.retained_bytes()
+            + self.lods.retained_bytes()
     }
     pub(crate) fn drained(&self) -> bool {
         self.instances
@@ -179,6 +238,7 @@ impl SourceInstances {
         self.content_instances.clear();
         self.lamp_instances.clear();
         self.selection.reset(0);
+        self.lods.reset();
         self.origin = None;
         self.cache_bytes = self.measure_cache_bytes();
     }
@@ -325,9 +385,48 @@ impl SourceInstances {
                 )?;
             if admitted {
                 prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
-                if let Some(loaded) =
-                    prototypes.loaded(stream.frame().request.session, &placement.prototype)
-                {
+                let lods = prototypes.lods(
+                    stream.frame().request.session,
+                    &placement.prototype,
+                    || {
+                        LodTable::for_prototype(&reference.world, prototype, |source| {
+                            stream.lod_owner(source)
+                        })
+                    },
+                )?;
+                let node_plan = prototypes.nodes(
+                    stream.frame().request.session,
+                    &placement.prototype,
+                    |loaded| {
+                        let asset = assets.get(&loaded.asset).ok_or_else(|| {
+                            ReferenceError("Missing generated prototype asset".into())
+                        })?;
+                        let count = loaded.plan.nodes.len();
+                        let mut sources = vec![None; count];
+                        let mut dynamic = vec![false; count];
+                        let moving = stream.moving_nodes(reference, prototype)?;
+                        for (index, node) in prototype.nodes.iter().enumerate() {
+                            sources[node.gltf_node as usize] = Some(index as u32);
+                            dynamic[node.gltf_node as usize] |= moving[index];
+                        }
+                        // Skin joints move with their nodes.
+                        for &joint in asset.joints.iter().flatten() {
+                            dynamic[joint] = true;
+                        }
+                        let children = loaded
+                            .plan
+                            .nodes
+                            .iter()
+                            .map(|n| n.children.as_slice())
+                            .collect::<Vec<_>>();
+                        Ok(NodePlan::new(&children, sources, dynamic))
+                    },
+                )?;
+                if let (Some(loaded), Some(lods), Some(node_plan)) = (
+                    prototypes.loaded(stream.frame().request.session, &placement.prototype),
+                    lods,
+                    node_plan,
+                ) {
                     if let Some(asset) = assets.get(&loaded.asset) {
                         let count = loaded.plan.nodes.len();
                         let primitives = loaded
@@ -347,7 +446,8 @@ impl SourceInstances {
                         let mut cpu = count
                             * (2048
                                 + std::mem::size_of::<DMat4>()
-                                + std::mem::size_of::<(Vec3, Vec3)>())
+                                + std::mem::size_of::<(Vec3, Vec3)>()
+                                + std::mem::size_of::<Option<u32>>())
                             + std::mem::size_of::<Vec<()>>()
                             + primitives * (8192 + crate::presentation::caster_material::CPU_BYTES);
                         let mut gpu =
@@ -369,109 +469,76 @@ impl SourceInstances {
                             .id();
                         let mut owned_bindings = Vec::with_capacity(primitives);
                         let construction = (|| -> Result<Instance, ReferenceError> {
-                            let mut nodes = Vec::with_capacity(count);
-                            let mut worlds = vec![DMat4::IDENTITY; count];
-                            let mut source_worlds = vec![Mat4::IDENTITY; count];
                             let source_root = Mat4::from_scale_rotation_translation(
                                 Vec3::from_array(placement.scale),
                                 Quat::from_array(placement.pose.rotation),
                                 Vec3::from_array(placement.pose.position.map(|v| v as f32)),
                             );
-                            for node in &loaded.plan.nodes {
-                                let local = if let Some(matrix) = node.matrix {
-                                    Mat4::from_cols_array(&matrix)
-                                } else {
-                                    Mat4::from_scale_rotation_translation(
-                                        Vec3::from_array(node.scale),
-                                        Quat::from_array(node.rotation),
-                                        Vec3::from_array(node.translation),
-                                    )
-                                };
-                                let local = match prototype
-                                    .nodes
-                                    .iter()
-                                    .find(|n| n.gltf_node == node.index)
-                                {
-                                    Some(source) => override_local(
-                                        local,
-                                        stream.appearance(&placement.id),
-                                        &source.source,
-                                    ),
-                                    None => local,
-                                };
-                                worlds[node.index as usize] = local.as_dmat4();
-                                nodes.push(
+                            let appearance = stream.appearance(&placement.id);
+                            let locals = loaded
+                                .plan
+                                .nodes
+                                .iter()
+                                .map(|node| {
+                                    let local = if let Some(matrix) = node.matrix {
+                                        Mat4::from_cols_array(&matrix)
+                                    } else {
+                                        Mat4::from_scale_rotation_translation(
+                                            Vec3::from_array(node.scale),
+                                            Quat::from_array(node.rotation),
+                                            Vec3::from_array(node.translation),
+                                        )
+                                    };
+                                    match node_plan.sources[node.index as usize] {
+                                        Some(source) => override_local(
+                                            local,
+                                            appearance,
+                                            &prototype.nodes[source as usize].source,
+                                        ),
+                                        None => local,
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            let active_nodes = (0..prototype.nodes.len())
+                                .map(|i| active(prototype, i, appearance))
+                                .collect::<Vec<_>>();
+                            let flat = node_plan.flatten(&locals);
+                            let worlds = flat
+                                .chain
+                                .iter()
+                                .map(|chain| root_pose * chain.as_dmat4())
+                                .collect::<Vec<_>>();
+                            let source_worlds = flat
+                                .chain
+                                .iter()
+                                .map(|chain| source_root * *chain)
+                                .collect::<Vec<_>>();
+                            // Parents spawn before children, so each anchor entity exists.
+                            let mut nodes = vec![None; count];
+                            for &node in &node_plan.order {
+                                let node = node as usize;
+                                if !flat.spawned[node] {
+                                    continue;
+                                }
+                                let parent = flat.anchors[node].map_or(root, |a| {
+                                    nodes[a as usize].expect("anchor spawns first")
+                                });
+                                let visible = node_plan.sources[node]
+                                    .is_none_or(|source| active_nodes[source as usize]);
+                                nodes[node] = Some(
                                     commands
                                         .spawn((
-                                            Transform::from_matrix(local),
-                                            Visibility::Inherited,
+                                            Transform::from_matrix(flat.rest[node]),
+                                            if visible {
+                                                Visibility::Inherited
+                                            } else {
+                                                Visibility::Hidden
+                                            },
+                                            ChildOf(parent),
                                         ))
                                         .id(),
                                 );
                             }
-                            for node in &loaded.plan.nodes {
-                                let parent = loaded
-                                    .plan
-                                    .nodes
-                                    .iter()
-                                    .find(|p| p.children.contains(&node.index));
-                                commands.entity(nodes[node.index as usize]).insert(ChildOf(
-                                    parent.map_or(root, |p| nodes[p.index as usize]),
-                                ));
-                            }
-                            // Parent traversal preserves glTF order without assuming topological node indices.
-                            for node in &loaded.plan.nodes {
-                                let mut matrix = worlds[node.index as usize].as_mat4();
-                                let mut current = node.index;
-                                for _ in 0..count {
-                                    let Some(parent) = loaded
-                                        .plan
-                                        .nodes
-                                        .iter()
-                                        .find(|p| p.children.contains(&current))
-                                    else {
-                                        break;
-                                    };
-                                    let local = if let Some(matrix) = parent.matrix {
-                                        Mat4::from_cols_array(&matrix)
-                                    } else {
-                                        Mat4::from_scale_rotation_translation(
-                                            Vec3::from_array(parent.scale),
-                                            Quat::from_array(parent.rotation),
-                                            Vec3::from_array(parent.translation),
-                                        )
-                                    };
-                                    let local = match prototype
-                                        .nodes
-                                        .iter()
-                                        .find(|n| n.gltf_node == parent.index)
-                                    {
-                                        Some(source) => override_local(
-                                            local,
-                                            stream.appearance(&placement.id),
-                                            &source.source,
-                                        ),
-                                        None => local,
-                                    };
-                                    matrix = local * matrix;
-                                    current = parent.index;
-                                }
-                                worlds[node.index as usize] = root_pose * matrix.as_dmat4();
-                                source_worlds[node.index as usize] = source_root * matrix;
-                            }
-                            for (i, node) in prototype.nodes.iter().enumerate() {
-                                commands.entity(nodes[node.gltf_node as usize]).insert(
-                                    if active(prototype, i, stream.appearance(&placement.id)) {
-                                        Visibility::Inherited
-                                    } else {
-                                        Visibility::Hidden
-                                    },
-                                );
-                            }
-                            let lods =
-                                LodGroup::for_prototype(&reference.world, prototype, |source| {
-                                    stream.lod_owner(source)
-                                })?;
                             let mut renderers = Vec::with_capacity(primitives);
                             for (source_index, source_node) in prototype.nodes.iter().enumerate() {
                                 if !source_node.renderer_enabled {
@@ -491,12 +558,7 @@ impl SourceInstances {
                                     ReferenceError("Missing generated receiver state".into())
                                 })?;
                                 // LOD uniforms and warm tickets retain each renderer's original handles.
-                                let has_lod = lods.iter().any(|group| {
-                                    group
-                                        .levels
-                                        .iter()
-                                        .any(|level| level.nodes.contains(&source_index))
-                                });
+                                let has_lod = !lods.levels(source_index).is_empty();
                                 for primitive in loaded
                                     .plan
                                     .primitives
@@ -592,11 +654,26 @@ impl SourceInstances {
                                     }
                                     let is_grass =
                                         matches!(binding.visible, InstanceMaterial::Grass(_));
+                                    // A static node bakes its matrix into the renderer.
+                                    let (parent, transform) = match nodes[node.index as usize] {
+                                        Some(entity) => (entity, Transform::default()),
+                                        None => (
+                                            flat.anchors[node.index as usize]
+                                                .map_or(root, |a| nodes[a as usize].unwrap()),
+                                            Transform::from_matrix(flat.rest[node.index as usize]),
+                                        ),
+                                    };
+                                    let chain_active = nodes[node.index as usize].is_some()
+                                        || active_nodes[source_index];
                                     let entity = commands
                                         .spawn((
-                                            Transform::default(),
-                                            Visibility::Inherited,
-                                            ChildOf(nodes[node.index as usize]),
+                                            transform,
+                                            if chain_active {
+                                                Visibility::Inherited
+                                            } else {
+                                                Visibility::Hidden
+                                            },
+                                            ChildOf(parent),
                                             RenderLayers::layer(source_node.layer as usize),
                                             SourceShadowMode(shadow),
                                             crate::presentation::renderer_visibility::SourceRenderer(
@@ -698,8 +775,14 @@ impl SourceInstances {
                                                 )
                                             })?
                                             .iter()
-                                            .map(|&j| nodes[j])
-                                            .collect();
+                                            .map(|&j| {
+                                                nodes[j].ok_or_else(|| {
+                                                    ReferenceError(
+                                                        "Generated skin joint is static".into(),
+                                                    )
+                                                })
+                                            })
+                                            .collect::<Result<_, _>>()?;
                                         let binding = SkinnedMesh {
                                             inverse_bindposes: asset.inverse_bindposes
                                                 [skin as usize]
@@ -777,6 +860,7 @@ impl SourceInstances {
                                         binding,
                                         ticket: None,
                                         lod_state: None,
+                                        active: chain_active,
                                         shadow: shadow != 0,
                                         settings,
                                     });
@@ -797,15 +881,9 @@ impl SourceInstances {
                                 food: None,
                                 session: stream.frame().request.session,
                                 root,
-                                active_nodes: prototype
-                                    .nodes
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, _)| {
-                                        active(prototype, i, stream.appearance(&placement.id))
-                                    })
-                                    .collect(),
+                                active_nodes,
                                 nodes,
+                                anchors: flat.anchors,
                                 scales: worlds
                                     .iter()
                                     .zip(&source_worlds)
@@ -819,7 +897,8 @@ impl SourceInstances {
                                 worlds,
                                 source_worlds,
                                 renderers,
-                                lods,
+                                lod: LodInstance::new(lods.clone()),
+                                plan: node_plan.clone(),
                                 ready: false,
                                 cpu,
                                 gpu,
@@ -836,6 +915,7 @@ impl SourceInstances {
                                 continuation.watch_upload(upload.receipt.clone());
                                 instance.continuation = Some(continuation);
                                 instance.upload = Some(upload);
+                                self.lods.spawn(&mut instance.lod, self.instances.len());
                                 self.instances.push(instance);
                                 self.bindings_dirty = true;
                             }
@@ -1073,7 +1153,7 @@ impl SourceInstances {
                         cap,
                         prototype,
                         &instance.nodes,
-                    );
+                    )?;
                 }
                 instance.caps_bound = true;
             }
@@ -1107,47 +1187,23 @@ impl SourceInstances {
             }
             if let Some(radio) = stream.radio(&instance.placement.id) {
                 let node = prototype.nodes[radio.needle_node].gltf_node as usize;
-                if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
-                    transform.set_if_neq(Transform {
-                        translation: Vec3::from_array(radio.needle.translation),
-                        rotation: Quat::from_array(radio.needle.rotation),
-                        scale: Vec3::from_array(radio.needle.scale),
-                    });
-                }
+                instance.write_local(transforms, node, local_pose(radio.needle), frame.origin)?;
             }
             if let Some(music_box) = stream.music_box(&instance.placement.id) {
                 for n in &music_box.nodes {
                     let node = prototype.nodes[n.node].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
-                        transform.set_if_neq(Transform {
-                            translation: Vec3::from_array(n.pose.translation),
-                            rotation: Quat::from_array(n.pose.rotation),
-                            scale: Vec3::from_array(n.pose.scale),
-                        });
-                    }
+                    instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
                 }
             }
             if let Some(detector) = stream.detector(&instance.placement.id) {
                 let n = &detector.needle;
                 let node = prototype.nodes[n.node].gltf_node as usize;
-                if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
-                    transform.set_if_neq(Transform {
-                        translation: Vec3::from_array(n.pose.translation),
-                        rotation: Quat::from_array(n.pose.rotation),
-                        scale: Vec3::from_array(n.pose.scale),
-                    });
-                }
+                instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
             }
             if let Some(dial) = stream.dial(&instance.placement.id) {
                 for n in dial.nodes() {
                     let node = prototype.nodes[n.node].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
-                        transform.set_if_neq(Transform {
-                            translation: Vec3::from_array(n.pose.translation),
-                            rotation: Quat::from_array(n.pose.rotation),
-                            scale: Vec3::from_array(n.pose.scale),
-                        });
-                    }
+                    instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
                 }
             }
             if let Some((record, vehicle)) = car
@@ -1170,7 +1226,7 @@ impl SourceInstances {
                     });
                 for (node, e) in needles.chain(digits) {
                     let node = prototype.nodes[node.0 as usize].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
+                    if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
                         let rotation =
                             Quat::from_array(crate::simulation::instruments::source_rotation(e));
                         if transform.rotation != rotation {
@@ -1179,48 +1235,38 @@ impl SourceInstances {
                     }
                 }
             }
-            if let Some(pose) = stream.spray_trigger(&instance.placement.id)
+            if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
                 && let Some(n) = prototype
                     .nodes
                     .iter()
                     .find(|n| n.source == reference.small_items.spray_bottle.trigger)
-                && let Ok(mut transform) = transforms.get_mut(instance.nodes[n.gltf_node as usize])
             {
-                transform.set_if_neq(Transform {
-                    translation: Vec3::from_array(pose.translation),
-                    rotation: Quat::from_array(pose.rotation),
-                    scale: Vec3::from_array(pose.scale),
-                });
+                instance.write_local(
+                    transforms,
+                    n.gltf_node as usize,
+                    local_pose(trigger),
+                    frame.origin,
+                )?;
             }
             if let Some(level) = stream.level(&instance.placement.id) {
                 for b in level.bubbles() {
                     let node = prototype.nodes[b.node].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[node]) {
-                        transform.set_if_neq(Transform {
-                            translation: Vec3::from_array(b.pose.translation),
-                            rotation: Quat::from_array(b.pose.rotation),
-                            scale: Vec3::from_array(b.pose.scale),
-                        });
-                    }
+                    instance.write_local(transforms, node, local_pose(b.pose), frame.origin)?;
                 }
             }
             for (i, node) in prototype.nodes.iter().enumerate() {
-                if let Some((_, pose)) = instance
+                if let Some((_, pose_value)) = instance
                     .lamp_buttons
                     .iter()
                     .filter_map(|index| stream.lamp_button_at(*index))
                     .find(|(button, _)| *button == &node.source)
                 {
-                    if let Ok(mut transform) =
-                        transforms.get_mut(instance.nodes[node.gltf_node as usize])
-                    {
-                        let value = Transform {
-                            translation: Vec3::from_array(pose.translation),
-                            rotation: Quat::from_array(pose.rotation),
-                            scale: Vec3::from_array(pose.scale),
-                        };
-                        transform.set_if_neq(value);
-                    }
+                    instance.write_local(
+                        transforms,
+                        node.gltf_node as usize,
+                        local_pose(pose_value),
+                        frame.origin,
+                    )?;
                 }
                 let enabled = active_food(prototype, i, appearance, reference, food)
                     && car
@@ -1228,13 +1274,19 @@ impl SourceInstances {
                         .unwrap_or(true);
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
-                    commands
-                        .entity(instance.nodes[node.gltf_node as usize])
-                        .insert(if enabled {
+                    if let Some(entity) = instance.nodes[node.gltf_node as usize] {
+                        commands.entity(entity).insert(if enabled {
                             Visibility::Inherited
                         } else {
                             Visibility::Hidden
                         });
+                    } else {
+                        // A static node hides its own renderers. Static descendants change in this loop too.
+                        for renderer in instance.renderers.iter_mut().filter(|r| r.node == i) {
+                            renderer.active = enabled;
+                            renderer.show(commands);
+                        }
+                    }
                 }
             }
             for renderer in &mut instance.renderers {
@@ -1263,6 +1315,7 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
                     std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
                     renderer.lod_state = None;
+                    self.lods.queue(&mut instance.lod, instance_index);
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
                 }
@@ -1289,6 +1342,7 @@ impl SourceInstances {
                     ),
                 ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
+                    self.lods.queue(&mut instance.lod, instance_index);
                     let delta = world * instance.worlds[index].inverse();
                     let source_changed = source_world != instance.source_worlds[index];
                     let source_delta = source_world * instance.source_worlds[index].inverse();
@@ -1314,13 +1368,9 @@ impl SourceInstances {
                     }
                     instance.worlds[index] = world;
                     instance.source_worlds[index] = source_world;
-                    let parent = if let Some(parent) = node.parent {
-                        instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
-                    } else {
-                        local_root(&instance.placement, frame.origin)
-                    };
-                    if let Ok(mut transform) = transforms.get_mut(instance.nodes[index]) {
-                        *transform = Transform::from_matrix((parent.inverse() * world).as_mat4());
+                    let anchor = instance.anchor_world(index, frame.origin);
+                    if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
+                        *transform = Transform::from_matrix((anchor.inverse() * world).as_mat4());
                     }
                 }
             }
@@ -1339,6 +1389,9 @@ impl SourceInstances {
                 };
                 let index = node.gltf_node as usize;
                 let world = pose_world(instance, index, pose);
+                if instance.worlds[index] != world {
+                    self.lods.queue(&mut instance.lod, instance_index);
+                }
                 instance.worlds[index] = world;
                 let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
@@ -1346,14 +1399,10 @@ impl SourceInstances {
                     Quat::from_array(pose.rotation),
                     Vec3::from_array(frame.origin.absolute(pose.position).map(|v| v as f32)),
                 );
-                let parent = if let Some(parent) = node.parent {
-                    instance.worlds[prototype.nodes[parent as usize].gltf_node as usize]
-                } else {
-                    local_root(&instance.placement, frame.origin)
-                };
-                if let Ok(mut transform) = transforms.get_mut(instance.nodes[index]) {
+                let anchor = instance.anchor_world(index, frame.origin);
+                if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
                     transform
-                        .set_if_neq(Transform::from_matrix((parent.inverse() * world).as_mat4()));
+                        .set_if_neq(Transform::from_matrix((anchor.inverse() * world).as_mat4()));
                 }
             }
             for renderer in &instance.renderers {
@@ -1385,60 +1434,36 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
     ) {
-        for instance in &mut self.instances {
-            if instance.retirement.started() {
-                continue;
-            }
-            let prototype = &reference.world.prototypes[instance.prototype];
-            for renderer in &mut instance.renderers {
-                let mut visible = true;
-                let mut fade = 1.0;
-                for group in &instance.lods {
-                    let Some(level) = group
-                        .levels
-                        .iter()
-                        .position(|l| l.nodes.contains(&renderer.node))
-                    else {
+        self.lods.update(
+            view,
+            reference.world.lod.lod_bias,
+            reference.world.lod.maximum_lod as usize,
+            self.origin,
+            &mut self.instances,
+            |instance| {
+                let prototype = &reference.world.prototypes[instance.prototype];
+                for renderer in &mut instance.renderers {
+                    let state = instance.lod.renderer(renderer.node);
+                    if renderer.lod_state == Some(state) {
                         continue;
-                    };
-                    let node = prototype.nodes[group.node].gltf_node as usize;
-                    let selected = group.select(
-                        instance.worlds[node].as_mat4(),
-                        view,
-                        reference.world.lod.lod_bias,
-                        reference.world.lod.maximum_lod as usize,
-                    );
-                    match selected {
-                        Some(value) if level == value.first => {
-                            fade = value.fade;
-                        }
-                        Some(value) if value.transition && level == value.first + 1 => {
-                            fade = value.fade - 1.0;
-                        }
-                        _ => {
-                            visible = false;
-                        }
                     }
+                    renderer.lod_state = Some(state);
+                    let fade = state.1;
+                    renderer.show(commands);
+                    let source_position = instance.source_worlds
+                        [prototype.nodes[renderer.node].gltf_node as usize]
+                        .w_axis
+                        .truncate()
+                        * Vec3::new(1., 1., -1.);
+                    materials.fade(&renderer.binding, fade, source_position);
+                    grass.set_fade(renderer.entity, fade, &mut materials.grass);
                 }
-                let state = (visible, fade);
-                if renderer.lod_state == Some(state) {
-                    continue;
-                }
-                renderer.lod_state = Some(state);
-                commands.entity(renderer.entity).insert(if visible {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                });
-                let source_position = instance.source_worlds
-                    [prototype.nodes[renderer.node].gltf_node as usize]
-                    .w_axis
-                    .truncate()
-                    * Vec3::new(1., 1., -1.);
-                materials.fade(&renderer.binding, fade, source_position);
-                grass.set_fade(renderer.entity, fade, &mut materials.grass);
-            }
-        }
+            },
+        );
+        crate::world::stream_profile::count(
+            crate::world::stream_profile::Stage::Lods,
+            self.lods.evaluated(),
+        );
     }
     pub fn request_writers(
         &self,
@@ -1537,6 +1562,10 @@ impl SourceInstances {
                 continue;
             }
             let mut instance = self.instances.swap_remove(index);
+            self.lods.remove(&instance.lod);
+            if let Some(moved) = self.instances.get_mut(index) {
+                self.lods.relocate(&mut moved.lod, index);
+            }
             self.bindings_dirty = true;
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
@@ -1713,6 +1742,13 @@ fn grass_bounds(
     bevy::camera::primitives::Aabb::from_min_max(min - padding, max + padding)
 }
 
+fn local_pose(pose: crate::reference::Transform) -> Transform {
+    Transform {
+        translation: Vec3::from_array(pose.translation),
+        rotation: Quat::from_array(pose.rotation),
+        scale: Vec3::from_array(pose.scale),
+    }
+}
 fn local_root(placement: &Placement, origin: crate::world::WorldOrigin) -> DMat4 {
     let mut root = Mat4::from_scale_rotation_translation(
         Vec3::from_array(placement.scale),

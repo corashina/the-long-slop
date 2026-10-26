@@ -9,7 +9,25 @@ pub struct LodView {
     pub fov_degrees: f32,
     pub ortho_size: Option<f32>,
 }
-#[derive(Clone, Copy)]
+impl LodView {
+    /// Checked perspective camera factor: scaled distance per camera distance.
+    pub fn factor(&self, bias: f32) -> f32 {
+        let angle = self.fov_degrees / 360.0;
+        let angle = angle + angle;
+        let angle = angle * std::f32::consts::PI;
+        let angle = angle * 0.5;
+        ((angle.tan() as f64) * 2.0) as f32 / bias
+    }
+    fn distance(&self, center: Vec3, bias: f32) -> f32 {
+        if let Some(half_height) = self.ortho_size {
+            2.0 * half_height / bias
+        } else {
+            let factor = self.factor(bias);
+            ((self.position - center).length_squared() * (factor * factor)).sqrt()
+        }
+    }
+}
+#[derive(Clone, Copy, PartialEq)]
 pub struct LodSelection {
     pub first: usize,
     pub fade: f32,
@@ -41,7 +59,7 @@ fn number(value: Option<&WorldValue>) -> Result<f32, ReferenceError> {
     }
 }
 impl LodGroup {
-    pub fn for_prototype<'a>(
+    fn for_prototype<'a>(
         reference: &WorldReference,
         prototype: &WorldPrototypeReference,
         owner: impl Fn(&SourceId) -> Option<&'a SourceId>,
@@ -125,6 +143,18 @@ impl LodGroup {
         }
         Ok(result)
     }
+    /// World center and size of the group for a node world matrix.
+    pub fn bounds(&self, world: Mat4) -> (Vec3, f32) {
+        let scale = Vec3::new(
+            world.x_axis.truncate().length(),
+            world.y_axis.truncate().length(),
+            world.z_axis.truncate().length(),
+        );
+        (
+            world.transform_point3(self.point),
+            scale.max_element() * self.size,
+        )
+    }
     /// UnityPlayer 3f99f0 selection and checked camera factor, and checked static width coefficients.
     pub fn select(
         &self,
@@ -133,39 +163,24 @@ impl LodGroup {
         bias: f32,
         maximum: usize,
     ) -> Option<LodSelection> {
-        let scale = Vec3::new(
-            world.x_axis.truncate().length(),
-            world.y_axis.truncate().length(),
-            world.z_axis.truncate().length(),
-        );
-        let size = scale.max_element() * self.size;
-        let center = world.transform_point3(self.point);
-        let distance = if let Some(half_height) = view.ortho_size {
-            2.0 * half_height / bias
-        } else {
-            let angle = view.fov_degrees / 360.0;
-            let angle = angle + angle;
-            let angle = angle * std::f32::consts::PI;
-            let angle = angle * 0.5;
-            let factor = ((angle.tan() as f64) * 2.0) as f32 / bias;
-            ((view.position - center).length_squared() * (factor * factor)).sqrt()
-        };
+        let (center, size) = self.bounds(world);
+        self.select_at(center, size, view, bias, maximum)
+    }
+    pub fn select_at(
+        &self,
+        center: Vec3,
+        size: f32,
+        view: LodView,
+        bias: f32,
+        maximum: usize,
+    ) -> Option<LodSelection> {
+        let distance = view.distance(center, bias);
         for (index, level) in self.levels.iter().enumerate().skip(maximum) {
             let threshold = size / level.height;
             if distance >= threshold {
                 continue;
             }
-            let previous = if index == 0 {
-                1.0
-            } else {
-                self.levels[index - 1].height
-            };
-            let width = if size.abs() <= 1.0e-6 || level.width <= 1.0e-5 {
-                0.0
-            } else {
-                (threshold - size / (level.height + (previous - level.height) * level.width))
-                    .max(0.0)
-            };
+            let width = self.width(index, size, threshold);
             let remaining = threshold - distance;
             let transition = width > 0.0 && remaining < width;
             return Some(LodSelection {
@@ -176,6 +191,59 @@ impl LodGroup {
         }
         None
     }
+    fn width(&self, index: usize, size: f32, threshold: f32) -> f32 {
+        let level = &self.levels[index];
+        let previous = if index == 0 {
+            1.0
+        } else {
+            self.levels[index - 1].height
+        };
+        if size.abs() <= 1.0e-6 || level.width <= 1.0e-5 {
+            0.0
+        } else {
+            (threshold - size / (level.height + (previous - level.height) * level.width)).max(0.0)
+        }
+    }
+    /// Camera travel that cannot change `select_at`. Zero during a fade transition.
+    /// The margin covers f32 rounding of the distance and the boundaries.
+    pub fn safe_distance(
+        &self,
+        center: Vec3,
+        size: f32,
+        view: LodView,
+        bias: f32,
+        maximum: usize,
+    ) -> f32 {
+        let distance = view.distance(center, bias);
+        let mut selected = false;
+        let mut safe = f32::INFINITY;
+        for (index, level) in self.levels.iter().enumerate().skip(maximum) {
+            let threshold = size / level.height;
+            let width = self.width(index, size, threshold);
+            if !selected && distance < threshold {
+                selected = true;
+                if width > 0.0 && threshold - distance < width {
+                    return 0.0;
+                }
+            }
+            // Comparisons with a non-finite boundary never change.
+            if !threshold.is_finite() {
+                continue;
+            }
+            let error = 1.0e-5 * (2.0 * distance + threshold.abs());
+            safe = safe.min((distance - threshold).abs() - error);
+            if width > 0.0 {
+                safe = safe.min((distance - (threshold - width)).abs() - error);
+            }
+        }
+        if view.ortho_size.is_some() || safe == f32::INFINITY {
+            return f32::INFINITY;
+        }
+        if !distance.is_finite() {
+            return 0.0;
+        }
+        (safe / view.factor(bias).abs()).max(0.0)
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.source.file.capacity()
@@ -185,5 +253,548 @@ impl LodGroup {
                 .iter()
                 .map(|l| l.nodes.capacity() * std::mem::size_of::<usize>())
                 .sum::<usize>()
+    }
+}
+/// Per prototype LOD groups and renderer membership. Built once per loaded prototype.
+pub struct LodTable {
+    groups: Vec<LodGroup>,
+    // glTF node of each group, which gives the instance world matrix.
+    worlds: Vec<usize>,
+    // Range in `levels` for each prototype node.
+    ranges: Vec<std::ops::Range<u32>>,
+    // (group, level) pairs: the first level of each group that holds the node.
+    levels: Vec<(u32, u32)>,
+}
+impl LodTable {
+    pub fn new(groups: Vec<LodGroup>, worlds: Vec<usize>, nodes: usize) -> Self {
+        let mut ranges = Vec::with_capacity(nodes);
+        let mut levels = Vec::new();
+        for node in 0..nodes {
+            let start = levels.len() as u32;
+            for (index, group) in groups.iter().enumerate() {
+                if let Some(level) = group.levels.iter().position(|l| l.nodes.contains(&node)) {
+                    levels.push((index as u32, level as u32));
+                }
+            }
+            ranges.push(start..levels.len() as u32);
+        }
+        Self {
+            groups,
+            worlds,
+            ranges,
+            levels,
+        }
+    }
+    pub fn for_prototype<'a>(
+        reference: &WorldReference,
+        prototype: &WorldPrototypeReference,
+        owner: impl Fn(&SourceId) -> Option<&'a SourceId>,
+    ) -> Result<Self, ReferenceError> {
+        let groups = LodGroup::for_prototype(reference, prototype, owner)?;
+        let worlds = groups
+            .iter()
+            .map(|g| prototype.nodes[g.node].gltf_node as usize)
+            .collect();
+        Ok(Self::new(groups, worlds, prototype.nodes.len()))
+    }
+    /// The (group, level) pairs of a prototype node.
+    pub fn levels(&self, node: usize) -> &[(u32, u32)] {
+        let range = &self.ranges[node];
+        &self.levels[range.start as usize..range.end as usize]
+    }
+}
+#[derive(Clone, Copy)]
+struct GroupState {
+    center: Vec3,
+    size: f32,
+    selection: Option<LodSelection>,
+    // Travel at which the group evaluates again. NaN when no entry is queued.
+    deadline: f64,
+}
+/// Per instance LOD state. Renderers read the group results.
+pub struct LodInstance {
+    table: std::sync::Arc<LodTable>,
+    groups: Vec<GroupState>,
+    stamp: u64,
+    queued: bool,
+    changed: bool,
+}
+impl LodInstance {
+    pub fn new(table: std::sync::Arc<LodTable>) -> Self {
+        let state = GroupState {
+            center: Vec3::ZERO,
+            size: 0.0,
+            selection: None,
+            deadline: f64::NAN,
+        };
+        Self {
+            groups: vec![state; table.groups.len()],
+            table,
+            stamp: 0,
+            queued: false,
+            changed: false,
+        }
+    }
+    pub fn table(&self) -> &LodTable {
+        &self.table
+    }
+    /// Renderer (visible, fade) of a prototype node from the group results.
+    pub fn renderer(&self, node: usize) -> (bool, f32) {
+        let mut visible = true;
+        let mut fade = 1.0;
+        for &(group, level) in self.table.levels(node) {
+            let level = level as usize;
+            match self.groups[group as usize].selection {
+                Some(value) if level == value.first => {
+                    fade = value.fade;
+                }
+                Some(value) if value.transition && level == value.first + 1 => {
+                    fade = value.fade - 1.0;
+                }
+                _ => {
+                    visible = false;
+                }
+            }
+        }
+        (visible, fade)
+    }
+}
+/// An instance that holds LOD state. Retired instances return `None`.
+pub trait LodOwner {
+    /// LOD state and the world matrices of the instance glTF nodes.
+    fn lod(&mut self) -> Option<(&mut LodInstance, &[bevy::math::DMat4])>;
+}
+const ALL: u32 = u32::MAX;
+// FOV, ortho size, bias, maximum and world origin. A change evaluates every group.
+type ViewKey = (f32, Option<f32>, f32, usize, Option<[f64; 3]>);
+struct Due {
+    deadline: f64,
+    slot: u32,
+    group: u32,
+    stamp: u64,
+}
+impl PartialEq for Due {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+impl Eq for Due {}
+impl PartialOrd for Due {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Due {
+    // Earliest deadline first.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.deadline.total_cmp(&self.deadline)
+    }
+}
+/// Evaluates a group only when the camera path since its last evaluation exceeds its safe distance.
+/// Results equal `LodGroup::select` for every group on every update.
+#[derive(Default)]
+pub struct LodSchedule {
+    // Camera path length. Bounds the camera distance from each evaluation point.
+    travel: f64,
+    camera: Option<Vec3>,
+    key: Option<ViewKey>,
+    view: Option<(LodView, f32, usize)>,
+    due: std::collections::BinaryHeap<Due>,
+    stamps: u64,
+    // Groups plus one per scheduled instance. Limits stale queue entries.
+    live: usize,
+    evaluated: usize,
+}
+impl LodSchedule {
+    /// Groups evaluated by the last update.
+    pub fn evaluated(&self) -> usize {
+        self.evaluated
+    }
+    pub fn retained_bytes(&self) -> usize {
+        self.due.capacity() * std::mem::size_of::<Due>()
+    }
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+    /// Starts a new instance in `slot`. It evaluates at the next update.
+    pub fn spawn(&mut self, lod: &mut LodInstance, slot: usize) {
+        self.live += lod.groups.len() + 1;
+        self.restamp(lod, slot);
+    }
+    pub fn remove(&mut self, lod: &LodInstance) {
+        self.live -= lod.groups.len() + 1;
+    }
+    /// The instance moved to another slot. It evaluates at the next update.
+    pub fn relocate(&mut self, lod: &mut LodInstance, slot: usize) {
+        self.restamp(lod, slot);
+    }
+    fn restamp(&mut self, lod: &mut LodInstance, slot: usize) {
+        self.stamps += 1;
+        lod.stamp = self.stamps;
+        lod.queued = false;
+        for group in &mut lod.groups {
+            group.deadline = f64::NAN;
+        }
+        self.queue(lod, slot);
+    }
+    /// Evaluates every group of the instance and applies its renderers at the next update.
+    /// Use it when the instance world matrices or renderer states change.
+    pub fn queue(&mut self, lod: &mut LodInstance, slot: usize) {
+        if lod.queued {
+            return;
+        }
+        lod.queued = true;
+        self.due.push(Due {
+            deadline: f64::NEG_INFINITY,
+            slot: slot as u32,
+            group: ALL,
+            stamp: lod.stamp,
+        });
+    }
+    /// Evaluates due groups. `apply` runs for each instance with changed group results.
+    pub fn update<I: LodOwner>(
+        &mut self,
+        view: LodView,
+        bias: f32,
+        maximum: usize,
+        origin: Option<[f64; 3]>,
+        owners: &mut [I],
+        mut apply: impl FnMut(&mut I),
+    ) {
+        self.evaluated = 0;
+        self.view = Some((view, bias, maximum));
+        let key = (view.fov_degrees, view.ortho_size, bias, maximum, origin);
+        let step = self.camera.map_or(0.0, |camera| {
+            (view.position.as_dvec3() - camera.as_dvec3()).length()
+        });
+        self.camera = Some(view.position);
+        if self.key != Some(key) || !step.is_finite() {
+            // The camera factor or frame changed: evaluate every group.
+            self.key = Some(key);
+            self.due.clear();
+            for (slot, owner) in owners.iter_mut().enumerate() {
+                let Some((lod, worlds)) = owner.lod() else {
+                    continue;
+                };
+                lod.queued = false;
+                for group in &mut lod.groups {
+                    group.deadline = f64::NAN;
+                }
+                self.evaluate_all(slot, lod, worlds);
+                lod.changed = false;
+                apply(owner);
+            }
+            return;
+        }
+        self.travel += step;
+        while self.due.peek().is_some_and(|d| d.deadline < self.travel) {
+            let due = self.due.pop().unwrap();
+            let Some(owner) = owners.get_mut(due.slot as usize) else {
+                continue;
+            };
+            {
+                let Some((lod, worlds)) = owner.lod() else {
+                    continue;
+                };
+                if lod.stamp != due.stamp {
+                    continue;
+                }
+                if due.group == ALL {
+                    if !lod.queued {
+                        continue;
+                    }
+                    lod.queued = false;
+                    self.evaluate_all(due.slot as usize, lod, worlds);
+                } else {
+                    let group = due.group as usize;
+                    if lod.groups[group].deadline.to_bits() != due.deadline.to_bits() {
+                        continue;
+                    }
+                    self.evaluate(due.slot as usize, lod, group);
+                }
+                if !std::mem::take(&mut lod.changed) {
+                    continue;
+                }
+            }
+            apply(owner);
+        }
+        if self.due.len() > 2 * self.live + 64 {
+            // Drop entries of moved, removed or retired instances.
+            self.due.retain(|due| {
+                owners
+                    .get_mut(due.slot as usize)
+                    .and_then(|owner| owner.lod())
+                    .is_some_and(|(lod, _)| {
+                        lod.stamp == due.stamp
+                            && if due.group == ALL {
+                                lod.queued
+                            } else {
+                                lod.groups[due.group as usize].deadline.to_bits()
+                                    == due.deadline.to_bits()
+                            }
+                    })
+            });
+        }
+    }
+    fn evaluate_all(&mut self, slot: usize, lod: &mut LodInstance, worlds: &[bevy::math::DMat4]) {
+        for group in 0..lod.groups.len() {
+            let world = worlds[lod.table.worlds[group]].as_mat4();
+            let (center, size) = lod.table.groups[group].bounds(world);
+            lod.groups[group].center = center;
+            lod.groups[group].size = size;
+            self.evaluate(slot, lod, group);
+        }
+        lod.changed = true;
+    }
+    fn evaluate(&mut self, slot: usize, lod: &mut LodInstance, group: usize) {
+        let (view, bias, maximum) = self.view.unwrap();
+        let source = &lod.table.groups[group];
+        let state = &mut lod.groups[group];
+        let selection = source.select_at(state.center, state.size, view, bias, maximum);
+        let safe = source.safe_distance(state.center, state.size, view, bias, maximum) as f64;
+        self.evaluated += 1;
+        if state.selection != selection {
+            state.selection = selection;
+            lod.changed = true;
+        }
+        // Round the deadline down against f64 rounding of the travel sum.
+        let deadline = self.travel + (safe - self.travel * 4.0 * f64::EPSILON).max(0.0);
+        if deadline.to_bits() == state.deadline.to_bits() {
+            return;
+        }
+        state.deadline = deadline;
+        if deadline.is_finite() {
+            self.due.push(Due {
+                deadline,
+                slot: slot as u32,
+                group: group as u32,
+                stamp: lod.stamp,
+            });
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::math::{DMat4, DQuat, DVec3};
+    use std::sync::Arc;
+    struct Random(u64);
+    impl Random {
+        fn next(&mut self) -> f32 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 40) as f32 / (1u64 << 24) as f32
+        }
+        fn range(&mut self, low: f32, high: f32) -> f32 {
+            low + (high - low) * self.next()
+        }
+        fn index(&mut self, count: usize) -> usize {
+            ((self.next() * count as f32) as usize).min(count - 1)
+        }
+    }
+    const NODES: usize = 8;
+    struct Owner {
+        lod: LodInstance,
+        worlds: Vec<DMat4>,
+        states: Vec<Option<(bool, f32)>>,
+        retired: bool,
+    }
+    impl LodOwner for Owner {
+        fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
+            (!self.retired).then_some((&mut self.lod, &self.worlds))
+        }
+    }
+    fn table(random: &mut Random) -> Arc<LodTable> {
+        let groups = (0..1 + random.index(3))
+            .map(|_| {
+                let mut height = random.range(0.3, 0.9);
+                let levels = (0..1 + random.index(4))
+                    .map(|_| {
+                        height *= random.range(0.1, 0.7);
+                        LodLevel {
+                            height,
+                            // Wide fades give many transition frames.
+                            width: if random.next() < 0.2 {
+                                0.0
+                            } else {
+                                random.next()
+                            },
+                            // Some nodes sit in two levels of one group.
+                            nodes: (0..1 + random.index(3))
+                                .map(|_| random.index(NODES))
+                                .collect(),
+                        }
+                    })
+                    .collect();
+                LodGroup {
+                    source: SourceId {
+                        file: String::new(),
+                        path_id: 0,
+                    },
+                    node: 0,
+                    point: Vec3::new(random.range(-2.0, 2.0), random.range(0.0, 3.0), 0.0),
+                    size: random.range(0.5, 12.0),
+                    levels,
+                }
+            })
+            .collect::<Vec<_>>();
+        let worlds = groups.iter().map(|_| random.index(NODES)).collect();
+        Arc::new(LodTable::new(groups, worlds, NODES))
+    }
+    fn place(random: &mut Random, worlds: &mut [DMat4]) {
+        let base = DVec3::new(
+            random.range(-600.0, 600.0) as f64,
+            random.range(-20.0, 20.0) as f64,
+            random.range(-600.0, 600.0) as f64,
+        );
+        for world in worlds {
+            *world = DMat4::from_scale_rotation_translation(
+                DVec3::splat(random.range(0.5, 2.0) as f64),
+                DQuat::from_rotation_y(random.range(0.0, 6.0) as f64),
+                base + DVec3::new(random.range(-5.0, 5.0) as f64, 0.0, 0.0),
+            );
+        }
+    }
+    fn spawn(random: &mut Random, tables: &[Arc<LodTable>]) -> Owner {
+        let mut worlds = vec![DMat4::IDENTITY; NODES];
+        place(random, &mut worlds);
+        Owner {
+            lod: LodInstance::new(tables[random.index(tables.len())].clone()),
+            worlds,
+            states: vec![None; NODES],
+            retired: false,
+        }
+    }
+    /// Old per renderer search over every group.
+    fn brute(owner: &Owner, view: LodView, bias: f32, maximum: usize, node: usize) -> (bool, f32) {
+        let table = owner.lod.table();
+        let mut visible = true;
+        let mut fade = 1.0;
+        for (index, group) in table.groups.iter().enumerate() {
+            let Some(level) = group.levels.iter().position(|l| l.nodes.contains(&node)) else {
+                continue;
+            };
+            match group.select(
+                owner.worlds[table.worlds[index]].as_mat4(),
+                view,
+                bias,
+                maximum,
+            ) {
+                Some(value) if level == value.first => fade = value.fade,
+                Some(value) if value.transition && level == value.first + 1 => {
+                    fade = value.fade - 1.0
+                }
+                _ => visible = false,
+            }
+        }
+        (visible, fade)
+    }
+    #[test]
+    fn scheduled_selection_equals_brute_force() {
+        let mut random = Random(0x9e37_79b9_7f4a_7c15);
+        let tables: Vec<_> = (0..12).map(|_| table(&mut random)).collect();
+        let mut owners: Vec<_> = (0..40).map(|_| spawn(&mut random, &tables)).collect();
+        let mut schedule = LodSchedule::default();
+        for (slot, owner) in owners.iter_mut().enumerate() {
+            schedule.spawn(&mut owner.lod, slot);
+        }
+        let mut view = LodView {
+            position: Vec3::ZERO,
+            fov_degrees: 60.0,
+            ortho_size: None,
+        };
+        let mut velocity = Vec3::ZERO;
+        let (mut bias, mut maximum, mut origin) = (1.0, 0, [0.0; 3]);
+        let (mut evaluated, mut brute_groups, mut transitions) = (0, 0, 0);
+        for frame in 0..20_000 {
+            // Smooth paths with stops, turns and rare teleports.
+            match random.index(200) {
+                0 => velocity = Vec3::ZERO,
+                1..=8 => {
+                    velocity = Vec3::new(random.range(-1.0, 1.0), 0.0, random.range(-1.0, 1.0))
+                        * random.range(0.0, 30.0)
+                }
+                9 => {
+                    view.position = Vec3::new(
+                        random.range(-600.0, 600.0),
+                        2.0,
+                        random.range(-600.0, 600.0),
+                    )
+                }
+                10..=12 => view.fov_degrees = random.range(20.0, 90.0),
+                13 => {
+                    view.ortho_size = (view.ortho_size.is_none()).then(|| random.range(1.0, 40.0))
+                }
+                14 => bias = random.range(0.5, 2.0),
+                15 => maximum = random.index(2),
+                16 => origin[0] += 1.0,
+                _ => {}
+            }
+            view.position += velocity * 0.016;
+            // Moving, retired, removed and new instances.
+            match random.index(40) {
+                0 => {
+                    let slot = random.index(owners.len());
+                    place(&mut random, &mut owners[slot].worlds);
+                    schedule.queue(&mut owners[slot].lod, slot);
+                }
+                1 => {
+                    let slot = random.index(owners.len());
+                    owners[slot].retired = true;
+                }
+                2 => {
+                    let slot = random.index(owners.len());
+                    let owner = owners.swap_remove(slot);
+                    schedule.remove(&owner.lod);
+                    if slot < owners.len() {
+                        schedule.relocate(&mut owners[slot].lod, slot);
+                    }
+                }
+                3 => {
+                    let mut owner = spawn(&mut random, &tables);
+                    schedule.spawn(&mut owner.lod, owners.len());
+                    owners.push(owner);
+                }
+                _ => {}
+            }
+            schedule.update(view, bias, maximum, Some(origin), &mut owners, |owner| {
+                for node in 0..NODES {
+                    owner.states[node] = Some(owner.lod.renderer(node));
+                }
+            });
+            evaluated += schedule.evaluated();
+            for owner in owners.iter().filter(|o| !o.retired) {
+                let table = owner.lod.table();
+                brute_groups += table.groups.len();
+                transitions += table
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, group)| {
+                        let world = owner.worlds[table.worlds[*index]].as_mat4();
+                        group
+                            .select(world, view, bias, maximum)
+                            .is_some_and(|s| s.transition)
+                    })
+                    .count();
+                for node in 0..NODES {
+                    let expected = brute(owner, view, bias, maximum, node);
+                    assert_eq!(
+                        owner.states[node],
+                        Some(expected),
+                        "frame {frame} node {node}"
+                    );
+                }
+            }
+        }
+        assert!(
+            transitions > 10_000,
+            "fixture has {transitions} transition frames"
+        );
+        assert!(
+            evaluated * 4 < brute_groups,
+            "{evaluated} of {brute_groups} groups evaluated"
+        );
     }
 }

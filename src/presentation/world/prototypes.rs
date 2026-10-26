@@ -27,6 +27,8 @@ struct Entry {
     gpu: usize,
     staging: usize,
     state: State,
+    lods: Option<Arc<super::lod::LodTable>>,
+    nodes: Option<Arc<super::node_plan::NodePlan>>,
 }
 #[derive(Resource, Default)]
 pub struct SourcePrototypes {
@@ -170,6 +172,8 @@ impl SourcePrototypes {
                 gpu: e.gpu,
                 staging: 0,
                 state: e.state.fork_ready().unwrap(),
+                lods: e.lods.clone(),
+                nodes: e.nodes.clone(),
             });
         }
         copy.account(stream)?;
@@ -220,6 +224,8 @@ impl SourcePrototypes {
             gpu: 0,
             staging: 0,
             state: State::Queued,
+            lods: None,
+            nodes: None,
         });
         Ok(())
     }
@@ -317,6 +323,48 @@ impl SourcePrototypes {
                 None
             }
         })
+    }
+    /// LOD table of a loaded prototype. The first call builds it.
+    pub fn lods(
+        &mut self,
+        session: u64,
+        source: &SourceId,
+        build: impl FnOnce() -> Result<super::lod::LodTable, ReferenceError>,
+    ) -> Result<Option<Arc<super::lod::LodTable>>, ReferenceError> {
+        let Some(entry) = self.entries.iter_mut().find(|e| {
+            e.session == session
+                && e.source == *source
+                && !e.retired
+                && matches!(e.state, State::Ready(_))
+        }) else {
+            return Ok(None);
+        };
+        if entry.lods.is_none() {
+            entry.lods = Some(Arc::new(build()?));
+        }
+        Ok(entry.lods.clone())
+    }
+    /// Node plan of a loaded prototype. The first call builds it.
+    pub fn nodes(
+        &mut self,
+        session: u64,
+        source: &SourceId,
+        build: impl FnOnce(&LoadedPrototype) -> Result<super::node_plan::NodePlan, ReferenceError>,
+    ) -> Result<Option<Arc<super::node_plan::NodePlan>>, ReferenceError> {
+        let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.session == session && e.source == *source && !e.retired)
+        else {
+            return Ok(None);
+        };
+        let State::Ready(loaded) = &entry.state else {
+            return Ok(None);
+        };
+        if entry.nodes.is_none() {
+            entry.nodes = Some(Arc::new(build(loaded)?));
+        }
+        Ok(entry.nodes.clone())
     }
     /// Retirement keeps loader reservations until cancellation or loading has completed.
     pub fn retire(&mut self, source: &SourceId) {

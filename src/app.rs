@@ -189,11 +189,6 @@ pub fn run(
                     },
                     ..default()
                 })
-                // The source frame graph draws Bevy phases in its own passes, without the GPU preprocessing nodes.
-                .set(bevy::pbr::PbrPlugin {
-                    use_gpu_instance_buffer_builder: false,
-                    ..default()
-                })
                 .set(AssetPlugin {
                     file_path: reference.content_base.clone(),
                     meta_check: AssetMetaCheck::Never,

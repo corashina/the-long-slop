@@ -21,6 +21,7 @@ use bevy::pbr::{
     ViewKeyCache, alpha_mode_pipeline_key, base_specialize,
 };
 use bevy::render::{
+    batching::gpu_preprocessing::GpuPreprocessingMode,
     erased_render_asset::ErasedRenderAssets,
     mesh::{RenderMesh, allocator::MeshAllocator},
     render_asset::RenderAssets,
@@ -32,10 +33,11 @@ use bevy::render::{
 };
 use bevy::{ecs as bevy_ecs, prelude::*};
 use std::sync::Arc;
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 struct QueuedShadow {
     key: ShadowBatchKey,
     mesh: bevy::asset::AssetId<Mesh>,
+    input: InputUniformIndex,
     batchable: bool,
     specialization: SpecializationKey,
     base: CachedRenderPipelineId,
@@ -277,9 +279,10 @@ pub fn queue(world: &mut World) {
                             state.queued[index].clear();
                             world.entity_mut(entity).insert(ShadowDrawState::default());
                         }
+                        // Source views carry NoIndirectDrawing, so their work items are direct.
                         phases.prepare_for_new_frame(
                             retained,
-                            bevy::render::batching::gpu_preprocessing::GpuPreprocessingMode::None,
+                            GpuPreprocessingMode::PreprocessingOnly,
                         );
                         let phase = phases.get_mut(&retained).unwrap();
                         let queued = &mut state.queued[index];
@@ -328,6 +331,8 @@ pub fn queue(world: &mut World) {
                                 continue;
                             };
                             let mesh = instance.mesh_asset_id();
+                            // A re-extracted mesh can get a new input slot. Rebin it on change.
+                            let input = instance.current_uniform_index;
                             let batchable = instance.should_batch();
                             let material = world.resource::<RenderMaterialInstances>().instances
                                 [&main]
@@ -342,6 +347,7 @@ pub fn queue(world: &mut World) {
                                     indexed: base.1,
                                 },
                                 mesh,
+                                input,
                                 batchable,
                                 specialization: base.2,
                                 base: base.0,
@@ -350,6 +356,7 @@ pub fn queue(world: &mut World) {
                             if previous.as_ref().is_none_or(|old| {
                                 old.key != next.key
                                     || old.mesh != mesh
+                                    || old.input != input
                                     || old.batchable != batchable
                             }) {
                                 phase.remove(main);
@@ -357,7 +364,7 @@ pub fn queue(world: &mut World) {
                                     next.key.clone(),
                                     mesh,
                                     (Entity::PLACEHOLDER, main),
-                                    InputUniformIndex::default(),
+                                    input,
                                     if batchable {
                                         BinnedRenderPhaseType::BatchableMesh
                                     } else {
@@ -368,6 +375,7 @@ pub fn queue(world: &mut World) {
                             if let Some(previous) = state.queued[index].get_mut(&main) {
                                 if previous.key == next.key
                                     && previous.mesh == next.mesh
+                                    && previous.input == next.input
                                     && previous.batchable == next.batchable
                                 {
                                     shadow_timing.hit();
@@ -446,7 +454,11 @@ pub fn write_cascades(
     frame: Res<SourceViewFrame>,
     live: Res<SourceSceneLighting>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
-    mut views: Query<(&mut SourceSurfaceView, &mut CasterViews)>,
+    mut views: Query<(
+        &mut SourceSurfaceView,
+        &mut CasterViews,
+        &super::shadow_atlas::ShadowCadence,
+    )>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
@@ -469,13 +481,14 @@ pub fn write_cascades(
         h(rotation * Vec3::Y),
         h(rotation * -Vec3::Z),
     ];
-    for (mut view, mut slots) in &mut views {
+    for (mut view, mut slots, cadence) in &mut views {
         if frame.skip_probe_preparation(view.index) {
             continue;
         }
         timing.face(view.index);
         let key = super::shadow_preparation::CascadeKey {
             view: scene.view_revision(view.index, &frame),
+            cadence: cadence.revision,
             bias: [
                 light.shadows.depth_bias.to_bits(),
                 light.shadows.normal_bias.to_bits(),
@@ -501,6 +514,10 @@ pub fn write_cascades(
         }
         slots.shadow_key = Some(key);
         for (index, cascade) in fit.cascades.iter().enumerate() {
+            // A stale slot keeps the values of its atlas tile.
+            if !cadence.render[index] {
+                continue;
+            }
             let (projection, device_e22) = cascade_projection(cascade, basis);
             // Selected D3D reversed-depth orthographic device e22 = 1/(far-near).
             let depth_bias = -light.shadows.depth_bias * device_e22;

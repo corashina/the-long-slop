@@ -46,6 +46,16 @@ mod selected_tests;
 #[allow(dead_code)]
 mod shared_material_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "presentation/world/lod.rs"]
+#[allow(dead_code)]
+mod lod_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "presentation/world/node_plan.rs"]
+#[allow(dead_code)]
+mod node_plan_tests;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "presentation/world/grass_worker.rs"]
 pub mod grass_worker;

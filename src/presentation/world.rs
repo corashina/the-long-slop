@@ -20,6 +20,8 @@ pub(crate) mod shared_materials;
 
 pub mod lod;
 
+pub mod node_plan;
+
 pub mod instances;
 
 pub mod runtime;
