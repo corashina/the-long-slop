@@ -41,11 +41,38 @@ def selected_actions(source, scripts, actions):
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
 
 VEHICLE_CLASSES = {'carscript','utanfutoscript'}
-# Car roots that leave other_vehicle and export as world prototypes. V03: the Lada prefab.
+# The start car prefab. car_prototypes adds the bus pool.
 LADA = ('sharedassets1.assets',82556)
-CAR_PROTOTYPES = {LADA}
-def vehicle_exclusion(root, classes):
-    return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in CAR_PROTOTYPES else ''
+CAR_CATEGORIES = ('bus',)
+def vehicle_exclusion(root, classes, cars):
+    """Car roots outside `cars` stay other_vehicle."""
+    return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
+
+def category_items(catalog, name):
+    """Item indices of catalog category `name` and its child categories."""
+    rows=catalog['categories'];found=set();seen=set()
+    def visit(row):
+        if row['index'] in seen:return
+        seen.add(row['index']);found.update(row['items'] or [])
+        for child in row['categories'] or []:
+            if child<len(rows):visit(rows[child])
+    matches=[r for r in rows if r['name']==name]
+    if not matches:raise ValueError(f'level1:66024 unknown category {name}')
+    visit(matches[0])
+    return sorted(found)
+
+def car_prototypes(source, catalog):
+    """The car roots that export as world prototypes: the Lada and the CAR_CATEGORIES pools.
+    A root with utanfutoscript (a trailer) stays other_vehicle."""
+    cars={LADA}
+    for name in CAR_CATEGORIES:
+        for index in category_items(catalog,name):
+            item=catalog['items'][index]
+            root=_source_root(source,source.get(item['source']['file'],item['source']['path_id']))
+            classes={source.class_name(c) for n in source.hierarchy(root) for c in n['components']
+                if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
+            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(root))
+    return cars
 
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
@@ -233,6 +260,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         building_types.append({'type_id':kind,'prototype':add(target,'structure')})
     selected.record(building_owner)
     catalog=recover_catalog(source,reader,selected,database)
+    cars=car_prototypes(source,catalog)
+    register_mirrors(source,cars)
     part_scope_slots=[]
     for node in source.hierarchy(_source_root(source,source.get('level1',17687))):
         for component in node['components']:
@@ -317,12 +346,12 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         if key(root) not in scope_cache:
             root_scripts=[c for c in source.components(root)[1] if c.type.name=='MonoBehaviour']
             root_classes={source.class_name(c) for c in root_scripts}
-            if vehicle_exclusion(root,root_classes):result=('other_vehicle',[])
+            if vehicle_exclusion(root,root_classes,cars):result=('other_vehicle',[])
             elif root_classes & actors:result=('actor_behavior',[])
             else:
                 scripts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour']
                 classes={source.class_name(c) for c in scripts}
-                result=(vehicle_exclusion(root,classes) or ('actor_behavior' if classes & actors else ''),selected_actions(source,scripts,actions))
+                result=(vehicle_exclusion(root,classes,cars) or ('actor_behavior' if classes & actors else ''),selected_actions(source,scripts,actions))
                 parts=[source.read(c) for c in root_scripts if source.class_name(c)=='partscript']
                 part_matches[key(root)],excluded_actions=part_scope(parts,part_scope_slots,result[1])
                 result=(result[0],excluded_actions)
@@ -346,7 +375,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             for child in source.read(node)['m_Children']:visit(source.resolve(node,child),node,path,active)
         visit(root,None,'',True)
         return result
-    for identity in sorted(CAR_PROTOTYPES):add(source.get(*identity),'nested')
+    for identity in sorted(cars):add(source.get(*identity),'nested')
     scanned=set()
     startup_pending=[source.get(r['source']['file'],r['source']['path_id']) for r in startup if r['prototype'] is None and r['source']['path_id'] not in (21819,39843)]
     while startup_pending or set(roots)-scanned:
@@ -473,6 +502,19 @@ def bind_light_cookies(source, world):
         if r['fields']['m_Type']['value']!=0 or textures.get(identity) not in spot:raise ValueError(f"{r['source']} world light cookie has no lighting spot cookie texture")
         bindings[identity]={'source':cookie['value'],'texture':textures[identity]}
     world['light_cookies']=[bindings[i] for i in sorted(bindings)]
+
+def register_mirrors(source, cars):
+    """Disabled mirrors of each car show the source noMirrorMaterial glass."""
+    main=source.get('level1',64919)
+    glass=source.resolve(main,source.read(main)['noMirrorMaterial'])
+    source.mirror_renderers={}
+    for identity in sorted(cars):
+        for node in source.hierarchy(source.get(*identity),activate_root=True):
+            for reader in node['components']:
+                if reader.type.name=='MonoBehaviour' and source.class_name(reader)=='mirrorscript':
+                    data=source.read(reader)['M']
+                    if data['R']['m_PathID'] and data['C']['m_PathID']:
+                        source.mirror_renderers[key(source.resolve(reader,data['R']))]=glass
 
 def recover_catalog(source, reader, selected, database):
     """Read source initializer tables without retaining method bodies in runtime output."""
