@@ -1,6 +1,6 @@
-// World radio voice slots: index group*SLOTS+slot, emitter base+index, voices base+index*4+1..3 (src/audio.rs).
+// World radio voice slots: index group*SLOTS+slot, emitter base+index, voices base+index*4+1..3 (crates/simulation/src/audio.rs).
 export const PORTABLE_RADIO_EMITTER=0x50000000,PORTABLE_RADIO_SLOTS=4;
-// Car voice templates play as survival kind CAR_KIND+id. Instance i routes through CAR_ROUTE+i (src/audio/cars.rs).
+// Car voice templates play as survival kind CAR_KIND+id. Instance i routes through CAR_ROUTE+i (crates/simulation/src/audio/cars.rs).
 export const CAR_KIND=0x100,CAR_ROUTE=0x60000000,CAR_EMITTER=0x40000000+CAR_KIND;
 // Voice id also plays as survival kind VOICE_KIND+id. Each instance is its own loop (src/audio.rs).
 export const VOICE_KIND=0x10000,VOICE_EMITTER=0x40000000+VOICE_KIND;

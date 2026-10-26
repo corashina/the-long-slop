@@ -109,10 +109,10 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
-        let started = crate::browser::game_now();
+        let started = simulation::host::game_now();
         loop {
             let before = stream.metrics();
-            let remaining = (budget_ms - (crate::browser::game_now() - started)).max(0.);
+            let remaining = (budget_ms - (simulation::host::game_now() - started)).max(0.);
             self.prepare_step(
                 stream,
                 reference,
@@ -130,7 +130,7 @@ impl WorldPresentation<'_, '_> {
                 remaining,
             )?;
             if budget_ms <= 0.
-                || crate::browser::game_now() - started >= budget_ms
+                || simulation::host::game_now() - started >= budget_ms
                 || before == stream.metrics()
             {
                 return Ok(());

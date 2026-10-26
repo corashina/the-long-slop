@@ -19,6 +19,7 @@ mod shadow_cache;
 pub mod sky_traffic;
 pub mod spawned;
 pub mod world;
+pub mod world_metrics;
 
 use crate::vehicle::VehiclePose;
 use bevy::prelude::*;

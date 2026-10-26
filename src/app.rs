@@ -1,4 +1,4 @@
-pub(crate) mod cpu_profile;
+pub(crate) use simulation::cpu_profile;
 mod performance;
 pub(crate) mod save;
 use crate::browser::*;
@@ -16,6 +16,7 @@ use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
+use simulation::host::{game_cpu_clear_input, game_now};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
@@ -201,7 +202,7 @@ pub fn run(
             last_inventory: None,
         })
         .insert_resource(ClearColor(Color::BLACK))
-        .init_resource::<crate::render_scale::SceneScale>()
+        .init_resource::<crate::render_scale::SceneScaleSetting>()
         .add_systems(PreUpdate, update_scene_scale)
         .add_plugins(presentation::source_io::SourceIoPlugin::new(
             reference.content_base.clone(),
@@ -252,12 +253,12 @@ pub fn run(
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::computer::ComputerScreens>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
-        .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
+        .init_resource::<crate::presentation::world_metrics::MeshMeasurements>()
         .add_systems(
             Last,
             (
-                crate::world::metrics::browser::collect_mesh_bytes,
-                crate::world::metrics::browser::publish,
+                crate::presentation::world_metrics::collect_mesh_bytes,
+                crate::presentation::world_metrics::publish,
                 performance::publish,
             )
                 .chain(),
@@ -373,13 +374,13 @@ fn initialize_storage(
 }
 
 fn update_scene_scale(
-    mut scale: ResMut<crate::render_scale::SceneScale>,
+    mut scale: ResMut<crate::render_scale::SceneScaleSetting>,
     status: Res<presentation::readiness::RendererStateHandle>,
 ) {
     match crate::render_scale::SceneScale::from_factor(game_scene_scale()) {
         Ok(value) => {
-            if *scale != value {
-                *scale = value;
+            if scale.0 != value {
+                scale.0 = value;
             }
         }
         Err(error) => {
@@ -1580,15 +1581,17 @@ fn publish_audio(
         );
         // Source `audioBasedOnInteriorsensscript`: a car radio plays through its car mixer.
         let car = runtime.vehicles.iter().find_map(|(key, car)| match key {
-            crate::world::ObjectKey::Generated(id) if id == parent => car
-                .record(&reference.0)
-                .audio
-                .as_ref()
-                .map(|a| &a.route),
+            crate::world::ObjectKey::Generated(id) if id == parent => {
+                car.record(&reference.0).audio.as_ref().map(|a| &a.route)
+            }
             _ => None,
         });
         let group = slot / crate::audio::PORTABLE_RADIO_SLOTS;
-        for (k, voice) in audio.reference.portable_radios[group].voices.iter().enumerate() {
+        for (k, voice) in audio.reference.portable_radios[group]
+            .voices
+            .iter()
+            .enumerate()
+        {
             let mixer = car.map_or(voice.mixer, |route| audio.world_car_mixer(route, parent));
             game_audio_route(
                 crate::audio::PORTABLE_RADIO_EMITTER + slot as u32 * 4 + k as u32 + 1,
