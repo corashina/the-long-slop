@@ -1173,6 +1173,7 @@ impl GarageRuntime {
             input,
             aim,
             &mut self.area.player,
+            &mut self.area.body,
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,

@@ -360,6 +360,7 @@ mod tests {
             FrameInput::default(),
             ResolvedAim::default(),
             &mut run.area.player,
+            &mut run.area.body,
             &mut run.area.items,
             &mut run.physics,
             crate::simulation::FIXED_DT,

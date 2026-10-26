@@ -1,11 +1,14 @@
 //! Source player body: `fpscontroller.UpdHandPos` targets, then the five `IKscript` chains.
 //! All frames are player-local: Player, then `CharacterRoot`, then the bones.
 pub mod ik;
+mod reach;
 
 use crate::reference::{ClothingReference, NodeId, NodeRecord, ReferenceError, ReferenceManifest};
 use crate::vehicle::VehiclePose;
 use ik::{Frame, IkChain, MAX_BONES};
 use rapier3d::math::{Rotation, Vector};
+use reach::Reach;
+pub use reach::{HandRule, ReachFrame, ReachTarget};
 use std::collections::HashMap;
 
 /// Left, then right. Poses are player-local in `BodyInputs` and body-local on a bound seat.
@@ -176,6 +179,17 @@ enum HandFrame {
     Hand,
     Seat,
     Drive,
+    /// `usingHand`.
+    Using,
+    /// `movedNearestHandTransform`: the target frame, and its pose unless the frame is the world.
+    Nearest(ReachFrame, Option<VehiclePose>),
+}
+
+impl HandFrame {
+    fn nearest(t: ReachTarget) -> Self {
+        // Source world targets reuse the one `nearestHand` Transform.
+        Self::Nearest(t.frame, (t.frame != ReachFrame::World).then_some(t.pose))
+    }
 }
 
 /// Source `MoveLegsWalk` waypoint. `state` is `walkAnimationState` in [0, 1].
@@ -252,6 +266,7 @@ pub struct BodyState {
     /// `VMoveLHValue`, `VMoveRHValue`.
     hand_timers: [f32; 2],
     carrying: bool,
+    reach: Reach,
 }
 
 impl BodyState {
@@ -403,12 +418,41 @@ impl BodyState {
             last_hands: [None; 2],
             hand_timers: [0.; 2],
             carrying: false,
+            reach: Reach::new(scalar(&p.method_inputs, "handSnapDelay")?),
             joints,
             rig,
         })
     }
 
-    pub fn step(&mut self, input: &BodyInputs, dt: f32) {
+    /// `MovedUsingHandObj`: `target` is the hit point with the camera rotation, in the usable frame.
+    pub fn move_using_hand(&mut self, target: ReachTarget, rule: HandRule) {
+        self.reach.move_using_hand(target, rule);
+    }
+    /// `MovedUsingHandObj()`: a held usable keeps the hand on its target.
+    pub fn refresh_using_hand(&mut self) {
+        self.reach.refresh_using_hand();
+    }
+    /// `MoveNearestHand`. `delay` None is `handSnapDelay`.
+    pub fn move_nearest_hand(&mut self, target: ReachTarget, delay: Option<f32>) {
+        self.reach.move_nearest_hand(target, delay);
+    }
+    /// `MoveNearestLeg`. `delay` None is `handSnapDelay`.
+    pub fn move_nearest_leg(&mut self, target: ReachTarget, delay: Option<f32>) {
+        self.reach.move_nearest_leg(target, delay);
+    }
+    /// `MoveNearestLegHand`: a hand when it is nearer than both legs, else a leg.
+    /// Source rotation is `CamParent.rotation`.
+    pub fn move_nearest_leg_hand(&mut self, target: ReachTarget) {
+        self.reach.move_nearest_leg_hand(target);
+    }
+
+    /// `resolve` gives the player-local pose of a reach target, or None when its frame is gone.
+    pub fn step(
+        &mut self,
+        input: &BodyInputs,
+        dt: f32,
+        resolve: impl FnMut(ReachTarget) -> Option<VehiclePose>,
+    ) {
         // fpscontroller.Update parents HHTarget to the camera, or to Th during sleep.
         let (position, rotation) = pose(if input.sleeping {
             &input.head
@@ -427,6 +471,8 @@ impl BodyState {
             self.carrying = input.carried.is_some();
             self.hand_timers = [self.lock_time; 2];
         }
+        let limbs = self.targets.map(|t| self.rig.world[t].position);
+        self.reach.resolve(limbs, resolve);
         self.upd_hand_pos(input, dt);
         self.upd_v_hand_leg_targets(dt);
         // IKscript.LateUpdate, in component order.
@@ -466,7 +512,7 @@ impl BodyState {
         (self.rig.target(node), HandFrame::Node(node))
     }
 
-    /// fpscontroller.UpdHandPos without usables, pointing, or per-item hand frames.
+    /// fpscontroller.UpdHandPos without pointing or per-item hand frames.
     fn upd_hand_pos(&mut self, input: &BodyInputs, dt: f32) {
         let def = |i: usize| {
             (
@@ -506,9 +552,23 @@ impl BodyState {
         } else if input.seat.is_some() || input.in_hand.is_none_or(|h| !h.double_hand) {
             left = Some(seated_left(self));
         }
-        let left = left.unwrap();
-        self.limbs[0] = left.0;
-        self.limbs[1] = right.0;
+        let mut hands = [left.unwrap(), right];
+        let free = input.in_hand.is_none() && input.carried.is_none();
+        if let Some(p) = self.reach.tick(reach::USING, dt) {
+            let (limb, frame) = self.reach.using_hands(free);
+            hands[limb].0 = p;
+            hands[frame].1 = HandFrame::Using;
+        } else {
+            // Source quirk: with no using hand, VCurrentRHT is always defRHPos.
+            hands[1].1 = HandFrame::Node(self.def_hands[1]);
+        }
+        // `vR` (`MovedRightHandObj`) has no source caller.
+        if let Some(p) = self.reach.tick(reach::HAND, dt) {
+            let side = (self.reach.dist[0] >= self.reach.dist[1]) as usize;
+            hands[side] = (p, HandFrame::nearest(self.reach.target(reach::HAND)));
+        }
+        self.limbs[0] = hands[0].0;
+        self.limbs[1] = hands[1].0;
         if let Some(seat) = &input.seat {
             if seat.driving {
                 // Without a drive frame the leg keeps its last target.
@@ -525,8 +585,6 @@ impl BodyState {
             self.limbs[2] = self.rig.target(self.def_legs[0]);
             self.limbs[3] = self.rig.target(self.def_legs[1]);
         }
-        // Source quirk: with no usable, VCurrentRHT is always defRHPos.
-        right.1 = HandFrame::Node(self.def_hands[1]);
         // The body follows the duck value after the targets are read.
         let duck = input.duck.clamp(0., 1.);
         let root = self.rig.world[self.character_root].rotation;
@@ -541,7 +599,11 @@ impl BodyState {
                 .set(self.def_hands[side], dp.lerp(sp, duck), dr.lerp(sr, duck));
         }
         self.move_legs_walk(input, dt);
-        for (side, frame) in [left.1, right.1].into_iter().enumerate() {
+        if let Some(p) = self.reach.tick(reach::LEG, dt) {
+            let side = (self.reach.dist[2] >= self.reach.dist[3]) as usize;
+            self.limbs[2 + side] = p;
+        }
+        for (side, frame) in hands.map(|h| h.1).into_iter().enumerate() {
             if self.last_hands[side] != Some(frame) {
                 self.hand_timers[side] = self.lock_time;
             }
@@ -692,7 +754,7 @@ mod tests {
             seat: None,
         };
         for _ in 0..120 {
-            body.step(&input, 1. / 60.);
+            body.step(&input, 1. / 60., |_| None);
         }
         let node = |pid: i64| {
             let id = r

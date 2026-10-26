@@ -1,6 +1,6 @@
 //! Player body inputs from the frame state. All poses go to the Player frame.
 use super::GarageRuntime;
-use crate::player::body::{BodyInputs, CarriedItem, InHandItem, SeatFrames};
+use crate::player::body::{BodyInputs, CarriedItem, InHandItem, ReachFrame, SeatFrames};
 use crate::reference::ReferenceManifest;
 use crate::simulation::FIXED_DT;
 use crate::sleep::SleepPhase;
@@ -17,7 +17,8 @@ impl GarageRuntime {
         let view = player.view(&self.physics);
         let [forward, backward] = player.walk_keys();
         let hand = reference.clothing.pose.anchors["RH"].node;
-        // Source `doubleHand` is not exported yet, so it is false.
+        let carry = &area.interaction.carry;
+        let double_hand = |item| carry.rule(item).is_some_and(|r| r.double_hand);
         let input = BodyInputs {
             camera: local(to_rapier(view.camera_pose)),
             head: local(to_rapier(view.head_pose)),
@@ -26,24 +27,23 @@ impl GarageRuntime {
             walk_add: player.walk_add(),
             forward,
             backward,
-            carried: area
-                .interaction
-                .carry
+            carried: carry
                 .hand_frames(player, &self.physics)
-                .map(|(grab, anchor, mass)| CarriedItem {
+                .zip(carry.held())
+                .map(|((grab, anchor, mass), item)| CarriedItem {
                     grab: local(grab),
                     anchor: local(anchor),
                     mass,
-                    double_hand: false,
+                    double_hand: double_hand(item),
                 }),
             in_hand: area
                 .interaction
                 .equipment
                 .item()
-                .and_then(|_| area.pose.anchor(hand))
-                .map(|hand| InHandItem {
+                .zip(area.pose.anchor(hand))
+                .map(|(item, hand)| InHandItem {
                     hand: local(to_rapier(hand)),
-                    double_hand: false,
+                    double_hand: double_hand(item),
                 }),
             seat: player
                 .seat_frames()
@@ -61,6 +61,15 @@ impl GarageRuntime {
                     }
                 }),
         };
-        area.body.step(&input, FIXED_DT);
+        let rapier = self.physics.rapier();
+        let mechanisms = &area.interaction.mechanisms;
+        area.body.step(&input, FIXED_DT, |target| {
+            let frame = match target.frame {
+                ReachFrame::World => Pose::IDENTITY,
+                ReachFrame::Body(handle) => *rapier.bodies.get(handle)?.position(),
+                ReachFrame::Node(node) => to_rapier(mechanisms.node_pose(node)?),
+            };
+            Some(local(frame * to_rapier(target.pose)))
+        });
     }
 }
