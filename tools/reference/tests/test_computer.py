@@ -59,6 +59,24 @@ class ComputerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 computer.display_switch(source, PROTOTYPE, source.objects[10], lambda r: source.objects[2])
 
+    def test_glyph_bake_follows_character_info_orientation(self):
+        # 2x2 texel glyph in the atlas bottom-left: the upper texel row (v 0.25..0.5) is opaque.
+        alpha = [[0] * 4, [0] * 4, [255, 255, 0, 0], [0] * 4]
+        def rect(flipped):
+            return {'advance': 4, 'flipped': flipped, 'uv': {'x': 0, 'y': .5, 'width': .5, 'height': -.5},
+                    'vert': {'x': 0, 'y': 4, 'width': 4, 'height': -4}}
+        for flipped in (False, True):
+            rects = {code: rect(flipped) for code in range(32, 127)}
+            g = computer.bake_glyphs(rects, alpha, 1, 4, 4, 1)
+            self.assertEqual((g['cell'], g['offset']), ([4, 4], [0, 0]))
+            cell = g['coverage'][(ord('a') - 32) * 16:(ord('a') - 31) * 16]
+            self.assertEqual(cell, g['coverage'][(ord('A') - 32) * 16:(ord('A') - 31) * 16], 'lowercase uses uppercase')
+            rows = [cell[i * 4:i * 4 + 4] for i in range(4)]
+            if flipped:
+                self.assertTrue(all(r[0] > 128 and r[3] == 0 for r in rows), 'uv.y runs along x')
+            else:
+                self.assertTrue(rows[3][0] > 128 and rows[0] == [0] * 4, 'uv.y is the glyph bottom')
+
     def test_record_rejects_extra_fields(self):
         with self.assertRaises(ValueError):
             computer.validate_computer({'computer': {}, 'display': {}, 'extra': {}}, {'audio': {'clips': []}})
