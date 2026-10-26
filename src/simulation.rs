@@ -11,6 +11,7 @@ pub mod instruments;
 pub mod lever;
 pub mod metal_detector;
 pub mod music_box;
+pub mod pedals;
 pub mod powertrain;
 pub mod radio;
 pub mod sled;
