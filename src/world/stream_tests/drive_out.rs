@@ -173,23 +173,29 @@ pub(super) fn place_car(
         position: run.stream.origin.local(point),
         rotation: Rotation::from_rotation_y(yaw).to_array(),
     };
-    run.physics.reset_preserving_wheels(run.vehicle, pose);
+    run.physics
+        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), pose);
     request(run);
     prepare_ready(run, reference);
     pose.position = run.stream.origin.local(point);
     let probe = [pose.position[0], pose.position[1] + 20., pose.position[2]];
     let height = ground(run, probe).expect("ground under the road point");
     pose.position[1] = height + clearance;
-    run.physics.reset_preserving_wheels(run.vehicle, pose);
+    run.physics
+        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), pose);
     run.physics.refresh_queries();
 }
 
 fn assert_car_resting(run: &GarageRuntime, stage: &str) {
-    let snapshot = run.physics.snapshot(run.vehicle);
+    let snapshot = run
+        .physics
+        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle));
     let up = Rotation::from_array(snapshot.pose.rotation) * Vector::Y;
     assert!(up.y > 0.9, "{stage}: car tipped: {snapshot:?}");
     assert!(
-        snapshot.wheels_contact.into_iter().all(|c| c),
+        run.physics
+            .wheel_contacts(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .all(|c| c),
         "{stage}: wheels lost the ground: {snapshot:?}"
     );
     assert!(
@@ -275,7 +281,10 @@ fn p04_drive_out_and_return() {
     let (reference, mut run) = garage_controls::load_garage();
     // Under-map rescue runs every 2 s. Let rescued items land first.
     settle(&mut run, &reference, 8.);
-    let car_start = run.physics.snapshot(run.vehicle).pose;
+    let car_start = run
+        .physics
+        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+        .pose;
     let car_start_absolute = run.stream.origin.absolute(car_start.position);
     let player_start = run.area.player.body_pose(&run.physics);
     let player_start_absolute = run.stream.origin.absolute(player_start.position);
@@ -352,11 +361,13 @@ fn p04_drive_out_and_return() {
         rotation: car_start.rotation,
     };
     let start = pose(&run);
-    run.physics.reset_preserving_wheels(run.vehicle, start);
+    run.physics
+        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), start);
     request(&mut run);
     prepare_ready(&mut run, &reference);
     let start = pose(&run);
-    run.physics.reset_preserving_wheels(run.vehicle, start);
+    run.physics
+        .reset_preserving_wheels(&crate::vehicle::garage_vehicle_key(run.vehicle), start);
     park(&mut run, &reference, car_start_absolute);
     settle(&mut run, &reference, 2.);
     assert_car_resting(&run, "garage");

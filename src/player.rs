@@ -166,7 +166,9 @@ impl PlayerState {
             None
         };
         if let Some(seat) = self.occupancy {
-            self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+            self.pose = *physics.rapier().bodies
+                [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle))]
+            .position()
                 * seat.local_pose;
         }
         self.cancel_view_input();
@@ -270,7 +272,9 @@ impl PlayerState {
         carry: Option<crate::save::CarrySnapshot>,
     ) -> Result<crate::save::PlayerSnapshot, crate::save::SaveError> {
         let (position, rotation) = if let Some(seat) = self.occupancy {
-            let chassis = physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position();
+            let chassis = physics.rapier().bodies
+                [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle))]
+            .position();
             let absolute = origin.absolute(chassis.translation.to_array());
             let offset = chassis.rotation * seat.local_pose.translation;
             (
@@ -367,7 +371,9 @@ impl PlayerState {
             return;
         }
         if let Some(seat) = self.occupancy {
-            self.pose = *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+            self.pose = *physics.rapier().bodies
+                [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle))]
+            .position()
                 * seat.local_pose;
             physics.edit_body(self.body, |body| {
                 body.set_next_kinematic_position(self.pose)
@@ -650,7 +656,7 @@ impl PlayerState {
         };
         let old_head = to_rapier(self.view(physics).head_pose);
         let local_pose = to_rapier(pose);
-        let chassis = physics.chassis_handle(seat.vehicle);
+        let chassis = physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle));
         let seated_pose = *physics.rapier().bodies[chassis].position() * local_pose;
         let head_in_seat = seated_pose.inverse() * old_head;
         self.yaw = yaw_from_rotation(head_in_seat.rotation);
@@ -732,7 +738,9 @@ impl PlayerState {
         let Some(candidate) = self.exit_pose(physics, limits) else {
             return false;
         };
-        let chassis = physics.chassis_handle(self.occupancy.unwrap().vehicle);
+        let chassis = physics.chassis_handle(&crate::vehicle::garage_vehicle_key(
+            self.occupancy.unwrap().vehicle,
+        ));
         self.pose = candidate;
         self.yaw = yaw_from_rotation(candidate.rotation);
         let inherited = physics.rapier().bodies[chassis].linvel() * 0.3;
@@ -789,7 +797,9 @@ impl PlayerState {
         let bodies = &physics.rapier().bodies;
         if let Some(seat) = self.occupancy {
             let head = to_rapier(self.view(physics).head_pose).rotation;
-            let velocity = bodies[physics.chassis_handle(seat.vehicle)].linvel();
+            let velocity = bodies
+                [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle))]
+            .linvel();
             self.view_state.step_car_bob(dt, velocity, dead, head);
             return;
         }
@@ -864,7 +874,9 @@ impl PlayerState {
             walking_pose.translation = physics.rapier().bodies[self.body].position().translation;
         }
         let pose = self.occupancy.map_or(walking_pose, |seat| {
-            *physics.rapier().bodies[physics.chassis_handle(seat.vehicle)].position()
+            *physics.rapier().bodies
+                [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(seat.vehicle))]
+            .position()
                 * seat.local_pose
         });
         from_rapier(pose)

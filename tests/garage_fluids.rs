@@ -125,7 +125,9 @@ fn g04_portable_mass_bounds_signed_depletion() {
     run.wheels
         .sync(&mut run.area.items, &mut run.physics)
         .unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let mass = run.physics.rapier().bodies[chassis].mass();
     assert!(mass.is_finite() && mass > 0., "vehicle mass {mass}");
     assert_eq!(
@@ -610,7 +612,9 @@ fn g04_particle_receipt() {
         r.world.draw_distance.default,
     )
     .unwrap();
-    let chassis = probe.physics.chassis_handle(0);
+    let chassis = probe
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let collider = probe
         .physics
         .rapier()
@@ -801,7 +805,9 @@ fn g04_detached_tanks_and_save() {
     run.area
         .interaction
         .drop_held(&mut run.area.items, &mut run.physics);
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let body_count = run.physics.rapier().bodies.len();
     let collider_count = run.physics.rapier().colliders.len();
     let engine = &r.vehicles[0].engine;

@@ -147,7 +147,14 @@ impl Play {
 
     /// Flat car frame: center, hood direction, and the side direction.
     fn car_frame(&self) -> (Vector, Vector, Vector) {
-        let center = Vector::from_array(self.run.physics.snapshot(0).pose.position).with_y(0.);
+        let center = Vector::from_array(
+            self.run
+                .physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(0))
+                .pose
+                .position,
+        )
+        .with_y(0.);
         let hood = self
             .reference
             .items
@@ -279,18 +286,31 @@ impl Play {
     }
 
     fn car_absolute(&self) -> [f64; 3] {
-        self.run
-            .stream
-            .origin
-            .absolute(self.run.physics.snapshot(0).pose.position)
+        self.run.stream.origin.absolute(
+            self.run
+                .physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(0))
+                .pose
+                .position,
+        )
     }
 
     fn car_position_y(&self) -> f32 {
-        self.run.physics.snapshot(0).pose.position[1]
+        self.run
+            .physics
+            .snapshot(&crate::vehicle::garage_vehicle_key(0))
+            .pose
+            .position[1]
     }
 
     fn car_speed(&self) -> f32 {
-        Vector::from_array(self.run.physics.snapshot(0).linear_velocity).length()
+        Vector::from_array(
+            self.run
+                .physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(0))
+                .linear_velocity,
+        )
+        .length()
     }
 
     fn tank(&self, item: ItemId) -> f32 {
@@ -449,7 +469,12 @@ impl Play {
                 return;
             }
             let forward = self.car_frame().1;
-            let moving = Vector::from_array(self.run.physics.snapshot(0).linear_velocity);
+            let moving = Vector::from_array(
+                self.run
+                    .physics
+                    .snapshot(&crate::vehicle::garage_vehicle_key(0))
+                    .linear_velocity,
+            );
             self.hold(
                 if moving.dot(forward) > 0. {
                     keys::BACK

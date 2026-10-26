@@ -261,6 +261,7 @@ impl PushState {
                 - ((input.held & keys::BACK != 0) as u8 as f32);
             let angle = physics
                 .vehicle_of(body_handle)
+                .and_then(crate::vehicle::garage_vehicle_index)
                 .map_or(0.0, |vehicle| self.steering_angles[vehicle]);
             let direction = Rotation::from_rotation_y(self.steer.unwrap() * angle)
                 * (car_pose.rotation * -Vector::Z)

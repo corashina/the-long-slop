@@ -7,7 +7,8 @@
 use rapier3d::math::Vector;
 use rapier3d::prelude::ColliderHandle;
 
-use crate::reference::{WheelColliderReference, WheelFrictionCurve, WheelSlotReference};
+use super::body::VehicleWheel;
+use crate::reference::{WheelColliderReference, WheelFrictionCurve};
 
 /// Wheel spin sub-steps in one physics step. Keeps stiff tire response stable.
 const SPIN_SUBSTEPS: usize = 20;
@@ -56,7 +57,7 @@ pub(super) struct WheelSlip {
 
 /// Source wheelgraphicsscript.WheelSize, wheelscript.Refresh and gumiscript.Refresh.
 pub(super) fn resolve_profile(
-    slot: &WheelSlotReference,
+    slot: &VehicleWheel,
     slip: &WheelSlip,
     assembly: WheelAssembly,
 ) -> WheelProfile {

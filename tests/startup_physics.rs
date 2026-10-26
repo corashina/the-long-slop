@@ -75,9 +75,17 @@ fn installed_spawn_alignment_and_settling() {
         !run.stream.required_ready(),
         "empty unresolved startup is not ready"
     );
-    let start_pose = run.physics.snapshot(0).pose;
+    let start_pose = run
+        .physics
+        .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+        .pose;
     assert!(run.stream.recovery_target([0.; 3], true).unwrap().is_none());
-    assert_eq!(run.physics.snapshot(0).pose, start_pose);
+    assert_eq!(
+        run.physics
+            .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+            .pose,
+        start_pose
+    );
     assert!(run.stream.frame().failure.is_none());
     assert!(!run.stream.supports(the_long_slop::world::WorldBounds {
         min: [-8.; 3],
@@ -116,10 +124,18 @@ fn installed_spawn_alignment_and_settling() {
     let player = run.area.player.body_handle();
     let physical = from_rapier(run.physics.rapier().bodies[player].position());
     assert_eq!(run.area.player.body_pose(&run.physics), physical);
-    let initial = run.physics.snapshot(0).pose;
+    let initial = run
+        .physics
+        .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+        .pose;
     assert!((initial.position[1] - reference.area.car_pose.translation[1] - offset).abs() < 0.0001);
     assert!(run.align_startup(&reference).unwrap());
-    assert_eq!(run.physics.snapshot(0).pose, initial);
+    assert_eq!(
+        run.physics
+            .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+            .pose,
+        initial
+    );
     assert_eq!(run.area.player.body_pose(&run.physics), physical);
 
     let mut peak_angular_speed = 0_f32;
@@ -138,7 +154,7 @@ fn installed_spawn_alignment_and_settling() {
         run.area.sync_attachments(&mut run.physics, true);
         run.area.sync_compound(&mut run.physics);
         run.physics.apply_vehicle_forces(
-            0,
+            &the_long_slop::vehicle::garage_vehicle_key(0),
             DriveInput {
                 handbrake: 1.,
                 ..Default::default()
@@ -148,18 +164,26 @@ fn installed_spawn_alignment_and_settling() {
         run.physics.step_physics();
         run.area.sync_attachments(&mut run.physics, false);
         run.physics.refresh_queries();
-        let snapshot = run.physics.snapshot(0);
+        let snapshot = run
+            .physics
+            .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0));
         peak_angular_speed =
             peak_angular_speed.max(Vector::from_array(snapshot.angular_velocity).length());
     }
-    let settled = run.physics.snapshot(0);
+    let settled = run
+        .physics
+        .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0));
     let up = Rotation::from_array(settled.pose.rotation) * Vector::Y;
     assert!(
         peak_angular_speed < 2.,
         "spawn angular speed: {peak_angular_speed}"
     );
     assert!(up.y > 0.95, "car must settle upright: {settled:?}");
-    assert!(settled.wheels_contact.into_iter().all(|contact| contact));
+    assert!(
+        run.physics
+            .wheel_contacts(&the_long_slop::vehicle::garage_vehicle_key(0))
+            .all(|contact| contact)
+    );
     assert!(run.area.player.grounded());
     let settled_position = run.stream.origin.absolute(settled.pose.position);
     run.sync_world_activity(&reference).unwrap();

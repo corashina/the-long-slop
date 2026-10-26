@@ -241,7 +241,11 @@ fn w02_garage_can_returns_after_far_trip() {
     let drop = 4;
     stop(&mut run, &reference, &path, drop);
     let body = run.area.items.get(can).unwrap().body.unwrap();
-    let car = run.physics.snapshot(run.vehicle).pose.position;
+    let car = run
+        .physics
+        .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+        .pose
+        .position;
     run.physics.edit_body(body, |body| {
         body.set_translation(
             rapier3d::math::Vector::new(car[0] + 4., car[1] + 1.5, car[2]),

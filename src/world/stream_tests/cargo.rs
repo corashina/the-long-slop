@@ -84,10 +84,12 @@ fn r05_cargo_locks_in_trunk() {
     // Drive out along the road for about 200 m.
     run.area.player.configure_seats(&reference.seats);
     assert!(enter(&mut run, &reference));
-    let start = run
-        .stream
-        .origin
-        .absolute(run.physics.snapshot(run.vehicle).pose.position);
+    let start = run.stream.origin.absolute(
+        run.physics
+            .snapshot(&crate::vehicle::garage_vehicle_key(run.vehicle))
+            .pose
+            .position,
+    );
     let points = road_points(&run, &reference);
     for pair in points.windows(2) {
         place_car(&mut run, &reference, pair[0], pair[1], 0.8);

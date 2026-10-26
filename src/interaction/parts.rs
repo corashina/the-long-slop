@@ -1072,7 +1072,9 @@ impl PartAttachments {
                 state.local_pose = from_rapier(&(inverse * to_rapier(state.pose)));
             }
             for shape in &self.parts[i].shapes {
-                let vehicle = physics.vehicle_of(body);
+                let vehicle = physics
+                    .vehicle_of(body)
+                    .map(|key| crate::vehicle::garage_vehicle_index(key).expect("garage car"));
                 let local = if let Some(vehicle) = vehicle {
                     let chassis = self.chassis[vehicle];
                     m.body_local_pose(shape.body, chassis)
@@ -1126,7 +1128,9 @@ impl PartAttachments {
                 return p.body.unwrap();
             };
             let Some(owner) = self.slots[s].reference.owner else {
-                return physics.chassis_handle(self.slots[s].vehicle.expect("vehicle slot"));
+                return physics.chassis_handle(&crate::vehicle::garage_vehicle_key(
+                    self.slots[s].vehicle.expect("vehicle slot"),
+                ));
             };
             if let Some(&parent) = self.indices.get(&owner) {
                 i = parent;

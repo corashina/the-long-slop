@@ -26,7 +26,9 @@ impl GarageRuntime {
         let seated = self.area.player.seat_vehicle();
         let vehicles: Vec<_> = (0..self.physics.vehicle_count())
             .filter_map(|index| {
-                let chassis = self.physics.chassis_handle(index);
+                let chassis = self
+                    .physics
+                    .chassis_handle(&crate::vehicle::garage_vehicle_key(index));
                 self.physics.body_active(chassis).then_some(())?;
                 Some((index, self.under_map(chassis)?))
             })
@@ -98,7 +100,10 @@ impl GarageRuntime {
     /// Move the car, its parts, its cargo, and a seated player up together.
     fn lift_vehicle(&mut self, reference: &ReferenceManifest, vehicle: usize, ground: f32) {
         self.collect_recovery_ownership(reference, vehicle);
-        let mut pose = self.physics.snapshot(vehicle).pose;
+        let mut pose = self
+            .physics
+            .snapshot(&crate::vehicle::garage_vehicle_key(vehicle))
+            .pose;
         let rise = ground + LIFT - pose.position[1];
         pose.position[1] += rise;
         let seated = self.area.player.seat_vehicle() == Some(vehicle);

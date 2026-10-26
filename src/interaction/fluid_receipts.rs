@@ -409,7 +409,9 @@ mod tests {
             .find(|o| o.tank == ItemId(116))
             .unwrap()
             .id;
-        let chassis = run.physics.chassis_handle(0);
+        let chassis = run
+            .physics
+            .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
         let node = r.items.iter().find(|i| i.id == receiver).unwrap().node;
         let other_node = r
             .items

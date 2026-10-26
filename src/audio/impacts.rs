@@ -106,7 +106,11 @@ fn side(physics: &PhysicsWorld, handle: crate::vehicle::ColliderHandle) -> Side 
     let Some(collider) = physics.rapier().colliders.get(handle) else {
         return Side::Other;
     };
-    if let Some(vehicle) = collider.parent().and_then(|b| physics.vehicle_of(b)) {
+    if let Some(vehicle) = collider
+        .parent()
+        .and_then(|b| physics.vehicle_of(b))
+        .and_then(crate::vehicle::garage_vehicle_index)
+    {
         return Side::Car(vehicle);
     }
     match (collider.user_data & u32::MAX as u128) as u32 {

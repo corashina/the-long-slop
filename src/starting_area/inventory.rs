@@ -80,7 +80,7 @@ impl StartingArea {
             carried
                 .and_then(|id| self.items.get(id))
                 .and_then(|i| i.body)
-                == Some(physics.chassis_handle(index))
+                == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)))
         });
         InventoryContext {
             carried,

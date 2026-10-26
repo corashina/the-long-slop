@@ -346,7 +346,9 @@ fn ignition_and_attachment() {
         assert_eq!(actual.location, expected.location);
     }
     // A loose engine can stay active after its chassis leaves the active world.
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     let loose = run.area.items.get(source.item).unwrap().body.unwrap();
     assert_ne!(loose, chassis);
     let before = run.vehicles[0].engine.capture_save();
@@ -440,7 +442,9 @@ fn active_chassis_preserves_inactive_detached_engine() {
     step(&mut run, &reference, FrameInput::default());
     assert!(run.vehicles[0].engine_output.running);
     let loose = run.area.items.get(source.item).unwrap().body.unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     assert_ne!(loose, chassis);
     run.physics.edit_body(loose, |body| body.set_enabled(false));
     run.physics.inactive_bodies.insert(loose);
@@ -837,7 +841,9 @@ fn garage_engine_remove_restore_continue() {
             .collect::<Vec<_>>(),
         [3, 0]
     );
-    let loaded_chassis = loaded.physics.chassis_handle(0);
+    let loaded_chassis = loaded
+        .physics
+        .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     let loaded_engine = loaded.area.items.get(source.item).unwrap().body.unwrap();
     assert!(!loaded.physics.body_active(loaded_chassis));
     assert!(!loaded.physics.body_active(loaded_engine));

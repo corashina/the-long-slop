@@ -85,7 +85,10 @@ impl StartingArea {
         let mut bodies = HashMap::with_capacity(reference.bodies.len());
         let mut compound_colliders = Vec::new();
         for (index, vehicle) in reference.vehicles.iter().enumerate() {
-            bodies.insert(vehicle.body, physics.chassis_handle(index));
+            bodies.insert(
+                vehicle.body,
+                physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)),
+            );
         }
         for body in &reference.bodies {
             if reference.vehicles.iter().any(|v| v.body == body.id) {
@@ -167,7 +170,9 @@ impl StartingArea {
             let owner = bodies[&record.body];
             let mut collider = builder.build();
             let local = *collider.position();
-            let physical_parent = match vehicle.map(|v| physics.chassis_handle(v)) {
+            let physical_parent = match vehicle
+                .map(|v| physics.chassis_handle(&crate::vehicle::garage_vehicle_key(v)))
+            {
                 Some(chassis) if owner != chassis => {
                     collider.set_position(
                         physics.rapier().bodies[chassis].position().inverse()
@@ -762,7 +767,11 @@ impl GarageRuntime {
         if stream_world {
             stream.request_at(
                 reference.area.player_spawn.translation.map(f64::from),
-                physics.snapshot(0).pose.position.map(f64::from),
+                physics
+                    .snapshot(&crate::vehicle::garage_vehicle_key(0))
+                    .pose
+                    .position
+                    .map(f64::from),
             );
         }
         let mut wheels = crate::interaction::wheels::WheelAssemblies::new(reference)?;
@@ -1447,7 +1456,10 @@ impl GarageRuntime {
                 .get(reference.vehicles[index].engine.item)
                 .and_then(|item| item.body)
                 .is_some_and(|body| self.physics.body_active(body));
-            let active = self.physics.body_active(self.physics.chassis_handle(index));
+            let active = self.physics.body_active(
+                self.physics
+                    .chassis_handle(&crate::vehicle::garage_vehicle_key(index)),
+            );
             let car_controls = self.area.player.seat_vehicle() == Some(index)
                 && (self.area.player.driving() || self.area.player.driving2());
             audio.vehicle(
@@ -1477,7 +1489,10 @@ impl GarageRuntime {
 
         self.advance_under_map(reference);
         let focus = if self.area.player.seat().is_some() {
-            self.physics.snapshot(self.vehicle).pose.position
+            self.physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(self.vehicle))
+                .pose
+                .position
         } else {
             self.area.player.focus_position(&self.physics)
         };
@@ -1583,7 +1598,11 @@ impl GarageRuntime {
         let r = &vehicle.instruments;
         let engine_present = self.area.items.mounted(vehicle.engine.item);
         crate::simulation::instruments::InstrumentSample {
-            speed_kmh: self.physics.snapshot(index).speed_mps * 3.6,
+            speed_kmh: self
+                .physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(index))
+                .speed_mps
+                * 3.6,
             fuel_liters: amount(vehicle.engine.fuel_tank),
             oil_liters: amount(vehicle.engine.oil_tank),
             temperature: if engine_present {
@@ -1616,7 +1635,10 @@ impl GarageRuntime {
                 .is_some_and(|body| self.physics.body_active(body))
             && output.running;
         // The chassis body frame is the car root node: reference validation requires it.
-        let root = self.physics.rapier().bodies[self.physics.chassis_handle(index)].position();
+        let root = self.physics.rapier().bodies[self
+            .physics
+            .chassis_handle(&crate::vehicle::garage_vehicle_key(index))]
+        .position();
         self.vehicles[index].exhaust.advance(
             FIXED_DT,
             crate::exhaust::ExhaustInput {
@@ -1645,7 +1667,10 @@ impl GarageRuntime {
         driving: bool,
         controls: crate::simulation::input::DrivingControls,
     ) {
-        let chassis_active = self.physics.body_active(self.physics.chassis_handle(index));
+        let chassis_active = self.physics.body_active(
+            self.physics
+                .chassis_handle(&crate::vehicle::garage_vehicle_key(index)),
+        );
         let engine_present = self
             .area
             .items
@@ -1662,7 +1687,9 @@ impl GarageRuntime {
         let sleep_modifier = self.clock_factors(reference).fluid_scale;
         let source = &reference.vehicles[index];
         let engine_reference = &source.engine;
-        let snapshot = self.physics.snapshot(index);
+        let snapshot = self
+            .physics
+            .snapshot(&crate::vehicle::garage_vehicle_key(index));
         let speed = snapshot.speed_mps;
         let driving = driving && chassis_active;
         let controls = if driving {
@@ -1677,7 +1704,9 @@ impl GarageRuntime {
                 .map(|v| v * v)
                 .sum::<f32>()
                 .sqrt();
-        let rolling_rpm = self.physics.driven_wheel_rpm(index);
+        let rolling_rpm = self
+            .physics
+            .driven_wheel_rpm(&crate::vehicle::garage_vehicle_key(index));
         let vehicle = &mut self.vehicles[index];
         let drivetrain = vehicle.drivetrain.step(
             controls,
@@ -1796,7 +1825,9 @@ impl GarageRuntime {
                 * engine_reference.starting_push_force
                 * factor
                 * FIXED_DT;
-            let chassis = self.physics.chassis_handle(index);
+            let chassis = self
+                .physics
+                .chassis_handle(&crate::vehicle::garage_vehicle_key(index));
             self.physics.edit_body(chassis, |body| {
                 body.apply_impulse_at_point(impulse, engine.translation + offset, true)
             });
@@ -1805,7 +1836,9 @@ impl GarageRuntime {
             .area
             .interaction
             .push_steering()
-            .filter(|(body, _)| self.physics.vehicle_of(*body) == Some(index))
+            .filter(|(body, _)| {
+                self.physics.vehicle_of(*body) == Some(&crate::vehicle::garage_vehicle_key(index))
+            })
             .map(|(_, steer)| steer);
         let drive = DriveInput {
             throttle,
@@ -1835,7 +1868,7 @@ impl GarageRuntime {
         );
         if chassis_active {
             self.physics.apply_vehicle_forces(
-                index,
+                &crate::vehicle::garage_vehicle_key(index),
                 drive,
                 if engine_present {
                     crate::simulation::drivetrain::transmitted_torques(output, source, gear)
@@ -1938,10 +1971,10 @@ impl GarageRuntime {
         self.audio_motion_revision = self.audio_motion_revision.wrapping_add(1);
         self.previous_speed = None;
         self.death_protected = true;
-        let position = if self
-            .physics
-            .body_active(self.physics.chassis_handle(self.vehicle))
-        {
+        let position = if self.physics.body_active(
+            self.physics
+                .chassis_handle(&crate::vehicle::garage_vehicle_key(self.vehicle)),
+        ) {
             self.persistent_world.absolute_vehicle_position(
                 &self.physics,
                 &self.stream.origin,
@@ -1982,10 +2015,15 @@ impl GarageRuntime {
         };
         supported(self.area.player.focus_position(&self.physics), 8.)
             && (0..self.physics.vehicle_count()).all(|index| {
-                let handle = self.physics.chassis_handle(index);
+                let handle = self
+                    .physics
+                    .chassis_handle(&crate::vehicle::garage_vehicle_key(index));
                 !self.physics.body_active(handle)
                     || supported(
-                        self.physics.snapshot(index).pose.position,
+                        self.physics
+                            .snapshot(&crate::vehicle::garage_vehicle_key(index))
+                            .pose
+                            .position,
                         8. + self.physics.rapier().bodies[handle].linvel().length() as f64
                             * FIXED_DT as f64,
                     )

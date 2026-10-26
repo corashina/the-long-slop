@@ -111,7 +111,9 @@ fn installed_lada_g03_identity_mass_and_collision() {
         reference.world.draw_distance.default,
     )
     .unwrap();
-    let chassis = run.physics.chassis_handle(vehicle);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(vehicle));
     let original_mass = run.physics.rapier().bodies[chassis].mass();
     let item_count = run.area.items.iter().count();
     let collider_count = run.physics.rapier().colliders.len();

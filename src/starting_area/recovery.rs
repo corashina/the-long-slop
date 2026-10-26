@@ -15,7 +15,9 @@ impl GarageRuntime {
     pub fn collect_recovery_ownership(&mut self, reference: &ReferenceManifest, vehicle: usize) {
         self.recovery_bodies.clear();
         self.recovery_held_bodies.clear();
-        let chassis = self.physics.chassis_handle(vehicle);
+        let chassis = self
+            .physics
+            .chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle));
         self.recovery_bodies.push(chassis);
         let inverse = self.physics.rapier().bodies[chassis].position().inverse();
         let held = self.area.interaction.held();
@@ -156,12 +158,14 @@ pub(super) fn transport_prepared(
 ) {
     area.interaction
         .finish_cancelled_input(&mut area.player, physics);
-    let old = *physics.rapier().bodies[physics.chassis_handle(vehicle)].position();
+    let old = *physics.rapier().bodies
+        [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle))]
+    .position();
     let delta = to_rapier(plan.vehicle) * old.inverse();
     area.interaction.drop_held(&mut area.items, physics);
-    physics.reset(vehicle, plan.vehicle);
+    physics.reset(&crate::vehicle::garage_vehicle_key(vehicle), plan.vehicle);
     for &body in bodies {
-        if body != physics.chassis_handle(vehicle) {
+        if body != physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)) {
             transport_body(physics, body, delta);
         }
     }
@@ -201,10 +205,11 @@ pub fn recovery_clearance(
 ) -> Option<RecoveryTransport> {
     let old_car = to_rapier(persistent.recovery_body_pose(
         physics,
-        physics.chassis_handle(vehicle),
+        physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)),
         vehicle,
     )?);
-    let dormant = !physics.body_active(physics.chassis_handle(vehicle));
+    let dormant =
+        !physics.body_active(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)));
     let collider_pose = |handle: RigidBodyHandle, collider: &Collider| -> Option<Pose> {
         if dormant && bodies.contains(&handle) {
             Some(

@@ -156,10 +156,11 @@ fn install_test_control(
         .scale = [2., 3., 4.];
     reference.mechanisms = vec![control];
     run.area.interaction.mechanisms = MechanismState::new(reference).unwrap();
-    run.area
-        .interaction
-        .mechanisms
-        .bind_body(reference.vehicles[0].body, run.physics.chassis_handle(0));
+    run.area.interaction.mechanisms.bind_body(
+        reference.vehicles[0].body,
+        run.physics
+            .chassis_handle(&crate::vehicle::garage_vehicle_key(0)),
+    );
     run.area.interaction.mechanisms.sync(&mut run.physics, true);
     (item, node)
 }
@@ -179,7 +180,12 @@ fn assert_impulse(
     let properties = run.physics.rapier().bodies[body].mass_properties();
     let expected_spin = properties.effective_world_inv_inertia * torque;
     let expected_angular = properties.effective_angular_inertia() * expected_spin;
-    if body == run.physics.chassis_handle(0) && force != 0. {
+    if body
+        == run
+            .physics
+            .chassis_handle(&crate::vehicle::garage_vehicle_key(0))
+        && force != 0.
+    {
         assert!(
             torque.length() > 0.001,
             "chassis probe must apply point torque"
@@ -211,7 +217,9 @@ fn assert_impulse(
 #[test]
 fn g10_endpoint_reactions() {
     let (mut reference, mut run) = load_garage();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     for inverted in [false, true] {
         for axis in 0..2 {
             for event in 0..4 {
@@ -300,7 +308,9 @@ fn g10_endpoint_root_and_restore() {
         unreachable!()
     };
     let r = control.rotation.as_ref().unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&crate::vehicle::garage_vehicle_key(0));
     let driven = r.targets[0].node;
     let driven_body = reference
         .bodies

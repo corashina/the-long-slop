@@ -586,7 +586,7 @@ impl GarageRuntime {
                     Ok(VehicleSnapshot {
                         instance: ids.vehicles[index].clone(),
                         body: self.physics.capture_save(
-                            index,
+                            &crate::vehicle::garage_vehicle_key(index),
                             BodyIdentity::Source {
                                 source: crate::save::identity::source_key(
                                     &ids.bodies,
@@ -653,7 +653,8 @@ impl GarageRuntime {
         }
         for (index, vehicle) in snapshot.vehicles.iter_mut().enumerate() {
             if let Some(body) = self.persistent_world.body_snapshot(
-                self.physics.chassis_handle(index),
+                self.physics
+                    .chassis_handle(&crate::vehicle::garage_vehicle_key(index)),
                 vehicle.body.identity.clone(),
             ) {
                 vehicle.body = body;
@@ -678,7 +679,7 @@ impl StartingArea {
         let mut records = Vec::new();
         let mut captured = HashSet::new();
         for index in 0..physics.vehicle_count() {
-            captured.insert(physics.chassis_handle(index));
+            captured.insert(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)));
         }
         for item in self.items.iter() {
             if !matches!(

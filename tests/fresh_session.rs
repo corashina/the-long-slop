@@ -26,7 +26,10 @@ fn first_permit_retains_runtime_and_commits_once_paused() {
     )
     .unwrap();
     let session = runtime.stream.frame().request.session;
-    let pose = runtime.physics.snapshot(0).pose;
+    let pose = runtime
+        .physics
+        .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+        .pose;
     let bodies = runtime.physics.rapier().bodies.len();
     let discarded = FreshSessionPermit::prepare(7, &runtime, 3).unwrap();
     let retry = FreshSessionPermit::prepare(8, &runtime, 3).unwrap();
@@ -42,13 +45,25 @@ fn first_permit_retains_runtime_and_commits_once_paused() {
     assert!(!changed_session.started);
     assert!(!runtime.started);
     assert_eq!(runtime.stream.frame().request.session, session);
-    assert_eq!(runtime.physics.snapshot(0).pose, pose);
+    assert_eq!(
+        runtime
+            .physics
+            .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+            .pose,
+        pose
+    );
     assert_eq!(runtime.physics.rapier().bodies.len(), bodies);
     retry.commit(8, &mut runtime, 3).unwrap();
     assert!(runtime.started && runtime.paused);
     assert_eq!(runtime.simulation_seconds, 0.);
     assert_eq!(runtime.stream.frame().request.session, session);
-    assert_eq!(runtime.physics.snapshot(0).pose, pose);
+    assert_eq!(
+        runtime
+            .physics
+            .snapshot(&the_long_slop::vehicle::garage_vehicle_key(0))
+            .pose,
+        pose
+    );
     assert_eq!(runtime.physics.rapier().bodies.len(), bodies);
     assert!(retry.commit(8, &mut runtime, 3).is_err());
     assert!(FreshSessionPermit::prepare(9, &runtime, 3).is_err());

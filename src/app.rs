@@ -1022,7 +1022,11 @@ fn active_camera(drive: &Drive) -> Transform {
     } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
         presentation::camera::pose(
             CameraMode::Chase,
-            drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
+            drive
+                .runtime
+                .physics
+                .snapshot(&crate::vehicle::garage_vehicle_key(drive.runtime.vehicle))
+                .pose,
         )
     } else {
         presentation::transform(drive.rendered)
@@ -1143,15 +1147,16 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     );
     let runtime = &drive.runtime;
     let current = &runtime.vehicles[runtime.vehicle];
-    let snapshot = runtime.physics.snapshot(runtime.vehicle);
+    let key = crate::vehicle::garage_vehicle_key(runtime.vehicle);
+    let snapshot = runtime.physics.snapshot(&key);
     let position = runtime.area.player.focus_position(&runtime.physics);
     let absolute = runtime.stream.origin.absolute(position);
     let origin = runtime.stream.origin.offset;
-    let contacts = snapshot
-        .wheels_contact
-        .iter()
+    let contacts = runtime
+        .physics
+        .wheel_contacts(&key)
         .enumerate()
-        .fold(0, |bits, (i, contact)| bits | ((*contact as u32) << i));
+        .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
     let fuel = runtime
         .area
         .items

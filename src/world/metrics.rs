@@ -357,7 +357,8 @@ pub(crate) mod browser {
         }
         let runtime = &drive.runtime;
         let frame = runtime.stream.frame();
-        let car = runtime.physics.snapshot(runtime.vehicle);
+        let car_key = crate::vehicle::garage_vehicle_key(runtime.vehicle);
+        let car = runtime.physics.snapshot(&car_key);
         let snapshot = Snapshot {
             session: frame.request.session,
             revision: frame.request.revision,
@@ -367,7 +368,7 @@ pub(crate) mod browser {
                 "simulation_seconds": runtime.simulation_seconds,
                 "vehicles": (0..runtime.vehicles.len()).map(|index| serde_json::json!({
                     "index": index,
-                    "active": runtime.physics.body_active(runtime.physics.chassis_handle(index)),
+                    "active": runtime.physics.body_active(runtime.physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index))),
                     "absolute_position": runtime.persistent_world.absolute_vehicle_position(
                         &runtime.physics, &frame.origin, index),
                 })).collect::<Vec<_>>(),
@@ -386,7 +387,7 @@ pub(crate) mod browser {
                 "vehicle": {
                     "position": car.pose.position, "rotation": car.pose.rotation,
                     "velocity": car.linear_velocity, "angular_velocity": car.angular_velocity,
-                    "wheel_contacts": car.wheels_contact,
+                    "wheel_contacts": runtime.physics.wheel_contacts(&car_key).collect::<Vec<_>>(),
                 },
                 "supported": runtime.world_supported(),
                 "required_ready": runtime.stream.required_ready(),

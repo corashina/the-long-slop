@@ -1,3 +1,4 @@
+mod body;
 mod mass;
 mod mutations;
 mod presentation_bodies;
@@ -5,26 +6,26 @@ mod query_bounds;
 mod wheel;
 mod wheel_set;
 
+use body::VehicleBody;
+pub use body::{garage_vehicle_index, garage_vehicle_key};
 use presentation_bodies::{BodyPresentationState, PresentationBodies};
 use query_bounds::QueryBounds;
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
-    ActiveEvents, ColliderBuilder, ColliderSet, CollisionEvent, ContactPair, EventHandler, Group,
-    InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline, RigidBodyBuilder,
-    RigidBodyHandle, RigidBodySet,
+    ColliderBuilder, ColliderSet, CollisionEvent, ContactPair, EventHandler, Group,
+    InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline, RigidBodyHandle,
+    RigidBodySet,
 };
-use wheel::WheelSlip;
 pub use wheel::{
     WheelAssembly, WheelContact, WheelProfile, WheelState, WheelTorques, collider_profile,
 };
 pub use wheel_set::{WheelMount, WheelSet};
 
-use crate::reference::{
-    ColliderGeometry, ReferenceError, ReferenceManifest, VehicleReference, WheelSlotId,
-    WheelSlotReference,
-};
+use crate::reference::{ColliderGeometry, ReferenceError};
 use crate::simulation::{DriveInput, FIXED_DT};
+use crate::world::ObjectKey;
+use std::collections::HashMap;
 
 /// Axle torque after gear ratios and engine engagement. Motor torque has a sign.
 #[derive(Clone, Copy, Debug, Default)]
@@ -160,11 +161,9 @@ pub struct VehiclePose {
 #[derive(Clone, Copy, Debug)]
 pub struct VehicleSnapshot {
     pub pose: VehiclePose,
-    pub wheels: [VehiclePose; 4],
     pub speed_mps: f32,
     pub linear_velocity: [f32; 3],
     pub angular_velocity: [f32; 3],
-    pub wheels_contact: [bool; 4],
 }
 
 impl VehicleSnapshot {
@@ -178,67 +177,36 @@ impl VehicleSnapshot {
     }
 }
 
-/// One rigid chassis with its four source wheel slots.
-struct VehicleBody {
-    chassis: RigidBodyHandle,
-    slip: WheelSlip,
-    wheels: WheelSet,
-    wheel_references: [WheelSlotReference; 4],
-    max_steer: f32,
-    brake_torque: f32,
-    handbrake_torque: f32,
-    assemblies: [WheelAssembly; 4],
-    last_handbrake: f32,
-    /// Mass of items locked to the chassis. `set_vehicle_mass` adds it.
-    cargo_mass: f32,
-}
-
 pub struct PhysicsWorld {
     body_mass_override: Option<mass::BodyMassOverride>,
     /// Locked item mass on non-vehicle bodies. `set_body_mass` adds it.
     body_cargo: Vec<(RigidBodyHandle, f32)>,
+    /// Local centre of mass overrides. Mass changes keep them.
+    center_of_mass: Vec<(RigidBodyHandle, Vector)>,
     pub(crate) inactive_bodies: std::collections::HashSet<RigidBodyHandle>,
     physics: rapier3d::prelude::PhysicsWorld,
     query_bounds: QueryBounds,
     presentation_bodies: PresentationBodies,
+    /// Chassis bodies of all vehicles, for the wheel ray rule.
     chassis: Vec<RigidBodyHandle>,
-    vehicles: Vec<VehicleBody>,
+    vehicles: HashMap<ObjectKey, VehicleBody>,
     hit_collector: HitCollector,
     hits: Vec<HitContact>,
     ignored: mutations::IgnoredCollisions,
 }
 
 impl PhysicsWorld {
-    /// Poses follow the order of `reference.vehicles`.
-    pub fn new(
-        reference: &ReferenceManifest,
-        poses: &[VehiclePose],
-    ) -> Result<Self, ReferenceError> {
-        if poses.len() != reference.vehicles.len() {
-            return Err(ReferenceError("Expected one pose per vehicle".into()));
-        }
-        let mut physics = Self::empty(
-            poses.len(),
-            reference.bodies.len() + reference.parts.len() + reference.wheel_parts.len(),
-        );
-        for (vehicle, pose) in reference.vehicles.iter().zip(poses) {
-            let vehicle = VehicleBody::new(reference, vehicle, *pose, &mut physics)?;
-            physics.chassis.push(vehicle.chassis);
-            physics.vehicles.push(vehicle);
-        }
-        physics.refresh_queries();
-        Ok(physics)
-    }
     /// A world without vehicles.
     pub(crate) fn empty(vehicles: usize, bodies: usize) -> Self {
         let mut physics = Self {
             physics: rapier3d::prelude::PhysicsWorld::new(),
             body_mass_override: None,
             body_cargo: Vec::with_capacity(mass::CARGO_BODIES),
+            center_of_mass: Vec::with_capacity(mass::CARGO_BODIES),
             query_bounds: QueryBounds::default(),
             presentation_bodies: PresentationBodies::default(),
             chassis: Vec::with_capacity(vehicles),
-            vehicles: Vec::with_capacity(vehicles),
+            vehicles: HashMap::with_capacity(vehicles),
             hit_collector: HitCollector::default(),
             hits: Vec::with_capacity(HIT_CAPACITY),
             ignored: Default::default(),
@@ -246,123 +214,6 @@ impl PhysicsWorld {
         };
         physics.physics.integration_parameters.dt = FIXED_DT;
         physics
-    }
-}
-
-impl VehicleBody {
-    fn new(
-        reference: &ReferenceManifest,
-        vehicle: &VehicleReference,
-        pose: VehiclePose,
-        physics: &mut PhysicsWorld,
-    ) -> Result<Self, ReferenceError> {
-        let source_body = reference
-            .bodies
-            .iter()
-            .find(|body| body.id == vehicle.body)
-            .ok_or_else(|| ReferenceError("Missing chassis body".into()))?;
-        let chassis = physics.insert_body(
-            RigidBodyBuilder::dynamic()
-                .pose(to_rapier(pose))
-                .linear_damping(source_body.linear_damping)
-                .angular_damping(source_body.angular_damping)
-                .ccd_enabled(true),
-        );
-        for id in &vehicle.colliders {
-            let collider = reference
-                .colliders
-                .iter()
-                .find(|record| record.id == *id)
-                .ok_or_else(|| ReferenceError(format!("Missing vehicle collider {}", id.0)))?;
-            let builder = collider_builder(&collider.geometry)?
-                .friction(collider.friction)
-                .restitution(collider.restitution)
-                .sensor(collider.sensor)
-                .enabled(collider.enabled)
-                .solver_groups(solver_groups(collider.enabled))
-                .collision_groups(InteractionGroups::new(
-                    Group::from_bits_truncate(collider.membership),
-                    Group::from_bits_truncate(collider.filter),
-                    InteractionTestMode::And,
-                ))
-                .density(if collider.sensor { 0.0 } else { 1.0 })
-                .active_events(ActiveEvents::COLLISION_EVENTS)
-                .user_data(
-                    VEHICLE_COLLIDER_FLAG
-                        | ((id.0 as u128) << 64)
-                        | step_surface_bits(collider.step_surface)
-                        | tag_bits(collider.tag),
-                );
-            physics.insert_collider_with_parent(builder, chassis);
-        }
-        physics.recompute_body_mass(chassis);
-        let geometry_mass = physics.rapier().bodies[chassis].mass();
-        if geometry_mass <= 0.0 || geometry_mass >= vehicle.mass_kg {
-            return Err(ReferenceError(
-                "Invalid car collision volume or mass".into(),
-            ));
-        }
-        physics.edit_body(chassis, |body| {
-            body.set_additional_mass(vehicle.mass_kg - geometry_mass, true)
-        });
-        physics.recompute_body_mass(chassis);
-        let slip = WheelSlip {
-            tire: vehicle.wheel_slip,
-            rim: vehicle.rim_slip,
-        };
-        let mut wheel_records = Vec::with_capacity(4);
-        let mut connections = Vec::with_capacity(4);
-        let mut assemblies = [WheelAssembly::Hub; 4];
-        for (index, id) in vehicle.wheel_slots.iter().enumerate() {
-            let wheel = reference
-                .wheel_slots
-                .iter()
-                .find(|record| record.id == *id)
-                .ok_or_else(|| ReferenceError(format!("Missing wheel slot {}", id.0)))?;
-            let anchor = reference
-                .anchors
-                .iter()
-                .find(|record| record.id == wheel.anchor)
-                .ok_or_else(|| {
-                    ReferenceError(format!("Missing wheel anchor {}", wheel.anchor.0))
-                })?;
-            let rotation = Rotation::from_xyzw(
-                anchor.transform.rotation[0],
-                anchor.transform.rotation[1],
-                anchor.transform.rotation[2],
-                anchor.transform.rotation[3],
-            );
-            let connection = Vector::from_array(anchor.transform.translation)
-                + rotation * Vector::from_array(wheel.collider.center);
-            // Wheel assembly sync replaces this before the first drive step.
-            assemblies[index] = WheelAssembly::Tire {
-                radius_m: wheel.collider.radius,
-                mass_kg: wheel.collider.wheel_mass_kg,
-                quality: 1.0,
-            };
-            connections.push(connection);
-            wheel_records.push(wheel.clone());
-        }
-        let wheel_references: [WheelSlotReference; 4] = wheel_records
-            .try_into()
-            .map_err(|_| ReferenceError("Expected four wheels".into()))?;
-        let mounts: [WheelMount; 4] = std::array::from_fn(|index| WheelMount {
-            connection: connections[index],
-            collider: &wheel_references[index].collider,
-            profile: wheel::resolve_profile(&wheel_references[index], &slip, assemblies[index]),
-        });
-        Ok(Self {
-            chassis,
-            slip,
-            wheels: WheelSet::new(chassis, &mounts),
-            wheel_references,
-            max_steer: vehicle.max_steer_degrees.to_radians(),
-            brake_torque: vehicle.brake_torque_nm,
-            handbrake_torque: vehicle.handbrake_torque_nm,
-            assemblies,
-            last_handbrake: vehicle.handbrake as u8 as f32,
-            cargo_mass: 0.0,
-        })
     }
 }
 
@@ -376,12 +227,13 @@ impl PhysicsWorld {
         Self {
             body_mass_override: None,
             body_cargo: Vec::new(),
+            center_of_mass: Vec::new(),
             inactive_bodies: Default::default(),
             physics,
             query_bounds: QueryBounds::default(),
             presentation_bodies: Default::default(),
             chassis: Vec::new(),
-            vehicles: Vec::new(),
+            vehicles: HashMap::new(),
             hit_collector: Default::default(),
             hits: Vec::new(),
             ignored: Default::default(),
@@ -392,23 +244,28 @@ impl PhysicsWorld {
     }
 
     /// Returns the vehicle whose chassis is `body`.
-    pub fn vehicle_of(&self, body: RigidBodyHandle) -> Option<usize> {
-        self.chassis.iter().position(|chassis| *chassis == body)
+    pub fn vehicle_of(&self, body: RigidBodyHandle) -> Option<&ObjectKey> {
+        if !self.chassis.contains(&body) {
+            return None;
+        }
+        self.vehicles
+            .iter()
+            .find(|(_, vehicle)| vehicle.chassis == body)
+            .map(|(key, _)| key)
     }
 
-    /// Returns the vehicle that owns the wheel slot.
-    pub fn slot_vehicle(&self, slot: WheelSlotId) -> Option<usize> {
-        self.vehicles.iter().position(|vehicle| {
-            vehicle
-                .wheel_references
-                .iter()
-                .any(|reference| reference.id == slot)
-        })
+    fn vehicle(&self, key: &ObjectKey) -> &VehicleBody {
+        self.vehicles.get(key).expect("Unknown vehicle")
     }
 
-    pub fn apply_vehicle_forces(&mut self, index: usize, input: DriveInput, torques: DriveTorques) {
-        let drive_count = self.driven_wheel_count(index).max(1) as f32;
-        let vehicle = &mut self.vehicles[index];
+    pub fn apply_vehicle_forces(
+        &mut self,
+        key: &ObjectKey,
+        input: DriveInput,
+        torques: DriveTorques,
+    ) {
+        let vehicle = self.vehicles.get_mut(key).expect("Unknown vehicle");
+        let drive_count = vehicle.driven_wheel_count().max(1) as f32;
         let pedal = |value: f32| {
             if value.is_finite() {
                 value.clamp(0.0, 1.0)
@@ -449,28 +306,25 @@ impl PhysicsWorld {
         };
         // Source carscript.SetWheel: driven wheels take motor torque and engine brake.
         // Service brake and handbrake add to the wheels in their source lists.
-        let wheel_torques: [WheelTorques; 4] = std::array::from_fn(|slot| {
-            let reference = &vehicle.wheel_references[slot];
-            let mut torques = WheelTorques::default();
-            if reference.drive {
+        for ((rules, torques), steer) in vehicle
+            .rules
+            .iter()
+            .zip(&mut vehicle.torques)
+            .zip(&mut vehicle.steer)
+        {
+            *torques = WheelTorques::default();
+            if rules.drive {
                 torques.motor_nm = motor_nm / drive_count;
                 torques.brake_nm = engine_brake_nm / drive_count;
             }
-            if reference.brake {
+            if rules.brake {
                 torques.brake_nm += vehicle.brake_torque * brake;
             }
-            if reference.handbrake {
+            if rules.handbrake {
                 torques.brake_nm += vehicle.handbrake_torque * handbrake;
             }
-            torques
-        });
-        let steer: [f32; 4] = std::array::from_fn(|slot| {
-            if vehicle.wheel_references[slot].steer {
-                steering
-            } else {
-                0.0
-            }
-        });
+            *steer = if rules.steer { steering } else { 0.0 };
+        }
         let own = vehicle.chassis;
         let chassis = &self.chassis;
         let ground = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
@@ -481,8 +335,8 @@ impl PhysicsWorld {
             &mut self.query_bounds,
             &mut self.presentation_bodies,
             QueryFilter::default().predicate(&ground),
-            &wheel_torques,
-            &steer,
+            &vehicle.torques,
+            &vehicle.steer,
         );
     }
 
@@ -531,7 +385,7 @@ impl PhysicsWorld {
 
     pub fn capture_save(
         &self,
-        vehicle: usize,
+        vehicle: &ObjectKey,
         identity: crate::save::BodyIdentity,
         origin: &crate::world::WorldOrigin,
     ) -> crate::save::BodySnapshot {
@@ -543,81 +397,68 @@ impl PhysicsWorld {
     }
     pub(crate) fn restore_wheel_save(
         &mut self,
-        vehicle: usize,
+        vehicle: &ObjectKey,
         index: usize,
         saved: &crate::save::WheelAttachment,
     ) {
-        let wheel = &mut self.vehicles[vehicle].wheels.wheels_mut()[index];
+        let vehicle = self.vehicles.get_mut(vehicle).expect("Unknown vehicle");
+        let wheel = &mut vehicle.wheels.wheels_mut()[index];
         wheel.angle = saved.rotation;
         wheel.omega = saved.rpm * std::f32::consts::TAU / 60.0;
         wheel.previous_angle = saved.previous_rotation;
     }
-    pub(crate) fn wheel_save_state(&self, vehicle: usize, index: usize) -> (f32, f32, f32) {
-        let wheel = &self.vehicles[vehicle].wheels.wheels()[index];
+    pub(crate) fn wheel_save_state(&self, vehicle: &ObjectKey, index: usize) -> (f32, f32, f32) {
+        let wheel = &self.vehicle(vehicle).wheels.wheels()[index];
         (wheel.angle, wheel.rpm(), wheel.previous_angle)
     }
 
     /// Source carscript avgRpm: all driven slots over the driven rim count.
-    pub fn driven_wheel_rpm(&self, index: usize) -> f32 {
-        let vehicle = &self.vehicles[index];
+    pub fn driven_wheel_rpm(&self, key: &ObjectKey) -> f32 {
+        let vehicle = self.vehicle(key);
         let sum: f32 = vehicle
             .wheels
             .wheels()
             .iter()
-            .zip(&vehicle.wheel_references)
-            .filter(|(_, reference)| reference.drive)
+            .zip(&vehicle.rules)
+            .filter(|(_, rules)| rules.drive)
             .map(|(wheel, _)| wheel.rpm())
             .sum();
-        sum / self.driven_wheel_count(index).max(1) as f32
+        sum / vehicle.driven_wheel_count().max(1) as f32
     }
 
     /// Source carscript.DrivenWheelsNum2: driven slots with a mounted rim.
-    pub fn driven_wheel_count(&self, index: usize) -> usize {
-        let vehicle = &self.vehicles[index];
-        vehicle
-            .assemblies
-            .iter()
-            .zip(&vehicle.wheel_references)
-            .filter(|(assembly, reference)| reference.drive && assembly.has_rim())
-            .count()
+    pub fn driven_wheel_count(&self, key: &ObjectKey) -> usize {
+        self.vehicle(key).driven_wheel_count()
     }
 
     /// Sets the vehicle mass without locked cargo. The cargo mass is added.
-    pub fn set_vehicle_mass(&mut self, index: usize, mass_kg: f32) {
-        let vehicle = &mut self.vehicles[index];
-        let mass_kg = mass_kg + vehicle.cargo_mass;
-        let geometry_mass: f32 = self.physics.bodies[vehicle.chassis]
+    pub fn set_vehicle_mass(&mut self, key: &ObjectKey, mass_kg: f32) {
+        let vehicle = self.vehicle(key);
+        let (chassis, mass_kg) = (vehicle.chassis, mass_kg + vehicle.cargo_mass);
+        self.apply_vehicle_mass(chassis, mass_kg);
+    }
+
+    /// Sets the chassis mass with cargo. Collider mass counts. The centre of mass stays.
+    fn apply_vehicle_mass(&mut self, chassis: RigidBodyHandle, mass_kg: f32) {
+        let geometry_mass: f32 = self.physics.bodies[chassis]
             .colliders()
             .iter()
             .map(|handle| self.physics.colliders[*handle].mass())
             .sum();
-        self.query_bounds.mark_body(vehicle.chassis);
-        let body = &mut self.physics.bodies[vehicle.chassis];
-        let before = BodyPresentationState::capture(body);
-        body.set_additional_mass((mass_kg - geometry_mass).max(0.0), true);
-        body.recompute_mass_properties_from_colliders(&self.physics.colliders);
-        self.presentation_bodies
-            .mark_if_changed(vehicle.chassis, before, body);
+        self.edit_body(chassis, |body| {
+            body.set_additional_mass((mass_kg - geometry_mass).max(0.0), true)
+        });
+        self.recompute_body_mass(chassis);
+        self.apply_center_of_mass(chassis);
     }
 
-    pub fn set_wheel(
-        &mut self,
-        slot: WheelSlotId,
-        assembly: WheelAssembly,
-    ) -> Result<(), ReferenceError> {
-        let vehicle = self
-            .slot_vehicle(slot)
-            .map(|index| &mut self.vehicles[index])
-            .ok_or_else(|| ReferenceError("Unknown wheel slot".into()))?;
-        let index = vehicle
-            .wheel_references
-            .iter()
-            .position(|reference| reference.id == slot)
-            .unwrap();
+    /// Changes the parts on one wheel. `index` is local to the vehicle.
+    pub fn set_wheel(&mut self, key: &ObjectKey, index: usize, assembly: WheelAssembly) {
+        let vehicle = self.vehicles.get_mut(key).expect("Unknown vehicle");
         vehicle.assemblies[index] = assembly;
         vehicle.wheels.set_profile(
             index,
-            wheel::resolve_profile(&vehicle.wheel_references[index], &vehicle.slip, assembly),
+            wheel::resolve_profile(&vehicle.rules[index], &vehicle.slip, assembly),
         );
         self.query_bounds.mark_body(vehicle.chassis);
         let body = &mut self.physics.bodies[vehicle.chassis];
@@ -625,15 +466,14 @@ impl PhysicsWorld {
         body.wake_up(true);
         self.presentation_bodies
             .mark_if_changed(vehicle.chassis, before, body);
-        Ok(())
     }
 
     pub fn rapier(&self) -> &rapier3d::prelude::PhysicsWorld {
         &self.physics
     }
 
-    pub fn chassis_handle(&self, index: usize) -> RigidBodyHandle {
-        self.chassis[index]
+    pub fn chassis_handle(&self, key: &ObjectKey) -> RigidBodyHandle {
+        self.vehicle(key).chassis
     }
 
     pub fn refresh_queries(&mut self) {
@@ -662,55 +502,65 @@ impl PhysicsWorld {
         }
     }
 
-    pub fn snapshot(&self, index: usize) -> VehicleSnapshot {
-        let vehicle = &self.vehicles[index];
-        let body = &self.physics.bodies[vehicle.chassis];
+    pub fn snapshot(&self, key: &ObjectKey) -> VehicleSnapshot {
+        let body = &self.physics.bodies[self.vehicle(key).chassis];
         let pose = body.position();
-        let wheels = std::array::from_fn(|i| {
-            let wheel = &vehicle.wheels.wheels()[i];
-            let local = wheel.connection - Vector::Y * wheel.suspension_length;
-            VehiclePose {
-                position: (pose * local).to_array(),
-                rotation: (pose.rotation
-                    * Rotation::from_rotation_y(wheel.steering)
-                    * Rotation::from_rotation_x(-wheel.angle))
-                .to_array(),
-            }
-        });
         VehicleSnapshot {
             pose: from_rapier(pose),
-            wheels,
             speed_mps: body.linvel().dot(pose.rotation * -Vector::Z),
             linear_velocity: body.linvel().to_array(),
             angular_velocity: body.angvel().to_array(),
-            wheels_contact: std::array::from_fn(|i| vehicle.wheels.wheels()[i].contact.is_some()),
         }
     }
 
+    /// World pose of one wheel. `index` is local to the vehicle.
+    pub fn wheel_pose(&self, key: &ObjectKey, index: usize) -> VehiclePose {
+        let vehicle = self.vehicle(key);
+        let pose = self.physics.bodies[vehicle.chassis].position();
+        let wheel = &vehicle.wheels.wheels()[index];
+        let local = wheel.connection - Vector::Y * wheel.suspension_length;
+        VehiclePose {
+            position: (pose * local).to_array(),
+            rotation: (pose.rotation
+                * Rotation::from_rotation_y(wheel.steering)
+                * Rotation::from_rotation_x(-wheel.angle))
+            .to_array(),
+        }
+    }
+
+    /// Ground contact of each wheel, in wheel order.
+    pub fn wheel_contacts(&self, key: &ObjectKey) -> impl Iterator<Item = bool> + '_ {
+        self.vehicle(key)
+            .wheels
+            .wheels()
+            .iter()
+            .map(|wheel| wheel.contact.is_some())
+    }
+
     /// Moves the car and stops it. Wheel angles and spin stay unchanged.
-    pub fn reset_preserving_wheels(&mut self, vehicle: usize, pose: VehiclePose) {
-        self.reset_chassis(vehicle, pose);
-        self.vehicles[vehicle].wheels.clear_contacts();
+    pub fn reset_preserving_wheels(&mut self, key: &ObjectKey, pose: VehiclePose) {
+        self.reset_chassis(key, pose);
+        self.vehicles.get_mut(key).unwrap().wheels.clear_contacts();
     }
 
-    pub fn reset(&mut self, index: usize, pose: VehiclePose) {
-        self.vehicles[index].wheels.reset();
-        self.reset_chassis(index, pose);
+    pub fn reset(&mut self, key: &ObjectKey, pose: VehiclePose) {
+        self.vehicles
+            .get_mut(key)
+            .expect("Unknown vehicle")
+            .wheels
+            .reset();
+        self.reset_chassis(key, pose);
     }
 
-    fn reset_chassis(&mut self, index: usize, pose: VehiclePose) {
-        let vehicle = &mut self.vehicles[index];
-        self.query_bounds.mark_body(vehicle.chassis);
-        let body = &mut self.physics.bodies[vehicle.chassis];
-        let before = BodyPresentationState::capture(body);
-
-        body.set_position(to_rapier(pose), true);
-        body.set_linvel(Vector::ZERO, true);
-        body.set_angvel(Vector::ZERO, true);
-        body.reset_forces(true);
-        body.reset_torques(true);
-        self.presentation_bodies
-            .mark_if_changed(vehicle.chassis, before, body);
+    fn reset_chassis(&mut self, key: &ObjectKey, pose: VehiclePose) {
+        let chassis = self.chassis_handle(key);
+        self.edit_body(chassis, |body| {
+            body.set_position(to_rapier(pose), true);
+            body.set_linvel(Vector::ZERO, true);
+            body.set_angvel(Vector::ZERO, true);
+            body.reset_forces(true);
+            body.reset_torques(true);
+        });
         self.refresh_queries();
     }
 
@@ -795,7 +645,7 @@ impl PhysicsWorld {
     }
 
     pub fn remove_collider(&mut self, handle: ColliderHandle) {
-        for vehicle in &self.vehicles {
+        for vehicle in self.vehicles.values() {
             if vehicle.wheels.wheels().iter().any(|wheel| {
                 wheel
                     .contact
@@ -944,6 +794,7 @@ pub fn from_rapier(pose: &Pose) -> VehiclePose {
 #[cfg(test)]
 mod hit_tests {
     use super::*;
+    use rapier3d::prelude::{ActiveEvents, RigidBodyBuilder};
 
     fn drop_box(events: ActiveEvents) -> Vec<HitContact> {
         let mut world = rapier3d::prelude::PhysicsWorld::new();

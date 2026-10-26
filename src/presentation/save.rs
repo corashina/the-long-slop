@@ -222,7 +222,13 @@ impl PreparedPresentation {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
         } else if mode == super::camera::CameraMode::Chase && candidate.area.player.seat().is_some()
         {
-            super::camera::pose(mode, candidate.physics.snapshot(candidate.vehicle).pose)
+            super::camera::pose(
+                mode,
+                candidate
+                    .physics
+                    .snapshot(&crate::vehicle::garage_vehicle_key(candidate.vehicle))
+                    .pose,
+            )
         } else {
             super::transform(pose)
         };

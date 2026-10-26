@@ -64,7 +64,9 @@ fn lada_parts_retain_contents_mass_collision_and_identity() {
         r.world.draw_distance.default,
     )
     .unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     let bodies = run.physics.rapier().bodies.len();
     let colliders = run.physics.rapier().colliders.len();
@@ -210,7 +212,9 @@ fn lada_plates_retain_source_owners_without_duplicate_members() {
         r.world.draw_distance.default,
     )
     .unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     for plate in &r.plates.plates {
         let target = r
@@ -394,7 +398,9 @@ fn lada_hood_and_trunk_cross_fit_like_source_can_craft() {
         r.world.draw_distance.default,
     )
     .unwrap();
-    let chassis = run.physics.chassis_handle(0);
+    let chassis = run
+        .physics
+        .chassis_handle(&the_long_slop::vehicle::garage_vehicle_key(0));
     let initial_mass = run.physics.rapier().bodies[chassis].mass();
     let named = |name: &str| r.items.iter().find(|i| i.name == name).unwrap().id;
     let slot = |item| {

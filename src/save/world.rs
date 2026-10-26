@@ -184,7 +184,10 @@ impl PersistentWorld {
         let Some(car) = self
             .records
             .iter()
-            .find(|r| r.handle == Some(physics.chassis_handle(vehicle)))
+            .find(|r| {
+                r.handle
+                    == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
+            })
             .and_then(|r| r.state)
         else {
             return Some(from_rapier(physics.rapier().bodies[handle].position()));
@@ -219,8 +222,11 @@ impl PersistentWorld {
         else {
             return false;
         };
-        let Some(car) = self.recovery_body_pose(physics, physics.chassis_handle(vehicle), vehicle)
-        else {
+        let Some(car) = self.recovery_body_pose(
+            physics,
+            physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)),
+            vehicle,
+        ) else {
             return false;
         };
         let Some(pose) = self.recovery_body_pose(physics, handle, vehicle) else {
@@ -239,7 +245,8 @@ impl PersistentWorld {
         vehicle: usize,
         bodies: &[RigidBodyHandle],
     ) {
-        if physics.body_active(physics.chassis_handle(vehicle)) {
+        if physics.body_active(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
+        {
             return;
         }
         // Set the virtual clearance frame only after the target permit succeeds.
@@ -278,10 +285,21 @@ impl PersistentWorld {
     ) -> [f64; 3] {
         self.records
             .iter()
-            .find(|r| r.handle == Some(physics.chassis_handle(vehicle)) && r.state.is_some())
+            .find(|r| {
+                r.handle
+                    == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
+                    && r.state.is_some()
+            })
             .and_then(|r| r.state)
             .map_or_else(
-                || origin.absolute(physics.snapshot(vehicle).pose.position),
+                || {
+                    origin.absolute(
+                        physics
+                            .snapshot(&crate::vehicle::garage_vehicle_key(vehicle))
+                            .pose
+                            .position,
+                    )
+                },
                 |s| s.pose.position,
             )
     }
@@ -465,10 +483,10 @@ impl PersistentWorld {
                     .is_some_and(|h| physics.body_active(*h))
             } else {
                 Some(handle) == held
-                    || area
-                        .player
-                        .seat_vehicle()
-                        .is_some_and(|vehicle| handle == physics.chassis_handle(vehicle))
+                    || area.player.seat_vehicle().is_some_and(|vehicle| {
+                        handle
+                            == physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle))
+                    })
                     || (bounded
                         && stream.supports(crate::world::WorldBounds {
                             min: absolute.map(|v| v - extent - 2.),

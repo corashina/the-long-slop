@@ -111,11 +111,13 @@ impl WheelAssemblies {
             } else if let ItemLocation::WheelSlot(slot_id) = state.location {
                 self.place_part(
                     i,
-                    physics.chassis_handle(
-                        physics
-                            .slot_vehicle(slot_id)
-                            .expect("validated wheel owner"),
-                    ),
+                    physics.chassis_handle(&crate::vehicle::garage_vehicle_key(
+                        self.slots
+                            .iter()
+                            .find(|slot| slot.id == slot_id)
+                            .expect("validated wheel owner")
+                            .vehicle,
+                    )),
                     to_rapier(state.local_pose),
                     false,
                     items,
@@ -144,7 +146,11 @@ impl WheelAssemblies {
                 .iter()
                 .find(|s| s.id == ids.wheel_slots[&record.slot])
                 .unwrap();
-            physics.restore_wheel_save(slot.vehicle, slot.index, record);
+            physics.restore_wheel_save(
+                &crate::vehicle::garage_vehicle_key(slot.vehicle),
+                slot.index,
+                record,
+            );
         }
         Ok(())
     }
@@ -586,8 +592,10 @@ impl WheelAssemblies {
             .slots
             .iter()
             .map(|slot| {
-                let (rotation, rpm, previous_rotation) =
-                    physics.wheel_save_state(slot.vehicle, slot.index);
+                let (rotation, rpm, previous_rotation) = physics.wheel_save_state(
+                    &crate::vehicle::garage_vehicle_key(slot.vehicle),
+                    slot.index,
+                );
                 Ok(crate::save::WheelAttachment {
                     slot: crate::save::identity::source_key(&ids.wheel_slots, slot.id)?,
                     rim: slot
@@ -721,7 +729,9 @@ impl WheelAssemblies {
         }
         let world = item_pose(items, self.parts[rim].item, physics)?;
         let body = self.free_body(rim, world, physics);
-        let chassis = physics.chassis_handle(self.slots[slot].vehicle);
+        let chassis = physics.chassis_handle(&crate::vehicle::garage_vehicle_key(
+            self.slots[slot].vehicle,
+        ));
         let velocity = physics.rapier().bodies[chassis].velocity_at_point(world.translation);
         let angular = physics.rapier().bodies[chassis].angvel();
         physics.edit_body(body, |body| body.set_linvel(velocity, true));
@@ -791,12 +801,12 @@ impl WheelAssemblies {
         }
         let slot = self.slots.iter().position(|slot| slot.id == id).unwrap();
         let rim = self.indices[&item];
-        let chassis = physics.chassis_handle(self.slots[slot].vehicle);
-        let snapshot = physics.snapshot(self.slots[slot].vehicle);
-        let rim_pose = to_rapier(snapshot.wheels[self.slots[slot].index])
+        let key = crate::vehicle::garage_vehicle_key(self.slots[slot].vehicle);
+        let chassis = physics.chassis_handle(&key);
+        let rim_pose = to_rapier(physics.wheel_pose(&key, self.slots[slot].index))
             * self.slots[slot].hub_to_mount
             * Pose::from_rotation(self.parts[rim].rotation);
-        let local = to_rapier(snapshot.pose).inverse() * rim_pose;
+        let local = to_rapier(physics.snapshot(&key).pose).inverse() * rim_pose;
         self.place_part(rim, chassis, local, false, items, physics)?;
         if let Some(tire) = self.parts[rim].tire {
             let tire_local = local
@@ -1019,7 +1029,9 @@ impl WheelAssemblies {
 
     pub fn sync_activity(&mut self, physics: &mut PhysicsWorld) {
         for slot in &self.slots {
-            let active = physics.body_active(physics.chassis_handle(slot.vehicle));
+            let active = physics.body_active(
+                physics.chassis_handle(&crate::vehicle::garage_vehicle_key(slot.vehicle)),
+            );
             if let Some(handle) = slot.sensor {
                 physics.edit_collider(handle, |collider| collider.set_enabled(active));
             }
@@ -1046,7 +1058,7 @@ impl WheelAssemblies {
             }
         }
         for vehicle in 0..self.vehicles.len() {
-            let chassis = physics.chassis_handle(vehicle);
+            let chassis = physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle));
             let state = &self.vehicles[vehicle];
             let mut mass = state.base_mass;
             for slot in self.slots.iter().filter(|slot| slot.vehicle == vehicle) {
@@ -1078,7 +1090,7 @@ impl WheelAssemblies {
                     .finite_total();
             }
             if !state.last_mass.is_finite() || (mass - state.last_mass).abs() > 0.0001 {
-                physics.set_vehicle_mass(vehicle, mass);
+                physics.set_vehicle_mass(&crate::vehicle::garage_vehicle_key(vehicle), mass);
                 self.vehicles[vehicle].last_mass = mass;
             }
         }
@@ -1092,17 +1104,18 @@ impl WheelAssemblies {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        if !physics.body_active(physics.chassis_handle(vehicle)) {
+        let key = crate::vehicle::garage_vehicle_key(vehicle);
+        if !physics.body_active(physics.chassis_handle(&key)) {
             return Ok(());
         }
-        let snapshot = physics.snapshot(vehicle);
-        let chassis = physics.chassis_handle(vehicle);
+        let snapshot = physics.snapshot(&key);
+        let chassis = physics.chassis_handle(&key);
 
         let inverse = to_rapier(snapshot.pose).inverse();
         for slot in self.slots.iter_mut().filter(|slot| slot.vehicle == vehicle) {
             let support = if let Some(rim) = slot.rim {
                 let part = &self.parts[rim];
-                let rim_pose = to_rapier(snapshot.wheels[slot.index])
+                let rim_pose = to_rapier(physics.wheel_pose(&key, slot.index))
                     * slot.hub_to_mount
                     * Pose::from_rotation(part.rotation);
                 let state = items
@@ -1139,11 +1152,11 @@ impl WheelAssemblies {
                 WheelAssembly::Hub
             };
             if slot.last_support != Some(support) {
-                physics.set_wheel(slot.id, support)?;
+                physics.set_wheel(&key, slot.index, support);
                 slot.last_support = Some(support);
             }
             if let Some(handle) = slot.sensor {
-                let world = to_rapier(snapshot.wheels[slot.index]) * slot.hub_to_mount;
+                let world = to_rapier(physics.wheel_pose(&key, slot.index)) * slot.hub_to_mount;
                 physics.edit_collider(handle, |collider| {
                     if !collider.is_enabled() {
                         collider.set_enabled(true);
