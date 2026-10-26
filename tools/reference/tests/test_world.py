@@ -122,7 +122,7 @@ class RopeTests(unittest.TestCase):
 
 
 class CarAllowListTests(unittest.TestCase):
-    """Car items export by name; start-only items stay out of pools; each start car field gives one placement."""
+    """Car items export by name and spawn from pools; each start car field gives one placement."""
     def fixture(self, missing='', roots_at=None):
         from tools.reference.world import CAR_ITEMS, START_CARS, START_ROOTS, LADA
         objects, data, trees = {}, {}, {}
@@ -142,8 +142,7 @@ class CarAllowListTests(unittest.TestCase):
             trees[key(root['reader'])] = [root]
             return root['reader']
         lada = prefab(LADA[1])
-        items = [{'index': 0, 'name': 'bus01', 'source': source_id(prefab(1000))},
-                 {'index': 1, 'name': 'car06p', 'source': source_id(prefab(1010))}]
+        items = [{'index': 0, 'name': 'bus01', 'source': source_id(prefab(1000))}]
         roots = {}
         for name in CAR_ITEMS:
             roots[name] = prefab(2000 + 10 * len(roots))
@@ -161,27 +160,35 @@ class CarAllowListTests(unittest.TestCase):
             cars[field] = car['reader']
         source = NS(get=lambda f, p: objects[f, p], read=lambda r: data[key(r)], class_name=lambda r: r.cls,
                     resolve=lambda owner, p: objects[p['file'], p['m_PathID']] if p['m_PathID'] else None,
-                    transform_for=lambda go: data[key(go)]['transform'], hierarchy=lambda root, **_: trees[key(root)])
+                    transform_for=lambda go: data[key(go)]['transform'], hierarchy=lambda root, **_: trees[key(root)],
+                    add_prefab=prefab)
         return source, catalog, settings, lada, roots, cars
 
-    def test_car_items_export_and_stay_out_of_pools(self):
-        from tools.reference.world import car_prototypes, pool_exclusion, CAR_ITEMS
+    def test_car_pools_hold_v02_types_only(self):
+        from tools.reference.world import car_prototypes, vehicle_exclusion, category_items, CAR_ITEMS
+        types = ('car01', 'car02k', 'car03', 'car03k', 'car04', 'car05', 'car06', 'car07',
+                 'car08', 'car08c', 'car09', 'car09P', 'car10', 'car10k')
+        self.assertEqual(set(CAR_ITEMS), {*types, *(t + 'full' for t in types), 'car09fullS'})
         source, catalog, _, lada, roots, _ = self.fixture()
-        cars, start_only = car_prototypes(source, catalog)
-        bus = source.get('sharedassets1.assets', 1000)
-        self.assertEqual(cars, {key(lada), key(bus), *(key(r) for r in roots.values())})
-        self.assertNotIn(('sharedassets1.assets', 1010), cars)
-        self.assertEqual(start_only, {key(roots[name]) for name, pool in CAR_ITEMS.items() if not pool})
-        self.assertEqual(pool_exclusion(roots['car01full'], start_only), 'other_vehicle')
-        self.assertEqual(pool_exclusion(bus, start_only), '')
-        source, catalog, *_ = self.fixture(missing='car04full')
-        with self.assertRaisesRegex(ValueError, 'level1:66024 item car04full'):
+        items = catalog['items']
+        for name, pid in (('car06p', 1010), ('car09t', 1020)):
+            items.append({'index': len(items), 'name': name, 'source': source_id(source.add_prefab(pid))})
+        pool = [i['index'] for i in items if i['name'].startswith('car')]
+        catalog['categories'].append({'index': 2, 'name': 'carfull', 'items': pool, 'categories': None})
+        cars = car_prototypes(source, catalog)
+        self.assertEqual(cars, {key(lada), ('sharedassets1.assets', 1000), *(key(r) for r in roots.values())})
+        def spawns(index):
+            root = source.get(items[index]['source']['file'], items[index]['source']['path_id'])
+            return not vehicle_exclusion(root, {'carscript'}, cars)
+        self.assertEqual({items[i]['name'] for i in category_items(catalog, 'carfull') if spawns(i)}, set(CAR_ITEMS))
+        source, catalog, *_ = self.fixture(missing='car07full')
+        with self.assertRaisesRegex(ValueError, 'level1:66024 item car07full'):
             car_prototypes(source, catalog)
 
     def test_start_placements_use_scene_pose_and_prefab(self):
         from tools.reference.world import car_prototypes, start_placements, START_CARS
         source, catalog, settings, lada, roots, scene = self.fixture()
-        cars, _ = car_prototypes(source, catalog)
+        cars = car_prototypes(source, catalog)
         with patch('tools.reference.world.world_pose', lambda s, r: {'node': r.path_id}):
             rows = start_placements(source, settings, source.read(settings), catalog, cars)
         self.assertEqual([r['group'] for r in rows], list(START_CARS))
