@@ -601,6 +601,10 @@ impl SourceInstances {
                                 );
                             }
                             let mut renderers = Vec::with_capacity(primitives);
+                            let emissive = super::instance_materials::emissive_prototype(
+                                reference,
+                                &prototype.source,
+                            );
                             for (source_index, source_node) in prototype.nodes.iter().enumerate() {
                                 if !source_node.renderer_enabled {
                                     continue;
@@ -700,6 +704,7 @@ impl SourceInstances {
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
                                         .and_then(bevy::camera::primitives::MeshAabb::compute_aabb);
                                     let row = variant_ids.is_empty()
+                                        && !emissive
                                         && node.skin.is_none()
                                         && flat.on_root(node.index as usize)
                                         && local.is_some()
@@ -788,7 +793,7 @@ impl SourceInstances {
                                     if let Some(color) = color {
                                         materials.color(&mut binding, color)?;
                                     }
-                                    if has_lod {
+                                    if has_lod || emissive {
                                         materials.make_private(&mut binding);
                                     }
                                     let is_grass =
