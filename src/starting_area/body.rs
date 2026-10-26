@@ -4,7 +4,7 @@ use crate::player::body::{BodyInputs, CarriedItem, InHandItem, SeatFrames};
 use crate::reference::ReferenceManifest;
 use crate::simulation::FIXED_DT;
 use crate::sleep::SleepPhase;
-use crate::vehicle::{from_rapier, to_rapier};
+use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
 use rapier3d::math::Pose;
 
 impl GarageRuntime {
@@ -45,14 +45,21 @@ impl GarageRuntime {
                     hand: local(to_rapier(hand)),
                     double_hand: false,
                 }),
-            seat: player.seated().then_some(SeatFrames {
-                def_pose: 0,
-                driving: false,
-                hands: [None; 2],
-                legs: [None; 2],
-                driving_hands: [None; 2],
-                driving_legs: [None; 2],
-            }),
+            seat: player
+                .seat_frames()
+                .zip(player.seat_body())
+                .map(|(f, owner)| {
+                    let seat = body * *self.physics.rapier().bodies[owner].position();
+                    let frame =
+                        |p: Option<VehiclePose>| p.map(|p| from_rapier(&(seat * to_rapier(p))));
+                    SeatFrames {
+                        hands: f.hands.map(frame),
+                        legs: f.legs.map(frame),
+                        driving_hands: f.driving_hands.map(frame),
+                        driving_legs: f.driving_legs.map(frame),
+                        ..*f
+                    }
+                }),
         };
         area.body.step(&input, FIXED_DT);
     }

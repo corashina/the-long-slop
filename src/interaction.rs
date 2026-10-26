@@ -787,8 +787,8 @@ impl InteractionState {
     pub(crate) fn item_seat(
         &self,
         collider: ColliderHandle,
-    ) -> Option<&crate::world::stream::content_seats::ItemSeat> {
-        self.item_seats.get(&collider).map(|seat| seat.as_ref())
+    ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
+        self.item_seats.get(&collider).cloned()
     }
     pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
         self.dial_knobs.insert(collider, kind);
@@ -1796,14 +1796,7 @@ impl InteractionState {
                     && seat_release.is_some_and(|press| {
                         press.matches(self.mechanisms.contains(target.item).then_some(target.item))
                     })
-                    && player.enter_item_seat(
-                        seat.owner.clone(),
-                        seat.body,
-                        &seat.seat,
-                        seat.seat_item,
-                        seat.pose,
-                        physics,
-                    )
+                    && player.enter_item_seat(seat, physics)
                 {
                     self.seat_action_latched = true;
                     action = Some(InteractionAction::Seat);
