@@ -146,6 +146,8 @@ pub struct PlateTextStatus {
     pub instance: u64,
     state: RenderingState,
     bindings: Vec<Binding>,
+    /// Root entities of the source instances of world car copies that show their plates.
+    world: Vec<Entity>,
     material: Option<Handle<PlateTextMaterial>>,
 }
 impl Default for PlateTextStatus {
@@ -154,6 +156,7 @@ impl Default for PlateTextStatus {
             instance: 1,
             state: RenderingState::Loading,
             bindings: Vec::new(),
+            world: Vec::new(),
             material: None,
         }
     }
@@ -180,7 +183,9 @@ impl Plugin for PlateTextPlugin {
             .init_resource::<PlateTextStatus>()
             .add_systems(
                 Update,
-                bind_plate_text.after(super::materials::material_readiness),
+                (bind_plate_text, bind_world_plate_text)
+                    .chain()
+                    .after(super::materials::material_readiness),
             );
     }
 }
@@ -215,6 +220,33 @@ fn mesh(glyphs: GlyphMesh) -> Mesh {
     );
     result.insert_indices(Indices::U32(glyphs.indices));
     result
+}
+/// Source sort data of a plate label with the shared plate material.
+fn sort_data(
+    record: &crate::reference::PlateRecord,
+    sorting_layer: i16,
+    sorting_order: i16,
+) -> Result<super::renderer_visibility::SourceSortData, String> {
+    let material_identity =
+        0x80000000 | u32::try_from(record.material.source.path_id).map_err(|e| e.to_string())?;
+    Ok(super::renderer_visibility::SourceSortData {
+        material_identity,
+        material_key: crate::reference::sorting::material_sort_key(material_identity, false, 0),
+        glass_source: 0,
+        shader_identity: i32::try_from(record.material.shader.source.path_id)
+            .map_err(|e| e.to_string())?,
+        source_material_index: 0,
+        layer_and_order: (u32::from((i32::from(sorting_layer) + 0x8000) as u16) << 16)
+            | u32::from((i32::from(sorting_order) + 0x8000) as u16),
+        queue: if record.material.state.render_queue < 0 {
+            3000
+        } else {
+            record.material.state.render_queue as i16
+        },
+        additive: false,
+        glass: false,
+        grab: false,
+    })
 }
 pub fn bind_plate_text(world: &mut World) {
     if !world.resource::<ReferenceVisuals>().bound
@@ -304,30 +336,7 @@ fn bind(world: &mut World) -> Result<(), String> {
                     .ok_or("Missing plate sorting order")?,
             )
             .map_err(|e| e.to_string())?;
-            let material_identity = 0x80000000
-                | u32::try_from(record.material.source.path_id).map_err(|e| e.to_string())?;
-            let sort = super::renderer_visibility::SourceSortData {
-                material_identity,
-                material_key: crate::reference::sorting::material_sort_key(
-                    material_identity,
-                    false,
-                    0,
-                ),
-                glass_source: 0,
-                shader_identity: i32::try_from(record.material.shader.source.path_id)
-                    .map_err(|e| e.to_string())?,
-                source_material_index: 0,
-                layer_and_order: (u32::from((i32::from(sorting_layer) + 0x8000) as u16) << 16)
-                    | u32::from((i32::from(sorting_order) + 0x8000) as u16),
-                queue: if record.material.state.render_queue < 0 {
-                    3000
-                } else {
-                    record.material.state.render_queue as i16
-                },
-                additive: false,
-                glass: false,
-                grab: false,
-            };
+            let sort = sort_data(record, sorting_layer, sorting_order)?;
             let layer = flags["layer"]
                 .as_u64()
                 .filter(|l| *l < 32)
@@ -458,6 +467,139 @@ pub fn reset_plate_text(world: &mut World) {
     for b in &mut status.bindings {
         b.revision = u64::MAX;
     }
+}
+/// Shows the plate labels of each shown world car copy. A copy binds once; its labels leave
+/// with its instance. The garage plate bind warmed the shared pipeline.
+/// V03 bridge: the shared material comes from the garage plate bind. Task 9 moves it here.
+pub fn bind_world_plate_text(world: &mut World) {
+    if !world.resource::<PlateTextStatus>().ready() {
+        return;
+    }
+    if let Err(e) = bind_world(world) {
+        world.resource_mut::<PlateTextStatus>().state = RenderingState::Failed(e);
+    }
+}
+fn bind_world(world: &mut World) -> Result<(), String> {
+    world.resource_scope(|world, mut status: Mut<PlateTextStatus>| {
+        let Some(WorldLabels {
+            root,
+            material,
+            labels,
+        }) = world_labels(world, &mut status)?
+        else {
+            return Ok(());
+        };
+        for WorldLabel {
+            node,
+            mesh,
+            layer,
+            sort,
+            text,
+        } in labels
+        {
+            let handle = world.resource_mut::<Assets<Mesh>>().add(mesh);
+            world.spawn((
+                Name::new(format!("Plate text {text}")),
+                Mesh3d(handle),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                Visibility::Inherited,
+                bevy::camera::visibility::RenderLayers::layer(layer),
+                ChildOf(node),
+                sort,
+                bevy::render::batching::NoAutomaticBatching,
+            ));
+        }
+        status.world.push(root);
+        Ok(())
+    })
+}
+/// One plate label of a world car copy, ready to spawn.
+struct WorldLabel {
+    node: Entity,
+    mesh: Mesh,
+    layer: usize,
+    sort: super::renderer_visibility::SourceSortData,
+    text: String,
+}
+/// The labels of one car copy: its instance root and the shared material.
+struct WorldLabels {
+    root: Entity,
+    material: Handle<PlateTextMaterial>,
+    labels: Vec<WorldLabel>,
+}
+/// Drops the bindings of removed instances. Returns the labels of one shown car copy that has
+/// none yet: its root, the shared material and each label's node, mesh, layer, sort and text.
+fn world_labels(
+    world: &World,
+    status: &mut PlateTextStatus,
+) -> Result<Option<WorldLabels>, String> {
+    let Some(instances) = world.get_resource::<super::world::instances::SourceInstances>() else {
+        return Ok(None);
+    };
+    // Labels of a removed instance despawned with its hierarchy.
+    if status.world.iter().any(|root| !instances.has_root(*root)) {
+        status.world.retain(|root| instances.has_root(*root));
+    }
+    let reference = &world.resource::<RuntimeReference>().0;
+    let vehicles = &world.resource::<Drive>().runtime.vehicles;
+    let Some((root, prototype, nodes, texts)) =
+        instances
+            .shown()
+            .find_map(|(root, placement, prototype, nodes)| {
+                let plates = &reference.world.prototypes[prototype]
+                    .vehicle
+                    .as_ref()?
+                    .plates;
+                if plates.is_empty() || status.world.contains(&root) {
+                    return None;
+                }
+                let texts = vehicles.iter().find_map(|(key, car)| match key {
+                    crate::world::ObjectKey::Generated(id) if *id == placement.id => {
+                        Some(&car.plates)
+                    }
+                    _ => None,
+                })?;
+                Some((root, prototype, nodes, texts))
+            })
+    else {
+        return Ok(None);
+    };
+    let record = &reference.plates;
+    let prototype = &reference.world.prototypes[prototype];
+    let material = status.material.clone().ok_or("Missing plate material")?;
+    let receiver_mask = world
+        .resource::<Assets<PlateTextMaterial>>()
+        .get(&material)
+        .ok_or("Missing plate material asset")?
+        .lighting
+        .receiver_mask;
+    let plates = &prototype.vehicle.as_ref().unwrap().plates;
+    if plates.len() != texts.len() {
+        return Err("Car plate texts differ from its record".into());
+    }
+    let mut labels = Vec::with_capacity(texts.len());
+    for (plate, text) in plates.iter().zip(texts) {
+        let node = &prototype.nodes[plate.text_node as usize];
+        let layer = usize::from(node.layer);
+        if layer >= 32 || 1u32 << layer != receiver_mask {
+            return Err("Shared plate source layer mismatch".into());
+        }
+        let glyphs = layout_text(&record.font, &plate.layout, &record.material, text)
+            .map_err(|e| e.to_string())?;
+        labels.push(WorldLabel {
+            node: nodes[node.gltf_node as usize],
+            mesh: mesh(glyphs),
+            layer,
+            sort: sort_data(record, plate.sorting[0], plate.sorting[1])?,
+            text: text.clone(),
+        });
+    }
+    Ok(Some(WorldLabels {
+        root,
+        material,
+        labels,
+    }))
 }
 pub fn plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
     let status = world.resource::<PlateTextStatus>();

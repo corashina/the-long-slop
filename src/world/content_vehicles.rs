@@ -331,6 +331,8 @@ pub(crate) fn spawn(
     if vehicles.contains_key(&key) {
         return Err(ReferenceError("Car runtime already exists".into()));
     }
+    // Plate binder: each copy draws its labels from its key. A reload draws the same texts.
+    let plates = crate::plates::copy_texts(&record.plates, key.seed())?;
     physics.add_vehicle(key.clone(), copy.chassis, copy.colliders, prototype)?;
     let mut runtime = VehicleRuntime::world(
         copy.prototype,
@@ -344,6 +346,7 @@ pub(crate) fn spawn(
             electronics: copy.electronics,
             lights: copy.lights,
             light_switch: copy.light_switch,
+            plates,
         },
     );
     if let Some(state) = changes.take_vehicle(&key) {
@@ -661,6 +664,73 @@ mod tests {
         }
         // The respawned car drives on.
         assert!(physics.snapshot(&key).speed_mps > 1.);
+    }
+
+    #[test]
+    fn plate_texts_differ_per_copy_and_survive_reload() {
+        let mut prototype = crate::vehicle::car_prototype_fixture();
+        let identity = [0., 0., 0., 1.];
+        let plate = |node: u32, same_as: Option<u32>| {
+            serde_json::from_value(serde_json::json!({
+                "source": {"file": "a", "path_id": 40 + node}, "node": node, "text_node": node,
+                "same_as": same_as, "initial_text": "", "initial_same": false,
+                "font_source": {"file": "f", "path_id": 1}, "material_source": {"file": "f", "path_id": 2},
+                "sorting": [0, 0],
+                "layout": {"bounds": [1.0, 0.2], "pivot": [0.5, 0.5], "anchor_min": [0.5, 0.5],
+                    "anchor_max": [0.5, 0.5], "font_size": 10.0, "font_size_base": 10.0, "font_size_min": 1.0,
+                    "font_size_max": 20.0, "font_style": 1, "font_weight": 400, "horizontal_alignment": 2,
+                    "vertical_alignment": 512, "auto_sizing": false, "kerning": true, "word_wrapping": false,
+                    "extra_padding": false, "orthographic": true, "rich_text": false, "overflow_mode": 0,
+                    "max_visible_descender": true, "spacing": [0.0, 0.0, 0.0, 0.0],
+                    "margin": [0.0, 0.0, 0.0, 0.0], "color": [1.0, 1.0, 1.0, 1.0],
+                    "transform": {"translation": [0.0, 0.0, 0.0], "rotation": identity, "scale": [1.0, 1.0, 1.0]}}
+            }))
+            .unwrap()
+        };
+        // The front label copies its text to the rear label.
+        prototype.vehicle.as_mut().unwrap().plates = vec![plate(1, Some(2)), plate(2, None)];
+        let copy = |ordinal| GeneratedId {
+            layer: WorldLayer::Prop,
+            generator: SourceId {
+                file: "a".into(),
+                path_id: 1,
+            },
+            unit: [0, 0],
+            ordinal,
+            children: Vec::new(),
+        };
+        // One session: spawn the copy and read its plate texts.
+        let texts = |id: &GeneratedId| {
+            let mut physics = PhysicsWorld::empty(1, 2);
+            let mut items = ItemStore::from_states(Vec::new());
+            let mut vehicles = BTreeMap::new();
+            let mut changes = ChangeRecords::default();
+            spawn_copy(
+                id,
+                &prototype,
+                &mut physics,
+                &mut items,
+                &mut vehicles,
+                &mut changes,
+            );
+            vehicles
+                .remove(&ObjectKey::Generated(id.clone()))
+                .unwrap()
+                .plates
+        };
+        let first = texts(&copy(3));
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0], first[1], "sameAsThis shares the text");
+        let bytes = first[0].as_bytes();
+        assert!(
+            first[0].len() == 7
+                && bytes[..3].iter().all(u8::is_ascii_uppercase)
+                && bytes[3] == b'-'
+                && bytes[4..].iter().all(u8::is_ascii_digit),
+            "{first:?}"
+        );
+        assert_ne!(texts(&copy(4)), first, "each copy draws its own plate");
+        assert_eq!(texts(&copy(3)), first, "a reload draws the same plate");
     }
 
     #[test]

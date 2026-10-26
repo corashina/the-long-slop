@@ -15,6 +15,8 @@ pub(crate) struct RadioBinding {
     pub(super) parent: GeneratedId,
     slot: usize,
     pub(crate) item: ItemId,
+    /// The radioscript. It selects the browser voice group.
+    script: SourceId,
     knobs: Vec<(ColliderId, Knob)>,
     pub(crate) state: RadioState,
     /// electronicsscript output without jam.
@@ -33,6 +35,7 @@ pub(crate) struct RadioBinding {
 impl RadioBinding {
     pub fn heap_bytes(&self) -> usize {
         crate::world::contents::identity_heap(&self.parent)
+            + self.script.file.capacity()
             + self.knobs.capacity() * std::mem::size_of::<(ColliderId, Knob)>()
             + self
                 .screens
@@ -68,6 +71,17 @@ fn prototype_affine(
         current = prototype.nodes[i].parent.map(|p| p as usize);
     }
     affine
+}
+
+/// The radio controls in the change record of world object `parent`: a portable radio or a car.
+fn saved_controls(
+    changes: &crate::world::changes::ChangeRecords,
+    parent: &GeneratedId,
+) -> Option<crate::save::RadioSnapshot> {
+    changes
+        .get(ObjectKey::Generated(parent.clone()))
+        .and_then(|c| c.snapshot.as_ref())
+        .and_then(|s| s.radio)
 }
 
 impl WorldStream {
@@ -212,12 +226,7 @@ impl WorldStream {
                 volume: number(f, "v")?,
             },
         );
-        if let Some(saved) = self
-            .changes
-            .get(ObjectKey::Generated(parent.clone()))
-            .and_then(|c| c.snapshot.as_ref())
-            .and_then(|s| s.radio)
-        {
+        if let Some(saved) = saved_controls(&self.changes, &parent) {
             state
                 .restore_save(&saved)
                 .map_err(|_| ReferenceError("Saved radio band without band control".into()))?;
@@ -268,6 +277,7 @@ impl WorldStream {
             parent,
             slot,
             item,
+            script: script.clone(),
             knobs,
             state,
             output,
@@ -360,14 +370,112 @@ impl WorldStream {
             .find(|b| b.item == item)
             .map(|b| b.state.capture_save())
     }
-    /// Bound portable radios with their controls and electronics output.
-    pub fn portable_radios(&self) -> impl Iterator<Item = (ItemId, &RadioState, f32)> + Clone {
+    /// Bound world radios (portable and car radios) with their radioscript, controls and
+    /// electronics output.
+    pub fn portable_radios(
+        &self,
+    ) -> impl Iterator<Item = (ItemId, &SourceId, &RadioState, f32)> + Clone {
         self.radio_bindings
             .iter()
-            .map(|b| (b.item, &b.state, b.output))
+            .map(|b| (b.item, &b.script, &b.state, b.output))
     }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn radio(&self, parent: &GeneratedId) -> Option<&RadioBinding> {
         self.radio_bindings.iter().find(|b| &b.parent == parent)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::save::RadioSnapshot;
+    use crate::world::changes::ChangeRecords;
+    use crate::world::{AbsolutePose, ObjectSnapshot, WorldLayer};
+
+    fn snapshot(radio: Option<RadioSnapshot>) -> ObjectSnapshot {
+        ObjectSnapshot {
+            pose: AbsolutePose {
+                position: [1., 2., 3.],
+                rotation: [0., 0., 0., 1.],
+            },
+            condition: 1.,
+            food: None,
+            temperature: None,
+            fluids: None,
+            valve: None,
+            lamp: None,
+            dial: None,
+            ammo: None,
+            glow: None,
+            radio,
+            detector: None,
+            linear_velocity: [0.; 3],
+            angular_velocity: [0.; 3],
+            sleeping: false,
+            held: false,
+            buried: false,
+            attachment: None,
+            mechanism: None,
+        }
+    }
+
+    #[test]
+    fn world_car_radio_controls_save_and_restore() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Saved {
+            #[serde(with = "crate::save::identity::lossless")]
+            changes: ChangeRecords,
+        }
+        let car = GeneratedId {
+            layer: WorldLayer::Prop,
+            generator: SourceId {
+                file: "sharedassets1.assets".into(),
+                path_id: 82556,
+            },
+            unit: [4, -2],
+            ordinal: 1,
+            children: Vec::new(),
+        };
+        let defaults = RadioSnapshot {
+            on: false,
+            am: false,
+            tuning: 0.5,
+            volume: 0.,
+        };
+        // The car radio of a fresh copy: radioscript defaults with a band switch.
+        let radio = || RadioState::new([530., 1610., 10.], [87.5, 108., 0.1], 0.1, true, defaults);
+        let mut state = radio();
+        for control in [
+            RadioControl::VolumeUp,
+            RadioControl::VolumeUp,
+            RadioControl::Band,
+            RadioControl::TuneUp,
+            RadioControl::TuneUp,
+        ] {
+            state.control(control);
+        }
+        let controls = state.capture_save();
+        assert!(controls.on && controls.am && controls.tuning > 0.5);
+
+        // The car root record keeps the controls; the save carries them through JSON.
+        let mut changes = ChangeRecords::default();
+        changes.record(
+            ObjectKey::Generated(car.clone()),
+            snapshot(Some(controls)),
+            &snapshot(None),
+        );
+        let json = serde_json::to_vec(&Saved { changes }).unwrap();
+        let loaded = serde_json::from_slice::<Saved>(&json).unwrap().changes;
+
+        // A new session binds the radio of the same copy with its saved controls.
+        let mut restored = radio();
+        restored
+            .restore_save(&saved_controls(&loaded, &car).unwrap())
+            .unwrap();
+        assert_eq!(restored.capture_save(), controls);
+        assert_eq!(restored.frequency(), state.frequency());
+        // Another copy keeps the radioscript defaults.
+        let other = GeneratedId { ordinal: 2, ..car };
+        assert!(saved_controls(&loaded, &other).is_none());
     }
 }

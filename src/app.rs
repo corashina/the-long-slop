@@ -1526,17 +1526,18 @@ fn publish_audio(
     let radios = runtime
         .stream
         .portable_radios()
-        .filter_map(|(id, state, output)| {
+        .filter_map(|(id, script, state, output)| {
             items
                 .get(id)
                 .filter(|item| item.inactive_pose.is_none())
-                .map(|item| (id, item.pose.position, state.on && output > cutoff))
+                .map(|item| (id, script, item.pose.position, state.on && output > cutoff))
         });
     if let Some(listener) = listener {
         audio.assign_portable_radios(listener, radios);
     }
-    for (slot, id) in audio.portable_radio_slots.iter().enumerate() {
-        let Some((item, (_, state, output))) = id.and_then(|id| {
+    let slots = audio.portable_radio_slots.iter().flatten();
+    for (slot, id) in slots.enumerate() {
+        let Some((item, (_, _, state, output))) = id.and_then(|id| {
             items
                 .get(id)
                 .zip(runtime.stream.portable_radios().find(|r| r.0 == id))

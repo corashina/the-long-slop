@@ -1785,7 +1785,30 @@ impl WorldReference {
             .map(|m| &m.recipe.source)
             .collect();
         interiors_valid(p, &doors)?;
-        vehicle_valid(p, a)
+        vehicle_valid(p, a)?;
+        // Car plates use the shared plate font and material.
+        let shared = &manifest.plates;
+        require(
+            p.vehicle.iter().flat_map(|v| &v.plates).all(|plate| {
+                plate.font_source == shared.font.source
+                    && plate.material_source == shared.material.source
+            }),
+            &format!("{f} plate font/material"),
+        )?;
+        // V03 bridge: capture targets use the shared probe record. Task 9 moves it to the car.
+        require(
+            p.vehicle
+                .iter()
+                .filter_map(|v| v.probe.as_ref())
+                .all(|probe| {
+                    manifest
+                        .render_lighting
+                        .probes
+                        .iter()
+                        .all(|s| probe.matches(s))
+                }),
+            &format!("{f} reflection probe"),
+        )
     }
 }
 /// Vehicle, engine and radiator records resolve inside the prototype.
@@ -2151,7 +2174,7 @@ mod tests {
                 "wheel_effects": [{"source": src(16), "pose": pose, "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []}],
                 "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "seats": [{"source": src(13), "node": 3, "sit_node": 3, "hit_nodes": [3], "driver": true, "driving2": true, "yaw_limits_degrees": [-179.0, 179.0], "min_exit_angle_degrees": 65.0, "exit_height": 1.0, "show_sleep_text": false, "default_pitch_degrees": 0.0, "pitch_limits_degrees": [-89.0, 89.0]}],
-                "lights": [], "light_switch": null, "instruments": null, "high_beams": []
+                "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": []
             },
             "engines": [crate::reference::engine_part_fixture()],
             "radiators": [{"source": src(15), "node": 2, "coolant_tank": null, "fan_node": 3, "thermostat_range": [80.0, 90.0], "fan_temperature_on": 95.0, "fan_temperature_off": 90.0, "fan_on_when_engine_runs": false, "max_value": 1.0, "max_fan_value": 1.0, "max_fan_speed": 1.0, "max_fluid_loss": 1.0}]

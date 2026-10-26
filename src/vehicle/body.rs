@@ -382,7 +382,7 @@ pub(crate) mod tests {
                 "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
                 "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
-                "lights": [], "light_switch": null, "instruments": null, "high_beams": []
+                "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": []
             }
         }))
         .unwrap()

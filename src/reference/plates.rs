@@ -95,6 +95,32 @@ pub struct PlateLayoutReference {
     pub color: [f32; 4],
     pub transform: Transform,
 }
+impl PlateLayoutReference {
+    /// Finite TextMeshPro values with the source alignment: Center=2, Middle=512, Bold.
+    pub(super) fn valid(&self) -> bool {
+        let l = self;
+        finite(&l.bounds)
+            && l.bounds.iter().all(|v| *v > 0.)
+            && finite(&l.pivot)
+            && finite(&l.anchor_min)
+            && finite(&l.anchor_max)
+            && finite(&[
+                l.font_size,
+                l.font_size_base,
+                l.font_size_min,
+                l.font_size_max,
+            ])
+            && l.font_size > 0.
+            && finite(&l.spacing)
+            && finite(&l.margin)
+            && finite(&l.color)
+            && transform(&l.transform)
+            && l.horizontal_alignment == 2
+            && l.vertical_alignment == 512
+            && l.font_style == 1
+            && l.font_weight == 400
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlateFontReference {
@@ -477,30 +503,7 @@ impl PlateRecord {
                     },
                 &label,
             )?;
-            let l = &p.layout;
-            require(
-                finite(&l.bounds)
-                    && l.bounds.iter().all(|v| *v > 0.)
-                    && finite(&l.pivot)
-                    && finite(&l.anchor_min)
-                    && finite(&l.anchor_max)
-                    && finite(&[
-                        l.font_size,
-                        l.font_size_base,
-                        l.font_size_min,
-                        l.font_size_max,
-                    ])
-                    && l.font_size > 0.
-                    && finite(&l.spacing)
-                    && finite(&l.margin)
-                    && finite(&l.color)
-                    && transform(&l.transform)
-                    && l.horizontal_alignment == 2
-                    && l.vertical_alignment == 512
-                    && l.font_style == 1
-                    && l.font_weight == 400,
-                "plate TMP layout; Center=2, Middle=512",
-            )?;
+            require(p.layout.valid(), "plate TMP layout; Center=2, Middle=512")?;
             let mut current = Some(p.item);
             let mut visited = HashSet::new();
             while let Some(id) = current {

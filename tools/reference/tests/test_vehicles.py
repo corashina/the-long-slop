@@ -61,6 +61,28 @@ def car_fixture():
     oil = node(engine_node)
     oil_tank = component(oil, 'MonoBehaviour', {'F': {'fluids': []}}, 'tankscript')
     component(engine_node, 'MonoBehaviour', {**ENGINE, 'T': ptr(oil_tank)}, 'enginescript')
+    # Two plates: the second label links the first with sameAsThis.
+    layout = dict(m_fontSize=10., m_fontSizeBase=10., m_fontSizeMin=1., m_fontSizeMax=20., m_fontStyle=1, m_fontWeight=400,
+        m_HorizontalAlignment=2, m_VerticalAlignment=512, m_enableAutoSizing=0, m_enableKerning=1, m_enableWordWrapping=0,
+        m_enableExtraPadding=0, m_isOrthographic=1, m_isRichText=0, m_overflowMode=0, m_useMaxVisibleDescender=1,
+        m_characterSpacing=0., m_wordSpacing=0., m_lineSpacing=0., m_paragraphSpacing=0.,
+        m_margin=dict(x=0., y=0., z=0., w=0.), m_fontColor=dict(r=1., g=1., b=1., a=1.))
+    font = record('MonoBehaviour', {}); material = record('Material', {})
+    plates = []
+    for same in (None, 0):
+        plate = node(root); text = node(plate)
+        data[text['reader'].path_id].update(m_SizeDelta=dict(x=1., y=.2), m_Pivot=dict(x=.5, y=.5),
+            m_AnchorMin=dict(x=.5, y=.5), m_AnchorMax=dict(x=.5, y=.5), m_LocalPosition=dict(x=0., y=0., z=0.),
+            m_LocalRotation=dict(x=0., y=0., z=0., w=1.), m_LocalScale=dict(x=1., y=1., z=1.))
+        tmp = component(text, 'MonoBehaviour', {**layout, 'm_fontAsset': ptr(font), 'm_sharedMaterial': ptr(material)}, 'TextMeshPro')
+        component(text, 'MeshRenderer', dict(m_SortingLayer=0, m_SortingOrder=3))
+        plates.append(component(plate, 'MonoBehaviour', dict(text=ptr(tmp), S='', same=0,
+            sameAsThis=ptr(plates[same] if same is not None else None)), 'rendszamscript'))
+    component(node(root), 'ReflectionProbe', dict(m_Mode=1, m_RefreshMode=1, m_TimeSlicingMode=1, m_Resolution=64,
+        m_HDR=True, m_BoxProjection=False, m_UseOcclusionCulling=False, m_BakedTexture=ptr(None),
+        m_CustomBakedTexture=ptr(None), m_Enabled=1, m_BoxSize=dict(x=6., y=2.5, z=6.), m_BoxOffset=dict(x=0., y=0., z=1.),
+        m_BlendDistance=1., m_IntensityMultiplier=1., m_Importance=1, m_NearClip=.3, m_FarClip=100.,
+        m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
     data[car.path_id].update(speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
         WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), carType=1, startingTime=1.,
@@ -104,6 +126,18 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         self.assertIsNone(vehicle['instruments'])
+        # Plate labels come from the car prototype, with prototype node ids.
+        front, rear = vehicle['plates']
+        self.assertIsNone(front['same_as'])
+        self.assertEqual(rear['same_as'], front['node'])
+        self.assertEqual(hierarchy[rear['text_node']]['parent'], hierarchy[rear['node']]['reader'])
+        self.assertEqual(rear['sorting'], [0, 3])
+        self.assertEqual(rear['layout']['bounds'], [1., .2])
+        self.assertEqual(front['font_source'], rear['font_source'])
+        # The reflection probe record is on the car prototype.
+        probe = vehicle['probe']
+        self.assertEqual(hierarchy[probe['node']]['components'][0].type.name, 'ReflectionProbe')
+        self.assertEqual((probe['bounds_size'], probe['near'], probe['mask']), ([6., 2.5, 6.], .3, 1))
         engines, radiators = part_records(source, hierarchy)
         self.assertEqual(len(engines), 1)
         engine = engines[0]

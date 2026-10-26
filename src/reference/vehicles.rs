@@ -1,5 +1,6 @@
 //! Vehicle records of car world prototypes and engine and radiator records of part nodes.
 //! Every `u32` id is local to its world prototype: node, body or collider index.
+use super::render_lighting::{CaptureFace, ProbeRecord, ProbeRefresh};
 use super::*;
 
 /// Source `carscript` of a car world prototype root.
@@ -51,7 +52,82 @@ pub struct WorldVehicleReference {
     pub instruments: Option<InstrumentReference>,
     /// Indices of `headlight2` lamps in `instruments.lamps`.
     pub high_beams: Vec<u32>,
+    /// Source `rendszamscript` labels of the license plates.
+    pub plates: Vec<WorldPlateReference>,
+    /// The realtime reflection probe that follows this car.
+    pub probe: Option<WorldProbeReference>,
     pub audio: Option<CarAudioReference>,
+}
+
+/// A realtime `ReflectionProbe` of a car prototype. The fields are those of `ProbeRecord`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldProbeReference {
+    pub source: SourceId,
+    /// The probe node.
+    pub node: u32,
+    pub enabled: bool,
+    pub bounds_size: [f32; 3],
+    pub bounds_offset: [f32; 3],
+    pub box_projection: bool,
+    pub blend_distance: f32,
+    pub intensity: f32,
+    pub importance: i32,
+    pub near: f32,
+    pub far: f32,
+    pub shadow_distance: f32,
+    pub mask: u32,
+    pub resolution: u32,
+    pub refresh: ProbeRefresh,
+    pub decode: [f32; 4],
+    pub faces: Vec<CaptureFace>,
+    pub mip_extents: Vec<u32>,
+}
+impl WorldProbeReference {
+    /// The capture and influence values equal those of `shared`.
+    pub fn matches(&self, shared: &ProbeRecord) -> bool {
+        self.enabled == shared.enabled
+            && self.bounds_size == shared.bounds_size
+            && self.bounds_offset == shared.bounds_offset
+            && self.box_projection == shared.box_projection
+            && self.blend_distance == shared.blend_distance
+            && self.intensity == shared.intensity
+            && self.importance == shared.importance
+            && self.near == shared.near
+            && self.far == shared.far
+            && self.shadow_distance == shared.shadow_distance
+            && self.mask == shared.mask
+            && self.resolution == shared.resolution
+            && self.refresh == shared.refresh
+            && self.decode == shared.decode
+            && self.faces.len() == shared.faces.len()
+            && self
+                .faces
+                .iter()
+                .zip(&shared.faces)
+                .all(|(a, b)| a.index == b.index && a.basis == b.basis)
+            && self.mip_extents == shared.mip_extents
+    }
+}
+
+/// A license plate `rendszamscript` label. It uses the shared plate font and material.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPlateReference {
+    pub source: SourceId,
+    /// The plate node with the script.
+    pub node: u32,
+    /// The TextMeshPro node.
+    pub text_node: u32,
+    /// `sameAsThis`: the node of the label that copies this label's text.
+    pub same_as: Option<u32>,
+    pub initial_text: String,
+    pub initial_same: bool,
+    pub font_source: SourceId,
+    pub material_source: SourceId,
+    /// Text renderer sorting layer and order.
+    pub sorting: [i16; 2],
+    pub layout: PlateLayoutReference,
 }
 
 /// A road WheelCollider of `carscript` and its wheel slot.
@@ -415,6 +491,27 @@ impl WorldVehicleReference {
                 && finite(&self.gear_ratios)
                 && self.gear_free_run.len() == self.gear_ratios.len()
                 && self.driving.initial_gear < self.gear_ratios.len(),
+        )?;
+        check(
+            s,
+            "vehicle plates",
+            self.plates.iter().all(|p| {
+                b.node(p.node)
+                    && b.node(p.text_node)
+                    && p.layout.valid()
+                    && p.same_as.is_none_or(|n| {
+                        n != p.node && self.plates.iter().any(|other| other.node == n)
+                    })
+            }) && self
+                .plates
+                .iter()
+                .enumerate()
+                .all(|(i, p)| self.plates[..i].iter().all(|o| o.node != p.node)),
+        )?;
+        check(
+            s,
+            "vehicle probe node",
+            self.probe.as_ref().is_none_or(|p| b.node(p.node)),
         )?;
         check(s, "vehicle wheels", !self.wheels.is_empty())?;
         for (i, w) in self.wheels.iter().enumerate() {

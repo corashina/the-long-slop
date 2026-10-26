@@ -52,8 +52,9 @@ impl SensorLatch {
         self.count = 3;
     }
 }
-/// Browser emitter ids of portable radio voice slots: base + slot.
+/// Browser emitter ids of world radio voice slots: base + group * slots + slot.
 pub const PORTABLE_RADIO_EMITTER: u32 = 0x5000_0000;
+/// Voice slots per world radio voice group.
 pub const PORTABLE_RADIO_SLOTS: usize = 4;
 pub fn source_gain_db(gain: f32) -> f32 {
     gain.clamp(0.001, 1.).ln() * 20.
@@ -153,8 +154,8 @@ pub struct AudioState {
     /// The Lada radio's controls.
     pub radio: crate::simulation::radio::RadioState,
     pub broadcasts: crate::simulation::radio::RadioBroadcasts,
-    /// Portable radios holding the browser's voice slots.
-    pub portable_radio_slots: [Option<ItemId>; PORTABLE_RADIO_SLOTS],
+    /// World radios holding the browser's voice slots, per voice group.
+    pub portable_radio_slots: Vec<[Option<ItemId>; PORTABLE_RADIO_SLOTS]>,
     pub radio_frame: crate::simulation::radio::RadioFrame,
     queue: [Option<AudioEvent>; 64],
     length: usize,
@@ -263,7 +264,10 @@ impl AudioState {
                 [0, 0],
             ),
             radio_frame: crate::simulation::radio::RadioFrame::default(),
-            portable_radio_slots: [None; PORTABLE_RADIO_SLOTS],
+            portable_radio_slots: vec![
+                [None; PORTABLE_RADIO_SLOTS];
+                reference.portable_radios.len()
+            ],
             collider_nodes: HashMap::new(),
             route_sensors: reference
                 .routes
@@ -785,7 +789,7 @@ impl AudioState {
             [0, 0],
         );
         self.radio_frame = crate::simulation::radio::RadioFrame::default();
-        self.portable_radio_slots = [None; PORTABLE_RADIO_SLOTS];
+        self.portable_radio_slots.fill([None; PORTABLE_RADIO_SLOTS]);
         self.session = session;
         self.queue.fill(None);
         self.length = 0;
@@ -1029,43 +1033,47 @@ impl AudioState {
             self.emit(id, 1., self.game_seconds);
         }
     }
-    /// Keeps each playing portable radio in its slot and gives free slots to the nearest
-    /// playing radios within the voices' maximum distance.
-    pub fn assign_portable_radios(
+    /// Keeps each playing world radio in its slot and gives free slots of its voice group to
+    /// the nearest playing radios within the group's maximum voice distance.
+    pub fn assign_portable_radios<'a>(
         &mut self,
         listener: [f32; 3],
-        radios: impl Iterator<Item = (ItemId, [f32; 3], bool)> + Clone,
+        radios: impl Iterator<Item = (ItemId, &'a crate::reference::SourceId, [f32; 3], bool)> + Clone,
     ) {
-        let range = self
-            .reference
-            .portable_radio
-            .voices
-            .iter()
-            .fold(0_f32, |m, v| m.max(v.max_distance));
-        let audible = |position: [f32; 3]| {
-            let d: f32 = (0..3).map(|i| (position[i] - listener[i]).powi(2)).sum();
-            (d <= range * range).then_some(d)
-        };
-        for slot in &mut self.portable_radio_slots {
-            if let Some(id) = *slot
-                && !radios
-                    .clone()
-                    .any(|(item, p, on)| item == id && on && audible(p).is_some())
-            {
-                *slot = None;
-            }
-        }
-        for i in 0..PORTABLE_RADIO_SLOTS {
-            if self.portable_radio_slots[i].is_some() {
-                continue;
-            }
-            let slots = self.portable_radio_slots;
-            self.portable_radio_slots[i] = radios
+        for (group, record) in self.reference.portable_radios.iter().enumerate() {
+            let slots = &mut self.portable_radio_slots[group];
+            let range = record
+                .voices
+                .iter()
+                .fold(0_f32, |m, v| m.max(v.max_distance));
+            let audible = |position: [f32; 3]| {
+                let d: f32 = (0..3).map(|i| (position[i] - listener[i]).powi(2)).sum();
+                (d <= range * range).then_some(d)
+            };
+            let members = radios
                 .clone()
-                .filter(|(item, _, on)| *on && !slots.contains(&Some(*item)))
-                .filter_map(|(item, p, _)| audible(p).map(|d| (item, d)))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(item, _)| item);
+                .filter(|(_, script, _, _)| record.sources.contains(script));
+            for slot in slots.iter_mut() {
+                if let Some(id) = *slot
+                    && !members
+                        .clone()
+                        .any(|(item, _, p, on)| item == id && on && audible(p).is_some())
+                {
+                    *slot = None;
+                }
+            }
+            for i in 0..PORTABLE_RADIO_SLOTS {
+                if slots[i].is_some() {
+                    continue;
+                }
+                let taken = *slots;
+                slots[i] = members
+                    .clone()
+                    .filter(|(item, _, _, on)| *on && !taken.contains(&Some(*item)))
+                    .filter_map(|(item, _, p, _)| audible(p).map(|d| (item, d)))
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(item, _)| item);
+            }
         }
     }
     /// radioscript.TurnRadio and the band switch on a portable radio share Cturned.

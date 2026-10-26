@@ -1,4 +1,4 @@
-// Portable radio voice slots: emitter base+slot, voices base+slot*4+1..3 (src/audio.rs).
+// World radio voice slots: index group*SLOTS+slot, emitter base+index, voices base+index*4+1..3 (src/audio.rs).
 export const PORTABLE_RADIO_EMITTER=0x50000000,PORTABLE_RADIO_SLOTS=4;
 // Car voice templates play as survival kind CAR_KIND+id. Instance i routes through CAR_ROUTE+i (src/audio/cars.rs).
 export const CAR_KIND=0x100,CAR_ROUTE=0x60000000,CAR_EMITTER=0x40000000+CAR_KIND;
@@ -12,8 +12,8 @@ export class VoiceBank {
   for(const v of raw.car_voices??[]){let pitch=1,mixer=raw.mixers.find(m=>m.id===v.mixer);while(mixer){pitch*=mixer.pitch;mixer=raw.mixers.find(m=>m.id===mixer.parent);}this.survivalRecords.set(CAR_KIND+v.id,{...v.settings,pan:v.pan,doppler:v.doppler,mixer:v.mixer,mixer_pitch:pitch,kind:CAR_KIND+v.id,one_shot:v.one_shot,emitter:CAR_EMITTER,channel:v.source.file+':'+v.source.path_id});}
   this.emitters.set(CAR_EMITTER,{position:new Float32Array(3),rotation:new Float32Array([0,0,0,1]),alive:true,seen:0});
   for(const v of raw.voices){const slot=this.slot(v,v.emitter,false);slot.radio=raw.radio.voices[1]===v.id||raw.radio.voices[2]===v.id;this.voices.set(v.id,slot);}
-  // Portable radio slots reuse the radioscript SS, SC and SC2 settings (web/audio.js ids).
-  for(let i=0;i<PORTABLE_RADIO_SLOTS;i++){const emitter=PORTABLE_RADIO_EMITTER+i;this.emitters.set(emitter,{position:new Float32Array(3),rotation:new Float32Array([0,0,0,1]),alive:false,seen:0});raw.portable_radio.voices.forEach((template,k)=>{const id=PORTABLE_RADIO_EMITTER+i*4+k+1,slot=this.slot({...template,id,emitter},emitter,false);slot.radio=k>0;this.voices.set(id,slot);});}
+  // World radio slots reuse the radioscript SS, SC and SC2 settings of their voice group (web/audio.js ids).
+  raw.portable_radios.forEach((group,g)=>{for(let i=0;i<PORTABLE_RADIO_SLOTS;i++){const index=g*PORTABLE_RADIO_SLOTS+i,emitter=PORTABLE_RADIO_EMITTER+index;this.emitters.set(emitter,{position:new Float32Array(3),rotation:new Float32Array([0,0,0,1]),alive:false,seen:0});group.voices.forEach((template,k)=>{const id=PORTABLE_RADIO_EMITTER+index*4+k+1,slot=this.slot({...template,id,emitter},emitter,false);slot.radio=k>0;this.voices.set(id,slot);});}});
   for(let i=0;i<raw.shared.audio_manager.real_voices;i++)this.effects.push(this.slot(raw.shared.settings,0,true));
  }
  slot(record,emitter,event){const gain=this.context.createGain(),dry=this.context.createGain(),wet=this.context.createGain(),panner=this.context.createPanner(),pan=this.context.createStereoPanner();panner.distanceModel='linear';panner.rolloffFactor=0;panner.panningModel='HRTF';gain.connect(dry);dry.connect(pan);gain.connect(wet);wet.connect(panner);panner.connect(pan);pan.connect(this.mixers.get(record.mixer??this.raw.shared.mixer));return {record,emitter,event,gain,dry,wet,panner,pan,source:null,buffer:null,clip:record.clip,playing:false,looping:record.loop,loading:false,token:0,offset:0,start:0,pitch:1,volume:1,seen:0,position:new Float32Array(3),previousPosition:new Float32Array(3),motionFrame:0,rate:1,survivalKey:null,survivalLoop:false,priority:record.priority,distanceScale:1,destroyAfter:0,mixer:record.mixer??this.raw.shared.mixer};}
