@@ -82,6 +82,8 @@ pub(super) fn validate(m: &ReferenceManifest) -> Result<(), ReferenceError> {
                 w.rate.is_finite()
                     && w.rate >= 0.
                     && transform(&w.pose)
+                    // Particle groups number wheel systems wheel * 8 + system.
+                    && w.grass.len() < 8
                     && w.own_gains
                         .is_none_or(|g| finite(&[g.ground, g.spring, g.spring_pitch])),
                 "wheel effects",

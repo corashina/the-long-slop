@@ -253,6 +253,10 @@ enum Owner {
     Storm(crate::weather::StormId),
     /// `mainscript` melee hit systems; `Group::source` is the system.
     Melee,
+    /// Vehicle wheel effects; `Group::source` is wheel * 8 + system (0 dust, 1.. grass).
+    Wheel(usize),
+    /// Vehicle skid bursts; `Group::source` is `tiresmoke` (0) or `tiresand` (1).
+    Skid(usize),
 }
 struct Group {
     owner: Owner,
@@ -596,6 +600,32 @@ fn sync_particles(
                     &mut materials,
                 );
             }
+            for (wheel, w) in v.wheel_effects.iter().enumerate() {
+                let dust = w.dust.iter().map(|p| (0, p));
+                let grass = w.grass.iter().enumerate().map(|(i, p)| (i + 1, p));
+                for (system, p) in dust.chain(grass) {
+                    add_group(
+                        &mut state,
+                        Owner::Wheel(vehicle),
+                        wheel * 8 + system,
+                        p,
+                        &lighting,
+                        &mut commands,
+                        &mut materials,
+                    );
+                }
+            }
+            for (burst, p) in reference.0.skid.particles.iter().enumerate() {
+                add_group(
+                    &mut state,
+                    Owner::Skid(vehicle),
+                    burst,
+                    p,
+                    &lighting,
+                    &mut commands,
+                    &mut materials,
+                );
+            }
         }
     }
     let weather = &drive.runtime.weather;
@@ -643,6 +673,14 @@ fn sync_particles(
             Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
+            Owner::Wheel(vehicle) => {
+                let w = &reference.0.vehicles[vehicle].wheel_effects[g.source / 8];
+                match g.source % 8 {
+                    0 => w.dust.as_ref().expect("wheel dust group"),
+                    system => &w.grass[system - 1],
+                }
+            }
+            Owner::Skid(_) => &reference.0.skid.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -660,7 +698,9 @@ fn sync_particles(
             | Owner::SprayBottle(_)
             | Owner::Exhaust(_)
             | Owner::Storm(_)
-            | Owner::Melee => None,
+            | Owner::Melee
+            | Owner::Wheel(_)
+            | Owner::Skid(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -704,6 +744,18 @@ fn sync_particles(
             )
         } else if let Owner::Melee = g.owner {
             Some(drive.runtime.area.interaction.melee.particles(g.source))
+        } else if let Owner::Wheel(vehicle) = g.owner {
+            Some(
+                drive.runtime.vehicles[vehicle]
+                    .wheel_effects
+                    .particles(g.source / 8, g.source % 8),
+            )
+        } else if let Owner::Skid(vehicle) = g.owner {
+            Some(
+                drive.runtime.vehicles[vehicle]
+                    .wheel_effects
+                    .burst_particles(g.source),
+            )
         } else if splash {
             fluid.map(|f| f.splash())
         } else {

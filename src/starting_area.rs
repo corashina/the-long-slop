@@ -613,6 +613,7 @@ pub struct VehicleRuntime {
     pub trip_m: f64,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
+    pub wheel_effects: crate::wheel_effects::WheelEffects,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -653,6 +654,11 @@ impl VehicleRuntime {
                 &vehicle.exhaust,
                 vehicle.engine.max_rpm,
                 vehicle.engine.smoke_rate,
+                vehicle.source.path_id as u64,
+            ),
+            wheel_effects: crate::wheel_effects::WheelEffects::new(
+                &vehicle.wheel_effects,
+                &reference.skid,
                 vehicle.source.path_id as u64,
             ),
             recovery_bounds,
@@ -1368,6 +1374,7 @@ impl GarageRuntime {
                 controls,
             );
             self.advance_exhaust(reference, index);
+            self.advance_wheel_effects(reference, index);
         }
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
@@ -1462,6 +1469,12 @@ impl GarageRuntime {
                 },
                 FIXED_DT,
                 audio.game_seconds,
+            );
+            audio.wheels(
+                &self.vehicles[index].wheel_effects,
+                &reference.vehicles[index].wheel_effects,
+                &reference.skid,
+                active,
             );
         }
         for (index, vehicle) in self.vehicles.iter_mut().enumerate() {
@@ -1632,6 +1645,49 @@ impl GarageRuntime {
                 origin: self.stream.origin.offset,
             },
             &reference.fluid_rules.burn_colors,
+            &self.physics,
+        );
+    }
+
+    /// Advances wheel effects every step, so old particles age out on a sleeping car.
+    fn advance_wheel_effects(&mut self, reference: &ReferenceManifest, index: usize) {
+        let vehicle = &reference.vehicles[index];
+        let chassis = self.physics.chassis_handle(index);
+        let body = &self.physics.rapier().bodies[chassis];
+        // The chassis body frame is the car root node: reference validation requires it.
+        let root = body.position();
+        let forward = root.rotation * -rapier3d::math::Vector::Z;
+        let linear_velocity = body.linvel();
+        let physics = &self.physics;
+        let wheels = std::array::from_fn(|w| {
+            let (rpm, radius, grounded) = physics.wheel_motion(index, w);
+            crate::wheel_effects::WheelInput {
+                rpm,
+                radius,
+                forward,
+                grounded,
+            }
+        });
+        // Footsteps own the source sand layer list. Without audio, every hit is road.
+        let sand_layers = self
+            .audio
+            .as_ref()
+            .map_or(&[][..], |a| &a.reference.footsteps.sand_layers);
+        self.vehicles[index].wheel_effects.advance(
+            FIXED_DT,
+            &crate::wheel_effects::WheelEffectsInput {
+                root_absolute: self.stream.origin.absolute(root.translation.to_array()),
+                rotation: root.rotation,
+                origin: self.stream.origin.offset,
+                chassis,
+                linear_velocity,
+                car_kmh: linear_velocity.dot(forward).abs() * 3.6,
+                wheels,
+            },
+            &vehicle.wheel_effects,
+            &vehicle.effect_gains,
+            &reference.skid,
+            sand_layers,
             &self.physics,
         );
     }
