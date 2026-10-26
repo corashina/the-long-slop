@@ -1,6 +1,6 @@
 //! Source melee swing: `weaponhandlingscript` (input, animator, swing sound) and
 //! `meleeweaponscript` (hand grips, hit box, force, hit particles, hit sound, digging,
-//! breakable damage). Food hits wait for X02 part 2 PR 3, tank and explosive hits for part 4.
+//! breakable damage, food cuts). Tank and explosive hits wait for X02 part 2 part 4.
 use super::buried::BuriedItems;
 use super::items::ItemStore;
 use crate::animation::controller::{MotionController, StateEvent};
@@ -132,6 +132,8 @@ pub struct MeleeState {
     hit_point: Vector,
     overlaps: Vec<ColliderHandle>,
     sounds: Vec<MeleeSound>,
+    /// Food items that `hurtFood` hits cut this frame.
+    cuts: Vec<ItemId>,
 }
 
 impl MeleeState {
@@ -202,6 +204,7 @@ impl MeleeState {
             hit_point: Vector::ZERO,
             overlaps: Vec::with_capacity(OVERLAP_CAPACITY),
             sounds: Vec::with_capacity(4),
+            cuts: Vec::with_capacity(OVERLAP_CAPACITY),
         })
     }
     /// The weapon whose pickup rule is the held item's rule.
@@ -225,6 +228,10 @@ impl MeleeState {
     }
     pub fn take_sounds(&mut self) -> impl Iterator<Item = MeleeSound> + '_ {
         self.sounds.drain(..)
+    }
+    /// The next food item to cut. The caller takes every cut after each step.
+    pub fn take_cut(&mut self) -> Option<ItemId> {
+        self.cuts.pop()
     }
     pub fn rebase(&mut self, shift: [f32; 3]) {
         if let Some(tip) = &mut self.last_tip {
@@ -480,8 +487,17 @@ impl MeleeState {
                 && (items.get(id).is_some_and(|i| i.buried) || buried.recently_unburied(id))
             {
                 buried.lift(id, dt, shovel_speed, items, physics, player);
-            } else if let Some(target) = breakables.target_of(physics, self.overlaps[i]) {
-                breakables.try_break_melee(records, target, contact.damage, dt);
+            } else {
+                if let Some(target) = breakables.target_of(physics, self.overlaps[i]) {
+                    breakables.try_break_melee(records, target, contact.damage, dt);
+                }
+                // ediblescript.Shot(onlySeparate: true) on the item that owns the collider.
+                if contact.hurt_food
+                    && let Some(id) = item
+                    && items.get(id).is_some_and(|s| s.food.is_some())
+                {
+                    self.cuts.push(id);
+                }
             }
             if !self.sounded {
                 self.has_to_sound = true;
@@ -489,6 +505,12 @@ impl MeleeState {
             }
         }
     }
+}
+
+/// `ediblescript.Shot(onlySeparate: true)`: with two or more `remaining` bites, the bites
+/// that move to a new piece. The cut item keeps the rest.
+pub fn cut(remaining: u8) -> Option<u8> {
+    (remaining >= 2).then_some(remaining / 2)
 }
 
 /// Poses, half extents and clips of one weapon record.
@@ -638,6 +660,14 @@ mod tests {
         assert!(!resets(Some(0), Some(0)));
         assert!(resets(Some(0), Some(1)));
         assert!(resets(Some(0), None));
+    }
+
+    #[test]
+    fn cut_moves_half_of_the_remaining_bites() {
+        assert_eq!(cut(5), Some(2));
+        assert_eq!(cut(2), Some(1));
+        assert_eq!(cut(1), None);
+        assert_eq!(cut(0), None);
     }
 
     #[test]

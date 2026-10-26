@@ -5,11 +5,14 @@ use crate::interaction::items::ItemLocation;
 use crate::lighting::{
     ControlPoseOutput, CycleOutput, LampMaterialOutput, LightOutput, NodeVisibilityOutput,
 };
-use crate::reference::{BodyId, ItemId, NodeId, OpeningId, ReferenceManifest};
+use crate::reference::{
+    BodyId, ConditionId, ConditionStartup, ItemId, NodeId, OpeningId, ReferenceManifest,
+};
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
 use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
+use crate::world::GeneratedId;
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use serde::de::DeserializeOwned;
@@ -118,6 +121,10 @@ pub struct StateBlock {
     pub origin: [f64; 3],
     /// Day cycle active seconds.
     pub cycle_elapsed_seconds: f64,
+    /// World stream session.
+    pub session: u64,
+    /// Required content selection revision.
+    pub selection_revision: u64,
     /// Interpolation from `SimFrame::previous` to `SimFrame::current`.
     pub alpha: f32,
     /// Sleep clock factor on frame time.
@@ -138,6 +145,18 @@ pub struct StateBlock {
     pub ember_light: u32,
     /// `DeadV` weight: death seconds over the survival death seconds, 0 to 1. 0 while alive.
     pub dead_weight: f32,
+    /// Bumps when the audio motion history restarts.
+    pub motion_revision: u32,
+    /// Source `Cam2FarPlane` of the draw distance.
+    pub far_plane: f32,
+    /// Sleep camera in stream space. `ACTIVE` while the sleep view shows.
+    pub sleep_camera: PoseRow,
+    /// Chassis of the car the player sits in, at the current step. `ACTIVE` while seated.
+    pub seat_car: PoseRow,
+    /// Startup roads with prepared meshes.
+    pub prepared_roads: u32,
+    /// Keeps the block free of padding.
+    pub pad: u32,
 }
 
 impl StateBlock {
@@ -147,6 +166,12 @@ impl StateBlock {
     pub const SLEEPING: u32 = 1 << 3;
     pub const DEAD: u32 = 1 << 4;
     pub const RECOVERING: u32 = 1 << 5;
+    /// The world stream failed.
+    pub const WORLD_FAILED: u32 = 1 << 6;
+    /// The initial world generation finished.
+    pub const GENERATION_READY: u32 = 1 << 7;
+    /// The world supports the player and the required content is ready.
+    pub const WORLD_READY: u32 = 1 << 8;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -155,6 +180,48 @@ impl StateBlock {
 pub struct ValveRow {
     pub opening: u32,
     pub valve: f32,
+}
+
+/// Use and limit of one world budget.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct BudgetRow {
+    pub used: f64,
+    pub limit: f64,
+}
+
+/// State of one condition owner. Frames carry changed owners; the first frame carries all.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ConditionRow {
+    pub id: u32,
+    pub state: u32,
+    pub state2: u32,
+    pub state3: u32,
+    pub repair_progress: f32,
+    pub color: [f32; 4],
+}
+
+impl ConditionRow {
+    pub fn new(id: ConditionId, s: &ConditionStartup) -> Self {
+        Self {
+            id: id.0,
+            state: u32::from(s.state),
+            state2: s.state2,
+            state3: s.state3,
+            repair_progress: s.repair_progress,
+            color: s.color,
+        }
+    }
+    pub fn startup(&self) -> ConditionStartup {
+        ConditionStartup {
+            state: self.state as u8,
+            state2: self.state2,
+            state3: self.state3,
+            repair_progress: self.repair_progress,
+            color: self.color,
+        }
+    }
 }
 
 /// Per-handle item state. Body rows stay zero.
@@ -185,6 +252,82 @@ pub struct PlaneRow {
     pub prefab: u32,
     pub offset: [f32; 3],
     pub heading: [f32; 4],
+}
+
+/// One live particle. Positions are relative to the stream origin (contrails: the sky anchor).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ParticleRow {
+    pub position: [f32; 3],
+    pub size: f32,
+    pub color: [f32; 4],
+    pub rotation: f32,
+    pub age: f32,
+    pub lifetime: f32,
+    pub uv_draw: f32,
+}
+
+/// One particle system and its rows in `SimFrame::particles`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+pub struct ParticleGroupRow {
+    /// `ParticleGroupRow::URINE` and the other kinds.
+    pub kind: u32,
+    /// Kind id: tool, wash, opening, storm, plane, item, effect or car system.
+    pub a: u32,
+    /// Car prototype.
+    pub b: u32,
+    /// Car chassis body index.
+    pub c: u32,
+    /// System index inside the owner.
+    pub source: u32,
+    pub start: u32,
+    pub count: u32,
+    /// Rows come from a fluid contact: no age or sheet.
+    pub fluid: u32,
+}
+
+impl ParticleGroupRow {
+    pub const URINE: u32 = 0;
+    pub const BRUSH: u32 = 1;
+    pub const SPRAY: u32 = 2;
+    pub const WASH: u32 = 3;
+    pub const OUTLET: u32 = 4;
+    pub const SPRAY_BOTTLE: u32 = 5;
+    pub const CAR: u32 = 6;
+    pub const STORM: u32 = 7;
+    pub const MELEE: u32 = 8;
+    pub const SKY: u32 = 9;
+    pub const EMBER: u32 = 10;
+    pub const EXHALE: u32 = 11;
+    pub const COBWEB: u32 = 12;
+    /// Car systems in `a`.
+    pub const CAR_EXHAUST: u32 = 0;
+    /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).
+    pub const CAR_WHEEL: u32 = 1;
+    /// Skid bursts: `tiresmoke` (0) or `tiresand` (1).
+    pub const CAR_SKID: u32 = 2;
+}
+
+/// The `(car system, source)` pairs of every particle system of a car prototype.
+pub fn car_particle_sources(
+    reference: &ReferenceManifest,
+    prototype: usize,
+) -> impl Iterator<Item = (u32, usize)> + '_ {
+    let record = crate::starting_area::world_vehicle(reference, prototype);
+    let exhaust = (0..record.exhaust.len()).map(|i| (ParticleGroupRow::CAR_EXHAUST, i));
+    let wheels = record
+        .wheel_effects
+        .iter()
+        .enumerate()
+        .flat_map(|(wheel, w)| {
+            let dust = w.dust.iter().map(|_| 0);
+            let grass = 1..=w.grass.len();
+            dust.chain(grass)
+                .map(move |system| (ParticleGroupRow::CAR_WHEEL, wheel * 8 + system))
+        });
+    let skid = (0..2).map(|i| (ParticleGroupRow::CAR_SKID, i));
+    exhaust.chain(wheels).chain(skid)
 }
 
 /// Day cycle and lamp outputs.
@@ -225,7 +368,19 @@ pub enum Change {
     PlayerRig(Vec<NodeId>),
     /// The renderer drops the handle, then releases it.
     Retire(Handle),
+    /// Home cable rope aims. Empty: no pole in range, the root stays hidden.
+    HomeCable(Vec<RopeAim>),
+    /// The world car the player last sat in, else the start car: id and prototype.
+    FollowedCar(Option<(GeneratedId, u32)>),
     Failure(String),
+}
+
+/// Local rotation and z scale of one home cable rope.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RopeAim {
+    pub node: NodeId,
+    pub rotation: [f32; 4],
+    pub scale_z: f32,
 }
 
 /// The simulation output of one tick.
@@ -244,7 +399,18 @@ pub struct SimFrame {
     /// World poses of the ragdoll bodies in `RagdollReference::bodies` order. Empty while the ragdoll is inactive.
     pub ragdoll: Vec<PoseRow>,
     pub cigarettes: Vec<CigaretteRow>,
+    pub particle_groups: Vec<ParticleGroupRow>,
+    pub particles: Vec<ParticleRow>,
     pub planes: Vec<PlaneRow>,
+    pub conditions: Vec<ConditionRow>,
+    /// 1 when the wash shows, in `ConditionRecord::washes` order.
+    pub washes: Vec<u8>,
+    /// Brush model poses, in `ConditionRecord::brushes` order.
+    pub brush_poses: Vec<PoseRow>,
+    /// Spray colors, in `ConditionRecord::sprays` order.
+    pub spray_colors: Vec<[f32; 4]>,
+    /// World budgets in `BUDGET_LABELS` order. Empty after the start.
+    pub budgets: Vec<BudgetRow>,
     pub lighting: FrameLighting,
     /// Lights in `LightingRecord::lights` order.
     pub lights: Vec<LightOutput>,
@@ -289,7 +455,14 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.joints);
     put_rows(out, &frame.ragdoll);
     put_rows(out, &frame.cigarettes);
+    put_rows(out, &frame.particle_groups);
+    put_rows(out, &frame.particles);
     put_rows(out, &frame.planes);
+    put_rows(out, &frame.conditions);
+    put_rows(out, &frame.washes);
+    put_rows(out, &frame.brush_poses);
+    put_rows(out, &frame.spray_colors);
+    put_rows(out, &frame.budgets);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
     put_list(out, &frame.lamp_materials);
@@ -310,7 +483,14 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.joints)?;
     take_rows(&mut rest, &mut frame.ragdoll)?;
     take_rows(&mut rest, &mut frame.cigarettes)?;
+    take_rows(&mut rest, &mut frame.particle_groups)?;
+    take_rows(&mut rest, &mut frame.particles)?;
     take_rows(&mut rest, &mut frame.planes)?;
+    take_rows(&mut rest, &mut frame.conditions)?;
+    take_rows(&mut rest, &mut frame.washes)?;
+    take_rows(&mut rest, &mut frame.brush_poses)?;
+    take_rows(&mut rest, &mut frame.spray_colors)?;
+    take_rows(&mut rest, &mut frame.budgets)?;
     frame.lighting = take_value(&mut rest)?;
     take_list(&mut rest, &mut frame.lights)?;
     take_list(&mut rest, &mut frame.lamp_materials)?;

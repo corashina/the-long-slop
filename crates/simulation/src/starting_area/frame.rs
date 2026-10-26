@@ -1,10 +1,14 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
-use crate::boundary::{CigaretteRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow};
+use crate::boundary::{
+    BudgetRow, Change, CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock,
+    ValveRow,
+};
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
 use crate::vehicle::VehiclePose;
+use crate::world::{ObjectKey, WorldLayer};
 
 impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
@@ -18,6 +22,10 @@ impl GarageRuntime {
             (self.sleeping(), StateBlock::SLEEPING),
             (self.needs_output().dead, StateBlock::DEAD),
             (self.recovering, StateBlock::RECOVERING),
+            (
+                self.stream.frame().failure.is_some(),
+                StateBlock::WORLD_FAILED,
+            ),
         ] {
             if on {
                 flags |= flag;
@@ -56,6 +64,8 @@ impl GarageRuntime {
             simulation_seconds: self.simulation_seconds,
             origin: area.origin,
             cycle_elapsed_seconds: self.lighting.cycle.elapsed_seconds(),
+            session: self.stream.frame().request.session,
+            selection_revision: self.stream.required_content().selection_revision,
             alpha,
             time_scale: self.clock_factors(reference).time_scale,
             flags,
@@ -67,6 +77,23 @@ impl GarageRuntime {
             sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
             dead_weight,
+            motion_revision: self.audio_motion_revision,
+            far_plane: self.distances.cam2_far_plane,
+            sleep_camera: self
+                .sleep_camera()
+                .map_or(PoseRow::default(), |camera| PoseRow {
+                    position: self.stream.origin.local(camera.absolute_position),
+                    flags: PoseRow::ACTIVE,
+                    rotation: camera.rotation,
+                }),
+            seat_car: match (area.player.seat_vehicle(), self.vehicle.as_ref()) {
+                (Some(_), Some(key)) => {
+                    PoseRow::new(self.physics.snapshot(key).pose, PoseRow::ACTIVE)
+                }
+                _ => PoseRow::default(),
+            },
+            prepared_roads: self.stream.metrics().prepared_roads as u32,
+            pad: 0,
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -89,6 +116,24 @@ impl GarageRuntime {
                     light_intensity: out.light_intensity,
                 }
             }));
+        self.fill_particles(reference, frame);
+        self.fill_conditions(reference, frame);
+        self.fill_followed_car(frame);
+        frame.budgets.clear();
+        if !self.started {
+            let stream = &self.stream;
+            frame.budgets.extend(
+                stream
+                    .presentation_budgets(stream.presentation_allocation())
+                    .map(|b| BudgetRow {
+                        used: b.used as f64,
+                        limit: b.limit as f64,
+                    }),
+            );
+        }
+        if let Some(aims) = self.home_cable(reference) {
+            frame.changes.push(Change::HomeCable(aims));
+        }
         frame.planes.clear();
         frame
             .planes
@@ -118,6 +163,7 @@ impl GarageRuntime {
         self.frame_poses
             .fill(reference, &self.area, &self.physics, frame);
         frame.ragdoll.clear();
+        let area = &self.area;
         if area.ragdoll.active() {
             frame
                 .ragdoll
@@ -133,6 +179,57 @@ impl GarageRuntime {
                         },
                     )
                 }));
+        }
+    }
+    fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
+        let store = &mut self.area.conditions;
+        frame.conditions.clear();
+        if self.conditions_sent {
+            while let Some(id) = store.take_changed() {
+                frame.conditions.push(ConditionRow::new(id, store.get(id)));
+            }
+        } else {
+            while store.take_changed().is_some() {}
+            frame
+                .conditions
+                .extend(store.iter().map(|(id, s)| ConditionRow::new(id, s)));
+            self.conditions_sent = true;
+        }
+        frame.washes.clear();
+        frame
+            .washes
+            .extend(store.washes.iter().map(|w| u8::from(w.visible())));
+        let cleaning = &self.area.interaction.cleaning;
+        frame.brush_poses.clear();
+        frame.brush_poses.extend(
+            (0..reference.conditions.brushes.len())
+                .map(|i| PoseRow::new(cleaning.model_pose(i, &self.area.items), 0)),
+        );
+        frame.spray_colors.clear();
+        frame.spray_colors.extend(
+            reference
+                .conditions
+                .sprays
+                .iter()
+                .map(|t| cleaning.get(t.item).unwrap().color.unwrap()),
+        );
+    }
+    /// Source probe follow: the world car the player last sat in, else the start car.
+    fn fill_followed_car(&mut self, frame: &mut SimFrame) {
+        let car = match self.vehicle.as_ref() {
+            Some(key @ ObjectKey::Generated(id)) => self.vehicles.get(key).map(|v| (id, v)),
+            Some(_) => None,
+            None => self.vehicles.iter().find_map(|(key, vehicle)| match key {
+                ObjectKey::Generated(id) if id.layer == WorldLayer::Startup => Some((id, vehicle)),
+                _ => None,
+            }),
+        }
+        .map(|(id, v)| (id, v.prototype as u32));
+        if car != self.followed_car.as_ref().map(|(id, p)| (id, *p)) {
+            self.followed_car = car.map(|(id, p)| (id.clone(), p));
+            frame
+                .changes
+                .push(Change::FollowedCar(self.followed_car.clone()));
         }
     }
     /// The renderer dropped a retired pose handle.

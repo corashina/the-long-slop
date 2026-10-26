@@ -25,6 +25,8 @@ mod body;
 pub mod cigarettes;
 mod computers;
 mod frame;
+mod frame_particles;
+mod home_cable;
 pub mod hose;
 mod ragdoll;
 mod reach;
@@ -33,6 +35,7 @@ mod survival;
 mod weather;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
+pub use survival::saved_food;
 
 pub struct StartingArea {
     pub conditions: crate::conditions::ConditionStore,
@@ -51,6 +54,8 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// Runtime food copies: turds and cut pieces.
+    pub foods: Vec<ItemId>,
     /// gibscript and scaleDestroyScript of spawned gibs.
     pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
@@ -281,6 +286,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            foods: Vec::new(),
             gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             portable_mass,
@@ -750,6 +756,12 @@ pub struct GarageRuntime {
     /// Simulation time of the next under-map check.
     under_map_check: f64,
     frame_poses: crate::boundary::FramePoses,
+    /// The first frame carries every condition; later frames carry changes.
+    conditions_sent: bool,
+    /// World session whose home cable is done.
+    home_cable_session: Option<u64>,
+    /// The followed car the renderer last received.
+    followed_car: Option<(crate::world::GeneratedId, u32)>,
 }
 
 impl GarageRuntime {
@@ -905,6 +917,9 @@ impl GarageRuntime {
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
             frame_poses: Default::default(),
+            conditions_sent: false,
+            home_cable_session: None,
+            followed_car: None,
         };
         run.refresh_powertrains();
         Ok(run)
@@ -1850,6 +1865,14 @@ impl GarageRuntime {
         }
     }
 
+    /// Per rendered frame work: gauges and gear levers move by render time `dt`.
+    pub fn advance_render_frame(&mut self, reference: &ReferenceManifest, dt: f32) {
+        if self.started && !self.paused {
+            self.advance_instruments(reference, dt, false);
+            // Source `carscript.Update` eases the lever once per frame by scaled frame time.
+            self.advance_levers(reference, dt);
+        }
+    }
     /// Source `carscript.Update`: eases each car gear lever by render time `dt`.
     pub fn advance_levers(&mut self, reference: &ReferenceManifest, dt: f32) {
         for vehicle in self.vehicles.values_mut() {

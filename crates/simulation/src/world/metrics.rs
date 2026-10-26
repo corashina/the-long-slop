@@ -1,5 +1,19 @@
 //! Retained world ownership and logical allocation reservations.
 //! These charges are not process memory or driver residency measurements.
+/// Name and unit of each `presentation_budgets` row.
+pub const BUDGET_LABELS: [(&str, &str); 10] = [
+    ("World CPU", "bytes"),
+    ("World GPU", "bytes"),
+    ("Asset CPU", "bytes"),
+    ("Asset GPU", "bytes"),
+    ("Objects", "objects"),
+    ("Pending work", "requests"),
+    ("Staging", "bytes"),
+    ("Dependency staging", "bytes"),
+    ("Generation staging", "bytes"),
+    ("Jobs", "jobs"),
+];
+
 #[derive(Clone, Copy, Debug)]
 pub struct ResourceBudget {
     pub name: &'static str,

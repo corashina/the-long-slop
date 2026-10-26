@@ -17,8 +17,9 @@ use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
-use simulation::boundary::StateBlock;
+use simulation::boundary::{PoseRow, StateBlock};
 use simulation::host::{game_cpu_clear_input, game_now};
+use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
@@ -289,7 +290,6 @@ pub fn run(
                     presentation::sky_traffic::sync,
                 )
                     .chain(),
-                sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
                 update_camera,
@@ -1011,59 +1011,49 @@ fn fill_frame(
     mut frame: ResMut<SimFrameResource>,
 ) {
     let drive = &mut *drive;
-    let alpha = drive
-        .clock
-        .alpha(drive.runtime.clock_factors(&reference.0).time_scale);
     drive
         .runtime
-        .fill_frame(&reference.0, alpha, &mut frame.frame);
+        .advance_render_frame(&reference.0, drive.render_delta_seconds);
+    fill(drive, &reference.0, &mut frame);
+}
+/// Writes the runtime state into `frame` and applies its changes.
+fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
+    let alpha = drive
+        .clock
+        .alpha(drive.runtime.clock_factors(reference).time_scale);
+    drive.runtime.fill_frame(reference, alpha, &mut frame.frame);
     frame.apply_changes(|handle| drive.runtime.release_pose(handle));
+    frame.index_particles();
 }
-fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let drive = &mut *drive;
-    if drive.runtime.started && !drive.runtime.paused {
-        let dt = drive.render_delta_seconds;
-        drive.runtime.advance_instruments(&reference.0, dt, false);
-        // Source `carscript.Update` eases the lever once per frame by scaled frame time.
-        drive.runtime.advance_levers(&reference.0, dt);
-    }
-}
-fn active_camera(drive: &Drive) -> Transform {
-    if let Some(camera) = drive.runtime.sleep_camera() {
-        presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
-    } else if drive.camera == CameraMode::Chase
-        && drive.runtime.area.player.seat_vehicle().is_some()
-    {
-        presentation::camera::pose(
-            CameraMode::Chase,
-            drive
-                .runtime
-                .physics
-                .snapshot(drive.runtime.vehicle.as_ref().unwrap())
-                .pose,
-        )
+fn active_camera(drive: &Drive, state: &StateBlock) -> Transform {
+    let pose = |row: PoseRow| presentation::transform(row.pose());
+    if state.sleep_camera.flags & PoseRow::ACTIVE != 0 {
+        pose(state.sleep_camera)
+    } else if drive.camera == CameraMode::Chase && state.seat_car.flags & PoseRow::ACTIVE != 0 {
+        presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
     } else {
         presentation::transform(drive.rendered)
     }
 }
 fn update_camera(
     drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     mut query: Query<(&mut Transform, &mut Projection), With<DriveCamera>>,
 ) {
-    let fov = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .fov_degrees;
+    let state = &sim.frame.state;
     for (mut transform, mut projection) in &mut query {
-        *transform = active_camera(&drive);
-        presentation::camera_projection::sync_player_projection(&mut projection, true, fov);
+        *transform = active_camera(&drive, state);
+        presentation::camera_projection::sync_player_projection(
+            &mut projection,
+            true,
+            state.fov_degrees,
+        );
     }
 }
 fn publish_loading(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     materials: Res<presentation::materials::SourceMaterials>,
     lighting: Res<presentation::lighting::SourceLighting>,
@@ -1074,21 +1064,21 @@ fn publish_loading(
     mut traced: Local<u8>,
 ) {
     let now = time.elapsed_secs_f64();
-    let stream = &drive.runtime.stream;
+    let state = &sim.frame.state;
     let rendering = visuals.bound
         && materials.state == presentation::materials::RenderingState::Ready
         && lighting.state == presentation::lighting::RenderingState::Ready
         && renderer.graph_ready(presentation::readiness::RendererContentCheck {
             preparation: crate::render_readiness::ContentPreparation::Prepared(
                 crate::render_readiness::ContentKey {
-                    session: stream.frame().request.session,
-                    selection_revision: stream.required_content().selection_revision,
+                    session: state.session,
+                    selection_revision: state.selection_revision,
                 },
             ),
-            history_revision: drive.runtime.audio_motion_revision,
+            history_revision: state.motion_revision,
         })
         && plates.ready();
-    if stream.initial_generation_ready() && *traced & 1 == 0 {
+    if state.flags & StateBlock::GENERATION_READY != 0 && *traced & 1 == 0 {
         game_startup_stage("generation", false);
         *traced |= 1;
     }
@@ -1105,18 +1095,13 @@ fn publish_loading(
     }
     *last = now;
     game_loading_progress(
-        stream.metrics().prepared_roads,
+        state.prepared_roads,
         reference.0.world.road.gen_at_start,
         rendering,
-        drive.runtime.world_supported() && stream.required_ready(),
+        state.flags & StateBlock::WORLD_READY != 0,
     );
-    for budget in stream.presentation_budgets(stream.presentation_allocation()) {
-        game_loading_budget(
-            budget.name,
-            budget.used as f64,
-            budget.limit as f64,
-            budget.unit,
-        );
+    for (budget, (name, unit)) in sim.frame.budgets.iter().zip(BUDGET_LABELS) {
+        game_loading_budget(name, budget.used, budget.limit, unit);
     }
 }
 

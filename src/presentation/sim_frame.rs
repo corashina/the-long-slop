@@ -1,11 +1,26 @@
 //! The newest simulation frame. Bevy systems read the simulation only through it.
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
-use simulation::boundary::{Change, Handle, ItemRow, PoseKey, PoseRow, SimFrame, SpawnData};
-use simulation::reference::{ItemId, NodeId};
+use simulation::boundary::{
+    Change, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, RopeAim, SimFrame,
+    SpawnData,
+};
+use simulation::conditions::ConditionState;
+use simulation::reference::{ConditionId, ItemId, NodeId};
 use simulation::starting_area::spawned::SpawnedItem;
 use simulation::vehicle::VehiclePose;
+use simulation::world::GeneratedId;
 use std::collections::HashMap;
+
+/// One particle group of the frame: kind, kind ids and source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ParticleGroupKey {
+    pub kind: u32,
+    pub a: u32,
+    pub b: u32,
+    pub c: u32,
+    pub source: u32,
+}
 
 #[derive(Resource, Default)]
 pub(crate) struct SimFrameResource {
@@ -13,11 +28,24 @@ pub(crate) struct SimFrameResource {
     poses: HashMap<PoseKey, (Handle, SpawnData)>,
     rig: Vec<NodeId>,
     spawned: Vec<SpawnedItem>,
+    particle_groups: HashMap<ParticleGroupKey, usize>,
+    conditions: HashMap<ConditionId, ConditionState>,
+    /// Owners whose condition changed since the visuals last read them.
+    pub changed_conditions: Vec<ConditionId>,
+    /// Home cable aims waiting for the reference visuals.
+    pub home_cable: Option<Vec<RopeAim>>,
+    /// The world car the player last sat in, else the start car: id and prototype.
+    pub followed_car: Option<(GeneratedId, u32)>,
 }
 
 impl SimFrameResource {
     /// Applies the frame changes to the pose index. Calls `retired` for each dropped handle.
     pub fn apply_changes(&mut self, mut retired: impl FnMut(Handle)) {
+        for row in &self.frame.conditions {
+            let id = ConditionId(row.id);
+            self.conditions.insert(id, row.startup());
+            self.changed_conditions.push(id);
+        }
         for change in &self.frame.changes {
             match change {
                 Change::Spawn { handle, key, data } => {
@@ -38,9 +66,40 @@ impl SimFrameResource {
                     retired(*handle);
                 }
                 Change::PlayerRig(joints) => self.rig.clone_from(joints),
+                Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),
+                Change::FollowedCar(car) => self.followed_car.clone_from(car),
                 Change::Failure(_) => {}
             }
         }
+    }
+    pub fn condition(&self, id: ConditionId) -> &ConditionState {
+        &self.conditions[&id]
+    }
+    /// Indexes the particle groups of a new frame.
+    pub fn index_particles(&mut self) {
+        self.particle_groups.clear();
+        for (index, g) in self.frame.particle_groups.iter().enumerate() {
+            let key = ParticleGroupKey {
+                kind: g.kind,
+                a: g.a,
+                b: g.b,
+                c: g.c,
+                source: g.source,
+            };
+            self.particle_groups.insert(key, index);
+        }
+    }
+    /// The group row and its live particles.
+    pub fn particle_group(
+        &self,
+        key: ParticleGroupKey,
+    ) -> Option<(ParticleGroupRow, &[ParticleRow])> {
+        let row = self.frame.particle_groups[*self.particle_groups.get(&key)?];
+        let start = row.start as usize;
+        Some((
+            row,
+            &self.frame.particles[start..start + row.count as usize],
+        ))
     }
     /// Previous and current rows of `key`.
     pub fn pose(&self, key: PoseKey) -> Option<(PoseRow, PoseRow)> {

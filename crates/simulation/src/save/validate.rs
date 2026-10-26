@@ -88,6 +88,16 @@ impl SaveSnapshot {
                 "Duplicate spawned item",
             )?;
         }
+        for record in &self.foods {
+            let source = &reference.survival.foods
+                [crate::starting_area::saved_food(reference, &record.source)?];
+            data(
+                record.bite <= source.bites
+                    && !(source.destroy_on_end && record.bite == source.bites),
+                "Food progress",
+            )?;
+            absolute(&record.pose)?;
+        }
         crate::starting_area::cigarettes::validate_save(
             reference,
             &self.spawned,

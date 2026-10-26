@@ -699,6 +699,11 @@ impl GarageRuntime {
                 });
             }
         }
+        while let Some(item) = self.area.interaction.melee.take_cut() {
+            if self.cut_food(reference, item).is_err() {
+                self.notice = "Cannot cut food.";
+            }
+        }
     }
     /// mainscript.PlayClipAtPoint for spray bottle clips.
     fn play_small_item_sounds(&mut self) {
@@ -725,8 +730,8 @@ impl StartingArea {
         ids: &crate::save::IdentityMap,
     ) -> Result<crate::save::InventorySnapshot, crate::save::SaveError> {
         let mut slots = [None, None, None, None];
-        // Spawned items save in the world, so their slots save empty.
-        let saved_item = |id: &ItemId| !self.spawned.contains(*id);
+        // Spawned items and runtime foods save in the world, so their slots save empty.
+        let saved_item = |id: &ItemId| !self.saves_in_world(*id);
         for (saved, id) in slots.iter_mut().zip(self.inventory.slots) {
             *saved = id
                 .filter(saved_item)
