@@ -476,6 +476,13 @@ impl StormRandom {
     pub(crate) fn range(&mut self, min: f32, max: f32) -> f32 {
         min + (max - min) * self.unit()
     }
+    /// A uniform direction.
+    pub(crate) fn on_unit_sphere(&mut self) -> [f32; 3] {
+        let vertical = self.range(-1., 1.);
+        let angle = self.range(0., std::f32::consts::TAU);
+        let horizontal = (1. - vertical * vertical).sqrt();
+        [horizontal * angle.cos(), vertical, horizontal * angle.sin()]
+    }
     fn inside_sphere(&mut self) -> [f32; 3] {
         let vertical = self.range(-1., 1.);
         let angle = self.range(0., std::f32::consts::TAU);

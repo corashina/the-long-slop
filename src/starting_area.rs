@@ -673,6 +673,7 @@ pub struct GarageRuntime {
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
+    flyers: crate::flyers::Flyers,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -830,6 +831,7 @@ impl GarageRuntime {
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
+            flyers: crate::flyers::Flyers::new(seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -1402,6 +1404,7 @@ impl GarageRuntime {
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
+        self.advance_flyers(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1587,10 +1590,11 @@ impl GarageRuntime {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
             self.weather.set_origin(self.stream.origin.offset);
-            self.urine
-                .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
-                    |i| (self.area.origin[i] - old_origin[i]) as f32,
-                )));
+            let shift = rapier3d::math::Vector::from_array(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
+            self.urine.rebase(shift);
+            self.flyers.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1653,6 +1657,29 @@ impl GarageRuntime {
         if let Some(audio) = &mut self.audio {
             audio.sky(self.sky.planes(), anchor);
         }
+    }
+
+    fn advance_flyers(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let flyer = &reference.sky.flyer;
+        self.flyers.sync(
+            flyer,
+            self.simulation_seconds,
+            self.stream.structure_revision(),
+            self.stream.frame().structures,
+            &self.area.items,
+            &self.physics,
+        );
+        self.flyers.step(
+            flyer,
+            self.simulation_seconds,
+            dt,
+            &self.area.items,
+            &mut self.physics,
+        );
+    }
+
+    pub fn flyers(&self) -> &crate::flyers::Flyers {
+        &self.flyers
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

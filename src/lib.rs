@@ -12,6 +12,7 @@ pub mod browser;
 pub mod conditions;
 pub mod exhaust;
 pub mod fluids;
+pub mod flyers;
 pub mod interaction;
 pub mod lighting;
 pub mod particles;
