@@ -1,3 +1,4 @@
+use super::sim_frame::SimFrameResource;
 use crate::reference::{
     AssetId, AssetUsage, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
 };
@@ -8,6 +9,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::gltf::{GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use simulation::boundary::{PoseKey, PoseRow, SimFrame};
 use std::collections::HashMap;
 
 #[derive(Component)]
@@ -410,7 +412,7 @@ pub(crate) fn bind_generated_cap(
 }
 
 pub fn sync_caps(
-    area: &StartingArea,
+    frame: &SimFrame,
     dt: f32,
     caps: &mut Query<
         (&mut CapVisual, &mut Transform),
@@ -430,7 +432,7 @@ pub fn sync_caps(
     >,
 ) {
     for (mut cap, mut transform) in caps {
-        let valve = area.interaction.opening_valve(cap.opening);
+        let valve = frame.valve(cap.opening);
         let mut pose = cap.closed;
         if cap.euler {
             let angles =
@@ -451,7 +453,7 @@ pub fn sync_caps(
         transform.set_if_neq(pose);
     }
     for (binding, mut visibility) in visibility {
-        let open = area.interaction.opening_valve(binding.opening) > 0.0;
+        let open = frame.valve(binding.opening) > 0.0;
         visibility.set_if_neq(if open == binding.open {
             Visibility::Inherited
         } else {
@@ -460,9 +462,8 @@ pub fn sync_caps(
     }
 }
 
-pub fn sync_items(
-    area: &StartingArea,
-    alpha: f32,
+pub(crate) fn sync_items(
+    frame: &SimFrameResource,
     query: &mut Query<
         (
             &ItemVisual,
@@ -473,40 +474,51 @@ pub fn sync_items(
         Without<BodyVisual>,
     >,
 ) {
-    for (binding, mut transform, mut visibility, valve) in query {
-        let active = area
-            .items
-            .get(binding.item)
-            .is_some_and(|item| item.inactive_pose.is_none());
-        visibility.set_if_neq(
-            if active
-                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
-            {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
+    for (binding, transform, visibility, valve) in query {
+        sync_pose(
+            frame,
+            PoseKey::Item(binding.item),
+            binding.scale,
+            valve,
+            transform,
+            visibility,
         );
-        if !active {
-            continue;
-        }
-        if let Some((_, previous, current)) = area
-            .item_render_poses
-            .iter()
-            .find(|(id, _, _)| *id == binding.item)
-        {
-            transform.set_if_neq(
-                super::transform(super::interpolate(*previous, *current, alpha))
-                    .with_scale(binding.scale),
-            );
-        }
     }
 }
 
-pub fn sync(
-    area: &StartingArea,
-    physics: &PhysicsWorld,
-    alpha: f32,
+/// Shows a visual at its interpolated frame pose, or hides it.
+fn sync_pose(
+    frame: &SimFrameResource,
+    key: PoseKey,
+    scale: Vec3,
+    valve: Option<&ValveVisibility>,
+    mut transform: Mut<Transform>,
+    mut visibility: Mut<Visibility>,
+) {
+    let pose = frame
+        .pose(key)
+        .filter(|(_, current)| current.flags & PoseRow::VISIBLE != 0);
+    visibility.set_if_neq(
+        if pose.is_some() && valve.is_none_or(|v| (frame.frame.valve(v.opening) > 0.) == v.open) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
+    );
+    if let Some((previous, current)) = pose {
+        transform.set_if_neq(
+            super::transform(super::interpolate(
+                previous.pose(),
+                current.pose(),
+                frame.frame.state.alpha,
+            ))
+            .with_scale(scale),
+        );
+    }
+}
+
+pub(crate) fn sync(
+    frame: &SimFrameResource,
     query: &mut Query<(
         &BodyVisual,
         &mut Transform,
@@ -514,51 +526,24 @@ pub fn sync(
         Option<&ValveVisibility>,
     )>,
 ) {
-    for (binding, mut transform, mut visibility, valve) in query {
-        let active = area.bodies.get(&binding.body).is_some_and(|h| {
-            physics.body_active(*h)
-                || matches!(
-                    area.inventory_body(*h),
-                    Some(crate::interaction::items::ItemLocation::Stored(_))
-                )
-        });
-        visibility.set_if_neq(
-            if active
-                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
-            {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
+    for (binding, transform, visibility, valve) in query {
+        sync_pose(
+            frame,
+            PoseKey::Body(binding.body),
+            binding.scale,
+            valve,
+            transform,
+            visibility,
         );
-        if !active {
-            continue;
-        }
-        if let Some((_, previous, current)) = area
-            .render_poses
-            .iter()
-            .find(|(id, _, _)| *id == binding.body)
-        {
-            transform.set_if_neq(
-                super::transform(super::interpolate(*previous, *current, alpha))
-                    .with_scale(binding.scale),
-            );
-        }
     }
 }
 
 pub(crate) fn sync_inventory(
-    drive: Res<crate::app::Drive>,
+    frame: Res<SimFrameResource>,
     mut query: Query<(&mut InventoryVisibility, &mut Visibility)>,
 ) {
-    use crate::interaction::items::ItemLocation;
     for (mut binding, mut visibility) in &mut query {
-        let stored = drive
-            .runtime
-            .area
-            .items
-            .get(binding.item)
-            .is_some_and(|i| matches!(i.location, ItemLocation::Stored(_)));
+        let stored = frame.frame.item_stored(binding.item);
         if stored || binding.stored {
             visibility.set_if_neq(if stored {
                 if binding.keep {

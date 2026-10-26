@@ -1,7 +1,7 @@
 //! The data that crosses between the simulation and the renderer.
 //! `SimFrame` goes out once per tick. `SimCommand` comes in once per rendered frame.
 //! Poses and state are Pod rows; rare changes are postcard encoded.
-use crate::reference::{BodyId, ItemId};
+use crate::reference::{BodyId, ItemId, OpeningId};
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
@@ -84,6 +84,8 @@ pub struct PoseRow {
 impl PoseRow {
     /// The renderer shows the object.
     pub const VISIBLE: u32 = 1;
+    /// The body sits in an inventory slot.
+    pub const STORED: u32 = 1 << 1;
     pub fn pose(&self) -> VehiclePose {
         VehiclePose {
             position: self.position,
@@ -106,7 +108,12 @@ pub struct StateBlock {
     pub simulation_seconds: f64,
     /// Interpolation from `SimFrame::previous` to `SimFrame::current`.
     pub alpha: f32,
+    /// Sleep clock factor on frame time.
+    pub time_scale: f32,
     pub flags: u32,
+    pub fov_degrees: f32,
+    /// Items stored in the inventory slots, as `ItemId + 1`. 0 is an empty slot.
+    pub stored_items: [u32; 4],
 }
 
 impl StateBlock {
@@ -116,6 +123,14 @@ impl StateBlock {
     pub const SLEEPING: u32 = 1 << 3;
     pub const DEAD: u32 = 1 << 4;
     pub const RECOVERING: u32 = 1 << 5;
+}
+
+/// Valve of one opening: 0 closed, 1 open.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ValveRow {
+    pub opening: u32,
+    pub valve: f32,
 }
 
 /// What a pose handle stands for.
@@ -147,7 +162,20 @@ pub struct SimFrame {
     /// Poses at the step before `current`, indexed by handle.
     pub previous: Vec<PoseRow>,
     pub current: Vec<PoseRow>,
+    pub valves: Vec<ValveRow>,
     pub changes: Vec<Change>,
+}
+
+impl SimFrame {
+    pub fn valve(&self, opening: OpeningId) -> f32 {
+        self.valves
+            .iter()
+            .find(|v| v.opening == opening.0)
+            .map_or(0., |v| v.valve)
+    }
+    pub fn item_stored(&self, item: ItemId) -> bool {
+        self.state.stored_items.contains(&(item.0 + 1))
+    }
 }
 
 /// The renderer input of one rendered frame.
@@ -169,6 +197,8 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     out.extend_from_slice(&(frame.current.len() as u32).to_le_bytes());
     out.extend_from_slice(bytemuck::cast_slice(&frame.previous));
     out.extend_from_slice(bytemuck::cast_slice(&frame.current));
+    out.extend_from_slice(&(frame.valves.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytemuck::cast_slice(&frame.valves));
     *out = postcard::to_extend(&frame.changes, std::mem::take(out)).expect("frame changes encode");
 }
 
@@ -196,6 +226,15 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
                 .map(|row| bytemuck::cast::<_, PoseRow>(*row)),
         );
     }
+    let valves = u32::from_le_bytes(take(4)?.try_into().expect("4 bytes")) as usize;
+    frame.valves.clear();
+    frame.valves.extend(
+        take(valves * size_of::<ValveRow>())?
+            .as_chunks::<{ size_of::<ValveRow>() }>()
+            .0
+            .iter()
+            .map(|row| bytemuck::cast::<_, ValveRow>(*row)),
+    );
     frame.changes = postcard::from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
     Ok(())
 }
@@ -236,15 +275,21 @@ impl FramePoses {
         });
         for (id, previous, current) in &area.render_poses {
             let body = area.bodies[id];
-            let visible = physics.body_active(body) || stored.contains(&Some(body));
-            self.write(PoseKey::Body(*id), *previous, *current, visible, frame);
+            let stored = stored.contains(&Some(body));
+            let flags = if physics.body_active(body) || stored {
+                PoseRow::VISIBLE
+            } else {
+                0
+            } | if stored { PoseRow::STORED } else { 0 };
+            self.write(PoseKey::Body(*id), *previous, *current, flags, frame);
         }
         for (id, previous, current) in &area.item_render_poses {
             let visible = area
                 .items
                 .get(*id)
                 .is_some_and(|item| item.inactive_pose.is_none());
-            self.write(PoseKey::Item(*id), *previous, *current, visible, frame);
+            let flags = if visible { PoseRow::VISIBLE } else { 0 };
+            self.write(PoseKey::Item(*id), *previous, *current, flags, frame);
         }
         for (slot, seen) in self.seen.iter().enumerate() {
             let handle = Handle(slot as u32);
@@ -265,7 +310,7 @@ impl FramePoses {
         key: PoseKey,
         previous: VehiclePose,
         current: VehiclePose,
-        visible: bool,
+        flags: u32,
         frame: &mut SimFrame,
     ) {
         let (handle, new) = self.handles.assign(key);
@@ -281,7 +326,6 @@ impl FramePoses {
             frame.changes.push(Change::Spawn { handle, key });
         }
         self.seen[slot] = self.stamp;
-        let flags = if visible { PoseRow::VISIBLE } else { 0 };
         frame.previous[slot] = PoseRow::new(previous, flags);
         frame.current[slot] = PoseRow::new(current, flags);
     }

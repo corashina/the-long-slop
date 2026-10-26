@@ -13,10 +13,17 @@ fn frame_round_trips() {
         state: StateBlock {
             simulation_seconds: 12.5,
             alpha: 0.25,
+            time_scale: 2.,
             flags: StateBlock::STARTED | StateBlock::SEATED,
+            fov_degrees: 60.,
+            stored_items: [0, 8, 0, 3],
         },
         previous: vec![row(1.), row(4.)],
         current: vec![row(2.), row(5.)],
+        valves: vec![ValveRow {
+            opening: 4,
+            valve: 0.5,
+        }],
         changes: vec![
             Change::Spawn {
                 handle: Handle(1),
