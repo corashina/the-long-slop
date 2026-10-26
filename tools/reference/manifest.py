@@ -9,6 +9,7 @@ from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
 from .parts import recover_parts
 from .driving import recover_driving
+from .wheels import wheel_collider_record
 from .lighting import rgba
 from .particles import recover_exhaust
 from .wheel_effects import recover_wheel_effects, effect_gains
@@ -273,11 +274,8 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             wheel_script=components[wheel_node]['wheelscript'][0]
             tire_slot=source.resolve(wheel_script,source.read(wheel_script)['gumi'])
             tire_part=source.resolve(tire_slot,source.read(tire_slot)['part']);tire_node=node_of(tire_part)
-            spring=value['m_SuspensionSpring']
             wheel_slots.append({'id':len(wheel_slots),'source':source_id(slot),'anchor':anchor(node),'wheel':item_nodes[wheel_node],
-                'tire':item_nodes[tire_node],'rim':item_nodes[wheel_node],'radius':value['m_Radius'],'suspension_distance':value['m_SuspensionDistance'],
-                'center':list(convert_point(vector(value['m_Center']))),
-                'spring':spring['spring'],'damper':spring['damper'],'target_position':spring['targetPosition'],
+                'tire':item_nodes[tire_node],'rim':item_nodes[wheel_node],'collider':wheel_collider_record(value),
                 'steer':identity in steer,'drive':identity in driven,'brake':identity in brake,'handbrake':identity in handbrake,
                 'tire_condition_range':[1,4],'rim_condition_range':[1,4]})
             wheel_slots[-1]['mount_anchor']=anchor(pointer_node(slot,source.read(slot)['T']))
@@ -286,7 +284,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     driving=recover_driving(source,car_readers,wheel_readers)
     for slot,record in zip(wheel_slots,driving['slots']):
         if slot['source'] != record['source']:raise ValueError('Driving wheel slot order differs')
-        for field in ('wheel_mass_kg','rotational_damping','force_application_distance_m','sideways_stiffness_modifier','hub','forward_friction','sideways_friction'):
+        for field in ('sideways_stiffness_modifier','hub'):
             slot[field]=record[field]
     source.driving_evidence=driving
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}

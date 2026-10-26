@@ -773,6 +773,48 @@ pub struct SeatReference {
     pub show_sleep_text: bool,
 }
 
+/// Source WheelCollider values.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WheelColliderReference {
+    pub radius: f32,
+    pub suspension_distance: f32,
+    pub center: [f32; 3],
+    pub spring: f32,
+    pub damper: f32,
+    pub target_position: f32,
+    pub forward_friction: WheelFrictionCurve,
+    pub sideways_friction: WheelFrictionCurve,
+    pub wheel_mass_kg: f32,
+    pub rotational_damping: f32,
+    pub force_application_distance_m: f32,
+}
+
+impl WheelColliderReference {
+    pub fn valid(&self) -> bool {
+        finite(&[
+            self.radius,
+            self.suspension_distance,
+            self.spring,
+            self.damper,
+            self.target_position,
+            self.wheel_mass_kg,
+            self.rotational_damping,
+            self.force_application_distance_m,
+        ]) && finite(&self.center)
+            && self.forward_friction.valid()
+            && self.sideways_friction.valid()
+            && self.radius > 0.0
+            && self.suspension_distance > 0.0
+            && self.spring >= 0.0
+            && self.damper >= 0.0
+            && (0.0..=1.0).contains(&self.target_position)
+            && self.wheel_mass_kg > 0.0
+            && self.rotational_damping >= 0.0
+            && self.force_application_distance_m >= 0.0
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WheelSlotReference {
@@ -783,21 +825,11 @@ pub struct WheelSlotReference {
     pub wheel: ItemId,
     pub tire: ItemId,
     pub rim: ItemId,
-    pub radius: f32,
-    pub suspension_distance: f32,
-    pub center: [f32; 3],
-    pub spring: f32,
-    pub damper: f32,
-    pub target_position: f32,
+    pub collider: WheelColliderReference,
     pub steer: bool,
     pub drive: bool,
     pub brake: bool,
     pub handbrake: bool,
-    pub forward_friction: WheelFrictionCurve,
-    pub sideways_friction: WheelFrictionCurve,
-    pub wheel_mass_kg: f32,
-    pub rotational_damping: f32,
-    pub force_application_distance_m: f32,
     pub sideways_stiffness_modifier: f32,
     pub hub: WheelHubReference,
     pub tire_condition_range: [u8; 2],
@@ -2091,38 +2123,19 @@ impl ReferenceManifest {
                 "wheel bindings",
             )?;
             require(
-                finite(&[
-                    r.radius,
-                    r.suspension_distance,
-                    r.spring,
-                    r.damper,
-                    r.target_position,
-                ]) && finite(&r.center)
-                    && r.forward_friction.valid()
-                    && r.sideways_friction.valid()
+                r.collider.valid()
                     && finite(&[
-                        r.wheel_mass_kg,
-                        r.rotational_damping,
-                        r.force_application_distance_m,
                         r.sideways_stiffness_modifier,
                         r.hub.radius_m,
                         r.hub.mass_kg,
                         r.hub.forward_stiffness,
                         r.hub.sideways_stiffness,
                     ])
-                    && r.wheel_mass_kg > 0.0
-                    && r.rotational_damping >= 0.0
-                    && r.force_application_distance_m >= 0.0
                     && r.sideways_stiffness_modifier >= 0.0
                     && r.hub.radius_m > 0.0
                     && r.hub.mass_kg > 0.0
                     && r.hub.forward_stiffness >= 0.0
-                    && r.hub.sideways_stiffness >= 0.0
-                    && r.radius > 0.0
-                    && r.suspension_distance > 0.0
-                    && r.spring >= 0.0
-                    && r.damper >= 0.0
-                    && (0.0..=1.0).contains(&r.target_position),
+                    && r.hub.sideways_stiffness >= 0.0,
                 "wheel parameters",
             )?;
         }

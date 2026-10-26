@@ -237,7 +237,7 @@ impl StartingArea {
             interaction.bind_body(id, handle);
         }
         for slot in &reference.wheel_slots {
-            let builder = rapier3d::prelude::ColliderBuilder::ball(slot.radius)
+            let builder = rapier3d::prelude::ColliderBuilder::ball(slot.collider.radius)
                 .sensor(true)
                 .enabled(false)
                 .density(0.0)
