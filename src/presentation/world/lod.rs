@@ -573,39 +573,29 @@ impl LodSchedule {
         }
     }
 }
+/// Random LOD tables and instance placements for scheduler tests.
 #[cfg(test)]
-mod tests {
+pub(super) mod fixture {
     use super::*;
     use bevy::math::{DMat4, DQuat, DVec3};
     use std::sync::Arc;
-    struct Random(u64);
+    pub struct Random(pub u64);
     impl Random {
-        fn next(&mut self) -> f32 {
+        pub fn next(&mut self) -> f32 {
             self.0 ^= self.0 << 13;
             self.0 ^= self.0 >> 7;
             self.0 ^= self.0 << 17;
             (self.0 >> 40) as f32 / (1u64 << 24) as f32
         }
-        fn range(&mut self, low: f32, high: f32) -> f32 {
+        pub fn range(&mut self, low: f32, high: f32) -> f32 {
             low + (high - low) * self.next()
         }
-        fn index(&mut self, count: usize) -> usize {
+        pub fn index(&mut self, count: usize) -> usize {
             ((self.next() * count as f32) as usize).min(count - 1)
         }
     }
-    const NODES: usize = 8;
-    struct Owner {
-        lod: LodInstance,
-        worlds: Vec<DMat4>,
-        states: Vec<Option<(bool, f32)>>,
-        retired: bool,
-    }
-    impl LodOwner for Owner {
-        fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
-            (!self.retired).then_some((&mut self.lod, &self.worlds))
-        }
-    }
-    fn table(random: &mut Random) -> Arc<LodTable> {
+    pub const NODES: usize = 8;
+    pub fn table(random: &mut Random) -> Arc<LodTable> {
         let groups = (0..1 + random.index(3))
             .map(|_| {
                 let mut height = random.range(0.3, 0.9);
@@ -642,7 +632,7 @@ mod tests {
         let worlds = groups.iter().map(|_| random.index(NODES)).collect();
         Arc::new(LodTable::new(groups, worlds, NODES))
     }
-    fn place(random: &mut Random, worlds: &mut [DMat4]) {
+    pub fn place(random: &mut Random, worlds: &mut [DMat4]) {
         let base = DVec3::new(
             random.range(-600.0, 600.0) as f64,
             random.range(-20.0, 20.0) as f64,
@@ -654,6 +644,24 @@ mod tests {
                 DQuat::from_rotation_y(random.range(0.0, 6.0) as f64),
                 base + DVec3::new(random.range(-5.0, 5.0) as f64, 0.0, 0.0),
             );
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::fixture::*;
+    use super::*;
+    use bevy::math::DMat4;
+    use std::sync::Arc;
+    struct Owner {
+        lod: LodInstance,
+        worlds: Vec<DMat4>,
+        states: Vec<Option<(bool, f32)>>,
+        retired: bool,
+    }
+    impl LodOwner for Owner {
+        fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
+            (!self.retired).then_some((&mut self.lod, &self.worlds))
         }
     }
     fn spawn(random: &mut Random, tables: &[Arc<LodTable>]) -> Owner {

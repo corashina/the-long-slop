@@ -113,6 +113,9 @@ impl SourceViewLighting {
         }
     }
 
+    pub fn bind_group(&self) -> &BindGroup {
+        &self.bind_group
+    }
     /// Reset before each view invocation. Earlier draws cannot satisfy this submission.
     pub fn begin_draws(&self) {
         for count in self.draw_counts.iter().chain(self.instance_counts.iter()) {
@@ -284,6 +287,7 @@ impl Plugin for SourceLightingPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             super::surface_graph::install(render_app);
             super::depth_resolve::install(render_app);
+            super::prop_draws::install(render_app);
             render_app
                 .init_resource::<SourceViewCamera>()
                 .add_systems(
@@ -489,6 +493,9 @@ pub struct SourceViewCamera {
     buffers: Option<(BufferId, BufferId)>,
 }
 impl SourceViewCamera {
+    pub fn bind_group(&self) -> Option<&BindGroup> {
+        self.bind_group.as_ref()
+    }
     pub fn ready(&self) -> bool {
         self.bind_group.is_some()
     }

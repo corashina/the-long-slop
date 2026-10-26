@@ -4416,6 +4416,7 @@ dependencies = [
  "async-lock",
  "bevy",
  "bevy_platform",
+ "bytemuck",
  "console_error_panic_hook",
  "gltf",
  "grass-mesh",

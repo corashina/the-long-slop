@@ -1,5 +1,6 @@
 //! Generated scenes are prepared offscreen before their collision recipes publish.
 use super::{
+    gpu_props::{BatchKey, GpuProps, PropRow, source_position, world_bounds},
     grass_jobs::GrassJobs,
     instance_materials::{InstanceMaterial, InstanceMaterials, RendererMaterial, ready},
     lod::{LodInstance, LodOwner, LodSchedule, LodTable},
@@ -14,7 +15,7 @@ use crate::{
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::{Placement, WorldStream},
 };
-use bevy::math::{DMat4, DVec3};
+use bevy::math::{Affine3A, DMat4, DVec3};
 use bevy::platform::collections::HashMap;
 use bevy::{
     camera::visibility::RenderLayers,
@@ -29,11 +30,23 @@ struct MaterialVariant {
     binding: RendererMaterial,
     ticket: Option<PipelineTicket>,
 }
+/// A renderer is an entity or a GPU prop row.
+#[derive(Clone, Copy)]
+enum Target {
+    Entity(Entity),
+    /// The glTF node and the local mesh bounds rebuild the row world on a rebase.
+    Row {
+        slot: u32,
+        node: u32,
+        center: [f32; 3],
+        half_extents: [f32; 3],
+    },
+}
 struct Renderer {
     material_source: Option<crate::reference::SourceId>,
     variants: Vec<MaterialVariant>,
     node: usize,
-    entity: Entity,
+    target: Target,
     mesh: Handle<Mesh>,
     binding: RendererMaterial,
     ticket: Option<PipelineTicket>,
@@ -44,13 +57,27 @@ struct Renderer {
     settings: Option<GrassSettings>,
 }
 impl Renderer {
-    fn show(&self, commands: &mut Commands) {
-        let visible = self.active && self.lod_state.is_none_or(|(visible, _)| visible);
-        commands.entity(self.entity).insert(if visible {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        });
+    fn entity(&self) -> Option<Entity> {
+        match self.target {
+            Target::Entity(entity) => Some(entity),
+            Target::Row { .. } => None,
+        }
+    }
+    fn visible(&self) -> bool {
+        self.active && self.lod_state.is_none_or(|(visible, _)| visible)
+    }
+    /// A row has no parent entity, so it also takes the visibility of its instance root.
+    fn show(&self, root: bool, commands: &mut Commands, props: &mut GpuProps) {
+        match self.target {
+            Target::Entity(entity) => {
+                commands.entity(entity).insert(if self.visible() {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                });
+            }
+            Target::Row { slot, .. } => props.set_hidden(slot, !(root && self.visible())),
+        }
     }
 }
 struct Instance {
@@ -89,6 +116,14 @@ struct Instance {
     origin: [f64; 3],
 }
 impl Instance {
+    /// Apply a root visibility change to the rows of this instance.
+    fn show_rows(&self, props: &mut GpuProps) {
+        for renderer in &self.renderers {
+            if let Target::Row { slot, .. } = renderer.target {
+                props.set_hidden(slot, !(self.visible && renderer.visible()));
+            }
+        }
+    }
     fn entity(&self, node: usize) -> Result<Entity, ReferenceError> {
         self.nodes[node]
             .ok_or_else(|| ReferenceError("Generated node writer targets a static node".into()))
@@ -142,8 +177,15 @@ pub struct SourceInstances {
     selection: InstanceSelection,
     lods: LodSchedule,
     cache_bytes: usize,
+    props: GpuProps,
 }
 impl SourceInstances {
+    pub fn props(&self) -> &GpuProps {
+        &self.props
+    }
+    pub(crate) fn props_mut(&mut self) -> &mut GpuProps {
+        &mut self.props
+    }
     pub(crate) fn cache_bytes(&self) -> usize {
         self.cache_bytes
     }
@@ -167,6 +209,7 @@ impl SourceInstances {
             + self.contents.retained_bytes()
             + self.selection.retained_bytes()
             + self.lods.retained_bytes()
+            + self.props.retained_bytes()
     }
     pub(crate) fn drained(&self) -> bool {
         self.instances
@@ -178,7 +221,7 @@ impl SourceInstances {
             "pending_owner": self.pending.as_ref().map(|p| &p.prototype),
             "unready": self.instances.iter().filter(|i| !i.ready).count(),
             "grass_waits": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
-                .filter(|r| r.settings.is_some() && !grass.ready(r.entity)).count(),
+                .filter(|r| r.entity().is_some_and(|e| r.settings.is_some() && !grass.ready(e))).count(),
             "unready_renderers": self.instances.iter().filter(|i| !i.ready).flat_map(|i| &i.renderers)
                 .take(4).map(|r| serde_json::json!({
                     "grass": r.settings.is_some(),
@@ -210,6 +253,7 @@ impl SourceInstances {
             }
         }
         materials.cache.generated.reset();
+        self.props.clear();
         self.pending = None;
         self.bindings_dirty = true;
         self.membership = None;
@@ -236,6 +280,19 @@ impl SourceInstances {
             }));
             for world in &mut instance.worlds {
                 world.w_axis += shift.extend(0.);
+            }
+            for renderer in &instance.renderers {
+                if let Target::Row {
+                    slot,
+                    node,
+                    center,
+                    half_extents,
+                } = renderer.target
+                {
+                    let world = instance.worlds[node as usize].as_mat4();
+                    let bounds = world_bounds(Affine3A::from_mat4(world), center, half_extents);
+                    self.props.set_world(slot, world, bounds);
+                }
             }
             commands.entity(instance.root).insert(Transform {
                 translation: Vec3::from_array(origin.local(instance.placement.pose.position)),
@@ -447,6 +504,8 @@ impl SourceInstances {
                             ))
                             .id();
                         let mut owned_bindings = Vec::with_capacity(primitives);
+                        let mut owned_rows = Vec::new();
+                        let props = &mut self.props;
                         let construction = (|| -> Result<Instance, ReferenceError> {
                             let source_root = Mat4::from_scale_rotation_translation(
                                 Vec3::from_array(placement.scale),
@@ -560,8 +619,7 @@ impl SourceInstances {
                                     let mesh = asset.meshes[index].clone();
                                     let world = worlds[node.index as usize].as_mat4();
                                     let source_position =
-                                        source_worlds[node.index as usize].w_axis.truncate()
-                                            * Vec3::new(1., 1., -1.);
+                                        source_position(source_worlds[node.index as usize]);
                                     let appearance =
                                         stream.appearance(&placement.id).iter().rev().find(|a| {
                                             a.node == source_node.source
@@ -570,42 +628,8 @@ impl SourceInstances {
                                                     || a.color.is_some()
                                                     || a.color_material.is_some())
                                         });
-                                    let (initial, selected) =
-                                        super::instance_materials::biome_material(
-                                            stream,
-                                            reference,
-                                            prototype,
-                                            placement,
-                                            source_index,
-                                            primitive,
-                                            super::instance_materials::selected_material(
-                                                stream,
-                                                reference,
-                                                prototype,
-                                                placement,
-                                                &source_node.source,
-                                            ),
-                                        );
-                                    let Some(mut binding) = materials.bind(
-                                        stream.frame().request.session,
-                                        prototype,
-                                        primitive,
-                                        extras.source_renderer.as_ref().ok_or_else(|| {
-                                            ReferenceError("Missing source renderer record".into())
-                                        })?,
-                                        initial,
-                                        selected,
-                                        source_node.layer,
-                                        receive,
-                                        world.determinant() < 0.,
-                                        source_position,
-                                        view,
-                                    )?
-                                    else {
-                                        continue;
-                                    };
-                                    if let Some(appearance) = appearance {
-                                        let color = appearance.color.or_else(|| {
+                                    let color = appearance.and_then(|appearance| {
+                                        appearance.color.or_else(|| {
                                             appearance.color_material.as_ref().and_then(|id| {
                                                 reference
                                                     .rendering
@@ -623,10 +647,123 @@ impl SourceInstances {
                                                             })
                                                     })
                                             })
+                                        })
+                                    });
+                                    let mut variant_ids = stream
+                                        .lamp_materials(&prototype.source, &source_node.source)?
+                                        .to_vec();
+                                    let (initial, selected) =
+                                        super::instance_materials::biome_material(
+                                            stream,
+                                            reference,
+                                            prototype,
+                                            placement,
+                                            source_index,
+                                            primitive,
+                                            super::instance_materials::selected_material(
+                                                stream,
+                                                reference,
+                                                prototype,
+                                                placement,
+                                                &source_node.source,
+                                            ),
+                                        );
+                                    variant_ids.retain(|id| Some(id) != selected);
+                                    // A static root renderer with one shared material can be a GPU prop row.
+                                    // A row takes its LOD state, color and source position from the row data,
+                                    // so its material stays shared.
+                                    let local = meshes
+                                        .get(&mesh)
+                                        .filter(|m| m.indices().is_some() && !m.has_morph_targets())
+                                        .and_then(bevy::camera::primitives::MeshAabb::compute_aabb);
+                                    let row = variant_ids.is_empty()
+                                        && node.skin.is_none()
+                                        && flat.on_root(node.index as usize)
+                                        && local.is_some()
+                                        && !reference.world.grass_displacement.writers.iter().any(
+                                            |w| w.enabled && w.transform == source_node.source,
+                                        );
+                                    let record =
+                                        extras.source_renderer.as_ref().ok_or_else(|| {
+                                            ReferenceError("Missing source renderer record".into())
+                                        })?;
+                                    let Some(mut binding) = materials.bind(
+                                        stream.frame().request.session,
+                                        prototype,
+                                        primitive,
+                                        record,
+                                        initial,
+                                        selected,
+                                        source_node.layer,
+                                        receive,
+                                        world.determinant() < 0.,
+                                        source_position,
+                                        view,
+                                        row,
+                                    )?
+                                    else {
+                                        continue;
+                                    };
+                                    let material_source = selected.cloned();
+                                    if binding.gpu_props() {
+                                        let material = match &binding.visible {
+                                            InstanceMaterial::Primary(h) => h.id().untyped(),
+                                            InstanceMaterial::Specular(h) => h.id().untyped(),
+                                            InstanceMaterial::Impostor(h) => h.id().untyped(),
+                                            InstanceMaterial::Grass(_) => {
+                                                unreachable!("Grass renderers are entities")
+                                            }
+                                        };
+                                        let color = materials.row_color(&binding, color)?;
+                                        let aabb = local.unwrap();
+                                        let world = worlds[node.index as usize].as_mat4();
+                                        let (center, half_extents) =
+                                            (aabb.center.to_array(), aabb.half_extents.to_array());
+                                        let slot = props.alloc(
+                                            BatchKey {
+                                                mesh: mesh.id(),
+                                                material,
+                                            },
+                                            PropRow {
+                                                world,
+                                                bounds: world_bounds(
+                                                    Affine3A::from_mat4(world),
+                                                    center,
+                                                    half_extents,
+                                                ),
+                                                layer: source_node.layer,
+                                                cast_shadows: record.cast_shadows,
+                                                hidden: true,
+                                                fade: 1.0,
+                                                color,
+                                                source_position,
+                                                batch: 0,
+                                            },
+                                        );
+                                        owned_rows.push(slot);
+                                        owned_bindings.push((None, binding.clone()));
+                                        renderers.push(Renderer {
+                                            material_source,
+                                            variants: Vec::new(),
+                                            node: source_index,
+                                            target: Target::Row {
+                                                slot,
+                                                node: node.index,
+                                                center,
+                                                half_extents,
+                                            },
+                                            mesh,
+                                            binding,
+                                            ticket: None,
+                                            lod_state: None,
+                                            active: active_nodes[source_index],
+                                            shadow: shadow != 0,
+                                            settings: None,
                                         });
-                                        if let Some(color) = color {
-                                            materials.color(&mut binding, color)?;
-                                        }
+                                        continue;
+                                    }
+                                    if let Some(color) = color {
+                                        materials.color(&mut binding, color)?;
                                     }
                                     if has_lod {
                                         materials.make_private(&mut binding);
@@ -667,12 +804,7 @@ impl SourceInstances {
                                             bevy::light::NotShadowCaster,
                                         ))
                                         .id();
-                                    owned_bindings.push((entity, binding.clone()));
-                                    let material_source = selected.cloned();
-                                    let mut variant_ids = stream
-                                        .lamp_materials(&prototype.source, &source_node.source)?
-                                        .to_vec();
-                                    variant_ids.retain(|id| Some(id) != material_source.as_ref());
+                                    owned_bindings.push((Some(entity), binding.clone()));
                                     let mut variants = Vec::with_capacity(variant_ids.len());
                                     if !variant_ids.is_empty() {
                                         let extra_cpu = variant_ids.len()
@@ -717,6 +849,7 @@ impl SourceInstances {
                                                 world.determinant() < 0.,
                                                 source_position,
                                                 view,
+                                                false,
                                             )?
                                             .ok_or_else(|| {
                                                 ReferenceError(
@@ -727,7 +860,7 @@ impl SourceInstances {
                                         if has_lod {
                                             materials.make_private(&mut variant);
                                         }
-                                        owned_bindings.push((entity, variant.clone()));
+                                        owned_bindings.push((Some(entity), variant.clone()));
                                         variants.push(MaterialVariant {
                                             source: Some(source),
                                             binding: variant,
@@ -834,7 +967,7 @@ impl SourceInstances {
                                         material_source,
                                         variants,
                                         node: source_index,
-                                        entity,
+                                        target: Target::Entity(entity),
                                         mesh,
                                         binding,
                                         ticket: None,
@@ -899,8 +1032,18 @@ impl SourceInstances {
                             }
                             Err(error) => {
                                 commands.entity(root).despawn();
+                                for slot in owned_rows {
+                                    props.free(slot);
+                                }
                                 for (entity, binding) in owned_bindings {
-                                    grass.retire(stream, entity, meshes, &mut materials.grass)?;
+                                    if let Some(entity) = entity {
+                                        grass.retire(
+                                            stream,
+                                            entity,
+                                            meshes,
+                                            &mut materials.grass,
+                                        )?;
+                                    }
                                     materials.release(binding);
                                 }
                                 let mut a = stream.presentation_allocation();
@@ -930,8 +1073,10 @@ impl SourceInstances {
             }
             let mut complete = true;
             for renderer in &mut instance.renderers {
-                if matches!(renderer.binding.visible, InstanceMaterial::Grass(_)) {
-                    complete &= grass.ready(renderer.entity);
+                if let (InstanceMaterial::Grass(_), Some(entity)) =
+                    (&renderer.binding.visible, renderer.entity())
+                {
+                    complete &= grass.ready(entity);
                     continue;
                 }
                 PipelineTicket::retry(&mut renderer.ticket);
@@ -1084,6 +1229,7 @@ impl SourceInstances {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
                     instance.visible = false;
+                    instance.show_rows(&mut self.props);
                 }
                 continue;
             }
@@ -1093,6 +1239,7 @@ impl SourceInstances {
             if !instance.visible {
                 commands.entity(instance.root).insert(Visibility::Inherited);
                 instance.visible = true;
+                instance.show_rows(&mut self.props);
             }
             let prototype = &reference.world.prototypes[instance.prototype];
             if !instance.caps_bound {
@@ -1199,9 +1346,10 @@ impl SourceInstances {
                         });
                     } else {
                         // A static node hides its own renderers. Static descendants change in this loop too.
+                        let root = instance.visible;
                         for renderer in instance.renderers.iter_mut().filter(|r| r.node == i) {
                             renderer.active = enabled;
-                            renderer.show(commands);
+                            renderer.show(root, commands, &mut self.props);
                         }
                     }
                 }
@@ -1227,8 +1375,9 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
                     renderer.lod_state = None;
                     self.lods.queue(&mut instance.lod, instance_index);
-                    renderer.binding.visible.replace(renderer.entity, commands);
-                    renderer.binding.apply_sort(renderer.entity, commands);
+                    let entity = renderer.entity().expect("lamp variants are entities");
+                    renderer.binding.visible.replace(entity, commands);
+                    renderer.binding.apply_sort(entity, commands);
                 }
             }
             for (body, handle) in prototype.bodies.iter().zip(&published.bodies) {
@@ -1317,11 +1466,12 @@ impl SourceInstances {
                 }
             }
             for renderer in &instance.renderers {
+                // A row impostor shares its material. Its row holds the source position.
+                if renderer.entity().is_none() {
+                    continue;
+                }
                 let node = &prototype.nodes[renderer.node];
-                let position = instance.source_worlds[node.gltf_node as usize]
-                    .w_axis
-                    .truncate()
-                    * Vec3::new(1., 1., -1.);
+                let position = source_position(instance.source_worlds[node.gltf_node as usize]);
                 if let InstanceMaterial::Impostor(handle) = &renderer.binding.visible {
                     if let Some(mut material) = materials.impostors.get_mut(handle) {
                         if material.uniform.source_position.truncate() != position {
@@ -1345,6 +1495,7 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
     ) {
+        let props = &mut self.props;
         self.lods.update(
             view,
             reference.world.lod.lod_bias,
@@ -1352,7 +1503,7 @@ impl SourceInstances {
             self.origin,
             &mut self.instances,
             |instance| {
-                let prototype = &reference.world.prototypes[instance.prototype];
+                let root = instance.visible;
                 for renderer in &mut instance.renderers {
                     let state = instance.lod.renderer(renderer.node);
                     if renderer.lod_state == Some(state) {
@@ -1360,14 +1511,17 @@ impl SourceInstances {
                     }
                     renderer.lod_state = Some(state);
                     let fade = state.1;
-                    renderer.show(commands);
-                    let source_position = instance.source_worlds
-                        [prototype.nodes[renderer.node].gltf_node as usize]
-                        .w_axis
-                        .truncate()
-                        * Vec3::new(1., 1., -1.);
-                    materials.fade(&renderer.binding, fade, source_position);
-                    grass.set_fade(renderer.entity, fade, &mut materials.grass);
+                    let entity = match renderer.target {
+                        Target::Entity(entity) => entity,
+                        // The row data holds the visibility and fade.
+                        Target::Row { slot, .. } => {
+                            props.set_lod(slot, root && renderer.active, state);
+                            continue;
+                        }
+                    };
+                    renderer.show(root, commands, props);
+                    materials.fade(&renderer.binding, fade);
+                    grass.set_fade(entity, fade, &mut materials.grass);
                 }
             },
         );
@@ -1389,6 +1543,9 @@ impl SourceInstances {
             }
             let prototype = &reference.world.prototypes[instance.prototype];
             for renderer in &instance.renderers {
+                let Some(entity) = renderer.entity() else {
+                    continue;
+                };
                 let node = &prototype.nodes[renderer.node];
                 if reference
                     .world
@@ -1399,7 +1556,7 @@ impl SourceInstances {
                 {
                     writers.request(
                         stream,
-                        renderer.entity,
+                        entity,
                         renderer.mesh.clone(),
                         instance.worlds[node.gltf_node as usize].as_mat4(),
                         meshes,
@@ -1420,8 +1577,8 @@ impl SourceInstances {
                 continue;
             }
             for renderer in &instance.renderers {
-                if renderer.settings.is_some() {
-                    grass.request_view(stream, renderer.entity, view)?;
+                if let (Some(_), Some(entity)) = (&renderer.settings, renderer.entity()) {
+                    grass.request_view(stream, entity, view)?;
                 }
             }
         }
@@ -1457,9 +1614,12 @@ impl SourceInstances {
                 parent.stop_flight();
             }
             let mut grass_drained = true;
-            for renderer in &self.instances[index].renderers {
-                grass_drained &=
-                    grass.retire(stream, renderer.entity, meshes, &mut materials.grass)?;
+            for entity in self.instances[index]
+                .renderers
+                .iter()
+                .filter_map(Renderer::entity)
+            {
+                grass_drained &= grass.retire(stream, entity, meshes, &mut materials.grass)?;
             }
             let parent_drained = self.instances[index]
                 .continuation
@@ -1480,8 +1640,13 @@ impl SourceInstances {
             self.bindings_dirty = true;
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
-                writers.retire(stream, renderer.entity)?;
-                grass.retire(stream, renderer.entity, meshes, &mut materials.grass)?;
+                match renderer.target {
+                    Target::Entity(entity) => {
+                        writers.retire(stream, entity)?;
+                        grass.retire(stream, entity, meshes, &mut materials.grass)?;
+                    }
+                    Target::Row { slot, .. } => self.props.free(slot),
+                }
                 materials.release(renderer.binding);
                 for variant in renderer.variants {
                     materials.release(variant.binding);

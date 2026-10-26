@@ -87,6 +87,12 @@ impl NodePlan {
         flat
     }
 }
+impl FlatNodes {
+    /// A static node under the instance root. It never moves after spawn.
+    pub fn on_root(&self, node: usize) -> bool {
+        !self.spawned[node] && self.anchors[node].is_none()
+    }
+}
 fn uniform(local: Mat4) -> bool {
     let scale = local.to_scale_rotation_translation().0;
     (scale - Vec3::splat(scale.x)).abs().max_element() <= 1e-5 * scale.abs().max_element()
