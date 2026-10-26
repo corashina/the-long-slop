@@ -148,12 +148,20 @@ Run the X01a test pass (player body) in the same run:
 5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
 6. Check the F3 cost of the body.
 
+Run the X01b test pass (hand and foot reach) in the same run:
+
+1. Re-export, then rebuild (X01b added car reach targets, gear stick targets, usable hand rules, `doubleHand`, point range and the player brush).
+2. Drive the Lada. Use the horn, lights, ignition (tap and hold), handbrake and gear stick: a hand moves to each. Press gas, brake and clutch: the feet move to the pedals.
+3. Use doors and handles. Push a car on foot and from a seat.
+4. Carry a two-hand item.
+5. Hold Left Alt: the hand points at the aimed surface. Rub dirt off a car and wash a wash trigger. Hold Left Alt at the sky: the hand waves.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
+| X01 | Player body and appearance | XL | Ragdoll, wearables, sunglasses, appearance editor, female body. [D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
+| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
