@@ -372,3 +372,8 @@ extern "C" {
         computer: u32,
     );
 }
+/// The local month and day.
+pub fn local_calendar() -> [u8; 2] {
+    let calendar = game_audio_calendar();
+    [(calendar / 100) as u8, (calendar % 100) as u8]
+}

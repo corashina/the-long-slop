@@ -672,10 +672,8 @@ fn advance_physics(
     let started = game_now();
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
-        let calendar = game_audio_calendar();
-        audio
-            .broadcasts
-            .calendar((calendar / 100) as u8, (calendar % 100) as u8);
+        let [month, day] = local_calendar();
+        audio.broadcasts.calendar(month, day);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
     drive.runtime.area.conditions.update(delta, true);
@@ -862,7 +860,11 @@ fn sync_world(
                 .map_or(&[], crate::world::RequiredViews::as_slice),
             budget_ms,
         )
-        .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
+        .and_then(|_| {
+            runtime
+                .align_startup(&reference.0, local_calendar())
+                .map(|_| ())
+        })
         .and_then(|_| {
             if runtime.has_deferred_save_links() {
                 runtime
