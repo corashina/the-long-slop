@@ -516,18 +516,19 @@ impl WorldStream {
                 } else {
                     &placement.prototype
                 };
-                let Some(pickup) =
+                let pickup =
                     self.contents
                         .rules
-                        .component(&self.reference, pickup_root, "pickupable")?
-                else {
+                        .component(&self.reference, pickup_root, "pickupable")?;
+                // A trailer root is an item without a pickupable.
+                if pickup.is_none() && prototype.trailer.is_none() {
                     if prototype.vehicle.is_some() {
                         return Err(ReferenceError(
                             "Car prototype root has no pickupable".into(),
                         ));
                     }
                     continue;
-                };
+                }
                 (|| -> Result<(), ReferenceError> {
                     let BoundPickup {
                         id,
@@ -1091,8 +1092,27 @@ impl WorldStream {
             }
             protected |= content.has_external_dependents(items, &interaction.parts, wheels);
             // The seat owner and the last seated car stay.
-            // V05 hook: a trailer attached to the seated car stays too. Check its hitch here.
             protected |= body.is_some_and(|b| self.kept.contains(&Some(b)));
+            // A trailer, its grip and the car that tows it load and unload as one group.
+            for group in interaction.hitch.groups() {
+                if !group.iter().flatten().any(|&item| local_item(item)) {
+                    continue;
+                }
+                for member in group
+                    .into_iter()
+                    .flatten()
+                    .filter(|&item| !local_item(item))
+                {
+                    let Some(state) = items.get(member) else {
+                        continue;
+                    };
+                    let body = state.body;
+                    let vehicle = body.filter(|b| physics.vehicle_of(*b).is_some());
+                    let position = self.origin.absolute(state.pose.position);
+                    distance = distance.min(self.important_distance(position, vehicle));
+                    protected |= body.is_some_and(|b| self.kept.contains(&Some(b)));
+                }
+            }
             protected |= self
                 .saved_item_protection
                 .iter()
@@ -1138,6 +1158,14 @@ impl WorldStream {
                 continue;
             }
             let content = self.contents.remove_active(index);
+            // Hitches end while the bodies still exist.
+            for item in content
+                .item
+                .into_iter()
+                .chain(content.bindings.iter().map(|b| b.item))
+            {
+                interaction.hitch.remove_item(item, items, physics);
+            }
             crate::world::content_vehicles::retire(
                 &content,
                 items,
@@ -1230,16 +1258,18 @@ struct BoundPickup {
     id: crate::reference::ItemId,
     body: rapier3d::prelude::RigidBodyHandle,
     body_index: usize,
-    rule: PickupReference,
+    /// None: a trailer root item without a pickupable.
+    rule: Option<PickupReference>,
     layers: u32,
 }
 
 /// Bind one `pickupable` to its instance body, colliders and hit sound.
 /// The item becomes the content item, or a content binding when `child`.
+/// Without a pickupable, the prototype root becomes an item that cannot be picked up.
 #[allow(clippy::too_many_arguments)]
 fn bind_pickup(
     content: &mut crate::world::contents::ContentInstance,
-    pickup: SourceRecord<'_>,
+    pickup: Option<SourceRecord<'_>>,
     child: bool,
     instance: &crate::world::StructureInstance,
     prototype: &crate::reference::WorldPrototypeReference,
@@ -1249,8 +1279,11 @@ fn bind_pickup(
     interaction: &mut InteractionState,
     physics: &mut PhysicsWorld,
 ) -> Result<BoundPickup, ReferenceError> {
-    let rule = pickup_rule(pickup)?;
-    let root = rules.root(world, pickup.source)?;
+    let rule = pickup.map(pickup_rule).transpose()?;
+    let root = match pickup {
+        Some(pickup) => rules.root(world, pickup.source)?,
+        None => &prototype.source,
+    };
     let body_index = prototype
         .bodies
         .iter()
@@ -1269,11 +1302,11 @@ fn bind_pickup(
         crate::world::placement::node_pose(prototype, pickup_node),
     );
     let mut key = placement.id.clone();
-    if child {
+    if let (true, Some(pickup)) = (child, pickup) {
         key.children.push((pickup.source.clone(), 0));
     }
     let id = items.insert_generated(key, prototype, pickup_pose)?;
-    let hit = hit_sound(world, pickup.source);
+    let hit = pickup.and_then(|pickup| hit_sound(world, pickup.source));
     let state = items.set_body(id, Some(body)).unwrap();
     state.hit_sound = hit;
     if !child {
@@ -1292,7 +1325,7 @@ fn bind_pickup(
         content
             .bindings
             .push(crate::world::contents::ContentBinding {
-                source: pickup.source.clone(),
+                source: pickup.map_or_else(|| root.clone(), |p| p.source.clone()),
                 item: id,
                 baseline: items.generated_snapshot(id, None).unwrap(),
                 render_body: Some((body, local)),
@@ -1324,13 +1357,15 @@ fn bind_pickup(
             ActionBinding {
                 collider: collider_id,
                 use_owner: None,
-                pickup_owner: Some(id),
+                pickup_owner: rule.as_ref().map(|_| id),
                 removal_owner: None,
                 push_owner: None,
             },
         );
     }
-    interaction.register_generated_pickup(id, rule.clone(), layers, container);
+    if let Some(rule) = &rule {
+        interaction.register_generated_pickup(id, rule.clone(), layers, container);
+    }
     Ok(BoundPickup {
         id,
         body,
@@ -1375,7 +1410,7 @@ fn bind_hose(
             .ok_or_else(|| ReferenceError("Generated hose segment has no pickup".into()))?;
         let bound = bind_pickup(
             content,
-            pickup,
+            Some(pickup),
             segment != hose.mains[0],
             instance,
             prototype,
@@ -1599,6 +1634,19 @@ pub(crate) fn restore_item(
         return Ok(false);
     }
     let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
+    // A saved hitch waits for the target and the trailer of the grip.
+    if let Some(target) = resolved
+        .zip(slot)
+        .and_then(|(owner, source)| interaction.hitch.resolve_target(owner, source))
+    {
+        if !interaction.hitch.is_grip(id) {
+            return Ok(false);
+        }
+        items.restore_generated(id, snapshot)?;
+        items.get_mut(id).unwrap().pending_attachment = false;
+        interaction.hitch.attach(id, target, items, physics)?;
+        return Ok(true);
+    }
     let volume = snapshot.attachment.as_ref().and_then(|a| a.volume.as_ref());
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
     // A world car slot mounts its rim from the car slot record.

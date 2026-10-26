@@ -165,6 +165,13 @@ pub struct WorldStream {
     sled_scan: Option<(u64, u64)>,
     /// Indices of world prototypes with a sled.
     sled_prototypes: Vec<usize>,
+    trailer_bindings: Vec<content_trailers::TrailerBinding>,
+    /// Session and active revision whose trailers and hitch targets are all bound.
+    trailer_scan: Option<(u64, u64)>,
+    /// Contents whose hitch targets are registered, with their item.
+    hitch_owners: Vec<(crate::world::GeneratedId, crate::reference::ItemId)>,
+    /// Indices of world prototypes with a trailer or hitch targets.
+    trailer_prototypes: Vec<usize>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
@@ -784,6 +791,16 @@ impl WorldStream {
                 .iter()
                 .enumerate()
                 .filter(|(_, p)| p.sled.is_some())
+                .map(|(i, _)| i)
+                .collect(),
+            trailer_bindings: Vec::new(),
+            trailer_scan: None,
+            hitch_owners: Vec::new(),
+            trailer_prototypes: world
+                .prototypes
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.trailer.is_some() || !p.hitches.is_empty())
                 .map(|(i, _)| i)
                 .collect(),
             detector_bindings: Vec::new(),
@@ -4337,6 +4354,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_trailer_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -5044,6 +5065,21 @@ impl WorldStream {
                     .map(content_sleds::SledBinding::heap_bytes)
                     .sum::<usize>()
                 + self.sled_prototypes.capacity() * std::mem::size_of::<usize>()
+                + self.trailer_bindings.capacity()
+                    * std::mem::size_of::<content_trailers::TrailerBinding>()
+                + self
+                    .trailer_bindings
+                    .iter()
+                    .map(content_trailers::TrailerBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.hitch_owners.capacity()
+                    * std::mem::size_of::<(crate::world::GeneratedId, crate::reference::ItemId)>()
+                + self
+                    .hitch_owners
+                    .iter()
+                    .map(|(id, _)| crate::world::contents::identity_heap(id))
+                    .sum::<usize>()
+                + self.trailer_prototypes.capacity() * std::mem::size_of::<usize>()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5369,6 +5405,8 @@ mod content_radios;
 pub(crate) mod content_seats;
 #[path = "content_sleds.rs"]
 mod content_sleds;
+#[path = "content_trailers.rs"]
+pub(crate) mod content_trailers;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;

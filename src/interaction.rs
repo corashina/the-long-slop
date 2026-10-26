@@ -9,6 +9,7 @@ pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
+pub mod hitch;
 mod hose;
 mod input;
 pub use input::InteractionOutcome;
@@ -62,6 +63,7 @@ pub enum SlotTarget {
     Wheel(WheelSlotId),
     Tire(ItemId),
     Part(PartSlotId),
+    Hitch(hitch::HitchTarget),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,6 +95,8 @@ pub enum InteractionAction {
     Wheel(WheelAction),
     PartRemove(ItemId),
     PartInstall(ItemId),
+    /// A held trailer grip drops onto a hitch target.
+    HitchAttach(ItemId),
     /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
     /// radio band switch.
     DialTune(ColliderId, f32),
@@ -230,6 +234,7 @@ pub struct InteractionState {
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
+    pub hitch: hitch::Hitches,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     hoses: hose::HoseState,
@@ -568,6 +573,7 @@ impl InteractionState {
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms,
             parts,
+            hitch: hitch::Hitches::default(),
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             receipt_tanks: fluid_receipts::tank_nodes(reference),
             callback_nodes: Vec::with_capacity(
@@ -1430,6 +1436,10 @@ impl InteractionState {
         {
             return Err(ReferenceError("Item is buried".into()));
         }
+        // Source pickupable.Pick on an attached grip detaches it first.
+        if self.hitch.is_hitched(item) {
+            self.hitch.detach(item, items, physics)?;
+        }
         self.carry.pickup(item, point, player, items, physics)?;
         self.storage.picked_up(item);
         Ok(())
@@ -1612,6 +1622,13 @@ impl InteractionState {
                             rim,
                             tire: held,
                         }));
+                    }
+                    SlotTarget::Hitch(target) => {
+                        self.drop_held(items, physics);
+                        self.hitch
+                            .attach(held, target, items, physics)
+                            .expect("validated grip attach");
+                        action = Some(InteractionAction::HitchAttach(held));
                     }
                     SlotTarget::Part(slot) => {
                         self.drop_held(items, physics);
@@ -2051,6 +2068,7 @@ impl InteractionState {
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
         self.parts.sync(items, physics)?;
+        self.hitch.sync(items, physics);
         Ok(())
     }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {

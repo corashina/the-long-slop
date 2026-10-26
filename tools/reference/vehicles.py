@@ -158,9 +158,10 @@ def material_link(source, owner, pointer, asset, material_indices):
 
 
 def light_records(source, proto, car_reader, car, asset, material_indices):
-    """headlightscript and rearlights controllers and the light switch of one car prototype."""
+    """headlightscript and rearlights controllers and the light switch of one car or trailer prototype."""
     scripts=[c for n in proto.hierarchy for c in n['components'] if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']]
-    routes,switches=vehicle_light_links(source,scripts,car_reader)
+    # A trailer has no carscript: no cabin routes, no switch and no electronics.
+    routes,switches=vehicle_light_links(source,scripts,car_reader) if car_reader else ({},[])
     if len(switches)>1:raise ValueError(f'{key(car_reader)} has more than one light switch')
     def lights(owner,pointers):
         result=[]
@@ -182,9 +183,10 @@ def light_records(source, proto, car_reader, car, asset, material_indices):
         def intensity(pointers,reader=reader):
             found=lights(reader,pointers)
             return source.read(found[0])['m_Intensity'] if found else 0.
-        electronics=car['electronics'] if kind=='rear' else f.get('electronics',{'m_PathID':0})
+        if kind=='rear':owner,electronics=(car_reader,car['electronics']) if car_reader else (reader,{'m_PathID':0})
+        else:owner,electronics=reader,f.get('electronics',{'m_PathID':0})
         record={'source':source_id(reader),'kind':kind,'node':node,
-            'electronics':proto.link(car_reader if kind=='rear' else reader,electronics),
+            'electronics':proto.link(owner,electronics),
             'startup_on':bool(f.get('ON',False)),'current_state':f.get('currentState',0),'requested_state':f.get('switchToState',0),
             'energy':f.get('energy',1.),'energy_move':f.get('energyMove',0.),'enabled':bool(f['m_Enabled']),
             'reverse_switch':bool(f.get('reverseSwitch',False)),'states':vehicle_states(f,kind,state,intensity),'cabin':None}

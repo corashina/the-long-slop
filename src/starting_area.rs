@@ -521,7 +521,7 @@ impl VehicleRuntime {
                 .instruments
                 .as_ref()
                 .map(crate::simulation::instruments::InstrumentState::new),
-            lights: crate::simulation::car_lights::CarLights::new(record, parts.lights),
+            lights: crate::simulation::car_lights::CarLights::new(&record.lights, parts.lights),
             brake: 0.,
             wheel_effects: crate::wheel_effects::WheelEffects::new(
                 &record.wheel_effects,
@@ -589,7 +589,7 @@ impl VehicleRuntime {
             .find(|m| m.node == node)
             .and_then(|m| m.choice)
         {
-            return choice.link(record);
+            return choice.link(&record.lights);
         }
         let (r, state) = (record.instruments.as_ref()?, self.instruments.as_ref()?);
         let pick = |on: bool, a, b| if on { a } else { b };
@@ -1359,6 +1359,21 @@ impl GarageRuntime {
                 self.stream.set_car_lights(id, vehicle.lights.lights());
             }
         }
+        let (items, vehicles) = (&self.area.items, &self.vehicles);
+        self.stream
+            .advance_trailer_lights(items, &self.area.interaction, |car| {
+                vehicles
+                    .get(&items.object_key(car))
+                    .map_or_else(Default::default, |vehicle| {
+                        crate::simulation::car_lights::CarLightInput {
+                            requested: vehicle.requested_headlights,
+                            ignition: vehicle.ignition.ignition,
+                            brake: vehicle.brake,
+                            gear_ratio: world_vehicle(reference, vehicle.prototype).gear_ratios
+                                [vehicle.drivetrain.gear()],
+                        }
+                    })
+            });
         self.step_loose_engines(reference);
         let sled_seat = match (
             self.area.player.seat_owner(),
@@ -1369,6 +1384,7 @@ impl GarageRuntime {
         };
         self.stream
             .step_sleds(&mut self.physics, sled_seat, driving_output.controls);
+        self.stream.step_trailers(&mut self.physics);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
@@ -1702,7 +1718,7 @@ impl GarageRuntime {
         let (items, mechanisms) = (&self.area.items, &self.area.interaction.mechanisms);
         let root = items.resolve_key(key);
         vehicle.lights.advance(
-            record,
+            &record.lights,
             input,
             |item| root.is_some_and(|root| item == root || items.descends(item, root)),
             |item| mechanisms.value(item, false).unwrap_or(0.),

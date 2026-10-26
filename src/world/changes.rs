@@ -649,6 +649,21 @@ pub(crate) fn capture(
         snapshot.attachment = Some(locked_attachment(id, items, &interaction.storage)?);
         return Some(snapshot);
     }
+    // A hitched grip saves its target as the slot of its car.
+    if let Some((owner, source)) = interaction.hitch.hitched_target(id) {
+        let parent = items.get(owner)?;
+        let pose = from_rapier(&(to_rapier(parent.pose).inverse() * to_rapier(state.pose)));
+        snapshot.attachment = Some(AttachmentSnapshot {
+            owner: Some(items.object_key(owner)),
+            slot: Some(source.clone()),
+            volume: None,
+            local_pose: AbsolutePose {
+                position: pose.position.map(f64::from),
+                rotation: pose.rotation,
+            },
+        });
+        return Some(snapshot);
+    }
     let relation = match state.location {
         ItemLocation::Attached(parent) => Some((Some(parent), None)),
         ItemLocation::PartSlot(slot) => interaction
