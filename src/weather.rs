@@ -467,13 +467,13 @@ fn small_emitter(player: [f64; 3], last: [f64; 3], dt: f32, yoffset: f32) -> [f6
 
 /// A separate deterministic stream. Unity's native random sequence is unrecovered.
 #[derive(Debug)]
-struct StormRandom(u64);
+pub(crate) struct StormRandom(pub(crate) u64);
 impl StormRandom {
-    fn unit(&mut self) -> f32 {
+    pub(crate) fn unit(&mut self) -> f32 {
         self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
         (crate::world::hash(self.0) >> 40) as f32 / 16_777_216.
     }
-    fn range(&mut self, min: f32, max: f32) -> f32 {
+    pub(crate) fn range(&mut self, min: f32, max: f32) -> f32 {
         min + (max - min) * self.unit()
     }
     fn inside_sphere(&mut self) -> [f32; 3] {

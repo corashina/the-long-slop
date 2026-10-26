@@ -24,6 +24,7 @@ mod render_readiness;
 mod render_scale;
 pub mod save;
 pub mod simulation;
+pub mod sky_traffic;
 pub mod sleep;
 pub mod starting_area;
 pub mod survival;
