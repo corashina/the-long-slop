@@ -74,7 +74,8 @@ pub enum InteractionAction {
     Push(ItemId),
     Cap(OpeningId),
     Mechanism(ItemId),
-    Seat(SeatId),
+    /// Enter or exit a seat. Item seats have no car seat record.
+    Seat(Option<SeatId>),
     Fill {
         source: ItemId,
         destination: ItemId,
@@ -266,6 +267,9 @@ pub struct InteractionState {
     receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
     callback_nodes: Vec<NodeId>,
     seats: Vec<SeatState>,
+    /// Hit colliders of world item seats.
+    item_seats:
+        HashMap<ColliderHandle, std::sync::Arc<crate::world::stream::content_seats::ItemSeat>>,
     pub(crate) carry: carry::CarryState,
     pub equipment: equipment::EquipmentState,
     pub(crate) equipment_input: equipment_input::EquipmentInput,
@@ -361,6 +365,7 @@ impl InteractionState {
             + map(&self.light_nodes)
             + set(&self.usable_light_controls)
             + map(&self.dial_knobs)
+            + map(&self.item_seats)
             + map(&self.kinds)
             + map(&self.slot_fits)
             + self.slot_fits.values().map(set).sum::<usize>()
@@ -668,6 +673,7 @@ impl InteractionState {
             sounds: [None; 64],
             sound_count: 0,
             seats,
+            item_seats: HashMap::new(),
             carry: carry::CarryState::new(reference)?,
             equipment: equipment::EquipmentState::new(reference),
             equipment_input: equipment_input::EquipmentInput::new(
@@ -837,6 +843,23 @@ impl InteractionState {
         self.light_controls.retain(|_, id| *id != control);
         self.held_controls.retain(|_, id| *id != control);
         self.usable_light_controls.remove(&control);
+    }
+    pub(crate) fn bind_item_seat(
+        &mut self,
+        collider: ColliderHandle,
+        seat: std::sync::Arc<crate::world::stream::content_seats::ItemSeat>,
+    ) {
+        self.item_seats.insert(collider, seat);
+    }
+    pub(crate) fn remove_item_seat(&mut self, collider: ColliderHandle) {
+        self.item_seats.remove(&collider);
+    }
+    #[cfg(test)]
+    pub(crate) fn item_seat(
+        &self,
+        collider: ColliderHandle,
+    ) -> Option<&crate::world::stream::content_seats::ItemSeat> {
+        self.item_seats.get(&collider).map(|seat| seat.as_ref())
     }
     pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
         self.dial_knobs.insert(collider, kind);
@@ -1703,7 +1726,7 @@ impl InteractionState {
                 let seat = player.seat();
                 if player.try_exit(physics) {
                     self.seat_action_latched = true;
-                    action = seat.map(InteractionAction::Seat);
+                    action = Some(InteractionAction::Seat(seat));
                 }
             } else if let Some(target) = use_target {
                 if use_input.held & keys::USE != 0
@@ -1799,7 +1822,24 @@ impl InteractionState {
                     && player.enter(seat.id, seat.pose, physics)
                 {
                     self.seat_action_latched = true;
-                    action = Some(InteractionAction::Seat(seat.id));
+                    action = Some(InteractionAction::Seat(Some(seat.id)));
+                }
+                if use_input.released & keys::USE != 0
+                    && !released_mechanism
+                    && let Some(seat) = self.item_seats.get(&target.collider)
+                    && seat_release.is_some_and(|press| {
+                        press.matches(self.mechanisms.contains(target.item).then_some(target.item))
+                    })
+                    && player.enter_item_seat(
+                        seat.owner.clone(),
+                        seat.body,
+                        &seat.seat,
+                        seat.pose,
+                        physics,
+                    )
+                {
+                    self.seat_action_latched = true;
+                    action = Some(InteractionAction::Seat(None));
                 }
                 if self.mechanisms.contains(target.item)
                     && (use_input.pressed & keys::USE != 0

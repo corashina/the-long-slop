@@ -231,7 +231,10 @@ impl InteractionState {
                     a.actions.0 |= ActionMask::TUNE;
                 }
             }
-            if self.seats.iter().any(|s| s.item == t.item) && !player.seated() {
+            if (self.seats.iter().any(|s| s.item == t.item)
+                || self.item_seats.contains_key(&t.collider))
+                && !player.seated()
+            {
                 a.actions.0 |= ActionMask::ENTER;
                 a.context = FeedbackContext::Seat;
             }

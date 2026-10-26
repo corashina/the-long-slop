@@ -713,7 +713,6 @@ impl PlayerState {
         )
     }
     /// Sit on a world item seat. The pose places sitPos relative to the item body.
-    #[expect(dead_code, reason = "item seat binding (v04 Task 2.3) calls it")]
     pub(crate) fn enter_item_seat(
         &mut self,
         owner: crate::world::ObjectKey,

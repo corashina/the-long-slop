@@ -5,6 +5,8 @@ mod cargo;
 mod drive_out;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
+#[path = "stream_tests/item_seats.rs"]
+mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
 
