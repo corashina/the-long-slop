@@ -13,6 +13,7 @@ fn frame_round_trips() {
         state: StateBlock {
             simulation_seconds: 12.5,
             origin: [1., 2., 3.],
+            stream_origin: [4., 5., 6.],
             cycle_elapsed_seconds: 40.,
             session: 3,
             selection_revision: 9,
@@ -137,6 +138,24 @@ fn frame_round_trips() {
             opening: 4,
             valve: 0.5,
         }],
+        structures: vec![StructureRow {
+            slot: 3,
+            flags: StructureRow::READY | StructureRow::LAMP,
+            lamp: [1., 0.5, 0., 1.],
+            display_map: 0,
+            poses: [0, 1],
+            hidden: [0, 1],
+            materials: [0, 1],
+        }],
+        structure_poses: vec![NodePoseRow {
+            node: 2,
+            kind: NodePoseRow::BODY,
+            translation: [1., 2., 3.],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        }],
+        hidden_nodes: vec![5],
+        node_materials: vec![MaterialRow { node: 1, source: 0 }],
         changes: vec![
             Change::Spawn {
                 handle: Handle(1),
@@ -174,6 +193,11 @@ fn frame_round_trips() {
                 quantities: [4.5, 0., 0., 0., 0., 0.],
                 ..Feedback::default()
             })),
+            Change::StructureRemove(3),
+            Change::MaterialSource(crate::reference::SourceId {
+                file: "level0".into(),
+                path_id: 8,
+            }),
             Change::Failure("stream".into()),
         ],
     };

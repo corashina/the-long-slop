@@ -550,7 +550,7 @@ pub struct FluidParticleReference {
     pub max_rate: f32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapVisualReference {
     pub open_nodes: Vec<NodeId>,

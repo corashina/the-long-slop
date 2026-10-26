@@ -247,6 +247,7 @@ fn process_request(
             drive.skip_elapsed = true;
             drive.runtime.advance_instruments(&reference, 0., true);
             // The new runtime starts a new frame stream: drop the old pose index and tables.
+            drive.runtime.reset_structure_views();
             let mut sim = SimFrameResource::default();
             super::fill(&mut drive, &reference, &mut sim);
             let state = sim.frame.state;

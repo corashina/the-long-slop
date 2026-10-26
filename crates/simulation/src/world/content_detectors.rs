@@ -404,7 +404,6 @@ impl WorldStream {
             self.presentation_changes.push(slot);
         }
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn detector(&self, parent: &GeneratedId) -> Option<&DetectorBinding> {
         self.detector_bindings.iter().find(|b| &b.parent == parent)
     }

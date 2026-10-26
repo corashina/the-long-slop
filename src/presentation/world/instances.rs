@@ -9,11 +9,10 @@ use super::{
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
 };
-use crate::animation::clip::LocalPart;
-use crate::world::stream::content_index::{ContentSlot, InstanceSelection};
+use crate::world::stream::content_index::InstanceSelection;
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
-    reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
+    reference::{ReferenceError, ReferenceManifest},
     world::{Placement, WorldStream},
 };
 use bevy::math::{Affine3A, DMat4, DVec3};
@@ -92,13 +91,9 @@ struct Instance {
     caps_bound: bool,
     placement: Placement,
     prototype: usize,
-    structure: usize,
+    /// Structure slot of the placement in the simulation frame.
+    slot: Option<u32>,
     sync_pending: bool,
-    /// `VehicleRuntime::presentation_signature` of the last sync of a car copy.
-    car_signature: u64,
-    content: Option<ContentSlot>,
-    lamp_buttons: Vec<usize>,
-    food: Option<crate::reference::ItemId>,
     session: u64,
     root: Entity,
     // Entity of each spawned glTF node. Static nodes have none.
@@ -174,13 +169,10 @@ impl LodOwner for Instance {
 pub struct SourceInstances {
     instances: Vec<Instance>,
     pending: Option<Placement>,
-    contents: crate::world::ContentIndex,
-    membership: Option<((u64, u64, u64, u64, u64), u64)>,
     bindings_dirty: bool,
     origin: Option<[f64; 3]>,
-    bodies: HashMap<rapier3d::prelude::RigidBodyHandle, Vec<usize>>,
-    content_instances: HashMap<ContentSlot, Vec<usize>>,
-    lamp_instances: HashMap<usize, Vec<usize>>,
+    /// Instances of each structure slot.
+    slot_instances: HashMap<u32, Vec<usize>>,
     selection: InstanceSelection,
     lods: LodSchedule,
     cache_bytes: usize,
@@ -196,8 +188,6 @@ pub struct SourceInstances {
     /// Indices of instances with a Grass displacement writer.
     writer_instances: Vec<usize>,
     writers_dirty: bool,
-    /// Local wing pose of each bat prototype node. Reused each frame.
-    wing_poses: Vec<Transform>,
 }
 impl SourceInstances {
     pub fn props(&self) -> &GpuProps {
@@ -211,22 +201,12 @@ impl SourceInstances {
     }
     fn measure_cache_bytes(&self) -> usize {
         use crate::interaction::memory::platform_map;
-        platform_map(&self.bodies)
-            + platform_map(&self.content_instances)
-            + platform_map(&self.lamp_instances)
+        platform_map(&self.slot_instances)
             + self
-                .bodies
+                .slot_instances
                 .values()
-                .chain(self.content_instances.values())
-                .chain(self.lamp_instances.values())
                 .map(|owners| owners.capacity() * std::mem::size_of::<usize>())
                 .sum::<usize>()
-            + self
-                .instances
-                .iter()
-                .map(|instance| instance.lamp_buttons.capacity() * std::mem::size_of::<usize>())
-                .sum::<usize>()
-            + self.contents.retained_bytes()
             + self.selection.retained_bytes()
             + self.lods.retained_bytes()
             + self.props.retained_bytes()
@@ -300,10 +280,7 @@ impl SourceInstances {
         self.props.clear();
         self.pending = None;
         self.bindings_dirty = true;
-        self.membership = None;
-        self.bodies.clear();
-        self.content_instances.clear();
-        self.lamp_instances.clear();
+        self.slot_instances.clear();
         self.selection.reset(0);
         self.lods.reset();
         self.origin = None;
@@ -584,7 +561,11 @@ impl SourceInstances {
                                 })
                                 .collect::<Vec<_>>();
                             let active_nodes = (0..prototype.nodes.len())
-                                .map(|i| active(prototype, i, appearance))
+                                .map(|i| {
+                                    crate::starting_area::structure_frame::active(
+                                        prototype, i, appearance,
+                                    )
+                                })
                                 .collect::<Vec<_>>();
                             let flat = node_plan.flatten(&locals);
                             let worlds = flat
@@ -1041,12 +1022,8 @@ impl SourceInstances {
                                 caps_bound: false,
                                 placement: placement.clone(),
                                 prototype: prototype_index,
-                                structure: usize::MAX,
+                                slot: None,
                                 sync_pending: true,
-                                car_signature: 0,
-                                content: None,
-                                lamp_buttons: Vec::new(),
-                                food: None,
                                 session: stream.frame().request.session,
                                 root,
                                 active_nodes,
@@ -1185,156 +1162,58 @@ impl SourceInstances {
         }
         Ok(())
     }
-    pub fn sync(
+    /// Applies the structure views of the simulation frame.
+    pub(crate) fn sync(
         &mut self,
-        stream: &WorldStream,
+        sim: &mut crate::presentation::sim_frame::SimFrameResource,
         reference: &ReferenceManifest,
-        physics: &crate::vehicle::PhysicsWorld,
-        items: &crate::interaction::items::ItemStore,
-        vehicles: &std::collections::BTreeMap<
-            crate::world::ObjectKey,
-            crate::starting_area::VehicleRuntime,
-        >,
-        powertrain: &crate::simulation::powertrain::PowertrainParts,
-        flyers: &crate::flyers::Flyers,
-        seconds: f64,
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
         screens: &crate::presentation::computer::ComputerScreens,
     ) -> Result<(), ReferenceError> {
-        self.rebase(stream.origin, commands);
-        let membership = (
-            stream.presentation_membership(),
-            items.membership_revision(),
-        );
-        if self.bindings_dirty || self.membership != Some(membership) {
-            let session_changed = self
-                .membership
-                .is_none_or(|previous| previous.0.0 != membership.0.0);
-            stream.index_contents(&mut self.contents);
+        use simulation::boundary::{NodePoseRow, StructureRow};
+        let origin = crate::world::WorldOrigin {
+            offset: sim.frame.state.stream_origin,
+        };
+        self.rebase(origin, commands);
+        if self.bindings_dirty || std::mem::take(&mut sim.structures_moved) {
             self.selection.reset(self.instances.len());
-            for owners in self.bodies.values_mut() {
+            for owners in self.slot_instances.values_mut() {
                 owners.clear();
-            }
-            for owners in self.content_instances.values_mut() {
-                owners.clear();
-            }
-            for owners in self.lamp_instances.values_mut() {
-                owners.clear();
-            }
-            let frame = stream.frame();
-            let mut published = HashMap::new();
-            for (index, structure) in frame.structures.iter().enumerate() {
-                published.entry(&structure.placement.id).or_insert(index);
             }
             for (index, instance) in self.instances.iter_mut().enumerate() {
-                let content = self.contents.slot(&instance.placement.id);
-                let lamp_buttons = self.contents.lamp_slots(&instance.placement.id);
-                let food = items.generated_item_id(&instance.placement.id);
-                let structure = published
-                    .get(&instance.placement.id)
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                instance.sync_pending |= session_changed
-                    || instance.content != content
-                    || instance.lamp_buttons.as_slice() != lamp_buttons
-                    || instance.food != food
-                    || instance.structure != structure;
-                instance.content = content;
-                instance.lamp_buttons.clear();
-                instance.lamp_buttons.extend_from_slice(lamp_buttons);
-                instance.food = food;
-                instance.structure = structure;
-                if let Some(structure) = frame.structures.get(instance.structure) {
-                    for body in &structure.bodies {
-                        self.bodies.entry(*body).or_default().push(index);
-                    }
-                }
-                if let Some(slot) = instance.content {
-                    self.content_instances.entry(slot).or_default().push(index);
-                }
-                for lamp in &instance.lamp_buttons {
-                    self.lamp_instances.entry(*lamp).or_default().push(index);
+                let slot = sim.structure_slot(&instance.placement.id);
+                instance.sync_pending |= instance.slot != slot;
+                instance.slot = slot;
+                if let Some(slot) = slot {
+                    self.slot_instances.entry(slot).or_default().push(index);
                 }
                 if instance.sync_pending {
                     self.selection.push(index);
                 }
             }
-            self.bodies.retain(|_, owners| !owners.is_empty());
-            self.content_instances
-                .retain(|_, owners| !owners.is_empty());
-            self.lamp_instances.retain(|_, owners| !owners.is_empty());
-            self.membership = Some(membership);
+            self.slot_instances.retain(|_, owners| !owners.is_empty());
             self.bindings_dirty = false;
             self.cache_bytes = self.measure_cache_bytes();
         }
-        for body in physics.presentation_bodies() {
-            if let Some(owners) = self.bodies.get(&body) {
-                for index in owners {
-                    self.selection.push(*index);
-                }
+        for slot in sim.changed_structures.drain(..) {
+            for &index in self.slot_instances.get(&slot).into_iter().flatten() {
+                self.selection.push(index);
             }
         }
-        for slot in stream.presentation_contents() {
-            if let Some(owners) = self.content_instances.get(&slot) {
-                for index in owners {
-                    self.selection.push(*index);
-                }
-            }
-        }
-        for lamp in stream.presentation_lamps() {
-            if let Some(owners) = self.lamp_instances.get(&lamp) {
-                for index in owners {
-                    self.selection.push(*index);
-                }
-            }
-        }
-        // Cobweb changes are rare: a cleaned or start-disabled trigger.
-        for id in stream.cobweb_changes() {
-            for (index, instance) in self.instances.iter().enumerate() {
-                if &instance.placement.id == id {
-                    self.selection.push(index);
-                }
-            }
-        }
-        // World car gauges and lamps change on a still car too. Sync a car copy only when
-        // its presented state changed. The sync records the signature once bindings are ready.
-        for (key, vehicle) in vehicles {
-            let Some(owners) = self.bodies.get(&physics.chassis_handle(key)) else {
-                continue;
-            };
-            let signature = vehicle.presentation_signature();
-            for &index in owners {
-                if self.instances[index].car_signature != signature {
-                    self.selection.push(index);
-                }
-            }
-        }
-        for (body, lights) in stream.trailers() {
-            let Some(owners) = self.bodies.get(&body) else {
-                continue;
-            };
-            let signature = lights.signature();
-            for &index in owners {
-                if self.instances[index].car_signature != signature {
-                    self.selection.push(index);
-                }
-            }
-        }
-        let frame = stream.frame();
+        let sim = &*sim;
         let selected = self.selection.len();
-        for selected_index in 0..selected {
-            self.instances[self.selection.at(selected_index)].sync_pending = true;
-        }
         for selected_index in 0..selected {
             let instance_index = self.selection.at(selected_index);
             let instance = &mut self.instances[instance_index];
             if instance.retirement.started() {
                 continue;
             }
-            let content = stream.content_at(instance.content);
-            if !content.bindings_ready() {
+            let view = instance
+                .slot
+                .map(|slot| &sim.structure_views[slot as usize]);
+            if view.is_some_and(|v| v.flags & StructureRow::READY == 0) {
                 if instance.visible {
                     commands.entity(instance.root).insert(Visibility::Hidden);
                     instance.visible = false;
@@ -1342,33 +1221,17 @@ impl SourceInstances {
                 }
                 continue;
             }
-            let Some(published) = frame.structures.get(instance.structure) else {
-                continue;
-            };
             if !instance.visible {
                 commands.entity(instance.root).insert(Visibility::Inherited);
                 instance.visible = true;
                 instance.show_rows(&mut self.props);
             }
+            let Some(view) = view else {
+                continue;
+            };
             let prototype = &reference.world.prototypes[instance.prototype];
-            // The car runtime of a car copy.
-            let car = prototype.vehicle.as_ref().and_then(|record| {
-                let handle = published.bodies.get(record.body as usize)?;
-                Some((record, vehicles.get(physics.vehicle_of(*handle)?)?))
-            });
-            if let Some((_, vehicle)) = car {
-                instance.car_signature = vehicle.presentation_signature();
-            }
-            // The lamp state of a trailer copy.
-            let trailer = prototype.trailer.as_ref().and_then(|record| {
-                let handle = published.bodies.get(record.body as usize)?;
-                Some((record, stream.trailer_lights(*handle)?))
-            });
-            if let Some((_, lights)) = trailer {
-                instance.car_signature = lights.signature();
-            }
             if !instance.caps_bound {
-                for cap in content.caps() {
+                for cap in &view.caps {
                     crate::presentation::reference::bind_generated_cap(
                         commands,
                         cap,
@@ -1378,186 +1241,116 @@ impl SourceInstances {
                 }
                 instance.caps_bound = true;
             }
-            let appearance = stream.indexed_appearance(&content, &instance.placement.id);
-            let food = instance
-                .food
-                .and_then(|id| items.get(id))
-                .filter(|item| item.food.is_some());
-            if let Some(item) = food {
-                let recipe = &reference.survival.foods[item.food.unwrap().prototype_index];
-                let root = reference
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == recipe.root)
-                    .ok_or_else(|| ReferenceError("Missing food root".into()))?;
-                if prototype
-                    .nodes
-                    .iter()
-                    .filter(|n| n.parent.is_none())
-                    .count()
-                    != 1
-                    || !prototype
-                        .nodes
-                        .iter()
-                        .any(|n| n.parent.is_none() && n.source == root.source)
-                {
-                    return Err(ReferenceError(
-                        "Generated food recipe does not own its complete source instance".into(),
-                    ));
-                }
-            }
-            if let Some(radio) = stream.radio(&instance.placement.id) {
-                let node = prototype.nodes[radio.needle_node].gltf_node as usize;
-                instance.write_local(transforms, node, local_pose(radio.needle), frame.origin)?;
-            }
-            if let Some(music_box) = stream.music_box(&instance.placement.id) {
-                for n in &music_box.nodes {
-                    let node = prototype.nodes[n.node].gltf_node as usize;
-                    instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
-                }
-            }
-            if let Some(detector) = stream.detector(&instance.placement.id) {
-                let n = &detector.needle;
-                let node = prototype.nodes[n.node].gltf_node as usize;
-                instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
-            }
-            if let Some(doors) = stream.bus_doors(&instance.placement.id) {
-                for leaf in doors.leaves() {
-                    let node = prototype.nodes[leaf.node].gltf_node as usize;
-                    instance.write_local(transforms, node, local_pose(leaf.pose), frame.origin)?;
-                }
-            }
-            if let Some(dial) = stream.dial(&instance.placement.id) {
-                for n in dial.nodes() {
-                    let node = prototype.nodes[n.node].gltf_node as usize;
-                    instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
-                }
-            }
-            for gauge in powertrain
-                .gauges()
-                .filter(|g| g.parent == instance.placement.id)
-            {
-                let (r, state) = (&gauge.record, &gauge.state);
-                let needles = r.needles.iter().zip(&state.needle_angles).map(|(n, &a)| {
-                    let mut e = n.rest;
-                    e[n.axis as usize] = a;
-                    (n.node, e)
-                });
-                let digits = r
-                    .counters
-                    .iter()
-                    .flat_map(|c| &c.digits)
-                    .zip(&state.digit_angles)
-                    .map(|(d, &a)| {
-                        let mut e = [0.; 3];
-                        e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
-                        (d.node, e)
-                    });
-                for (node, e) in needles.chain(digits) {
-                    let node = prototype.nodes[node.0 as usize].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
-                        let rotation =
-                            Quat::from_array(crate::simulation::instruments::source_rotation(e));
-                        if transform.rotation != rotation {
-                            transform.rotation = rotation;
+            for row in &view.poses {
+                let rotation = Quat::from_array(row.rotation);
+                match row.kind {
+                    NodePoseRow::LOCAL => {
+                        let node = prototype.nodes[row.node as usize].gltf_node as usize;
+                        let pose = Transform {
+                            translation: Vec3::from_array(row.translation),
+                            rotation,
+                            scale: Vec3::from_array(row.scale),
+                        };
+                        instance.write_local(transforms, node, pose, origin)?;
+                    }
+                    NodePoseRow::ROTATION => {
+                        let node = prototype.nodes[row.node as usize].gltf_node as usize;
+                        if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
+                            if transform.rotation != rotation {
+                                transform.rotation = rotation;
+                            }
+                        }
+                    }
+                    NodePoseRow::BODY => {
+                        let body = &prototype.bodies[row.node as usize];
+                        let translation = Vec3::from_array(row.translation);
+                        let world = Mat4::from_rotation_translation(rotation, translation);
+                        let node = &prototype.nodes[body.node as usize];
+                        let index = node.gltf_node as usize;
+                        let scale = Vec3::from_array(body.pose.scale)
+                            * Vec3::from_array(instance.placement.scale);
+                        let world = (world * Mat4::from_scale(scale)).as_dmat4();
+                        let source_world = Mat4::from_rotation_translation(
+                            rotation,
+                            Vec3::from_array(origin.absolute(row.translation).map(|v| v as f32)),
+                        ) * Mat4::from_scale(scale);
+                        if instance.worlds[index] != world {
+                            self.lods.queue(&mut instance.lod, instance_index);
+                            let delta = world * instance.worlds[index].inverse();
+                            let source_changed = source_world != instance.source_worlds[index];
+                            let source_delta =
+                                source_world * instance.source_worlds[index].inverse();
+                            for descendant in &prototype.nodes {
+                                let mut cursor = descendant.parent;
+                                let mut belongs = descendant.gltf_node == node.gltf_node;
+                                for _ in 0..prototype.nodes.len() {
+                                    let Some(parent) = cursor else { break };
+                                    if parent == body.node {
+                                        belongs = true;
+                                        break;
+                                    }
+                                    cursor = prototype.nodes[parent as usize].parent;
+                                }
+                                if belongs {
+                                    let target = descendant.gltf_node as usize;
+                                    instance.worlds[target] = delta * instance.worlds[target];
+                                    if source_changed {
+                                        instance.source_worlds[target] =
+                                            source_delta * instance.source_worlds[target];
+                                    }
+                                }
+                            }
+                            instance.worlds[index] = world;
+                            instance.source_worlds[index] = source_world;
+                            let anchor = instance.anchor_world(index, origin);
+                            if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
+                                *transform =
+                                    Transform::from_matrix((anchor.inverse() * world).as_mat4());
+                            }
+                        }
+                    }
+                    _ => {
+                        let index = prototype.nodes[row.node as usize].gltf_node as usize;
+                        let world = Mat4::from_scale_rotation_translation(
+                            instance.scales[index].0,
+                            rotation,
+                            Vec3::from_array(row.translation),
+                        )
+                        .as_dmat4();
+                        if instance.worlds[index] != world {
+                            self.lods.queue(&mut instance.lod, instance_index);
+                        }
+                        instance.worlds[index] = world;
+                        instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
+                            instance.scales[index].1,
+                            rotation,
+                            Vec3::from_array(origin.absolute(row.translation).map(|v| v as f32)),
+                        );
+                        let anchor = instance.anchor_world(index, origin);
+                        if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
+                            transform.set_if_neq(Transform::from_matrix(
+                                (anchor.inverse() * world).as_mat4(),
+                            ));
                         }
                     }
                 }
             }
-            if let Some((record, vehicle)) = car
-                && let (Some(r), Some(state)) = (&record.instruments, &vehicle.instruments)
-            {
-                let needles = r.needles.iter().zip(&state.needle_angles).map(|(n, &a)| {
-                    let mut e = n.rest;
-                    e[n.axis as usize] = a;
-                    (n.node, e)
-                });
-                let digits = r.digits().iter().zip(&state.digit_angles).map(|(d, &a)| {
-                    let mut e = [0.; 3];
-                    e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
-                    (d.node, e)
-                });
-                for (node, e) in needles.chain(digits) {
-                    let node = prototype.nodes[node.0 as usize].gltf_node as usize;
-                    if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
-                        let rotation =
-                            Quat::from_array(crate::simulation::instruments::source_rotation(e));
-                        if transform.rotation != rotation {
-                            transform.rotation = rotation;
-                        }
-                    }
-                }
-            }
-            // Source `carscript.Transmission`: the lever pose in its parent space.
-            if let Some((record, vehicle)) = car
-                && let (Some(r), Some(lever)) = (&record.lever, &vehicle.lever)
-            {
-                let node = &prototype.nodes[r.node as usize];
-                let pose = Transform {
-                    translation: Vec3::from_array(lever.translation.to_array()),
-                    rotation: Quat::from_array(lever.rotation.to_array()),
-                    scale: Vec3::from_array(node.transform.scale),
-                };
-                instance.write_local(transforms, node.gltf_node as usize, pose, frame.origin)?;
-            }
-            // Source `bikepedalscript.UpdPedals`: turned pedals and level feet holders.
-            if let Some((record, vehicle)) = car
-                && let Some(r) = &record.pedals
-            {
-                use crate::simulation::pedals::{feet_holder_rotation, turned};
-                let angle = vehicle.pedal_angle;
-                let rest = |n: u32| prototype.nodes[n as usize].transform.rotation;
-                let pedals = r.pedals.iter().map(|&n| (n, turned(rest(n), angle)));
-                let inverse = r
-                    .pedals_inverse
-                    .iter()
-                    .map(|&n| (n, turned(rest(n), -angle)));
-                let holders = r
-                    .feet_holders
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &n)| (n, feet_holder_rotation(&prototype.nodes, r, angle, i)));
-                for (n, rotation) in pedals.chain(inverse).chain(holders) {
-                    let node = &prototype.nodes[n as usize];
-                    let pose = Transform {
-                        translation: Vec3::from_array(node.transform.translation),
-                        rotation: Quat::from_array(rotation.to_array()),
-                        scale: Vec3::from_array(node.transform.scale),
-                    };
-                    instance.write_local(
-                        transforms,
-                        node.gltf_node as usize,
-                        pose,
-                        frame.origin,
-                    )?;
-                }
-            }
-            if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
-                && let Some(n) = prototype
-                    .nodes
-                    .iter()
-                    .find(|n| n.source == reference.small_items.spray_bottle.trigger)
-            {
-                instance.write_local(
-                    transforms,
-                    n.gltf_node as usize,
-                    local_pose(trigger),
-                    frame.origin,
-                )?;
-            }
-            if let Some(color) = stream.lamp_emission(&instance.placement.id) {
+            if view.flags & StructureRow::LAMP != 0 {
                 for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
-                    materials.emission(&mut renderer.binding, color, None)?;
+                    materials.emission(&mut renderer.binding, view.lamp, None)?;
                 }
             }
             // displayscript.Upd: on shows defMaterial with the computer output as _EmissionMap.
-            if let Some((on, map)) = stream.display_screen(&instance.placement.id) {
-                let color = if on {
+            if view.flags & StructureRow::DISPLAY != 0 {
+                let color = if view.flags & StructureRow::DISPLAY_ON != 0 {
                     reference.computer.display.emission
                 } else {
                     [0., 0., 0., 1.]
                 };
-                let image = map.and_then(|item| screens.image(item));
+                let image = view
+                    .display_map
+                    .checked_sub(1)
+                    .and_then(|item| screens.image(crate::reference::ItemId(item)));
                 for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
                     materials.emission(&mut renderer.binding, color, image.cloned())?;
                     if image.is_none() {
@@ -1565,72 +1358,8 @@ impl SourceInstances {
                     }
                 }
             }
-            if let Some(level) = stream.level(&instance.placement.id) {
-                for b in level.bubbles() {
-                    let node = prototype.nodes[b.node].gltf_node as usize;
-                    instance.write_local(transforms, node, local_pose(b.pose), frame.origin)?;
-                }
-            }
-            let cobwebs = stream.cobweb_hidden(&instance.placement.id);
-            // The bat Animator loops the wing clip from the flyer start.
-            if prototype.source == reference.sky.flyer.prefab {
-                let wing = &reference.sky.flyer.wing;
-                let born = items
-                    .generated_item_id(&instance.placement.id)
-                    .and_then(|item| flyers.flyers().iter().find(|f| f.item == item))
-                    .map_or(0., |f| f.born);
-                let poses = &mut self.wing_poses;
-                poses.resize(prototype.nodes.len(), Transform::IDENTITY);
-                for track in &wing.tracks {
-                    let node = track.node as usize;
-                    poses[node] = local_pose(prototype.nodes[node].transform);
-                }
-                let time = crate::animation::clip::loop_time(wing, (seconds - born) as f32);
-                crate::animation::clip::sample_clip(wing, time, |node, part| {
-                    let pose = &mut poses[node as usize];
-                    match part {
-                        LocalPart::Position(p) => pose.translation = Vec3::from_array(p.to_array()),
-                        LocalPart::Rotation(r) => pose.rotation = Quat::from_array(r.to_array()),
-                        LocalPart::Scale(v) => pose.scale = Vec3::from_array(v.to_array()),
-                    }
-                });
-                for track in &wing.tracks {
-                    let node = &prototype.nodes[track.node as usize];
-                    instance.write_local(
-                        transforms,
-                        node.gltf_node as usize,
-                        poses[track.node as usize],
-                        frame.origin,
-                    )?;
-                }
-            }
             for (i, node) in prototype.nodes.iter().enumerate() {
-                if let Some((_, pose_value)) = instance
-                    .lamp_buttons
-                    .iter()
-                    .filter_map(|index| stream.lamp_button_at(*index))
-                    .find(|(button, _)| *button == &node.source)
-                {
-                    instance.write_local(
-                        transforms,
-                        node.gltf_node as usize,
-                        local_pose(pose_value),
-                        frame.origin,
-                    )?;
-                }
-                let enabled = active_food(prototype, i, appearance, reference, food)
-                    && !cobwebs.contains(&i)
-                    && car
-                        .and_then(|(record, v)| v.node_visible(record, i as u32))
-                        .or_else(|| {
-                            trailer.and_then(|(_, l)| {
-                                l.visibility()
-                                    .iter()
-                                    .find(|(n, _)| *n == i as u32)
-                                    .map(|(_, visible)| *visible)
-                            })
-                        })
-                        .unwrap_or(true);
+                let enabled = !view.hidden.contains(&(i as u32));
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
                     if let Some(entity) = instance.nodes[node.gltf_node as usize] {
@@ -1650,35 +1379,11 @@ impl SourceInstances {
                 }
             }
             for renderer in &mut instance.renderers {
-                let node = renderer.node as u32;
-                let selected = car
-                    .and_then(|(record, v)| v.renderer_material(record, node))
-                    .or_else(|| {
-                        let (record, lights) = trailer?;
-                        lights
-                            .materials()
-                            .iter()
-                            .find(|m| m.node == node)
-                            .and_then(|m| m.choice)
-                            .and_then(|c| c.link(&record.lights))
-                    })
-                    .or_else(|| {
-                        powertrain
-                            .gauges()
-                            .filter(|g| g.parent == instance.placement.id)
-                            .find_map(|g| g.state.renderer_material(&g.record, node))
-                    })
-                    .map(|link| &link.source)
-                    .or_else(|| {
-                        appearance
-                            .iter()
-                            .rev()
-                            .find(|a| {
-                                a.node == prototype.nodes[renderer.node].source
-                                    && a.material.is_some()
-                            })
-                            .and_then(|a| a.material.as_ref())
-                    });
+                let selected = view
+                    .materials
+                    .iter()
+                    .find(|m| m.node as usize == renderer.node)
+                    .map(|m| &sim.material_sources[m.source as usize]);
                 if selected == renderer.material_source.as_ref() {
                     continue;
                 }
@@ -1695,91 +1400,6 @@ impl SourceInstances {
                     let entity = renderer.entity().expect("lamp variants are entities");
                     renderer.binding.visible.replace(entity, commands);
                     renderer.binding.apply_sort(entity, commands);
-                }
-            }
-            for (body, handle) in prototype.bodies.iter().zip(&published.bodies) {
-                let pose = physics.rapier().bodies[*handle].position();
-                let rotation = Quat::from_array(pose.rotation.to_array());
-                let world = Mat4::from_rotation_translation(
-                    rotation,
-                    Vec3::from_array(pose.translation.to_array()),
-                );
-                let node = &prototype.nodes[body.node as usize];
-                let index = node.gltf_node as usize;
-                let scale =
-                    Vec3::from_array(body.pose.scale) * Vec3::from_array(instance.placement.scale);
-                let world = (world * Mat4::from_scale(scale)).as_dmat4();
-                let source_world = Mat4::from_rotation_translation(
-                    rotation,
-                    Vec3::from_array(
-                        frame
-                            .origin
-                            .absolute(pose.translation.to_array())
-                            .map(|v| v as f32),
-                    ),
-                ) * Mat4::from_scale(scale);
-                if instance.worlds[index] != world {
-                    self.lods.queue(&mut instance.lod, instance_index);
-                    let delta = world * instance.worlds[index].inverse();
-                    let source_changed = source_world != instance.source_worlds[index];
-                    let source_delta = source_world * instance.source_worlds[index].inverse();
-                    for descendant in &prototype.nodes {
-                        let mut cursor = descendant.parent;
-                        let mut belongs = descendant.gltf_node == node.gltf_node;
-                        for _ in 0..prototype.nodes.len() {
-                            let Some(parent) = cursor else { break };
-                            if parent == body.node {
-                                belongs = true;
-                                break;
-                            }
-                            cursor = prototype.nodes[parent as usize].parent;
-                        }
-                        if belongs {
-                            let target = descendant.gltf_node as usize;
-                            instance.worlds[target] = delta * instance.worlds[target];
-                            if source_changed {
-                                instance.source_worlds[target] =
-                                    source_delta * instance.source_worlds[target];
-                            }
-                        }
-                    }
-                    instance.worlds[index] = world;
-                    instance.source_worlds[index] = source_world;
-                    let anchor = instance.anchor_world(index, frame.origin);
-                    if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
-                        *transform = Transform::from_matrix((anchor.inverse() * world).as_mat4());
-                    }
-                }
-            }
-            let pose_world =
-                |instance: &Instance, index: usize, pose: crate::vehicle::VehiclePose| {
-                    Mat4::from_scale_rotation_translation(
-                        instance.scales[index].0,
-                        Quat::from_array(pose.rotation),
-                        Vec3::from_array(pose.position),
-                    )
-                    .as_dmat4()
-                };
-            for (node_index, node) in prototype.nodes.iter().enumerate() {
-                let Some(pose) = content.node_pose(node_index) else {
-                    continue;
-                };
-                let index = node.gltf_node as usize;
-                let world = pose_world(instance, index, pose);
-                if instance.worlds[index] != world {
-                    self.lods.queue(&mut instance.lod, instance_index);
-                }
-                instance.worlds[index] = world;
-                let source_scale = instance.scales[index].1;
-                instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
-                    source_scale,
-                    Quat::from_array(pose.rotation),
-                    Vec3::from_array(frame.origin.absolute(pose.position).map(|v| v as f32)),
-                );
-                let anchor = instance.anchor_world(index, frame.origin);
-                if let Ok(mut transform) = transforms.get_mut(instance.entity(index)?) {
-                    transform
-                        .set_if_neq(Transform::from_matrix((anchor.inverse() * world).as_mat4()));
                 }
             }
             for renderer in &instance.renderers {
@@ -1900,20 +1520,18 @@ impl SourceInstances {
         if self.retire_key != Some(key) {
             self.retire_key = Some(key);
             let frame = stream.frame();
+            let published = frame
+                .structures
+                .iter()
+                .map(|s| &s.placement.id)
+                .chain(stream.pending_structures().iter().map(|p| &p.id))
+                .collect::<bevy::platform::collections::HashSet<_>>();
             for (index, instance) in self.instances.iter_mut().enumerate() {
                 if instance.retirement.started() {
                     continue;
                 }
-                let id = &instance.placement.id;
-                // A valid cached structure index proves publication without a scan.
-                let published = frame
-                    .structures
-                    .get(instance.structure)
-                    .is_some_and(|s| &s.placement.id == id);
                 let wanted = instance.session == frame.request.session
-                    && (published
-                        || stream.pending_structures().iter().any(|p| &p.id == id)
-                        || frame.structures.iter().any(|s| &s.placement.id == id));
+                    && published.contains(&instance.placement.id);
                 if !instance.retirement.keep(wanted) {
                     self.retiring.push(index);
                 }
@@ -1988,54 +1606,6 @@ impl SourceInstances {
         Ok(())
     }
 }
-fn active_food(
-    prototype: &WorldPrototypeReference,
-    mut node: usize,
-    appearance: &[crate::world::NodeAppearance],
-    reference: &ReferenceManifest,
-    item: Option<&crate::interaction::items::ItemState>,
-) -> bool {
-    let Some(item) = item else {
-        return active(prototype, node, appearance);
-    };
-    let state = item.food.unwrap();
-    let food = &reference.survival.foods[state.prototype_index];
-    for _ in 0..prototype.nodes.len() {
-        let source = &prototype.nodes[node].source;
-        let part = food.parts.iter().position(|group| {
-            group.iter().any(|id| {
-                reference
-                    .nodes
-                    .iter()
-                    .any(|n| n.id == *id && &n.source == source)
-            })
-        });
-        let root = reference
-            .nodes
-            .iter()
-            .any(|n| n.id == food.root && &n.source == source);
-        let enabled = if root && item.removed {
-            false
-        } else if let Some(part) = part {
-            !item.removed && part == state.bite as usize
-        } else {
-            appearance
-                .iter()
-                .rev()
-                .find(|a| &a.node == source && a.active.is_some())
-                .and_then(|a| a.active)
-                .unwrap_or(prototype.nodes[node].parent.is_none() || prototype.nodes[node].active)
-        };
-        if !enabled {
-            return false;
-        }
-        let Some(parent) = prototype.nodes[node].parent else {
-            return true;
-        };
-        node = parent as usize;
-    }
-    false
-}
 /// Applies the last rotation and the last scale override of a node to its local transform.
 fn override_local(
     local: Mat4,
@@ -2063,28 +1633,6 @@ fn override_local(
         transform.scale = Vec3::from_array(scale);
     }
     transform.to_matrix()
-}
-fn active(
-    prototype: &WorldPrototypeReference,
-    mut node: usize,
-    appearance: &[crate::world::NodeAppearance],
-) -> bool {
-    for _ in 0..prototype.nodes.len() {
-        if !appearance
-            .iter()
-            .rev()
-            .find(|a| a.node == prototype.nodes[node].source && a.active.is_some())
-            .and_then(|a| a.active)
-            .unwrap_or(prototype.nodes[node].parent.is_none() || prototype.nodes[node].active)
-        {
-            return false;
-        }
-        let Some(parent) = prototype.nodes[node].parent else {
-            return true;
-        };
-        node = parent as usize;
-    }
-    false
 }
 fn grass_patches(mesh: &Mesh, world: Mat4) -> Result<Arc<[GrassPatch]>, ReferenceError> {
     let Some(VertexAttributeValues::Float32x3(positions)) =
@@ -2142,13 +1690,6 @@ fn grass_bounds(
     bevy::camera::primitives::Aabb::from_min_max(min - padding, max + padding)
 }
 
-fn local_pose(pose: crate::reference::Transform) -> Transform {
-    Transform {
-        translation: Vec3::from_array(pose.translation),
-        rotation: Quat::from_array(pose.rotation),
-        scale: Vec3::from_array(pose.scale),
-    }
-}
 fn local_root(placement: &Placement, origin: crate::world::WorldOrigin) -> DMat4 {
     let mut root = Mat4::from_scale_rotation_translation(
         Vec3::from_array(placement.scale),

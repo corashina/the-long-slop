@@ -70,7 +70,6 @@ impl DialBinding {
             + self.values.capacity() * std::mem::size_of::<f32>()
             + self.knobs.capacity() * std::mem::size_of::<ColliderId>()
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn nodes(&self) -> impl Iterator<Item = &DialNode> {
         self.digits
             .iter()
@@ -405,7 +404,6 @@ impl WorldStream {
             }
         }
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn dial(&self, parent: &GeneratedId) -> Option<&DialBinding> {
         self.dial_bindings.iter().find(|b| &b.parent == parent)
     }

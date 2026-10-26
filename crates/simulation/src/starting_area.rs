@@ -33,6 +33,7 @@ mod hud;
 mod ragdoll;
 mod reach;
 pub mod spawned;
+pub mod structure_frame;
 mod survival;
 mod weather;
 pub use survival::DrinkResult;
@@ -764,6 +765,7 @@ pub struct GarageRuntime {
     home_cable_session: Option<u64>,
     /// The followed car the renderer last received.
     followed_car: Option<(crate::world::GeneratedId, u32)>,
+    structure_views: structure_frame::StructureViews,
     /// The feedback the renderer last received.
     last_feedback: Option<hud::FeedbackStamp>,
     /// The last rendered frame input.
@@ -926,6 +928,7 @@ impl GarageRuntime {
             conditions_sent: false,
             home_cable_session: None,
             followed_car: None,
+            structure_views: Default::default(),
             last_feedback: None,
             render_input: Default::default(),
         };

@@ -6,13 +6,13 @@ use crate::lighting::{
     ControlPoseOutput, CycleOutput, LampMaterialOutput, LightOutput, NodeVisibilityOutput,
 };
 use crate::reference::{
-    BodyId, ConditionId, ConditionStartup, ItemId, NodeId, OpeningId, ReferenceManifest,
+    BodyId, ConditionId, ConditionStartup, ItemId, NodeId, OpeningId, ReferenceManifest, SourceId,
 };
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
 use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
-use crate::world::GeneratedId;
+use crate::world::{GeneratedCapVisual, GeneratedId};
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use serde::de::DeserializeOwned;
@@ -119,6 +119,8 @@ pub struct StateBlock {
     pub simulation_seconds: f64,
     /// Starting area origin in world space.
     pub origin: [f64; 3],
+    /// World stream origin: stream space is world space minus this offset.
+    pub stream_origin: [f64; 3],
     /// Day cycle active seconds.
     pub cycle_elapsed_seconds: f64,
     /// World stream session.
@@ -358,6 +360,65 @@ pub struct BudgetRow {
     pub limit: f64,
 }
 
+/// Presentation view of one world structure slot. The renderer keeps the last view of each slot.
+/// Ranges index `SimFrame::structure_poses`, `hidden_nodes` and `node_materials`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct StructureRow {
+    pub slot: u32,
+    pub flags: u32,
+    /// Emission color of a lamp item. Valid with `LAMP`.
+    pub lamp: [f32; 4],
+    /// Computer item of the display output, as `ItemId + 1`. 0 is none.
+    pub display_map: u32,
+    pub poses: [u32; 2],
+    pub hidden: [u32; 2],
+    pub materials: [u32; 2],
+}
+
+impl StructureRow {
+    /// The content bindings are ready. Without it the renderer hides the structure.
+    pub const READY: u32 = 1;
+    /// `lamp` is the emission of the emissive renderers.
+    pub const LAMP: u32 = 1 << 1;
+    /// The structure is a computer display.
+    pub const DISPLAY: u32 = 1 << 2;
+    /// The display is on.
+    pub const DISPLAY_ON: u32 = 1 << 3;
+}
+
+/// One node write of a structure view. `node` indexes the prototype nodes,
+/// or the prototype bodies for `BODY`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct NodePoseRow {
+    pub node: u32,
+    pub kind: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
+impl NodePoseRow {
+    /// A pose relative to the glTF parent.
+    pub const LOCAL: u32 = 0;
+    /// Only the local rotation of a spawned node.
+    pub const ROTATION: u32 = 1;
+    /// A body pose in stream space. Its nodes follow.
+    pub const BODY: u32 = 2;
+    /// A content node pose in stream space.
+    pub const CONTENT: u32 = 3;
+}
+
+/// The material that the renderers of one prototype node show.
+/// `source` indexes the `Change::MaterialSource` list.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct MaterialRow {
+    pub node: u32,
+    pub source: u32,
+}
+
 /// State of one condition owner. Frames carry changed owners; the first frame carries all.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -541,6 +602,20 @@ pub enum Change {
     /// The world car the player last sat in, else the start car: id and prototype.
     FollowedCar(Option<(GeneratedId, u32)>),
     Feedback(Box<Feedback>),
+    /// A world structure takes the slot.
+    StructureAdd {
+        slot: u32,
+        id: GeneratedId,
+    },
+    /// The structure of the slot is gone. The slot can take a new structure.
+    StructureRemove(u32),
+    /// Cap visuals of the structure in the slot.
+    StructureCaps {
+        slot: u32,
+        caps: Vec<GeneratedCapVisual>,
+    },
+    /// The next material source index names this source.
+    MaterialSource(SourceId),
     Failure(String),
 }
 
@@ -589,6 +664,12 @@ pub struct SimFrame {
     pub lamp_materials: Vec<LampMaterialOutput>,
     pub control_poses: Vec<ControlPoseOutput>,
     pub node_visibility: Vec<NodeVisibilityOutput>,
+    /// Structures whose view changed.
+    pub structures: Vec<StructureRow>,
+    pub structure_poses: Vec<NodePoseRow>,
+    /// Prototype nodes that the structure hides.
+    pub hidden_nodes: Vec<u32>,
+    pub node_materials: Vec<MaterialRow>,
     pub changes: Vec<Change>,
 }
 
@@ -636,6 +717,10 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.brush_poses);
     put_rows(out, &frame.spray_colors);
     put_rows(out, &frame.budgets);
+    put_rows(out, &frame.structures);
+    put_rows(out, &frame.structure_poses);
+    put_rows(out, &frame.hidden_nodes);
+    put_rows(out, &frame.node_materials);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
     put_list(out, &frame.lamp_materials);
@@ -666,6 +751,10 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.brush_poses)?;
     take_rows(&mut rest, &mut frame.spray_colors)?;
     take_rows(&mut rest, &mut frame.budgets)?;
+    take_rows(&mut rest, &mut frame.structures)?;
+    take_rows(&mut rest, &mut frame.structure_poses)?;
+    take_rows(&mut rest, &mut frame.hidden_nodes)?;
+    take_rows(&mut rest, &mut frame.node_materials)?;
     frame.lighting = take_value(&mut rest)?;
     take_list(&mut rest, &mut frame.lights)?;
     take_list(&mut rest, &mut frame.lamp_materials)?;

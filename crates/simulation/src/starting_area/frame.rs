@@ -63,6 +63,7 @@ impl GarageRuntime {
         frame.state = StateBlock {
             simulation_seconds: self.simulation_seconds,
             origin: area.origin,
+            stream_origin: offset,
             cycle_elapsed_seconds: self.lighting.cycle.elapsed_seconds(),
             session: self.stream.frame().request.session,
             selection_revision: self.stream.required_content().selection_revision,
@@ -119,6 +120,7 @@ impl GarageRuntime {
         self.fill_particles(reference, frame);
         self.fill_conditions(reference, frame);
         self.fill_followed_car(frame);
+        self.fill_structures(reference, frame);
         self.fill_hud(reference, frame);
         self.fill_audio(reference, alpha, self.render_input, &mut frame.audio);
         frame.budgets.clear();
