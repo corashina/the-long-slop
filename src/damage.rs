@@ -1,5 +1,9 @@
-//! Source breakablescript damage rules. Pure functions with no world access.
-use crate::reference::BreakableReference;
+//! Source breakablescript damage rules and bound break targets.
+//! The rules are pure functions. `Breakables` holds the targets of active content.
+use crate::reference::{BreakableReference, ItemId, LightControlId};
+use crate::vehicle::{ColliderHandle, PhysicsWorld};
+use crate::world::GeneratedId;
+use std::collections::VecDeque;
 
 /// Source breakablescript.velocityToMass.
 const VELOCITY_TO_MASS: f32 = 0.25;
@@ -72,6 +76,149 @@ pub fn try_break_explosion(
         return broken;
     }
     try_break(rules, &mut state.health, force)
+}
+
+/// The object that a breakablescript breaks.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BreakKind {
+    /// A world content item. Its collider user data holds the item.
+    Item(ItemId),
+    /// A lamp trigger of a structure. The record lamp lists the lamps of the control.
+    Lamp {
+        parent: GeneratedId,
+        control: LightControlId,
+    },
+}
+
+/// One bound breakablescript. `record` is an index in `ReferenceManifest::breakables`.
+#[derive(Clone, Debug)]
+pub struct BreakTarget {
+    pub kind: BreakKind,
+    pub record: usize,
+    pub health: BreakHealth,
+    /// Source breakablescript.destroyed: a target breaks once.
+    pub destroyed: bool,
+}
+
+/// Break targets of active content and the breaks of this step.
+#[derive(Default)]
+pub struct Breakables {
+    targets: Vec<BreakTarget>,
+    /// Lamp trigger colliders and their target.
+    colliders: Vec<(ColliderHandle, usize)>,
+    queue: VecDeque<usize>,
+    scan: Option<[u64; 4]>,
+}
+
+impl Breakables {
+    pub fn targets(&self) -> &[BreakTarget] {
+        &self.targets
+    }
+    /// The target of a collider: an item collider or a lamp trigger collider.
+    pub fn target_of(&self, physics: &PhysicsWorld, collider: ColliderHandle) -> Option<usize> {
+        if let Some((_, target)) = self.colliders.iter().find(|(c, _)| *c == collider) {
+            return Some(*target);
+        }
+        // Collider user data low 32 bits hold the item id plus one. Zero is no item.
+        let data = physics.rapier().colliders.get(collider)?.user_data;
+        let item = ((data & u32::MAX as u128) as u32)
+            .checked_sub(1)
+            .map(ItemId)?;
+        self.targets
+            .iter()
+            .position(|t| t.kind == BreakKind::Item(item))
+    }
+    /// Source breakablescript.TryBreak(float).
+    pub fn try_break(&mut self, records: &[BreakableReference], target: usize, force: f32) {
+        let t = &mut self.targets[target];
+        let broken = try_break(&records[t.record], &mut t.health.health, force);
+        self.queue_break(target, broken);
+    }
+    /// Source breakablescript.TryBreak(Rigidbody).
+    pub fn try_break_body(
+        &mut self,
+        records: &[BreakableReference],
+        target: usize,
+        speed: f32,
+        mass: f32,
+    ) {
+        let force = body_force(&records[self.targets[target].record], speed, mass);
+        self.try_break(records, target, force);
+    }
+    /// Source breakablescript.TryBreakShoot.
+    pub fn try_break_shoot(&mut self, records: &[BreakableReference], target: usize, force: f32) {
+        let t = &mut self.targets[target];
+        let broken = try_break_shoot(&records[t.record], &mut t.health, force);
+        self.queue_break(target, broken);
+    }
+    /// Source breakablescript.TryBreakExplosion.
+    pub fn try_break_explosion(
+        &mut self,
+        records: &[BreakableReference],
+        target: usize,
+        force: f32,
+    ) {
+        let t = &mut self.targets[target];
+        let broken = try_break_explosion(&records[t.record], &mut t.health, force);
+        self.queue_break(target, broken);
+    }
+    /// Source breakablescript.Break runs once per target.
+    fn queue_break(&mut self, target: usize, broken: bool) {
+        let t = &mut self.targets[target];
+        if broken && !t.destroyed {
+            t.destroyed = true;
+            self.queue.push_back(target);
+        }
+    }
+    /// Next broken target, in break order.
+    pub fn take_break(&mut self) -> Option<usize> {
+        self.queue.pop_front()
+    }
+    /// Stores the binding scan. False when it did not change.
+    pub(crate) fn rescan(&mut self, scan: [u64; 4]) -> bool {
+        if self.scan == Some(scan) {
+            return false;
+        }
+        self.scan = Some(scan);
+        true
+    }
+    /// Keeps targets in order and moves queued breaks with them. Clears lamp colliders.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&BreakTarget) -> bool) {
+        let mut next = 0;
+        for index in 0..self.targets.len() {
+            if !keep(&self.targets[index]) {
+                self.queue.retain(|q| *q != index);
+                continue;
+            }
+            self.targets.swap(next, index);
+            for q in &mut self.queue {
+                if *q == index {
+                    *q = next;
+                }
+            }
+            next += 1;
+        }
+        self.targets.truncate(next);
+        self.colliders.clear();
+    }
+    /// Adds a target unless the same kind and record is bound.
+    pub(crate) fn bind(&mut self, kind: BreakKind, record: usize, rules: &BreakableReference) {
+        if !self
+            .targets
+            .iter()
+            .any(|t| t.record == record && t.kind == kind)
+        {
+            self.targets.push(BreakTarget {
+                kind,
+                record,
+                health: BreakHealth::new(rules),
+                destroyed: false,
+            });
+        }
+    }
+    pub(crate) fn bind_collider(&mut self, collider: ColliderHandle, target: usize) {
+        self.colliders.push((collider, target));
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +298,31 @@ mod tests {
         assert_eq!(collision_force(&bottle, 5.), Some(5.));
         bottle.no_collider = true;
         assert_eq!(collision_force(&bottle, 40.), None);
+    }
+
+    #[test]
+    fn a_target_breaks_once_and_queued_breaks_follow_rebinding() {
+        let records = [rules(6.), rules(7.)];
+        let mut breakables = Breakables::default();
+        for (item, record) in [(1, 0), (2, 1), (3, 0)] {
+            breakables.bind(BreakKind::Item(ItemId(item)), record, &records[record]);
+        }
+        breakables.bind(BreakKind::Item(ItemId(1)), 0, &records[0]);
+        assert_eq!(breakables.targets().len(), 3, "a bound target binds once");
+        breakables.try_break(&records, 2, 5.);
+        assert!(breakables.take_break().is_none());
+        breakables.try_break(&records, 2, 6.);
+        breakables.try_break_body(&records, 2, 400., 1.);
+        breakables.try_break(&records, 1, 7.);
+        assert!(breakables.targets()[2].destroyed);
+        // Item 1 goes before the breaks are taken. Queued targets move with their index.
+        breakables.retain(|t| t.kind != BreakKind::Item(ItemId(1)));
+        let item = |b: &Breakables, i: usize| b.targets()[i].kind.clone();
+        let first = breakables.take_break().unwrap();
+        assert_eq!(item(&breakables, first), BreakKind::Item(ItemId(3)));
+        let second = breakables.take_break().unwrap();
+        assert_eq!(item(&breakables, second), BreakKind::Item(ItemId(2)));
+        assert!(breakables.take_break().is_none(), "a target breaks once");
     }
 
     #[test]

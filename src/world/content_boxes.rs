@@ -1,12 +1,10 @@
-//! Source boxes: spawnInBoxScript content and breakablescript breaks of generated boxes.
+//! Source boxes: spawnInBoxScript content and contact and hazard breaks of generated boxes.
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
-use crate::damage::{collision_force, try_break};
+use crate::damage::{BreakKind, collision_force};
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::storage::StorageLocks;
-use crate::reference::{
-    BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole,
-};
+use crate::reference::{ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole};
 use crate::vehicle::PhysicsWorld;
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
 use rapier3d::math::{Rotation, Vector};
@@ -125,61 +123,29 @@ pub(crate) fn relocate(placement: &mut Placement, origin: &AbsolutePose, pose: &
     placement.bounds = bounds;
 }
 
-/// Bound generated box and its current breakablescript health.
-pub(crate) struct BoxBinding {
-    item: ItemId,
-    health: f32,
-}
+/// Change revision whose forgotten box removals are applied.
 #[derive(Default)]
 pub(crate) struct BoxRuntime {
-    bindings: Vec<BoxBinding>,
-    scan: Option<(u64, u64)>,
     changes: Option<u64>,
-    broken: Vec<ItemId>,
 }
 
 impl WorldStream {
-    fn box_rules<'a>(&self, reference: &'a ReferenceManifest) -> &'a BreakableReference {
-        reference
-            .breakable(&reference.acquisition.r#box.breakable)
-            .expect("validated box breakable")
-    }
     /// Box content that waits for its box to break.
     pub(super) fn box_content_withheld(&self, id: &GeneratedId) -> bool {
         self.contents.boxes.withheld(id)
     }
-    fn refresh_boxes(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
-        if self.boxes.changes != Some(self.changes.revision()) {
-            // A forgotten box removal respawns the box and withholds its content again.
-            let changes = &self.changes;
-            self.contents.boxes.retain(|r| {
-                changes
-                    .get(ObjectKey::Generated(r.id.clone()))
-                    .is_some_and(|c| c.snapshot.is_none())
-            });
-            self.boxes.changes = Some(self.changes.revision());
-        }
-        let scan = (self.contents.active_revision(), items.membership_revision());
-        if self.boxes.scan == Some(scan) {
+    fn refresh_boxes(&mut self) {
+        if self.boxes.changes == Some(self.changes.revision()) {
             return;
         }
-        self.boxes.scan = Some(scan);
-        let prototype = &reference.acquisition.r#box.prototype.0;
-        let health = self.box_rules(reference).health;
-        let active = &self.contents.active;
-        let bound = |item: ItemId| {
-            items.get(item).is_some_and(|s| !s.removed)
-                && active
-                    .iter()
-                    .any(|c| c.item == Some(item) && &c.content.placement.prototype == prototype)
-        };
-        self.boxes.bindings.retain(|b| bound(b.item));
-        for content in active {
-            let Some(item) = content.item else { continue };
-            if bound(item) && !self.boxes.bindings.iter().any(|b| b.item == item) {
-                self.boxes.bindings.push(BoxBinding { item, health });
-            }
-        }
+        // A forgotten box removal respawns the box and withholds its content again.
+        let changes = &self.changes;
+        self.contents.boxes.retain(|r| {
+            changes
+                .get(ObjectKey::Generated(r.id.clone()))
+                .is_some_and(|c| c.snapshot.is_none())
+        });
+        self.boxes.changes = Some(self.changes.revision());
     }
     /// Run after the physics step. Queues boxes that break this step.
     pub fn step_boxes(
@@ -189,33 +155,25 @@ impl WorldStream {
         physics: &PhysicsWorld,
         dt: f32,
     ) {
-        self.refresh_boxes(reference, items);
-        if self.boxes.bindings.is_empty() {
-            return;
-        }
-        let rules = self.box_rules(reference);
-        let item_of = |handle| {
-            physics
-                .rapier()
-                .colliders
-                .get(handle)
-                .map(|c| (c.user_data & u32::MAX as u128) as u32)
-                .filter(|id| *id != 0)
-                .map(|id| ItemId(id - 1))
-        };
+        self.refresh_boxes();
+        self.refresh_breakables(reference, items);
+        let records = &reference.breakables;
+        let box_record = records
+            .iter()
+            .position(|r| r.source == reference.acquisition.r#box.breakable)
+            .expect("validated box breakable");
+        let rules = &records[box_record];
+        let breakables = &mut self.breakables;
         for hit in physics.hits() {
             for handle in hit.colliders {
-                let Some(item) = item_of(handle) else {
+                let Some(target) = breakables
+                    .target_of(physics, handle)
+                    .filter(|t| breakables.targets()[*t].record == box_record)
+                else {
                     continue;
                 };
-                let Some(binding) = self.boxes.bindings.iter_mut().find(|b| b.item == item) else {
-                    continue;
-                };
-                if let Some(force) = collision_force(rules, hit.speed)
-                    && try_break(rules, &mut binding.health, force)
-                    && !self.boxes.broken.contains(&item)
-                {
-                    self.boxes.broken.push(item);
+                if let Some(force) = collision_force(rules, hit.speed) {
+                    breakables.try_break(records, target, force);
                 }
             }
         }
@@ -225,8 +183,15 @@ impl WorldStream {
         }
         let bodies = &physics.rapier().bodies;
         let filter = QueryFilter::default().exclude_solids();
-        for binding in &mut self.boxes.bindings {
-            let Some(handle) = items.get(binding.item).and_then(|s| s.body) else {
+        for target in 0..breakables.targets().len() {
+            let t = &breakables.targets()[target];
+            let BreakKind::Item(item) = t.kind else {
+                continue;
+            };
+            if t.record != box_record || t.destroyed {
+                continue;
+            }
+            let Some(handle) = items.get(item).and_then(|s| s.body) else {
                 continue;
             };
             let Some(body) = bodies.get(handle) else {
@@ -247,10 +212,8 @@ impl WorldStream {
                     if let Some(TriggerRole::Hazard {
                         damage_breakable, ..
                     }) = self.trigger_roles.get(trigger, other)
-                        && try_break(rules, &mut binding.health, damage_breakable * dt)
-                        && !self.boxes.broken.contains(&binding.item)
                     {
-                        self.boxes.broken.push(binding.item);
+                        breakables.try_break(records, target, damage_breakable * dt);
                     }
                 }
             }
@@ -258,7 +221,12 @@ impl WorldStream {
     }
     /// Next box queued by `step_boxes`. Drop it from the hand before `break_box`.
     pub fn take_broken_box(&mut self) -> Option<ItemId> {
-        self.boxes.broken.pop()
+        while let Some(target) = self.breakables.take_break() {
+            if let BreakKind::Item(item) = self.breakables.targets()[target].kind {
+                return Some(item);
+            }
+        }
+        None
     }
     /// Source breakablescript.Break and mountStuff.Unstore: remove the box, release its content.
     /// Items locked in the box unlock at their current pose first.
@@ -312,8 +280,6 @@ impl WorldStream {
         let state = items.get_mut(item).unwrap();
         state.removed = true;
         items.mark_dirty(item);
-        self.boxes.bindings.retain(|b| b.item != item);
-        self.boxes.scan = None;
         self.boxes.changes = Some(self.changes.revision());
         Ok(Some(release))
     }
