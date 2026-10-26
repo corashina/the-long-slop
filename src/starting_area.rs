@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 
 mod body;
 pub mod cigarettes;
+mod computers;
 pub(crate) mod hose;
 pub mod spawned;
 mod survival;
@@ -1100,6 +1101,7 @@ impl GarageRuntime {
             };
             self.clear_input();
         }
+        self.step_typing(&mut input);
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
@@ -1202,6 +1204,9 @@ impl GarageRuntime {
                     }
                 });
                 if !bus_door
+                    && !self
+                        .stream
+                        .switch_display(knob, reference, &self.area.items)
                     && !self.stream.tune_dial(knob, direction, &mut self.area.items)
                     && !self.stream.switch_detector(knob, &mut self.area.items)
                     && let Some((item, true)) =
@@ -1232,6 +1237,9 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        self.computer_actions(input);
+        self.play_computer_sounds();
+        self.play_computer_notes(&reference.computer.computer);
         while let Some((source, poured_liters, fractions)) =
             self.area.interaction.take_drink_contact()
         {
@@ -2270,6 +2278,7 @@ impl GarageRuntime {
     }
 
     pub fn clear_input(&mut self) {
+        self.stream.computers.typing = false;
         self.area.player.cancel_view_input();
         self.sleep.cancel_charge();
         self.clear_driving_input();

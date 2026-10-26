@@ -1196,6 +1196,7 @@ impl SourceInstances {
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
+        screens: &crate::presentation::computer::ComputerScreens,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
         let membership = (
@@ -1510,6 +1511,21 @@ impl SourceInstances {
             if let Some(color) = stream.lamp_emission(&instance.placement.id) {
                 for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
                     materials.emission(&mut renderer.binding, color, None)?;
+                }
+            }
+            // displayscript.Upd: on shows defMaterial with the computer output as _EmissionMap.
+            if let Some((on, map)) = stream.display_screen(&instance.placement.id) {
+                let color = if on {
+                    reference.computer.display.emission
+                } else {
+                    [0., 0., 0., 1.]
+                };
+                let image = map.and_then(|item| screens.image(item));
+                for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
+                    materials.emission(&mut renderer.binding, color, image.cloned())?;
+                    if image.is_none() {
+                        materials.clear_emission_map(&mut renderer.binding)?;
+                    }
                 }
             }
             if let Some(level) = stream.level(&instance.placement.id) {

@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod computer;
+pub use computer::*;
 pub mod melee;
 pub use melee::*;
 pub mod breakables;
@@ -858,6 +860,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub computer: ComputerRecord,
     pub melee: MeleeReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
@@ -1839,6 +1842,7 @@ impl ReferenceManifest {
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.computer.validate(self)?;
         self.melee.validate(self)?;
         ids(self.breakables.iter().map(|b| &b.source), "breakable sources")?;
         for breakable in &self.breakables {

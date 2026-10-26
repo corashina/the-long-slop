@@ -46,6 +46,17 @@ impl ItemPrompt {
     pub const RELOAD: u8 = 8;
     pub const UNLOAD: u8 = 16;
 }
+/// Computer prompt bits: R turns on or off, LMB uses, E connects or disconnects a held one.
+pub struct ComputerPrompt;
+impl ComputerPrompt {
+    pub const TURN_ON: u8 = 1;
+    pub const TURN_OFF: u8 = 2;
+    pub const USE: u8 = 4;
+    pub const CONNECT: u8 = 8;
+    pub const DISCONNECT: u8 = 16;
+    /// The player types on a computer (inputscript.usingComputer).
+    pub const TYPING: u8 = 32;
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u32)]
 pub enum FeedbackContext {

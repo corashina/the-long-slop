@@ -353,6 +353,10 @@ extern "C" {
     pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameRadioFeedback)]
     pub fn game_radio_feedback(volume: f32, frequency: f32, am: bool);
+    #[wasm_bindgen(js_namespace = window, js_name = gameTypingKeys)]
+    pub fn game_typing_keys() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameTypedText)]
+    pub fn game_typed_text(buffer: &mut [u8]) -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
     pub fn game_feedback(
         actions: u32,
@@ -385,6 +389,7 @@ extern "C" {
         control: u32,
         lmb_use: bool,
         prompts: u32,
+        computer: u32,
     );
 }
 /// The local month and day.
