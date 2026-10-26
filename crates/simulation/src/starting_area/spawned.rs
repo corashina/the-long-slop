@@ -4,7 +4,7 @@ use crate::reference::{ItemId, ItemPrototype, ReferenceError, ReferenceManifest}
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, from_rapier, to_rapier};
 use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpawnedItem {
     pub id: ItemId,
     /// Save identity of one spawn call. All bodies of that call share it.

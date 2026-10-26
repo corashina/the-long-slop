@@ -49,9 +49,8 @@ pub(crate) struct Drive {
 }
 
 impl Drive {
-    /// Player body pose at the rendered camera. It moves with the camera interpolation.
-    pub(crate) fn rendered_body_pose(&self) -> VehiclePose {
-        let mut pose = self.runtime.area.player.body_pose(&self.runtime.physics);
+    /// Player body `pose` at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self, mut pose: VehiclePose) -> VehiclePose {
         for i in 0..3 {
             pose.position[i] += self.rendered.position[i] - self.current.position[i];
         }
