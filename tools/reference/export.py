@@ -90,6 +90,7 @@ def runtime_resources(manifest):
     collect(manifest.get('lighting', {}))
     collect(manifest.get('particles', []))
     collect(manifest.get('weather', {}))
+    collect(manifest.get('sky', {}))
     collect(manifest.get('conditions', {}))
     collect(manifest.get('clothing', {}))
     for p in manifest.get('item_prototypes',[]):collect(p.get('consumable'))
@@ -113,7 +114,8 @@ def validate_runtime_paths(manifest):
     if not world or not world.get('prototypes'):
         raise ValueError('Missing required source world dependency')
     from .item_prototypes import SELECTED
-    expected = {f'reference/{name}.gltf' for name in ('home','items','road_lamp','sky','food','player',*(p[3] for p in SELECTED))}
+    from .sky import PREFABS
+    expected = {f'reference/{name}.gltf' for name in ('home','items','road_lamp','sky','food','player',*(p[3] for p in SELECTED),*(p[0] for p in PREFABS))}
     prototype_ids={p['asset'] for p in world['prototypes']}
     material_ids={p['asset'] for p in world['painting_materials']}
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
@@ -303,6 +305,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
+    from .sky import prepare_sky, recover_sky, validate_sky
+    prepare_sky(source, roots)
     from .world import prepare_home_cable
     prepare_home_cable(source)
     report = {}
@@ -348,6 +352,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_particles_export(particles,manifest)
     manifest['weather']=weather
     validate_weather_export(weather,manifest)
+    manifest['sky']=recover_sky(source,manifest,output)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)
@@ -365,12 +370,13 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith('item_') and name!='player'},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith(('item_','sky_')) and name!='player'},manifest,library,output)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
     from .acquisition import recover_acquisition, validate_acquisition
     manifest['acquisition'] = recover_acquisition(source, manifest)
     validate_acquisition(manifest['acquisition'], manifest)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
+    validate_sky(manifest['sky'], manifest)
     validate_small_items(manifest['small_items'], manifest)
     validate_melee(manifest['melee'], manifest)
     validate_skid(manifest['skid'])
