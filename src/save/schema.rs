@@ -38,7 +38,9 @@ pub struct SaveSnapshot {
     pub mechanisms: MechanismsSnapshot,
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
-    /// save_radioscript controls; absent only when the audio export is unavailable.
+    /// save_radioscript controls of the garage Lada radio; absent only when the audio export
+    /// is unavailable. World car radios save in their world change records.
+    /// V03 bridge: Task 9 removes this field with the garage Lada.
     pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,

@@ -229,6 +229,17 @@ def audio_curve(value):
         'rotation_order': value['m_RotationOrder']}
 
 
+def radio_voice_groups(templates):
+    """Group world radios by equal SS, SC and SC2 settings. `templates` is (radioscript, voices) pairs."""
+    strip=lambda t:[{k:v for k,v in voice.items() if k!='source'} for voice in t]
+    groups=[]
+    for identity,voices in templates:
+        group=next((g for g in groups if strip(g['voices'])==strip(voices)),None)
+        if group is None:groups.append({'sources':[identity],'voices':voices})
+        else:group['sources'].append(identity)
+    return groups
+
+
 def car_voice(templates, record):
     """Id of a car voice template in `templates`. Equal templates share one id."""
     for t in templates:
@@ -704,20 +715,20 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'initial_outside':bool(d['outSide']),'initial_player_inside':bool(d['playerInside']),
             'methods':[method(cls,'Update'),method(cls,'SetSources')]})
 
-    # World radios share one checked voice template; the browser keeps a fixed slot pool.
+    # World radios (portable and car radios) share a voice template per equal setting set.
+    # The browser keeps a fixed slot pool per template.
     portable=[r['source'] for r in manifest['world']['records']
         if r['class_name']=='radioscript' and r['source']!=audio['radio']['source']]
     templates=[]
     for identity in portable:
         r=source.get(identity['file'],identity['path_id']);d=source.read(r)
-        templates.append([{'id':0,'source':source_id(source.resolve(r,d[f])),'emitter':0,
+        template=[{'id':0,'source':source_id(source.resolve(r,d[f])),'emitter':0,
             **voice_settings(source.resolve(r,d[f])),'methods':[method('radioscript','Start'),method('radioscript','SetRadio')]}
-            for f in ['SS','SC','SC2']])
-        for v in templates[-1][:2]:v['priority']=PRIORITIES[5]
+            for f in ['SS','SC','SC2']]
+        for v in template[:2]:v['priority']=PRIORITIES[5]
+        templates.append((identity,template))
     if not templates:raise ValueError('Missing portable radio prefabs')
-    strip=lambda t:[{k:v for k,v in voice.items() if k!='source'} for voice in t]
-    if any(strip(t)!=strip(templates[0]) for t in templates):raise ValueError('Portable radio voices differ')
-    audio['portable_radio']={'sources':portable,'voices':templates[0]}
+    audio['portable_radios']=radio_voice_groups(templates)
     # Preserve the compiled group graph, snapshot parameters, and native effect identity.
     mixer_sources = {key(source.resolve(source.get(*identity),source.read(source.get(*identity))['m_AudioMixer'])) for identity in groups}
     if len(mixer_sources)!=1:raise ValueError('Selected voices must resolve one source mixer')
@@ -765,7 +776,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         vehicle['audio']=car_audio(source,car,wheels,cd,car_sound,car_shot)
     skid=manifest['skid']
     for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
-    for field in ['radio','portable_radio']:
+    for field in ['radio','portable_radios']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")

@@ -443,6 +443,14 @@ class HitAudio(unittest.TestCase):
             with self.assertRaises(ValueError): validate_ambience_zones(changed, {7, 8})
 
 class CarAudio(unittest.TestCase):
+    def test_car_radio_exports_its_own_voices(self):
+        from tools.reference.audio import radio_voice_groups
+        voices = lambda source, gain: [{'id': 0, 'source': source + k, 'gain': gain} for k in range(3)]
+        groups = radio_voice_groups([('portable1', voices(10, 1.)), ('car', voices(20, .5)), ('portable2', voices(30, 1.))])
+        # Equal settings share one group; the car radio keeps its own voices.
+        self.assertEqual([g['sources'] for g in groups], [['portable1', 'portable2'], ['car']])
+        self.assertEqual(groups[1]['voices'][0]['gain'], .5)
+
     def test_engine_part_sounds_and_shared_templates(self):
         from tools.reference.audio import car_voice, engine_audio, PRIORITIES
         file = NS(source_container_path='sharedassets1.assets')
