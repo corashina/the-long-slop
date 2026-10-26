@@ -37,7 +37,22 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
 - The save keeps gauge part values per key.
-- Save schema 21. Older saves are rejected.
+- The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
+- Save schema 22. Older saves are rejected.
+
+## Bus doors
+
+`src/world/content_busdoors.rs` binds `busdoorscripts`, `busdooropenscript` and `dinamiccolliderforbus` on a car copy.
+
+- Each door has `Usign` and `Uopen` usables. Their colliders are switch knobs. One usable can serve more doors.
+- `Usign` sets the signal. `Uopen` toggles the door and clears the signal.
+- Lamps: open = green off, red on. Signal = green on, red off. Else both off. `Rbs` and `Rbc` take the `greenON`/`greenOFF` and `redON`/`redOFF` materials.
+- Buttons work only when the `electronics` output is above `mainscript.lightTurnOffValue`. With no electronics they always work.
+- Leaves lerp their euler angles to `opened` or `closed`. The speed is drawn in `Start` order from `minspeed`..`maxspeed`.
+- A leaf plays a random sound when `minTime` passed since its last use. Colliders below a leaf turn with it.
+- `dinamiccolliderforbus`: each box length follows the `t1`-`t2` distance when a leaf moves.
+- `detachIfOpen` waits for the V05 hitch. Opening only clears the link.
+- A usable that also slides (world mechanism) slides and works as a door button.
 
 ## Physics fix
 
@@ -111,6 +126,6 @@ Expected work for other cars:
 
 - Car03: the engine needs two-stroke mixed fuel. It has no radiator and no oil tank.
 - Car06P: diesel works through its engine `fuel_consumption`. Add its category.
-- Buses: door scripts (`busdoorscripts`) and the trailer come in later PRs.
+- Buses: the trailer comes in a later PR.
 - Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.

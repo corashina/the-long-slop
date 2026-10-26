@@ -10,6 +10,7 @@ from .library.reader import checked
 from .library.types import ObjectId
 from .source import key, source_id
 from .wheel_effects import recover_wheel_voices
+from .bus_doors import door_audio
 from .particles import relative_pose
 
 ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
@@ -408,14 +409,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             'mixer': mixer(source.resolve(reader, d['OutputAudioMixerGroup'])), 'doppler': d['DopplerLevel'], 'pan': d['Pan2D']})
     def car_sound(reader, owner, priority):
         return {'voice': car_template(reader, priority, False), 'position': offset(reader, owner)}
-    def car_shot(owner_reader, pointer, gain, reader, owner):
+    def car_shot(owner_reader, pointer, gain, reader, owner, priority=PRIORITIES[2]):
         """A clip played once: on AudioSource `reader`, else through mainscript.PlayClipAtPoint at `owner`."""
         target = source.resolve(owner_reader, pointer)
         if target is None: return None
         if reader is not None:
             return {'voice': car_template(reader, None, True), 'clip': clip(target), 'gain': gain, 'position': offset(reader, owner)}
         shared = car_voice(audio['car_voices'], {'source': audio['shared']['source'], 'one_shot': True, 'clip': None,
-            'settings': {**audio['shared']['settings'], 'priority': PRIORITIES[2]}, 'mixer': audio['shared']['mixer'],
+            'settings': {**audio['shared']['settings'], 'priority': priority}, 'mixer': audio['shared']['mixer'],
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
         return {'voice': shared, 'clip': clip(target), 'gain': gain, 'position': [0., 0., 0.]}
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
@@ -538,6 +539,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
             car_group=group
             wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
             vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
+            vehicle['audio']['doors']=door_audio(source,root,car,lambda r,p:car_shot(r,p,1.,None,None,PRIORITIES[4]))
             routes=[c for node in source.hierarchy(root,activate_root=True) for c in node['components']
                 if c.type.name=='MonoBehaviour' and source.class_name(c)=='audioBasedOnInteriorsensscript' and source.read(c)['def']['m_PathID']]
             if len(routes)>1:raise ValueError(f'Car prototype has more than one audio route: {key(car)}')

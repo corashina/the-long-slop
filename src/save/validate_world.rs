@@ -365,6 +365,11 @@ impl SaveSnapshot {
                 source(s)?;
                 source(part)?;
             }
+            for (id, s, speed) in &init.door_speeds {
+                generated(id)?;
+                source(s)?;
+                data(speed.is_finite(), "Source door speed")?;
+            }
             for c in &init.conditions {
                 generated(&c.parent)?;
                 source(&c.source)?;

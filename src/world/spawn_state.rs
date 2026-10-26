@@ -37,6 +37,8 @@ pub struct SpawnInitialization {
     pub selectors: Vec<(GeneratedId, SourceId, usize)>,
     pub activations: Vec<(GeneratedId, SourceId, bool)>,
     pub slot_parts: Vec<(GeneratedId, SourceId, SourceId)>,
+    /// Source `busdooropenscript.speed` drawn in Start.
+    pub door_speeds: Vec<(GeneratedId, SourceId, f32)>,
 }
 impl SpawnInitialization {
     pub(crate) fn for_parent(&self, parent: &GeneratedId) -> Self {
@@ -79,6 +81,12 @@ impl SpawnInitialization {
                 .collect(),
             paintings: self
                 .paintings
+                .iter()
+                .filter(|v| &v.0 == parent)
+                .cloned()
+                .collect(),
+            door_speeds: self
+                .door_speeds
                 .iter()
                 .filter(|v| &v.0 == parent)
                 .cloned()
@@ -141,6 +149,12 @@ impl SpawnInitialization {
                 .slot_parts
                 .iter()
                 .map(|(p, s, t)| identity_bytes(p) + s.file.capacity() + t.file.capacity())
+                .sum::<usize>()
+            + self.door_speeds.capacity() * std::mem::size_of::<(GeneratedId, SourceId, f32)>()
+            + self
+                .door_speeds
+                .iter()
+                .map(|(p, s, _)| identity_bytes(p) + s.file.capacity())
                 .sum::<usize>()
     }
 }

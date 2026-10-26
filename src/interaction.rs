@@ -1813,7 +1813,10 @@ impl InteractionState {
                         player.view(physics).camera_pose,
                         dt,
                     );
-                    action = Some(InteractionAction::Mechanism(target.item));
+                    // A usable can slide and be a switch knob (bus door button): both react.
+                    if !matches!(action, Some(InteractionAction::DialTune(..))) {
+                        action = Some(InteractionAction::Mechanism(target.item));
+                    }
                 }
             }
         }
