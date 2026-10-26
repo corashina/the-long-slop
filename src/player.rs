@@ -1,3 +1,4 @@
+pub mod body;
 pub mod collision;
 mod head_bob;
 mod ladder;
@@ -173,6 +174,8 @@ pub struct PlayerState {
     running: bool,
     ladder: ladder::LadderState,
     hazard_damage: f32,
+    /// Source `GetDir` `forward` and `backward`.
+    walk_keys: [bool; 2],
 }
 
 impl PlayerState {
@@ -287,6 +290,7 @@ impl PlayerState {
             running: false,
             ladder: ladder::LadderState::default(),
             hazard_damage: 0.0,
+            walk_keys: [false; 2],
         }
     }
 
@@ -906,6 +910,17 @@ impl PlayerState {
             return;
         }
         let bodies = &physics.rapier().bodies;
+        let held = |key| input.held & key != 0;
+        self.walk_keys = if self.occupancy.is_some() {
+            [false; 2]
+        } else if self.push_gripping {
+            [held(keys::FORWARD), held(keys::BACK)]
+        } else {
+            [
+                held(keys::FORWARD) || held(keys::LEFT) || held(keys::RIGHT),
+                held(keys::BACK),
+            ]
+        };
         if let Some(seat) = &self.occupancy {
             let head = to_rapier(self.view(physics).head_pose).rotation;
             let velocity = bodies[seat.body].linvel();
@@ -928,6 +943,14 @@ impl PlayerState {
     /// True on the step a source footstep fires.
     pub fn footstep_beat(&self) -> bool {
         self.view_state.footstep_beat()
+    }
+    /// Source `currentAdd` of the last head bob step.
+    pub fn walk_add(&self) -> f32 {
+        self.view_state.walk_add()
+    }
+    /// Source `forward` and `backward` of the last head bob step.
+    pub fn walk_keys(&self) -> [bool; 2] {
+        self.walk_keys
     }
     pub fn apply_recoil(&mut self, impulse: Vector) {
         self.recoil_velocity += impulse / self.reference.mass_kg;

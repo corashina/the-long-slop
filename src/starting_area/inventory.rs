@@ -45,6 +45,8 @@ impl StartingArea {
                 physics,
             )
             .expect("validated equipment receipt");
+        // Source RightHandRelease: Drop leaves pickedUpPoint on TpickedUpParent.
+        self.interaction.carry.grip_at_anchor();
         physics.refresh_queries();
         Ok(true)
     }
@@ -254,6 +256,8 @@ impl StartingArea {
                         physics,
                     )
                     .expect("validated inventory retrieval");
+                // Source inventory retrieval puts pickedUpPoint on TpickedUpParent.
+                self.interaction.carry.grip_at_anchor();
             }
         }
         self.sync_inventory();

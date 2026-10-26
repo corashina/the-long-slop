@@ -21,6 +21,7 @@ use rapier3d::prelude::{
 };
 use std::collections::{BTreeMap, HashMap};
 
+mod body;
 pub mod cigarettes;
 pub(crate) mod hose;
 pub mod spawned;
@@ -36,6 +37,7 @@ pub struct StartingArea {
     pub interaction: InteractionState,
     pub inventory: crate::inventory::InventoryState,
     pub pose: crate::player::pose::PlayerPoseState,
+    pub body: crate::player::body::BodyState,
     inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
     inventory_clutch_conflict: bool,
     pub player: PlayerState,
@@ -261,6 +263,7 @@ impl StartingArea {
                     && binding.codes.iter().any(|code| code == "Digit1")
             }),
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
+            body: crate::player::body::BodyState::new(reference)?,
             bodies,
             items,
             interaction,
@@ -1361,6 +1364,7 @@ impl GarageRuntime {
         }
         self.area.sync_inventory();
         self.area.sync_equipment(reference, &mut self.physics);
+        self.step_body(reference);
         self.sync_mouth();
         self.area.items.sync_poses(&self.physics);
         self.break_boxes(reference);
