@@ -26,6 +26,7 @@ pub mod cigarettes;
 mod computers;
 mod frame;
 pub mod hose;
+mod ragdoll;
 mod reach;
 pub mod spawned;
 mod survival;
@@ -270,7 +271,7 @@ impl StartingArea {
             }),
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
             body: crate::player::body::BodyState::new(reference)?,
-            ragdoll: Default::default(),
+            ragdoll: crate::player::ragdoll::Ragdoll::new(reference)?,
             bodies,
             items,
             interaction,
@@ -289,6 +290,7 @@ impl StartingArea {
     pub fn sync_origin(&mut self, origin: [f64; 3]) {
         let shift = std::array::from_fn(|i| (origin[i] - self.origin[i]) as f32);
         self.player.rebase(shift);
+        self.ragdoll.rebase(shift);
         self.interaction.rebase(shift);
         self.items.rebase(shift);
         self.gibs.rebase(shift);
@@ -1347,9 +1349,13 @@ impl GarageRuntime {
                 .player
                 .scan_triggers(&self.physics, self.stream.trigger_roles());
         }
-        self.area
-            .player
-            .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        if self.area.ragdoll.active() {
+            self.follow_ragdoll();
+        } else {
+            self.area
+                .player
+                .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        }
         self.apply_hazards(reference);
         self.area.sync_attachments(&mut self.physics, true);
         self.area
