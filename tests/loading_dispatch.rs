@@ -12,6 +12,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     let mut stream = WorldStream::new(
         &reference,
         42,
+        reference.world.spawn_context.date,
         the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,
@@ -64,6 +65,7 @@ fn installed_graph_control_admission_precedes_allocation_and_replaces_bootstrap(
     let mut candidate = WorldStream::new(
         &reference,
         43,
+        reference.world.spawn_context.date,
         the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,

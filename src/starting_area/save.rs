@@ -245,8 +245,14 @@ impl GarageRuntime {
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
-        let mut candidate =
-            Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
+        let mut candidate = Self::new_candidate(
+            reference,
+            false,
+            saved.world.seed,
+            saved.world.date,
+            mode,
+            draw_distance,
+        )?;
         candidate
             .area
             .conditions

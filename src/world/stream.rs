@@ -183,6 +183,8 @@ pub struct WorldStream {
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
+    /// Session date as year, month, day. It decides date rules for the whole game.
+    date: [i32; 3],
     mode: super::GameMode,
     package_id: String,
     generation_revision: u64,
@@ -406,6 +408,7 @@ impl WorldStream {
                 placements: self.placements.capture_index(),
             },
             seed: self.seed,
+            date: self.date,
             changes,
             spawn: self.contents.state.capture_history(),
         }
@@ -668,6 +671,7 @@ impl WorldStream {
         Self::new(
             reference,
             seed,
+            reference.world.spawn_context.date,
             super::GameMode::default(),
             super::DrawDistances::resolve(r, r.default),
         )
@@ -675,6 +679,7 @@ impl WorldStream {
     pub fn new(
         reference: &ReferenceManifest,
         seed: i32,
+        date: [i32; 3],
         mode: super::GameMode,
         distances: super::DrawDistances,
     ) -> Result<Self, ReferenceError> {
@@ -729,7 +734,7 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let mut contents = super::contents::SourceContents::new(world);
+        let mut contents = super::contents::SourceContents::new(world, date);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
@@ -810,6 +815,7 @@ impl WorldStream {
             bus_door_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
+            date,
             mode,
             biome_materials,
             structure_helpers,

@@ -737,7 +737,14 @@ impl GarageRuntime {
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32, mode, draw_distance)
+        Self::new_candidate(
+            reference,
+            true,
+            DEFAULT_SEED as i32,
+            new_game_date(reference),
+            mode,
+            draw_distance,
+        )
     }
     /// Test runtime in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -752,6 +759,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        date: [i32; 3],
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
@@ -760,7 +768,7 @@ impl GarageRuntime {
         let mut physics = PhysicsWorld::new(reference);
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed, mode, distances)?;
+        let mut stream = WorldStream::new(reference, seed, date, mode, distances)?;
         if stream_world {
             let spawn = reference.area.player_spawn.translation.map(f64::from);
             stream.request_at(spawn, spawn);
@@ -2531,6 +2539,21 @@ fn vehicle_steer(current: f32, pushed: Option<f32>, driven: Option<f32>) -> f32 
     pushed.or(driven).unwrap_or(current)
 }
 
+/// Today's local date as year, month, day.
+#[cfg(target_arch = "wasm32")]
+fn new_game_date(_: &ReferenceManifest) -> [i32; 3] {
+    let today = js_sys::Date::new_0();
+    [
+        today.get_full_year() as i32,
+        today.get_month() as i32 + 1,
+        today.get_date() as i32,
+    ]
+}
+/// Native builds use the fixed reference date, so tests stay deterministic.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_game_date(reference: &ReferenceManifest) -> [i32; 3] {
+    reference.world.spawn_context.date
+}
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }

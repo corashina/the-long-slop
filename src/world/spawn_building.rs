@@ -3,6 +3,10 @@ use super::Placement;
 use super::spawn_contents::{SpawnEvaluation, SpawnedContent, yaw};
 use super::spawn_rules::*;
 use crate::reference::{ReferenceError, SourceId};
+/// Source Halloween window: 15 October through 15 November.
+fn halloween(date: [i32; 3]) -> bool {
+    (date[1] == 10 && date[2] >= 15) || (date[1] == 11 && date[2] <= 15)
+}
 impl SpawnEvaluation<'_> {
     pub(super) fn building(
         &mut self,
@@ -34,10 +38,10 @@ impl SpawnEvaluation<'_> {
                 self.painting(parent, self.rules.get(self.reference, p)?)?;
             }
         }
-        let halloween = (self.context.date[1] == 10 && self.context.date[2] >= 15)
-            || (self.context.date[1] == 11 && self.context.date[2] <= 15);
         if flag(f, "forceRandomFlyer")?
-            || (flag(f, "randomFlyerOnHalloween")? && halloween && self.random.range(0., 1.) > 0.35)
+            || (flag(f, "randomFlyerOnHalloween")?
+                && halloween(self.context.date)
+                && self.random.range(0., 1.) > 0.35)
         {
             let count = self.random.range_int(5, 30);
             let main = SourceId {
@@ -169,4 +173,14 @@ pub(crate) fn source_euler(v: [f32; 3]) -> [f32; 4] {
     let z = [0., 0., v[2].sin(), v[2].cos()];
     let q = super::placement::multiply(super::placement::multiply(y, x), z);
     [-q[0], -q[1], q[2], q[3]]
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn halloween_window() {
+        assert!(!super::halloween([2026, 10, 14]));
+        assert!(super::halloween([2026, 10, 15]));
+        assert!(super::halloween([2026, 11, 15]));
+        assert!(!super::halloween([2026, 11, 16]));
+    }
 }
