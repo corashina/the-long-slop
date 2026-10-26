@@ -1196,9 +1196,8 @@ impl SourceInstances {
                 }
                 let enabled = active_food(prototype, i, appearance, reference, food)
                     && car
-                        .and_then(|(_, v)| v.lights.as_ref())
-                        .and_then(|l| l.visibility().iter().find(|(n, _)| *n == i as u32))
-                        .is_none_or(|(_, visible)| *visible);
+                        .and_then(|(record, v)| v.node_visible(record, i as u32))
+                        .unwrap_or(true);
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
                     commands

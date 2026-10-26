@@ -818,6 +818,25 @@ impl VehicleRuntime {
                 _ => None,
             })
     }
+    /// Visibility that a world car sets on node `node`: lamp Working/nWorking nodes and the
+    /// light switch state nodes. None: the car does not set it.
+    pub fn node_visible(
+        &self,
+        record: &crate::reference::WorldVehicleReference,
+        node: u32,
+    ) -> Option<bool> {
+        if let Some(switch) = &record.light_switch
+            && let Some(state) = switch.state_nodes.iter().position(|n| n.contains(&node))
+        {
+            return Some(state == self.requested_headlights as usize);
+        }
+        self.lights
+            .as_ref()?
+            .visibility()
+            .iter()
+            .find(|(n, _)| *n == node)
+            .map(|(_, visible)| *visible)
+    }
     /// Requested headlight state: off, low or high.
     pub fn headlights(&self, lighting: &crate::lighting::LightingState) -> u8 {
         match self.record {

@@ -269,12 +269,12 @@ enum CarSystem {
     Skid,
 }
 /// The particle record of one car group.
-fn car_particle<'a>(
-    reference: &'a crate::reference::ReferenceManifest,
+fn car_particle(
+    reference: &crate::reference::ReferenceManifest,
     system: CarSystem,
     record: crate::starting_area::VehicleRecord,
     source: usize,
-) -> &'a crate::reference::ParticleReference {
+) -> &crate::reference::ParticleReference {
     match system {
         CarSystem::Exhaust => &record.exhaust(reference)[source],
         CarSystem::Wheel => {
