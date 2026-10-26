@@ -4213,6 +4213,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "simulation"
+version = "0.1.0"
+dependencies = [
+ "bevy_platform",
+ "glam 0.32.1",
+ "grass-mesh",
+ "js-sys",
+ "rapier3d",
+ "road-mesh",
+ "serde",
+ "serde_json",
+ "terrain",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "skrifa"
 version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4426,6 +4442,7 @@ dependencies = [
  "road-mesh",
  "serde",
  "serde_json",
+ "simulation",
  "terrain",
  "wasm-bindgen",
  "wasm-bindgen-futures",

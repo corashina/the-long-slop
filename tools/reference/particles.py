@@ -78,7 +78,7 @@ def validate_particle(p,textures):
     for material in p['materials']:
         if any(t['texture'] not in textures for t in material['textures']):raise ValueError('Missing particle texture')
 
-# Modules that src/particles.rs runs. ShapeModule and EmissionModule feed emission; the others change live particles.
+# Modules that crates/simulation/src/particles.rs runs. ShapeModule and EmissionModule feed emission; the others change live particles.
 EXHAUST_MODULES=frozenset({'InitialModule','ShapeModule','EmissionModule','VelocityModule','ForceModule',
     'InheritVelocityModule','SizeModule','ColorModule','RotationModule','CollisionModule','UVModule'})
 
