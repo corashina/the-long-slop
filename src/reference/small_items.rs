@@ -9,6 +9,38 @@ pub struct SmallItemsReference {
     pub genie_lamp: GenieLampReference,
     pub start_packs: Vec<SmallItemStartReference>,
     pub exhale: ExhaleReference,
+    pub washes: Vec<WashReference>,
+    pub wash_effects: Vec<WashEffectReference>,
+}
+
+/// A washtriggerscript on a world prototype node: the building cobwebs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WashReference {
+    pub source: SourceId,
+    pub prototype: SourceId,
+    /// The trigger node (Transform).
+    pub node: SourceId,
+    /// Colliders on the node and below it (GetComponentInParent).
+    pub colliders: Vec<SourceId>,
+    /// CleanProperty: the clean table row.
+    pub permission: u8,
+    pub never_repair: bool,
+    pub destroy_on_repair: bool,
+    /// Nodes that GotClean deactivates.
+    pub objects: Vec<SourceId>,
+    pub chance_to_start_disabled: f32,
+    pub particle_on_destroy: Option<SourceId>,
+}
+
+/// A particleOnDestroy prefab: its particle system and its play-on-awake sound.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WashEffectReference {
+    pub source: SourceId,
+    pub particle: ParticleReference,
+    pub clip: SourceId,
+    pub volume: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -46,6 +78,9 @@ pub struct SprayBottleReference {
     pub prototype: SourceId,
     pub source: SourceId,
     pub ammo: AcquisitionAmmo,
+    /// ammoscript.canPour: refill repeats every `pour_time` while R is held.
+    pub can_pour: bool,
+    pub pour_time: f32,
     pub cleaning_type: u8,
     pub text: u32,
     pub angle_speed: f32,
@@ -113,6 +148,7 @@ const GENIE_LAMP_ITEM: u32 = 211;
 const PACK_ITEM: u32 = 74;
 const START_BOTTLES: usize = 2;
 const START_PACKS: usize = 3;
+const COBWEBS: usize = 529;
 
 fn invalid(field: &str) -> ReferenceError {
     ReferenceError(format!("Invalid small item field {field}"))
@@ -227,6 +263,8 @@ impl SmallItemsReference {
                 && s.gain > 0.
                 && s.distance > 0.
                 && s.wash_radius > 0.
+                && s.pour_time.is_finite()
+                && s.pour_time >= 0.
                 && s.startup.len() == START_BOTTLES,
             "spray bottle",
         )?;
@@ -290,6 +328,8 @@ impl SmallItemsReference {
             "duplicate small item start",
         )?;
 
+        self.validate_washes(m, &class)?;
+
         let e = &self.exhale;
         checked(
             e.node.0 >= 1
@@ -302,6 +342,75 @@ impl SmallItemsReference {
             "mouth smoke",
         )?;
         conditions::validate_particle(&e.controller, &e.particle, m)
+    }
+}
+
+impl SmallItemsReference {
+    fn validate_washes(
+        &self,
+        m: &ReferenceManifest,
+        class: &dyn Fn(&SourceId, &str) -> bool,
+    ) -> Result<(), ReferenceError> {
+        for f in &self.wash_effects {
+            checked(
+                item_prototypes::clip_exists(m, &f.clip) && (0. ..=1.).contains(&f.volume),
+                "wash destroy sound",
+            )?;
+            conditions::validate_particle(&f.source, &f.particle, m)?;
+        }
+        for w in &self.washes {
+            let p = m
+                .world
+                .prototypes
+                .iter()
+                .find(|p| p.source == w.prototype)
+                .ok_or_else(|| invalid("wash prototype"))?;
+            let node = p
+                .nodes
+                .iter()
+                .position(|n| n.source == w.node)
+                .ok_or_else(|| invalid("wash node"))?;
+            let below = |mut i: usize| loop {
+                if i == node {
+                    return true;
+                }
+                match p.nodes[i].parent {
+                    Some(parent) => i = parent as usize,
+                    None => return false,
+                }
+            };
+            checked(
+                class(&w.source, "washtriggerscript")
+                    && usize::from(w.permission) < m.conditions.clean_tables.len()
+                    && w.colliders.iter().all(|c| {
+                        p.colliders
+                            .iter()
+                            .any(|pc| pc.source == *c && below(pc.node as usize))
+                    })
+                    && w.objects
+                        .iter()
+                        .all(|o| p.nodes.iter().any(|n| n.source == *o))
+                    && (0. ..1.).contains(&w.chance_to_start_disabled)
+                    && w.particle_on_destroy
+                        .as_ref()
+                        .is_none_or(|e| self.wash_effects.iter().any(|f| f.source == *e)),
+                "wash trigger",
+            )?;
+        }
+        // The checked cobwebs: CleanProperty 2, destroyOnRepair, one sphere trigger each.
+        checked(
+            self.washes.len() == COBWEBS
+                && self.washes.iter().all(|w| {
+                    w.permission == 2
+                        && w.destroy_on_repair
+                        && !w.never_repair
+                        && w.objects.is_empty()
+                        && w.colliders.len() == 1
+                        && w.particle_on_destroy.is_some()
+                }),
+            "cobweb wash triggers",
+        )?;
+        ids(self.washes.iter().map(|w| &w.node), "duplicate wash node").map(|_| ())
     }
 }
 
@@ -347,5 +456,22 @@ mod tests {
         assert_eq!(parsed.ammo.r#type, 5);
         let extra = start.replacen("\"item_id\"", "\"extra\":1,\"item_id\"", 1);
         assert!(serde_json::from_str::<SmallItemStartReference>(&extra).is_err());
+    }
+
+    #[test]
+    fn wash_records_keep_trigger_fields() {
+        let wash = r#"{"source":{"file":"level1","path_id":77908},
+            "prototype":{"file":"sharedassets1.assets","path_id":49170},
+            "node":{"file":"sharedassets1.assets","path_id":1},
+            "colliders":[{"file":"sharedassets1.assets","path_id":124445}],"permission":2,
+            "never_repair":false,"destroy_on_repair":true,"objects":[],
+            "chance_to_start_disabled":0.3,
+            "particle_on_destroy":{"file":"sharedassets1.assets","path_id":45340}}"#;
+        let parsed: WashReference = serde_json::from_str(wash).unwrap();
+        assert!(parsed.destroy_on_repair && !parsed.never_repair);
+        assert_eq!(parsed.permission, 2);
+        assert_eq!(parsed.particle_on_destroy.unwrap().path_id, 45340);
+        let shoot = wash.replacen("\"permission\"", "\"wash_on_shoot\":true,\"permission\"", 1);
+        assert!(serde_json::from_str::<WashReference>(&shoot).is_err());
     }
 }

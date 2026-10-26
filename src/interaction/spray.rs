@@ -128,6 +128,8 @@ pub(crate) mod tests {
                 r#type: 7,
                 random_range: [10., 100.],
             },
+            can_pour: false,
+            pour_time: 0.,
             cleaning_type: 0,
             text: 185,
             angle_speed: 10.,
