@@ -97,12 +97,13 @@ def recover_flyer(source, manifest):
         'speed_range':[d['minSpeed'],d['maxSpeed']],'velocity_lerp':d['velocityLerp'],'rot_lerp':d['rotLerp'],
         'sound_time_range':[d['soundMinTime'],d['soundMaxTime']],'volume_range':[d['soundMinVolume'],d['soundMaxVolume']],
         'pitch_range':[d['soundMinPitch'],d['soundMaxPitch']],
-        # recover_audio replaces these AudioClip identities with clip ids.
-        'clips':[source_id(source.resolve(flyer,c)) for c in d['soundClips']],'wing':wing}
+        # recover_audio replaces these AudioClip identities with clip ids and sets the shared one-shot voice.
+        'clips':[source_id(source.resolve(flyer,c)) for c in d['soundClips']],'voice':None,'wing':wing}
 
 def validate_flyer(f, manifest):
     prototype=next((p for p in manifest['world']['prototypes'] if p['source']==f['prefab']),None)
     clips={c['id'] for c in manifest['audio']['clips']}
+    shots={v['id'] for v in manifest['audio']['car_voices'] if v['one_shot']}
     def track(t):
         width=4 if t.get('attribute')==2 else 3
         record(t,{'node':u32,'attribute':u32,'path_hash':u32,'custom_type':u32,'curve_offset':u32,'storage':string,'interpolation':string,
@@ -113,12 +114,13 @@ def validate_flyer(f, manifest):
             'start_time':number,'stop_time':number,'sample_rate':number,'loop':boolean,'cycle_offset':number,'tracks':array(track),'events':array(lambda e:None)})
     record(f,{'source':source_shape,'prefab':source_shape,'asset':u32,'item_id':u32,'time_range':array(number,2),'range':array(number,2),
         'max_range_from_start':number,'speed_range':array(number,2),'velocity_lerp':number,'rot_lerp':number,'sound_time_range':array(number,2),
-        'volume_range':array(number,2),'pitch_range':array(number,2),'clips':array(u32),'wing':clip})
+        'volume_range':array(number,2),'pitch_range':array(number,2),'clips':array(u32),'voice':u32,'wing':clip})
     finite_record(f)
     if prototype is None or prototype['asset']!=f['asset']:raise ValueError('Invalid flyer prototype')
     if any(not 0<=r[0]<=r[1] for r in (f['time_range'],f['range'],f['speed_range'],f['sound_time_range'],f['volume_range'],f['pitch_range'])):
         raise ValueError('Invalid flyer range')
-    if min(f['max_range_from_start'],f['velocity_lerp'],f['rot_lerp'])<=0 or not f['clips'] or any(c not in clips for c in f['clips']):
+    if (min(f['max_range_from_start'],f['velocity_lerp'],f['rot_lerp'])<=0 or not f['clips'] or any(c not in clips for c in f['clips'])
+            or f['voice'] not in shots):
         raise ValueError('Invalid flyer values')
     w=f['wing']
     if (w['source']!={'file':FLYER_CLIP[0],'path_id':FLYER_CLIP[1]} or not w['loop'] or not w['start_time']<w['stop_time']

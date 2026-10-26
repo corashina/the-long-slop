@@ -45,6 +45,8 @@ pub struct FlyerReference {
     pub pitch_range: [f32; 2],
     /// Squeak audio clip IDs.
     pub clips: Vec<u32>,
+    /// One-shot car voice template of mainscript.PlayClipAtPoint for the squeaks.
+    pub voice: u32,
     /// Looping wing clip. Track nodes are prototype node indices.
     pub wing: MotionClip,
 }
@@ -74,6 +76,14 @@ impl FlyerReference {
                     clips.is_some_and(|c| c.iter().any(|c| c["id"].as_u64() == Some(*id as u64)))
                 }),
             "flyer clips",
+        )?;
+        require(
+            m.audio["car_voices"].as_array().is_some_and(|v| {
+                v.iter().any(|v| {
+                    v["id"].as_u64() == Some(u64::from(self.voice)) && v["one_shot"] == true
+                })
+            }),
+            "flyer voice",
         )?;
         let prototype = m.world.prototypes.get(&self.prefab);
         require(
@@ -195,7 +205,7 @@ impl FlyerReference {
             "prefab": {"file": "sharedassets1.assets", "path_id": 32395},
             "asset": 1, "item_id": 318, "time_range": [0., 3.], "range": [5., 20.],
             "max_range_from_start": 20., "speed_range": [1., 4.], "velocity_lerp": 1., "rot_lerp": 2.,
-            "sound_time_range": [10., 60.], "volume_range": [0.3, 0.6], "pitch_range": [0.8, 1.2], "clips": [1],
+            "sound_time_range": [10., 60.], "volume_range": [0.3, 0.6], "pitch_range": [0.8, 1.2], "clips": [1], "voice": 1,
             "wing": {
                 "source": {"file": "sharedassets1.assets", "path_id": 3992},
                 "source_tracks": {"bytes": 1, "file": "tracks.json", "sha256": "a"},

@@ -9,6 +9,7 @@ use super::{
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
 };
+use crate::animation::clip::LocalPart;
 use crate::world::stream::content_index::{ContentSlot, InstanceSelection};
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
@@ -193,6 +194,8 @@ pub struct SourceInstances {
     /// Indices of instances with a Grass displacement writer.
     writer_instances: Vec<usize>,
     writers_dirty: bool,
+    /// Local wing pose of each bat prototype node. Reused each frame.
+    wing_poses: Vec<Transform>,
 }
 impl SourceInstances {
     pub fn props(&self) -> &GpuProps {
@@ -1184,6 +1187,8 @@ impl SourceInstances {
             crate::starting_area::VehicleRuntime,
         >,
         powertrain: &crate::simulation::powertrain::PowertrainParts,
+        flyers: &crate::flyers::Flyers,
+        seconds: f64,
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
@@ -1494,6 +1499,38 @@ impl SourceInstances {
                 for b in level.bubbles() {
                     let node = prototype.nodes[b.node].gltf_node as usize;
                     instance.write_local(transforms, node, local_pose(b.pose), frame.origin)?;
+                }
+            }
+            // The bat Animator loops the wing clip from the flyer start.
+            if prototype.source == reference.sky.flyer.prefab {
+                let wing = &reference.sky.flyer.wing;
+                let born = items
+                    .generated_item_id(&instance.placement.id)
+                    .and_then(|item| flyers.flyers().iter().find(|f| f.item == item))
+                    .map_or(0., |f| f.born);
+                let poses = &mut self.wing_poses;
+                poses.resize(prototype.nodes.len(), Transform::IDENTITY);
+                for track in &wing.tracks {
+                    let node = track.node as usize;
+                    poses[node] = local_pose(prototype.nodes[node].transform);
+                }
+                let time = crate::animation::clip::loop_time(wing, (seconds - born) as f32);
+                crate::animation::clip::sample_clip(wing, time, |node, part| {
+                    let pose = &mut poses[node as usize];
+                    match part {
+                        LocalPart::Position(p) => pose.translation = Vec3::from_array(p.to_array()),
+                        LocalPart::Rotation(r) => pose.rotation = Quat::from_array(r.to_array()),
+                        LocalPart::Scale(v) => pose.scale = Vec3::from_array(v.to_array()),
+                    }
+                });
+                for track in &wing.tracks {
+                    let node = &prototype.nodes[track.node as usize];
+                    instance.write_local(
+                        transforms,
+                        node.gltf_node as usize,
+                        poses[track.node as usize],
+                        frame.origin,
+                    )?;
                 }
             }
             for (i, node) in prototype.nodes.iter().enumerate() {

@@ -673,7 +673,7 @@ pub struct GarageRuntime {
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
-    flyers: crate::flyers::Flyers,
+    pub flyers: crate::flyers::Flyers,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -1676,10 +1676,18 @@ impl GarageRuntime {
             &self.area.items,
             &mut self.physics,
         );
-    }
-
-    pub fn flyers(&self) -> &crate::flyers::Flyers {
-        &self.flyers
+        if let Some(audio) = &mut self.audio {
+            let (items, physics, origin) = (&self.area.items, &self.physics, &self.stream.origin);
+            audio.flyers(
+                flyer.voice,
+                self.flyers.squeaks(),
+                self.simulation_seconds,
+                |item| {
+                    let body = physics.rapier().bodies.get(items.get(item)?.body?)?;
+                    Some(origin.absolute(body.translation().to_array()))
+                },
+            );
+        }
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

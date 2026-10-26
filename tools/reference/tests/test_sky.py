@@ -92,7 +92,8 @@ def manifest(source):
     return {'nodes': nodes, 'assets': [{'id': 1, 'usage': 'sky_traffic', 'root': {'file': ASSETS, 'path_id': 6484}},
         {'id': 2, 'usage': 'sky_traffic', 'root': {'file': ASSETS, 'path_id': 38331}}],
         'lighting': {'textures': []}, 'audio': {'voices': [{'id': 1, 'emitter': 1}, {'id': 2, 'emitter': 2}],
-        'emitters': [{'id': 1, 'node': 3}, {'id': 2, 'node': 4}], 'clips': [{'id': 1}]},
+        'emitters': [{'id': 1, 'node': 3}, {'id': 2, 'node': 4}], 'clips': [{'id': 1}],
+        'car_voices': [{'id': 1, 'one_shot': False}, {'id': 2, 'one_shot': True}]},
         'world': {'prototypes': [{'source': {'file': ASSETS, 'path_id': 32395}, 'asset': 7,
             'nodes': [{'source': {'file': ASSETS, 'path_id': 32395}}, {'source': {'file': ASSETS, 'path_id': 32401}}]}]}}
 
@@ -120,7 +121,7 @@ class SkyTests(unittest.TestCase):
             record = sky.recover_sky(source, records or manifest(source), None)
         record['flyer'] = sky.recover_flyer(source, records or manifest(source))
         # recover_audio replaces the AudioClip identities with clip ids.
-        record['flyer']['clips'] = [1]
+        record['flyer']['clips'] = [1]; record['flyer']['voice'] = 2
         return record
 
     def test_record(self):
@@ -143,7 +144,7 @@ class SkyTests(unittest.TestCase):
             sky.validate_sky(record, manifest(source))
             for change in [lambda r: r['chances'].pop(), lambda r: r.update(max_planes=0), lambda r: r.update(spawn_time_range=[500., 50.]),
                     lambda r: r.update(speed=float('nan')), lambda r: r['prefabs'][0].update(voices=[2]),
-                    lambda r: r['flyer'].update(clips=[2]), lambda r: r['flyer'].update(speed_range=[4., 1.]),
+                    lambda r: r['flyer'].update(clips=[2]), lambda r: r['flyer'].update(voice=1), lambda r: r['flyer'].update(speed_range=[4., 1.]),
                     lambda r: r['flyer']['wing'].update(loop=False), lambda r: r['flyer']['wing']['tracks'][0].update(node=2),
                     lambda r: r['flyer']['wing']['tracks'][0]['values'].pop(),
                     lambda r: r['flyer']['wing']['tracks'][2]['values'][0].pop()]:
@@ -161,7 +162,7 @@ class SkyTests(unittest.TestCase):
         self.assertEqual({k: v for k, v in flyer.items() if k != 'wing'}, {
             'source': {'file': ASSETS, 'path_id': 32397}, 'prefab': {'file': ASSETS, 'path_id': 32395}, 'asset': 7, 'item_id': 318,
             'time_range': [0., 3.], 'range': [5., 20.], 'max_range_from_start': 20., 'speed_range': [1., 4.], 'velocity_lerp': 1.,
-            'rot_lerp': 2., 'sound_time_range': [10., 60.], 'volume_range': [.3, .6], 'pitch_range': [.8, 1.2], 'clips': [1]})
+            'rot_lerp': 2., 'sound_time_range': [10., 60.], 'volume_range': [.3, .6], 'pitch_range': [.8, 1.2], 'clips': [1], 'voice': 2})
         self.assertEqual(flyer['wing']['source'], {'file': ASSETS, 'path_id': 3992})
         self.assertEqual(flyer['wing']['tracks'][0]['node'], 1)
 

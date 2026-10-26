@@ -318,6 +318,8 @@ impl PreparedPresentation {
                 &mut candidate.wheels,
                 &mut candidate.vehicles,
                 &mut candidate.powertrain,
+                &candidate.flyers,
+                candidate.simulation_seconds,
                 view,
                 candidate.lighting.cycle.output().shader_time_seconds as f32,
                 lod,

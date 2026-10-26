@@ -873,6 +873,8 @@ fn sync_world(
             &mut runtime.wheels,
             &mut runtime.vehicles,
             &mut runtime.powertrain,
+            &runtime.flyers,
+            runtime.simulation_seconds,
             view,
             runtime.lighting.cycle.output().shader_time_seconds as f32,
             lod_view,

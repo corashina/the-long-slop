@@ -12,6 +12,8 @@ use rapier3d::prelude::RigidBodyHandle;
 pub struct Flyer {
     pub item: ItemId,
     pub body: RigidBodyHandle,
+    /// Simulation seconds when the flyer started. The wing Animator plays from here.
+    pub born: f64,
     start: Vector,
     target: Vector,
     next_time: f64,
@@ -91,6 +93,7 @@ impl Flyers {
             let mut flyer = Flyer {
                 item,
                 body,
+                born: now,
                 start,
                 target: start,
                 next_time: now,
@@ -104,7 +107,8 @@ impl Flyers {
     }
 
     /// Source randomFlyer.Update. Sets the body velocity and rotation before the physics step.
-    /// A carried, stored, frozen or inactive bat does not fly.
+    /// A held bat keeps its timers and squeaks but does not fly.
+    /// A stored, frozen or inactive bat does nothing.
     pub fn step(
         &mut self,
         r: &FlyerReference,
@@ -115,17 +119,20 @@ impl Flyers {
     ) {
         self.squeaks.clear();
         for f in &mut self.flyers {
-            if !items
+            let Some(flies) = items
                 .get(f.item)
-                .is_some_and(|i| i.location == ItemLocation::World && i.inactive_pose.is_none())
-                || !physics.body_active(f.body)
-            {
+                .filter(|i| i.inactive_pose.is_none())
+                .and_then(|i| free(i.location))
+            else {
+                continue;
+            };
+            if !physics.body_active(f.body) {
                 continue;
             }
             let Some(body) = physics.rapier().bodies.get(f.body) else {
                 continue;
             };
-            if !body.is_dynamic() || !body.is_enabled() {
+            if !body.is_enabled() {
                 continue;
             }
             let position = body.translation();
@@ -147,6 +154,9 @@ impl Flyers {
                     });
                 }
             }
+            if !flies || !body.is_dynamic() {
+                continue;
+            }
             let dir = (f.target - position).clamp_length_max(f.speed);
             let velocity = steer(body.linvel(), dir, dt * r.velocity_lerp);
             let rotation =
@@ -167,6 +177,16 @@ impl Flyers {
             f.start -= shift;
             f.target -= shift;
         }
+    }
+}
+
+/// Whether randomFlyer.Update runs and the bat may fly: `Some(true)` free, `Some(false)` held.
+/// A stored or attached bat is inactive.
+fn free(location: ItemLocation) -> Option<bool> {
+    match location {
+        ItemLocation::World => Some(true),
+        ItemLocation::Held => Some(false),
+        _ => None,
     }
 }
 
@@ -214,6 +234,7 @@ mod tests {
         Flyer {
             item: ItemId(0),
             body: RigidBodyHandle::invalid(),
+            born: 0.,
             start,
             target: start,
             next_time: 0.,
@@ -234,6 +255,13 @@ mod tests {
             assert!((f.target - start).length() <= r.max_range_from_start + 1e-3);
             assert!((r.speed_range[0]..=r.speed_range[1]).contains(&f.speed));
         }
+    }
+
+    #[test]
+    fn held_bat_keeps_timers_but_does_not_fly() {
+        assert_eq!(free(ItemLocation::World), Some(true));
+        assert_eq!(free(ItemLocation::Held), Some(false));
+        assert_eq!(free(ItemLocation::Stored(0)), None);
     }
 
     #[test]
