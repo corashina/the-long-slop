@@ -85,11 +85,43 @@ pub struct ChangeRecords {
     payload_bytes: usize,
     #[serde(skip)]
     region_bytes: usize,
+    /// Car-side state of car objects. A car takes its state back when it spawns.
+    #[serde(serialize_with = "pairs")]
+    vehicles: BTreeMap<ObjectKey, crate::starting_area::VehicleState>,
+    /// The rim object of each wheel slot of car objects, in wheel order.
+    #[serde(serialize_with = "pairs")]
+    wheel_slots: BTreeMap<ObjectKey, Vec<Option<ObjectKey>>>,
+    /// Source `enginescript` state of engine part objects.
+    #[serde(serialize_with = "pairs")]
+    engines: BTreeMap<ObjectKey, crate::save::EngineSnapshot>,
+    /// Source `coolantTankscript` fan state of radiator part objects.
+    #[serde(serialize_with = "pairs")]
+    radiators: BTreeMap<ObjectKey, bool>,
 }
 impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
         self.records == other.records
+            && self.vehicles == other.vehicles
+            && self.wheel_slots == other.wheel_slots
+            && self.engines == other.engines
+            && self.radiators == other.radiators
     }
+}
+/// Writes a map with object keys as a list of pairs. JSON object keys must be strings.
+fn pairs<V: Serialize, S: serde::Serializer>(
+    map: &BTreeMap<ObjectKey, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(map.iter())
+}
+/// Reads a list of pairs. A key must occur once.
+fn unique<V, E: serde::de::Error>(pairs: Vec<(ObjectKey, V)>) -> Result<BTreeMap<ObjectKey, V>, E> {
+    let count = pairs.len();
+    let map: BTreeMap<_, _> = pairs.into_iter().collect();
+    if map.len() != count {
+        return Err(E::custom("Duplicate object state identity"));
+    }
+    Ok(map)
 }
 impl<'de> Deserialize<'de> for ChangeRecords {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -97,9 +129,19 @@ impl<'de> Deserialize<'de> for ChangeRecords {
         #[serde(deny_unknown_fields)]
         struct Envelope {
             records: Vec<(ObjectKey, ObjectChange)>,
+            vehicles: Vec<(ObjectKey, crate::starting_area::VehicleState)>,
+            wheel_slots: Vec<(ObjectKey, Vec<Option<ObjectKey>>)>,
+            engines: Vec<(ObjectKey, crate::save::EngineSnapshot)>,
+            radiators: Vec<(ObjectKey, bool)>,
         }
         let envelope = Envelope::deserialize(deserializer)?;
-        let mut result = Self::default();
+        let mut result = Self {
+            vehicles: unique(envelope.vehicles)?,
+            wheel_slots: unique(envelope.wheel_slots)?,
+            engines: unique(envelope.engines)?,
+            radiators: unique(envelope.radiators)?,
+            ..Self::default()
+        };
         for (key, change) in envelope.records {
             if result.identities.contains_key(&key) {
                 return Err(serde::de::Error::custom("Duplicate world change identity"));
@@ -113,8 +155,15 @@ fn region(p: [f64; 3]) -> (i64, i64) {
     ((p[0] / 256.).floor() as i64, (p[2] / 256.).floor() as i64)
 }
 impl ChangeRecords {
+    /// Generated object records and every object state.
     pub(crate) fn generated_records(&self) -> Self {
-        let mut result = Self::default();
+        let mut result = Self {
+            vehicles: self.vehicles.clone(),
+            wheel_slots: self.wheel_slots.clone(),
+            engines: self.engines.clone(),
+            radiators: self.radiators.clone(),
+            ..Self::default()
+        };
         for (key, change) in self.iter() {
             if matches!(key, ObjectKey::Generated(_)) {
                 result.insert(key.clone(), change.clone());
@@ -418,8 +467,77 @@ impl ChangeRecords {
             }
         }
     }
+    /// Keeps the car-side state of car `key` until it spawns again.
+    pub(crate) fn keep_vehicle(
+        &mut self,
+        key: ObjectKey,
+        state: crate::starting_area::VehicleState,
+    ) {
+        self.vehicles.insert(key, state);
+    }
+    pub(crate) fn take_vehicle(
+        &mut self,
+        key: &ObjectKey,
+    ) -> Option<crate::starting_area::VehicleState> {
+        self.vehicles.remove(key)
+    }
+    pub fn vehicle(&self, key: &ObjectKey) -> Option<&crate::starting_area::VehicleState> {
+        self.vehicles.get(key)
+    }
+    pub fn vehicles(
+        &self,
+    ) -> impl Iterator<Item = (&ObjectKey, &crate::starting_area::VehicleState)> {
+        self.vehicles.iter()
+    }
+    /// Keeps the rim object of each wheel slot of car `key` until it spawns again.
+    pub(crate) fn keep_wheel_slots(&mut self, key: ObjectKey, rims: Vec<Option<ObjectKey>>) {
+        self.wheel_slots.insert(key, rims);
+    }
+    pub(crate) fn take_wheel_slots(&mut self, key: &ObjectKey) -> Option<Vec<Option<ObjectKey>>> {
+        self.wheel_slots.remove(key)
+    }
+    /// Keeps the state of engine part `key` until it spawns again.
+    pub(crate) fn keep_engine(&mut self, key: ObjectKey, state: crate::save::EngineSnapshot) {
+        self.engines.insert(key, state);
+    }
+    pub(crate) fn take_engine(&mut self, key: &ObjectKey) -> Option<crate::save::EngineSnapshot> {
+        self.engines.remove(key)
+    }
+    pub fn engine(&self, key: &ObjectKey) -> Option<&crate::save::EngineSnapshot> {
+        self.engines.get(key)
+    }
+    pub fn engines(&self) -> impl Iterator<Item = (&ObjectKey, &crate::save::EngineSnapshot)> {
+        self.engines.iter()
+    }
+    /// Keeps the fan state of radiator part `key` until it spawns again.
+    pub(crate) fn keep_radiator(&mut self, key: ObjectKey, fan_on: bool) {
+        self.radiators.insert(key, fan_on);
+    }
+    pub(crate) fn take_radiator(&mut self, key: &ObjectKey) -> Option<bool> {
+        self.radiators.remove(key)
+    }
+    pub fn radiator(&self, key: &ObjectKey) -> Option<bool> {
+        self.radiators.get(key).copied()
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
+            + object_states_bytes(&self.vehicles)
+            + object_states_bytes(&self.wheel_slots)
+            + self
+                .wheel_slots
+                .values()
+                .map(|rims| {
+                    rims.capacity() * std::mem::size_of::<Option<ObjectKey>>()
+                        + rims.iter().flatten().map(key_heap).sum::<usize>()
+                })
+                .sum::<usize>()
+            + object_states_bytes(&self.engines)
+            + self
+                .engines
+                .values()
+                .map(|e| e.start_draw.capacity())
+                .sum::<usize>()
+            + object_states_bytes(&self.radiators)
             + self.records.capacity() * std::mem::size_of::<(ObjectKey, ObjectChange)>()
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)
@@ -435,6 +553,11 @@ impl ChangeRecords {
                     + 12 * std::mem::size_of::<usize>()
                     + 64)
     }
+}
+/// B-tree nodes and key heap of an object state map.
+fn object_states_bytes<V>(map: &BTreeMap<ObjectKey, V>) -> usize {
+    map.len() * (std::mem::size_of::<(ObjectKey, V)>() + 16)
+        + map.keys().map(key_heap).sum::<usize>()
 }
 fn attachment_owner(snapshot: &ObjectSnapshot) -> Option<&ObjectKey> {
     snapshot.attachment.as_ref()?.owner.as_ref()
@@ -479,33 +602,17 @@ pub(crate) fn capture(
         snapshot.attachment = Some(locked_attachment(id, items, &interaction.storage)?);
         return Some(snapshot);
     }
-    let relation =
-        match state.location {
-            ItemLocation::Attached(parent) => Some((Some(parent), None)),
-            ItemLocation::PartSlot(slot) => interaction
-                .parts
-                .slot_identity(slot)
-                .map(|(owner, source)| (owner, Some(source.clone()))),
-            ItemLocation::WheelSlot(slot) => reference
-                .wheel_slots
-                .iter()
-                .find(|s| s.id == slot)
-                .map(|s| {
-                    (
-                        reference
-                            .items
-                            .iter()
-                            .find(|i| {
-                                reference.vehicles.iter().any(|vehicle| {
-                                    vehicle.wheel_slots.contains(&slot) && i.node == vehicle.root
-                                })
-                            })
-                            .map(|i| i.id),
-                        Some(s.source.clone()),
-                    )
-                }),
-            _ => None,
-        };
+    let relation = match state.location {
+        ItemLocation::Attached(parent) => Some((Some(parent), None)),
+        ItemLocation::PartSlot(slot) => interaction
+            .parts
+            .slot_identity(slot)
+            .map(|(owner, source)| (owner, Some(source.clone()))),
+        ItemLocation::WheelSlot(slot) => interaction
+            .wheel_slot_identity(slot)
+            .map(|(owner, source)| (owner, Some(source.clone()))),
+        _ => None,
+    };
     if let Some((parent, slot)) = relation {
         let pose = if let Some(parent) = parent.and_then(|p| items.get(p)) {
             from_rapier(&(to_rapier(parent.pose).inverse() * to_rapier(state.pose)))

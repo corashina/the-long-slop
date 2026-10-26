@@ -314,13 +314,8 @@ impl StructureRecipe {
                 continue;
             };
             // PhysX keeps the inertia of the collider shapes and moves only the center of mass.
-            physics.recompute_body_mass(handle);
-            physics.edit_body(handle, |body| {
-                let mut properties = body.mass_properties().local_mprops;
-                properties.local_com = center;
-                body.set_additional_mass_properties(properties, false);
-            });
-            physics.recompute_body_mass(handle);
+            // The override stays through later mass changes.
+            physics.set_center_of_mass(handle, center)?;
         }
         physics.refresh_queries();
         Ok(StructureInstance {

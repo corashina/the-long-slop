@@ -63,8 +63,8 @@ class WheelEffectsTests(unittest.TestCase):
         self.assertEqual(records[0]['pose'], 130)
         self.assertEqual(records[0]['dust'], {'source': 132, 'role': 'wheel_0_0_dust', 'rate': 1.})
         self.assertEqual(records[0]['grass'], [{'source': 133, 'role': 'wheel_0_0_grass_0', 'rate': 7.}])
-        self.assertEqual([records[0][f] for f in ('ground_voice', 'spring_voice', 'slide_voice')],
-            [{'file': 'level1', 'path_id': 134 + k} for k in range(3)])
+        voices = wheel_effects.recover_wheel_voices(source, source.root, source.wheels)
+        self.assertEqual(voices[0], {f: {'file': 'level1', 'path_id': 134 + k} for k, f in enumerate(('ground', 'spring', 'slide'))})
         self.assertEqual(records[0]['ray_mask'], 5)
         self.assertIsNone(records[0]['own_gains'])
 

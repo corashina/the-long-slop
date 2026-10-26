@@ -435,6 +435,7 @@ impl WorldStream {
     pub fn world_reference(&self) -> &crate::reference::WorldReference {
         &self.reference
     }
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn sync_contents(
         &mut self,
         reference: &ReferenceManifest,
@@ -442,6 +443,8 @@ impl WorldStream {
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<ObjectKey, crate::starting_area::VehicleRuntime>,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         for content in &mut self.contents.active {
             crate::world::content_mechanisms::sync(content, items, interaction, physics);
@@ -518,6 +521,11 @@ impl WorldStream {
                         .rules
                         .component(&self.reference, pickup_root, "pickupable")?
                 else {
+                    if prototype.vehicle.is_some() {
+                        return Err(ReferenceError(
+                            "Car prototype root has no pickupable".into(),
+                        ));
+                    }
                     continue;
                 };
                 (|| -> Result<(), ReferenceError> {
@@ -644,6 +652,23 @@ impl WorldStream {
                         reference,
                         interaction,
                     )?;
+                    // The last fallible step: a failed binding leaves no car behind.
+                    // Seats bind later and find the vehicle of the chassis.
+                    crate::world::content_vehicles::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.reference,
+                        &reference.skid,
+                        &self.contents.rules,
+                        items,
+                        interaction,
+                        physics,
+                        wheels,
+                        vehicles,
+                        powertrain,
+                        &mut self.changes,
+                    )?;
                     content.suspended_bodies.reserve(instance.bodies.len());
                     capture_baselines(content, reference, items, interaction, physics);
                     let state = items.get(id).unwrap();
@@ -724,41 +749,60 @@ impl WorldStream {
                     interaction
                         .parts
                         .mount_mechanism(item, &mut interaction.mechanisms);
-                    if let Some(mut snapshot) =
-                        crate::world::changes::capture(item, items, interaction, physics, reference)
-                    {
-                        for owner in &mut self.contents.active {
-                            if owner.item == Some(item) {
-                                snapshot.lamp = owner.content.portable_lamp();
-                                owner.baseline = Some(snapshot);
-                                for binding in &mut owner.bindings {
-                                    binding.baseline = crate::world::changes::capture(
-                                        binding.item,
-                                        items,
-                                        interaction,
-                                        physics,
-                                        reference,
-                                    )
-                                    .unwrap();
-                                }
-                                owner.restored = false;
-                                break;
-                            }
-                            if let Some(binding) =
-                                owner.bindings.iter_mut().find(|b| b.item == item)
-                            {
-                                binding.baseline = snapshot;
-                                owner.restored = false;
-                                break;
-                            }
-                        }
-                    }
+                    self.rebaseline(item, reference, items, interaction, physics);
                     self.contents.active[content_index].slots[slot_index].initialized = true;
                 }
             }
         }
+        // World car wheel slots mount their rim when its item binds.
+        if wheels.install_pending(items, physics)? {
+            for (sensor, rim) in wheels.sensor_rims() {
+                interaction.bind_wheel_sensor(sensor, rim, physics);
+            }
+            for &item in wheels.last_installed() {
+                self.rebaseline(item, reference, items, interaction, physics);
+            }
+        }
         self.restore_content_changes(reference, items, interaction, physics, wheels)?;
         Ok(())
+    }
+    /// A slot part that mounted at binding: its owner content takes the mounted state as
+    /// its baseline.
+    fn rebaseline(
+        &mut self,
+        item: crate::reference::ItemId,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        if let Some(mut snapshot) =
+            crate::world::changes::capture(item, items, interaction, physics, reference)
+        {
+            for owner in &mut self.contents.active {
+                if owner.item == Some(item) {
+                    snapshot.lamp = owner.content.portable_lamp();
+                    owner.baseline = Some(snapshot);
+                    for binding in &mut owner.bindings {
+                        binding.baseline = crate::world::changes::capture(
+                            binding.item,
+                            items,
+                            interaction,
+                            physics,
+                            reference,
+                        )
+                        .unwrap();
+                    }
+                    owner.restored = false;
+                    break;
+                }
+                if let Some(binding) = owner.bindings.iter_mut().find(|b| b.item == item) {
+                    binding.baseline = snapshot;
+                    owner.restored = false;
+                    break;
+                }
+            }
+        }
     }
     fn restore_content_changes(
         &mut self,
@@ -934,10 +978,20 @@ impl WorldStream {
             .is_none_or(|c| c.item.is_none() || c.restored)
     }
     /// Squared distance to the nearest source important object: the player and every car.
-    fn important_distance(&self, position: [f64; 3]) -> f32 {
+    /// A car does not count itself: `own` is its chassis.
+    fn important_distance(
+        &self,
+        position: [f64; 3],
+        own: Option<rapier3d::prelude::RigidBodyHandle>,
+    ) -> f32 {
         [self.request.player, self.request.vehicle]
             .into_iter()
-            .chain(self.cars.iter().copied())
+            .chain(
+                self.cars
+                    .iter()
+                    .filter(|(chassis, _)| Some(*chassis) != own)
+                    .map(|(_, p)| *p),
+            )
             .map(|p| crate::world::contents::distance(p, position))
             .fold(f32::INFINITY, f32::min)
     }
@@ -947,6 +1001,8 @@ impl WorldStream {
         items: &mut ItemStore,
         interaction: &mut InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<ObjectKey, crate::starting_area::VehicleRuntime>,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         let remove = self.distances.item_remove_dist;
         let freeze = self.distances.item_freeze_dist;
@@ -979,7 +1035,9 @@ impl WorldStream {
             let offset =
                 crate::world::placement::rotate(pose.rotation, content.content.distance_offset);
             let position = std::array::from_fn(|i| pose.position[i] + offset[i] as f64);
-            let mut distance = self.important_distance(position);
+            let body = id.and_then(|id| items.get(id)).and_then(|s| s.body);
+            let own = body.filter(|b| physics.vehicle_of(*b).is_some());
+            let mut distance = self.important_distance(position, own);
             let local_item = |item| {
                 content.item == Some(item) || content.bindings.iter().any(|b| b.item == item)
             };
@@ -997,10 +1055,28 @@ impl WorldStream {
                             && owner.slots.iter().any(|s| s.slot == slot)
                     })
             };
+            // A world car slot rim may leave with its car or the car content that spawned it.
+            let local_owner = |item| {
+                local_item(item)
+                    || self.contents.active.iter().any(|owner| {
+                        let parent = &owner.content.placement.id;
+                        let child = &content.content.placement.id;
+                        parent.layer == child.layer
+                            && parent.generator == child.generator
+                            && parent.unit == child.unit
+                            && parent.ordinal == child.ordinal
+                            && child.children.len() > parent.children.len()
+                            && child.children.starts_with(&parent.children)
+                            && owner.item == Some(item)
+                    })
+            };
             let protected_location = |location| match location {
                 crate::interaction::items::ItemLocation::World => false,
                 crate::interaction::items::ItemLocation::Attached(owner) => !local_item(owner),
                 crate::interaction::items::ItemLocation::PartSlot(slot) => !local_slot(slot),
+                crate::interaction::items::ItemLocation::WheelSlot(slot) => {
+                    !wheels.slot_owner(slot).is_some_and(local_owner)
+                }
                 _ => true,
             };
             let mut protected = id
@@ -1010,10 +1086,13 @@ impl WorldStream {
                 if let Some(item) = items.get(binding.item) {
                     protected |= protected_location(item.location);
                     let position = self.origin.absolute(item.pose.position);
-                    distance = distance.min(self.important_distance(position));
+                    distance = distance.min(self.important_distance(position, own));
                 }
             }
             protected |= content.has_external_dependents(items, &interaction.parts, wheels);
+            // The seat owner and the last seated car stay.
+            // V05 hook: a trailer attached to the seated car stays too. Check its hitch here.
+            protected |= body.is_some_and(|b| self.kept.contains(&Some(b)));
             protected |= self
                 .saved_item_protection
                 .iter()
@@ -1059,6 +1138,16 @@ impl WorldStream {
                 continue;
             }
             let content = self.contents.remove_active(index);
+            crate::world::content_vehicles::retire(
+                &content,
+                items,
+                interaction,
+                physics,
+                vehicles,
+                wheels,
+                powertrain,
+                &mut self.changes,
+            );
             if let Some(item) = content.item {
                 interaction.storage.departed(item);
                 // Restart: items that leave with this owner may sit before `index`.
@@ -1358,6 +1447,13 @@ fn bind_storage(
                 node as usize,
             )
         },
+        |source| {
+            content
+                .slots
+                .iter()
+                .find(|s| s.source == *source)
+                .map(|s| s.slot)
+        },
     )
 }
 
@@ -1505,10 +1601,9 @@ pub(crate) fn restore_item(
     let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
     let volume = snapshot.attachment.as_ref().and_then(|a| a.volume.as_ref());
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
-    if slot.is_some()
-        && target_slot.is_none()
-        && !slot.is_some_and(|source| reference.wheel_slots.iter().any(|s| &s.source == source))
-    {
+    // A world car slot mounts its rim from the car slot record.
+    let world_wheel = slot.and_then(|source| interaction.resolve_wheel_slot(resolved, source));
+    if slot.is_some() && target_slot.is_none() && world_wheel.is_none() {
         return Ok(false);
     }
     let current = items.get(id).unwrap().location;
@@ -1533,12 +1628,6 @@ pub(crate) fn restore_item(
         interaction
             .parts
             .mount_mechanism(id, &mut interaction.mechanisms);
-    } else if let Some(wheel) =
-        slot.and_then(|source| reference.wheel_slots.iter().find(|s| &s.source == source))
-    {
-        if items.get(id).unwrap().location != ItemLocation::WheelSlot(wheel.id) {
-            wheels.install(id, wheel.id, items, physics)?;
-        }
     } else if let Some(parent) = resolved.filter(|_| volume.is_none()) {
         if slot.is_none()
             && items.get(id).unwrap().location != ItemLocation::Attached(parent)

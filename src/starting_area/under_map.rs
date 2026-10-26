@@ -17,7 +17,7 @@ const DEPTH: f32 = 2.;
 const LIFT: f32 = 5.;
 
 impl GarageRuntime {
-    pub(super) fn advance_under_map(&mut self, reference: &ReferenceManifest) {
+    pub(super) fn advance_under_map(&mut self) {
         if self.simulation_seconds < self.under_map_check {
             return;
         }
@@ -25,17 +25,20 @@ impl GarageRuntime {
         let player = self.area.player.body_handle();
         // A seated player follows the seat owner, which this check lifts.
         let seated = self.area.player.seated();
-        let vehicles: Vec<_> = (0..self.physics.vehicle_count())
-            .filter_map(|index| {
-                let chassis = self.physics.chassis_handle(index);
+        // Every car lifts with its cargo. The check runs every two seconds, not each frame.
+        let vehicles: Vec<_> = self
+            .vehicles
+            .keys()
+            .filter_map(|key| {
+                let chassis = self.physics.chassis_handle(key);
                 self.physics.body_active(chassis).then_some(())?;
-                Some((index, self.under_map(chassis)?))
+                Some((key.clone(), self.under_map(chassis)?))
             })
             .collect();
         let walking = (!seated).then(|| self.under_map(player)).flatten();
         let lifted = !vehicles.is_empty() || walking.is_some();
         for (vehicle, ground) in vehicles {
-            self.lift_vehicle(reference, vehicle, ground);
+            self.lift_vehicle(&vehicle, ground);
         }
         if let Some(ground) = walking {
             let mut pose = self.area.player.body_pose(&self.physics);
@@ -97,8 +100,8 @@ impl GarageRuntime {
     }
 
     /// Move the car, its parts, its cargo, and a seated player up together.
-    fn lift_vehicle(&mut self, reference: &ReferenceManifest, vehicle: usize, ground: f32) {
-        self.collect_recovery_ownership(reference, vehicle);
+    fn lift_vehicle(&mut self, vehicle: &ObjectKey, ground: f32) {
+        self.collect_recovery_ownership(vehicle);
         let mut pose = self.physics.snapshot(vehicle).pose;
         let rise = ground + LIFT - pose.position[1];
         pose.position[1] += rise;

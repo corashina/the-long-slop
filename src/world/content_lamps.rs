@@ -494,6 +494,32 @@ impl WorldStream {
             .find(|b| &b.node == node)
             .map(|b| b.pose)
     }
+    /// Source `headlightscript` and `rearlights` outputs of the car copy `parent`.
+    pub(crate) fn set_car_lights(
+        &mut self,
+        parent: &GeneratedId,
+        outputs: &[crate::simulation::car_lights::CarLightOutput],
+    ) {
+        let Some(content) = self
+            .contents
+            .active
+            .iter_mut()
+            .find(|c| c.content.placement.id == *parent)
+        else {
+            return;
+        };
+        for light in &mut content.content.lights {
+            let Some(output) = outputs.iter().find(|o| Some(o.node) == light.node) else {
+                continue;
+            };
+            light.enabled = output.enabled;
+            light.intensity = output.intensity;
+            if let Some(current) = self.lights.iter_mut().find(|l| l.id == light.id) {
+                current.enabled = output.enabled;
+                current.intensity = output.intensity;
+            }
+        }
+    }
     fn refresh_lamp_outputs(&mut self) {
         for content in self.contents.instances() {
             for light in &content.lights {

@@ -308,6 +308,23 @@ def recover_road_lamp(source: Source, output: Path) -> dict:
         'lights':[source.lighting_light_ids[key(source.resolve(controller,source.read(controller)['LLight']))]],
         'global_enabled':bool(main['kozlampakOn']),'startup_on':bool(main['kozlampakSwitchedOn']),'electronics_threshold':.2}
 
+REAR_SIGNALS=(('H','tail'),('F','brake'),('R','reverse'))
+def vehicle_states(f, kind, state, intensity):
+    """headlightscript or rearlights states. `state` builds one state; `intensity` reads the first light."""
+    if kind=='rear':
+        return [state(signal,intensity(f.get(p+'Light',[])),f.get(p+'Light',[]),f[p+'Lamp'],f[p+'LampOn'],f[p+'LampOff'],dont_overwrite=f[p+'DontOverwrite'])
+            for p,signal in REAR_SIGNALS]
+    names=('off','low','high') if kind=='headlight' else ('off','cabin')
+    return [state(names[i],s['intensity'],[s['L'],*s['Ls']],[s['R'],*s['Rs']],s['M'],f['MOFF']) for i,s in enumerate(f['states'])]
+
+def vehicle_light_links(source, scripts, car):
+    """inputconnect cabin routes by target and the InteractSwitchLights usables of one car."""
+    routes={key(source.resolve(r,p)):r for r in scripts if source.class_name(r)=='inputconnect' for p in source.read(r)['headLightState1_If1']}
+    switches=[c for c in scripts if source.class_name(c)=='usablescript'
+        and any(call['m_Target']['m_PathID']==car.path_id and call['m_MethodName']=='InteractSwitchLights'
+            for call in source.read(c)['turnedEvent']['m_PersistentCalls']['m_Calls'])]
+    return routes,switches
+
 def recover_controllers(source: Source, roots: list, node_ids: dict, material_ids: dict) -> list[dict]:
     def node(reader):
         t=reader if reader.type.name=='Transform' else source.transform_for(reader if reader.type.name=='GameObject' else source.resolve(reader,source.read(reader)['m_GameObject']))
@@ -334,38 +351,21 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
     records=[]
     for root in roots:
         records.extend(source.hierarchy(root,activate_root=True))
-    # Each car owns the controllers in its hierarchy and the controls on its carscript.
-    cars=[]
-    for root in source.lighting_cars:
-        members=source.hierarchy(root,activate_root=True)
-        scripts=[c for n in members for c in n['components'] if c.type.name=='MonoBehaviour']
-        car=next(c for c in scripts if source.class_name(c)=='carscript')
-        routes={key(linked(r,p)):r for r in scripts if source.class_name(r)=='inputconnect' for p in source.read(r)['headLightState1_If1']}
-        switches=[c for c in scripts if source.class_name(c)=='usablescript'
-            and any(call['m_Target']['m_PathID']==car.path_id and call['m_MethodName']=='InteractSwitchLights'
-                for call in source.read(c)['turnedEvent']['m_PersistentCalls']['m_Calls'])]
-        if len(switches)!=1:raise ValueError(f'{key(car)} needs one light switch')
-        cars.append({'nodes':{key(n['reader']) for n in members},'car':car,'routes':routes,'switch':switches[0]})
-    def car_of(reader):
-        t=source.transform_for(source.resolve(reader,source.read(reader)['m_GameObject']))
-        return next((i for i,c in enumerate(cars) if key(t) in c['nodes']),None)
     controls=[]
     for record in records:
         for reader in record['components']:
             if key(reader) not in source.lighting_control_ids:continue
-            f=source.read(reader);cls=source.class_name(reader);vehicle=car_of(reader)
-            owner=cars[vehicle] if vehicle is not None else None
-            kind={'flashlightscript':'switch','headlightscript':'cabin' if owner and key(reader) in owner['routes'] else 'headlight','rearlights':'rear','kozlampa':'road'}[cls]
-            if kind in ('headlight','cabin','rear') and owner is None:raise ValueError(f'{key(reader)} vehicle light outside selected cars')
+            f=source.read(reader);cls=source.class_name(reader)
+            if cls in ('headlightscript','rearlights'):raise ValueError(f'{key(reader)} car lights belong to the car prototypes')
+            kind={'flashlightscript':'switch','kozlampa':'road'}[cls]
             elec=linked(reader,f.get('electronics',{'m_PathID':0}))
-            if kind=='rear':elec=linked(owner['car'],source.read(owner['car'])['electronics'])
             e=source.read(elec) if elec else None
             if e and e['jamValue']!=0:raise ValueError(f'{key(elec)} nonzero startup jam requires source rule')
-            c={'id':source.lighting_control_ids[key(reader)],'source':source_id(reader),'kind':kind,'vehicle':vehicle if kind in ('headlight','cabin','rear') else None,'node':node(reader),
+            c={'id':source.lighting_control_ids[key(reader)],'source':source_id(reader),'kind':kind,'node':node(reader),
                 'aim_colliders':[],'animated_poses':[],'startup_on':bool(f.get('ON',False)),
                 'current_state':f.get('currentState',0),'requested_state':f.get('switchToState',0),'energy':f.get('energy',1.),'energy_move':f.get('energyMove',0.),
                 'enabled':bool(f['m_Enabled']),'electronics_source':source_id(elec) if elec else None,'electronics_output':e['maxOutput'] if e else 1.,
-                'electronics_threshold':.2,'reverse_switch':bool(f.get('reverseSwitch',False)),'states':[],'usable_source':None,'usable_event':None,'cabin_input':None,'vehicle_switch':None}
+                'electronics_threshold':.2,'reverse_switch':bool(f.get('reverseSwitch',False)),'states':[],'usable_source':None,'usable_event':None}
             if kind=='switch':
                 if f['randomStart'] or f['SingleLight']['m_PathID']:raise ValueError(f'{key(reader)} unsupported selected switch startup')
                 for lamp in f['Lamps']:
@@ -378,77 +378,10 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                     parents=[source.read(linked(reader,f[field]))['m_Father'] for field in ('GButton','GButtonOff','GButtonOn')]
                     if parents[1:]!=parents[:-1]:raise ValueError(f'{key(reader)} switch button parent frame')
                     c['animated_poses'].append({'node':node(linked(reader,f['GButton'])),'states':[converted_transform(source.read(linked(reader,f['GButtonOff']))),converted_transform(source.read(linked(reader,f['GButtonOn'])))],'rule':'current_pose_lerp','speed':25.})
-            elif kind in ('headlight','cabin'):
-                for i,s in enumerate(f['states']):
-                    c['states'].append(state(reader,('off','low','high')[i] if kind=='headlight' else ('off','cabin')[i],s['intensity'],[s['L'],*s['Ls']],[s['R'],*s['Rs']],s['M'],f['MOFF']))
-                if kind=='headlight':
-                    car_reader=owner['car'];car_fields=source.read(car_reader)
-                    c['vehicle_switch']={'source':source_id(car_reader),'nodes':nodes(car_reader,car_fields['LightSwitch']),'state_nodes':[nodes(car_reader,car_fields[k]) for k in ('LightOff','LightLow','LightHigh')]}
-                route=owner['routes'].get(key(reader))
-                usable=linked(route,source.read(route)['turnOverride']) if kind=='cabin' else owner['switch']
-                uf=source.read(usable);c['usable_source']=source_id(usable);c['usable_event']='SwitchState' if kind=='cabin' else 'InteractSwitchLights'
-                for n in source.hierarchy(source.transform_for(source.resolve(usable,uf['m_GameObject']))):
-                    c['aim_colliders'].extend(source.lighting_collider_ids[key(col)] for col in n['components'] if key(col) in source.lighting_collider_ids)
-                if kind=='cabin':
-                    rf=source.read(route)
-                    if [key(linked(route,p)) for p in rf['headLightState1_If1']]!=[key(reader)] or rf['headLightState1_If0']:
-                        raise ValueError(f'{key(route)} cabin targets differ')
-                    switch=linked(route,rf['turnOverride']);sf=source.read(switch)
-                    doors=[];door_usables=[];slots=[]
-                    for pointer in rf['ISlotUsableV1To1']:
-                        slot=linked(route,pointer);slots.append(source_id(slot));slot_data=source.read(slot)
-                        part=linked(slot,slot_data['part'])
-                        if part is None:raise ValueError(f'{key(slot)} startup cabin door missing')
-                        part_data=source.read(part)
-                        pick=linked(part,part_data['p']);pick_data=source.read(pick)
-                        usable_door=linked(pick,pick_data['usable'])
-                        if usable_door is None:raise ValueError(f'{key(pick)} cabin door usable missing')
-                        df=source.read(usable_door)
-                        expected=((0.,60.,False),(-60.,0.,True),(0.,60.,False),(-60.,0.,True))[len(doors)]
-                        if ((df['minY'],df['maxY'],bool(df['invY']))!=expected or df['minX']!=0. or df['maxX']!=0.
-                                or df['invX'] or df['veryInvert'] or df['onlyInvertDoorValue'] or not df['rotateAble'] or df['slideAble']):
-                            raise ValueError(f'{key(usable_door)} cabin GetValue mapping')
-                        doors.append(node(usable_door));door_usables.append(source_id(usable_door))
-                    c['usable_event']=None
-                    c['cabin_input']={'source':source_id(route),'switch_source':source_id(switch),'switch_node':node(switch),
-                        'modes':rf['turnOverrideT'],'startup_mode':sf['currentTurnState'],'door_slots':slots,'door_nodes':doors,
-                        'door_usable_sources':door_usables,'threshold':rf['iUsableV1To1Limit'],
-                        'include_children':bool(rf['includeUsablesChild1To1']),'missing_slot_is_same':bool(rf['ISlotUsableV1To1NoPartInSlotIsSame']),
-                        'target':c['id']}
-            elif kind=='rear':
-                for prefix,signal in [('H','tail'),('F','brake'),('R','reverse')]:
-                    ids=lights(reader,f.get(prefix+'Light',[]));intensity=source.lighting_lights[ids[0]-1]['serialized_intensity'] if ids else 0.
-                    c['states'].append(state(reader,signal,intensity,f.get(prefix+'Light',[]),f[prefix+'Lamp'],f[prefix+'LampOn'],f[prefix+'LampOff'],dont_overwrite=f[prefix+'DontOverwrite']))
-            else:
+            if kind=='road':
                 c['states'].append(state(reader,'road',e['maxOutput'],[f['LLight']],[],{'m_PathID':0},{'m_PathID':0}))
             controls.append(c)
     return controls
-
-def recover_high_beam(source: Source, material_ids: dict, root) -> dict:
-    meters=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='meterscript']
-    if len(meters)!=1:raise ValueError(f'{key(root)} needs one meter')
-    meter=meters[0]
-    lamps=[]
-    for pointer in source.read(meter)['leds']:
-        reader=source.resolve(meter,pointer);fields=source.read(reader)
-        if fields['vname']=='headlight2':lamps.append((reader,fields))
-    if len(lamps)!=1 or len(lamps[0][1]['leds'])!=1:raise ValueError('Selected headlight2 lamp')
-    reader,fields=lamps[0];lamp=fields['leds'][0]
-    renderer=source.resolve(reader,lamp['r'])
-    transform=source.transform_for(source.resolve(renderer,source.read(renderer)['m_GameObject']))
-    node=source.lighting_nodes[key(transform)];asset=source.lighting_assets_for_node[node]
-    def material(pointer):
-        linked=source.resolve(reader,pointer);group=source.lighting_extra_materials.setdefault(asset,[])
-        if key(linked) not in [key(m) for m in group]:group.append(linked)
-        result={'asset':asset,'gltf_material':next(i for i,m in enumerate(group) if key(m)==key(linked)),
-                'source':source_id(linked),'condition_key':None}
-        material_ids[asset,key(linked)]=result
-        return result
-    result={'source':source_id(reader),'node':node,'signal':fields['vname'],'on':material(lamp['on']),
-            'off':material(lamp['off']),'min_value':lamp['minValue'],'max_value':lamp['maxValue'],
-            'stay_on':bool(lamp['stayOnAfterMaximum'])}
-    source.lighting_startup_materials[key(renderer)]=source.resolve(reader,lamp['off'])
-    return result
 
 def recover_lighting(source: Source, roots: list, output: Path) -> dict:
     output.mkdir(parents=True,exist_ok=True)
@@ -481,7 +414,6 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
             elif isinstance(value,list):
                 for child in value:walk(child)
         walk(source.read(r))
-    high_beams=[recover_high_beam(source,material_ids,root) for root in source.lighting_cars]
     menu=source.get('level1',74691);switch_reader=source.resolve(menu,source.read(menu)['ISwitch'])
     switch_data=source.read(switch_reader);switch_image=source.sprite_image(switch_reader)
     switch_path=output/f'lighting-switch-{switch_reader.assets_file.name}-{switch_reader.path_id}.png'
@@ -521,7 +453,7 @@ def recover_lighting(source: Source, roots: list, output: Path) -> dict:
         'fog':{'enabled':bool(f['m_Fog']),'mode':f['m_FogMode'],'density':f['m_FogDensity'],'color':rgba(f['m_FogColor']),'start':f['m_LinearFogStart'],'end':f['m_LinearFogEnd']},
         'startup_ambient':cycle['day_ambient'],'startup_reflection':cycle['max_reflection'],'startup_fog_density':cycle['day_fog_densities'][0],
         'default_spot_cookie':texture(source,source.resolve(render,f['m_SpotCookie']),output),
-        'skybox':sky_material(source,source.resolve(render,f['m_SkyboxMaterial']),output),'sun':1,'lights':source.lighting_lights,'cycle':cycle,'controllers':controls,'high_beams':high_beams,
+        'skybox':sky_material(source,source.resolve(render,f['m_SkyboxMaterial']),output),'sun':1,'lights':source.lighting_lights,'cycle':cycle,'controllers':controls,
         'road_lamp':recover_road_lamp(source,output),'textures':list(source.lighting_textures.values()),'materials':[{'asset':m['asset'],'gltf_material':m['gltf_material'],'source':m['source']} for m in material_ids.values()]}
     graphics=source.get('globalgamemanagers',7);gf=source.read(graphics)
     quality=source.get('globalgamemanagers',12);qf=source.read(quality);q=qf['m_QualitySettings'][qf['m_CurrentQuality']]
@@ -573,23 +505,6 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
         for d in a['dependencies']:
             path=output/Path(d['file']).name
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=d['sha256']:raise ValueError(f"{d['file']} dependency hash")
-    if len(lighting.get('high_beams',[]))!=len(manifest['vehicles']):raise ValueError('Required headlight2 instruments')
-    for vehicle,lamp in zip(manifest['vehicles'],lighting['high_beams']):
-        if not (lamp['signal']=='headlight2' and lamp['node'] in nodes and lamp['stay_on']):
-            fail(lamp['source'],'headlight2 instrument')
-        instruments=[entry for entry in vehicle['instruments']['lamps'] if entry['signal']=='headlight2']
-        fields=('source','node','signal','min_value','max_value','stay_on')
-        if len(instruments)!=1 or any(lamp[field]!=instruments[0][field] for field in fields):
-            fail(lamp['source'],'headlight2 instrument correspondence')
-        for field in ('on','off'):
-            material=lamp[field];document=documents.get(material['asset']);index=material['gltf_material']
-            if any(material[key]!=instruments[0][field][key] for key in ('source','asset','gltf_material')):
-                fail(lamp['source'],f'headlight2 {field} source')
-            if (nodes[lamp['node']]['asset']!=material['asset'] or not document
-                    or not 0<=index<len(document['materials'])
-                    or document['materials'][index]['extras']['source']!=material['source']
-                    or not any(m['asset']==material['asset'] and m['gltf_material']==index and m['source']==material['source'] for m in lighting['materials'])):
-                fail(lamp['source'],f'headlight2 {field}')
     for c in lighting['controllers']:
         if c['node'] not in nodes:fail(c['source'],'node')
         owner=nodes[c['node']]['asset']
@@ -604,23 +519,6 @@ def validate_lighting_export(manifest: dict, output: Path) -> None:
                     document=documents.get(m['asset']);index=m['gltf_material']
                     if m['asset']!=owner or not document or not 0<=index<len(document['materials']) or document['materials'][index]['extras']['source']!=m['source']:fail(c['source'],field)
         if c['kind']=='switch' and not c['aim_colliders']:fail(c['source'],'aim colliders')
-        if c['kind']=='cabin':
-            cabin=c.get('cabin_input')
-            if not cabin:fail(c['source'],'cabin input missing')
-            if not (cabin['switch_node']==c['node'] and cabin['switch_node'] in nodes and nodes[cabin['switch_node']]['asset']==owner
-                    and cabin['target']==c['id']):fail(c['source'],'cabin input links')
-            if cabin['modes']!=[0,1,2] or not 0<=cabin['startup_mode']<3:fail(c['source'],'cabin input modes')
-            fields=('door_slots','door_usable_sources','door_nodes')
-            if any(len(cabin[field])!=4 for field in fields):fail(c['source'],'cabin door links')
-            if any(nid not in nodes or nodes[nid]['asset']!=owner for nid in cabin['door_nodes']):
-                fail(c['source'],'cabin door links correspondence')
-            for slot_source,usable,nid,part_type in zip(cabin['door_slots'],cabin['door_usable_sources'],cabin['door_nodes'],('fldoor','frdoor','rldoor','rrdoor')):
-                slots=[slot for slot in manifest['part_slots'] if slot['source']==slot_source]
-                mechanisms=[mechanism for mechanism in manifest['mechanisms'] if mechanism['source']==usable]
-                if (len(slots)!=1 or len(mechanisms)!=1 or slots[0]['part_types']!=[part_type]
-                        or mechanisms[0]['parent_item']!=slots[0]['part']
-                        or mechanisms[0]['drag']['node']!=nid):
-                    fail(c['source'],'cabin door links correspondence')
     for l in lighting['lights']:
         if l['cookie'] is not None and l['cookie'] not in textures:fail(l['source'],'cookie')
         if l['node'] is not None and l['node'] not in nodes:fail(l['source'],'node')

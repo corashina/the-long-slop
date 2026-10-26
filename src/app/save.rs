@@ -228,10 +228,7 @@ fn process_request(
             drive.runtime.paused = true;
             drive.skip_elapsed = true;
             drive.last_feedback = None;
-            for (index, vehicle) in reference.vehicles.iter().enumerate() {
-                let sample = drive.runtime.instrument_sample(&reference, index);
-                drive.instruments[index].initialize_from_sample(&vehicle.instruments, sample);
-            }
+            drive.runtime.advance_instruments(&reference, 0., true);
             let camera = super::active_camera(&drive);
             let far = drive.runtime.distances.cam2_far_plane;
             let fov = drive
@@ -264,7 +261,6 @@ fn process_request(
             }
             crate::browser::game_loading();
             crate::presentation::view_frame::restart_scene(world);
-            crate::presentation::plates::reset_plate_text(world);
             Ok(String::new())
         }
         "Capture" | "Prepare" | "PrepareNewGame" => {

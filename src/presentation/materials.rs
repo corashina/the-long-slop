@@ -1793,7 +1793,6 @@ pub(crate) fn prepare_lamp_materials(
     mut commands: Commands,
     reference: Res<crate::app::RuntimeReference>,
     drive: Res<crate::app::Drive>,
-    instruments: Res<super::instruments::InstrumentVisuals>,
     mut source: ResMut<super::lighting::SourceLighting>,
     mut originals: ResMut<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<SourceMaterial>>,
@@ -1809,7 +1808,6 @@ pub(crate) fn prepare_lamp_materials(
 ) {
     if !authored_materials.textures_ready()
         || !source.bound
-        || !instruments.prepared
         || source.materials_prepared
         || !source.materials_ready
         || source.road_lamps.recipe.is_none()
@@ -1846,16 +1844,6 @@ pub(crate) fn prepare_lamp_materials(
                 let key = (material.asset, material.gltf_material);
                 if !keys.contains(&key) {
                     keys.push(key);
-                }
-            }
-        }
-        for dashboard in &reference.0.lighting.high_beams {
-            if dashboard.node == output.renderer {
-                for material in [&dashboard.on, &dashboard.off] {
-                    let key = (material.asset, material.gltf_material);
-                    if !keys.contains(&key) {
-                        keys.push(key);
-                    }
                 }
             }
         }

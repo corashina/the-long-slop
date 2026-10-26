@@ -30,6 +30,15 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(part_scope([{'maintipus': [1], 'tipus': [2]}], slots, []), (['s'], []))
         self.assertEqual(part_scope([], slots, []), ([], []))
 
+    def test_car_allow_list_keeps_lada_and_excludes_other_cars(self):
+        from tools.reference.world import vehicle_exclusion
+        lada = NS(assets_file=NS(source_container_path='sharedassets1.assets'), path_id=82556)
+        bus = NS(assets_file=NS(source_container_path='sharedassets1.assets'), path_id=1)
+        self.assertEqual(vehicle_exclusion(lada, {'carscript'}), '')
+        self.assertEqual(vehicle_exclusion(bus, {'carscript', 'partscript'}), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(bus, {'utanfutoscript'}), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(bus, {'partscript'}), '')
+
     def test_sled_values_stop_on_a_missing_value(self):
         from tools.reference.sled import VALUES, LINKS, sled_values
         data = {**{field: 1. for field in VALUES}, **{field: None for field in LINKS}}

@@ -89,6 +89,8 @@ struct Instance {
     prototype: usize,
     structure: usize,
     sync_pending: bool,
+    /// `VehicleRuntime::presentation_signature` of the last sync of a car copy.
+    car_signature: u64,
     content: Option<ContentSlot>,
     lamp_buttons: Vec<usize>,
     food: Option<crate::reference::ItemId>,
@@ -233,6 +235,27 @@ impl SourceInstances {
         self.instances
             .iter()
             .all(|i| !i.retirement.started() && i.ready && i.visible)
+    }
+    /// Ready visible instances: root entity, placement, prototype index and node entities by
+    /// glTF node.
+    pub(crate) fn shown(
+        &self,
+    ) -> impl Iterator<Item = (Entity, &Placement, usize, &[Option<Entity>])> {
+        self.instances
+            .iter()
+            .filter(|i| i.ready && i.visible && !i.retirement.started())
+            .map(|i| (i.root, &i.placement, i.prototype, i.nodes.as_slice()))
+    }
+    /// Node entities by glTF node of the instance of world object `id`.
+    pub(crate) fn nodes_of(&self, id: &crate::world::GeneratedId) -> Option<&[Option<Entity>]> {
+        self.instances
+            .iter()
+            .find(|i| i.placement.id == *id && !i.retirement.started())
+            .map(|i| i.nodes.as_slice())
+    }
+    /// Whether an instance with root entity `root` exists.
+    pub(crate) fn has_root(&self, root: Entity) -> bool {
+        self.instances.iter().any(|i| i.root == root)
     }
     pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
         self.instances
@@ -987,6 +1010,7 @@ impl SourceInstances {
                                 prototype: prototype_index,
                                 structure: usize::MAX,
                                 sync_pending: true,
+                                car_signature: 0,
                                 content: None,
                                 lamp_buttons: Vec::new(),
                                 food: None,
@@ -1122,6 +1146,10 @@ impl SourceInstances {
         reference: &ReferenceManifest,
         physics: &crate::vehicle::PhysicsWorld,
         items: &crate::interaction::items::ItemStore,
+        vehicles: &std::collections::BTreeMap<
+            crate::world::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
@@ -1213,6 +1241,19 @@ impl SourceInstances {
                 }
             }
         }
+        // World car gauges and lamps change on a still car too. Sync a car copy only when
+        // its presented state changed. The sync records the signature once bindings are ready.
+        for (key, vehicle) in vehicles {
+            let Some(owners) = self.bodies.get(&physics.chassis_handle(key)) else {
+                continue;
+            };
+            let signature = vehicle.presentation_signature();
+            for &index in owners {
+                if self.instances[index].car_signature != signature {
+                    self.selection.push(index);
+                }
+            }
+        }
         let frame = stream.frame();
         let selected = self.selection.len();
         for selected_index in 0..selected {
@@ -1242,6 +1283,14 @@ impl SourceInstances {
                 instance.show_rows(&mut self.props);
             }
             let prototype = &reference.world.prototypes[instance.prototype];
+            // The car runtime of a car copy.
+            let car = prototype.vehicle.as_ref().and_then(|record| {
+                let handle = published.bodies.get(record.body as usize)?;
+                Some((record, vehicles.get(physics.vehicle_of(*handle)?)?))
+            });
+            if let Some((_, vehicle)) = car {
+                instance.car_signature = vehicle.presentation_signature();
+            }
             if !instance.caps_bound {
                 for cap in content.caps() {
                     crate::presentation::reference::bind_generated_cap(
@@ -1302,6 +1351,35 @@ impl SourceInstances {
                     instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
                 }
             }
+            if let Some((record, vehicle)) = car
+                && let (Some(r), Some(state)) = (&record.instruments, &vehicle.instruments)
+            {
+                let needles = r.needles.iter().zip(&state.needle_angles).map(|(n, &a)| {
+                    let mut e = n.rest;
+                    e[n.axis as usize] = a;
+                    (n.node, e)
+                });
+                let digits = r
+                    .odometer
+                    .digits
+                    .iter()
+                    .zip(&state.digit_angles)
+                    .map(|(d, &a)| {
+                        let mut e = [0.; 3];
+                        e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
+                        (d.node, e)
+                    });
+                for (node, e) in needles.chain(digits) {
+                    let node = prototype.nodes[node.0 as usize].gltf_node as usize;
+                    if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
+                        let rotation =
+                            Quat::from_array(crate::simulation::instruments::source_rotation(e));
+                        if transform.rotation != rotation {
+                            transform.rotation = rotation;
+                        }
+                    }
+                }
+            }
             if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
                 && let Some(n) = prototype
                     .nodes
@@ -1335,7 +1413,10 @@ impl SourceInstances {
                         frame.origin,
                     )?;
                 }
-                let enabled = active_food(prototype, i, appearance, reference, food);
+                let enabled = active_food(prototype, i, appearance, reference, food)
+                    && car
+                        .and_then(|(record, v)| v.node_visible(record, i as u32))
+                        .unwrap_or(true);
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
                     if let Some(entity) = instance.nodes[node.gltf_node as usize] {
@@ -1355,13 +1436,19 @@ impl SourceInstances {
                 }
             }
             for renderer in &mut instance.renderers {
-                let selected = appearance
-                    .iter()
-                    .rev()
-                    .find(|a| {
-                        a.node == prototype.nodes[renderer.node].source && a.material.is_some()
-                    })
-                    .and_then(|a| a.material.as_ref());
+                let selected = car
+                    .and_then(|(record, v)| v.renderer_material(record, renderer.node as u32))
+                    .map(|link| &link.source)
+                    .or_else(|| {
+                        appearance
+                            .iter()
+                            .rev()
+                            .find(|a| {
+                                a.node == prototype.nodes[renderer.node].source
+                                    && a.material.is_some()
+                            })
+                            .and_then(|a| a.material.as_ref())
+                    });
                 if selected == renderer.material_source.as_ref() {
                     continue;
                 }

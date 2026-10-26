@@ -100,8 +100,6 @@ extern "C" {
         looping: bool,
         clip: u32,
     );
-    #[wasm_bindgen(js_namespace = window, js_name = gameAudioStarter)]
-    pub fn game_audio_starter(emitter: u32, enabled: bool, time: f64);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEvent)]
     pub fn game_audio_event(
         session: u32,
@@ -333,6 +331,8 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace=window,js_name=gameInventory)]
     pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameRadioFeedback)]
+    pub fn game_radio_feedback(volume: f32, frequency: f32, am: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameFeedback)]
     pub fn game_feedback(
         actions: u32,

@@ -18,7 +18,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
-use crate::reference::{PlayerPoseReference, PlayerReference, SeatId, SeatReference};
+use crate::reference::{ItemId, PlayerPoseReference, PlayerReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 
@@ -74,9 +74,6 @@ pub struct ExitReference {
 }
 
 impl ExitReference {
-    pub fn from_reference(player: &PlayerReference, seat: &SeatReference) -> Self {
-        Self::new(player, seat.exit_distance, seat.min_exit_angle_degrees)
-    }
     fn new(player: &PlayerReference, distance: f32, minimum_look_angle_degrees: f32) -> Self {
         Self {
             distance,
@@ -89,10 +86,10 @@ impl ExitReference {
     }
 }
 
-/// The object that owns the occupied seat. `Vehicle` holds an opaque vehicle index.
+/// The object that owns the occupied seat. `Vehicle` holds the vehicle key of the car.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SeatOwner {
-    Vehicle(usize),
+    Vehicle(crate::world::ObjectKey),
     Item(crate::world::ObjectKey),
 }
 
@@ -113,20 +110,7 @@ pub struct SeatValues {
 }
 
 impl SeatValues {
-    pub fn car(player: &PlayerReference, seat: &SeatReference) -> Self {
-        Self {
-            yaw_limits_degrees: seat.yaw_limits_degrees,
-            yaw_unlimited: false,
-            look_instead_of_lean: false,
-            pitch_limits_degrees: seat.pitch_limits_degrees,
-            default_pitch_degrees: seat.default_pitch_degrees,
-            driver: seat.driver,
-            driving2: seat.driving2,
-            show_sleep_text: seat.show_sleep_text,
-            exit: ExitReference::from_reference(player, seat),
-        }
-    }
-    /// Item seats have no driver roles. The exit distance is the player value.
+    /// Driver roles come from the seat record. The exit distance is the player value.
     pub(crate) fn item(
         player: &PlayerReference,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
@@ -137,8 +121,8 @@ impl SeatValues {
             look_instead_of_lean: seat.look_instead_of_lean,
             pitch_limits_degrees: seat.pitch_limits_degrees,
             default_pitch_degrees: seat.default_pitch_degrees,
-            driver: false,
-            driving2: false,
+            driver: seat.driver,
+            driving2: seat.driving2,
             show_sleep_text: seat.show_sleep_text,
             exit: ExitReference::new(player, player.exit_distance, seat.min_exit_angle_degrees),
         }
@@ -153,8 +137,8 @@ impl SeatValues {
 }
 
 struct Occupancy {
-    /// Car seat record. Item seats have none.
-    id: Option<SeatId>,
+    /// The item that holds the seat. Its part cannot be taken while the player sits on it.
+    item: ItemId,
     /// Main seatscript of an item seat. Car seats have none.
     source: Option<crate::reference::SourceId>,
     owner: SeatOwner,
@@ -177,7 +161,6 @@ pub struct PlayerState {
     feet: ColliderHandle,
     clearance_shapes: [rapier3d::parry::shape::Ball; 10],
     pose: Pose,
-    seats: Vec<SeatReference>,
     occupancy: Option<Occupancy>,
     collisions: Vec<CharacterCollision>,
     yaw: f32,
@@ -196,7 +179,6 @@ impl PlayerState {
     pub(crate) fn restore_save(
         &mut self,
         saved: &crate::save::PlayerSnapshot,
-        ids: &crate::save::IdentityMap,
         origin: &crate::world::WorldOrigin,
         physics: &mut PhysicsWorld,
     ) -> Result<(), crate::save::SaveError> {
@@ -211,27 +193,8 @@ impl PlayerState {
         self.posture.restore(saved.posture);
         self.movement_speed = MovementSpeed::default();
         self.running = saved.running;
-        // An item seat waits for its world item binding. See `restore_item_seat`.
-        self.occupancy = match saved.seat.as_ref().map(|record| (record, &record.owner)) {
-            Some((record, crate::save::SeatOwnerSnapshot::Vehicle { vehicle })) => {
-                let id = ids.seats[&record.source];
-                let seat = self.seats.iter().find(|s| s.id == id).unwrap();
-                let vehicle = ids
-                    .vehicles
-                    .iter()
-                    .position(|v| v == vehicle)
-                    .ok_or_else(|| crate::save::SaveError::InvalidLinks("Seat vehicle".into()))?;
-                Some(Occupancy {
-                    id: Some(id),
-                    source: None,
-                    owner: SeatOwner::Vehicle(vehicle),
-                    body: physics.chassis_handle(vehicle),
-                    local_pose: to_rapier(crate::save::local_pose(&record.local_pose)),
-                    values: SeatValues::car(&self.reference, seat),
-                })
-            }
-            Some((_, crate::save::SeatOwnerSnapshot::Item { .. })) | None => None,
-        };
+        // A world item or world car seat waits for its binding. See `restore_item_seat`.
+        self.occupancy = None;
         if let Some(seat) = &self.occupancy {
             self.pose = *physics.rapier().bodies[seat.body].position() * seat.local_pose;
         }
@@ -312,7 +275,6 @@ impl PlayerState {
                 rapier3d::parry::shape::Ball::new(reference.posture.clearance[i].sphere.radius)
             }),
             pose,
-            seats: Vec::new(),
             occupancy: None,
             collisions: Vec::with_capacity(20),
             yaw: yaw_from_rotation(pose.rotation),
@@ -330,7 +292,6 @@ impl PlayerState {
 
     pub fn capture_save(
         &self,
-        ids: &crate::save::IdentityMap,
         origin: &crate::world::WorldOrigin,
         physics: &PhysicsWorld,
         carry: Option<crate::save::CarrySnapshot>,
@@ -355,14 +316,19 @@ impl PlayerState {
                 .occupancy
                 .as_ref()
                 .map(|seat| {
-                    let (owner, source) = match (&seat.owner, seat.id) {
-                        (SeatOwner::Vehicle(vehicle), Some(id)) => (
+                    let (owner, source) = match &seat.owner {
+                        SeatOwner::Vehicle(vehicle) => (
                             crate::save::SeatOwnerSnapshot::Vehicle {
-                                vehicle: ids.vehicles[*vehicle].clone(),
+                                vehicle: vehicle.clone(),
                             },
-                            crate::save::identity::source_key(&ids.seats, id)?,
+                            seat.source
+                                .as_ref()
+                                .map(crate::save::SourceKey::from)
+                                .ok_or_else(|| {
+                                    crate::save::SaveError::InvalidLinks("Car seat source".into())
+                                })?,
                         ),
-                        (SeatOwner::Item(item), None) => (
+                        SeatOwner::Item(item) => (
                             crate::save::SeatOwnerSnapshot::Item { item: item.clone() },
                             seat.source
                                 .as_ref()
@@ -371,11 +337,8 @@ impl PlayerState {
                                     crate::save::SaveError::InvalidLinks("Item seat source".into())
                                 })?,
                         ),
-                        _ => {
-                            return Err(crate::save::SaveError::InvalidLinks("Seat owner".into()));
-                        }
                     };
-                    Ok(crate::save::SeatSnapshot {
+                    Ok::<_, crate::save::SaveError>(crate::save::SeatSnapshot {
                         owner,
                         source,
                         local_pose: crate::save::LocalPose {
@@ -392,16 +355,6 @@ impl PlayerState {
             carry,
         })
     }
-    /// Bind seats once at setup. Driver identity comes from the recovered seat record.
-    pub fn configure_seats(&mut self, seats: &[SeatReference]) {
-        assert!(
-            self.occupancy.is_none(),
-            "cannot replace occupied seat records"
-        );
-        self.seats.clear();
-        self.seats.extend_from_slice(seats);
-    }
-
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
     pub fn step_view(&mut self, input: FrameInput, context: PlayerStepContext, dt: f32) {
         if !dt.is_finite() || dt <= 0.0 {
@@ -733,49 +686,34 @@ impl PlayerState {
         });
         physics.refresh_queries();
     }
-    /// The seat pose places the source sitPos root relative to the chassis.
-    pub fn enter(&mut self, id: SeatId, pose: VehiclePose, physics: &mut PhysicsWorld) -> bool {
-        if self.occupancy.is_some() {
-            return false;
-        }
-        let Some(seat) = self.seats.iter().find(|seat| seat.id == id) else {
-            return false;
-        };
-        let occupancy = Occupancy {
-            id: Some(id),
-            source: None,
-            owner: SeatOwner::Vehicle(seat.vehicle),
-            body: physics.chassis_handle(seat.vehicle),
-            local_pose: to_rapier(pose),
-            values: SeatValues::car(&self.reference, seat),
-        };
-        self.occupy(occupancy, physics)
-    }
-    /// Sit on a world item seat. The pose places sitPos relative to the item body.
+    /// Sit on a world item seat. A car copy owns its seats as a vehicle.
+    /// The pose places sitPos relative to the owner body.
     pub(crate) fn enter_item_seat(
         &mut self,
-        owner: crate::world::ObjectKey,
+        owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        seat_item: ItemId,
         pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) -> bool {
         if self.occupancy.is_some() {
             return false;
         }
-        let occupancy = self.item_occupancy(owner, body, seat, pose);
+        let occupancy = self.item_occupancy(owner, body, seat, seat_item, pose);
         self.occupy(occupancy, physics)
     }
     /// Finish a saved item seat after the world item binds. View and posture keep their saved values.
     pub(crate) fn restore_item_seat(
         &mut self,
-        owner: crate::world::ObjectKey,
+        owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        seat_item: ItemId,
         local_pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) {
-        let occupancy = self.item_occupancy(owner, body, seat, local_pose);
+        let occupancy = self.item_occupancy(owner, body, seat, seat_item, local_pose);
         self.pose = *physics.rapier().bodies[body].position() * occupancy.local_pose;
         self.occupancy = Some(occupancy);
         self.update_geometry(physics);
@@ -787,15 +725,16 @@ impl PlayerState {
     }
     fn item_occupancy(
         &self,
-        owner: crate::world::ObjectKey,
+        owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        item: ItemId,
         pose: VehiclePose,
     ) -> Occupancy {
         Occupancy {
-            id: None,
+            item,
             source: Some(seat.source.clone()),
-            owner: SeatOwner::Item(owner),
+            owner,
             body,
             local_pose: to_rapier(pose),
             values: SeatValues::item(&self.reference, seat),
@@ -892,20 +831,20 @@ impl PlayerState {
         physics.refresh_queries();
         true
     }
-    /// The occupied car seat. Item seats return `None`.
-    pub fn seat(&self) -> Option<SeatId> {
-        self.occupancy.as_ref().and_then(|seat| seat.id)
-    }
     pub fn seated(&self) -> bool {
         self.occupancy.is_some()
+    }
+    /// The item that holds the occupied seat.
+    pub fn seat_item(&self) -> Option<ItemId> {
+        self.occupancy.as_ref().map(|seat| seat.item)
     }
     pub fn seat_owner(&self) -> Option<&SeatOwner> {
         self.occupancy.as_ref().map(|seat| &seat.owner)
     }
     /// Returns the vehicle that owns the occupied seat. Item seats return `None`.
-    pub fn seat_vehicle(&self) -> Option<usize> {
+    pub fn seat_vehicle(&self) -> Option<&crate::world::ObjectKey> {
         match self.seat_owner()? {
-            SeatOwner::Vehicle(vehicle) => Some(*vehicle),
+            SeatOwner::Vehicle(vehicle) => Some(vehicle),
             SeatOwner::Item(_) => None,
         }
     }
@@ -1171,5 +1110,158 @@ mod seat_values_tests {
         assert_eq!(values.clamp_yaw(200.), 60.);
         values.yaw_unlimited = true;
         assert_eq!(values.clamp_yaw(200.), 200.);
+    }
+}
+
+#[cfg(test)]
+mod vehicle_seat_tests {
+    use super::{PlayerState, SeatOwner};
+    use crate::reference::{PlayerPoseReference, PlayerReference};
+    use crate::vehicle::{VehiclePose, body_fixture};
+    use crate::world::stream::content_seats::WorldSeatReference;
+    use serde_json::json;
+
+    /// Player values that keep every exit point clear: no exit mask, no use mask.
+    fn player() -> (PlayerReference, PlayerPoseReference) {
+        let src = json!({"file": "p", "path_id": 1});
+        let head =
+            json!({"translation": [0, 1.6, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]});
+        let sphere = json!({"source": src, "center": [0, 0.2, 0], "radius": 0.2, "membership": 1, "filter": 1});
+        let clearance: Vec<_> = (0..10)
+            .map(|_| json!({"posture": 1.0, "sphere": sphere}))
+            .collect();
+        let mut player = json!({
+            "posture": {"capsule_membership": 1, "capsule_filter": 1, "standing_head": head, "prone_head": head,
+                "minimum_radius": 0.1, "maximum_radius": 0.3, "ctrl_value": 0.3, "scroll_step": 0.05, "rise_rate": 1.0,
+                "feet": sphere, "clearance": clearance, "sensor_hold_steps": 1},
+            "view": {"head_lerp": 10.0, "lean_sensitivity": 1.0, "lean_distance": 0.3, "height_limits": [-0.5, 0.5],
+                "foot_fov_degrees": 60.0, "car_fov_degrees": 60.0, "tap_seconds": 0.2, "return_window_seconds": 0.5,
+                "return_rate": 1.0, "free_look_limit_degrees": 90.0, "zoom_multiplier": 1.0, "zoom_in_rate": 1.0,
+                "zoom_out_rate": 1.0, "lean_scroll_multiplier": 1.0, "height_scroll_step": 0.1},
+            "source": src, "capsule_source": src, "camera_source": src,
+            "action_masks": {"use_mask": 0, "pickup_mask": 0, "attach_mask": 0, "push_mask": 0},
+            "get_out_layer_mask": 0, "exit_steps_vertical": 4, "exit_steps_horizontal": 4,
+            "carry_anchor_offset": [0, 0, 0], "look_sensitivity": [1, 1], "camera_culling_mask": 0,
+        });
+        for name in [
+            "prone_multiplier",
+            "duck_jump_multiplier",
+            "inverse_duck_multiplier",
+            "max_fall_speed",
+            "walk_speed",
+            "run_multiplier",
+            "ladder_speed",
+            "walk_bob_speed",
+            "walk_bob_speed_rb",
+            "max_walk_bob",
+            "walk_bob_sound_threshold",
+            "jump_force",
+            "mass_kg",
+            "duck_multiplier",
+            "aim_reach",
+            "exit_capsule_half_height",
+            "exit_capsule_radius",
+            "exit_distance",
+            "exit_step_vertical",
+            "exit_step_horizontal",
+            "source_force_interval",
+            "throw_minimum",
+            "throw_gain",
+            "throw_multiplier",
+            "push_force",
+            "airborne_push_force",
+            "grip_force",
+            "grip_speed",
+            "grip_distance",
+            "carry_min_weight",
+            "carry_max_weight",
+            "carry_offset_radius",
+            "carry_drop_distance",
+            "carry_force_multiplier",
+            "carry_max_force",
+            "carry_min_distance",
+            "carry_max_distance",
+            "obj_move_sensitivity",
+            "obj_rotation_sensitivity",
+            "scroll_sensitivity",
+        ] {
+            player[name] = json!(0.5);
+        }
+        let scalars: serde_json::Map<_, _> = [
+            "headBackM",
+            "headBackLerp",
+            "headForwardLerp",
+            "maxHeadBobX",
+            "maxHeadBobY",
+            "maxHeadBobZ",
+        ]
+        .into_iter()
+        .map(|name| (name.to_string(), json!(0.1)))
+        .collect();
+        let pose = json!({
+            "player_source": src, "animation_source": src, "root": 0, "anchors": {}, "targets": {},
+            "walk_paths": [[], []], "sit_poses": [[], [], [], []], "wearable_anchors": [],
+            "character_meshes": [], "runtime_targets": {}, "walk_offsets": [0, 0], "method_inputs": {},
+            "scalars": {}, "animation_scalars": scalars, "right_hand_rotation": [0, 0, 0, 1],
+            "use_override_sit_pose": false, "override_sit_pose_index": 0, "ik_chains": [],
+            "follow": {"source": src, "owner": 0, "enabled": false, "inverse": false, "nodes": [], "targets": []},
+            "evidence": {"assembly_sha256": "", "methods": []},
+        });
+        (
+            serde_json::from_value(player).unwrap(),
+            serde_json::from_value(pose).unwrap(),
+        )
+    }
+
+    #[test]
+    fn enter_and_leave_the_driver_seat_of_a_second_car() {
+        let prototype = body_fixture::car();
+        let (mut physics, keys, chassis) = body_fixture::two_cars(&prototype);
+        let (reference, pose) = player();
+        let mut player = PlayerState::new(
+            &reference,
+            &pose,
+            VehiclePose {
+                position: [5.0, 0.0, 4.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+            },
+            &mut physics,
+        );
+        let seat = WorldSeatReference {
+            source: serde_json::from_value(json!({"file": "a", "path_id": 30})).unwrap(),
+            sit_node: 0,
+            hit_nodes: vec![0],
+            yaw_limits_degrees: [-90.0, 90.0],
+            yaw_unlimited: false,
+            cant_sit_angle_degrees: None,
+            look_instead_of_lean: false,
+            pitch_limits_degrees: [-89.0, 89.0],
+            default_pitch_degrees: 0.0,
+            min_exit_angle_degrees: 0.0,
+            exit_height: 0.0,
+            show_sleep_text: false,
+            driver: true,
+            driving2: false,
+        };
+        let owner = SeatOwner::Vehicle(physics.vehicle_of(chassis[1]).unwrap().clone());
+        let sit = VehiclePose {
+            position: [-0.4, 0.3, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        };
+        assert!(player.enter_item_seat(
+            owner,
+            chassis[1],
+            &seat,
+            crate::reference::ItemId(7),
+            sit,
+            &mut physics
+        ));
+        assert!(player.driving());
+        assert_eq!(player.seat_vehicle(), Some(&keys[1]));
+        assert_eq!(player.seat_body(), Some(chassis[1]));
+        assert_eq!(player.item_seat_body(), None);
+        assert!(player.try_exit(&mut physics));
+        assert!(!player.seated() && !player.driving());
+        assert_eq!(player.seat_vehicle(), None);
     }
 }

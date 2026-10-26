@@ -158,6 +158,25 @@ def prepare_startup_lighting(source, roots):
     source.startup_light_material_evidence = evidence
 
 
+def probe_settings(identity, data):
+    """Checked realtime ReflectionProbe values of one source probe."""
+    from .source import vector
+    expected={'m_Mode':1,'m_RefreshMode':1,'m_TimeSlicingMode':1,'m_Resolution':64,
+        'm_HDR':True,'m_BoxProjection':False,'m_UseOcclusionCulling':False}
+    for field,value in expected.items():
+        if data[field]!=value:raise ValueError(f'{identity} unsupported {field}')
+    if data['m_BakedTexture']['m_PathID'] or data['m_CustomBakedTexture']['m_PathID']:
+        raise ValueError(f'{identity} unexpected authored probe texture')
+    return {'enabled':bool(data['m_Enabled']),'bounds_size':list(vector(data['m_BoxSize'])),
+        'bounds_offset':list(convert_point(vector(data['m_BoxOffset']))),
+        'box_projection':False,'blend_distance':data['m_BlendDistance'],
+        'intensity':data['m_IntensityMultiplier'],'importance':data['m_Importance'],
+        'near':data['m_NearClip'],'far':data['m_FarClip'],'shadow_distance':data['m_ShadowDistance'],
+        'mask':data['m_CullingMask']['m_Bits'],'resolution':64,'refresh':'individual_faces_every_frame',
+        'decode':[1.,1.,0.,0.],'faces':[{'index':face,'basis':basis} for face,basis in enumerate(CUBE_BASES)],
+        'mip_extents':[64>>mip for mip in range(7)]}
+
+
 def recover_lights_and_probes(source, roots):
     """Resolve identities through live component links, never prose source IDs."""
     from .source import key, source_id, vector
@@ -215,24 +234,12 @@ def recover_lights_and_probes(source, roots):
                     'depth_bias':shadows['m_Bias'],'normal_bias':shadows['m_NormalBias'],
                     'near':shadows['m_NearPlane']}})
         else:
-            if node is None:raise ValueError(f'{identity} missing probe node')
-            expected={'m_Mode':1,'m_RefreshMode':1,'m_TimeSlicingMode':1,'m_Resolution':64,
-                'm_HDR':True,'m_BoxProjection':False,'m_UseOcclusionCulling':False}
-            for field,value in expected.items():
-                if data[field]!=value:raise ValueError(f'{identity} unsupported {field}')
-            if data['m_BakedTexture']['m_PathID'] or data['m_CustomBakedTexture']['m_PathID']:
-                raise ValueError(f'{identity} unexpected authored probe texture')
-            probes.append({'source':source_id(reader),'node':node,'world_pose':pose,
-                'enabled':bool(data['m_Enabled']),'bounds_size':list(vector(data['m_BoxSize'])),
-                'bounds_offset':list(convert_point(vector(data['m_BoxOffset']))),
-                'box_projection':False,'blend_distance':data['m_BlendDistance'],
-                'intensity':data['m_IntensityMultiplier'],'importance':data['m_Importance'],
-                'near':data['m_NearClip'],'far':data['m_FarClip'],'shadow_distance':data['m_ShadowDistance'],
-                'mask':data['m_CullingMask']['m_Bits'],'resolution':64,'refresh':'individual_faces_every_frame',
-                'decode':[1.,1.,0.,0.],'faces':[{'index':face,'basis':basis} for face,basis in enumerate(CUBE_BASES)],
-                'mip_extents':[64>>mip for mip in range(7)]})
-    if len(probes)!=len(source.lighting_cars):
-        raise ValueError('Each selected source car requires one registered local probe')
+            raise ValueError(f'{identity} reflection probes belong to the car prototypes')
+    # The car prototype probe holds the shared capture settings. The runtime moves it to the last seated car.
+    car_probes=[c for node in source.hierarchy(source.lighting_probe_prototype,activate_root=True)
+        for c in node['components'] if c.type.name=='ReflectionProbe']
+    if len(car_probes)!=1:raise ValueError('The car prototype requires one reflection probe')
+    probes.append({'source':source_id(car_probes[0]),**probe_settings(key(car_probes[0]),source.read(car_probes[0]))})
     if any(light['enabled'] for light in lights[1:]):
         raise ValueError('The selected startup profile contains an unresolved enabled local light')
     return lights,probes

@@ -102,8 +102,7 @@ impl SaveSnapshot {
             if let Some(slot) = &a.slot {
                 links(
                     sources.contains(slot)
-                        || reference.part_slots.iter().any(|s| &s.source == slot)
-                        || reference.wheel_slots.iter().any(|s| &s.source == slot),
+                        || reference.part_slots.iter().any(|s| &s.source == slot),
                     "Unknown attachment slot",
                 )?;
             }
@@ -266,7 +265,7 @@ impl SaveSnapshot {
                         )?;
                     }
                 }
-                ItemLocationSave::Attached { owner } | ItemLocationSave::Locked { owner, .. } => {
+                ItemLocationSave::Attached { owner } => {
                     edges.insert(key, ObjectKey::Imported(ids.item(owner)?));
                 }
                 _ => (),
@@ -289,13 +288,8 @@ impl SaveSnapshot {
             }),
             "Generated carry record",
         )?;
-        let vehicle_index = ids
-            .vehicles
-            .iter()
-            .position(|v| v == &self.progress.selected_vehicle)
-            .ok_or_else(|| invalid("Selected vehicle identity"))?;
         links(
-            self.world.spawn.context.current_car == reference.vehicles[vehicle_index].spawn_car_id,
+            self.world.spawn.context.current_car == crate::world::START_CAR,
             "Selected source spawn car",
         )?;
         for record in &self.attachments.parts {
@@ -312,28 +306,6 @@ impl SaveSnapshot {
                 links(
                     slots.insert((slot.owner.map(ObjectKey::Imported), slot.source.clone())),
                     "Duplicate cross-source part slot",
-                )?;
-            }
-        }
-        for record in &self.attachments.wheels {
-            if record.rim.is_some() {
-                let slot_id = ids
-                    .wheel_slots
-                    .get(&record.slot)
-                    .ok_or_else(|| invalid("Unknown source wheel slot"))?;
-                let vehicle = reference
-                    .vehicles
-                    .iter()
-                    .find(|v| v.wheel_slots.contains(slot_id))
-                    .unwrap();
-                let owner = reference
-                    .items
-                    .iter()
-                    .find(|i| i.node == vehicle.root)
-                    .map(|i| ObjectKey::Imported(i.id));
-                links(
-                    slots.insert((owner, record.slot.source_id()?)),
-                    "Duplicate cross-source wheel slot",
                 )?;
             }
         }
@@ -406,8 +378,7 @@ impl SaveSnapshot {
         Ok(())
     }
 }
-/// A storage lock has an owner and no slot. Its volume is a source volume of an imported owner,
-/// or a prototype volume of a generated owner. `prototype` is the generated owner prototype if known.
+/// A storage lock has an owner and no slot. Its volume is a prototype volume of a generated owner. `prototype` is the generated owner prototype if known.
 fn storage_volume(
     storage: &r::StorageRecord,
     a: &AttachmentSnapshot,
@@ -418,13 +389,7 @@ fn storage_volume(
     };
     links(a.slot.is_none(), "Storage lock with a slot")?;
     match a.owner.as_ref() {
-        Some(ObjectKey::Imported(owner)) => links(
-            storage
-                .volumes
-                .iter()
-                .any(|v| v.source == *volume && v.owner == *owner),
-            "Storage volume owner",
-        ),
+        Some(ObjectKey::Imported(_)) => Err(invalid("Storage volume owner")),
         Some(ObjectKey::Generated(_)) => links(
             storage
                 .prototype_volumes
@@ -463,7 +428,6 @@ mod tests {
                 drop_delay_seconds: 1.0,
                 scan_interval_seconds: 1.5,
             },
-            volumes: Vec::new(),
             prototype_volumes: [10, 20]
                 .map(|path_id| r::PrototypeVolumeReference {
                     prototype: id(path_id),
@@ -475,6 +439,7 @@ mod tests {
                     storage_type: 0,
                     only_manual: false,
                     usables: Vec::new(),
+                    slots: Vec::new(),
                     dont_lock_if_owner_picked_up: false,
                 })
                 .into(),

@@ -1,71 +1,12 @@
-//! Checked source plate, attachment, font, and material contracts.
+//! Checked source plate font and material contracts. Car prototype plates use them.
 use super::*;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlateRecord {
-    pub plates: Vec<PlateReference>,
-    pub targets: Vec<PlateTargetReference>,
     pub font: PlateFontReference,
     pub material: PlateMaterialReference,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlateReference {
-    pub source: SourceId,
-    pub attachment_source: SourceId,
-    pub pickup_source: SourceId,
-    pub save_source: SourceId,
-    pub text_source: SourceId,
-    pub font_source: SourceId,
-    pub material_source: SourceId,
-    pub mass_source: SourceId,
-    pub item: ItemId,
-    pub node: NodeId,
-    pub text_node: NodeId,
-    pub same_as: Option<ItemId>,
-    pub initial_text: String,
-    pub initial_same: bool,
-    pub startup_target: AttachmentTargetId,
-    pub layout: PlateLayoutReference,
-    pub types: Vec<String>,
-    pub colliders: Vec<ColliderId>,
-    pub parent_at_attach: bool,
-    pub lock_rotation: bool,
-    pub target_pos_rot: bool,
-    pub only_to_point: bool,
-    pub ignore_points: bool,
-    pub use_collider_attach_point: bool,
-    pub snap_y_to_normal: bool,
-    pub remove_target_pos: [f32; 3],
-    pub offset_back: f32,
-    pub mass_kg: f32,
-    pub body_policy: PlateBodyPolicy,
-    pub body_source: Option<SourceId>,
-    pub pickup_store_damping: [f32; 2],
-    /// None means the source creates a body with Unity AddComponent defaults.
-    pub linear_damping: Option<f32>,
-    pub angular_damping: Option<f32>,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlateBodyPolicy {
-    SourceBody,
-    UnityAddComponent,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlateTargetReference {
-    pub id: AttachmentTargetId,
-    pub source: SourceId,
-    pub node: NodeId,
-    pub owner: ItemId,
-    pub colliders: Vec<ColliderId>,
-    pub types: Vec<String>,
-    pub pose: Transform,
-    pub attached_items: Vec<ItemId>,
-    pub dont_remove_attached_when_looking: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,6 +35,32 @@ pub struct PlateLayoutReference {
     pub margin: [f32; 4],
     pub color: [f32; 4],
     pub transform: Transform,
+}
+impl PlateLayoutReference {
+    /// Finite TextMeshPro values with the source alignment: Center=2, Middle=512, Bold.
+    pub(super) fn valid(&self) -> bool {
+        let l = self;
+        finite(&l.bounds)
+            && l.bounds.iter().all(|v| *v > 0.)
+            && finite(&l.pivot)
+            && finite(&l.anchor_min)
+            && finite(&l.anchor_max)
+            && finite(&[
+                l.font_size,
+                l.font_size_base,
+                l.font_size_min,
+                l.font_size_max,
+            ])
+            && l.font_size > 0.
+            && finite(&l.spacing)
+            && finite(&l.margin)
+            && finite(&l.color)
+            && transform(&l.transform)
+            && l.horizontal_alignment == 2
+            && l.vertical_alignment == 512
+            && l.font_style == 1
+            && l.font_weight == 400
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,23 +153,6 @@ impl PlateRecord {
     pub fn validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError> {
         let valid_source = |s: &SourceId| {
             s.path_id != 0 && manifest.source_hashes.iter().any(|h| h.file == s.file)
-        };
-        let descendant = |mut node: NodeId, root: NodeId| {
-            for _ in 0..=manifest.nodes.len() {
-                if node == root {
-                    return true;
-                }
-                match manifest
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == node)
-                    .and_then(|n| n.parent)
-                {
-                    Some(parent) => node = parent,
-                    None => return false,
-                }
-            }
-            false
         };
         let resource = |r: &PlateResourceReference| {
             valid_source(&r.source)
@@ -362,156 +312,6 @@ impl PlateRecord {
             }),
             "plate material atlas binding",
         )?;
-        require(
-            self.plates.len() == 2 && self.targets.len() == 2,
-            "two selected startup plates/targets",
-        )?;
-        let plate_ids = ids(
-            self.plates.iter().map(|p| p.item),
-            "duplicate plate item ownership",
-        )?;
-        let target_ids = ids(
-            self.targets.iter().map(|t| t.id),
-            "duplicate plate attachment target",
-        )?;
-        for t in &self.targets {
-            let owner = manifest.items.iter().find(|i| i.id == t.owner);
-            require(
-                valid_source(&t.source)
-                    && t.id.0 as i64 == t.source.path_id
-                    && owner.is_some()
-                    && owner.is_some_and(|i| descendant(t.node, i.node))
-                    && transform(&t.pose)
-                    && !t.types.is_empty()
-                    && !t.colliders.is_empty()
-                    && t.colliders.iter().all(|id| {
-                        manifest.colliders.iter().any(|c| {
-                            c.id == *id && owner.is_some_and(|i| descendant(c.node, i.node))
-                        })
-                    })
-                    && t.attached_items.iter().all(|id| plate_ids.contains(id)),
-                "plate target owner/pose/colliders",
-            )?;
-            ids(
-                t.attached_items.iter(),
-                "duplicate target attachment membership",
-            )?;
-        }
-        let bindings = [
-            (
-                78750, 66420, 65528, 65530, 64254, 22542, 61809, 66346, 74954,
-            ),
-            (
-                73955, 71250, 72351, 72350, 64270, 30779, 62878, 66601, 77830,
-            ),
-        ];
-        for (p, (script, attachment, pickup, save, text, root, text_transform, target, mass)) in
-            self.plates.iter().zip(bindings)
-        {
-            let label = format!("level1:{} plate binding", p.source.path_id);
-            require(
-                p.source.file == "level1"
-                    && p.source.path_id == script
-                    && p.attachment_source.path_id == attachment
-                    && p.pickup_source.path_id == pickup
-                    && p.save_source.path_id == save
-                    && p.text_source.path_id == text
-                    && p.mass_source.path_id == mass
-                    && p.startup_target.0 == target
-                    && manifest.nodes.iter().any(|n| {
-                        n.id == p.node && n.source.file == "level1" && n.source.path_id == root
-                    })
-                    && manifest.nodes.iter().any(|n| {
-                        n.id == p.text_node
-                            && n.source.file == "level1"
-                            && n.source.path_id == text_transform
-                    })
-                    && p.initial_text.is_empty()
-                    && !p.initial_same
-                    && [
-                        &p.attachment_source,
-                        &p.pickup_source,
-                        &p.save_source,
-                        &p.text_source,
-                        &p.mass_source,
-                    ]
-                    .into_iter()
-                    .all(valid_source)
-                    && p.font_source == f.source
-                    && p.material_source == m.source
-                    && manifest
-                        .items
-                        .iter()
-                        .any(|i| i.id == p.item && i.node == p.node)
-                    && manifest.nodes.iter().any(|n| n.id == p.text_node)
-                    && descendant(p.text_node, p.node)
-                    && target_ids.contains(&p.startup_target)
-                    && !p.colliders.is_empty()
-                    && p.colliders.iter().all(|id| {
-                        manifest
-                            .colliders
-                            .iter()
-                            .any(|c| c.id == *id && descendant(c.node, p.node))
-                    })
-                    && p.same_as
-                        .is_none_or(|id| id != p.item && plate_ids.contains(&id))
-                    && self.targets.iter().any(|t| {
-                        t.id == p.startup_target && p.types.iter().any(|ty| t.types.contains(ty))
-                    })
-                    && finite(&p.remove_target_pos)
-                    && finite(&[p.offset_back, p.mass_kg])
-                    && p.mass_kg > 0.
-                    && finite(&p.pickup_store_damping)
-                    && match p.body_policy {
-                        PlateBodyPolicy::SourceBody => {
-                            p.body_source.as_ref().is_some_and(valid_source)
-                                && [p.linear_damping, p.angular_damping]
-                                    .into_iter()
-                                    .all(|v| v.is_some_and(|v| v.is_finite() && v >= 0.))
-                        }
-                        PlateBodyPolicy::UnityAddComponent => {
-                            p.body_source.is_none()
-                                && p.linear_damping.is_none()
-                                && p.angular_damping.is_none()
-                        }
-                    },
-                &label,
-            )?;
-            let l = &p.layout;
-            require(
-                finite(&l.bounds)
-                    && l.bounds.iter().all(|v| *v > 0.)
-                    && finite(&l.pivot)
-                    && finite(&l.anchor_min)
-                    && finite(&l.anchor_max)
-                    && finite(&[
-                        l.font_size,
-                        l.font_size_base,
-                        l.font_size_min,
-                        l.font_size_max,
-                    ])
-                    && l.font_size > 0.
-                    && finite(&l.spacing)
-                    && finite(&l.margin)
-                    && finite(&l.color)
-                    && transform(&l.transform)
-                    && l.horizontal_alignment == 2
-                    && l.vertical_alignment == 512
-                    && l.font_style == 1
-                    && l.font_weight == 400,
-                "plate TMP layout; Center=2, Middle=512",
-            )?;
-            let mut current = Some(p.item);
-            let mut visited = HashSet::new();
-            while let Some(id) = current {
-                require(visited.insert(id), "cyclic plate same_as")?;
-                current = self
-                    .plates
-                    .iter()
-                    .find(|p| p.item == id)
-                    .and_then(|p| p.same_as);
-            }
-        }
         Ok(())
     }
 }

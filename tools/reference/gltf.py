@@ -412,17 +412,19 @@ class GltfExporter(GltfBuilder):
                 if component.type.name=='MonoBehaviour' and self.source.class_name(component)=='partconditionscript':
                     for pointer in self.source.read(component)['MatList']:
                         self.material(self.source.resolve(component,pointer))
-        # Cache all instrument and radio material variants in the same imported glTF.
+        # Cache all instrument, radio and vehicle lamp material variants in the same imported glTF.
         for record in records:
             for component in record['components']:
                 if component.type.name!='MonoBehaviour' or not self.source.read(component)['m_Script']['m_PathID']:continue
                 cname=self.source.class_name(component)
-                if cname not in ('meterscript','mutatoscript','ledkijelzoscript','forgoszamlap','radioscript'):continue
+                if cname not in ('meterscript','mutatoscript','ledkijelzoscript','forgoszamlap','radioscript','headlightscript','rearlights'):continue
                 data=self.source.read(component)
                 pointers=[]
                 if cname in ('meterscript','mutatoscript'):pointers=[data['OnM'],data['OffM']]
                 elif cname=='radioscript':pointers=[data[k] for k in ('SOn','SOff','MutatoOn','MutatoOff')]
                 elif cname=='ledkijelzoscript':pointers=[v[k] for v in data['leds'] for k in ('on','off')]
+                elif cname=='headlightscript':pointers=[*(s['M'] for s in data['states']),data['MOFF']]
+                elif cname=='rearlights':pointers=[data[p+k] for p in 'HFR' for k in ('LampOn','LampOff')]
                 else:pointers=[v[k] for v in data['szamok'] for k in ('MOn','MOff')]
                 for ptr in pointers:
                     if ptr['m_PathID']:self.material(self.source.resolve(component,ptr))

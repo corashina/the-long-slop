@@ -2,7 +2,7 @@
 import copy
 from . import world_probe
 from .source import key, source_id
-from .world import Selection, RULE_CLASSES, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
+from .world import Selection, RULE_CLASSES, vehicle_exclusion, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
 
 
 def extend_spawn_closure(source, reader, output, world):
@@ -17,7 +17,6 @@ def extend_spawn_closure(source, reader, output, world):
     items_by_root={}
     for i in items:items_by_root.setdefault(key(item_roots[i['index']]),[]).append(i)
     actors={'aiscript','newAiScript','nyulscript','vultureAI','movecreaturescript','randomFlyer'}
-    vehicles={'carscript','utanfutoscript'}
     actions={'GunAim','GunShoot','bbgunscript','meleeweaponscript','weaponscript','weaponhandlingscript','wearable','ediblescript','survivalscript','cigiscript'}
     def add(target):
         root=_source_root(source,target)
@@ -57,7 +56,7 @@ def extend_spawn_closure(source, reader, output, world):
         hierarchy=source.hierarchy(root,activate_root=True)
         scripts=[c for n in hierarchy for c in n['components'] if c.type.name=='MonoBehaviour']
         classes={source.class_name(c) for c in scripts}
-        reason='other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else ''
+        reason=vehicle_exclusion(root,classes) or ('actor_behavior' if classes & actors else '')
         excluded_actions=selected_actions(source,scripts,actions)
         root_parts=[source.read(c) for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='partscript']
         matches,excluded_actions=part_scope(root_parts,world['part_scope_slots'],excluded_actions)

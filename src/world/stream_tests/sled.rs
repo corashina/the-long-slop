@@ -102,7 +102,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
     );
     run.physics.refresh_queries();
     let mut driving = KeyboardDriving::new(
-        reference.vehicles[0].keyboard_steering_rate,
+        reference.driving.keyboard_steering_rate,
         reference.driving.pedal_rate,
     );
     for _ in 0..(0.5 / FIXED_DT) as usize {
@@ -122,11 +122,12 @@ fn sled_slides_steers_and_keeps_its_seat() {
                 .filter(|seat| seat.seat.source == first.source)
         })
         .expect("bound first sled seat");
-    let (seat_record, pose) = (seat.seat.clone(), seat.pose);
+    let (seat_record, seat_item, pose) = (seat.seat.clone(), seat.seat_item, seat.pose);
     assert!(run.area.player.enter_item_seat(
-        owner.clone(),
+        SeatOwner::Item(owner.clone()),
         body,
         &seat_record,
+        seat_item,
         pose,
         &mut run.physics
     ));
@@ -169,9 +170,10 @@ fn sled_slides_steers_and_keeps_its_seat() {
 
     // Sit again, save and load.
     assert!(run.area.player.enter_item_seat(
-        owner.clone(),
+        SeatOwner::Item(owner.clone()),
         body,
         &seat_record,
+        seat_item,
         pose,
         &mut run.physics
     ));

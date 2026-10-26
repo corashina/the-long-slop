@@ -1,4 +1,4 @@
-use super::{ReferenceError, ReferenceManifest, SourceId, finite, require};
+use super::{ReferenceError, SourceId, finite, require};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -37,6 +37,8 @@ pub struct DrivingBinding {
 pub struct DrivingReference {
     pub source: SourceId,
     pub pedal_rate: f32,
+    /// Settings steering slider value: keyboard steer change per second.
+    pub keyboard_steering_rate: f32,
     pub force_manual: bool,
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
@@ -88,14 +90,18 @@ pub struct WheelHubReference {
 }
 
 impl DrivingReference {
-    pub(super) fn validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError> {
+    pub(super) fn validate(&self) -> Result<(), ReferenceError> {
         require(
             self.source.file == "level0" && self.source.path_id == 16865,
             "driving settings source",
         )?;
         require(
-            finite(&[self.pedal_rate, self.min_motor_torque_nm])
-                && self.pedal_rate > 0.0
+            finite(&[
+                self.pedal_rate,
+                self.keyboard_steering_rate,
+                self.min_motor_torque_nm,
+            ]) && self.pedal_rate > 0.0
+                && self.keyboard_steering_rate > 0.0
                 && self.min_motor_torque_nm >= 0.0,
             "driving parameters",
         )?;
@@ -141,12 +147,6 @@ impl DrivingReference {
                 }),
             "driving bindings",
         )?;
-        for vehicle in &manifest.vehicles {
-            require(
-                vehicle.driving.initial_gear < vehicle.gear_ratios.len(),
-                "driving startup gear",
-            )?;
-        }
         Ok(())
     }
 }

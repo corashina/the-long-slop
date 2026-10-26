@@ -123,9 +123,13 @@ fn scan(
     let queries = physics.queries(filter);
     let mut total = 0.;
     for _ in 0..rules.ray_count {
-        let [x, y] = random.inside_unit_circle().map(|v| v * rules.ray_start_radius);
+        let [x, y] = random
+            .inside_unit_circle()
+            .map(|v| v * rules.ray_start_radius);
         let start = transform.translation + right * x + up * y;
-        let [x, y] = random.inside_unit_circle().map(|v| v * rules.ray_end_radius);
+        let [x, y] = random
+            .inside_unit_circle()
+            .map(|v| v * rules.ray_end_radius);
         let direction = (forward * rules.ray_distance + right * x + up * y).normalize_or_zero();
         if direction == Vector::ZERO {
             continue;
@@ -212,7 +216,14 @@ mod tests {
     }
     fn value(physics: &PhysicsWorld) -> f32 {
         let mut random = UnityRandom::new(1);
-        scan(&rules(), Pose::IDENTITY, None, physics, &mut random, &mut Vec::new())
+        scan(
+            &rules(),
+            Pose::IDENTITY,
+            None,
+            physics,
+            &mut random,
+            &mut Vec::new(),
+        )
     }
 
     #[test]
@@ -230,7 +241,15 @@ mod tests {
         detector.turn();
         let mut random = UnityRandom::new(1);
         let (_, volume) = detector
-            .advance(&rules(), 0.1, Pose::IDENTITY, None, &physics, &mut random, &mut Vec::new())
+            .advance(
+                &rules(),
+                0.1,
+                Pose::IDENTITY,
+                None,
+                &physics,
+                &mut random,
+                &mut Vec::new(),
+            )
             .unwrap();
         assert!(volume > 0.1);
         detector.turn();

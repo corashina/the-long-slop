@@ -190,21 +190,6 @@ impl RadioState {
             band,
         }
     }
-    pub fn lada(reference: &RadioAudioReference) -> Self {
-        let c = &reference.constants;
-        Self::new(
-            [c["AMmin"], c["AMmax"], c["AMStep"]],
-            [c["FMmin"], c["FMmax"], c["FMStep"]],
-            c["vSpeed"],
-            reference.controls.band.is_some(),
-            crate::save::RadioSnapshot {
-                on: reference.initial_on,
-                am: reference.initial_am,
-                tuning: reference.initial_tuning,
-                volume: reference.initial_volume,
-            },
-        )
-    }
     fn range(&self) -> [f32; 3] {
         if self.am {
             self.am_range
@@ -432,42 +417,41 @@ mod a09_save {
     use super::*;
     use crate::save::{RadioSnapshot, SaveError};
 
-    fn reference(band: bool) -> RadioAudioReference {
-        let source = serde_json::json!({"file": "level1", "path_id": 1});
+    fn reference() -> RadioAudioReference {
         let method = serde_json::json!({
             "class": "radioscript", "method": "Update", "file": "", "line_start": 0,
             "line_end": 0, "sha256": ""
         });
-        let control = serde_json::json!({
-            "source": source, "node": 1, "item": 1, "enabled": true, "tune": false,
-            "turnable": true
-        });
         serde_json::from_value(serde_json::json!({
-            "source": source, "emitter": 0, "voices": [1, 2, 3],
-            "controls": {"volume": control, "tuning": null, "band": if band { control.clone() } else { serde_json::Value::Null }},
-            "visuals": {
-                "screen": {"kind": "absent"}, "indicator": {"kind": "absent"},
-                "needle": 1, "start": 1, "end": 1
-            },
             "constants": {
                 "AMmin": 530., "AMmax": 1600., "AMStep": 10., "FMmin": 88., "FMmax": 108.,
                 "FMStep": 0.1, "vSpeed": 0.05
             },
-            "initial_on": false, "initial_am": false, "initial_tuning": 0.2, "initial_volume": 0.5,
             "fm_tolerance": 0.5, "am_tolerance": 10., "electronics_cutoff": 0.1,
             "time_correction_seconds": 0., "late_seek_margin_seconds": 0., "custom_gain": 1.,
             "clock": {
                 "kind": "game", "selected": method, "music_start": method, "talk_start": method,
                 "multiplayer": method
             },
-            "click_binding": null, "stations": [], "methods": [], "electronics_source": source,
-            "electronics_output": 1., "tuning_repeat_seconds": 0.1,
+            "stations": [], "methods": [], "tuning_repeat_seconds": 0.1,
             "holiday_ranges": [[0, 0, 0, 0], [0, 0, 0, 0]]
         }))
         .unwrap()
     }
     fn radio(band: bool) -> RadioState {
-        RadioState::lada(&reference(band))
+        let c = &reference().constants;
+        RadioState::new(
+            [c["AMmin"], c["AMmax"], c["AMStep"]],
+            [c["FMmin"], c["FMmax"], c["FMStep"]],
+            c["vSpeed"],
+            band,
+            RadioSnapshot {
+                on: false,
+                am: false,
+                tuning: 0.2,
+                volume: 0.5,
+            },
+        )
     }
 
     #[test]
@@ -504,7 +488,7 @@ mod a09_save {
 
     #[test]
     fn set_radio_gains_follow_distance_and_output() {
-        let mut reference = reference(false);
+        let mut reference = reference();
         reference.stations = vec![
             serde_json::from_value(serde_json::json!({
                 "id": 1, "band": "fm", "frequency": 100., "name": "", "custom": true,
@@ -516,7 +500,7 @@ mod a09_save {
             .unwrap(),
         ];
         let broadcasts = RadioBroadcasts::new(&reference, &[], [10, 24]);
-        let mut radio = RadioState::lada(&reference);
+        let mut radio = radio(false);
         radio.on = true;
         radio.volume = 0.5;
         // FR 100.0 is exact; 100.5 sits at the FM tolerance.

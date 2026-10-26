@@ -8,10 +8,12 @@ pub(super) fn publish(drive: Res<Drive>, archetypes: &bevy::ecs::archetype::Arch
     }
     let runtime = &drive.runtime;
     let counters = runtime.stream.performance_counters();
-    let snapshot = runtime.physics.snapshot(runtime.vehicle);
+    let contacts = runtime.vehicle.as_ref().map_or(0, |key| {
+        runtime.physics.wheel_contacts(key).filter(|v| *v).count() as u32
+    });
     game_performance_counters(
         drive.frame_steps,
-        snapshot.wheels_contact.into_iter().filter(|v| *v).count() as u32,
+        contacts,
         runtime.physics.rapier().bodies.len() as u32,
         runtime.physics.collider_count() as u32,
         counters.roads as u32,

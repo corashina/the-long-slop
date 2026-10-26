@@ -497,6 +497,16 @@ pub(crate) fn array<'a>(
         _ => Err(ReferenceError(format!("Invalid source array {n}"))),
     }
 }
+/// A source string array.
+pub(crate) fn texts<'a>(f: impl FieldAccess<'a>, n: &str) -> Result<Vec<String>, ReferenceError> {
+    array(f, n)?
+        .iter()
+        .map(|v| match v {
+            WorldValue::Text(s) => Ok(s.clone()),
+            _ => Err(ReferenceError(format!("Invalid source text in {n}"))),
+        })
+        .collect()
+}
 pub(crate) fn fields(v: &WorldValue) -> Result<Fields<'_>, ReferenceError> {
     match v {
         WorldValue::Record(f) => Ok(Fields::Record(f)),

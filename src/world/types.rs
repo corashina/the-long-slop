@@ -16,6 +16,8 @@ pub enum WorldLayer {
     DesertBuilding,
     Lamp,
     Nested,
+    /// Fixed world prototype placements of the source startup list, such as the start car.
+    Startup,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -27,11 +29,41 @@ pub struct GeneratedId {
     pub ordinal: u32,
     pub children: Vec<(SourceId, u32)>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum ObjectKey {
     Imported(ItemId),
     Generated(GeneratedId),
+}
+impl ObjectKey {
+    /// Stable 64-bit FNV-1a seed of the key. Each copy of one prototype gets its own seed.
+    pub fn seed(&self) -> u64 {
+        fn mix(hash: &mut u64, bytes: &[u8]) {
+            for byte in bytes {
+                *hash = (*hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        fn source(hash: &mut u64, id: &SourceId) {
+            mix(hash, id.file.as_bytes());
+            mix(hash, &id.path_id.to_le_bytes());
+        }
+        let mut hash = 0xcbf29ce484222325;
+        match self {
+            Self::Imported(id) => mix(&mut hash, &id.0.to_le_bytes()),
+            Self::Generated(id) => {
+                mix(&mut hash, &[id.layer as u8]);
+                source(&mut hash, &id.generator);
+                mix(&mut hash, &id.unit[0].to_le_bytes());
+                mix(&mut hash, &id.unit[1].to_le_bytes());
+                mix(&mut hash, &id.ordinal.to_le_bytes());
+                for (child, ordinal) in &id.children {
+                    source(&mut hash, child);
+                    mix(&mut hash, &ordinal.to_le_bytes());
+                }
+            }
+        }
+        hash
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

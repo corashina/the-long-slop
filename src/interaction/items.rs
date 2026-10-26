@@ -9,8 +9,8 @@ use rapier3d::prelude::RigidBodyHandle;
 use crate::fluids::{FluidContainer, FluidEntry, VehicleFluids, validate_fluid_entries};
 use crate::reference::{
     BodyId, FoodReference, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest,
-    WheelSlotId,
 };
+use super::wheels::WheelSlotId;
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,10 +66,7 @@ pub struct ItemStore {
     states: Vec<ItemState>,
     indices: BevyHashMap<ItemId, usize>,
     body_ids: Vec<BodyId>,
-    /// Fuel, sump, and coolant state indices per vehicle.
-    vehicle_tanks: Vec<[usize; 3]>,
     names: Vec<String>,
-    vehicle_items: Vec<ItemId>,
     slot_owners: HashMap<PartSlotId, Option<ItemId>>,
     generated: BevyHashMap<GeneratedId, ItemId>,
     membership_revision: u64,
@@ -126,17 +123,14 @@ impl ItemStore {
             let state = self.get_mut(ids.item(&record.instance)?).unwrap();
             state.location = match &record.location {
                 // `GarageRuntime::from_save` locks saved items after their bodies bind.
-                ItemLocationSave::World
-                | ItemLocationSave::GeneratedAttachment { .. }
-                | ItemLocationSave::Locked { .. } => ItemLocation::World,
+                ItemLocationSave::World | ItemLocationSave::GeneratedAttachment { .. } => {
+                    ItemLocation::World
+                }
                 ItemLocationSave::Held => ItemLocation::Held,
                 ItemLocationSave::Stored { slot } => ItemLocation::Stored(*slot),
                 ItemLocationSave::Equipped => ItemLocation::Equipped,
                 ItemLocationSave::Attached { owner } => ItemLocation::Attached(ids.item(owner)?),
                 ItemLocationSave::PartSlot { slot } => ItemLocation::PartSlot(ids.part_slots[slot]),
-                ItemLocationSave::WheelSlot { slot } => {
-                    ItemLocation::WheelSlot(ids.wheel_slots[slot])
-                }
             };
             state.pending_attachment = matches!(
                 record.location,
@@ -144,7 +138,6 @@ impl ItemStore {
             );
             // A saved lock pose is relative to the owner, not to the item body.
             let locked = match &record.location {
-                ItemLocationSave::Locked { .. } => true,
                 ItemLocationSave::GeneratedAttachment { attachment } => attachment.volume.is_some(),
                 _ => false,
             };
@@ -277,11 +270,7 @@ impl ItemStore {
                 pose,
                 local_pose,
                 generated_condition: None,
-                temperature: reference
-                    .vehicles
-                    .iter()
-                    .find(|vehicle| vehicle.engine.item == item.id)
-                    .map(|vehicle| vehicle.engine.initial_temperature),
+                temperature: None,
                 fluid,
                 food: (item.id == reference.survival.starter_food).then_some(FoodState {
                     prototype_index: sausage,
@@ -299,42 +288,6 @@ impl ItemStore {
                 pending_attachment: false,
                 buried: false,
             });
-        }
-        let mut vehicle_tanks = Vec::with_capacity(reference.vehicles.len());
-        for vehicle in &reference.vehicles {
-            let ids = [
-                vehicle.engine.fuel_tank,
-                vehicle.engine.oil_tank,
-                vehicle.engine.coolant_tank,
-            ];
-            let mut tanks = [0; 3];
-            for (index, id) in ids.iter().enumerate() {
-                tanks[index] = *indices
-                    .get(id)
-                    .ok_or_else(|| ReferenceError(format!("Missing engine tank {}", id.0)))?;
-                if states[tanks[index]].fluid.is_none() {
-                    return Err(ReferenceError(format!(
-                        "Missing engine fluid container {}",
-                        id.0
-                    )));
-                }
-            }
-            if tanks[0] == tanks[1] || tanks[0] == tanks[2] || tanks[1] == tanks[2] {
-                return Err(ReferenceError(
-                    "Engine tanks must have distinct item IDs".into(),
-                ));
-            }
-            vehicle_tanks.push(tanks);
-        }
-        for slot in &reference.wheel_slots {
-            for id in [slot.wheel, slot.rim] {
-                if let Some(index) = indices.get(&id) {
-                    states[*index].location = ItemLocation::WheelSlot(slot.id);
-                }
-            }
-            if let Some(index) = indices.get(&slot.tire) {
-                states[*index].location = ItemLocation::Attached(slot.rim);
-            }
         }
         for slot in &reference.part_slots {
             if let Some(id) = slot.part {
@@ -358,18 +311,6 @@ impl ItemStore {
                 .checked_add(1)
                 .ok_or_else(|| ReferenceError("Item identity space exhausted".into()))?,
             origin: WorldOrigin::default(),
-            vehicle_items: reference
-                .vehicles
-                .iter()
-                .map(|vehicle| {
-                    reference
-                        .items
-                        .iter()
-                        .find(|i| i.node == vehicle.root)
-                        .expect("vehicle item")
-                        .id
-                })
-                .collect(),
             slot_owners: reference
                 .part_slots
                 .iter()
@@ -378,7 +319,6 @@ impl ItemStore {
             states,
             indices,
             body_ids,
-            vehicle_tanks,
             names: reference
                 .items
                 .iter()
@@ -432,6 +372,19 @@ impl ItemStore {
             let location = match item.location {
                 ItemLocation::World => ItemLocationSave::World,
                 ItemLocation::Held => ItemLocationSave::Held,
+                ItemLocation::WheelSlot(_) => ItemLocationSave::GeneratedAttachment {
+                    attachment: crate::world::changes::capture(
+                        id,
+                        self,
+                        interaction,
+                        physics,
+                        reference,
+                    )
+                    .and_then(|s| s.attachment)
+                    .ok_or_else(|| {
+                        crate::save::SaveError::InvalidLinks("Missing wheel slot identity".into())
+                    })?,
+                },
                 ItemLocation::PartSlot(slot) if !ids.part_slots.values().any(|id| *id == slot) => {
                     ItemLocationSave::GeneratedAttachment {
                         attachment: crate::world::changes::capture(
@@ -453,9 +406,6 @@ impl ItemStore {
                 ItemLocation::Equipped => ItemLocationSave::Equipped,
                 ItemLocation::PartSlot(slot) => ItemLocationSave::PartSlot {
                     slot: source_key(&ids.part_slots, slot)?,
-                },
-                ItemLocation::WheelSlot(slot) => ItemLocationSave::WheelSlot {
-                    slot: source_key(&ids.wheel_slots, slot)?,
                 },
                 ItemLocation::Attached(owner)
                     if matches!(
@@ -482,13 +432,8 @@ impl ItemStore {
                 ItemLocation::Attached(owner) => ItemLocationSave::Attached {
                     owner: ids.item_instance(owner)?,
                 },
-                // A world owner volume has no fixed source key. It saves with the generated owner.
-                ItemLocation::Locked { owner, .. }
-                    if matches!(
-                        self.object_key(owner),
-                        crate::world::ObjectKey::Generated(_)
-                    ) =>
-                {
+                // Storage volumes belong to world owners. A lock saves with the generated owner.
+                ItemLocation::Locked { .. } => {
                     ItemLocationSave::GeneratedAttachment {
                         attachment: crate::world::changes::capture(
                             id,
@@ -505,21 +450,6 @@ impl ItemStore {
                         })?,
                     }
                 }
-                ItemLocation::Locked { owner, volume } => ItemLocationSave::Locked {
-                    owner: ids.item_instance(owner)?,
-                    volume: crate::save::SourceKey::from(
-                        &reference
-                            .storage
-                            .volumes
-                            .get(volume as usize)
-                            .ok_or_else(|| {
-                                crate::save::SaveError::InvalidLinks(
-                                    "Unknown storage volume".into(),
-                                )
-                            })?
-                            .source,
-                    ),
-                },
             };
             let local_pose = self.saved_local_pose(id, &interaction.storage)?;
             records.push(ItemSnapshot {
@@ -605,7 +535,6 @@ impl ItemStore {
                     .copied()
                     .flatten()
                     .is_some_and(&owns),
-                ItemLocation::WheelSlot(_) => self.vehicle_items.iter().any(|item| owns(*item)),
                 _ => false,
             }
         })
@@ -645,9 +574,6 @@ impl ItemStore {
     }
     pub fn mounted(&self, mut id: ItemId) -> bool {
         for _ in 0..self.states.len() {
-            if self.vehicle_items.contains(&id) {
-                return true;
-            }
             match self.get(id).map(|i| i.location) {
                 Some(ItemLocation::PartSlot(slot)) => {
                     if let Some(Some(owner)) = self.slot_owners.get(&slot) {
@@ -979,17 +905,11 @@ impl ItemStore {
         self.membership_revision += 1;
         self.dirty.remove(&id);
         self.indices.remove(&id);
-        let last = self.states.len() - 1;
         self.states.swap_remove(index);
         self.names.swap_remove(index);
         self.body_ids.swap_remove(index);
         if index < self.states.len() {
             self.indices.insert(self.states[index].id, index);
-        }
-        for tank in self.vehicle_tanks.iter_mut().flatten() {
-            if *tank == last {
-                *tank = index;
-            }
         }
     }
 
@@ -1011,9 +931,7 @@ impl ItemStore {
             indices: states.iter().enumerate().map(|(i, s)| (s.id, i)).collect(),
             states,
             body_ids: Vec::new(),
-            vehicle_tanks: Vec::new(),
             names: Vec::new(),
-            vehicle_items: Vec::new(),
             slot_owners: HashMap::new(),
             generated: BevyHashMap::new(),
             membership_revision: 0,
@@ -1065,28 +983,35 @@ impl ItemStore {
         Some((first, second))
     }
 
-    pub fn vehicle_fluids(&mut self, vehicle: usize) -> Result<VehicleFluids<'_>, ReferenceError> {
-        for index in self.vehicle_tanks[vehicle] {
-            self.dirty.insert(self.states[index].id);
+    /// Fuel, oil, and coolant tanks of one engine step. A missing or repeated tank is `None`.
+    pub fn engine_fluids(&mut self, tanks: [Option<ItemId>; 3]) -> VehicleFluids<'_> {
+        let index = tanks.map(|id| id.and_then(|id| self.indices.get(&id).copied()));
+        for i in index.into_iter().flatten() {
+            self.dirty.insert(self.states[i].id);
         }
-        let [fuel, sump, coolant] = self
-            .states
-            .get_disjoint_mut(self.vehicle_tanks[vehicle])
-            .map_err(|_| ReferenceError("Engine tank bindings overlap".into()))?;
-        Ok(VehicleFluids {
-            fuel: fuel
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing fuel state".into()))?,
-            sump: sump
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing sump state".into()))?,
-            coolant: coolant
-                .fluid
-                .as_mut()
-                .ok_or_else(|| ReferenceError("Missing coolant state".into()))?,
-        })
+        let mut order = [0, 1, 2];
+        order.sort_by_key(|k| index[*k].unwrap_or(usize::MAX));
+        let mut found: [Option<&mut FluidContainer>; 3] = [None, None, None];
+        let mut rest = self.states.as_mut_slice();
+        let mut offset = 0;
+        for k in order {
+            let Some(i) = index[k] else { break };
+            if i < offset {
+                continue;
+            }
+            let (state, tail) = std::mem::take(&mut rest)[i - offset..]
+                .split_first_mut()
+                .expect("indexed state");
+            found[k] = state.fluid.as_mut();
+            rest = tail;
+            offset = i + 1;
+        }
+        let [fuel, sump, coolant] = found;
+        VehicleFluids {
+            fuel,
+            sump,
+            coolant,
+        }
     }
 
     pub fn bind_body(&mut self, id: BodyId, handle: RigidBodyHandle) {
@@ -1294,6 +1219,9 @@ mod world_sync_tests {
             colliders: Vec::new(),
             prefab_pose: transform,
             interiors: Vec::new(),
+            vehicle: None,
+            engines: Vec::new(),
+            radiators: Vec::new(),
             sled: None,
         }
     }

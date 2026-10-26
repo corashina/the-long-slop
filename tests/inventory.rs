@@ -1067,7 +1067,7 @@ fn g08_frame_context_hints_match_available_actions() {
             .actions
             .0
     }
-    let (reference, _, mut game) = fixture();
+    let (_, _, mut game) = fixture();
     assert_eq!(
         actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
         0
@@ -1123,31 +1123,6 @@ fn g08_frame_context_hints_match_available_actions() {
     game.area
         .interaction
         .drop_held(&mut game.area.items, &mut game.physics);
-    let seat = &reference.seats[0];
-    let anchor = reference
-        .anchors
-        .iter()
-        .find(|a| a.id == seat.anchor)
-        .unwrap();
-    assert!(game.area.player.enter(
-        seat.id,
-        the_long_slop::vehicle::VehiclePose {
-            position: anchor.transform.translation,
-            rotation: anchor.transform.rotation,
-        },
-        &mut game.physics
-    ));
-    assert_eq!(
-        actions(&game) & (EQUIP | RECENTER | RELEASE | SEATED_RELEASE),
-        SEATED_RELEASE
-    );
-    let body = game.area.items.get(ItemId(128)).unwrap().body.unwrap();
-    game.physics.edit_body(body, |body| body.set_enabled(false));
-    assert_eq!(
-        actions(&game) & (RELEASE | SEATED_RELEASE),
-        0,
-        "invalid equipment cannot release"
-    );
     let (_, _, mut game) = fixture();
     pickup(&mut game, ItemId(120));
     assert_eq!(

@@ -12,12 +12,13 @@ pub struct InstrumentSample {
     pub headlights: u8,
     pub distance_m: f64,
 }
+/// Gauge state of one car, for any needle, lamp and digit count. Lamp bits hold up to 32 lamps.
 pub struct InstrumentState {
-    signals: [f32; 3],
-    values: [f32; 3],
-    digit_values: [f32; 5],
-    pub needle_angles: [f32; 3],
-    pub digit_angles: [f32; 5],
+    signals: Vec<f32>,
+    values: Vec<f32>,
+    digit_values: Vec<f32>,
+    pub needle_angles: Vec<f32>,
+    pub digit_angles: Vec<f32>,
     pub lamp_bits: u32,
     pub digits_lit: bool,
     pub distance_km: f32,
@@ -38,19 +39,33 @@ pub fn source_rotation(e: [f32; 3]) -> [f32; 4] {
 }
 impl InstrumentState {
     pub fn new(r: &InstrumentReference) -> Self {
-        Self {
-            signals: [0.; 3],
-            values: [0.; 3],
-            digit_values: std::array::from_fn(|i| r.odometer.digits[i].initial_value),
-            needle_angles: std::array::from_fn(|i| needle_angle(&r.needles[i], 0.)),
-            digit_angles: std::array::from_fn(|i| r.odometer.digits[i].initial_angle),
+        let mut state = Self {
+            signals: vec![0.; r.needles.len()],
+            values: vec![0.; r.needles.len()],
+            digit_values: vec![0.; r.odometer.digits.len()],
+            needle_angles: vec![0.; r.needles.len()],
+            digit_angles: vec![0.; r.odometer.digits.len()],
             lamp_bits: 0,
             digits_lit: false,
-            distance_km: r.odometer.initial_value,
-        }
+            distance_km: 0.,
+        };
+        state.reset(r);
+        state
     }
+    /// Startup values. Keeps the buffers.
     pub fn reset(&mut self, r: &InstrumentReference) {
-        *self = Self::new(r);
+        self.signals.fill(0.);
+        self.values.fill(0.);
+        for (i, d) in r.odometer.digits.iter().enumerate() {
+            self.digit_values[i] = d.initial_value;
+            self.digit_angles[i] = d.initial_angle;
+        }
+        for (i, n) in r.needles.iter().enumerate() {
+            self.needle_angles[i] = needle_angle(n, 0.);
+        }
+        self.lamp_bits = 0;
+        self.digits_lit = false;
+        self.distance_km = r.odometer.initial_value;
     }
     pub fn initialize_from_sample(&mut self, r: &InstrumentReference, s: InstrumentSample) {
         self.reset(r);
@@ -150,16 +165,3 @@ impl InstrumentState {
     }
 }
 
-pub fn update_high_beam(
-    lamp: &crate::reference::HighBeamLampReference,
-    high_beam: bool,
-) -> crate::lighting::LampMaterialOutput {
-    let value = high_beam as u8 as f32;
-    let on = value >= lamp.min_value && (value <= lamp.max_value || lamp.stay_on);
-    let material = if on { &lamp.on } else { &lamp.off };
-    crate::lighting::LampMaterialOutput {
-        renderer: lamp.node,
-        asset: material.asset,
-        material_index: material.gltf_material,
-    }
-}

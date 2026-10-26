@@ -1,4 +1,3 @@
-pub mod attachments;
 pub mod buried;
 pub mod carry;
 pub mod cigarettes;
@@ -33,11 +32,12 @@ pub use wheel_actions::WheelAction;
 use crate::fluids::{spill, transfer};
 use crate::player::PlayerState;
 use crate::reference::{
-    ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderGeometry, ColliderId,
+    ActionBinding, ActionMasks, BodyId, ColliderGeometry, ColliderId,
     FluidParticleReference, FluidPresentation, ItemId, ItemKind, LightControlId,
     LightControllerKind, NodeId, OpeningId, OpeningRecord, PartSlotId, ReferenceError,
-    ReferenceManifest, SeatId, TankRole, WheelSlotId,
+    ReferenceManifest, TankRole,
 };
+use wheels::WheelSlotId;
 use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
@@ -62,7 +62,6 @@ pub enum SlotTarget {
     Wheel(WheelSlotId),
     Tire(ItemId),
     Part(PartSlotId),
-    Attachment(AttachmentTargetId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,8 +73,8 @@ pub enum InteractionAction {
     Push(ItemId),
     Cap(OpeningId),
     Mechanism(ItemId),
-    /// Enter or exit a seat. Item seats have no car seat record.
-    Seat(Option<SeatId>),
+    /// Enter or exit a seat.
+    Seat,
     Fill {
         source: ItemId,
         destination: ItemId,
@@ -93,8 +92,6 @@ pub enum InteractionAction {
     },
     Wheel(WheelAction),
     PartRemove(ItemId),
-    PlateRemove(ItemId),
-    PlateMount(ItemId),
     PartInstall(ItemId),
     /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
     /// radio band switch.
@@ -191,39 +188,14 @@ impl SeatPress {
             && (usable.is_none() || crate::player::source_short_hold(self.duration, 0.2))
     }
 }
-fn seat_usable(
-    reference: &ReferenceManifest,
-    seat: &crate::reference::SeatReference,
-) -> Result<Option<ItemId>, ReferenceError> {
-    let mut result = None;
-    for (index, hit) in seat.hit_nodes.iter().enumerate() {
-        let mut node = Some(*hit);
-        let mut usable = None;
-        while let Some(id) = node {
-            if let Some(item) = reference.items.iter().find(|item| {
-                item.node == id && reference.mechanisms.iter().any(|m| m.item == item.id)
-            }) {
-                usable = Some(item.id);
-                break;
-            }
-            node = reference
-                .nodes
-                .iter()
-                .find(|n| n.id == id)
-                .and_then(|n| n.parent);
-        }
-        if index > 0 && result != usable {
-            return Err(ReferenceError("Seat hit usable components differ".into()));
-        }
-        result = usable;
-    }
-    Ok(result)
-}
-struct SeatState {
-    id: SeatId,
-    item: ItemId,
-    pose: VehiclePose,
-    usable: Option<ItemId>,
+/// Install rules and identity of one wheel slot.
+struct WheelSlotRule {
+    /// The car root item.
+    owner: Option<ItemId>,
+    source: crate::reference::SourceId,
+    rim_main_types: Vec<String>,
+    rim_types: Vec<String>,
+    fits: HashSet<ItemId>,
 }
 
 pub struct InteractionState {
@@ -238,8 +210,6 @@ pub struct InteractionState {
     held_controls: HashMap<ItemId, LightControlId>,
     pub storage: storage::StorageLocks,
     light_nodes: HashMap<ColliderId, NodeId>,
-    /// Door usable and owner per lighting controller. Only cabin controllers have links.
-    cabin_doors: Vec<[Option<(ItemId, ItemId)>; 4]>,
     seat_press: Option<SeatPress>,
     seat_action_latched: bool,
     cancelled_input: u32,
@@ -248,7 +218,7 @@ pub struct InteractionState {
     dial_knobs: HashMap<ColliderId, Knob>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
-    slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
+    wheel_slots: HashMap<WheelSlotId, WheelSlotRule>,
     tire_fits: HashSet<(ItemId, ItemId)>,
     f_gesture_consumed: bool,
     source_bindings: HashMap<ColliderId, ActionBinding>,
@@ -260,13 +230,11 @@ pub struct InteractionState {
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
-    pub attachments: attachments::PlateAttachments,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     hoses: hose::HoseState,
     receipt_tanks: Vec<fluid_receipts::ReceiptTank>,
     callback_nodes: Vec<NodeId>,
-    seats: Vec<SeatState>,
     /// Hit colliders of world item seats.
     item_seats:
         HashMap<ColliderHandle, std::sync::Arc<crate::world::stream::content_seats::ItemSeat>>,
@@ -367,8 +335,17 @@ impl InteractionState {
             + map(&self.dial_knobs)
             + map(&self.item_seats)
             + map(&self.kinds)
-            + map(&self.slot_fits)
-            + self.slot_fits.values().map(set).sum::<usize>()
+            + map(&self.wheel_slots)
+            + self
+                .wheel_slots
+                .values()
+                .map(|r| {
+                    set(&r.fits)
+                        + r.source.file.capacity()
+                        + memory::strings(&r.rim_main_types)
+                        + memory::strings(&r.rim_types)
+                })
+                .sum::<usize>()
             + set(&self.tire_fits)
             + map(&self.pickup_layers)
             + map(&self.removal_layers)
@@ -443,23 +420,6 @@ impl InteractionState {
                 borrowed_tank: None,
             });
         }
-        let mut seats = Vec::with_capacity(reference.seats.len());
-        for seat in &reference.seats {
-            let anchor = reference
-                .anchors
-                .iter()
-                .find(|anchor| anchor.id == seat.anchor)
-                .ok_or_else(|| ReferenceError("Missing seat anchor".into()))?;
-            seats.push(SeatState {
-                id: seat.id,
-                item: seat.item,
-                pose: VehiclePose {
-                    position: anchor.transform.translation,
-                    rotation: anchor.transform.rotation,
-                },
-                usable: seat_usable(reference, seat)?,
-            });
-        }
         let mut pickup_layers = HashMap::new();
         for binding in &reference.action_bindings {
             if let Some(owner) = binding.pickup_owner {
@@ -472,16 +432,10 @@ impl InteractionState {
             }
         }
         let usable_items = reference
-            .seats
+            .openings
             .iter()
-            .map(|seat| seat.item)
-            .chain(
-                reference
-                    .openings
-                    .iter()
-                    .filter(|opening| opening.can_toggle || opening.can_tune)
-                    .map(|opening| opening.cap),
-            )
+            .filter(|opening| opening.can_toggle || opening.can_tune)
+            .map(|opening| opening.cap)
             .collect();
         let filling_items = reference
             .openings
@@ -505,29 +459,6 @@ impl InteractionState {
                 .iter()
                 .any(|item| item.id == id && matches!(item.kind, ItemKind::Rim | ItemKind::Wheel))
         };
-        let slot_fits = reference
-            .wheel_slots
-            .iter()
-            .map(|slot| {
-                (
-                    slot.id,
-                    reference
-                        .wheel_parts
-                        .iter()
-                        .filter(|part| {
-                            is_rim(part.item)
-                                && wheels::fits(
-                                    &slot.rim_main_types,
-                                    &slot.rim_types,
-                                    &part.main_types,
-                                    &part.part_types,
-                                )
-                        })
-                        .map(|part| part.item)
-                        .collect(),
-                )
-            })
-            .collect();
         let mut tire_fits = HashSet::new();
         for rim in &reference.wheel_parts {
             if is_rim(rim.item) {
@@ -569,22 +500,6 @@ impl InteractionState {
                 light_controls.insert(collider, control.id);
             }
         }
-        let cabin_doors = reference
-            .lighting
-            .controllers
-            .iter()
-            .map(|c| {
-                c.cabin_input.as_ref().map_or([None; 4], |input| {
-                    std::array::from_fn(|i| {
-                        reference
-                            .mechanisms
-                            .iter()
-                            .find(|m| m.source == input.door_usable_sources[i])
-                            .map(|m| (m.item, m.parent_item.unwrap_or(m.item)))
-                    })
-                })
-            })
-            .collect();
         Ok(Self {
             cleaning: cleaning::CleaningTools::new(reference)?,
             buried: buried::BuriedItems::default(),
@@ -600,7 +515,6 @@ impl InteractionState {
                 .map(|f| (f.item, f.controller))
                 .collect(),
             storage: storage::StorageLocks::new(reference)?,
-            cabin_doors,
             seat_press: None,
             seat_action_latched: false,
             cancelled_input: 0,
@@ -633,7 +547,7 @@ impl InteractionState {
                 })
                 .map(|c| c.id)
                 .collect(),
-            slot_fits,
+            wheel_slots: HashMap::new(),
             tire_fits,
             f_gesture_consumed: false,
             pickup_layers,
@@ -654,7 +568,6 @@ impl InteractionState {
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms,
             parts,
-            attachments: attachments::PlateAttachments::new(reference)?,
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             receipt_tanks: fluid_receipts::tank_nodes(reference),
             callback_nodes: Vec::with_capacity(
@@ -672,7 +585,6 @@ impl InteractionState {
             ),
             sounds: [None; 64],
             sound_count: 0,
-            seats,
             item_seats: HashMap::new(),
             carry: carry::CarryState::new(reference)?,
             equipment: equipment::EquipmentState::new(reference),
@@ -854,10 +766,10 @@ impl InteractionState {
     pub(crate) fn remove_item_seat(&mut self, collider: ColliderHandle) {
         self.item_seats.remove(&collider);
     }
-    /// The bound seat of a world item by its main seatscript.
+    /// The bound item seat of a world item by its main seatscript. Car seats are not saved here.
     pub(crate) fn find_item_seat(
         &self,
-        owner: &crate::world::ObjectKey,
+        owner: &crate::player::SeatOwner,
         source: &crate::reference::SourceId,
     ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
         self.item_seats
@@ -902,16 +814,74 @@ impl InteractionState {
             }
         }
     }
+    /// Adds the install rules of a world car wheel slot. `owner` is the car root item.
+    pub(crate) fn register_wheel_slot(
+        &mut self,
+        id: WheelSlotId,
+        owner: ItemId,
+        source: crate::reference::SourceId,
+        slot: &wheels::WorldWheelSlot,
+        rules: &[crate::reference::WheelPartReference],
+    ) {
+        let fits = rules
+            .iter()
+            .filter(|rule| {
+                self.is_wheel(rule.item)
+                    && wheels::fits(
+                        &slot.rim_main_types,
+                        &slot.rim_types,
+                        &rule.main_types,
+                        &rule.part_types,
+                    )
+            })
+            .map(|rule| rule.item)
+            .collect();
+        self.wheel_slots.insert(
+            id,
+            WheelSlotRule {
+                owner: Some(owner),
+                source,
+                rim_main_types: slot.rim_main_types.clone(),
+                rim_types: slot.rim_types.clone(),
+                fits,
+            },
+        );
+    }
+    /// Removes a world car wheel slot and the binding of its sensor.
+    pub(crate) fn remove_wheel_slot(&mut self, id: WheelSlotId, sensor: Option<ColliderHandle>) {
+        self.wheel_slots.remove(&id);
+        if let Some(sensor) = sensor {
+            self.collider_bindings.remove(&sensor);
+        }
+    }
+    /// The car root item and the source slot of a wheel slot.
+    pub(crate) fn wheel_slot_identity(
+        &self,
+        id: WheelSlotId,
+    ) -> Option<(Option<ItemId>, &crate::reference::SourceId)> {
+        self.wheel_slots.get(&id).map(|r| (r.owner, &r.source))
+    }
+    /// The world car wheel slot of car root item `owner` and source slot `source`.
+    pub(crate) fn resolve_wheel_slot(
+        &self,
+        owner: Option<ItemId>,
+        source: &crate::reference::SourceId,
+    ) -> Option<WheelSlotId> {
+        let owner = owner?;
+        self.wheel_slots
+            .iter()
+            .find(|(_, r)| r.owner == Some(owner) && &r.source == source)
+            .map(|(id, _)| *id)
+    }
     pub fn register_generated_wheel(
         &mut self,
         rule: &crate::reference::WheelPartReference,
         rim: bool,
         rules: &[crate::reference::WheelPartReference],
-        reference: &ReferenceManifest,
     ) {
         self.kinds
             .insert(rule.item, if rim { ItemKind::Rim } else { ItemKind::Tire });
-        for slot in &reference.wheel_slots {
+        for slot in self.wheel_slots.values_mut() {
             if rim
                 && wheels::fits(
                     &slot.rim_main_types,
@@ -920,7 +890,7 @@ impl InteractionState {
                     &rule.part_types,
                 )
             {
-                self.slot_fits.entry(slot.id).or_default().insert(rule.item);
+                slot.fits.insert(rule.item);
             }
         }
         for old in rules {
@@ -981,8 +951,8 @@ impl InteractionState {
         }
         self.carry.unregister_generated(id);
         self.unregister_hose(id);
-        for fits in self.slot_fits.values_mut() {
-            fits.remove(&id);
+        for slot in self.wheel_slots.values_mut() {
+            slot.fits.remove(&id);
         }
         self.tire_fits
             .retain(|(rim, tire)| *rim != id && *tire != id);
@@ -1412,13 +1382,6 @@ impl InteractionState {
     pub fn push_gripping(&self) -> bool {
         self.push.gripping()
     }
-    pub fn cabin_door_values(&self, control: usize, items: &ItemStore) -> [f32; 4] {
-        self.cabin_doors[control].map(|link| {
-            link.filter(|(_, owner)| items.mounted(*owner))
-                .and_then(|(usable, _)| self.mechanisms.value(usable, false))
-                .unwrap_or(0.)
-        })
-    }
     pub fn cancel_input(&mut self) {
         self.equipment_input.cancel_input();
         self.cancelled_input = keys::GRAB
@@ -1484,7 +1447,6 @@ impl InteractionState {
         self.melee.rebase(shift);
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
-        self.attachments.rebase(shift);
         for opening in &mut self.openings {
             if let Some(contact) = opening.contact.as_mut() {
                 contact.rebase(Vector::from_array(shift));
@@ -1548,15 +1510,9 @@ impl InteractionState {
             self.latched_mechanism = None;
         }
         if input.pressed & keys::USE != 0 {
-            let usable = aim.use_target.and_then(|target| {
-                self.seats
-                    .iter()
-                    .find(|seat| seat.item == target.item)
-                    .map_or_else(
-                        || self.mechanisms.contains(target.item).then_some(target.item),
-                        |seat| seat.usable,
-                    )
-            });
+            let usable = aim
+                .use_target
+                .and_then(|target| self.mechanisms.contains(target.item).then_some(target.item));
             self.seat_press = Some(SeatPress {
                 usable,
                 duration: 0.0,
@@ -1657,11 +1613,6 @@ impl InteractionState {
                             tire: held,
                         }));
                     }
-                    SlotTarget::Attachment(target) => {
-                        self.mount_plate(held, target, items, physics)
-                            .expect("validated plate mount");
-                        action = Some(InteractionAction::PlateMount(held));
-                    }
                     SlotTarget::Part(slot) => {
                         self.drop_held(items, physics);
                         self.parts
@@ -1690,11 +1641,7 @@ impl InteractionState {
                 if let Some(rim) = available.rim {
                     action = Some(InteractionAction::Wheel(WheelAction::Split(rim)));
                 } else if let Some(target) = grab_target {
-                    if self.attachments.contains(target.item) {
-                        self.remove_plate(target.item, target.point, player, items, physics)
-                            .expect("validated plate removal");
-                        action = Some(InteractionAction::PlateRemove(target.item));
-                    } else if self.parts.contains(target.item) {
+                    if self.parts.contains(target.item) {
                         self.parts
                             .remove(target.item, items, physics)
                             .expect("validated removal");
@@ -1734,10 +1681,9 @@ impl InteractionState {
                 && player.seated()
                 && !can_use_target
             {
-                let seat = player.seat();
                 if player.try_exit(physics) {
                     self.seat_action_latched = true;
-                    action = Some(InteractionAction::Seat(seat));
+                    action = Some(InteractionAction::Seat);
                 }
             } else if let Some(target) = use_target {
                 if use_input.held & keys::USE != 0
@@ -1828,15 +1774,6 @@ impl InteractionState {
                 }
                 if use_input.released & keys::USE != 0
                     && !released_mechanism
-                    && let Some(seat) = self.seats.iter().find(|seat| seat.item == target.item)
-                    && seat_release.is_some_and(|press| press.matches(seat.usable))
-                    && player.enter(seat.id, seat.pose, physics)
-                {
-                    self.seat_action_latched = true;
-                    action = Some(InteractionAction::Seat(Some(seat.id)));
-                }
-                if use_input.released & keys::USE != 0
-                    && !released_mechanism
                     && let Some(seat) = self.item_seats.get(&target.collider)
                     && seat.can_sit(physics)
                     && seat_release.is_some_and(|press| {
@@ -1846,12 +1783,13 @@ impl InteractionState {
                         seat.owner.clone(),
                         seat.body,
                         &seat.seat,
+                        seat.seat_item,
                         seat.pose,
                         physics,
                     )
                 {
                     self.seat_action_latched = true;
-                    action = Some(InteractionAction::Seat(None));
+                    action = Some(InteractionAction::Seat);
                 }
                 if self.mechanisms.contains(target.item)
                     && (use_input.pressed & keys::USE != 0
@@ -1860,8 +1798,7 @@ impl InteractionState {
                             && availability.lmb_use)
                         || use_input.held & keys::USE != 0
                         || (use_input.held & keys::PRIMARY != 0
-                            && (self.mechanisms.radio_tunable(target.item)
-                                || self.mechanisms.drag_eligible(target.item))
+                            && self.mechanisms.drag_eligible(target.item)
                             && primary_use)
                         || (use_input.wheel != 0.0 && self.mechanisms.scroll_eligible(target.item)))
                 {
@@ -2101,46 +2038,6 @@ impl InteractionState {
         }
     }
 
-    pub fn remove_plate(
-        &mut self,
-        item: ItemId,
-        point: [f32; 3],
-        player: &PlayerState,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<(), ReferenceError> {
-        if !self.carry.allows_pickup(item, player.seated(), true) {
-            return Err(ReferenceError("Cannot remove plate".into()));
-        }
-        let body = self
-            .attachments
-            .loose_body(item)
-            .ok_or_else(|| ReferenceError("Missing loose plate body".into()))?;
-        self.carry.can_acquire(item, point, player, body, physics)?;
-        self.attachments.remove(item, items, physics)?;
-        self.pickup_item(item, point, player, items, physics)?;
-        self.parts.sync(items, physics)?;
-        Ok(())
-    }
-    pub fn mount_plate(
-        &mut self,
-        item: ItemId,
-        target: AttachmentTargetId,
-        items: &mut ItemStore,
-        physics: &mut PhysicsWorld,
-    ) -> Result<(), ReferenceError> {
-        self.attachments
-            .can_mount(item, target, items)
-            .map_err(|_| ReferenceError("Cannot mount plate".into()))?;
-        self.attachments
-            .preflight_mount(item, target, items, physics)?;
-        if self.held() != Some(item) {
-            return Err(ReferenceError("Plate is not held".into()));
-        }
-        self.drop_held(items, physics);
-        self.attachments.mount(item, target, items, physics)?;
-        self.parts.sync(items, physics)
-    }
     pub fn sync_parts(
         &mut self,
         items: &mut ItemStore,
@@ -2150,7 +2047,6 @@ impl InteractionState {
         self.mechanisms.sync(physics, true);
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
-        self.attachments.sync(items, physics)?;
         self.parts.sync(items, physics)?;
         Ok(())
     }

@@ -99,11 +99,7 @@ impl PersistentWorld {
                 state: None,
             });
         }
-        for body in snapshot
-            .bodies
-            .iter()
-            .chain(snapshot.vehicles.iter().map(|v| &v.body))
-        {
+        for body in &snapshot.bodies {
             let key = match &body.identity {
                 BodyIdentity::Source { source } => Key::Source(
                     *identities
@@ -179,7 +175,7 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         handle: RigidBodyHandle,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
     ) -> Option<VehiclePose> {
         let Some(car) = self
             .records
@@ -208,7 +204,7 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         handle: RigidBodyHandle,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
         bounds: &crate::reference::Bounds,
     ) -> bool {
         let Some(state) = self
@@ -236,7 +232,7 @@ impl PersistentWorld {
         &mut self,
         area: &mut StartingArea,
         physics: &mut PhysicsWorld,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
         bodies: &[RigidBodyHandle],
     ) {
         if physics.body_active(physics.chassis_handle(vehicle)) {
@@ -274,7 +270,7 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         origin: &WorldOrigin,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
     ) -> [f64; 3] {
         self.records
             .iter()
@@ -384,8 +380,8 @@ impl PersistentWorld {
         let mut important = std::mem::take(&mut self.important);
         important.clear();
         important.push(stream.focus());
-        for index in 0..physics.vehicle_count() {
-            important.push(self.absolute_vehicle_position(physics, &stream.origin, index));
+        for key in physics.vehicle_keys() {
+            important.push(self.absolute_vehicle_position(physics, &stream.origin, key));
         }
         let held = area
             .items

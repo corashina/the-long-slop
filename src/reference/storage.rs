@@ -1,14 +1,11 @@
 //! Checked source `mountStuff` storage volumes, policy, and item flags.
-use super::{
-    ColliderId, ItemId, NodeId, PartSlotId, ReferenceError, ReferenceManifest, SourceId, require,
-};
+use super::{ItemId, ReferenceError, ReferenceManifest, SourceId, require};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageRecord {
     pub policy: StoragePolicy,
-    pub volumes: Vec<StorageVolumeReference>,
     pub prototype_volumes: Vec<PrototypeVolumeReference>,
     pub flags: Vec<StorageFlag>,
     pub prototype_flags: Vec<PrototypeStorageFlag>,
@@ -22,25 +19,6 @@ pub struct StoragePolicy {
     pub mount_mask: u32,
     pub drop_delay_seconds: f32,
     pub scan_interval_seconds: f32,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StorageVolumeReference {
-    pub source: SourceId,
-    pub node: NodeId,
-    pub owner: ItemId,
-    pub collider: ColliderId,
-    pub center: [f32; 3],
-    pub half_extents: [f32; 3],
-    pub storage_type: u8,
-    pub only_manual: bool,
-    pub no_physics_lock: bool,
-    pub owner_pickup: Option<SourceId>,
-    pub dont_lock_if_owner_picked_up: bool,
-    pub slots: Vec<PartSlotId>,
-    pub usables: Vec<SourceId>,
-    pub active: bool,
 }
 
 /// Storage volume in a world prototype. The node is an index in the prototype.
@@ -61,6 +39,8 @@ pub struct PrototypeVolumeReference {
     pub only_manual: bool,
     /// Gate `usablescript` sources. Each is a world mechanism of the same prototype.
     pub usables: Vec<SourceId>,
+    /// Gate `partslotscript` sources of the same prototype. Each slot must hold a closed part.
+    pub slots: Vec<SourceId>,
     pub dont_lock_if_owner_picked_up: bool,
 }
 
@@ -100,31 +80,9 @@ impl StorageRecord {
             policy.default_setting == 2
                 && policy.mount_mask == 8_388_609
                 && policy.drop_delay_seconds == 1.0
-                && policy.scan_interval_seconds == 1.5
-                && self.volumes.len() == 8,
+                && policy.scan_interval_seconds == 1.5,
             "storage policy",
         )?;
-        for volume in &self.volumes {
-            require(
-                manifest.items.iter().any(|item| item.id == volume.owner)
-                    && manifest.colliders.iter().any(|collider| {
-                        collider.id == volume.collider
-                            && (collider.node == volume.node
-                                || manifest.nodes.iter().any(|node| {
-                                    node.id == collider.node && node.parent == Some(volume.node)
-                                }))
-                    })
-                    && volume
-                        .slots
-                        .iter()
-                        .all(|id| manifest.part_slots.iter().any(|slot| slot.id == *id))
-                    && volume.center.iter().all(|value| value.is_finite())
-                    && positive(&volume.half_extents)
-                    && !volume.only_manual
-                    && !volume.no_physics_lock,
-                "storage volume",
-            )?;
-        }
         let world = &manifest.world;
         for volume in &self.prototype_volumes {
             let prototype = world
@@ -137,6 +95,11 @@ impl StorageRecord {
                         world.mechanisms.iter().any(|mechanism| {
                             mechanism.prototype == volume.prototype
                                 && mechanism.recipe.source == *usable
+                        })
+                    })
+                    && volume.slots.iter().all(|slot| {
+                        world.records.iter().any(|record| {
+                            record.source == *slot && record.class_name == "partslotscript"
                         })
                     })
                     && volume.center.iter().all(|value| value.is_finite())

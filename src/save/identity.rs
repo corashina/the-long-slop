@@ -56,13 +56,10 @@ pub struct IdentityMap {
     pub nodes: HashMap<SourceKey, NodeId>,
     pub anchors: HashMap<SourceKey, AnchorId>,
     pub part_slots: HashMap<SourceKey, PartSlotId>,
-    pub wheel_slots: HashMap<SourceKey, WheelSlotId>,
-    pub seats: HashMap<SourceKey, SeatId>,
     pub mechanisms: HashMap<SourceKey, MechanismId>,
     pub openings: HashMap<SourceKey, OpeningId>,
     pub lights: HashMap<SourceKey, LightId>,
     pub controllers: HashMap<SourceKey, LightControlId>,
-    pub vehicles: Vec<InstanceId>,
 }
 impl IdentityMap {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, SaveError> {
@@ -73,8 +70,6 @@ impl IdentityMap {
             nodes: index(reference.nodes.iter().map(|r| (&r.source, r.id)))?,
             anchors: index(reference.anchors.iter().map(|r| (&r.source, r.id)))?,
             part_slots: index(reference.part_slots.iter().map(|r| (&r.source, r.id)))?,
-            wheel_slots: index(reference.wheel_slots.iter().map(|r| (&r.source, r.id)))?,
-            seats: index(reference.seats.iter().map(|r| (&r.source, r.id)))?,
             mechanisms: index(reference.mechanisms.iter().map(|r| (&r.source, r.id)))?,
             openings: index(reference.openings.iter().map(|r| (&r.source, r.id)))?,
             lights: index(reference.lighting.lights.iter().map(|r| (&r.source, r.id)))?,
@@ -85,11 +80,6 @@ impl IdentityMap {
                     .iter()
                     .map(|r| (&r.source, r.id)),
             )?,
-            vehicles: reference
-                .vehicles
-                .iter()
-                .map(|v| InstanceId::initial(&v.source))
-                .collect(),
         })
     }
     pub fn bind_generated(&mut self, items: &crate::interaction::items::ItemStore) {

@@ -253,11 +253,6 @@ pub fn bind(
         if !matches!(item.kind, ItemKind::Wheel | ItemKind::Rim | ItemKind::Tire)
             && !reference.parts.iter().any(|part| part.item == item.id)
             && !reference
-                .plates
-                .plates
-                .iter()
-                .any(|plate| plate.item == item.id)
-            && !reference
                 .flashlights
                 .instances
                 .iter()

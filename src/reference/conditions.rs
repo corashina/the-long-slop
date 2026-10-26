@@ -190,7 +190,6 @@ pub struct ConditionColliderBinding {
     pub forwarded_condition: Option<ConditionId>,
     pub installed_slot_source: Option<SourceId>,
     pub installed_part_slot: Option<PartSlotId>,
-    pub installed_wheel_slot: Option<WheelSlotId>,
     pub installed_tire_slot: Option<ItemId>,
     pub wash: Option<WashId>,
 }
@@ -595,7 +594,6 @@ impl ConditionRecord {
                 "collider",
             )?;
             let slot_kinds = usize::from(b.installed_part_slot.is_some())
-                + usize::from(b.installed_wheel_slot.is_some())
                 + usize::from(b.installed_tire_slot.is_some());
             check(
                 &b.source,
@@ -608,16 +606,12 @@ impl ConditionRecord {
             )?;
             check(
                 &b.source,
-                b.installed_wheel_slot.is_none_or(|id| {
-                    r.wheel_slots.iter().any(|slot| {
-                        slot.id == id && Some(&slot.source) == b.installed_slot_source.as_ref()
-                    })
-                }) && b.installed_tire_slot.is_none_or(|id| {
+                b.installed_tire_slot.is_none_or(|id| {
                     r.wheel_parts
                         .iter()
                         .any(|part| part.item == id && part.tire_slot_anchor.is_some())
                 }),
-                "installed_wheel_slot/installed_tire_slot",
+                "installed_tire_slot",
             )?;
             check(
                 &b.source,

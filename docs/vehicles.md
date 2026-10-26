@@ -1,39 +1,31 @@
 # Vehicles
 
-The startup export contains the Lada. The Skoda is excluded for now.
+The world loader spawns cars from car prototypes. The export allows only the Lada for now.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
-| Lada 2101 | `level1` GO 17687, `StartCar02` | Garage spot | Front, petrol |
-
-## Selection
-
-Car01 has complete start-car records and the same part set as the Lada.
-It has four wheels, rear drive, a petrol engine, a radiator, and fuel, oil, and coolant tanks.
-Its differences come from the source: torque, rpm, gears, mass, engine position, lights, and gauges.
-
-Rejected cars:
-
-- Car02k is a Lada wagon. It adds no mechanical difference.
-- Car03 and Car03k use a two-stroke mixed-fuel engine without a radiator or an oil tank.
-- Car06P, Bus01, and Bus02 use diesel.
-- Car07 has an automatic gearbox and is not a start car.
-- Bike01 and Bike03 need balance physics.
-
-## Project change
-
-In the source, all start cars share one garage spot. The game can show one start car.
-The export selects the Lada at that spot. It adds no car to the yard.
+| Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
 
 ## Model
 
-- `ReferenceManifest.vehicles` holds one record per car. Each record holds its engine and instruments.
-- Seats, light controllers, high-beam lamps, part slots, and tanks name their car by index.
-- One Rapier world holds every chassis. `PhysicsWorld` methods take the car index.
-- `GarageRuntime.vehicles` holds engine, handbrake, gear, ignition, and trip per car.
+- `CAR_PROTOTYPES` in `tools/reference/world.py` is the allow list. Other car roots stay `other_vehicle`.
+- An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
+- The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
+- Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
+- `src/world/content_vehicles.rs` binds a car copy: chassis, `VehicleRuntime`, wheel slots, engine and radiator parts.
+- `ObjectKey` keys each car copy. `GarageRuntime.vehicles`, `PhysicsWorld` and wheel slots use this key.
+- One Rapier world holds every chassis. Every engine steps each frame. Only the seated driver's car reads keys.
 - `GarageRuntime.vehicle` is the last seated car. The camera, HUD, and recovery follow it.
-- Every engine steps each frame. Only the seated driver's car reads keys.
 - Parts fit only slots with a matching source part type. The source rules decide cross-car fit.
+
+## Placement and save
+
+- The `world.startup` entry `StartCar02` has a prototype. The stream spawns it as a fixed placement on the `Startup` layer.
+- The world generator can place any number of copies at any pose. Each copy has its own key.
+- On retire, the car, engine, radiator and wheel slot states go to the world change records.
+- On return, the copy respawns and takes its states back. A moved car returns at its last pose.
+- The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
+- Save schema 20. Older saves are rejected.
 
 ## Physics fix
 
@@ -97,14 +89,16 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car to `CARS` in `tools/reference/export.py`: root GameObject, start-car name, and starter link.
-2. Check its source pose against other cars, home colliders, and the terrain.
-3. Run the runtime export. The exporter stops when a source record is missing.
-4. Run the production tests with the new manifest.
+1. Add the car prefab to `CAR_PROTOTYPES` in `tools/reference/world.py`. It then exports as a world prototype with a `vehicle` record.
+2. For a start car, add its startup placement next to `StartCar02` in `recover_world`. Check the pose against home colliders and the terrain.
+3. Add its `mountStuff` volumes to the prototype storage in `tools/reference/storage.py`.
+4. Run the runtime export. The exporter stops when a source record is missing.
+5. Check the prototype node count against the stream limits.
+6. Run the export-based tests with the new manifest.
 
-Expected work for each rejected car:
+Expected work for other cars:
 
-- Car03: the engine needs two-stroke mixed fuel. The manifest requires a radiator and an oil tank for each car. Make both optional.
-- Diesel cars: the engine record keeps source fuel types. Check the station pumps and the start fluids.
+- Car03: the engine needs two-stroke mixed fuel. It has no radiator and no oil tank.
+- Diesel cars (Car06P, buses): check the station pumps and the start fluids.
 - Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.

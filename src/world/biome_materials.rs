@@ -110,6 +110,9 @@ mod tests {
             colliders: Vec::new(),
             prefab_pose: transform.clone(),
             interiors: Vec::new(),
+            vehicle: None,
+            engines: Vec::new(),
+            radiators: Vec::new(),
             sled: None,
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();

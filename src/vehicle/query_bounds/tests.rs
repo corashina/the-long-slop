@@ -697,11 +697,11 @@ fn simulation_motion_sleep_wake_and_kinematic_queries_match_scan() {
 #[test]
 fn private_controller_impulses_keep_post_step_queries_current() {
     use crate::reference::{
-        AnchorId, ItemId, SourceId, WheelColliderReference, WheelFrictionCurve, WheelHubReference,
-        WheelSlotId, WheelSlotReference,
+        ItemId, WheelColliderReference, WheelFrictionCurve, WheelHubReference,
     };
+    use crate::vehicle::body::{VehicleBody, VehicleControls, VehicleWheel};
     use crate::vehicle::wheel::{WheelSlip, resolve_profile};
-    use crate::vehicle::{DriveTorques, VehicleBody, WheelAssembly};
+    use crate::vehicle::{DriveTorques, WheelAssembly};
     use rapier3d::control::KinematicCharacterController;
     let mut world = empty_world();
     world.set_gravity(Vector::ZERO);
@@ -720,30 +720,20 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         asymptote_value: 0.5,
         stiffness: 1.0,
     };
-    let reference = WheelSlotReference {
-        id: WheelSlotId(0),
-        source: SourceId {
-            file: "fixture".into(),
-            path_id: 0,
-        },
-        anchor: AnchorId(0),
-        mount_anchor: AnchorId(0),
-        wheel: ItemId(0),
-        tire: ItemId(0),
-        rim: ItemId(0),
-        collider: WheelColliderReference {
-            radius: 0.25,
-            suspension_distance: 1.0,
-            center: [0.0; 3],
-            spring: 100.0,
-            damper: 1.0,
-            target_position: 0.75,
-            forward_friction: friction,
-            sideways_friction: friction,
-            wheel_mass_kg: 1.0,
-            rotational_damping: 0.0,
-            force_application_distance_m: 0.0,
-        },
+    let collider = WheelColliderReference {
+        radius: 0.25,
+        suspension_distance: 1.0,
+        center: [0.0; 3],
+        spring: 100.0,
+        damper: 1.0,
+        target_position: 0.75,
+        forward_friction: friction,
+        sideways_friction: friction,
+        wheel_mass_kg: 1.0,
+        rotational_damping: 0.0,
+        force_application_distance_m: 0.0,
+    };
+    let rules = VehicleWheel {
         steer: false,
         drive: false,
         brake: false,
@@ -755,10 +745,6 @@ fn private_controller_impulses_keep_post_step_queries_current() {
             forward_stiffness: 1.0,
             sideways_stiffness: 1.0,
         },
-        tire_condition_range: [0, 100],
-        rim_condition_range: [0, 100],
-        rim_main_types: Vec::new(),
-        rim_types: Vec::new(),
     };
     let slip = WheelSlip {
         tire: [1.0; 4],
@@ -769,44 +755,45 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         mass_kg: 1.0,
         quality: 1.0,
     };
-    let mount = crate::vehicle::WheelMount {
-        connection: Vector::ZERO,
-        collider: &reference.collider,
-        profile: resolve_profile(&reference, &slip, assembly),
-    };
-    world.chassis.push(chassis);
-    world.vehicles.push(VehicleBody {
+    let mut vehicle = VehicleBody::new(
         chassis,
         slip,
-        wheels: crate::vehicle::WheelSet::new(chassis, &[mount; 4]),
-        wheel_references: std::array::from_fn(|_| reference.clone()),
-        max_steer: 0.0,
-        brake_torque: 0.0,
-        handbrake_torque: 0.0,
-        assemblies: [assembly; 4],
-        last_handbrake: 0.0,
-        cargo_mass: 0.0,
-    });
+        &[(Vector::ZERO, &collider, rules); 4],
+        VehicleControls {
+            max_steer_degrees: 0.0,
+            brake_torque_nm: 0.0,
+            handbrake_torque_nm: 0.0,
+            handbrake: false,
+        },
+    );
+    for index in 0..4 {
+        vehicle.assemblies[index] = assembly;
+        vehicle
+            .wheels
+            .set_profile(index, resolve_profile(&rules, &slip, assembly));
+    }
+    let key = crate::world::ObjectKey::Imported(ItemId(1));
+    world.insert_vehicle(key.clone(), vehicle);
     let mut scan = super::reference::ScanBounds::default();
     assert_matches_scan(&mut world, &mut scan, &[Vector::Y * 0.75]);
     let before = world.rapier().bodies[chassis].linvel();
     world.apply_vehicle_forces(
-        0,
+        &key,
         crate::simulation::DriveInput::default(),
         DriveTorques::default(),
     );
     assert_ne!(world.rapier().bodies[chassis].linvel(), before);
-    assert!(world.vehicles[0].wheels.wheels()[0].contact.is_some());
+    assert!(world.vehicles[&key].wheels.wheels()[0].contact.is_some());
     world.step_physics();
     let point = world.rapier().bodies[chassis].translation();
     assert_eq!(ray_hit(&world, point.x, point.z), Some(chassis_collider));
     assert_matches_scan(&mut world, &mut scan, &[point]);
     world.apply_vehicle_forces(
-        0,
+        &key,
         crate::simulation::DriveInput::default(),
         DriveTorques::default(),
     );
-    assert!(world.vehicles[0].wheels.wheels()[0].contact.is_some());
+    assert!(world.vehicles[&key].wheels.wheels()[0].contact.is_some());
 
     let mut character_world = empty_world();
     character_world.set_gravity(Vector::ZERO);
