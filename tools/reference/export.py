@@ -360,7 +360,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .computer import recover_computer, validate_computer
     manifest['computer'] = recover_computer(source, manifest)
     from .melee import recover_melee, validate_melee
-    manifest['melee'] = recover_melee(source, output)
+    manifest['melee'] = recover_melee(source, manifest, output)
     from .breakables import recover_breakables, recover_gib_constants
     # Before audio: breakable clips join source.item_clips.
     manifest['breakables'] = recover_breakables(source, manifest)

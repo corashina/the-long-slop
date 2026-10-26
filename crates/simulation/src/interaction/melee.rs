@@ -7,8 +7,8 @@ use crate::animation::controller::{MotionController, StateEvent};
 use crate::damage::Breakables;
 use crate::particles::ParticleState;
 use crate::reference::{
-    BreakableReference, ColliderTag, ItemId, ReferenceError, ReferenceManifest,
-    ShovelAcquisitionReference, SourceId,
+    BreakableReference, ColliderTag, ItemId, MeleeMotion, MeleeWeaponReference, ReferenceError,
+    ReferenceManifest, SourceId,
 };
 use crate::simulation::FIXED_DT;
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_tag, to_rapier};
@@ -79,7 +79,8 @@ pub struct MeleeSound {
 }
 
 pub struct MeleeState {
-    shovel: ShovelAcquisitionReference,
+    shovel: MeleeWeaponReference,
+    motion: MeleeMotion,
     controller: MotionController,
     triggers: [usize; 5],
     hit_trigger: usize,
@@ -114,10 +115,18 @@ pub struct MeleeState {
 
 impl MeleeState {
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        let shovel = r.acquisition.shovel.clone();
-        let motion = &shovel.motion;
+        let shovel = r
+            .melee
+            .shovel(r)
+            .ok_or_else(|| ReferenceError("Missing melee shovel".into()))?
+            .clone();
+        let motion = r
+            .melee
+            .motion(&shovel)
+            .ok_or_else(|| ReferenceError("Missing shovel motion".into()))?
+            .clone();
         let parameter = |name| {
-            MotionController::parameter(motion, name)
+            MotionController::parameter(&motion, name)
                 .ok_or_else(|| ReferenceError(format!("Missing shovel parameter {name}")))
         };
         let mut triggers = [0; 5];
@@ -150,11 +159,8 @@ impl MeleeState {
                 .map(|(_, id, length)| (*id, *length))
                 .ok_or_else(|| ReferenceError("Missing shovel clip".into()))
         };
-        if shovel.contact_clips.len() != 6 {
-            return Err(ReferenceError("Shovel hit sound groups differ".into()));
-        }
         let mut hit_clips: [Vec<(u32, f32)>; 6] = Default::default();
-        for (group, sources) in hit_clips.iter_mut().zip(&shovel.contact_clips) {
+        for (group, sources) in hit_clips.iter_mut().zip(&r.melee.hit_clips) {
             *group = sources.iter().map(clip).collect::<Result<_, _>>()?;
         }
         let swing_clips = shovel
@@ -163,7 +169,7 @@ impl MeleeState {
             .map(|s| clip(s).map(|(id, _)| id))
             .collect::<Result<_, _>>()?;
         Ok(Self {
-            controller: MotionController::new(motion),
+            controller: MotionController::new(&motion),
             triggers,
             hit_trigger,
             tip,
@@ -194,6 +200,7 @@ impl MeleeState {
             overlaps: Vec::with_capacity(OVERLAP_CAPACITY),
             sounds: Vec::with_capacity(4),
             shovel,
+            motion,
         })
     }
     /// The held item is a shovel when its pickup rule is the shovel prototype rule.
@@ -214,8 +221,7 @@ impl MeleeState {
     }
     /// Animated RH pose in its parent frame, or `None` for `defRH`.
     pub fn hand(&self) -> Option<VehiclePose> {
-        self.active
-            .then(|| self.controller.pose(&self.shovel.motion))
+        self.active.then(|| self.controller.pose(&self.motion))
     }
     /// One frame. `shovel` is the item in the right hand when it is a shovel.
     #[allow(clippy::too_many_arguments)]
@@ -320,7 +326,7 @@ impl MeleeState {
         );
         // animationEventScript: OnStateEnter is AttackStart, OnStateExit is AttackEnd.
         self.controller
-            .advance(&self.shovel.motion, dt, |event| match event {
+            .advance(&self.motion, dt, |event| match event {
                 StateEvent::Enter(_) => {
                     *attacking += 1;
                     if held {
@@ -343,7 +349,7 @@ impl MeleeState {
         self.started_attack = false;
         self.attacking = 0;
         self.last_tip = None;
-        self.controller.reset(&self.shovel.motion);
+        self.controller.reset(&self.motion);
     }
     #[allow(clippy::too_many_arguments)]
     fn hit(

@@ -1,14 +1,12 @@
 //! Checked acquisition inputs. Gameplay owns draw execution and publication.
 use super::*;
-fn required_field<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(super) fn required_field<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
 {
     T::deserialize(deserializer)
 }
-pub mod motion;
-pub use motion::*;
 
 macro_rules! record {
     ($name:ident { $($field:ident: $ty:ty),* $(,)? }) => {
@@ -19,7 +17,7 @@ macro_rules! record {
 }
 record!(AcquisitionReference {
     stations: Vec<StationAcquisitionReference>, categories: Vec<CategoryReference>,
-    r#box: BoxAcquisitionReference, shovel: ShovelAcquisitionReference, packs: Vec<PackAcquisitionReference>,
+    r#box: BoxAcquisitionReference, packs: Vec<PackAcquisitionReference>,
     startup_packs: Vec<StartupPackReference>, holiday_pumpkin: SourceId, holiday_startup: HolidayPumpkinReference,
     pack_item_id: u32, cigarette_item_id: u32, evidence: AcquisitionEvidence, rules: AcquisitionRules
 });
@@ -182,26 +180,7 @@ record!(HolidayPumpkinReference {
     prototype: PrototypeId, wearable: SourceId, terrain: SourceId, start: [u32;2], end: [u32;2],
     inclusive: bool, local_calendar: bool, new_game_only: bool, multiplayer: bool
 });
-record!(ShovelAcquisitionReference {
-    prototype: PrototypeId, source: SourceId, pickup: SourceId, target: SourceId, trigger: SourceId, contact_mask: u32,
-    speed: f32, shovel_speed: f32, recent_recovery_seconds: f32, attack_volume: f32, attack_clips: Vec<SourceId>,
-    contact_clips: Vec<Vec<SourceId>>, motion: AcquisitionMotion, controller: SourceId, right_hand_poses: Vec<SourceId>, left_hand_poses: Vec<SourceId>, contact: ShovelContact
-});
-
-record!(ShovelContact {
-    force: f32,
-    damage: f32,
-    damage_tank: f32,
-    hurt_food: bool,
-    all_particles: f32,
-    blood: f32,
-    sand: f32,
-    plant: f32,
-    wood: f32,
-    spark: f32
-});
-
-fn source_is(s: &SourceId, file: &str, id: i64) -> bool {
+pub(super) fn source_is(s: &SourceId, file: &str, id: i64) -> bool {
     s.file == file && s.path_id == id
 }
 fn valid_source(s: &SourceId) -> bool {
@@ -736,61 +715,7 @@ impl AcquisitionReference {
                 && h.manual_start,
             "holiday startup source",
         )?;
-        let s = &self.shovel;
-        require(
-            s.controller == s.motion.controller
-                && s.right_hand_poses.is_empty()
-                && s.left_hand_poses.is_empty(),
-            "shovel controller or hand pose arrays",
-        )?;
-        let c = &s.contact;
-        require(
-            c.force == 20000.
-                && c.damage == 40.
-                && c.damage_tank == 12.
-                && c.hurt_food
-                && c.all_particles == 0.01
-                && c.blood == 0.5
-                && c.sand == 2.
-                && c.plant == 1.
-                && c.wood == 0.5
-                && c.spark == 0.5,
-            "shovel contact inputs",
-        )?;
-        let p = prototype(&s.prototype, Some(216), m)?;
-        let behavior = &p.behavior;
-        require(
-            behavior.melee.as_ref() == Some(&s.source)
-                && behavior.attack_target.as_ref() == Some(&s.target)
-                && behavior.attack_trigger.as_ref() == Some(&s.trigger)
-                && p.pickups
-                    .first()
-                    .is_some_and(|p| p.pickup.source == s.pickup)
-                && s.contact_mask == 8552961
-                && s.speed == 0.7
-                && s.shovel_speed == 0.5
-                && s.recent_recovery_seconds == 1.
-                && s.attack_volume == 0.5
-                && s.attack_clips == behavior.clips
-                && s.contact_clips == behavior.contact_clips,
-            "shovel source contact rules",
-        )?;
-        for clip in s
-            .attack_clips
-            .iter()
-            .chain(s.contact_clips.iter().flatten())
-        {
-            require(
-                m.audio["clips"].as_array().is_some_and(|clips| {
-                    clips.iter().any(|c| {
-                        c["source"]["file"].as_str() == Some(clip.file.as_str())
-                            && c["source"]["path_id"].as_i64() == Some(clip.path_id)
-                    })
-                }),
-                "acquisition audio resource",
-            )?;
-        }
-        s.motion.validate(m)
+        Ok(())
     }
 }
 fn validate_ammo(v: &AcquisitionAmmo, file: &str, id: i64) -> Result<(), ReferenceError> {

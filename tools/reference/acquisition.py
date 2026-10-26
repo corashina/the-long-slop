@@ -288,19 +288,7 @@ def recover_acquisition(source, manifest):
     pumpkin=source.get('level1',82);holiday=startup(pumpkin)
     holiday.update(prototype=prototypes[92]['id'], wearable={'file':'level1','path_id':79857}, terrain=source_id(terrain),
                    start=[10,15],end=[11,15],inclusive=True,local_calendar=True,new_game_only=True,multiplayer=False)
-    shovel=source.get('sharedassets1.assets',132938);sh=source.read(shovel);sp=prototypes[216]
-    from .acquisition_motion import recover_motion
-    shovel_rules={'prototype':sp['id'],'source':source_id(shovel), 'pickup':ptr(shovel,sh,'p'),
-        'target':ptr(shovel,sh,'T'),'trigger':ptr(shovel,sh,'Trigger'),'contact_mask':sh['mask']['m_Bits'],
-        'speed':sh['speed'],'shovel_speed':sh['shovelSpeed'],'recent_recovery_seconds':1.,
-        'attack_volume':sh['attackVolume'],'attack_clips':sp['behavior']['clips'],
-        'contact_clips':sp['behavior']['contact_clips'], 'motion':recover_motion(source,manifest),
-        'controller':ptr(shovel,sh,'AnimationController'),
-        'right_hand_poses':[ptr(shovel,{'pose':v},'pose') for v in sh['RHs']],
-        'left_hand_poses':[ptr(shovel,{'pose':v},'pose') for v in sh['LHs']],
-        'contact':{k:sh[v] for k,v in SHOVEL_CONTACT_FIELDS.items()}}
-    shovel_rules['contact']['hurt_food']=bool(sh['hurtFood'])
-    return {'stations':stations,'categories':categories,'box':box,'shovel':shovel_rules,'packs':packs,
+    return {'stations':stations,'categories':categories,'box':box,'packs':packs,
         'startup_packs':startup_packs,'holiday_pumpkin':source_id(pumpkin),'holiday_startup':holiday,
         'pack_item_id':74,'cigarette_item_id':230,'evidence':evidence, 'rules':recover_rules(code)}
 
@@ -360,10 +348,7 @@ def _transform(t):
 
 def source_contract(value):
     if isinstance(value, dict):
-        result = {k:source_contract(v) for k,v in value.items() if k not in ('asset','root','node')}
-        if 'motion' in result:
-            result['motion'].pop('target')
-        return result
+        return {k:source_contract(v) for k,v in value.items() if k not in ('asset','root','node')}
     if isinstance(value, list):
         return [source_contract(v) for v in value]
     return value
@@ -373,14 +358,15 @@ def validate_acquisition(a, manifest):
     try:
         _validate_acquisition(a, manifest)
         content = json.dumps(source_contract(a), sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
-        if hashlib.sha256(content).hexdigest() != CONTRACT_SHA256:
-            raise ValueError("Acquisition differs from the checked source contract")
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != CONTRACT_SHA256:
+            raise ValueError(f"Acquisition differs from the checked source contract: {digest}")
     except (KeyError, TypeError, IndexError, OverflowError, StopIteration) as error:
         raise ValueError("Malformed acquisition contract") from error
 
 
 def _validate_acquisition(a, manifest):
-    _shape(a,'stations categories box shovel packs startup_packs holiday_pumpkin holiday_startup pack_item_id cigarette_item_id evidence rules')
+    _shape(a,'stations categories box packs startup_packs holiday_pumpkin holiday_startup pack_item_id cigarette_item_id evidence rules')
     finite_record(a)
     validate_rules(a['rules'])
     if type(a['pack_item_id']) is not int or a['pack_item_id']!=74 or type(a['cigarette_item_id']) is not int or a['cigarette_item_id']!=230:
@@ -595,32 +581,14 @@ def _validate_objects(a,manifest,prototype,table):
         for x in h[f]:_integer(x)
     if h['source']!=a['holiday_pumpkin'] or h['wearable']!={'file':'level1','path_id':79857} or h['terrain']!={'file':'level1','path_id':64898} or h['start']!=[10,15] or h['end']!=[11,15] or not h['inclusive'] or not h['local_calendar'] or not h['new_game_only'] or h['multiplayer']:
         raise ValueError('Holiday startup predicate differs')
-    s=a['shovel'];_shape(s,'prototype source pickup target trigger contact_mask speed shovel_speed recent_recovery_seconds attack_volume attack_clips contact_clips motion controller right_hand_poses left_hand_poses contact')
-    p=prototype(s['prototype'],216);behavior=p['behavior']
-    for f in ('source','pickup','target','trigger'):_source(s[f])
-    for f in ('speed','shovel_speed','recent_recovery_seconds','attack_volume'):_number(s[f])
-    _integer(s['contact_mask'])
-    if s['source']!=behavior['melee'] or s['target']!=behavior['attack_target'] or s['trigger']!=behavior['attack_trigger'] or s['pickup']!=p['pickups'][0]['pickup']['source'] or s['contact_mask']!=8552961 or s['speed']!=.699999988079071 or s['shovel_speed']!=.5 or s['recent_recovery_seconds']!=1. or s['attack_volume']!=.5 or s['attack_clips']!=behavior['clips'] or s['contact_clips']!=behavior['contact_clips']:
-        raise ValueError('Shovel contact or equip links differ')
-    _source(s['controller'])
-    if s['controller']!=s['motion']['controller']:raise ValueError('Shovel controller owner differs')
-    for f in ('right_hand_poses','left_hand_poses'):
-        if _list(s[f]):raise ValueError('Selected shovel hand pose array differs')
-    _shape(s['contact'],' '.join(SHOVEL_CONTACT_FIELDS))
-    for k,v in s['contact'].items():
-        if k=='hurt_food':_boolean(v)
-        else:_number(v)
-    if s['contact']!=SHOVEL_CONTACT:raise ValueError('Shovel source contact inputs differ')
     audio_sources={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
-    for clip in [*b['clips'],*s['attack_clips'],*(c for group in s['contact_clips'] for c in group)]:
+    for clip in b['clips']:
         _source(clip)
         if (clip['file'],clip['path_id']) not in audio_sources:raise ValueError('Acquisition audio resource missing')
     e=a['evidence'];_shape(e,'assembly_sha256 text_sha256 methods')
     for method in _list(e['methods']):_shape(method,'owner signature sha256')
     if e['assembly_sha256'] != ASSEMBLY_SHA256 or e['text_sha256'] != TEXT_SHA256:
         raise ValueError('Acquisition checked source differs')
-    from .acquisition_motion import validate_motion
-    validate_motion(s['motion'],manifest)
 
 
 # Checked build 11140890 identities and branches. Recovery must reproduce these records.
@@ -805,6 +773,3 @@ HOLIDAY_STARTUP = {'active': True,
  'started': False,
  'terrain': {'file': 'level1', 'path_id': 64898},
  'wearable': {'file': 'level1', 'path_id': 79857}}
-
-SHOVEL_CONTACT_FIELDS = {'force':'force','damage':'damage','damage_tank':'damageTank','hurt_food':'hurtFood','all_particles':'allparticle','blood':'blood','sand':'sand','plant':'plant','wood':'wood','spark':'spark'}
-SHOVEL_CONTACT = {'force':20000.,'damage':40.,'damage_tank':12.,'hurt_food':True,'all_particles':0.009999999776482582,'blood':.5,'sand':2.,'plant':1.,'wood':.5,'spark':.5}
