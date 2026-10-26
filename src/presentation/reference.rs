@@ -379,18 +379,21 @@ pub(crate) fn bind_generated_cap(
     commands: &mut Commands,
     cap: &crate::world::GeneratedCapVisual,
     prototype: &crate::reference::WorldPrototypeReference,
-    nodes: &[Entity],
-) {
+    nodes: &[Option<Entity>],
+) -> Result<(), crate::reference::ReferenceError> {
     let links = &cap.visual;
-    let entity = |id: NodeId| nodes[prototype.nodes[id.0 as usize].gltf_node as usize];
+    let entity = |id: NodeId| {
+        nodes[prototype.nodes[id.0 as usize].gltf_node as usize]
+            .ok_or_else(|| crate::reference::ReferenceError("Generated cap node is static".into()))
+    };
     for &id in &links.open_nodes {
-        commands.entity(entity(id)).insert(ValveVisibility {
+        commands.entity(entity(id)?).insert(ValveVisibility {
             opening: cap.opening,
             open: true,
         });
     }
     for &id in &links.closed_nodes {
-        commands.entity(entity(id)).insert(ValveVisibility {
+        commands.entity(entity(id)?).insert(ValveVisibility {
             opening: cap.opening,
             open: false,
         });
@@ -404,7 +407,7 @@ pub(crate) fn bind_generated_cap(
                 .with_scale(scale)
         };
         let closed = pose(links.closed_node.unwrap_or(id));
-        commands.entity(entity(id)).insert(CapVisual {
+        commands.entity(entity(id)?).insert(CapVisual {
             opening: cap.opening,
             closed,
             opened: links.open_node.map(pose).unwrap_or(closed),
@@ -414,6 +417,7 @@ pub(crate) fn bind_generated_cap(
             motion: None,
         });
     }
+    Ok(())
 }
 
 pub fn sync_caps(

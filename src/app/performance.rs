@@ -2,7 +2,7 @@ use super::Drive;
 use crate::browser::{game_performance_counters, game_performance_frame};
 use bevy::prelude::*;
 
-pub(super) fn publish(drive: Res<Drive>) {
+pub(super) fn publish(drive: Res<Drive>, archetypes: &bevy::ecs::archetype::Archetypes) {
     if !game_performance_frame(drive.physics_ms, drive.world_ms) {
         return;
     }
@@ -24,5 +24,6 @@ pub(super) fn publish(drive: Res<Drive>) {
         runtime.weather.storms().len() as u32,
         runtime.weather.influence().strength,
         runtime.weather.particle_count() as u32,
+        archetypes.iter().map(|a| a.len()).sum(),
     );
 }

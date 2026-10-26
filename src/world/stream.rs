@@ -5209,6 +5209,9 @@ mod content_lamps;
 #[path = "content_levels.rs"]
 mod content_levels;
 
+#[path = "moving_nodes.rs"]
+mod moving_nodes;
+
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 pub(crate) mod tests;
