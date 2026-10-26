@@ -1,6 +1,7 @@
 //! Source boxes: spawnInBoxScript content and breakablescript breaks of generated boxes.
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
+use crate::damage::{collision_force, try_break};
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::storage::StorageLocks;
 use crate::reference::{
@@ -122,26 +123,6 @@ pub(crate) fn relocate(placement: &mut Placement, origin: &AbsolutePose, pose: &
         .normalize()
         .to_array();
     placement.bounds = bounds;
-}
-
-/// Source breakablescript.OnCollisionEnter: the force passed to TryBreak.
-pub(crate) fn collision_force(rules: &BreakableReference, relative_speed: f32) -> Option<f32> {
-    if rules.no_collider
-        || rules.only_decrease_above && relative_speed < rules.decrease_above_health
-    {
-        return None;
-    }
-    Some(relative_speed)
-}
-/// Source breakablescript.TryBreak(float). True breaks the box.
-pub(crate) fn try_break(rules: &BreakableReference, health: &mut f32, force: f32) -> bool {
-    if force >= *health {
-        return true;
-    }
-    if rules.decrease_after_attack {
-        *health -= force;
-    }
-    false
 }
 
 /// Bound generated box and its current breakablescript health.
@@ -345,34 +326,6 @@ mod tests {
     use crate::world::spawn_selection::{box_count, pick_weighted};
     use crate::world::{UnityRandom, WorldBounds};
 
-    /// breakables record of item 62 (box01).
-    fn rules() -> BreakableReference {
-        BreakableReference {
-            source: source(135113),
-            owners: Vec::new(),
-            health: 7.,
-            shoot_health: 0.,
-            shoot_different: false,
-            explosion_health: 0.,
-            explosion_different: false,
-            no_shoot: false,
-            decrease_after_attack: false,
-            only_decrease_above: false,
-            decrease_above_health: 0.,
-            only_velocity: false,
-            mass_modifier: 1.,
-            child_modifier: 0.,
-            children: Vec::new(),
-            no_trigger: true,
-            no_collider: false,
-            no_gib: false,
-            no_destroy: false,
-            gib: None,
-            reduced_gib: None,
-            clips: Vec::new(),
-            lamp: None,
-        }
-    }
     fn source(path_id: i64) -> SourceId {
         SourceId {
             file: "sharedassets1.assets".into(),
@@ -398,30 +351,6 @@ mod tests {
             position,
             rotation: Rotation::from_rotation_y(yaw).to_array(),
         }
-    }
-
-    #[test]
-    fn break_threshold_matches_source_health() {
-        let rules = rules();
-        let mut health = rules.health;
-        assert_eq!(collision_force(&rules, 6.99), Some(6.99));
-        assert!(!try_break(&rules, &mut health, 6.99));
-        assert_eq!(health, 7., "decreaseAfterAttack is off");
-        assert!(try_break(&rules, &mut health, 7.));
-        // A hazard with damageBreakable d breaks the box when d * dt reaches health.
-        assert!(!try_break(&rules, &mut health, 349. * 0.02));
-        assert!(try_break(&rules, &mut health, 350. * 0.02));
-        let mut decreasing = BreakableReference {
-            decrease_after_attack: true,
-            ..rules.clone()
-        };
-        assert!(!try_break(&decreasing, &mut health, 4.));
-        assert!(try_break(&decreasing, &mut health, 3.));
-        decreasing.only_decrease_above = true;
-        decreasing.decrease_above_health = 5.;
-        assert_eq!(collision_force(&decreasing, 4.), None);
-        decreasing.no_collider = true;
-        assert_eq!(collision_force(&decreasing, 40.), None);
     }
 
     #[test]
