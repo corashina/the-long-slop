@@ -512,7 +512,7 @@ fn tool_surface(
                 && collider.is_enabled()
                 && !collider.is_sensor()
                 && collider.collision_groups().memberships.bits()
-                    & reference.conditions.brushes[0].mask
+                    & reference.conditions.brushes[0].tool.mask
                     != 0
                 && game.area.conditions.can_repair(target, tool)
                 && size.x > if tool == 0 { 0.1 } else { 0.6 }
@@ -652,7 +652,7 @@ fn g08_tools_require_the_correct_owner() {
         game.area.interaction.cleaning.signals()[0].voice_gain,
         gain_before
     );
-    let rule = &reference.conditions.brushes[0];
+    let rule = &reference.conditions.brushes[0].tool;
     let original_root = to_rapier(
         the_long_slop::interaction::items::node_pose(
             &reference,

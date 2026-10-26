@@ -61,6 +61,7 @@ pub struct WorldVehicleReference {
     pub oil_led_two_stroke: bool,
     pub seats: Vec<WorldSeatReference>,
     pub drive_frames: DriveFrames,
+    pub reach: VehicleReach,
     pub lights: Vec<WorldLightReference>,
     pub light_switch: Option<WorldLightSwitchReference>,
     /// Node ids are prototype node indices.
@@ -304,6 +305,77 @@ pub struct DriveFrames {
     pub right_leg: Option<u32>,
 }
 
+/// Source `carscript` hand and foot targets of the car controls (`None` for a null link) and limb
+/// flags. `carscript.Start` already inverted the first five flags when `Vinv` is set.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VehicleReach {
+    /// `HornHandPos`.
+    pub horn: Option<u32>,
+    /// `LightHandPos`.
+    pub lights: Option<u32>,
+    /// `IgnitionHandPos`. When null, the engine gear stick `kick_ignition` serves.
+    pub ignition: Option<u32>,
+    /// `HandBrakeHandPos`.
+    pub handbrake: Option<u32>,
+    /// `TransmissionHandPos`. When null, the engine gear stick `transmission` serves.
+    pub transmission: Option<u32>,
+    /// `GasLegPos`.
+    pub gas: Option<u32>,
+    /// `BrakeLegPos`.
+    pub brake: Option<u32>,
+    /// `ClutchLegPos`.
+    pub clutch: Option<u32>,
+    /// `DefLLPos`: left leg rest pose. When null, `ClutchLegPos` serves unless `no_clutch`.
+    pub default_left_leg: Option<u32>,
+    /// `DefRLPos`: right leg rest pose. When null, `GasLegPos` serves.
+    pub default_right_leg: Option<u32>,
+    /// `VLegShift`: a leg moves the gear stick, also in automatic.
+    pub leg_shift: bool,
+    /// `VHandGas`: a hand works the throttle.
+    pub hand_gas: bool,
+    /// `VHandBrake`: a hand works the brake.
+    pub hand_brake: bool,
+    /// `VHandClutch`: a hand works the clutch.
+    pub hand_clutch: bool,
+    /// `VLegHandbrake`: a leg works the handbrake.
+    pub leg_handbrake: bool,
+    /// `VLegIgnition`: a leg works the ignition.
+    pub leg_ignition: bool,
+    /// `VNoClutch`: no clutch pose.
+    pub no_clutch: bool,
+    /// `VDontHoldIgnitionWhenStart`.
+    pub dont_hold_ignition_when_start: bool,
+}
+
+impl VehicleReach {
+    fn nodes(&self) -> [Option<u32>; 10] {
+        [
+            self.horn,
+            self.lights,
+            self.ignition,
+            self.handbrake,
+            self.transmission,
+            self.gas,
+            self.brake,
+            self.clutch,
+            self.default_left_leg,
+            self.default_right_leg,
+        ]
+    }
+}
+
+/// Source `gearstickScript` of `enginescript.gearstick`. Nodes are prototype node indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GearStickReference {
+    pub source: SourceId,
+    /// `TransmissionHandPos`.
+    pub transmission: Option<u32>,
+    /// `KickNitionHandPos`: kick start target.
+    pub kick_ignition: Option<u32>,
+}
+
 /// A `headlightscript` (headlight or cabin) or `rearlights` controller.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -371,6 +443,8 @@ pub struct EnginePartReference {
     pub node: u32,
     /// `enginescript.T` oil tank node.
     pub oil_tank: Option<u32>,
+    /// `enginescript.gearstick`.
+    pub gear_stick: Option<GearStickReference>,
     pub start_chance: f32,
     pub starter_rpm: f32,
     pub starter_rpm_lerp: f32,
@@ -688,6 +762,11 @@ impl WorldVehicleReference {
         )?;
         check(
             s,
+            "vehicle reach",
+            self.reach.nodes().iter().flatten().all(|n| b.node(*n)),
+        )?;
+        check(
+            s,
             "vehicle probe node",
             self.probe.as_ref().is_none_or(|p| b.node(p.node)),
         )?;
@@ -866,7 +945,14 @@ impl EnginePartReference {
         check(
             s,
             "engine part links",
-            (self.node as usize) < nodes && self.oil_tank.is_none_or(|n| (n as usize) < nodes),
+            (self.node as usize) < nodes
+                && self.oil_tank.is_none_or(|n| (n as usize) < nodes)
+                && self.gear_stick.as_ref().is_none_or(|g| {
+                    [g.transmission, g.kick_ignition]
+                        .into_iter()
+                        .flatten()
+                        .all(|n| (n as usize) < nodes)
+                }),
         )?;
         check(
             s,
@@ -969,7 +1055,7 @@ impl EngineGlobals {
 /// A small engine part record for native tests: petrol, 120 Nm, oil fluid 3.
 #[cfg(test)]
 pub fn engine_part_fixture() -> serde_json::Value {
-    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false, "oil_toleration_min": 0.02, "oil_toleration_max": 0.3,
+    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "gear_stick": null, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false, "oil_toleration_min": 0.02, "oil_toleration_max": 0.3,
                 "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
                 "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0, "audio": engine_audio_fixture()})
 }
@@ -993,4 +1079,13 @@ pub fn engine_audio_fixture() -> serde_json::Value {
 pub fn gauge_limits_fixture() -> serde_json::Value {
     serde_json::json!({"electronics_output": 1.0, "electronics_off_threshold": 0.2, "low_fuel": 5.0,
         "low_oil": 1.0, "oil_test_rpm": 500.0, "battery_test_rpm": 500.0})
+}
+
+/// Car reach for native tests: no targets, no limb flags.
+#[cfg(test)]
+pub fn reach_fixture() -> serde_json::Value {
+    serde_json::json!({"horn": null, "lights": null, "ignition": null, "handbrake": null, "transmission": null,
+        "gas": null, "brake": null, "clutch": null, "default_left_leg": null, "default_right_leg": null,
+        "leg_shift": false, "hand_gas": false, "hand_brake": false, "hand_clutch": false, "leg_handbrake": false,
+        "leg_ignition": false, "no_clutch": false, "dont_hold_ignition_when_start": false})
 }

@@ -22,6 +22,14 @@ def recover_endpoint_reaction(source, reader, fields, node):
                 force=force, events=events)
 
 
+def usable_hand(reader, fields, pointer_node):
+    """usablescript hand rules of fpscontroller.MovedUsingHandObj."""
+    target=fields['handTarget']
+    return {'hand_target':pointer_node(reader,target) if target['m_PathID'] else None,
+        'right_hand':bool(fields['rightHand']),'left_hand':bool(fields['leftHand']),
+        'not_nearest_hand':bool(fields['notNearestHand'])}
+
+
 def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
     result = []
     for node, group in components.items():
@@ -84,7 +92,7 @@ def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
                     'node2':pointer_node(reader,value['MouseT2']) if value['MouseT2']['m_PathID'] else node,
                     'axis':list(convert_point(vector(value['MouseAxis']))),
                     'axes2':[list(convert_point(vector(value[f'MouseAxis2{a}']))) for a in 'XY']},
-                'rotation':rotation,'slide':slide,'turn':turn,
+                'rotation':rotation,'slide':slide,'turn':turn,**usable_hand(reader,value,pointer_node),
                 'reaction':recover_endpoint_reaction(source,reader,value,node) if rotation else {'kind':'none'}})
     # fpscontroller calls flashlightscript.TURN directly on a hit ancestor.
     for node,group in components.items():
@@ -94,7 +102,7 @@ def recover_mechanisms(source, nodes, components, pointer_node, node_of, main):
             result.append({'id':len(result)+1,'source':source_id(reader),'use_node':node,'driven_nodes':[],
                 'enabled':bool(fields['m_Enabled']),'child_source':None,'invert_child':False,'invert_value':False,
                 'drag':{'mode':'direct','node':node,'node2':node,'axis':[0.,0.,0.],'axes2':[[0.,0.,0.],[0.,0.,0.]]},
-                'rotation':None,'slide':None,'reaction':{'kind':'none'},'turn':{'action':{'kind':'toggle_home_light','source':source_id(reader)},'max_state':0,'initial_state':0}})
+                'rotation':None,'slide':None,'reaction':{'kind':'none'},'hand_target':None,'right_hand':False,'left_hand':False,'not_nearest_hand':False,'turn':{'action':{'kind':'toggle_home_light','source':source_id(reader)},'max_state':0,'initial_state':0}})
     return result
 
 

@@ -929,7 +929,7 @@ impl GarageRuntime {
                 .iter()
                 .zip(self.area.interaction.cleaning.signals())
             {
-                if let Some(voice) = b.voice {
+                if let Some(voice) = b.tool.voice {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }

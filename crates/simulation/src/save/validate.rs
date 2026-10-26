@@ -109,7 +109,7 @@ impl SaveSnapshot {
                 .conditions
                 .tools
                 .iter()
-                .find(|t| t.source == SourceKey::from(&brush.source))
+                .find(|t| t.source == SourceKey::from(&brush.tool.source))
                 .unwrap();
             let owner = reference
                 .conditions
@@ -124,7 +124,7 @@ impl SaveSnapshot {
                 .find(|s| s.source == SourceKey::from(&owner.source))
                 .unwrap();
             data(
-                tool.disabled == (surface.state == 5 || brush.disabled),
+                tool.disabled == (surface.state == 5 || brush.tool.disabled),
                 "Tool disabled condition",
             )?;
         }

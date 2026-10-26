@@ -6,10 +6,10 @@ from .source import key, source_id
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 DECOMPILED_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 ACTIONS = {'clutch':'clutch', 'shift_up':'shiftup', 'shift_down':'shiftdown', 'reverse':'gearr',
-    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}, 'mouse_drive':'togglemousedrive'}
+    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}, 'mouse_drive':'togglemousedrive', 'point':'pointrubwave'}
 KEY_CODES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'UpArrow':'ArrowUp',
     'DownArrow':'ArrowDown', 'KeypadPlus':'NumpadAdd', 'KeypadMinus':'NumpadSubtract',
-    'R':'KeyR', 'N':'KeyN', 'U':'KeyU', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
+    'R':'KeyR', 'LeftAlt':'AltLeft', 'N':'KeyN', 'U':'KeyU', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
     **{f'Keypad{i}':f'Numpad{i}' for i in range(7)}}
 
 

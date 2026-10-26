@@ -1596,6 +1596,7 @@ pub fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, Referenc
         right_hand_rotation: crate::world::spawn_building::source_euler(vector(f, "RHR")?),
         right_hand_grip: optional(f, "RightHandPos")?.cloned(),
         left_hand_grip: optional(f, "LeftHandPos")?.cloned(),
+        double_hand: flag(f, "doubleHand")?,
         disable_when_stored: optional(f, "disableThisWhenStored")?.cloned(),
         keep_when_stored: optional(f, "dontDisableWhenStored")?.cloned(),
         inventory_icon: optional(f, "invImg")?.cloned(),

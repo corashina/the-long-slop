@@ -4,7 +4,7 @@ const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2,CapsLock:4,KeyX:8};
 const TYPING_HELD={KeyQ:1,Digit2:2,KeyW:4,Digit3:8,KeyE:16,KeyR:32,Digit5:64,KeyT:128,Digit6:256,KeyY:512,KeyZ:512,Digit7:1024,KeyU:2048,KeyI:4096,Digit9:8192,KeyO:16384,Digit0:32768,KeyP:65536,ArrowUp:1<<17,ArrowDown:1<<18,ArrowLeft:1<<19,ArrowRight:1<<20};
 const TYPING_PRESSED={KeyA:1<<21,KeyS:1<<22,KeyX:1<<23},TYPING_ANY=1<<24,TEXT_CAPACITY=64;
 // Driving actions that are player bits (crates/simulation/src/simulation.rs player_keys).
-const PLAYER_ACTIONS={mouse_drive:16};
+const PLAYER_ACTIONS={mouse_drive:16,point:32};
 const DRIVING_BITS={clutch:2**21,shift_up:2**22,shift_down:2**23,reverse:2**24,neutral:2**25,gear1:2**26,gear2:2**27,gear3:2**28,gear4:2**29,gear5:2**30,gear6:2**31};
 export class InputState {
  constructor(bindings){this.typing=false;this.typedCodes=new Set();this.text=new Uint8Array(TEXT_CAPACITY);this.textLength=0;this.typingPressed=0;this.inventoryBits={Digit1:1,Digit2:2,Digit3:4,Digit4:8};this.bits={...BITS};this.playerBits={...PLAYER_BITS};for(const {action,codes} of bindings){if(action in PLAYER_ACTIONS){for(const code of codes)this.playerBits[code]=(this.playerBits[code]??0)|PLAYER_ACTIONS[action];continue;}if(!(action in DRIVING_BITS))throw Error('Unknown driving action: '+action);for(const code of codes)this.bits[code]=((this.bits[code]??0)|DRIVING_BITS[action])>>>0;}this.codes=new Set();this.frame={held:0,pressed:0,released:0,mouseX:0,mouseY:0,wheel:0,inventoryHeld:0,inventoryReleased:0,playerHeld:0,playerPressed:0,playerReleased:0};this.clear();}
