@@ -150,6 +150,22 @@ impl Breakables {
         let broken = try_break(&records[t.record], &mut t.health.health, force);
         self.queue_break(target, broken);
     }
+    /// Source meleeweaponscript hit: `TryBreak(decreaseAfterAttack ? damage * dt : damage)`.
+    pub fn try_break_melee(
+        &mut self,
+        records: &[BreakableReference],
+        target: usize,
+        damage: f32,
+        dt: f32,
+    ) {
+        let rules = &records[self.targets[target].record];
+        let force = if rules.decrease_after_attack {
+            damage * dt
+        } else {
+            damage
+        };
+        self.try_break(records, target, force);
+    }
     /// Source breakablescript.TryBreak(Rigidbody).
     pub fn try_break_body(
         &mut self,
@@ -415,6 +431,32 @@ mod tests {
         let second = breakables.take_break().unwrap();
         assert_eq!(item(&breakables, second), BreakKind::Item(ItemId(2)));
         assert!(breakables.take_break().is_none(), "a target breaks once");
+    }
+
+    #[test]
+    fn melee_damage_scales_with_dt_only_for_decrease_after_attack() {
+        // Shovel damage 40. Lamp: health 5, decreaseAfterAttack. Bottle: health 6.
+        let records = [
+            BreakableReference {
+                decrease_after_attack: true,
+                ..rules(5.)
+            },
+            rules(6.),
+        ];
+        let mut breakables = Breakables::default();
+        breakables.bind(BreakKind::Item(ItemId(1)), 0, &records[0]);
+        breakables.bind(BreakKind::Item(ItemId(2)), 1, &records[1]);
+        // 40 * 0.05 = 2 per frame: health 5 goes to 1 after two frames and breaks at the third.
+        for _ in 0..2 {
+            breakables.try_break_melee(&records, 0, 40., 0.05);
+        }
+        assert_eq!(breakables.targets()[0].health.health, 1.);
+        assert!(breakables.take_break().is_none());
+        breakables.try_break_melee(&records, 0, 40., 0.05);
+        assert_eq!(breakables.take_break(), Some(0));
+        // Full damage breaks the bottle at the first frame.
+        breakables.try_break_melee(&records, 1, 40., 0.05);
+        assert_eq!(breakables.take_break(), Some(1));
     }
 
     #[test]
