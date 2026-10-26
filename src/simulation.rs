@@ -6,6 +6,7 @@ pub mod engine;
 pub mod ignition;
 pub mod input;
 pub mod instruments;
+pub mod lever;
 pub mod music_box;
 pub mod radio;
 const MAX_FRAME_SECONDS: f64 = 0.1;

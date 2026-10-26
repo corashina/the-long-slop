@@ -68,9 +68,55 @@ def checked_methods(source):
     return bodies, evidence, float(minimum[1]), text
 
 
-def recover_driving(source, car_readers, wheel_readers):
-    """Resolve selected cars and wheel owners; fail on missing records or links."""
+LEVER_FIELDS = {'seconds':'TransmissionLerp', 'stage1':'transmissionStage1', 'stage2':'transmissionStage2'}
+LEVER_LERPS = [f'Transmission.{part} = {kind}.Lerp(Transmission.{part}, gears[{gear} + 1].{target}.{part}, transMissionLerp3);'
+    for gear,target in (('lastgear','Path'),('gear','Path'),('gear','Pos'))
+    for part,kind in (('position','Vector3'),('rotation','Quaternion'))]
+
+
+def lever_constants(text):
+    """carscript lever timing from the private field initializers."""
+    values = {}
+    for name,field in LEVER_FIELDS.items():
+        match = re.search(rf'private float {field} = ([\d.]+)f;', text)
+        if match is None:raise ValueError(f'Missing lever constant: {field}')
+        values[name] = float(match[1])
+    if any(line not in text for line in LEVER_LERPS):raise ValueError('Lever lerp source differs')
+    return values
+
+
+def recover_lever(source, car_reader, car, root, node_ids, constants):
+    """carscript.Transmission and gear Path/Pos, posed in the lever parent space.
+    The source writes world poses. The runtime writes the node local pose."""
+    from .collision import world_pose
+    from .particles import relative_pose
+    lever = source.resolve(car_reader, car['Transmission'])
+    if lever is None:return None
+    def inside(reader):
+        while reader is not None:
+            if key(reader)==key(root):return True
+            reader = source.resolve(reader, source.read(reader)['m_Father'])
+        return False
+    parent = source.resolve(lever, source.read(lever)['m_Father'])
+    if parent is None or not inside(parent):raise ValueError(f'Lever parent is outside the car: {source_id(lever)}')
+    if key(lever) not in node_ids:raise ValueError(f'Missing lever node: {key(lever)}')
+    scale = world_pose(source, parent)['scale']
+    if max(scale)-min(scale) > 1e-5 * max(abs(v) for v in scale):raise ValueError(f'Lever parent scale is not uniform: {source_id(lever)}')
+    def pose(pointer):
+        reader = source.resolve(car_reader, pointer)
+        if reader is None or not inside(reader):raise ValueError(f'Lever gear pose is outside the car: {source_id(car_reader)}')
+        value = relative_pose(source, reader, parent)
+        value['translation'] = [v/scale[0] for v in value['translation']]
+        return value
+    return {'node':node_ids[key(lever)], 'gears':[{'path':pose(g['Path']), 'pos':pose(g['Pos'])} for g in car['gears']],
+        'seconds':constants['seconds'], 'stages':[constants['stage1'], constants['stage2']]}
+
+
+def recover_driving(source, car_readers, wheel_readers, node_ids):
+    """Resolve selected cars and wheel owners; fail on missing records or links.
+    `node_ids` maps source Transform keys to manifest node ids."""
     bodies, methods, minimum, text = checked_methods(source)
+    constants = lever_constants(text)
     drive = bodies['public void DriveStuff()']
     rates = [float(value) for value in re.findall(r'B(?:Gas|Brake|Clutch) = Mathf.MoveTowards\([^;]+Time.deltaTime \* ([\d.]+)f\);',drive)]
     if len(rates)!=3 or len(set(rates))!=1:raise ValueError('Driving pedal rates differ')
@@ -123,12 +169,13 @@ def recover_driving(source, car_readers, wheel_readers):
         value=source.read(reader);identity=key(reader);cars[identity]=(reader,value)
         initial=value['gear']+1
         if not 0<=initial<len(value['gears']):raise ValueError('Driving startup gear outside source gear list')
+        transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
         vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':{'initial_gear':initial,
-            'force_automatic':bool(value['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False}})
+            'force_automatic':bool(value['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False},
+            'lever':recover_lever(source,reader,value,transform,node_ids,constants)})
         road={key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in value[field]}
         if len(road)!=4 or any(k in owners for k in road):raise ValueError('Driving car must own four wheels')
         owners.update({k:identity for k in road})
-        transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
         for node in source.hierarchy(transform,activate_root=True):
             if not node['active']:continue
             for component in node['components']:

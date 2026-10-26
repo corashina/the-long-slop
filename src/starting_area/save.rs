@@ -431,6 +431,10 @@ impl GarageRuntime {
             vehicle.ignition.clear_input();
             vehicle.engine_output = vehicle.engine.restore_save(&record.engine)?;
             vehicle.drivetrain.restore_gear(record.gear);
+            vehicle.lever = reference.vehicles[index]
+                .lever
+                .as_ref()
+                .map(|lever| crate::simulation::lever::LeverState::rest(lever, record.gear));
             vehicle.handbrake = record.handbrake;
             vehicle.trip_m = record.trip_m;
         }

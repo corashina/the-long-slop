@@ -614,6 +614,7 @@ pub struct VehicleRuntime {
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
     pub wheel_effects: crate::wheel_effects::WheelEffects,
+    pub lever: Option<crate::simulation::lever::LeverState>,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -650,6 +651,9 @@ impl VehicleRuntime {
             trip_m: 0.0,
             ignition: IgnitionState::default(),
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle),
+            lever: vehicle.lever.as_ref().map(|lever| {
+                crate::simulation::lever::LeverState::rest(lever, vehicle.driving.initial_gear)
+            }),
             exhaust: crate::exhaust::ExhaustState::new(
                 &vehicle.exhaust,
                 vehicle.engine.max_rpm,
@@ -1737,6 +1741,7 @@ impl GarageRuntime {
                 .sqrt();
         let rolling_rpm = self.physics.driven_wheel_rpm(index);
         let vehicle = &mut self.vehicles[index];
+        let last_gear = vehicle.drivetrain.gear();
         let drivetrain = vehicle.drivetrain.step(
             controls,
             input.pressed,
@@ -1750,6 +1755,11 @@ impl GarageRuntime {
             driving,
         );
         let gear = drivetrain.gear;
+        if gear != last_gear
+            && let (Some(lever), Some(reference)) = (&mut vehicle.lever, &source.lever)
+        {
+            lever.shift(reference, last_gear, gear);
+        }
         let throttle = drivetrain.throttle;
         let brake = drivetrain.brake;
         let car_controls = chassis_active

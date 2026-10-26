@@ -979,7 +979,29 @@ fn sync_instruments(
     mut materials: Query<&mut MeshMaterial3d<presentation::materials::SourceMaterial>>,
 ) {
     let drive = &mut *drive;
-    let run = &drive.runtime;
+    let run = &mut drive.runtime;
+    let moving = run.started && !run.paused;
+    // Source `carscript.Update` eases the lever once per frame by scaled frame time.
+    for (vehicle, state) in reference.0.vehicles.iter().zip(&mut run.vehicles) {
+        let (Some(r), Some(lever)) = (&vehicle.lever, &mut state.lever) else {
+            continue;
+        };
+        if moving {
+            lever.step(r, drive.render_delta_seconds);
+        }
+        if imported.bound
+            && let Ok(mut transform) = transforms.get_mut(imported.nodes[&r.node])
+        {
+            let translation = Vec3::from_array(lever.translation.to_array());
+            let rotation = Quat::from_array(lever.rotation.to_array());
+            if transform.translation != translation {
+                transform.translation = translation;
+            }
+            if transform.rotation != rotation {
+                transform.rotation = rotation;
+            }
+        }
+    }
     // Source `coolantTankscript.Cool`: Fan.Rotate(0, 0, selectedFanSpeed * dt) in local space.
     if imported.bound && run.started && !run.paused {
         for (vehicle, state) in reference.0.vehicles.iter().zip(&run.vehicles) {

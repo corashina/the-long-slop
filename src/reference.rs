@@ -938,6 +938,7 @@ pub struct VehicleReference {
     pub exhaust: Vec<ParticleReference>,
     pub wheel_effects: [WheelEffectsReference; 4],
     pub effect_gains: EffectGains,
+    pub lever: Option<LeverReference>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

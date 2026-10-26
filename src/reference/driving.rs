@@ -1,4 +1,6 @@
-use super::{ReferenceError, ReferenceManifest, SourceId, finite, require};
+use super::{
+    NodeId, ReferenceError, ReferenceManifest, SourceId, Transform, finite, require, transform,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -49,6 +51,24 @@ pub struct DrivingVehicleReference {
     pub initial_gear: usize,
     pub force_automatic: bool,
     pub play_shift_sounds_in_automatic: bool,
+}
+
+/// Source `carscript.gears[i]` lever poses, in the lever parent space.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverGear {
+    pub path: Transform,
+    pub pos: Transform,
+}
+
+/// Source `carscript.Transmission`. `gears` follow `VehicleReference.gear_ratios`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverReference {
+    pub node: NodeId,
+    pub gears: Vec<LeverGear>,
+    pub seconds: f32,
+    pub stages: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -146,6 +166,22 @@ impl DrivingReference {
                 vehicle.driving.initial_gear < vehicle.gear_ratios.len(),
                 "driving startup gear",
             )?;
+            if let Some(lever) = &vehicle.lever {
+                require(
+                    manifest.nodes.iter().any(|node| node.id == lever.node)
+                        && lever.gears.len() == vehicle.gear_ratios.len()
+                        && lever
+                            .gears
+                            .iter()
+                            .all(|gear| transform(&gear.path) && transform(&gear.pos))
+                        && finite(&[lever.seconds, lever.stages[0], lever.stages[1]])
+                        && lever.seconds > 0.0
+                        && 0.0 < lever.stages[0]
+                        && lever.stages[0] < lever.stages[1]
+                        && lever.stages[1] < 1.0,
+                    "driving lever",
+                )?;
+            }
         }
         Ok(())
     }
