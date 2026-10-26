@@ -42,6 +42,12 @@ impl WorldStream {
         for body in &prototype.bodies {
             moving[body.node as usize] = true;
         }
+        // Bat wing bones.
+        if prototype.source == reference.sky.flyer.prefab {
+            for track in &reference.sky.flyer.wing.tracks {
+                moving[track.node as usize] = true;
+            }
+        }
         // Spray bottle trigger.
         let trigger = &reference.small_items.spray_bottle.trigger;
         // Lamp buttons: flashlightscript GButton.

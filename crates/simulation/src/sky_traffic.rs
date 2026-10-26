@@ -132,6 +132,7 @@ mod tests {
                 assembly_sha256: String::new(),
                 methods: Vec::new(),
             },
+            flyer: crate::reference::FlyerReference::fixture(),
         }
     }
 

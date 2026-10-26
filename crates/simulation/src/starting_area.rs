@@ -24,7 +24,9 @@ use std::collections::{BTreeMap, HashMap};
 mod body;
 pub mod cigarettes;
 mod computers;
+mod frame;
 pub mod hose;
+mod reach;
 pub mod spawned;
 mod survival;
 mod weather;
@@ -510,6 +512,8 @@ pub struct VehicleRuntime {
     pub pedals: crate::simulation::pedals::PedalState,
     /// Total pedal turn in degrees, modulo 360. The presentation poses the pedal nodes from it.
     pub pedal_angle: f32,
+    /// Source `carscript` drive leg poses of the pedals.
+    pub pedal_reach: crate::simulation::reach::PedalReach,
 }
 
 impl VehicleRuntime {
@@ -561,6 +565,7 @@ impl VehicleRuntime {
             balance: Default::default(),
             pedals: Default::default(),
             pedal_angle: 0.,
+            pedal_reach: Default::default(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -695,6 +700,7 @@ pub struct GarageRuntime {
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
+    pub flyers: crate::flyers::Flyers,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -739,6 +745,7 @@ pub struct GarageRuntime {
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
+    frame_poses: crate::boundary::FramePoses,
 }
 
 impl GarageRuntime {
@@ -759,7 +766,14 @@ impl GarageRuntime {
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32, mode, draw_distance)
+        Self::new_candidate(
+            reference,
+            true,
+            DEFAULT_SEED as i32,
+            new_game_date(reference),
+            mode,
+            draw_distance,
+        )
     }
     /// Test runtime in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -774,6 +788,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        date: [i32; 3],
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
@@ -782,7 +797,7 @@ impl GarageRuntime {
         let mut physics = PhysicsWorld::new(reference);
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed, mode, distances)?;
+        let mut stream = WorldStream::new(reference, seed, date, mode, distances)?;
         if stream_world {
             let spawn = reference.area.player_spawn.translation.map(f64::from);
             stream.request_at(spawn, spawn);
@@ -844,6 +859,7 @@ impl GarageRuntime {
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
+            flyers: crate::flyers::Flyers::new(seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -884,6 +900,7 @@ impl GarageRuntime {
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
+            frame_poses: Default::default(),
         };
         run.refresh_powertrains();
         Ok(run)
@@ -916,7 +933,7 @@ impl GarageRuntime {
                 .iter()
                 .zip(self.area.interaction.cleaning.signals())
             {
-                if let Some(voice) = b.voice {
+                if let Some(voice) = b.tool.voice {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
@@ -931,6 +948,12 @@ impl GarageRuntime {
                 if let Some(voice) = b.voice {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
+            }
+            // The player brush signal comes last.
+            if let Some(voice) = reference.conditions.player_brush.voice
+                && let Some(s) = self.area.interaction.cleaning.signals().last()
+            {
+                audio.voice(voice, s.playing, s.voice_gain, 1.);
             }
         }
     }
@@ -1160,6 +1183,7 @@ impl GarageRuntime {
             input,
             aim,
             &mut self.area.player,
+            &mut self.area.body,
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,
@@ -1268,11 +1292,22 @@ impl GarageRuntime {
                         .find(|v| v.handbrake_lever == Some(lever))
                     {
                         vehicle.handbrake = !vehicle.handbrake;
+                        if let Some(key) = self.area.player.seat_vehicle().cloned()
+                            && self.area.player.driving()
+                            && self.vehicles[&key].handbrake_lever == Some(lever)
+                        {
+                            self.reach_seated_car(
+                                reference,
+                                &key,
+                                crate::simulation::reach::handbrake,
+                            );
+                        }
                     }
                 }
                 crate::interaction::mechanisms::ControlAction::CycleHeadlights(switch) => {
                     if let Some((key, record)) = use_light_switch(&mut self.vehicles, switch) {
                         self.car_switch_sound(reference, &key, record);
+                        self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
                     }
                 }
                 _ => {}
@@ -1363,12 +1398,17 @@ impl GarageRuntime {
             vehicle.cycle_headlights();
             let prototype = vehicle.prototype;
             self.car_switch_sound(reference, &key, prototype);
+            self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
         }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
-            && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
+            && let Some(key) = self.vehicle.clone()
+            && let Some(vehicle) = self.vehicles.get_mut(&key)
         {
             vehicle.handbrake = !vehicle.handbrake;
+            if driving {
+                self.reach_seated_car(reference, &key, crate::simulation::reach::handbrake);
+            }
         }
         self.refresh_powertrains();
         // Taking the map lets each car step borrow the runtime without allocation.
@@ -1423,6 +1463,7 @@ impl GarageRuntime {
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
+        self.advance_flyers(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1620,10 +1661,11 @@ impl GarageRuntime {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
             self.weather.set_origin(self.stream.origin.offset);
-            self.urine
-                .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
-                    |i| (self.area.origin[i] - old_origin[i]) as f32,
-                )));
+            let shift = rapier3d::math::Vector::from_array(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
+            self.urine.rebase(shift);
+            self.flyers.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1685,6 +1727,37 @@ impl GarageRuntime {
         );
         if let Some(audio) = &mut self.audio {
             audio.sky(self.sky.planes(), anchor);
+        }
+    }
+
+    fn advance_flyers(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let flyer = &reference.sky.flyer;
+        self.flyers.sync(
+            flyer,
+            self.simulation_seconds,
+            self.stream.structure_revision(),
+            self.stream.frame().structures,
+            &self.area.items,
+            &self.physics,
+        );
+        self.flyers.step(
+            flyer,
+            self.simulation_seconds,
+            dt,
+            &self.area.items,
+            &mut self.physics,
+        );
+        if let Some(audio) = &mut self.audio {
+            let (items, physics, origin) = (&self.area.items, &self.physics, &self.stream.origin);
+            audio.flyers(
+                flyer.voice,
+                self.flyers.squeaks(),
+                self.simulation_seconds,
+                |item| {
+                    let body = physics.rapier().bodies.get(items.get(item)?.body?)?;
+                    Some(origin.absolute(body.translation().to_array()))
+                },
+            );
         }
     }
 
@@ -2048,6 +2121,33 @@ impl GarageRuntime {
             lever.shift(&reference.driving.lever, last_gear, gear);
         }
         let record = world_vehicle(reference, vehicle.prototype);
+        let reach = &record.reach;
+        let frames = self.car_frames(reference, key, vehicle);
+        let body = &mut self.area.body;
+        if gear != last_gear
+            && driving
+            && let Some(m) = crate::simulation::reach::shift(
+                reach,
+                frames.gear_stick(),
+                drivetrain.automatic,
+                reference.driving.lever.seconds,
+            )
+        {
+            frames.send(body, m);
+        }
+        let drive = &record.drive_frames;
+        vehicle.pedal_reach.step(
+            reach,
+            [drive.left_leg.is_some(), drive.right_leg.is_some()],
+            crate::simulation::reach::Pedals {
+                throttle: drivetrain.throttle,
+                brake: drivetrain.brake,
+                clutch: drivetrain.clutch,
+            },
+            driving,
+            FIXED_DT,
+            |m| frames.send(body, m),
+        );
         // Source `carscript.ControlStuff`: pedals are off while the engine runs.
         let pedaling = driving
             && record.pedals.is_some()
@@ -2081,6 +2181,25 @@ impl GarageRuntime {
                 * 4.0)
                 .round() as u8
         });
+        if car_controls {
+            crate::simulation::reach::ignition(
+                reach,
+                frames.gear_stick(),
+                crate::simulation::reach::IgnitionReach {
+                    held: ignition_held,
+                    last_held: vehicle.ignition.held(),
+                    starting: vehicle.ignition.starter,
+                    hold: vehicle.ignition.hold_seconds(),
+                    delay: vehicle.starter_delay_seconds,
+                },
+                |m| frames.send(&mut self.area.body, m),
+            );
+            if input.held & keys::HORN != 0
+                && let Some(m) = crate::simulation::reach::horn(reach)
+            {
+                frames.send(&mut self.area.body, m);
+            }
+        }
         let was_ignition = vehicle.ignition.ignition;
         vehicle.ignition.step(
             IgnitionInput {
@@ -2829,6 +2948,21 @@ fn vehicle_steer(current: f32, pushed: Option<f32>, driven: Option<f32>) -> f32 
     pushed.or(driven).unwrap_or(current)
 }
 
+/// Today's local date as year, month, day.
+#[cfg(target_arch = "wasm32")]
+fn new_game_date(_: &ReferenceManifest) -> [i32; 3] {
+    let today = js_sys::Date::new_0();
+    [
+        today.get_full_year() as i32,
+        today.get_month() as i32 + 1,
+        today.get_date() as i32,
+    ]
+}
+/// Native builds use the fixed reference date, so tests stay deterministic.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_game_date(reference: &ReferenceManifest) -> [i32; 3] {
+    reference.world.spawn_context.date
+}
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }

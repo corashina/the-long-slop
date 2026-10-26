@@ -39,6 +39,7 @@ fn installed_spawn_alignment_and_settling() {
     let mut replay = WorldStream::new(
         &reference,
         42,
+        reference.world.spawn_context.date,
         the_long_slop::world::GameMode::default(),
         the_long_slop::world::DrawDistances::resolve(
             &reference.world.draw_distance,

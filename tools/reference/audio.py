@@ -397,9 +397,15 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if (r := source.resolve(c, d[field])) is not None}
     for c in components:
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
+    # fpscontroller.pointKefe slide voice. The player root is not an audio root.
+    point = manifest['conditions']['player_brush']['voice_source']
+    if point: voice(source.get(point['file'], point['path_id']))
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
     for prefab in manifest['sky']['prefabs']:
         prefab['voices'] = [voice(source.get(v['file'], v['path_id']), [method('AirPlaneSpawnScript', 'Update')]) for v in prefab['voices']]
+    # randomFlyer.Sound plays a random clip at the bat and follows it.
+    flyer = manifest['sky']['flyer']
+    flyer['clips'] = [clip(source.get(c['file'], c['path_id'])) for c in flyer['clips']]
     audio['shared']['settings'] = source_settings(prefab_data, prefab_data['Priority'])
     audio['shared']['mixer'] = mixer(source.resolve(main_r, main['defGroup']))
     def offset(reader, owner):
@@ -418,10 +424,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if target is None: return None
         if reader is not None:
             return {'voice': car_template(reader, None, True), 'clip': clip(target), 'gain': gain, 'position': offset(reader, owner)}
-        shared = car_voice(audio['car_voices'], {'source': audio['shared']['source'], 'one_shot': True, 'clip': None,
+        return {'voice': shared_voice(priority), 'clip': clip(target), 'gain': gain, 'position': [0., 0., 0.]}
+    def shared_voice(priority):
+        """The mainscript.PlayClipAtPoint template at `priority`."""
+        return car_voice(audio['car_voices'], {'source': audio['shared']['source'], 'one_shot': True, 'clip': None,
             'settings': {**audio['shared']['settings'], 'priority': priority}, 'mixer': audio['shared']['mixer'],
             'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
-        return {'voice': shared, 'clip': clip(target), 'gain': gain, 'position': [0., 0., 0.]}
+    # randomFlyer.Sound plays its clip through mainscript.PlayClipAtPoint at AudioPriorities[3].
+    flyer['voice'] = shared_voice(PRIORITIES[3])
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
         choices = [clip(source.resolve(owner, p)) for p in pointers if p['m_PathID']]
         if not choices: return None

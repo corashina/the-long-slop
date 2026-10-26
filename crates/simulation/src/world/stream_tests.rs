@@ -1660,6 +1660,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
             placements: candidate.placements.capture_index(),
         },
         seed: 42,
+        date: reference.world.spawn_context.date,
         start_car: candidate.start_car(),
         changes: ChangeRecords::default(),
         spawn: candidate.contents.state.capture_history(),
@@ -2226,6 +2227,7 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
     run.stream = WorldStream::new(
         &reference,
         saved.seed,
+        saved.date,
         crate::world::GameMode::default(),
         run.distances,
     )
@@ -2427,6 +2429,7 @@ fn fixed_decoration_possessions_restore_on_item_path() {
     run.stream = WorldStream::new(
         &reference,
         saved.seed,
+        saved.date,
         crate::world::GameMode::default(),
         run.distances,
     )
@@ -2839,6 +2842,7 @@ fn roadside_edits_survive_retirement_and_save_reload() {
     run.stream = WorldStream::new(
         &reference,
         saved.seed,
+        saved.date,
         crate::world::GameMode::default(),
         run.distances,
     )
@@ -2961,6 +2965,7 @@ fn roadside_unresolved_attachment_keeps_retired_parent() {
     let mut reloaded = WorldStream::new(
         &reference,
         readback.seed,
+        readback.date,
         crate::world::GameMode::default(),
         run.distances,
     )

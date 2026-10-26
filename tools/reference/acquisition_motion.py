@@ -82,31 +82,11 @@ def recover_motion(source, manifest, reader):
             'clip_duration':blend['m_Duration'], 'clip_cycle_offset':blend['m_CycleOffset'],
             'clip_mirror':blend['m_Mirror'], 'callback':callbacks.get(d['m_FullPathID']),
             'transitions':[transition(t['data']) for t in d['m_TransitionConstantArray']]})
-    index = next(i for i in source.library.manifest['category_indexes'] if i['file']=='animations/index.json')
-    exports = json.loads(checked(source.library.root,index))['exports']
-    clips = []
-    for identity in slots:
-        export = next((e for e in exports if e['source']==identity), None)
-        if export is None:raise ValueError(f'{name}: clip {identity} not in the animation library')
-        receipt = next(f for f in export['files'] if f['file']==export['details']['tracks_file'])
-        record = json.loads(checked(source.library.root,receipt))
-        tracks = []
-        for track in record['tracks']:
-            b = track['binding']
-            target = next((t for t in b['targets'] if t['owner']==ANIMATOR), None)
-            if target is None or b['type_id']!=4 or b['attribute'] not in TRACK_TYPES or b['dimension']!=3 or b['is_pptr'] or b['script'] is not None or target['source']!=TARGET:
-                raise ValueError(f'{name}: unsupported track binding in clip {identity}')
-            tracks.append({'node':node, 'attribute':b['attribute'], 'path_hash':b['path_hash'], 'custom_type':b['custom_type'],
-                'curve_offset':b['curve_offset'], 'storage':b['storage'], 'interpolation':track['interpolation'],
-                'times':track['times'], 'values':track['values'], 'in_tangents':track['in_tangents'],
-                'out_tangents':track['out_tangents'], 'coefficients':track['coefficients']})
-        if record['events']:
-            raise ValueError(f'{name}: unexpected clip events in {identity}; callbacks are state behaviors')
-        muscle = record['settings']['muscle']
-        clips.append({'source':identity, 'source_tracks':receipt, 'name':record['settings']['m_Name'],
-            'start_time':muscle['m_StartTime'], 'stop_time':muscle['m_StopTime'],
-            'sample_rate':record['settings']['m_SampleRate'], 'loop':muscle['m_LoopTime'],
-            'cycle_offset':muscle['m_CycleOffset'], 'tracks':tracks, 'events':[]})
+    def bind(b, target):
+        if b['type_id']!=4 or b['attribute'] not in TRACK_TYPES or b['dimension']!=3 or b['is_pptr'] or b['script'] is not None or target!=TARGET:
+            raise ValueError(f'{name}: unsupported track binding')
+        return node
+    clips = motion_clips(source, slots, animator, bind)
     layer = data['m_LayerArray'][0]['data']
     return {'controller':source_id(reader), 'handler':source_id(handler), 'animator':source_id(animator),
         'target':node, 'coordinate_space':'unity_parent_local', 'clip_slots':slots, 'parameters':parameters,
@@ -117,6 +97,34 @@ def recover_motion(source, manifest, reader):
         'selectors':[{'id':s['data']['m_FullPathID'], 'entry':s['data']['m_IsEntry'],
             'destinations':[t['data']['m_Destination'] for t in s['data']['m_TransitionConstantArray']]}
             for s in machine['m_SelectorStateConstantArray']], 'clips':clips}
+
+
+def motion_clips(source, identities, animator, bind):
+    """MotionClip records from the library tracks of `animator`. `bind(binding, target)` checks a track and gives its node."""
+    index = next(i for i in source.library.manifest['category_indexes'] if i['file']=='animations/index.json')
+    exports = json.loads(checked(source.library.root,index))['exports']
+    clips = []
+    for identity in identities:
+        export = next(e for e in exports if e['source']==identity)
+        receipt = next(f for f in export['files'] if f['file']==export['details']['tracks_file'])
+        record = json.loads(checked(source.library.root,receipt))
+        tracks = []
+        for track in record['tracks']:
+            b = track['binding']
+            target = next((t for t in b.get('targets',[]) if t['owner']==source_id(animator)),None)
+            if target is None:raise ValueError(f'Clip track has no target: {identity}')
+            tracks.append({'node':bind(b,target['source']), 'attribute':b['attribute'], 'path_hash':b['path_hash'], 'custom_type':b['custom_type'],
+                'curve_offset':b['curve_offset'], 'storage':b['storage'], 'interpolation':track['interpolation'],
+                'times':track['times'], 'values':track['values'], 'in_tangents':track['in_tangents'],
+                'out_tangents':track['out_tangents'], 'coefficients':track['coefficients']})
+        # Shovel callbacks are state behaviors. No selected clip has events.
+        if record['events']:raise ValueError(f'Unexpected clip events: {identity}')
+        muscle = record['settings']['muscle']
+        clips.append({'source':identity, 'source_tracks':receipt, 'name':record['settings']['m_Name'],
+            'start_time':muscle['m_StartTime'], 'stop_time':muscle['m_StopTime'],
+            'sample_rate':record['settings']['m_SampleRate'], 'loop':muscle['m_LoopTime'],
+            'cycle_offset':muscle['m_CycleOffset'], 'tracks':tracks, 'events':[]})
+    return clips
 
 
 def validate_motion(m, manifest):

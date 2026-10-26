@@ -48,10 +48,39 @@ record!(MotionEvent {
     time: f32,
     function: String
 });
+// Transform attribute 1 position, 2 quaternion, 3 scale, 4 euler degrees. Values are Unity parent-local.
+// A key row has one value per component: 4 for a quaternion, else 3.
+// The node is a manifest node id for the shovel and a world prototype node index for the flyer.
 record!(MotionTrack {
-    node:NodeId,attribute:u32,path_hash:u32,custom_type:u32,curve_offset:u32,storage:String,interpolation:String,
-    times:Vec<f32>,values:Vec<[f32;3]>,in_tangents:Vec<[f32;3]>,out_tangents:Vec<[f32;3]>,coefficients:Vec<[[f32;3];3]>
+    node:u32,attribute:u32,path_hash:u32,custom_type:u32,curve_offset:u32,storage:String,interpolation:String,
+    times:Vec<f32>,values:Vec<Vec<f32>>,in_tangents:Vec<Vec<f32>>,out_tangents:Vec<Vec<f32>>,coefficients:Vec<Vec<[f32;3]>>
 });
+impl MotionTrack {
+    /// Components of one key row.
+    pub fn width(&self) -> usize {
+        if self.attribute == 2 { 4 } else { 3 }
+    }
+    /// Finite, ordered keys in [0, stop] with one row of `width` per key.
+    pub fn keys_valid(&self, stop_time: f32) -> bool {
+        let n = self.times.len();
+        let w = self.width();
+        n > 0
+            && (1..=4).contains(&self.attribute)
+            && self.times.windows(2).all(|p| p[1] > p[0])
+            && self
+                .times
+                .iter()
+                .all(|v| v.is_finite() && *v >= 0. && *v <= stop_time + 1e-6)
+            && [&self.values, &self.in_tangents, &self.out_tangents]
+                .iter()
+                .all(|rows| rows.len() == n && rows.iter().all(|r| r.len() == w && finite(r)))
+            && (self.coefficients.is_empty() || self.coefficients.len() == n)
+            && self
+                .coefficients
+                .iter()
+                .all(|k| k.len() == w && k.iter().all(|c| finite(c)))
+    }
+}
 /// Parameter names in source order: five attack triggers, Speed, Hit.
 const PARAMETER_NAMES: [&str; 7] = [
     "AttackLeft",
@@ -194,7 +223,7 @@ impl MeleeMotion {
             for (j, t) in c.tracks.iter().enumerate() {
                 require(
                     c.tracks[..j].iter().all(|u| u.attribute != t.attribute)
-                        && t.node == self.target
+                        && t.node == self.target.0
                         && TRACK_TYPES.contains(&(t.attribute, t.custom_type))
                         && t.path_hash == 0,
                     "melee track binding",
@@ -205,27 +234,9 @@ impl MeleeMotion {
                         || (t.storage == "streamed" && t.interpolation == "CUBIC"),
                     "melee track interpolation",
                 )?;
+                require(t.keys_valid(c.stop_time), "melee track keys")?;
                 require(
-                    !t.times.is_empty()
-                        && t.times.windows(2).all(|p| p[1] > p[0])
-                        && t.times
-                            .iter()
-                            .all(|v| v.is_finite() && *v >= 0. && *v <= c.stop_time + 1e-6),
-                    "melee track times",
-                )?;
-                for rows in [&t.values, &t.in_tangents, &t.out_tangents] {
-                    require(
-                        rows.len() == t.times.len() && rows.iter().flatten().all(|v| v.is_finite()),
-                        "melee track keys",
-                    )?;
-                }
-                require(
-                    t.coefficients.len() == if constant { 0 } else { t.times.len() }
-                        && t.coefficients
-                            .iter()
-                            .flatten()
-                            .flatten()
-                            .all(|v| v.is_finite()),
+                    t.coefficients.len() == if constant { 0 } else { t.times.len() },
                     "melee track polynomials",
                 )?;
             }

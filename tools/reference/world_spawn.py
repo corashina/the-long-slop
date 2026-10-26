@@ -17,7 +17,7 @@ def extend_spawn_closure(source, reader, output, world):
     item_roots={i['index']:_source_root(source,source.get(i['source']['file'],i['source']['path_id'])) for i in items}
     items_by_root={}
     for i in items:items_by_root.setdefault(key(item_roots[i['index']]),[]).append(i)
-    actors={'aiscript','newAiScript','nyulscript','vultureAI','movecreaturescript','randomFlyer'}
+    actors={'aiscript','newAiScript','nyulscript','vultureAI','movecreaturescript'}
     actions={'GunAim','GunShoot','bbgunscript','meleeweaponscript','weaponscript','weaponhandlingscript','wearable','ediblescript','survivalscript','cigiscript'}
     def add(target):
         root=_source_root(source,target)
@@ -67,11 +67,10 @@ def extend_spawn_closure(source, reader, output, world):
                 row.update(exclusion=reason,excluded_actions=excluded_actions,compatible_slots=matches,prototype=None if reason else source_id(root))
         if not reason and identity not in prototypes:new_roots[identity]=root
         if reason:
-            initialization={'tosaveitemscript','newAiScript','randomFlyer','nyulscript','partconditionscript','partslotscript','partscript','randomTypeSelector','randomScaleScript','spawnInBoxScript','paintingScript','paintingMain','newRandomStuffSpawnScript','ammoscript','foodscript','tankscript','massScript','childunparent','sprayscript','flashlightscript'}
+            initialization={'tosaveitemscript','newAiScript','nyulscript','partconditionscript','partslotscript','partscript','randomTypeSelector','randomScaleScript','spawnInBoxScript','paintingScript','paintingMain','newRandomStuffSpawnScript','ammoscript','foodscript','tankscript','massScript','childunparent','sprayscript','flashlightscript'}
             consumed={
                 'tosaveitemscript': {'m_GameObject','m_Script','m_Enabled','started','partslotscripts','randomScales','painting','spawnBox','ammo','tanks','randomizetanks','food','engine','partconditions','manualStart','scaleDestroyOnStart','scaleDestroyOnStartIfReducedGibs'},
                 'newAiScript': {'m_GameObject','m_Script','m_Enabled','sleeping','startSleepChange','voiceMinPitch','voiceMaxPitch','startPatrolTimeMin','startPatrolTimeMax'},
-                'randomFlyer': {'m_GameObject','m_Script','m_Enabled','minTime','maxTime','minRange','maxRange','minSpeed','maxSpeed','soundMinTime','soundMaxTime'},
                 'flashlightscript': {'m_GameObject','m_Script','m_Enabled','ON','randomStart'},
                 'nyulscript': {'m_GameObject','m_Script','m_Enabled'},
                 'partscript': {'m_GameObject','m_Script','tosaveitem','localRotationAfterMount','T'},

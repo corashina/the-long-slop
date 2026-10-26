@@ -16,6 +16,8 @@ use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
+use presentation::sim_frame::SimFrameResource;
+use simulation::boundary::StateBlock;
 use simulation::host::{game_cpu_clear_input, game_now};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -252,6 +254,7 @@ pub fn run(
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::computer::ComputerScreens>()
+        .init_resource::<SimFrameResource>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<crate::presentation::world_metrics::MeshMeasurements>()
         .add_systems(
@@ -275,7 +278,7 @@ pub fn run(
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
                 advance_physics,
-                sync_world,
+                (sync_world, fill_frame).chain(),
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
@@ -904,6 +907,8 @@ fn sync_world(
             &mut runtime.wheels,
             &mut runtime.vehicles,
             &mut runtime.powertrain,
+            &runtime.flyers,
+            runtime.simulation_seconds,
             view,
             runtime.lighting.cycle.output().shader_time_seconds as f32,
             lod_view,
@@ -952,8 +957,7 @@ fn sync_world(
 }
 
 pub(crate) fn sync_imported(
-    reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     mut query: Query<(
         &BodyVisual,
         &mut Transform,
@@ -987,28 +991,32 @@ pub(crate) fn sync_imported(
         ),
     >,
 ) {
-    presentation::reference::sync(
-        &drive.runtime.area,
-        &drive.runtime.physics,
-        drive
-            .clock
-            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
-        &mut query,
-    );
-    presentation::reference::sync_items(
-        &drive.runtime.area,
-        drive
-            .clock
-            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
-        &mut items,
-    );
+    presentation::reference::sync(&frame, &mut query);
+    presentation::reference::sync_items(&frame, &mut items);
     // Source DoMove advances by scaled Time.deltaTime.
-    let dt = if drive.runtime.paused {
+    let state = frame.frame.state;
+    let dt = if state.flags & StateBlock::PAUSED != 0 {
         0.
     } else {
-        time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale
+        time.delta_secs() * state.time_scale
     };
-    presentation::reference::sync_caps(&drive.runtime.area, dt, &mut caps, &mut visibility);
+    presentation::reference::sync_caps(&frame.frame, dt, &mut caps, &mut visibility);
+}
+
+/// Fills the frame after the simulation and world work of this Bevy frame.
+fn fill_frame(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut frame: ResMut<SimFrameResource>,
+) {
+    let drive = &mut *drive;
+    let alpha = drive
+        .clock
+        .alpha(drive.runtime.clock_factors(&reference.0).time_scale);
+    drive
+        .runtime
+        .fill_frame(&reference.0, alpha, &mut frame.frame);
+    frame.apply_changes(|handle| drive.runtime.release_pose(handle));
 }
 fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let drive = &mut *drive;

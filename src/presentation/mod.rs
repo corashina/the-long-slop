@@ -16,6 +16,7 @@ pub mod reference;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;
+pub(crate) mod sim_frame;
 pub mod sky_traffic;
 pub mod spawned;
 pub mod world;

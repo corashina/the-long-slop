@@ -1425,7 +1425,15 @@ fn bind_push(
                 .then_some((index as u32, *handle))
         })
         .collect();
-    interaction.register_generated_push(id, body, push, &colliders, physics)
+    let node = |i: u32| crate::world::placement::node_pose(prototype, i as usize);
+    let hand = push.grip.as_ref().map(|g| {
+        crate::interaction::push::grip_hand(
+            &g.local_pose,
+            &node(g.node),
+            g.hand_node.map(node).as_ref(),
+        )
+    });
+    interaction.register_generated_push(id, body, push, &colliders, hand, physics)
 }
 
 /// Siphon hose placement: one item per segment body, then one runtime hose.
@@ -1596,6 +1604,7 @@ pub fn pickup_rule(pickup: SourceRecord<'_>) -> Result<PickupReference, Referenc
         right_hand_rotation: crate::world::spawn_building::source_euler(vector(f, "RHR")?),
         right_hand_grip: optional(f, "RightHandPos")?.cloned(),
         left_hand_grip: optional(f, "LeftHandPos")?.cloned(),
+        double_hand: flag(f, "doubleHand")?,
         disable_when_stored: optional(f, "disableThisWhenStored")?.cloned(),
         keep_when_stored: optional(f, "dontDisableWhenStored")?.cloned(),
         inventory_icon: optional(f, "invImg")?.cloned(),

@@ -402,8 +402,8 @@ impl AcquisitionReference {
                     && f.vertical_scale == 5.
                     && f.horizontal == [6., 16.]
                     && source_is(&f.prefab, "sharedassets1.assets", 32394)
-                    && !f.supported,
-                "station unsupported flyer contract",
+                    && f.supported,
+                "station flyer contract",
             )?;
             let d = &s.item_spawn_distance;
             require(
