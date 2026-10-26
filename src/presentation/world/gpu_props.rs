@@ -30,8 +30,6 @@ pub struct PropRow {
     /// Source shadow casting mode. 3 is shadows only.
     pub cast_shadows: u8,
     pub hidden: bool,
-    /// The material has a shadow caster pass.
-    pub caster: bool,
     pub batch: u32,
 }
 impl PropRow {
@@ -192,7 +190,13 @@ impl GpuProps {
         }
         if self.dirty.len() == DIRTY_RANGES {
             let start = self.dirty.iter().map(|r| r.start).min().unwrap().min(slot);
-            let end = self.dirty.iter().map(|r| r.end).max().unwrap().max(slot + 1);
+            let end = self
+                .dirty
+                .iter()
+                .map(|r| r.end)
+                .max()
+                .unwrap()
+                .max(slot + 1);
             self.dirty.clear();
             self.dirty.push(start..end);
             return;
@@ -338,7 +342,6 @@ mod tests {
             layer: 3,
             cast_shadows: 1,
             hidden,
-            caster: true,
             batch: 0,
         }
     }
@@ -377,7 +380,11 @@ mod tests {
 
         props.set_hidden(c, true);
         props.set_hidden(c, true);
-        props.set_world(e, Mat4::from_translation(Vec3::X), props.rows()[e as usize].bounds);
+        props.set_world(
+            e,
+            Mat4::from_translation(Vec3::X),
+            props.rows()[e as usize].bounds,
+        );
         assert_eq!(dirty(&mut props), [2..3, 1..2]);
         assert_eq!(props.batches()[1].shown, 0);
         assert_eq!(props.live(), 3);
@@ -442,7 +449,11 @@ mod tests {
             trs([2.0; 3], Quat::from_rotation_y(0.3), [1.0, 2.0, 3.0]),
             trs([1.0; 3], Quat::from_rotation_x(0.7), [0.0, 1.0, 0.0]),
             trs([0.5; 3], Quat::from_rotation_z(-0.4), [0.2, 0.0, 0.1]),
-            trs([4.0, 1.0, 2.0], Quat::from_rotation_x(-0.9), [0.0, 0.0, 2.0]),
+            trs(
+                [4.0, 1.0, 2.0],
+                Quat::from_rotation_x(-0.9),
+                [0.0, 0.0, 2.0],
+            ),
             trs([1.5; 3], Quat::from_rotation_y(0.5), [0.1, 0.0, 0.0]),
             trs([1.0, 2.0, 1.0], Quat::from_rotation_z(0.8), [0.0, 0.2, 0.0]),
             trs([1.0, 2.0, 3.0], Quat::from_rotation_x(0.4), [3.0, 0.0, 0.0]),

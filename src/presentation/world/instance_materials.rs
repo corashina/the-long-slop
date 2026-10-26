@@ -148,16 +148,18 @@ impl InstanceMaterials<'_> {
         reflected: bool,
         source_position: Vec3,
         view: GrassView,
+        gpu: bool,
     ) -> Result<Option<RendererMaterial>, ReferenceError> {
         let mask = 1u32 << layer;
         let mut sort = None;
         let mut shared = None;
-        let key = |material| SharedMaterialKey {
+        let key = |material, gpu| SharedMaterialKey {
             session,
             material,
             layer,
             receive,
             reflected,
+            gpu,
         };
         let visible = if initial.is_none() && (selected.is_some() || primitive.has_source_material)
         {
@@ -188,7 +190,7 @@ impl InstanceMaterials<'_> {
                     )?))
                 }
                 "Standard (Specular setup)" => {
-                    let key = key(MaterialIdentity::Specular(id.clone()));
+                    let key = key(MaterialIdentity::Specular(id.clone()), false);
                     if let Some(binding) = self.cache.generated.acquire(&key) {
                         return Ok(Some(RendererMaterial {
                             visible: binding.visible,
@@ -225,8 +227,8 @@ impl InstanceMaterials<'_> {
             sort = self
                 .cache
                 .sort_data(identity, renderer, primitive.submesh)?;
-            if sort.is_none() {
-                let key = key(MaterialIdentity::Primary(identity.0, identity.1));
+            if sort.is_none() && self.cache.shareable_generated_primary(identity) {
+                let key = key(MaterialIdentity::Primary(identity.0, identity.1), gpu);
                 if let Some(binding) = self.cache.generated.acquire(&key) {
                     return Ok(Some(RendererMaterial {
                         visible: binding.visible,
@@ -234,16 +236,13 @@ impl InstanceMaterials<'_> {
                         shared: Some(key),
                     }));
                 }
-                if self.cache.shareable_generated_primary(identity) {
-                    shared = Some(key);
-                }
+                shared = Some(key);
             }
-            InstanceMaterial::Primary(self.primary.add(materials::authored_material(
-                identity,
-                reflected,
-                mask,
-                &self.cache,
-            )))
+            let mut material = materials::authored_material(identity, reflected, mask, &self.cache);
+            if shared.as_ref().is_some_and(|key| key.gpu) {
+                material.extension.use_gpu_props();
+            }
+            InstanceMaterial::Primary(self.primary.add(material))
         };
         match &visible {
             InstanceMaterial::Primary(h) => {
@@ -278,6 +277,7 @@ impl InstanceMaterials<'_> {
         let Some(key) = binding.shared.take() else {
             return;
         };
+        assert!(!key.gpu, "GPU prop materials stay shared");
         let Self {
             cache,
             primary,
@@ -433,6 +433,10 @@ pub fn ready(ticket: &Option<PipelineTicket>) -> Result<bool, ReferenceError> {
 }
 
 impl RendererMaterial {
+    /// The renderer is a GPU prop row: its shared material reads the row buffers.
+    pub fn gpu_props(&self) -> bool {
+        self.shared.as_ref().is_some_and(|key| key.gpu)
+    }
     pub fn apply_sort(&self, entity: Entity, commands: &mut Commands) {
         if let Some(sort) = self.sort {
             commands

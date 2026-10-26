@@ -14,6 +14,8 @@ pub(crate) struct SharedMaterialKey {
     pub layer: u8,
     pub receive: bool,
     pub reflected: bool,
+    /// GPU prop rows use their own material. Its pipeline reads the row buffers.
+    pub gpu: bool,
 }
 impl SharedMaterialKey {
     fn heap_bytes(&self) -> usize {
@@ -114,6 +116,7 @@ mod tests {
             layer: 0,
             receive: true,
             reflected: false,
+            gpu: false,
         }
     }
     #[test]
@@ -154,6 +157,9 @@ mod tests {
         keys.push(changed);
         let mut changed = original.clone();
         changed.reflected = true;
+        keys.push(changed);
+        let mut changed = original.clone();
+        changed.gpu = true;
         keys.push(changed);
         let mut changed = original.clone();
         changed.session = 2;

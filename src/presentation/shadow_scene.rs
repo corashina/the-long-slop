@@ -8,14 +8,18 @@ use super::{
     renderer_visibility::SourceMaterialWarmup,
     shadow_changes::{ShadowChanges, ShadowMaterials, ShadowMesh, ShadowMeshItem},
     view_frame::SourceViewFrame,
+    world::{
+        gpu_props::{GpuProps, NO_BATCH, world_bounds},
+        instances::SourceInstances,
+    },
 };
 use crate::reference::shadow_profile;
 use crate::reference::{
     shadow_bounds::{BoundsKey, WorldBoundsCache},
-    shadow_candidates::{Bounds, CandidateState},
+    shadow_candidates::CandidateState,
     shadow_frame::{CasterInput, ShadowViewCache},
     shadow_planes::CullPlanes,
-    shadow_scene::{CasterData, CasterIndex},
+    shadow_scene::{CasterData, CasterIndex, CasterKey},
     shadows::{ShadowFit, ShadowFitInput, source_atlas_size},
 };
 use bevy::camera::visibility::{SetViewVisibility, ViewVisibility};
@@ -27,7 +31,7 @@ pub struct ShadowScene {
     pub origin: [f64; 3],
     pub imported_capacity: usize,
     pub generated_capacity: usize,
-    pub caster_data: CasterData<Entity>,
+    pub caster_data: CasterData<CasterKey>,
     pub masks: [Vec<u8>; VIEW_COUNT],
     pub fits: [Option<ShadowFit>; VIEW_COUNT],
     pub candidates: [usize; VIEW_COUNT],
@@ -35,7 +39,9 @@ pub struct ShadowScene {
     pub camera_visible: usize,
     pub shadow_only: usize,
     bounds: WorldBoundsCache<Entity>,
-    index: CasterIndex<Entity>,
+    index: CasterIndex<CasterKey>,
+    /// GPU prop owner with its row membership and row revision.
+    rows: Option<(u64, u64, u64)>,
     casters_ready: bool,
     views: [ShadowViewCache; VIEW_COUNT],
     mask_revisions: [u64; VIEW_COUNT],
@@ -51,6 +57,9 @@ impl ShadowScene {
             scene: frame.scene,
             fit: self.mask_revisions[index],
         }
+    }
+    pub fn mask_revision(&self, index: usize) -> u64 {
+        self.mask_revisions[index]
     }
     pub fn capacity(&self) -> usize {
         self.imported_capacity + self.generated_capacity
@@ -80,6 +89,7 @@ pub(super) fn prepare_scene(
     master: Res<super::lighting::SourceLighting>,
     camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
+    instances: Res<SourceInstances>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Shadows,
@@ -105,6 +115,13 @@ pub(super) fn prepare_scene(
     let mut changes = updates.p0();
     let mut rebuild = changes.removed() || !changes.warmup.is_empty();
     rebuild |= scene.bounds.begin(frame.session, frame.scene, origin.0) || !was_ready;
+    let props = instances.props();
+    let rows = (props.id(), props.membership(), props.revision());
+    rebuild |= scene
+        .rows
+        .is_none_or(|(id, membership, _)| (id, membership) != (rows.0, rows.1));
+    let rows_changed = scene.rows != Some(rows);
+    scene.rows = Some(rows);
     let fail = |message: &str| {
         status.fail(message.into());
     };
@@ -143,9 +160,15 @@ pub(super) fn prepare_scene(
                 }
             }
         }
+        if (materials.changed() || rows_changed)
+            && let Err(error) = update_rows(&mut scene, &materials, props)
+        {
+            fail(error);
+            return;
+        }
     }
     if rebuild {
-        let imported = meshes.iter().count();
+        let imported = meshes.iter().count() + props.live() as usize;
         if imported > scene.imported_capacity {
             scene.reserve(imported, 0);
             scene.bounds.reserve(imported);
@@ -159,6 +182,10 @@ pub(super) fn prepare_scene(
                 fail(error);
                 return;
             }
+        }
+        if let Err(error) = update_rows(scene, &materials, props) {
+            fail(error);
+            return;
         }
     }
     if let Err(error) = scene.caster_data.publish() {
@@ -235,7 +262,10 @@ pub(super) fn prepare_scene(
     let mut visibility = updates.p1();
     scene.camera_visible = 0;
     scene.shadow_only = 0;
-    for (i, entity) in scene.caster_data.entities.iter().enumerate() {
+    for (i, key) in scene.caster_data.entities.iter().enumerate() {
+        let CasterKey::Entity(entity) = key else {
+            continue;
+        };
         let Ok(mut visible) = visibility.get_mut(*entity) else {
             continue;
         };
@@ -262,13 +292,14 @@ fn update_caster(
     mesh: ShadowMeshItem<'_, '_>,
     rebuilding: bool,
 ) -> Result<bool, &'static str> {
+    let key = CasterKey::Entity(mesh.entity);
     let Some(has_caster) = materials.has_caster(&mesh)? else {
-        return Ok(!scene.index.contains(mesh.entity));
+        return Ok(!scene.index.contains(key));
     };
     let layer = if let Some(layers) = mesh.layers {
         let mut iter = layers.iter();
         let Some(layer) = iter.next() else {
-            return Ok(!scene.index.contains(mesh.entity));
+            return Ok(!scene.index.contains(key));
         };
         if layer >= 32 || iter.next().is_some() {
             return Err("Source shadow renderer requires one source layer");
@@ -277,29 +308,26 @@ fn update_caster(
     } else {
         0
     };
-    if !rebuilding && !scene.index.contains(mesh.entity) {
+    if !rebuilding && !scene.index.contains(key) {
         return Ok(false);
     }
     let world = mesh.transform.affine();
     let bounds = mesh.bounds;
-    let key = BoundsKey::new(
+    let bounds_key = BoundsKey::new(
         world.to_cols_array(),
         bounds.center.to_array(),
         bounds.half_extents.to_array(),
     );
-    let bounds = scene.bounds.get_or_update(mesh.entity, key, || {
-        let center = world.transform_point3a(bounds.center);
-        let e = world.matrix3.x_axis.abs() * bounds.half_extents.x
-            + world.matrix3.y_axis.abs() * bounds.half_extents.y
-            + world.matrix3.z_axis.abs() * bounds.half_extents.z;
-        Bounds {
-            center: [center.x, center.y, -center.z],
-            extents: e.to_array(),
-        }
+    let bounds = scene.bounds.get_or_update(mesh.entity, bounds_key, || {
+        world_bounds(
+            world,
+            bounds.center.to_array(),
+            bounds.half_extents.to_array(),
+        )
     })?;
     scene.index.update(
         &mut scene.caster_data,
-        mesh.entity,
+        key,
         CasterInput {
             bounds,
             state: CandidateState {
@@ -316,6 +344,38 @@ fn update_caster(
         },
     );
     Ok(true)
+}
+/// Rows enter the caster list after the entities, in slot order.
+fn update_rows(
+    scene: &mut ShadowScene,
+    materials: &ShadowMaterials,
+    props: &GpuProps,
+) -> Result<(), &'static str> {
+    for (slot, row) in props.rows().iter().enumerate() {
+        if row.batch == NO_BATCH {
+            continue;
+        }
+        let material = props.batches()[row.batch as usize].key.material;
+        scene.index.update(
+            &mut scene.caster_data,
+            CasterKey::Row(slot as u32),
+            CasterInput {
+                bounds: row.bounds,
+                state: CandidateState {
+                    shadow_casting_mode: row.cast_shadows,
+                    layer: row.layer,
+                    renderer_present: true,
+                    disabled: row.hidden,
+                    force_off: false,
+                    lod_group: 0,
+                    lod_index_mask: 0,
+                    active_lod: 0,
+                },
+                material_has_caster: materials.source_caster(material.typed())?,
+            },
+        );
+    }
+    Ok(())
 }
 /// Copy bounded arrays into retained render-world storage. No manifest, material, or handle clones.
 pub fn extract_scene(

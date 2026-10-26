@@ -79,6 +79,8 @@ pub struct SurfaceKey {
     transparent: bool,
     glass: bool,
     glass_shader: Option<Handle<Shader>>,
+    /// Static rows draw this material from the GPU prop buffers.
+    gpu_props: bool,
 }
 impl SurfaceKey {
     /// ForwardAdd uses back-face culling, LEqual depth, and One One blending.
@@ -941,6 +943,7 @@ fn make_material(
                     glass: record.shader_family == ShaderFamily::StainedGlass,
                     glass_shader: (record.shader_family == ShaderFamily::StainedGlass)
                         .then(|| source.shaders[2].clone()),
+                    gpu_props: false,
                 },
             },
         },
@@ -1138,6 +1141,7 @@ impl Default for SourceSurface {
                 transparent: false,
                 glass: false,
                 glass_shader: None,
+                gpu_props: false,
             },
         }
     }
@@ -1340,6 +1344,11 @@ impl SourceExtension {
     pub fn has_caster(&self) -> bool {
         self.surface.state.standard
     }
+    /// Only a shared opaque or cutout material can draw GPU prop rows.
+    pub fn use_gpu_props(&mut self) {
+        assert!(!self.surface.state.transparent && !self.surface.state.glass);
+        self.surface.state.gpu_props = true;
+    }
 }
 
 impl MaterialExtension for SourceExtension {
@@ -1397,6 +1406,9 @@ impl MaterialExtension for SourceExtension {
                 attributes.push(attribute.at_shader_location(location as u32));
             }
         }
+        if state.gpu_props {
+            descriptor.layout[2] = super::prop_draws::draw_layout();
+        }
         attributes.push(super::renderers::SOURCE_BOUNDS_CENTER.at_shader_location(8));
         attributes.push(super::renderers::SOURCE_BOUNDS_EXTENTS.at_shader_location(9));
         descriptor.vertex.buffers = vec![layout.0.get_layout(&attributes)?];
@@ -1407,6 +1419,7 @@ impl MaterialExtension for SourceExtension {
             ("SOURCE_OBJECT_REFLECTED", state.reflected),
             ("SOURCE_FORWARD_ONE", state.single_pass()),
             ("SOURCE_LAMPS", state.single_pass()),
+            ("SOURCE_GPU_PROPS", state.gpu_props),
         ] {
             if value || name == "SOURCE_OBJECT_REFLECTED" {
                 descriptor

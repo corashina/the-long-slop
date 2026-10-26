@@ -262,6 +262,14 @@ pub(crate) fn render_atlas(
             status.fail(format!("Source shadow atlas draw: {error:?}"));
             return;
         }
+        let (attempted, issued) =
+            super::prop_draws::draw_cascade(world, &mut pass, entity, source.index, cascade);
+        if attempted != issued {
+            status.fail(format!(
+                "Source GPU prop caster draw skipped in cascade {cascade}: {issued}/{attempted}"
+            ));
+            return;
+        }
     }
     drop(pass);
     let (epoch, attempted, issued) = state.counts();

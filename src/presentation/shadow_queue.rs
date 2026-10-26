@@ -288,13 +288,18 @@ pub fn queue(world: &mut World) {
                         let queued = &mut state.queued[index];
                         queued.reserve(scene.capacity().saturating_sub(queued.len()));
                         let mut ready = true;
-                        for (item, main) in scene.caster_data.entities.iter().enumerate() {
+                        for (item, caster) in scene.caster_data.entities.iter().enumerate() {
                             let mask = scene.masks[index][item];
+                            // GPU prop rows draw from their own buffers.
+                            let crate::reference::shadow_scene::CasterKey::Entity(main) = *caster
+                            else {
+                                continue;
+                            };
                             if mask == 0 {
                                 continue;
                             }
                             shadow_timing.items(1);
-                            let main = MainEntity::from(*main);
+                            let main = MainEntity::from(main);
                             let previous = state.queued[index].get(&main).cloned();
                             let base = match base_pipeline(
                                 world,
@@ -584,12 +589,15 @@ pub(crate) fn graph_ready(
     owners: Res<super::pipeline_ownership::PipelineOwners>,
     loading: Res<super::materials::MaterialLoading>,
     status: Res<RendererStateHandle>,
+    props: Res<super::prop_draws::PropDraws>,
 ) -> bool {
     let (view, collector) = view.into_inner();
     frame.frame != 0
         && frame.views[view.index].is_some()
         && queues.frame == frame.frame
         && queues.ready[view.index]
+        && props.frame == frame.frame
+        && props.ready[view.index]
         && loading.is_ready()
         && surface.ready(&cache, &owners)
         && caster.ready(&cache, &owners)

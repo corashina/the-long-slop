@@ -787,6 +787,7 @@ fn finish_surface(
     cache: Res<PipelineCache>,
     effects: Res<super::source_effects::SourceEffects>,
     status: Res<RendererStateHandle>,
+    props: Res<super::prop_draws::PropDraws>,
     mut context: RenderContext,
 ) {
     let (source, target, collector, lighting, shadow, targets, glass) = view.into_inner();
@@ -807,6 +808,7 @@ fn finish_surface(
         shadow_attempts,
         shadow_issued,
         shadow_instances: shadow.instance_counts(),
+        props: props.audit(source.index),
         collector_frame: collector.encoded_frame(),
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
@@ -1006,6 +1008,8 @@ struct ViewAudit {
     shadow_attempts: [u32; 4],
     shadow_issued: [u32; 4],
     shadow_instances: [[u32; 4]; 2],
+    /// GPU prop rows, camera-visible rows and issued indirect draws.
+    props: [u32; 3],
     collector_frame: u32,
     atlas_size: u32,
     physical_extent: [u32; 2],

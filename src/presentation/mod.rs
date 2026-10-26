@@ -53,6 +53,7 @@ pub mod particles;
 pub mod plates;
 pub mod postprocessing;
 pub mod probes;
+pub mod prop_draws;
 mod reflection_preparation;
 pub mod render_targets;
 pub mod renderer_visibility;

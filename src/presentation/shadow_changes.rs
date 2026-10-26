@@ -47,6 +47,15 @@ impl ShadowMaterials<'_> {
             || self.grass.is_changed()
             || self.impostors.is_changed()
     }
+    pub fn source_caster(
+        &self,
+        id: bevy::asset::AssetId<SourceMaterial>,
+    ) -> Result<bool, &'static str> {
+        self.source
+            .get(id)
+            .map(|material| material.extension.has_caster())
+            .ok_or("Missing source shadow material")
+    }
     pub fn has_caster(&self, mesh: &ShadowMeshItem<'_, '_>) -> Result<Option<bool>, &'static str> {
         if let Some(handle) = mesh.material {
             return self

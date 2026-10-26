@@ -45,6 +45,10 @@ impl SurfacePasses {
             }
         })
     }
+    /// The additive pipeline of an inspected base.
+    pub fn partner(&self, base: CachedRenderPipelineId) -> Option<CachedRenderPipelineId> {
+        self.partners.get(&base).copied().flatten()
+    }
     pub fn counts(&self) -> (usize, usize) {
         (
             self.partners.len(),
