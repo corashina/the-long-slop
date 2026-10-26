@@ -38,7 +38,7 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
 - The save keeps gauge part values per key.
 - The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
-- Save schema 22. Older saves are rejected.
+- Save schema 23. Older saves are rejected.
 
 ## Bus doors
 
