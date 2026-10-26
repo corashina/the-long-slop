@@ -34,6 +34,7 @@ fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
     drive: Res<crate::app::Drive>,
+    sim: Res<super::sim_frame::SimFrameResource>,
     mut input: ResMut<EffectInput>,
 ) {
     if input.scene != frame.scene {
@@ -48,7 +49,7 @@ fn snapshot_input(
         return;
     }
     input.delta_seconds = drive.render_delta_seconds;
-    input.grading_temperature = drive.runtime.lighting.cycle.output().grading_temperature;
+    input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.frame = frame.frame;
 }
 

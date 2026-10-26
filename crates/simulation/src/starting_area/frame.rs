@@ -1,8 +1,9 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
-use crate::boundary::{Handle, PoseRow, SimFrame, StateBlock, ValveRow};
+use crate::boundary::{CigaretteRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow};
+use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
-use crate::reference::ReferenceManifest;
+use crate::reference::{ItemId, ReferenceManifest};
 
 impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
@@ -30,8 +31,24 @@ impl GarageRuntime {
             })
             .map_or(0, |id| id.0 + 1)
         });
+        let c = &area.cigarettes;
+        let lit = |id: &ItemId| {
+            c.cigarette(*id)
+                .is_some_and(|s| s.ember.phase != EmberPhase::Start)
+        };
+        // One ember light: the worn cigarette, then the held one, then any lit one.
+        let ember_light = c
+            .mouth
+            .item
+            .filter(lit)
+            .or(area.interaction.held().filter(lit))
+            .or_else(|| c.cigarettes.iter().map(|(id, _)| *id).find(lit));
+        let anchor = self.sky_anchor(reference);
+        let offset = self.stream.origin.offset;
         frame.state = StateBlock {
             simulation_seconds: self.simulation_seconds,
+            origin: area.origin,
+            cycle_elapsed_seconds: self.lighting.cycle.elapsed_seconds(),
             alpha,
             time_scale: self.clock_factors(reference).time_scale,
             flags,
@@ -40,6 +57,8 @@ impl GarageRuntime {
             body_pose: PoseRow::new(area.player.body_pose(&self.physics), 0),
             body_root: PoseRow::new(area.body.root_local(), 0),
             joint_scale: area.body.joint_scale(),
+            sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
+            ember_light: ember_light.map_or(0, |id| id.0 + 1),
             pad: 0,
         };
         frame.valves.clear();
@@ -51,6 +70,44 @@ impl GarageRuntime {
                     valve,
                 }),
         );
+        frame.cigarettes.clear();
+        frame
+            .cigarettes
+            .extend(c.cigarettes.iter().map(|(id, state)| {
+                let out = state.ember.output(&c.rates.ember);
+                CigaretteRow {
+                    item: id.0,
+                    blend: state.part_blend(),
+                    color: out.color,
+                    light_intensity: out.light_intensity,
+                }
+            }));
+        frame.planes.clear();
+        frame
+            .planes
+            .extend(self.sky().planes().iter().map(|plane| PlaneRow {
+                id: plane.id,
+                prefab: plane.prefab as u32,
+                offset: plane.offset.to_array(),
+                heading: plane.heading.to_array(),
+            }));
+        let lighting = &self.lighting;
+        frame.lighting.cycle.clone_from(lighting.cycle.output());
+        frame.lighting.road_lamp = lighting.road_lamp_output(&reference.lighting);
+        frame.lights.clear();
+        frame.lights.extend_from_slice(lighting.light_outputs());
+        frame.lamp_materials.clear();
+        frame
+            .lamp_materials
+            .extend_from_slice(lighting.material_outputs());
+        frame.control_poses.clear();
+        frame
+            .control_poses
+            .extend_from_slice(lighting.control_poses());
+        frame.node_visibility.clear();
+        frame
+            .node_visibility
+            .extend_from_slice(lighting.visibility_outputs());
         self.frame_poses
             .fill(reference, &self.area, &self.physics, frame);
     }

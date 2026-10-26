@@ -2,6 +2,9 @@
 //! `SimFrame` goes out once per tick. `SimCommand` comes in once per rendered frame.
 //! Poses and state are Pod rows; rare changes are postcard encoded.
 use crate::interaction::items::ItemLocation;
+use crate::lighting::{
+    ControlPoseOutput, CycleOutput, LampMaterialOutput, LightOutput, NodeVisibilityOutput,
+};
 use crate::reference::{BodyId, ItemId, NodeId, OpeningId, ReferenceManifest};
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
@@ -9,6 +12,7 @@ use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
@@ -86,8 +90,10 @@ pub struct PoseRow {
 impl PoseRow {
     /// The renderer shows the object.
     pub const VISIBLE: u32 = 1;
-    /// The body sits in an inventory slot.
+    /// The object sits in an inventory slot.
     pub const STORED: u32 = 1 << 1;
+    /// The body or item takes part in physics.
+    pub const ACTIVE: u32 = 1 << 2;
     pub fn pose(&self) -> VehiclePose {
         VehiclePose {
             position: self.position,
@@ -108,6 +114,10 @@ impl PoseRow {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct StateBlock {
     pub simulation_seconds: f64,
+    /// Starting area origin in world space.
+    pub origin: [f64; 3],
+    /// Day cycle active seconds.
+    pub cycle_elapsed_seconds: f64,
     /// Interpolation from `SimFrame::previous` to `SimFrame::current`.
     pub alpha: f32,
     /// Sleep clock factor on frame time.
@@ -122,6 +132,10 @@ pub struct StateBlock {
     pub body_root: PoseRow,
     /// Uniform scale of every joint relative to `CharacterRoot`.
     pub joint_scale: f32,
+    /// Sky traffic anchor relative to the stream origin.
+    pub sky_anchor: [f32; 3],
+    /// Cigarette that owns the ember light, as `ItemId + 1`. 0 is none.
+    pub ember_light: u32,
     /// Keeps the block free of implicit padding.
     pub pad: u32,
 }
@@ -151,6 +165,33 @@ pub struct ItemRow {
     pub scale: f32,
     /// Food bite index.
     pub bite: u32,
+}
+
+/// One cigarette: part blend and ember output.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct CigaretteRow {
+    pub item: u32,
+    pub blend: f32,
+    pub color: [f32; 4],
+    pub light_intensity: f32,
+}
+
+/// One sky traffic plane relative to the sky anchor.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct PlaneRow {
+    pub id: u32,
+    pub prefab: u32,
+    pub offset: [f32; 3],
+    pub heading: [f32; 4],
+}
+
+/// Day cycle and lamp outputs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrameLighting {
+    pub cycle: CycleOutput,
+    pub road_lamp: LightOutput,
 }
 
 /// What the renderer needs to build a new handle's visual.
@@ -200,6 +241,14 @@ pub struct SimFrame {
     pub valves: Vec<ValveRow>,
     /// Player body joints relative to `CharacterRoot`.
     pub joints: Vec<PoseRow>,
+    pub cigarettes: Vec<CigaretteRow>,
+    pub planes: Vec<PlaneRow>,
+    pub lighting: FrameLighting,
+    /// Lights in `LightingRecord::lights` order.
+    pub lights: Vec<LightOutput>,
+    pub lamp_materials: Vec<LampMaterialOutput>,
+    pub control_poses: Vec<ControlPoseOutput>,
+    pub node_visibility: Vec<NodeVisibilityOutput>,
     pub changes: Vec<Change>,
 }
 
@@ -236,6 +285,13 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.items);
     put_rows(out, &frame.valves);
     put_rows(out, &frame.joints);
+    put_rows(out, &frame.cigarettes);
+    put_rows(out, &frame.planes);
+    put(out, &frame.lighting);
+    put_list(out, &frame.lights);
+    put_list(out, &frame.lamp_materials);
+    put_list(out, &frame.control_poses);
+    put_list(out, &frame.node_visibility);
     *out = postcard::to_extend(&frame.changes, std::mem::take(out)).expect("frame changes encode");
 }
 
@@ -249,6 +305,13 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.items)?;
     take_rows(&mut rest, &mut frame.valves)?;
     take_rows(&mut rest, &mut frame.joints)?;
+    take_rows(&mut rest, &mut frame.cigarettes)?;
+    take_rows(&mut rest, &mut frame.planes)?;
+    frame.lighting = take_value(&mut rest)?;
+    take_list(&mut rest, &mut frame.lights)?;
+    take_list(&mut rest, &mut frame.lamp_materials)?;
+    take_list(&mut rest, &mut frame.control_poses)?;
+    take_list(&mut rest, &mut frame.node_visibility)?;
     frame.changes = postcard::from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
     Ok(())
 }
@@ -256,6 +319,33 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
 fn put_rows<T: Pod>(out: &mut Vec<u8>, rows: &[T]) {
     out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
     out.extend_from_slice(bytemuck::cast_slice(rows));
+}
+
+fn put<T: Serialize>(out: &mut Vec<u8>, value: &T) {
+    *out = postcard::to_extend(value, std::mem::take(out)).expect("frame value encode");
+}
+
+/// Serde rows, one postcard value each. Decode reuses the vector.
+fn put_list<T: Serialize>(out: &mut Vec<u8>, rows: &[T]) {
+    out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    for row in rows {
+        put(out, row);
+    }
+}
+
+fn take_value<T: DeserializeOwned>(rest: &mut &[u8]) -> Result<T, DecodeError> {
+    let (value, tail) = postcard::take_from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
+    *rest = tail;
+    Ok(value)
+}
+
+fn take_list<T: DeserializeOwned>(rest: &mut &[u8], rows: &mut Vec<T>) -> Result<(), DecodeError> {
+    let n = u32::from_le_bytes(take(rest, 4)?.try_into().expect("4 bytes")) as usize;
+    rows.clear();
+    for _ in 0..n {
+        rows.push(take_value(rest)?);
+    }
+    Ok(())
 }
 
 fn take<'a>(rest: &mut &'a [u8], n: usize) -> Result<&'a [u8], DecodeError> {
@@ -321,11 +411,17 @@ impl FramePoses {
         for (id, previous, current) in &area.render_poses {
             let body = area.bodies[id];
             let stored = stored.contains(&Some(body));
-            let flags = if physics.body_active(body) || stored {
-                PoseRow::VISIBLE
-            } else {
-                0
-            } | if stored { PoseRow::STORED } else { 0 };
+            let active = physics.body_active(body);
+            let mut flags = 0;
+            if active || stored {
+                flags |= PoseRow::VISIBLE;
+            }
+            if active {
+                flags |= PoseRow::ACTIVE;
+            }
+            if stored {
+                flags |= PoseRow::STORED;
+            }
             let slot = self.write(PoseKey::Body(*id), || SpawnData::Bound, frame);
             frame.previous[slot] = PoseRow::new(*previous, flags);
             frame.current[slot] = PoseRow::new(*current, flags);
@@ -335,7 +431,7 @@ impl FramePoses {
             let item = area.items.get(*id);
             let mut flags = 0;
             if item.is_some_and(|item| item.inactive_pose.is_none()) {
-                flags |= PoseRow::VISIBLE;
+                flags |= PoseRow::VISIBLE | PoseRow::ACTIVE;
             }
             if item.is_some_and(|item| matches!(item.location, ItemLocation::Stored(_))) {
                 flags |= PoseRow::STORED;
