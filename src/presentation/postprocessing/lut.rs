@@ -95,7 +95,6 @@ pub struct LutPass {
     _curves: Texture,
     bindings: [Binding; 33],
     pipeline: CachedRenderPipelineId,
-    tint: f32,
 }
 impl LutPass {
     pub fn new(
@@ -250,19 +249,22 @@ impl LutPass {
             _curves: curves,
             bindings,
             pipeline,
-            tint: settings.tint,
         })
     }
-    /// Replace the profile temperature. Each existing slice buffer takes a queue write; bake again after this.
-    pub fn set_temperature(
+    /// Replace the grading. Each existing slice buffer takes a queue write; bake again after this.
+    pub fn set_grading(
         &mut self,
         device: &RenderDevice,
         queue: &RenderQueue,
-        temperature: f32,
+        settings: &GradingSettings,
     ) {
-        let balance = Vec3::from_array(color_balance(temperature, self.tint)).extend(0.);
+        let params = Params::new(settings);
         for binding in &mut self.bindings {
-            binding.uniform.get_mut().balance = balance;
+            let uniform = binding.uniform.get_mut();
+            *uniform = Params {
+                slice: uniform.slice,
+                ..params
+            };
             binding.uniform.write_buffer(device, queue);
         }
     }

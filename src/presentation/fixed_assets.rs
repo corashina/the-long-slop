@@ -126,6 +126,7 @@ impl SourceFixedAssets {
                         | AssetUsage::SkyPrototype
                         | AssetUsage::ItemPrototype
                         | AssetUsage::PlayerPrototype
+                        | AssetUsage::RagdollPrototype
                         | AssetUsage::SkyTraffic
                 )
             })

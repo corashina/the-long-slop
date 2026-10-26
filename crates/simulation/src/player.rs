@@ -6,6 +6,7 @@ pub mod normals;
 pub mod point;
 pub mod pose;
 mod posture;
+pub mod ragdoll;
 mod view;
 use collision::PlayerSweepShape;
 use posture::{MovementSpeed, PostureState};
@@ -180,6 +181,8 @@ pub struct PlayerState {
     /// Source `GetDir` `forward` and `backward`.
     walk_keys: [bool; 2],
     point: point::PointState,
+    /// `Death2` turned the colliders off. The ragdoll moves the player.
+    dead: bool,
 }
 
 impl PlayerState {
@@ -296,6 +299,7 @@ impl PlayerState {
             hazard_damage: 0.0,
             walk_keys: [false; 2],
             point: point::PointState::default(),
+            dead: false,
         }
     }
 
@@ -683,7 +687,7 @@ impl PlayerState {
                 .as_capsule_mut()
                 .expect("Owned player capsule") = *self.sweep.capsule();
             collider.set_position_wrt_parent(self.sweep.capsule_pose());
-            crate::vehicle::set_collider_enabled(collider, self.occupancy.is_none());
+            crate::vehicle::set_collider_enabled(collider, self.occupancy.is_none() && !self.dead);
         });
         physics.edit_collider(self.feet, |collider| {
             *collider
@@ -692,7 +696,7 @@ impl PlayerState {
                 .expect("Owned player foot sphere") = self.sweep.feet();
             crate::vehicle::set_collider_enabled(
                 collider,
-                self.occupancy.is_none() && self.sweep.feet_enabled(),
+                self.occupancy.is_none() && !self.dead && self.sweep.feet_enabled(),
             );
         });
         physics.refresh_queries();
@@ -1120,6 +1124,38 @@ impl PlayerState {
             body.set_next_kinematic_position(self.pose);
         });
         self.update_geometry(physics);
+    }
+    /// `Death2`: colliders off. A seat ends with the world look kept, so the ragdoll can move the player.
+    pub fn die(&mut self, physics: &mut PhysicsWorld) {
+        if let Some(seat) = self.occupancy.take() {
+            let pose = *physics.rapier().bodies[seat.body].position() * seat.local_pose;
+            self.yaw = yaw_from_rotation(
+                pose.rotation * Rotation::from_rotation_y(-self.yaw.to_radians()),
+            );
+            self.pose = Pose::from_parts(
+                pose.translation,
+                Rotation::from_rotation_y(-self.yaw.to_radians()),
+            );
+        }
+        self.dead = true;
+        self.push_gripping = false;
+        self.vertical_velocity = 0.0;
+        self.recoil_velocity = Vector::ZERO;
+        self.grounded = false;
+        self.support_body = None;
+        self.place(physics);
+        self.update_geometry(physics);
+    }
+    /// Dead `Update`: `transform.position += ragdolHeadPos.position - Th.position`.
+    pub fn follow(&mut self, shift: Vector, physics: &mut PhysicsWorld) {
+        self.pose.translation += shift;
+        self.place(physics);
+    }
+    fn place(&self, physics: &mut PhysicsWorld) {
+        physics.edit_body(self.body, |body| {
+            body.set_position(self.pose, false);
+            body.set_next_kinematic_position(self.pose);
+        });
     }
     pub fn focus_position(&self, physics: &PhysicsWorld) -> [f32; 3] {
         self.view(physics).camera_pose.position

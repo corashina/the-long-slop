@@ -7,6 +7,7 @@ use crate::boundary::{
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
+use crate::vehicle::VehiclePose;
 use crate::world::{ObjectKey, WorldLayer};
 
 impl GarageRuntime {
@@ -30,6 +31,12 @@ impl GarageRuntime {
                 flags |= flag;
             }
         }
+        let needs = self.needs_output();
+        let dead_weight = if needs.dead {
+            (needs.death_seconds as f32 / reference.survival.death_seconds).clamp(0., 1.)
+        } else {
+            0.
+        };
         let area = &self.area;
         let stored_items = area.inventory.slots.map(|id| {
             id.filter(|id| {
@@ -69,6 +76,7 @@ impl GarageRuntime {
             joint_scale: area.body.joint_scale(),
             sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
+            dead_weight,
             motion_revision: self.audio_motion_revision,
             far_plane: self.distances.cam2_far_plane,
             sleep_camera: self
@@ -85,6 +93,7 @@ impl GarageRuntime {
                 _ => PoseRow::default(),
             },
             prepared_roads: self.stream.metrics().prepared_roads as u32,
+            pad: 0,
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -154,6 +163,24 @@ impl GarageRuntime {
             .extend_from_slice(lighting.visibility_outputs());
         self.frame_poses
             .fill(reference, &self.area, &self.physics, frame);
+        frame.ragdoll.clear();
+        let area = &self.area;
+        if area.ragdoll.active() {
+            frame
+                .ragdoll
+                .extend(reference.clothing.ragdoll.bodies.iter().map(|b| {
+                    area.ragdoll.node_pose(&self.physics, b.node).map_or_else(
+                        PoseRow::default,
+                        |f| {
+                            let pose = VehiclePose {
+                                position: f.position.to_array(),
+                                rotation: f.rotation.to_array(),
+                            };
+                            PoseRow::new(pose, PoseRow::VISIBLE)
+                        },
+                    )
+                }));
+        }
     }
     fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
         let store = &mut self.area.conditions;

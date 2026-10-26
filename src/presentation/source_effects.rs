@@ -29,6 +29,7 @@ struct EffectInput {
     frame: u32,
     delta_seconds: f32,
     grading_temperature: Option<f32>,
+    dead_weight: f32,
 }
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
@@ -50,6 +51,7 @@ fn snapshot_input(
     }
     input.delta_seconds = drive.render_delta_seconds;
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
+    input.dead_weight = sim.frame.state.dead_weight;
     input.frame = frame.frame;
 }
 
@@ -255,6 +257,7 @@ fn prepare(
             colors.resolved.sampled.as_ref().unwrap(),
             extent,
             record,
+            &assets.record.0.clothing.dead_profile,
             layer.stop_nan,
             previous.as_mut().and_then(|old| old.chain.take()),
         )?;
@@ -368,6 +371,7 @@ fn encode_post(
             token: frame.main_token,
             delta_seconds: input.delta_seconds,
             grading_temperature: input.grading_temperature,
+            dead_weight: input.dead_weight,
         },
         targets.colors.attachment(),
         targets.colors.resolve_target().unwrap(),

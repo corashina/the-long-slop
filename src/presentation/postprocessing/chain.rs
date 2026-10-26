@@ -11,7 +11,9 @@ use super::{
     lut::{CURVE_BYTES, LUT_BYTES, LutPass},
     uber::{MainInputs, UberPass},
 };
-use crate::reference::postprocessing::PostprocessingRecord;
+use crate::reference::postprocessing::{
+    DeadGrading, DeadProfile, GradingSettings, PostprocessingRecord,
+};
 use bevy::prelude::*;
 use bevy::render::{
     render_resource::*,
@@ -42,6 +44,8 @@ pub struct PostFrame {
     pub delta_seconds: f32,
     /// Main-view grading temperature. None keeps the applied value.
     pub grading_temperature: Option<f32>,
+    /// `DeadV` weight over the main grading, 0 to 1.
+    pub dead_weight: f32,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -76,7 +80,11 @@ struct MainChain {
     bloom: BloomPass,
     lut: LutPass,
     lut_baked: bool,
-    temperature: f32,
+    /// Main grading with the applied temperature.
+    base: GradingSettings,
+    dead: DeadGrading,
+    /// Grading in the LUT and Uber.
+    grading: GradingSettings,
 }
 pub struct SourcePostChain {
     pub extent: [u32; 2],
@@ -102,6 +110,7 @@ impl SourcePostChain {
         source: &TextureView,
         extent: [u32; 2],
         record: &PostprocessingRecord,
+        dead: &DeadProfile,
         stop_nan: bool,
         previous: Option<Self>,
     ) -> Result<Self, String> {
@@ -124,7 +133,7 @@ impl SourcePostChain {
         };
         copy.rebind(device, cache, source);
         let main = {
-            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, temperature) =
+            let (old_histogram, old_exposure, old_bloom, old_lut, lut_baked, grading) =
                 match old_main {
                     Some(old) => (
                         Some(old.histogram),
@@ -132,10 +141,24 @@ impl SourcePostChain {
                         Some(old.bloom),
                         Some(old.lut),
                         old.lut_baked,
-                        old.temperature,
+                        (old.base, old.dead, old.grading),
                     ),
-                    None => (None, None, None, None, false, record.grading.temperature),
+                    None => {
+                        let (dead, ignored) = DeadGrading::new(dead);
+                        if !ignored.is_empty() {
+                            warn!("DeadV parameters without a main stack effect: {ignored:?}");
+                        }
+                        (
+                            None,
+                            None,
+                            None,
+                            None,
+                            false,
+                            (record.grading, dead, record.grading),
+                        )
+                    }
                 };
+            let (base, dead, grading) = grading;
             let histogram = HistogramPasses::new(
                 device,
                 queue,
@@ -189,7 +212,9 @@ impl SourcePostChain {
                 bloom,
                 lut,
                 lut_baked,
-                temperature,
+                base,
+                dead,
+                grading,
             }
         };
         let inputs = MainInputs {
@@ -200,7 +225,7 @@ impl SourcePostChain {
             lut: main.lut.output(),
             sample_scale: main.bloom.layout.sample_scale,
         };
-        let uber = UberPass::new(
+        let mut uber = UberPass::new(
             device,
             queue,
             cache,
@@ -212,6 +237,7 @@ impl SourcePostChain {
             inputs,
             old_uber,
         )?;
+        uber.set_post_exposure(main.grading.post_exposure);
         let area = u64::from(extent[0]) * u64::from(extent[1]);
         let logical_bytes = area * 8
             + main.histogram.layout.logical_bytes()
@@ -305,14 +331,21 @@ impl SourcePostChain {
             .output_index()
             .ok_or("Source exposure output is missing")?;
         self.main.bloom.encode(encoder, cache, exposure_index);
-        if let Some(temperature) = frame.grading_temperature
-            && temperature != self.main.temperature
-        {
+        if let Some(temperature) = frame.grading_temperature {
             if !temperature.is_finite() {
                 return Err("Invalid source grading temperature".into());
             }
-            self.main.lut.set_temperature(device, queue, temperature);
-            self.main.temperature = temperature;
+            self.main.base.temperature = temperature;
+        }
+        if !(0. ..=1.).contains(&frame.dead_weight) {
+            return Err("Invalid source dead weight".into());
+        }
+        let mut grading = self.main.base;
+        self.main.dead.blend(&mut grading, frame.dead_weight);
+        if grading != self.main.grading {
+            self.main.lut.set_grading(device, queue, &grading);
+            self.uber.set_post_exposure(grading.post_exposure);
+            self.main.grading = grading;
             self.main.lut_baked = false;
         }
         if !self.main.lut_baked {

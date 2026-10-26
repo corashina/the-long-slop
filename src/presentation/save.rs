@@ -633,6 +633,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
                 | AssetUsage::SkyPrototype
                 | AssetUsage::ItemPrototype
                 | AssetUsage::PlayerPrototype
+                | AssetUsage::RagdollPrototype
                 | AssetUsage::SkyTraffic
         )
     }) {

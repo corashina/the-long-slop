@@ -141,12 +141,12 @@ pub struct OcclusionSettings {
     pub upsample_tolerance: f32,
     pub direct_lighting_strength: f32,
 }
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GradingCurves {
     SourceDefault,
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GradingSettings {
     pub lut_size: u32,
@@ -623,5 +623,303 @@ impl GlassesProfile {
             )?;
         }
         Ok(())
+    }
+}
+
+/// Main camera `PostProcessLayer.volumeLayer` (layers 8 and 21).
+pub const MAIN_VOLUME_MASK: u32 = 2097408;
+
+/// `fpscontroller.DeadV`: a global volume over the main stack. `mainscript.Died` enables it.
+/// While dead, its weight is `InverseLerp(0, 14, t - deathTime)`; `survival` holds both constants.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeadProfile {
+    /// `PostProcessVolume`.
+    pub source: super::SourceId,
+    pub enabled: bool,
+    pub global: bool,
+    pub blend_distance: f32,
+    /// Authored weight. The death fade replaces it.
+    pub weight: f32,
+    pub priority: f32,
+    pub layer: u32,
+    /// `PostProcessVolume.sharedProfile`.
+    pub profile: super::SourceId,
+    pub effects: Vec<VolumeEffect>,
+    pub evidence: super::ManagedEvidence,
+}
+
+/// One profile effect with every serialized parameter, by source field name.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeEffect {
+    /// Snake case class name, such as `color_grading` or `vignette`.
+    pub kind: String,
+    pub source: super::SourceId,
+    pub active: bool,
+    pub parameters: std::collections::BTreeMap<String, VolumeParameter>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum VolumeParameter {
+    Texture(SourceTextureParameter),
+    Spline(SourceParameter<SourceGradingSpline>),
+    Bool(SourceParameter<bool>),
+    Number(SourceParameter<f32>),
+    /// Color (rgba) or vector (xy, xyz or xyzw).
+    Vector(SourceParameter<Vec<f32>>),
+}
+
+impl VolumeParameter {
+    pub fn override_state(&self) -> bool {
+        match self {
+            Self::Texture(p) => p.override_state,
+            Self::Spline(p) => p.override_state,
+            Self::Bool(p) => p.override_state,
+            Self::Number(p) => p.override_state,
+            Self::Vector(p) => p.override_state,
+        }
+    }
+}
+
+impl DeadProfile {
+    pub fn validate(&self, m: &super::ReferenceManifest) -> Result<(), super::ReferenceError> {
+        use super::{finite, ids, require};
+        require(
+            self.source.file == "level1"
+                && self.global
+                && finite(&[self.blend_distance, self.weight, self.priority])
+                && (0. ..=1.).contains(&self.weight)
+                && self.layer < 32
+                && MAIN_VOLUME_MASK & (1 << self.layer) != 0
+                && !self.effects.is_empty()
+                && self.evidence.valid(),
+            "dead volume",
+        )?;
+        ids(
+            self.effects.iter().map(|e| &e.source),
+            "duplicate dead effect",
+        )?;
+        for e in &self.effects {
+            require(
+                !e.kind.is_empty()
+                    && e.kind
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                    && matches!(e.parameters.get("enabled"), Some(VolumeParameter::Bool(_))),
+                "dead effect",
+            )?;
+            for p in e.parameters.values() {
+                require(
+                    match p {
+                        VolumeParameter::Texture(t) => match (&t.value, t.texture) {
+                            (Some(s), Some(id)) => m
+                                .lighting
+                                .textures
+                                .iter()
+                                .any(|v| v.id == id && &v.source == s),
+                            (None, None) => true,
+                            _ => false,
+                        },
+                        VolumeParameter::Spline(s) => s.value.valid(),
+                        VolumeParameter::Bool(_) => true,
+                        VolumeParameter::Number(n) => n.value.is_finite(),
+                        VolumeParameter::Vector(v) => {
+                            (2..=4).contains(&v.value.len()) && finite(&v.value)
+                        }
+                    },
+                    "dead effect parameter",
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `ColorGrading` parameters of the main grading, by source field name, in `GradingSettings::values` order.
+/// `colorFilter`, `lift`, `gamma` and `gain` are four values each. The mixer names come from `MIXER`.
+const GRADING_FIELDS: [(&str, usize); 10] = [
+    ("temperature", 0),
+    ("tint", 1),
+    ("hueShift", 2),
+    ("saturation", 3),
+    ("postExposure", 4),
+    ("contrast", 5),
+    ("colorFilter", 6),
+    ("lift", 19),
+    ("gamma", 23),
+    ("gain", 27),
+];
+/// `mixer{out}Out{in}In` starts at value 10, row by output channel.
+const MIXER: [&str; 3] = ["Red", "Green", "Blue"];
+
+impl GradingSettings {
+    /// Every blended number: the six scalars, color filter, channel mixer rows and the lift, gamma and gain trackballs.
+    fn values(&mut self) -> [&mut f32; 31] {
+        let Self {
+            temperature,
+            tint,
+            hue_shift,
+            saturation,
+            post_exposure,
+            contrast,
+            color_filter: [f0, f1, f2, f3],
+            channel_mixer: [[m0, m1, m2], [m3, m4, m5], [m6, m7, m8]],
+            trackballs: [[l0, l1, l2, l3], [g0, g1, g2, g3], [n0, n1, n2, n3]],
+            ..
+        } = self;
+        [
+            temperature,
+            tint,
+            hue_shift,
+            saturation,
+            post_exposure,
+            contrast,
+            f0,
+            f1,
+            f2,
+            f3,
+            m0,
+            m1,
+            m2,
+            m3,
+            m4,
+            m5,
+            m6,
+            m7,
+            m8,
+            l0,
+            l1,
+            l2,
+            l3,
+            g0,
+            g1,
+            g2,
+            g3,
+            n0,
+            n1,
+            n2,
+            n3,
+        ]
+    }
+}
+
+/// The `DeadV` overrides that the main grading supports.
+/// Source PostProcessManager blends each overridden parameter as `Lerp(main, dead, weight)`.
+/// The port main stack has only `ColorGrading` in its HDR Neutral variant with default curves.
+/// Thus other effects, curve and texture parameters, and a different grading mode or tonemapper are ignored.
+/// `new` names each ignored overridden parameter.
+#[derive(Clone, Debug, Default)]
+pub struct DeadGrading {
+    /// `GradingSettings::values` index and its `DeadV` value.
+    overrides: Vec<(usize, f32)>,
+}
+
+impl DeadGrading {
+    /// The supported overrides of the active `DeadV` effects, and the ignored ones as `effect.parameter`.
+    pub fn new(profile: &DeadProfile) -> (Self, Vec<String>) {
+        let mut overrides = Vec::new();
+        let mut ignored = Vec::new();
+        for effect in profile.effects.iter().filter(|e| e.active) {
+            for (name, parameter) in &effect.parameters {
+                if !parameter.override_state() {
+                    continue;
+                }
+                let grading = effect.kind == "color_grading";
+                let index = GRADING_FIELDS
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, index)| *index)
+                    .or_else(|| {
+                        (0..9).find_map(|i| {
+                            let field = format!("mixer{}Out{}In", MIXER[i / 3], MIXER[i % 3]);
+                            (field == *name).then_some(10 + i)
+                        })
+                    });
+                match (grading, index, parameter) {
+                    (true, Some(index), VolumeParameter::Number(p))
+                        if index < 6 || (10..19).contains(&index) =>
+                    {
+                        overrides.push((index, p.value));
+                    }
+                    (true, Some(index), VolumeParameter::Vector(p))
+                        if (index == 6 || index >= 19) && p.value.len() == 4 =>
+                    {
+                        overrides.extend(p.value.iter().enumerate().map(|(i, v)| (index + i, *v)));
+                    }
+                    // The main grading is enabled, HDR (gradingMode 1) and Neutral (tonemapper 1).
+                    (true, None, VolumeParameter::Bool(p)) if name == "enabled" && p.value => {}
+                    (true, None, VolumeParameter::Number(p))
+                        if (name == "gradingMode" || name == "tonemapper") && p.value == 1. => {}
+                    _ => ignored.push(format!("{}.{name}", effect.kind)),
+                }
+            }
+        }
+        (Self { overrides }, ignored)
+    }
+    /// Blends the overrides over `grading` with `weight` from 0 to 1.
+    pub fn blend(&self, grading: &mut GradingSettings, weight: f32) {
+        let values = grading.values();
+        for (index, target) in &self.overrides {
+            let value = &mut *values[*index];
+            *value += (target - *value) * weight;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dead_grading_blends_supported_overrides() {
+        let n = |o: bool, v: f32| serde_json::json!({"override_state": o, "value": v});
+        let profile: DeadProfile = serde_json::from_value(serde_json::json!({
+            "source": {"file": "level1", "path_id": 1}, "enabled": true, "global": true,
+            "blend_distance": 0., "weight": 1., "priority": 1., "layer": 8,
+            "profile": {"file": "sharedassets0.assets", "path_id": 2},
+            "effects": [
+                {"kind": "color_grading", "source": {"file": "a", "path_id": 3}, "active": true,
+                 "parameters": {
+                    "enabled": {"override_state": true, "value": true},
+                    "saturation": n(true, -100.), "contrast": n(false, 50.),
+                    "mixerRedOutGreenIn": n(true, 20.),
+                    "colorFilter": {"override_state": true, "value": [1., 0., 0., 1.]}}},
+                {"kind": "vignette", "source": {"file": "a", "path_id": 4}, "active": true,
+                 "parameters": {"enabled": {"override_state": true, "value": true},
+                    "intensity": n(true, 0.5)}},
+                {"kind": "grain", "source": {"file": "a", "path_id": 5}, "active": false,
+                 "parameters": {"enabled": {"override_state": true, "value": true}}}],
+            "evidence": {"assembly_sha256": "", "methods": []}
+        }))
+        .unwrap();
+        let (dead, ignored) = DeadGrading::new(&profile);
+        assert_eq!(ignored, ["vignette.enabled", "vignette.intensity"]);
+        let main = GradingSettings {
+            lut_size: 33,
+            curves: GradingCurves::SourceDefault,
+            temperature: 10.,
+            tint: 0.,
+            hue_shift: 0.,
+            saturation: 20.,
+            post_exposure: 1.,
+            contrast: 10.,
+            color_filter: [1.; 4],
+            channel_mixer: [[100., 0., 0.], [0., 100., 0.], [0., 0., 100.]],
+            trackballs: [[1., 1., 1., 0.]; 3],
+        };
+        let mut grading = main;
+        dead.blend(&mut grading, 0.);
+        assert_eq!(grading, main);
+        dead.blend(&mut grading, 0.5);
+        assert_eq!(grading.saturation, -40.);
+        assert_eq!(grading.contrast, 10.);
+        assert_eq!(grading.channel_mixer[0], [100., 10., 0.]);
+        assert_eq!(grading.color_filter, [1., 0.5, 0.5, 1.]);
+        let mut grading = main;
+        dead.blend(&mut grading, 1.);
+        assert_eq!(grading.saturation, -100.);
+        assert_eq!(grading.temperature, 10.);
     }
 }
