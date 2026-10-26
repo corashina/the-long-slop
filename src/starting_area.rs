@@ -1514,7 +1514,7 @@ impl GarageRuntime {
                 &self.powertrain,
                 key,
                 vehicle,
-                &record.gauge_limits,
+                record,
                 vehicle.requested_headlights,
             );
             for &(row, slot) in &vehicle.kmh_slots {
@@ -1651,7 +1651,7 @@ impl GarageRuntime {
             &self.powertrain,
             key,
             vehicle,
-            &vehicle.record(reference).gauge_limits,
+            vehicle.record(reference),
             vehicle.requested_headlights,
         )
     }
@@ -1691,7 +1691,7 @@ impl GarageRuntime {
                 powertrain,
                 key,
                 vehicle,
-                &record.gauge_limits,
+                record,
                 vehicle.requested_headlights,
             );
             let Some(state) = vehicle.instruments.as_mut() else {
@@ -2500,9 +2500,10 @@ pub(crate) fn instrument_sample(
     powertrain: &PowertrainParts,
     key: &ObjectKey,
     vehicle: &VehicleRuntime,
-    limits: &crate::reference::GaugeLimits,
+    record: &crate::reference::WorldVehicleReference,
     headlights: u8,
 ) -> crate::simulation::instruments::InstrumentSample {
+    let limits = &record.gauge_limits;
     let amount = |id: ItemId| {
         items
             .get(id)
@@ -2519,6 +2520,9 @@ pub(crate) fn instrument_sample(
         oil_liters: engine.and_then(|e| e.oil_tank).map_or(0., amount),
         temperature: engine.map_or(0., |e| e.state.output().temperature),
         rpm: engine.map_or(0., |e| e.state.output().rpm),
+        two_stroke: engine.is_some_and(|e| e.record.two_stroke),
+        oil_penalty: engine.map_or(0., |e| e.state.output().oil_penalty),
+        oil_led_two_stroke: record.oil_led_two_stroke,
         headlights,
         local_ignition: vehicle.ignition.ignition
             && limits.electronics_output > limits.electronics_off_threshold,

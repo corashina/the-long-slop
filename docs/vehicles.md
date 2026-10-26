@@ -1,6 +1,6 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 PR 1 car types.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 PR 1 and PR 2 car types.
 
 ## Car types
 
@@ -9,12 +9,16 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 | Lada 2101 (car02) | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | car01, car02k, car04, car05 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05` | Petrol |
 | car06 (bare and full) | Catalog item in `CAR_ITEMS` | `StartCar06` | `randomTypeSelector`: petrol or diesel, 50/50 |
+| car03, car03k, car10, car10k (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar03`, `StartCar03k`, `StartCar10`, `StartCar10k` | Two-stroke |
+| car08, car08c (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar08`, `StartCar08c` | Petrol |
+| car09 (bare, full, `car09fullS`) | Catalog items in `CAR_ITEMS` | `StartCar09`, `StartCar09S` (`level1` GO 12382, `Car09full_slide`) | Two-stroke |
+| car09P (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar09P` | Two-stroke |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
 | Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
 | Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
 - Each `vehicle` record has the source `carscript.carType`.
-- PR 1 types spawn only as start cars. Their pool rows (`kaszni`, `carfull`) stay off until PR 3.
+- PR 1 and PR 2 types spawn only as start cars. Their pool rows (`kaszni`, `carfull`) stay off until PR 3.
 
 Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. See [Trailers](#trailers).
 
@@ -28,7 +32,10 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
-- A car can have any wheel count. The radiator is optional.
+- A car can have any wheel count. The radiator and the engine oil tank are optional.
+- Engine records have `two_stroke` and the mix tolerances `oil_toleration_min`, `oil_toleration_max` (source `oilTolerationMin`, `oilTolerationMax`).
+- The vehicle record has `oil_led_two_stroke` (source `carscript.ledOilTestTwoStrokeDefault`).
+- `colliderscaleapplyscript` (Car10k) is an editor bake helper. The export stops if its `run` flag is set.
 - The fuel tank is the root `tankscript`. Without it, the tank is the part in `carscript.tankslot` (Bike03).
 - Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
 - Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
@@ -62,7 +69,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 | `StartCar10`, `StartCar10k` | 55 |
 
 - The pick draws `Random.Range(0, sum)` and takes the first cumulative chance above it.
-- A field without an exported placement is skipped with its chance. PR 2 and V03 add the missing fields.
+- A field without an exported placement is skipped with its chance. V03 adds `StartCar06p`.
 - Car09 then takes `StartCar09` or `StartCar09S`, 50/50 (source `startscript`).
 - The pick uses a menu random from browser entropy. It does not touch the world random state.
 - The spawn context current car is source `itemdatabase.carTypeToCarID[carType]` of the picked car. The Lada gives 15.
@@ -179,7 +186,8 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 Expected work for other cars:
 
-- Car03: the engine needs two-stroke mixed fuel. It has no radiator and no oil tank.
+- Two-strokes (car03, car03k, car09, car09P, car10, car10k): the engine needs two-stroke mixed fuel. They have no oil tank.
+- Car03, car03k, car08 and car08c have no radiator.
 - Car06P: diesel works through its engine `fuel_consumption`. Add its category.
 - Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.

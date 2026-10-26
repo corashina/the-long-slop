@@ -1,4 +1,4 @@
-//! V02 PR 1: each start car starts, drives, saves and loads. The Lada pick keeps the world draws.
+//! V02 start cars: each one starts, drives, saves and loads. The Lada pick keeps the world draws.
 use super::drive_out::{enter, frame, frame_with, ground, settle};
 use super::*;
 use crate::fluids::FluidEntry;
@@ -6,14 +6,23 @@ use crate::reference::{DrivingAssists, ItemId};
 use crate::simulation::{FrameInput, keys};
 use crate::world::{GameMode, ObjectKey, StartCar, StartCarChoice};
 
-/// The start cars of V02 PR 1 and the Lada.
-const START_CARS: [&str; 6] = [
+/// The start cars of V02 PR 1 and PR 2, and the Lada.
+const START_CARS: [&str; 15] = [
     "StartCar01",
     "StartCar02",
     "StartCar02k",
+    "StartCar03",
+    "StartCar03k",
     "StartCar04",
     "StartCar05",
     "StartCar06",
+    "StartCar08",
+    "StartCar08c",
+    "StartCar09",
+    "StartCar09S",
+    "StartCar09P",
+    "StartCar10",
+    "StartCar10k",
 ];
 /// Height of the test deck above the start pose. No start area object reaches it.
 const DECK_HEIGHT: f32 = 30.;
@@ -64,6 +73,7 @@ fn fill(run: &mut GarageRuntime, tank: ItemId, mix: [f32; 6]) {
 }
 
 /// Fuel of the mix the mounted engine wants (car06 can have the diesel engine), oil and water.
+/// A two-stroke gets its oil in the fuel mix (petrol and 2.5% oil) and no sump oil.
 fn fill_fluids(run: &mut GarageRuntime, key: &ObjectKey) {
     let mounted = run.powertrain.mounted_on(&run.area.items, key);
     let engine = run
@@ -72,7 +82,7 @@ fn fill_fluids(run: &mut GarageRuntime, key: &ObjectKey) {
         .unwrap();
     let (fuel, oil_tank, oil) = (
         engine.record.fuel_consumption,
-        engine.oil_tank,
+        engine.oil_tank.filter(|_| !engine.record.two_stroke),
         engine.record.oil_fluid as usize,
     );
     let coolant = mounted

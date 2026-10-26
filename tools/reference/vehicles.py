@@ -21,7 +21,8 @@ ENGINE_FIELDS = {'start_chance':'startChance','starter_rpm':'starterRpm','starte
     'heat_gain_max':'engineHeatGainMax','heat_loss':'engineHeatLoss','initial_temperature':'temp',
     'heat_loss_speed_modifier':'engineHeatLossSpeedModifier','max_rpm_difference':'maxRpmDifference',
     'torque_modifier':'modifier','oil_fluid':'Oilfluid','auto_shift_clutch_rpm':'autoShiftClutchRpm',
-    'auto_shift_clutch_rpm_range':'autoShiftClutchRpmRange'}
+    'auto_shift_clutch_rpm_range':'autoShiftClutchRpmRange',
+    'oil_toleration_min':'oilTolerationMin','oil_toleration_max':'oilTolerationMax'}
 RADIATOR_FIELDS = {'fan_temperature_on':'fanOnTemp','fan_temperature_off':'fanOffTemp','max_value':'maxValue',
     'max_fan_value':'maxFanValue','max_fan_speed':'maxFanSpeed','max_fluid_loss':'maxFluidLoss'}
 
@@ -171,6 +172,12 @@ def selector_engines(source, proto):
                 if any(c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID'] and source.class_name(c)=='enginescript' for n in nodes for c in n['components']):
                     proto.node(owner)
 
+def check_collider_bakes(source, proto):
+    """colliderscaleapplyscript (Car10k) is an editor bake helper. With `run` off it does nothing at runtime."""
+    for _,reader in proto.scripts('colliderscaleapplyscript'):
+        if source.read(reader)['run']:raise ValueError(f'{key(reader)} colliderscaleapplyscript.run is set: its bake is not exported')
+
+
 def fuel_tank_slot(source, proto, car_reader, car):
     """carscript.tankslot. Its part holds the fuel tank when the root has no tankscript."""
     slot=source.resolve(car_reader,car['tankslot'])
@@ -267,6 +274,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     cars=[c for i,c in proto.scripts('carscript') if i==0]
     if not cars:return None
     car_reader=cars[0];car=source.read(car_reader)
+    check_collider_bakes(source,proto)
     if car['speedBasedKeyboardSens']:
         raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     rigidbody=source.resolve(car_reader,car['RB'])
@@ -319,6 +327,8 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
         # inputscript.DriveStuff uses the multiplier only when it is not zero.
         'key_steer_multiplier':car['keySteerSensMultiplier'],
+        # Source carscript.ledOilTestTwoStrokeDefault: the oil LED follows the two-stroke mix.
+        'oil_led_two_stroke':bool(car['ledOilTestTwoStrokeDefault']),
         'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
