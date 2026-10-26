@@ -71,8 +71,9 @@ impl ComputerRecord {
                 .and_then(|p| m.world.prototypes.iter().find(|w| &w.source == p))
                 .ok_or_else(|| ReferenceError(format!("Invalid computer owner {name}")))
         };
-        let inside =
-            |p: &WorldPrototypeReference, node: &SourceId| p.nodes.iter().any(|n| &n.source == node);
+        let inside = |p: &WorldPrototypeReference, node: &SourceId| {
+            p.nodes.iter().any(|n| &n.source == node)
+        };
         let c = &self.computer;
         prototype(COMPUTER_ITEM, "gep01", &c.prototype)?;
         checked(

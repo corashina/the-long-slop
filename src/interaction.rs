@@ -2,6 +2,7 @@ pub mod buried;
 pub mod carry;
 pub mod cigarettes;
 pub mod cleaning;
+pub mod computer;
 pub mod consumption;
 pub mod equipment;
 pub(crate) mod equipment_input;
