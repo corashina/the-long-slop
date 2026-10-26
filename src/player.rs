@@ -1081,7 +1081,9 @@ impl PlayerState {
     pub fn cancel_view_input(&mut self) {
         self.view_state.cancel(self.posture.value());
     }
+    /// Place the player on foot. An item seat ends here.
     pub(crate) fn recover(&mut self, pose: VehiclePose, physics: &mut PhysicsWorld) {
+        self.occupancy = None;
         self.pose = to_rapier(pose);
         self.yaw = yaw_from_rotation(self.pose.rotation);
         self.posture.restore(self.posture.value());

@@ -220,7 +220,9 @@ impl PreparedPresentation {
         let pose = player_view.camera_pose;
         let camera = if let Some(sleep) = candidate.sleep_camera() {
             super::camera::sleep_pose(sleep, &candidate.stream.origin)
-        } else if mode == super::camera::CameraMode::Chase && candidate.area.player.seated() {
+        } else if mode == super::camera::CameraMode::Chase
+            && candidate.area.player.seat_vehicle().is_some()
+        {
             super::camera::pose(mode, candidate.physics.snapshot(candidate.vehicle).pose)
         } else {
             super::transform(pose)

@@ -648,7 +648,7 @@ fn read_input(
     if !drive.runtime.needs_output().dead
         && !drive.runtime.sleeping()
         && frame.pressed & keys::CAMERA != 0
-        && drive.runtime.area.player.seated()
+        && drive.runtime.area.player.seat_vehicle().is_some()
     {
         drive.runtime.audio_motion_revision = drive.runtime.audio_motion_revision.wrapping_add(1);
         drive.camera = match drive.camera {
@@ -1019,7 +1019,9 @@ fn sync_instruments(
 fn active_camera(drive: &Drive) -> Transform {
     if let Some(camera) = drive.runtime.sleep_camera() {
         presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
-    } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seated() {
+    } else if drive.camera == CameraMode::Chase
+        && drive.runtime.area.player.seat_vehicle().is_some()
+    {
         presentation::camera::pose(
             CameraMode::Chase,
             drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,

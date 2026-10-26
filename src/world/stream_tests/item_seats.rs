@@ -133,6 +133,6 @@ fn item_seat_follows_item_body() {
     let expected = *loaded.physics.rapier().bodies[body].position() * to_rapier(pose);
     let seated = to_rapier(loaded.area.player.body_pose(&loaded.physics));
     assert!((seated.translation - expected.translation).length() < 1e-3);
-    assert!(run.area.player.try_exit(&mut run.physics));
-    assert!(!run.area.player.seated());
+    assert!(loaded.area.player.try_exit(&mut loaded.physics));
+    assert!(!loaded.area.player.seated());
 }
