@@ -40,7 +40,7 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,slider,audio,drivingBindings}) {
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,slider,audio,drivingBindings,onPause}) {
  const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
@@ -97,7 +97,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,slider,
   }
  }
  function flush(){const a=model.takeActions();if(a)queueAction(a);}
- function pause(cancelPending=false){audio?.pause();clearInput();model.pause(cancelPending===true?saveSession:undefined);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
+ function pause(cancelPending=false){if(model.state==='playing')onPause?.();audio?.pause();clearInput();model.pause(cancelPending===true?saveSession:undefined);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  async function operate(operation){audio?.pause();clearInput();const pending=model.run(operation,saveSession);paint();await pending;flush();paint();}
  async function capture(){clearInput();const pending=captureWithAudio(model,ACTIONS.CONTINUE,async()=>{canvas.focus();await canvas.requestPointerLock();if(document.pointerLockElement!==canvas)throw Error('The browser did not capture the mouse.');},audio);paint();const success=await pending;if(!success && document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();}
  document.querySelector('#new-game').addEventListener('click',()=>operate('newGame'));
@@ -116,5 +116,5 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,slider,
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();
- return {model,drivingState,takeDrivingAssists(){const request=pendingDriving;pendingDriving=0;return request;},survival(dead,due){if(dead===model.dead&&due===model.deathComplete)return;model.dead=dead;model.deathComplete=due;if(due){pause();model.status='You died. Select New game or Load.';queueMicrotask(()=>document.querySelector('#pause-new-game').focus({preventScroll:true}));}paint();},loading(){pendingDriving=0;audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},ready(){model.ready();paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
+ return {model,drivingState,takeDrivingAssists(){const request=pendingDriving;pendingDriving=0;return request;},survival(dead,due){if(dead===model.dead&&due===model.deathComplete)return;model.dead=dead;model.deathComplete=due;if(due){pause();model.status='You died. Select New game or Load.';queueMicrotask(()=>document.querySelector('#pause-new-game').focus({preventScroll:true}));}paint();},loading(){pendingDriving=0;audio?.pause();clearInput();model.loading();if(document.pointerLockElement===canvas)document.exitPointerLock();paint();},ready(){model.ready();paint();},sync(started,stopped,travelM){model.started=started;if(stopped && started && model.state==='playing'){onPause?.();model.pause();paint();}const km=Math.round(travelM/10)/100;if(lastTravel!==km){document.querySelector('#session-distance').textContent='Session distance: '+km.toFixed(2)+' km';lastTravel=km;}},fail(message){saveSession.cancel();clearInput();model.fail(message);if(document.pointerLockElement===canvas)document.exitPointerLock();flush();paint();},dispose(){window.removeEventListener('resize',resize);}};
 }

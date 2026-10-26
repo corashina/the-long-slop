@@ -7,6 +7,7 @@ import {createAudio,installAudioBridge} from './audio.js';
 import {manifestStamp,createSaveStorage,defaultName} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
+import {createThumbnail} from './thumbnail.js';
 export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
 import {installDrivingSettings} from './driving-settings.js';
@@ -57,7 +58,8 @@ window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-const loading=createLoading();
+const loading=createLoading(),thumbnail=createThumbnail(canvas);
+let lastThumbnail=null;
 performance.setResourceTimingBufferSize?.(16000);
 let startupFailureDetails=null,startupDone=false,startupReady=false;
 function fetched(record){
@@ -196,7 +198,7 @@ async function load(){
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession:{save:()=>saveSession.save(defaultName(new Date()),null),load:()=>saveSession.loadLast(manifest.build_id),newGame:()=>saveSession.newGame(),cancel:()=>saveSession.cancel()},slider,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession:{save:()=>saveSession.save(defaultName(new Date()),lastThumbnail),load:()=>saveSession.loadLast(manifest.build_id),newGame:()=>saveSession.newGame(),cancel:()=>saveSession.cancel()},slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconBytes=await readPackageAsset(manifest.lighting.switch_icon.path);
  const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
