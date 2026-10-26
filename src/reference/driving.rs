@@ -18,6 +18,8 @@ pub enum DrivingAction {
     Gear4,
     Gear5,
     Gear6,
+    /// Source `IN.togglemousedrive`.
+    MouseDrive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +45,30 @@ pub struct DrivingReference {
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
     pub bindings: Vec<DrivingBinding>,
+    pub mouse_drive: MouseDriveReference,
+}
+
+/// Source `slidersettingscript`: `GetValue` range and default, multiplier applied.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SliderRange {
+    pub default: f32,
+    pub minimum: f32,
+    pub maximum: f32,
+}
+
+impl SliderRange {
+    pub fn contains(&self, value: f32) -> bool {
+        (self.minimum..=self.maximum).contains(&value)
+    }
+}
+
+/// Source `tabControls.sliders[8]`, `[9]` (`FMouseDriveSensX`, `FMouseDriveSensY`).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MouseDriveReference {
+    pub sensitivity_x: SliderRange,
+    pub sensitivity_y: SliderRange,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -146,10 +172,11 @@ impl DrivingReference {
             "Numpad4",
             "Numpad5",
             "Numpad6",
+            "KeyU",
         ];
         let mut actions = HashSet::new();
         require(
-            self.bindings.len() == 11
+            self.bindings.len() == 12
                 && self.bindings.iter().all(|binding| {
                     actions.insert(binding.action)
                         && !binding.codes.is_empty()
@@ -161,10 +188,23 @@ impl DrivingReference {
                 }),
             "driving bindings",
         )?;
+        require(
+            [self.mouse_drive.sensitivity_x, self.mouse_drive.sensitivity_y]
+                .iter()
+                .all(|range| {
+                    finite(&[range.default, range.minimum, range.maximum])
+                        && range.contains(range.default)
+                }),
+            "mouse driving sensitivity",
+        )?;
         for vehicle in &manifest.vehicles {
             require(
                 vehicle.driving.initial_gear < vehicle.gear_ratios.len(),
                 "driving startup gear",
+            )?;
+            require(
+                vehicle.key_steer_multiplier.is_finite() && vehicle.key_steer_multiplier >= 0.0,
+                "key steer multiplier",
             )?;
             if let Some(lever) = &vehicle.lever {
                 require(

@@ -364,7 +364,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         multiplier=definition['valueMultipler'] if definition['valueMultipler'] else 1.
         defaults.append(definition['defValue']*multiplier)
     for car_reader,car in zip(car_readers,car_data):
-        if car['speedBasedKeyboardSens'] or car['keySteerSensMultiplier'] != 0:
+        if car['speedBasedKeyboardSens']:
             raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     player_record.update(carry_min_distance=max(0.,math.sqrt(sum(value**2 for value in held_offset))-player['maxPickupDist']),
         carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'],obj_move_sensitivity=defaults[3],
@@ -437,7 +437,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
             'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM'],'exhaust':exhaust,
-            'wheel_effects':wheel_effects,'effect_gains':effect_gains(car),'lever':drive['lever']}
+            'wheel_effects':wheel_effects,'effect_gains':effect_gains(car),'lever':drive['lever'],'key_steer_multiplier':drive['key_steer_multiplier']}
             for engine,exhaust,wheel_effects,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,exhaust_records,wheel_effect_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)

@@ -939,6 +939,8 @@ pub struct VehicleReference {
     pub wheel_effects: [WheelEffectsReference; 4],
     pub effect_gains: EffectGains,
     pub lever: Option<LeverReference>,
+    /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
+    pub key_steer_multiplier: f32,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

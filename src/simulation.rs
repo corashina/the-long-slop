@@ -57,6 +57,8 @@ pub mod player_keys {
     pub const SMOKE: u8 = 4;
     /// Source `input.removeSunglasses` (X).
     pub const TAKE_OFF: u8 = 8;
+    /// Source `IN.togglemousedrive` (U).
+    pub const MOUSE_DRIVE: u8 = 16;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -77,6 +79,8 @@ pub struct FrameInput {
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
+    /// Source `Mouse X`, `Mouse Y` axes, without look sensitivity. Y is up.
+    pub drive_mouse: [f32; 2],
     pub wheel: f32,
     pub carry: CarryDeltas,
 }
@@ -91,7 +95,12 @@ impl FrameInput {
         self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
-        for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
+        for (pending, delta) in self
+            .mouse
+            .iter_mut()
+            .chain(&mut self.drive_mouse)
+            .zip(frame.mouse.into_iter().chain(frame.drive_mouse))
+        {
             if delta.is_finite() {
                 *pending += delta;
             }

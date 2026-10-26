@@ -36,3 +36,9 @@ test('profile_input_marks_the_fixed_step_and_clears_pending_events_on_blur',t=>{
  host.dispatchEvent(key());host.dispatchEvent(new Event('blur'));assert.equal(input.takeFrame().held,0);input.consume(3);profile.submitFrame(4);
  assert.equal(profile.snapshot().inputs[1].step,null);
 });
+
+test('mouse_drive_binding_sets_the_player_bit',()=>{
+ const i=new InputState([{action:'mouse_drive',codes:['KeyU']}]);
+ i.code('KeyU',true);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.playerHeld,16);assert.equal(f.playerPressed,16);
+ assert.throws(()=>new InputState([{action:'unknown',codes:['KeyU']}]));
+});

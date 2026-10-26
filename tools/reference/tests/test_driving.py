@@ -121,3 +121,29 @@ class LeverSourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):lever_constants(text)
         values = lever_constants(text + '\nprivate float transmissionStage2 = 0.66666f;')
         self.assertEqual(values, {'seconds':.25, 'stage1':.33333, 'stage2':.66666})
+
+
+class MouseDriveSourceTests(unittest.TestCase):
+    """Mouse driving sliders and toggle binding with a fake source: no library needed."""
+    def test_slider_range_applies_multiplier(self):
+        from types import SimpleNamespace
+        from tools.reference.driving import slider_range
+        sliders = {8:{'defValue':1.,'minValue':.1,'maxValue':4.,'valueMultipler':0.},
+            9:{'defValue':2.,'minValue':.5,'maxValue':3.,'valueMultipler':2.}}
+        source = SimpleNamespace(resolve=lambda owner,p:p['m_PathID'] or None, read=lambda r:sliders[r])
+        settings = {'tabControls':{'sliders':[{'m_PathID':i if i in sliders else 0} for i in range(10)]}}
+        self.assertEqual(slider_range(source, None, settings, 8)[0], {'default':1.,'minimum':.1,'maximum':4.})
+        self.assertEqual(slider_range(source, None, settings, 9)[0], {'default':4.,'minimum':1.,'maximum':6.})
+        sliders[9]['defValue'] = 5.
+        with self.assertRaises(ValueError):slider_range(source, None, settings, 9)
+
+    def test_toggle_binding_is_key_u(self):
+        from tools.reference.driving import ACTIONS, recover_bindings
+        names = ['look'] + list(ACTIONS.values())
+        text = 'public enum IN\n{\n' + ',\n'.join(names) + '\n}'
+        defaults = '\n'.join(f'defaultInput[{i}].keys[0].Set(KeyCode.{"U" if n=="togglemousedrive" else "R"});'
+            for i,n in enumerate(names))
+        bindings, evidence = recover_bindings(text, defaults)
+        self.assertIn({'action':'mouse_drive','codes':['KeyU']}, bindings)
+        self.assertEqual(evidence[-1]['source_input'], 'togglemousedrive')
+        with self.assertRaises(ValueError):recover_bindings(text, defaults.replace('KeyCode.U', 'KeyCode.Q').replace(f'defaultInput[{len(names)-1}]', 'x'))

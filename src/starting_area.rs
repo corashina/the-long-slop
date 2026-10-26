@@ -719,7 +719,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
-    driving_input: crate::simulation::input::KeyboardDriving,
+    pub driving_input: crate::simulation::input::DrivingInput,
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
@@ -865,9 +865,10 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
-            driving_input: crate::simulation::input::KeyboardDriving::new(
+            driving_input: crate::simulation::input::DrivingInput::new(
                 reference.vehicles[0].keyboard_steering_rate,
                 reference.driving.pedal_rate,
+                crate::simulation::input::DrivingSettings::defaults(&reference.driving.mouse_drive),
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
@@ -1348,6 +1349,9 @@ impl GarageRuntime {
             input
         };
         let driving = self.area.player.driving();
+        if input.player_pressed & crate::simulation::player_keys::MOUSE_DRIVE != 0 {
+            self.driving_input.toggle_mouse();
+        }
         let controls = self.driving_input.step(
             if driving {
                 self.area.player.seat()
@@ -1355,6 +1359,8 @@ impl GarageRuntime {
                 None
             },
             vehicle_input.held,
+            vehicle_input.drive_mouse,
+            reference.vehicles[self.vehicle].key_steer_multiplier,
         );
         if (driving || self.area.player.driving2()) && input.pressed & keys::LIGHTS != 0 {
             if let Some(audio) = &mut self.audio

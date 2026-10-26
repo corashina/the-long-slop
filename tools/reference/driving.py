@@ -6,10 +6,10 @@ from .source import key, source_id
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 DECOMPILED_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 ACTIONS = {'clutch':'clutch', 'shift_up':'shiftup', 'shift_down':'shiftdown', 'reverse':'gearr',
-    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}}
+    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}, 'mouse_drive':'togglemousedrive'}
 KEY_CODES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'UpArrow':'ArrowUp',
     'DownArrow':'ArrowDown', 'KeypadPlus':'NumpadAdd', 'KeypadMinus':'NumpadSubtract',
-    'R':'KeyR', 'N':'KeyN', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
+    'R':'KeyR', 'N':'KeyN', 'U':'KeyU', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
     **{f'Keypad{i}':f'Numpad{i}' for i in range(7)}}
 
 
@@ -112,6 +112,35 @@ def recover_lever(source, car_reader, car, root, node_ids, constants):
         'seconds':constants['seconds'], 'stages':[constants['stage1'], constants['stage2']]}
 
 
+MOUSE_DRIVE_LINES = ['currentMouseSteer = Mathf.Clamp(currentMouseSteer + Input.GetAxis("Mouse X") * 0.0125f * 0.25f * settingsscript.s.S.FMouseDriveSensX, -1f, 1f);',
+    'currentMouseGas = Mathf.Clamp(currentMouseGas + Input.GetAxis("Mouse Y") * 0.0125f * settingsscript.s.S.FMouseDriveSensY, -1f, 1f);']
+
+
+def slider_range(source, settings_reader, settings, index):
+    """slidersettingscript value range: clamp to minValue..maxValue, then GetValue multiplies."""
+    reader = source.resolve(settings_reader, settings['tabControls']['sliders'][index])
+    if reader is None:raise ValueError(f'Unresolved control slider: {index}')
+    value = source.read(reader)
+    multiplier = value['valueMultipler'] if value['valueMultipler'] else 1.
+    if not value['minValue'] <= value['defValue'] <= value['maxValue']:raise ValueError(f'Control slider default outside range: {index}')
+    return {'default':value['defValue']*multiplier, 'minimum':value['minValue']*multiplier, 'maximum':value['maxValue']*multiplier}, reader
+
+
+def recover_bindings(text, defaults):
+    """inputscript.IN default keys from InitDefault, by enum index."""
+    enum = re.search(r'public enum IN\s*\{([^}]+)\}',text)
+    if enum is None:raise ValueError('Missing driving input enum')
+    names=[name.strip() for name in enum[1].split(',') if name.strip()]
+    bindings=[];evidence=[]
+    for action,name in ACTIONS.items():
+        index=names.index(name)
+        keys=re.findall(rf'defaultInput\[{index}\]\.keys\[\d+\]\.Set\(KeyCode\.(\w+)\);',defaults)
+        if not keys:raise ValueError(f'Unresolved driving input: {name}')
+        bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
+        evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
+    return bindings, evidence
+
+
 def recover_driving(source, car_readers, wheel_readers, node_ids):
     """Resolve selected cars and wheel owners; fail on missing records or links.
     `node_ids` maps source Transform keys to manifest node ids."""
@@ -146,20 +175,14 @@ def recover_driving(source, car_readers, wheel_readers, node_ids):
     if slider is None:raise ValueError('Unresolved steering slider')
     steering=source.read(slider)
     steering_rate=steering['defValue']*(steering['valueMultipler'] if steering['valueMultipler'] else 1.)
-    enum = re.search(r'public enum IN\s*\{([^}]+)\}',text)
-    if enum is None:raise ValueError('Missing driving input enum')
-    names=[name.strip() for name in enum[1].split(',') if name.strip()]
-    defaults=bodies['private void InitDefault()']
-    bindings=[];binding_evidence=[]
-    for action,name in ACTIONS.items():
-        index=names.index(name)
-        keys=re.findall(rf'defaultInput\[{index}\]\.keys\[\d+\]\.Set\(KeyCode\.(\w+)\);',defaults)
-        if not keys:raise ValueError(f'Unresolved driving input: {name}')
-        bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
-        binding_evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
+    if any(line not in drive for line in MOUSE_DRIVE_LINES):raise ValueError('Mouse driving source differs')
+    mouse_x,mouse_x_slider=slider_range(source,settings_reader,settings,8)
+    mouse_y,mouse_y_slider=slider_range(source,settings_reader,settings,9)
+    bindings,binding_evidence=recover_bindings(text,bodies['private void InitDefault()'])
     global_record={'source':source_id(settings_reader),'pedal_rate':rates[0], 'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
-            'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings}
+            'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings,
+        'mouse_drive':{'sensitivity_x':mouse_x,'sensitivity_y':mouse_y}}
     main_reader=source.get('level1',64919)
     if source.class_name(main_reader)!='mainscript':raise ValueError('Driving hub owner differs')
     hubs=source.read(main_reader)['kerekagyProperties']
@@ -172,7 +195,9 @@ def recover_driving(source, car_readers, wheel_readers, node_ids):
         transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
         vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':{'initial_gear':initial,
             'force_automatic':bool(value['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False},
-            'lever':recover_lever(source,reader,value,transform,node_ids,constants)})
+            'lever':recover_lever(source,reader,value,transform,node_ids,constants),
+            # inputscript.DriveStuff uses the multiplier only when it is not zero.
+            'key_steer_multiplier':value['keySteerSensMultiplier']})
         road={key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in value[field]}
         if len(road)!=4 or any(k in owners for k in road):raise ValueError('Driving car must own four wheels')
         owners.update({k:identity for k in road})
@@ -204,6 +229,6 @@ def recover_driving(source, car_readers, wheel_readers, node_ids):
     return {'global':global_record,'vehicles':vehicles,'slots':slots,'keyboard_steering_rate':steering_rate,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,
-            'steering_source':source_id(slider),'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
+            'steering_source':source_id(slider),'mouse_drive_sources':[source_id(mouse_x_slider),source_id(mouse_y_slider)],'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
             'startup':'FStart -> LoadSettings -> ResetSettings(true) -> DoReset (one yielded frame) -> tab.PressedReset -> togglesetting.ResetToDefault -> ResetCustomRadioPath -> OnChangedAnything -> RefreshSettings. The settled fresh reset applies true/true; serialized S contains true/false. Static source evidence, without a native startup measurement.',
             'shift_sounds':'Private bool has no initializer or assignment; CLR startup value is false.'}}
