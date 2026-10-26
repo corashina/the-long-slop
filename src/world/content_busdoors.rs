@@ -616,42 +616,42 @@ impl WorldStream {
             self.presentation_changes.push(slot);
         }
     }
-    /// One bus door button. Calls `play` with the bus and shot of each leaf sound.
-    /// Returns false when the knob is not a bus door button.
+    /// One bus door button. Each door that lists the usable reacts. Calls `play` with the
+    /// bus and shot of each leaf sound. Returns false when the knob is not a bus door button.
     pub fn use_bus_door_button(
         &mut self,
         knob: ColliderId,
         mut play: impl FnMut(&ObjectKey, &CarShotReference),
     ) -> bool {
-        let Some((index, door, open)) =
-            self.bus_door_bindings
-                .iter()
-                .enumerate()
-                .find_map(|(i, b)| {
-                    b.buttons
-                        .iter()
-                        .find(|(k, ..)| *k == knob)
-                        .map(|(_, door, open)| (i, *door, *open))
-                })
+        let Some(index) = self
+            .bus_door_bindings
+            .iter()
+            .position(|b| b.buttons.iter().any(|(k, ..)| *k == knob))
         else {
             return false;
         };
         let reference = self.reference.clone();
-        let b = &mut self.bus_door_bindings[index];
-        let key = ObjectKey::Generated(b.parent.clone());
-        let audio = reference.prototypes[b.prototype]
+        let audio = reference.prototypes[self.bus_door_bindings[index].prototype]
             .vehicle
             .as_ref()
             .and_then(|v| v.audio.as_ref());
-        let changed = b.state.press(door, open, |leaf, sound| {
-            if let Some(shot) = leaf.and_then(|a| audio?.doors[a].sounds.get(sound)) {
-                play(&key, shot);
+        let key = ObjectKey::Generated(self.bus_door_bindings[index].parent.clone());
+        for button in 0..self.bus_door_bindings[index].buttons.len() {
+            let b = &mut self.bus_door_bindings[index];
+            let (k, door, open) = b.buttons[button];
+            if k != knob {
+                continue;
             }
-        });
-        if changed {
-            let saved = b.state.capture();
-            self.changes.set_bus_doors(key, saved);
-            self.show_door_lamps(index, door);
+            let changed = b.state.press(door, open, |leaf, sound| {
+                if let Some(shot) = leaf.and_then(|a| audio?.doors[a].sounds.get(sound)) {
+                    play(&key, shot);
+                }
+            });
+            if changed {
+                let saved = b.state.capture();
+                self.changes.set_bus_doors(key.clone(), saved);
+                self.show_door_lamps(index, door);
+            }
         }
         true
     }
