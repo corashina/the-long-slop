@@ -14,6 +14,8 @@ pub(super) struct PendingRestore {
     ids: IdentityMap,
     ready: bool,
     motion: Vec<BodySnapshot>,
+    /// A saved item seat. It waits for the world item seat binding.
+    seat: Option<SeatSnapshot>,
 }
 impl GarageRuntime {
     pub fn restore_pending(&self) -> bool {
@@ -194,6 +196,24 @@ impl GarageRuntime {
             stream: &mut self.stream,
         }
         .deferred(reference, ids, &mut pending.motion, &pending.items)?;
+        if let Some(seat) = pending.seat.take() {
+            let SeatOwnerSnapshot::Item { item } = seat.owner else {
+                unreachable!()
+            };
+            // The stream has bound all saved items, so a missing seat never binds.
+            let bound = self
+                .area
+                .interaction
+                .find_item_seat(&item, &seat.source.source_id()?)
+                .ok_or_else(|| SaveError::InvalidLinks("Seat item is not bound".into()))?;
+            self.area.player.restore_item_seat(
+                item,
+                bound.body,
+                &bound.seat,
+                local_pose(&seat.local_pose),
+                &mut self.physics,
+            );
+        }
         pending.carry = None;
         pending.inventory = None;
         pending.ready = true;
@@ -289,6 +309,13 @@ impl GarageRuntime {
             if let InstanceId::Generated { id } = instance {
                 protected.push(crate::world::ObjectKey::Generated(id.clone()));
             }
+        }
+        if let Some(SeatSnapshot {
+            owner: SeatOwnerSnapshot::Item { item },
+            ..
+        }) = &saved.player.seat
+        {
+            protected.push(item.clone());
         }
         for item in &saved.items {
             match &item.location {
@@ -501,6 +528,11 @@ impl GarageRuntime {
                 .chain(saved.vehicles.iter().map(|v| &v.body))
                 .cloned()
                 .collect(),
+            seat: saved
+                .player
+                .seat
+                .clone()
+                .filter(|s| matches!(s.owner, SeatOwnerSnapshot::Item { .. })),
         });
         candidate.clear_input();
         candidate.paused = true;
@@ -550,6 +582,10 @@ impl GarageRuntime {
             if matches!(key, crate::world::ObjectKey::Generated(_)) {
                 required.push(key);
             }
+        }
+        // A seat item saves its change, so the load waits for its binding.
+        if let Some(crate::player::SeatOwner::Item(key)) = self.area.player.seat_owner() {
+            required.push(key.clone());
         }
         let world = self.stream.capture_save(
             reference,

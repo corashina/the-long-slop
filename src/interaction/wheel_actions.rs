@@ -129,10 +129,7 @@ impl InteractionState {
             ));
         }
         let tire = wheels.can_split(rim, items)?;
-        if !self
-            .carry
-            .allows_pickup(tire, player.seat().is_some(), true)
-        {
+        if !self.carry.allows_pickup(tire, player.seated(), true) {
             return Err(ReferenceError("Cannot remove this tire".into()));
         }
         let body = items.get(rim).unwrap().body.unwrap();

@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 18;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 18;
+pub const SAVE_SCHEMA_VERSION: u32 = 19;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 19;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -181,9 +181,22 @@ pub struct NeedsSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeatSnapshot {
-    pub vehicle: InstanceId,
+    pub owner: SeatOwnerSnapshot,
+    /// Car seat record or world item main seatscript.
     pub source: SourceKey,
+    /// sitPos relative to the owner body.
     pub local_pose: LocalPose,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SeatOwnerSnapshot {
+    Vehicle {
+        vehicle: InstanceId,
+    },
+    Item {
+        #[serde(with = "super::identity::lossless")]
+        item: crate::world::ObjectKey,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -432,7 +445,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 19] {
+        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -443,10 +456,50 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 18 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 19 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":18}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":19}"#),
             Err(SaveError::CorruptData(_))
         ));
+    }
+
+    #[test]
+    fn seat_snapshot_round_trips_both_owners() {
+        let source = SourceKey {
+            file: "level0".into(),
+            path_id: "-9223372036854775807".into(),
+        };
+        let local_pose = LocalPose {
+            position: [0.1, 0.5, -0.2],
+            rotation: [0., 0., 0., 1.],
+        };
+        let generated = crate::world::GeneratedId {
+            layer: crate::world::WorldLayer::Nested,
+            generator: crate::reference::SourceId {
+                file: "level0".into(),
+                path_id: i64::MIN + 1,
+            },
+            unit: [i64::MAX - 1, -3],
+            ordinal: 7,
+            children: vec![],
+        };
+        for owner in [
+            SeatOwnerSnapshot::Vehicle {
+                vehicle: InstanceId::Initial {
+                    source: source.clone(),
+                },
+            },
+            SeatOwnerSnapshot::Item {
+                item: crate::world::ObjectKey::Generated(generated),
+            },
+        ] {
+            let seat = SeatSnapshot {
+                owner,
+                source: source.clone(),
+                local_pose,
+            };
+            let json = serde_json::to_string(&seat).unwrap();
+            assert_eq!(serde_json::from_str::<SeatSnapshot>(&json).unwrap(), seat);
+        }
     }
 }

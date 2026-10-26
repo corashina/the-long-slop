@@ -1,5 +1,5 @@
 //! Source sleep deadlines use normal simulation time.
-use crate::reference::{SeatId, SeatReference, SleepReference};
+use crate::reference::SleepReference;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SleepCamera {
@@ -33,11 +33,6 @@ pub struct SleepOutput {
     pub wake_time: f64,
     pub cooldown_remaining: f64,
     pub progress: f32,
-}
-
-/// seatscript.showSleepText of the occupied seat.
-pub fn show_text(seats: &[SeatReference], seat: Option<SeatId>) -> bool {
-    seat.is_some_and(|id| seats.iter().any(|s| s.id == id && s.show_sleep_text))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,7 +158,7 @@ impl SleepState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reference::{AnchorId, ItemId, ManagedEvidence, SourceId};
+    use crate::reference::{ManagedEvidence, SourceId};
 
     #[test]
     fn hint_shows_only_in_flagged_seat() {
@@ -171,24 +166,6 @@ mod tests {
             file: String::new(),
             path_id: 0,
         };
-        let seat = |id, show_sleep_text| SeatReference {
-            default_pitch_degrees: 0.,
-            pitch_limits_degrees: [0.; 2],
-            id: SeatId(id),
-            source: source.clone(),
-            item: ItemId(0),
-            anchor: AnchorId(0),
-            vehicle: 0,
-            driver: false,
-            driving2: false,
-            hit_nodes: Vec::new(),
-            yaw_limits_degrees: [0.; 2],
-            exit_distance: 0.,
-            min_exit_angle_degrees: 0.,
-            exit_height: 0.,
-            show_sleep_text,
-        };
-        let seats = [seat(0, true), seat(1, false)];
         let r = SleepReference {
             source: source.clone(),
             need_modifier: 1.,
@@ -212,17 +189,13 @@ mod tests {
                 methods: Vec::new(),
             },
         };
-        for (seat, hint) in [
-            (Some(SeatId(0)), true),
-            (Some(SeatId(1)), false),
-            (None, false),
-        ] {
+        for hint in [true, false] {
             let input = SleepInput {
                 held: false,
                 active: true,
                 camera_allowed: true,
                 dead: false,
-                show_text: show_text(&seats, seat),
+                show_text: hint,
             };
             let output = SleepState::new(&r).step(&r, input, 10., 0.02);
             assert!(output.eligible);

@@ -23,7 +23,8 @@ impl GarageRuntime {
         }
         self.under_map_check = self.simulation_seconds + INTERVAL;
         let player = self.area.player.body_handle();
-        let seated = self.area.player.seat_vehicle();
+        // A seated player follows the seat owner, which this check lifts.
+        let seated = self.area.player.seated();
         let vehicles: Vec<_> = (0..self.physics.vehicle_count())
             .filter_map(|index| {
                 let chassis = self
@@ -33,7 +34,7 @@ impl GarageRuntime {
                 Some((index, self.under_map(chassis)?))
             })
             .collect();
-        let walking = seated.is_none().then(|| self.under_map(player)).flatten();
+        let walking = (!seated).then(|| self.under_map(player)).flatten();
         let lifted = !vehicles.is_empty() || walking.is_some();
         for (vehicle, ground) in vehicles {
             self.lift_vehicle(reference, vehicle, ground);

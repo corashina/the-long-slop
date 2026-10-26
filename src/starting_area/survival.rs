@@ -539,7 +539,7 @@ impl GarageRuntime {
     pub(super) fn sample_survival_speed(&mut self, reference: &ReferenceManifest) {
         // Kinematic controller velocity comes from Rapier's completed fixed step.
         // Seat entry and exit are placement operations, not source acceleration.
-        if self.area.player.seat().is_some() || self.sleeping() {
+        if self.area.player.seated() || self.sleeping() {
             self.previous_speed = None;
             return;
         }

@@ -74,20 +74,20 @@ impl StartingArea {
             }
         }
     }
-    pub fn inventory_context(&self, physics: &PhysicsWorld, input: FrameInput) -> InventoryContext {
+    pub fn inventory_context(&self, input: FrameInput) -> InventoryContext {
         let carried = self.interaction.held();
-        let ancestor_carry = self.player.seat_vehicle().is_some_and(|index| {
+        let ancestor_carry = self.player.seat_body().is_some_and(|body| {
             carried
                 .and_then(|id| self.items.get(id))
                 .and_then(|i| i.body)
-                == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)))
+                == Some(body)
         });
         InventoryContext {
             carried,
             equipped: self.interaction.equipment.item(),
             ancestor_carry,
             seated_clutch: self.inventory_clutch_conflict
-                && self.player.seat().is_some()
+                && self.player.seated()
                 && input.held & keys::CLUTCH != 0,
         }
     }
@@ -117,9 +117,7 @@ impl StartingArea {
             });
         let carried_after = held.filter(|id| Some(*id) != outgoing && !drop_carry);
         let equipped_after = equipped.filter(|id| Some(*id) != outgoing);
-        if self
-            .inventory_context(physics, FrameInput::default())
-            .ancestor_carry
+        if self.inventory_context(FrameInput::default()).ancestor_carry
             || (held.is_some() && !drop_carry && equipped.is_some() && incoming.is_some())
         {
             return Ok(false);
@@ -142,7 +140,7 @@ impl StartingArea {
                 || physics.vehicle_of(item.body.unwrap()).is_some()
                 || !self.interaction.carry.allows_pickup(
                     id,
-                    self.player.seat().is_some(),
+                    self.player.seated(),
                     self.items.mounted(id),
                 )
                 || item.inactive_pose.is_some()
@@ -350,7 +348,7 @@ impl StartingArea {
                 .is_some_and(|r| r.can_hold_right_hand),
             carried: self.interaction.held(),
             has_equipment: self.interaction.equipment.item().is_some(),
-            seated: self.player.seat().is_some(),
+            seated: self.player.seated(),
         }
     }
 }
@@ -419,7 +417,7 @@ impl GarageRuntime {
                 .recenter(&self.area.player, &self.physics),
             None => {}
         }
-        let context = self.area.inventory_context(&self.physics, input);
+        let context = self.area.inventory_context(input);
         if let Some(command) = self
             .area
             .inventory
@@ -429,7 +427,7 @@ impl GarageRuntime {
                 .apply_inventory_command(command, reference, &mut self.physics)
                 .expect("checked inventory bindings");
         }
-        let context = self.area.inventory_context(&self.physics, input);
+        let context = self.area.inventory_context(input);
         if let Some(command) = self
             .area
             .inventory
