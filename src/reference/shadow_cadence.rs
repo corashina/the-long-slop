@@ -51,12 +51,12 @@ fn same(a: &ShadowCascade, b: &ShadowCascade) -> bool {
     words(a).eq(words(b))
 }
 /// Cascades 0 and 1 render each frame, cascade 2 on even frames, cascade 3 when frame % 4 == 1.
-/// All render after an epoch change, a forced refresh, or a sphere move above 25% of its radius.
+/// All render after an epoch change, a forced refresh, or a cascade 2 or 3 sphere move above 25% of its radius.
 pub fn cascades_to_render(frame: u32, last: &CascadeHistory, current: &CascadeInputs) -> [bool; 4] {
-    let moved = last
-        .cascades
+    // Cascades 0 and 1 render each frame, so only the skipped cascades can hold a stale fit.
+    let moved = last.cascades[2..]
         .iter()
-        .zip(&current.cascades)
+        .zip(&current.cascades[2..])
         .any(|(old, new)| {
             let distance = (0..3)
                 .map(|i| (new.sphere_center[i] - old.sphere_center[i]).powi(2))
@@ -121,6 +121,12 @@ mod tests {
         }
         let mut near = inputs();
         near.cascades[3].sphere_center[0] = 9.6;
+        assert_eq!(
+            cascades_to_render(3, &history, &near),
+            [true, true, false, false]
+        );
+        // Cascade 0 renders each frame, so its move never forces a full refresh.
+        near.cascades[0].sphere_center[0] = 5.;
         assert_eq!(
             cascades_to_render(3, &history, &near),
             [true, true, false, false]
