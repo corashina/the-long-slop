@@ -837,6 +837,17 @@ impl AudioReference {
                 }),
             "audio collision gains",
         )?;
+        require(
+            game.vehicles.iter().all(|v| {
+                v.wheel_effects.iter().all(|w| {
+                    [w.ground_voice, w.spring_voice, w.slide_voice]
+                        .iter()
+                        .all(|id| voices.contains(id))
+                })
+            }) && clips.contains(&game.skid.road_clip)
+                && clips.contains(&game.skid.dirt_clip),
+            "audio wheel effects",
+        )?;
         for a in &self.ambience {
             require(
                 game.world

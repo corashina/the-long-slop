@@ -1469,6 +1469,7 @@ fn publish_audio(
             signal.gain,
             signal.pitch,
             signal.looping,
+            signal.clip,
         );
     }
     game_audio_starter(

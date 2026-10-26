@@ -661,6 +661,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
+    # talajnezo loops 3 sources per wheel. The slide voice switches between the mainscript skid clips.
+    for vehicle in manifest['vehicles']:
+        for wheel in vehicle['wheel_effects']:
+            for field in ('ground_voice','spring_voice','slide_voice'):
+                wheel[field]=voice(source.get(wheel[field]['file'],wheel[field]['path_id']),[method('talajnezo','FixedUpdate')])
+    skid=manifest['skid']
+    for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
     for field in ['engine','horn','radio','portable_radio']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
