@@ -170,6 +170,15 @@ Run the X01b test pass (hand and foot reach) in the same run:
 4. Carry a two-hand item.
 5. Hold Left Alt: the hand points at the aimed surface. Rub dirt off a car and wash a wash trigger. Hold Left Alt at the sky: the hand waves.
 
+Run the X01c test pass (player ragdoll) in the same run:
+
+1. Re-export, then rebuild (X01c added the ragdoll asset and the DeadV profile).
+2. Die on foot and in a moving car. The body falls with joint limits and carries the car speed.
+3. The camera stays in the head. Mouse look fades out.
+4. The death screen effect fades in over 14 s, then the menu opens. Read the console for DeadV parameters the port ignores.
+5. Load a save: no ragdoll is left.
+6. Press F3 during death. Compare with the frame rate rule.
+
 Run the X02 part 1 test pass (damage and breaking) in the same run:
 
 1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
@@ -189,7 +198,7 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Ragdoll, wearables, sunglasses, appearance editor, female body. [D03, D05, D06, M10] |
+| X01 | Player body and appearance | XL | Wearables, sunglasses, appearance editor, female body. [D05, D06, M10] |
 | X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
