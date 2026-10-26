@@ -167,6 +167,45 @@ pub struct WorldPrototypeReference {
     #[serde(default)]
     pub gauges: Vec<GaugePartReference>,
     pub sled: Option<SledReference>,
+    /// Source `pushablescript` components with a Rigidbody on their node.
+    #[serde(default)]
+    pub pushes: Vec<WorldPushReference>,
+}
+
+/// Source `pushablescript` of a world prototype. Ids are prototype node, body and collider indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPushReference {
+    pub source: SourceId,
+    pub node: u32,
+    pub body: u32,
+    pub modifier: f32,
+    pub only_projected: bool,
+    pub both: bool,
+    pub push_even_if_same_parent: bool,
+    /// The `pushgripable` whose `car` is on `node`. Its pose is relative to `body`.
+    pub grip: Option<super::PushGripReference<u32, u32>>,
+}
+impl WorldPushReference {
+    fn valid(&self, p: &WorldPrototypeReference) -> bool {
+        let node = |n: u32| (n as usize) < p.nodes.len();
+        p.bodies
+            .get(self.body as usize)
+            .is_some_and(|b| b.node == self.node)
+            && self.modifier.is_finite()
+            && self.modifier >= 0.
+            && self.grip.as_ref().is_none_or(|g| {
+                node(g.node)
+                    && g.hand_node.is_none_or(node)
+                    && transform(&g.local_pose)
+                    && !g.colliders.is_empty()
+                    && g.colliders.iter().all(|&c| {
+                        p.colliders
+                            .get(c as usize)
+                            .is_some_and(|c| c.node == g.node)
+                    })
+            })
+    }
 }
 
 impl WorldPrototypeReference {
@@ -1781,6 +1820,10 @@ impl WorldReference {
                 .all(|b| b.center_of_mass.is_none_or(|c| finite(&c)))
                 && p.sled.as_ref().is_none_or(|sled| sled.valid(p)),
             &field(&p.source, "prototype sled/center of mass"),
+        )?;
+        require(
+            p.pushes.iter().all(|push| push.valid(p)),
+            &field(&p.source, "prototype push"),
         )?;
         let doors: Vec<_> = self
             .mechanisms

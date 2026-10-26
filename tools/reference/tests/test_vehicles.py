@@ -187,3 +187,49 @@ class VehicleRecordTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WorldPushTests(unittest.TestCase):
+    def test_world_push_record_holds_the_car_grip(self):
+        from tools.reference.actions import recover_world_pushes
+        records = {}; data = {}; hierarchy = []
+        def ptr(reader):
+            return {'m_FileID': 0, 'm_PathID': reader.path_id if reader else 0}
+        def record(type_name, fields, cls=''):
+            reader = NS(assets_file=FILE, path_id=len(records) + 1, type=NS(name=type_name), cls=cls)
+            records[('sharedassets1.assets', reader.path_id)] = reader
+            data[reader.path_id] = fields
+            return reader
+        def node(parent, position):
+            transform = record('Transform', dict(m_LocalPosition=dict(zip('xyz', position)),
+                m_LocalRotation=dict(x=0., y=0., z=0., w=1.), m_LocalScale=dict(x=1., y=1., z=1.),
+                m_Father=ptr(parent['reader'] if parent else None)))
+            game_object = record('GameObject', {'transform': ptr(transform)})
+            hierarchy.append({'reader': transform, 'game_object': game_object, 'components': [], 'active': True})
+            return hierarchy[-1]
+        def component(owner, fields, cls):
+            reader = record('MonoBehaviour', {'m_GameObject': ptr(owner['game_object']), **fields}, cls)
+            owner['components'].append(reader)
+            return reader
+        root = node(None, (0., 0., 0.)); handle = node(root, (0., 1., 2.)); hand = node(handle, (0., 0., 0.))
+        car = component(root, {}, 'carscript')
+        component(root, dict(m_Enabled=1, modifier=2., onlyProjected=1, both=0, pushEvenIfSameParent=0), 'pushablescript')
+        grip = component(handle, dict(car=ptr(car), HT=ptr(hand['reader']), inuse=0), 'pushgripable')
+        def chain(transform):
+            result = []
+            while transform:
+                result.append(data[transform.path_id])
+                transform = records.get(('sharedassets1.assets', result[-1]['m_Father']['m_PathID']))
+            return result
+        source = NS(read=lambda reader: data[reader.path_id], class_name=lambda reader: reader.cls,
+            resolve=lambda owner, pointer: records.get(('sharedassets1.assets', pointer['m_PathID'])),
+            transform_for=lambda go: records[('sharedassets1.assets', data[go.path_id]['transform']['m_PathID'])], chain=chain)
+        mapping = {('sharedassets1.assets', n['reader'].path_id): i for i, n in enumerate(hierarchy)}
+        bodies = [{'node': 0, 'pose': {'translation': [0., 0., 0.], 'rotation': [0., 0., 0., 1.]}}]
+        colliders = [{'node': 0}, {'node': 1}]
+        [push] = recover_world_pushes(source, hierarchy, mapping, bodies, colliders)
+        self.assertEqual((push['node'], push['body'], push['modifier'], push['only_projected'], push['both']), (0, 0, 2., True, False))
+        self.assertEqual(push['grip']['source'], source_id(grip))
+        self.assertEqual((push['grip']['node'], push['grip']['hand_node'], push['grip']['colliders']), (1, 2, [1]))
+        self.assertEqual(push['grip']['local_pose']['translation'], [0., 1., -2.])
+        self.assertIs(push['grip']['in_use'], False)

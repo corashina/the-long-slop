@@ -115,6 +115,7 @@ mod tests {
             radiators: Vec::new(),
             gauges: Vec::new(),
             sled: None,
+            pushes: Vec::new(),
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();
         assert_eq!(marked, [false, true, true, false]);

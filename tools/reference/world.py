@@ -13,6 +13,7 @@ from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
 from .sled import centers_of_mass, recover_sled
+from .actions import recover_world_pushes
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
 WORLD_DATABASE_ID = 66024
@@ -761,6 +762,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
+        pushes=recover_world_pushes(local,hierarchy,mapping,bodies,colliders)
         for node in hierarchy:
             for component in node['components']:
                 if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass'):selected.record(component)
@@ -768,7 +770,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled}
+            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,'pushes':pushes}
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle

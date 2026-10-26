@@ -1224,6 +1224,7 @@ mod world_sync_tests {
             radiators: Vec::new(),
             gauges: Vec::new(),
             sled: None,
+            pushes: Vec::new(),
         }
     }
     fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {
