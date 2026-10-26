@@ -220,10 +220,17 @@ impl WorldStream {
                 });
             }
         }
-        let [face] = array(meter, "szamlapok")? else {
+        // A clock reads only its "time" face. A car dashboard meter also has the odometer face.
+        let mut faces = Vec::new();
+        for f in array(meter, "szamlapok")? {
+            let f = fields(f)?;
+            if s.class_name != "clockscript" || text(f, "tipus")? == "time" {
+                faces.push(f);
+            }
+        }
+        let [face] = faces[..] else {
             return Err(ReferenceError("Dial needs one source face".into()));
         };
-        let face = fields(face)?;
         let [usable] = array(face, "usables")? else {
             return Err(ReferenceError("Dial needs one source knob".into()));
         };

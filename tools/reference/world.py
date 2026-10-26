@@ -50,8 +50,8 @@ LADA = ('sharedassets1.assets',82556)
 # Catalog categories whose car items export and spawn from pools.
 CAR_CATEGORIES = ('bus', 'bike')
 # Catalog car items that export by name and spawn from pools (`kaszni` bare body, `carfull` full car).
-# Car06P and Car09T are V03. The Lada is LADA.
-CAR_ITEMS = ('car01','car01full','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full',
+# Car06P and Car09T are V03. The full Lada is LADA; car02 is its bare body.
+CAR_ITEMS = ('car01','car01full','car02','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full',
     'car03','car03full','car03k','car03kfull','car07','car07full','car08','car08full','car08c','car08cfull',
     'car09','car09full','car09fullS','car09P','car09Pfull','car10','car10full','car10k','car10kfull')
 # TerrainGenerationSettings start car fields and the catalog item of their car type. StartCar02 is the Lada.

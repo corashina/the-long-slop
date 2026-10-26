@@ -168,7 +168,7 @@ class CarAllowListTests(unittest.TestCase):
         from tools.reference.world import car_prototypes, vehicle_exclusion, category_items, CAR_ITEMS
         types = ('car01', 'car02k', 'car03', 'car03k', 'car04', 'car05', 'car06', 'car07',
                  'car08', 'car08c', 'car09', 'car09P', 'car10', 'car10k')
-        self.assertEqual(set(CAR_ITEMS), {*types, *(t + 'full' for t in types), 'car09fullS'})
+        self.assertEqual(set(CAR_ITEMS), {*types, *(t + 'full' for t in types), 'car09fullS', 'car02'})
         source, catalog, _, lada, roots, _ = self.fixture()
         items = catalog['items']
         for name, pid in (('car06p', 1010), ('car09t', 1020)):

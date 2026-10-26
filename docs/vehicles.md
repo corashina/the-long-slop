@@ -6,7 +6,7 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 
 | Car type | Source root | Start field | Engine |
 | --- | --- | --- | --- |
-| Lada 2101 (car02) | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
+| Lada 2101 (car02full; bare body car02) | `sharedassets1` 82556; car02 in `CAR_ITEMS` | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | car01, car02k, car04, car05 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05` | Petrol |
 | car06 (bare and full) | Catalog item in `CAR_ITEMS` | `StartCar06` | `randomTypeSelector`: petrol or diesel, 50/50 |
 | car03, car03k, car10, car10k (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar03`, `StartCar03k`, `StartCar10`, `StartCar10k` | Two-stroke |
@@ -36,7 +36,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The vehicle record has `oil_led_two_stroke` (source `carscript.ledOilTestTwoStrokeDefault`).
 - `colliderscaleapplyscript` (Car10k) is an editor bake helper. The export stops if its `run` flag is set.
 - The fuel tank is the root `tankscript`. Without it, the tank is the part in `carscript.tankslot` (Bike03).
-- A `clockscript` on an active child node (Car07 dashboard clock) binds like the item clock, on the car root item.
+- A `clockscript` on an active child node (Car07 dashboard clock) binds like the item clock, on the car root item. It reads only the meter face with `tipus` "time".
 - Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
 - Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
 - A `kmhmeters` row reads its `types`, times `modifier`. With `force`, every needle of the gauge reads the speed (source behavior).
