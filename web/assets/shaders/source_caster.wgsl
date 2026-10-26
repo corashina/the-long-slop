@@ -1,5 +1,8 @@
 #import bevy_pbr::{mesh_functions, mesh_bindings::mesh, forward_io::Vertex, pbr_bindings}
 #import bevy_render::maths::mat2x4_f32_to_mat3x3_unpack
+#ifdef SOURCE_GPU_PROPS
+#import source_props::{prop_world_from_local, prop_normal_local_to_world}
+#endif
 #import source_caster_math::{caster_transform, caster_normal_bias, caster_clip_bias, caster_cutout_margin, caster_premultiplied_alpha, caster_dither_coordinate}
 
 struct CasterView {
@@ -33,11 +36,17 @@ struct CasterOutput {
 }
 @vertex
 fn vertex(input: Vertex) -> CasterOutput {
+#ifdef SOURCE_GPU_PROPS
+    let model = prop_world_from_local(input.instance_index);
+    let position = caster_transform(model, vec4(input.position, 1.0));
+    let normal = prop_normal_local_to_world(model, input.normal);
+#else
     let model = mesh_functions::get_world_from_local(input.instance_index);
     let position = caster_transform(model, vec4(input.position, 1.0));
     let normal_matrix = mat2x4_f32_to_mat3x3_unpack(mesh[input.instance_index].local_from_world_transpose_a, mesh[input.instance_index].local_from_world_transpose_b);
     let raw_normal = normal_matrix * input.normal;
     let normal = raw_normal * inverseSqrt(dot(raw_normal, raw_normal));
+#endif
     let displaced = caster_normal_bias(position.xyz, normal, normalize(caster_view.direction_to_light.xyz), caster_view.bias.z);
     let clip = caster_transform(caster_view.clip_from_world, vec4(displaced, position.w));
     var output: CasterOutput;

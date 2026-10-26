@@ -6,6 +6,9 @@
     pbr_bindings,
     mesh_view_bindings,
 }
+#ifdef SOURCE_GPU_PROPS
+#import bevy_pbr::{pbr_types, pbr_functions}
+#endif
 
 #import source_float_store::half4
 
@@ -114,7 +117,18 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     if !source_lod_keep(in.position.xy, bitcast<f32>(receiver.y)) { discard; }
+#ifdef SOURCE_GPU_PROPS
+    // Same fields as pbr_input_from_vertex_output, without the mesh uniform flags.
+    var pbr = pbr_types::pbr_input_new();
+    pbr.is_orthographic = mesh_view_bindings::view.clip_from_view[3].w == 1.0;
+    pbr.V = pbr_functions::calculate_view(in.world_position, pbr.is_orthographic);
+    pbr.frag_coord = in.position;
+    pbr.world_position = in.world_position;
+    pbr.world_normal = pbr_functions::prepare_world_normal(in.world_normal, false, is_front);
+    pbr.N = normalize(pbr.world_normal);
+#else
     var pbr = pbr_input_from_vertex_output(in, is_front, false);
+#endif
     var uv = vec2(0.0);
 #ifdef VERTEX_UVS_A
     uv = in.uv;
