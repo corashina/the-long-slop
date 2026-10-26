@@ -5,8 +5,6 @@ from .source import key, source_id
 
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 DECOMPILED_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
-CURVE_FIELDS = {'extremum_slip':'m_ExtremumSlip', 'extremum_value':'m_ExtremumValue',
-    'asymptote_slip':'m_AsymptoteSlip', 'asymptote_value':'m_AsymptoteValue', 'stiffness':'m_Stiffness'}
 ACTIONS = {'clutch':'clutch', 'shift_up':'shiftup', 'shift_down':'shiftdown', 'reverse':'gearr',
     'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}}
 KEY_CODES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'UpArrow':'ArrowUp',
@@ -144,7 +142,7 @@ def recover_driving(source, car_readers, wheel_readers):
         raise ValueError('Driving wheel selection differs from car roles')
     slots=[]
     for reader in wheel_readers:
-        identity=key(reader);value=source.read(reader);car_reader,car=cars[owners[identity]]
+        identity=key(reader);car_reader,car=cars[owners[identity]]
         graphic,raw=graphics[identity]
         linked_car=source.resolve(graphic,raw['car']);slot=source.resolve(graphic,raw['slot'])
         if linked_car is None or key(linked_car)!=key(car_reader) or slot is None:
@@ -154,10 +152,6 @@ def recover_driving(source, car_readers, wheel_readers):
         hub=hubs[hub_index]
         slots.append({'source':source_id(slot),'collider_source':source_id(reader),'graphics_source':source_id(graphic),
             'vehicle_source':source_id(car_reader),'hub_source':source_id(main_reader),'hub_index':hub_index,
-            'wheel_mass_kg':value['m_Mass'],'rotational_damping':value['m_WheelDampingRate'],
-            'force_application_distance_m':value['m_ForceAppPointDistance'],
-            'forward_friction':{out:value['m_ForwardFriction'][field] for out,field in CURVE_FIELDS.items()},
-            'sideways_friction':{out:value['m_SidewaysFriction'][field] for out,field in CURVE_FIELDS.items()},
             'sideways_stiffness_modifier':raw['sideStiffnessModifier'],
             'hub':{'radius_m':hub['radius'],'mass_kg':hub['mass'],'forward_stiffness':hub['slip1'],'sideways_stiffness':hub['slip2']}})
     return {'global':global_record,'vehicles':vehicles,'slots':slots,'keyboard_steering_rate':steering_rate,

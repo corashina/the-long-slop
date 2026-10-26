@@ -332,17 +332,17 @@ impl VehicleBody {
                 anchor.transform.rotation[3],
             );
             let connection = Vector::from_array(anchor.transform.translation)
-                + rotation * Vector::from_array(wheel.center);
+                + rotation * Vector::from_array(wheel.collider.center);
             // Wheel assembly sync replaces this before the first drive step.
             assemblies[index] = WheelAssembly::Tire {
-                radius_m: wheel.radius,
-                mass_kg: wheel.wheel_mass_kg,
+                radius_m: wheel.collider.radius,
+                mass_kg: wheel.collider.wheel_mass_kg,
                 quality: 1.0,
             };
             wheels.push(WheelState::new(
                 connection,
                 wheel::resolve_profile(wheel, &slip, assemblies[index]),
-                wheel.suspension_distance * wheel.target_position,
+                wheel.collider.suspension_distance * wheel.collider.target_position,
             ));
             wheel_records.push(wheel.clone());
         }
@@ -489,7 +489,7 @@ impl PhysicsWorld {
                     .predicate(&not_own),
             };
             for (wheel, reference) in vehicle.wheels.iter_mut().zip(&vehicle.wheel_references) {
-                let travel = reference.suspension_distance;
+                let travel = reference.collider.suspension_distance;
                 let radius = wheel.profile.radius;
                 let origin = pose * wheel.connection;
                 let hit =
@@ -521,7 +521,7 @@ impl PhysicsWorld {
                     .filter(|parent| self.physics.bodies[*parent].is_dynamic())
             });
             let point = wheel.contact.map_or(Vector::ZERO, |contact| {
-                contact.point + up * reference.force_application_distance_m
+                contact.point + up * reference.collider.force_application_distance_m
             });
             let frame = WheelFrame {
                 up,
@@ -798,7 +798,8 @@ impl PhysicsWorld {
             wheel.omega = 0.0;
             wheel.previous_angle = wheel.angle;
             wheel.contact = None;
-            wheel.suspension_length = reference.suspension_distance * reference.target_position;
+            wheel.suspension_length =
+                reference.collider.suspension_distance * reference.collider.target_position;
         }
         self.refresh_queries();
     }

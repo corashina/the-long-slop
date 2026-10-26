@@ -29,7 +29,7 @@ class DrivingSourceTests(unittest.TestCase):
         source = self.source
         car = self.cars[0]
         original = source.read
-        for owner, field in [(car,'gear'),(car,'kerekagyType'),(self.wheels[0],'m_Mass')]:
+        for owner, field in [(car,'gear'),(car,'kerekagyType')]:
             def missing(reader):
                 value = original(reader)
                 if key(reader)==key(owner):
@@ -47,6 +47,9 @@ class DrivingSourceTests(unittest.TestCase):
             return value
         with patch.object(source,'read',side_effect=invalid_hub):
             with self.assertRaises(ValueError):recover_driving(source,self.cars,self.wheels)
+        from tools.reference.wheels import wheel_collider_record
+        value=deepcopy(original(self.wheels[0]));del value['m_Mass']
+        with self.assertRaises(KeyError):wheel_collider_record(value)
 
 
         clutch_toggle=source.get('level0',18636)

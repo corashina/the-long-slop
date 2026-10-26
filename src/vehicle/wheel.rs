@@ -253,7 +253,7 @@ pub(super) fn solve(
                 state,
                 torques.motor_nm,
                 0.0,
-                slot.rotational_damping,
+                slot.collider.rotational_damping,
                 brake_step,
                 h,
             );
@@ -261,11 +261,11 @@ pub(super) fn solve(
         return None;
     };
     // Source rest position is targetPosition of the travel below the connection.
-    let rest = slot.suspension_distance * slot.target_position;
+    let rest = slot.collider.suspension_distance * slot.collider.target_position;
     let compression_rate = -frame.velocity.dot(frame.up);
     let load = (frame.sprung_mass * frame.gravity
-        + slot.spring * (rest - state.suspension_length)
-        + slot.damper * compression_rate)
+        + slot.collider.spring * (rest - state.suspension_length)
+        + slot.collider.damper * compression_rate)
         .max(0.0);
     let normal = contact.normal;
     let mut forward = normal.cross(frame.axle);
@@ -277,17 +277,22 @@ pub(super) fn solve(
     let vx = frame.velocity.dot(forward);
     let vy = frame.velocity.dot(side);
     let reference_speed = vx.abs().max(MIN_SLIP_SPEED);
-    let forward_peak = slot.forward_friction.extremum_value * profile.forward_stiffness * load;
-    let sideways_peak = slot.sideways_friction.extremum_value * profile.sideways_stiffness * load;
-    let lateral = -friction(&slot.sideways_friction, (vy / reference_speed).atan())
-        * profile.sideways_stiffness
+    let forward_peak =
+        slot.collider.forward_friction.extremum_value * profile.forward_stiffness * load;
+    let sideways_peak =
+        slot.collider.sideways_friction.extremum_value * profile.sideways_stiffness * load;
+    let lateral = -friction(
+        &slot.collider.sideways_friction,
+        (vy / reference_speed).atan(),
+    ) * profile.sideways_stiffness
         * load;
     let mut fx_sum = 0.0;
     let mut fy_sum = 0.0;
     for _ in 0..SPIN_SUBSTEPS {
         let u = state.omega * profile.radius;
         let slip = (u - vx) / reference_speed.max(u.abs());
-        let mut fx = friction(&slot.forward_friction, slip) * profile.forward_stiffness * load;
+        let mut fx =
+            friction(&slot.collider.forward_friction, slip) * profile.forward_stiffness * load;
         let mut fy = lateral;
         // Combined slip: keep the force pair inside the friction ellipse.
         let usage = ratio(fx, forward_peak).powi(2) + ratio(fy, sideways_peak).powi(2);
@@ -300,7 +305,7 @@ pub(super) fn solve(
             state,
             torques.motor_nm,
             fx * profile.radius,
-            slot.rotational_damping,
+            slot.collider.rotational_damping,
             brake_step,
             h,
         );

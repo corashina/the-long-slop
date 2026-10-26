@@ -697,8 +697,8 @@ fn simulation_motion_sleep_wake_and_kinematic_queries_match_scan() {
 #[test]
 fn private_controller_impulses_keep_post_step_queries_current() {
     use crate::reference::{
-        AnchorId, ItemId, SourceId, WheelFrictionCurve, WheelHubReference, WheelSlotId,
-        WheelSlotReference,
+        AnchorId, ItemId, SourceId, WheelColliderReference, WheelFrictionCurve, WheelHubReference,
+        WheelSlotId, WheelSlotReference,
     };
     use crate::vehicle::wheel::{WheelSlip, WheelState, resolve_profile};
     use crate::vehicle::{DriveTorques, VehicleBody, WheelAssembly};
@@ -731,21 +731,23 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         wheel: ItemId(0),
         tire: ItemId(0),
         rim: ItemId(0),
-        radius: 0.25,
-        suspension_distance: 1.0,
-        center: [0.0; 3],
-        spring: 100.0,
-        damper: 1.0,
-        target_position: 0.75,
+        collider: WheelColliderReference {
+            radius: 0.25,
+            suspension_distance: 1.0,
+            center: [0.0; 3],
+            spring: 100.0,
+            damper: 1.0,
+            target_position: 0.75,
+            forward_friction: friction,
+            sideways_friction: friction,
+            wheel_mass_kg: 1.0,
+            rotational_damping: 0.0,
+            force_application_distance_m: 0.0,
+        },
         steer: false,
         drive: false,
         brake: false,
         handbrake: false,
-        forward_friction: friction,
-        sideways_friction: friction,
-        wheel_mass_kg: 1.0,
-        rotational_damping: 0.0,
-        force_application_distance_m: 0.0,
         sideways_stiffness_modifier: 1.0,
         hub: WheelHubReference {
             radius_m: 0.1,
