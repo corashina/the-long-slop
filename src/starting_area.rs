@@ -2016,12 +2016,13 @@ impl GarageRuntime {
         };
         // Source `carscript.Update` calls `Balance()` for a seated driver or an in-use push grip.
         // A push leaves source `isteer` at 0 after `ResetInput`, so the balance steer is 0.
+        // Source `isteer` is right minus left. Port steer is left minus right.
         if chassis_active
             && (driving || pushed.is_some())
             && let Some(balance) = &world_vehicle(reference, vehicle.prototype).balance
         {
             let steer = if driving {
-                controls.steer.clamp(-1., 1.)
+                -controls.steer.clamp(-1., 1.)
             } else {
                 0.
             };

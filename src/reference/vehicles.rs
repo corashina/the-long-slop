@@ -116,7 +116,10 @@ impl BalanceReference {
         ]) && self.lean_angle_lerp >= 0.
             && self.steer_angle_lerp >= 0.
             && self.max_force >= 0.
-            && (!self.lean || curve_valid(&self.lean_curve))
+            // The curve evaluator has no weighted keys.
+            && (!self.lean
+                || curve_valid(&self.lean_curve)
+                    && self.lean_curve.keys.iter().all(|k| k.weighted_mode == 0))
     }
 }
 

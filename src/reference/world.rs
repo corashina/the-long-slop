@@ -189,6 +189,16 @@ pub struct WorldPushReference {
 impl WorldPushReference {
     fn valid(&self, p: &WorldPrototypeReference) -> bool {
         let node = |n: u32| (n as usize) < p.nodes.len();
+        // Grip colliders must be on the push body, below the push node, as the binder needs.
+        let under = |mut n: u32| loop {
+            if n == self.node {
+                break true;
+            }
+            match p.nodes.get(n as usize).and_then(|n| n.parent) {
+                Some(parent) => n = parent,
+                None => break false,
+            }
+        };
         p.bodies
             .get(self.body as usize)
             .is_some_and(|b| b.node == self.node)
@@ -196,13 +206,14 @@ impl WorldPushReference {
             && self.modifier >= 0.
             && self.grip.as_ref().is_none_or(|g| {
                 node(g.node)
+                    && under(g.node)
                     && g.hand_node.is_none_or(node)
                     && transform(&g.local_pose)
                     && !g.colliders.is_empty()
                     && g.colliders.iter().all(|&c| {
                         p.colliders
                             .get(c as usize)
-                            .is_some_and(|c| c.node == g.node)
+                            .is_some_and(|c| c.node == g.node && c.body == Some(self.body))
                     })
             })
     }
