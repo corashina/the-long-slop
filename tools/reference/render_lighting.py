@@ -235,7 +235,7 @@ def recover_lights_and_probes(source, roots):
                     'near':shadows['m_NearPlane']}})
         else:
             if node is None:raise ValueError(f'{identity} missing probe node')
-            probes.append({'source':source_id(reader),'node':node,'world_pose':pose,**probe_settings(identity,data)})
+            probes.append({'source':source_id(reader),**probe_settings(identity,data)})
     if len(probes)!=len(source.lighting_cars):
         raise ValueError('Each selected source car requires one registered local probe')
     if any(light['enabled'] for light in lights[1:]):

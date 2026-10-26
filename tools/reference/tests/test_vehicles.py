@@ -105,9 +105,7 @@ def car_fixture():
 class VehicleRecordTests(unittest.TestCase):
     def test_car_prototype_vehicle_and_engine_part(self):
         source, hierarchy, bodies, colliders = car_fixture()
-        view = dict(default_pitch_degrees=0., pitch_limits_degrees=[-89., 89.])
-        with patch('tools.reference.vehicles.seat_view', return_value=view), \
-                patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+        with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
                 patch('tools.reference.vehicles.recover_wheel_effects',
                       lambda source, car_reader, car, root, wheels, index, output: [w.path_id for w in wheels]):
             vehicle = vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
@@ -121,8 +119,9 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(sum(w['drive'] and w['handbrake'] for w in vehicle['wheels']), 2)
         self.assertTrue(all(w['mount'] == w['slot'] for w in vehicle['wheels']))
         self.assertEqual([s['driver'] for s in vehicle['seats']], [True])
-        self.assertEqual(len(vehicle['seats'][0]['hit_nodes']), 2)
-        self.assertEqual(vehicle['mass_kg'], 820.)
+        self.assertEqual(set(vehicle['seats'][0]), {'source', 'driver', 'driving2'})
+        # Dry massScript mass. The runtime adds the 20 L of tank fluid.
+        self.assertEqual(vehicle['mass_kg'], 800.)
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         self.assertIsNone(vehicle['instruments'])

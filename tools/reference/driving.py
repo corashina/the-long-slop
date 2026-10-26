@@ -146,7 +146,7 @@ def recover_driving(source, car_readers, wheel_readers):
         if not keys:raise ValueError(f'Unresolved driving input: {name}')
         bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
         binding_evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
-    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0], 'force_manual':toggles[2]['default'],
+    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'keyboard_steering_rate':steering_rate, 'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
             'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings}
     main_reader=source.get('level1',64919)

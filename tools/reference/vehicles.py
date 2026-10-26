@@ -10,7 +10,6 @@ from .instruments import instrument_record
 from .lighting import vehicle_light_links, vehicle_states
 from .particles import recover_exhaust
 from .wheel_effects import recover_wheel_effects, effect_gains
-from .player_movement import seat_view
 from .plates import prototype_plates
 from .render_lighting import probe_settings
 
@@ -73,12 +72,10 @@ def dry_mass(source, components) -> float:
 
 
 def seat_fields(source, reader, value, car_reader) -> dict:
-    """seatscript values of a primary seat in the car of `car_reader`."""
+    """Driver roles of a primary seat in the car of `car_reader`."""
     car=source.resolve(reader,value['Car'])
     own=car is not None and key(car)==key(car_reader)
-    return {'driver':bool(value['driverSeat0']) and own,'driving2':bool(value['driverSeat1']) and own,
-        'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'min_exit_angle_degrees':value['minGetUpAnlge'],
-        'exit_height':value['getOutHeight'],'show_sleep_text':bool(value['showSleepText'])}
+    return {'driver':bool(value['driverSeat0']) and own,'driving2':bool(value['driverSeat1']) and own}
 
 
 class Prototype:
@@ -216,19 +213,12 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
             'slot':proto.node(slot),'mount':proto.link(slot,source.read(slot)['T']) or proto.node(slot),
             **{name:identity in roles[name] for name in ('steer','drive','brake','handbrake')},
             'sideways_stiffness_modifier':raw['sideStiffnessModifier']})
-    # Seats. A seat with `mainseat` adds its node to the hit nodes of the primary seat.
-    seat_readers=proto.scripts('seatscript',active_only=True)
-    hits={}
-    for node,reader in seat_readers:
-        value=source.read(reader)
-        primary=source.resolve(reader,value['mainseat']) if value['mainseat']['m_PathID'] else reader
-        hits.setdefault(key(primary),[]).append(node)
+    # Driver roles of primary seats. The runtime binds the seats from the prototype.
     seats=[]
-    for node,reader in seat_readers:
+    for node,reader in proto.scripts('seatscript',active_only=True):
         value=source.read(reader)
         if value['mainseat']['m_PathID']:continue
-        seats.append({'source':source_id(reader),'node':node,'sit_node':proto.link(reader,value['sitPos']) if value['sitPos']['m_PathID'] else node,
-            'hit_nodes':hits[key(reader)],**seat_fields(source,reader,value,car_reader),**seat_view(source,reader)})
+        seats.append({'source':source_id(reader),**seat_fields(source,reader,value,car_reader)})
     lights,light_switch=light_records(source,proto,car_reader,car,asset,material_indices)
     instruments=instrument_record(source,hierarchy[0]['reader'],proto.nodes,asset,material_indices)
     tanks=[c for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='tankscript']

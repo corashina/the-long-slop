@@ -23,16 +23,16 @@ Rejected cars:
 ## Project change
 
 In the source, all start cars share one garage spot. The game can show one start car.
-The export selects the Lada at that spot. It adds no car to the yard.
+The world stream spawns the Lada from the startup entry `StartCar02`. It adds no car to the yard.
 
 ## Model
 
-- `ReferenceManifest.vehicles` holds one record per car. Each record holds its engine and instruments.
-- Seats, light controllers, high-beam lamps, part slots, and tanks name their car by index.
-- One Rapier world holds every chassis. `PhysicsWorld` methods take the car index.
-- `GarageRuntime.vehicles` holds engine, handbrake, gear, ignition, and trip per car.
+- Each car prototype in `WorldReference::prototypes` holds a `vehicle` record.
+- `GarageRuntime.vehicles` holds one `VehicleRuntime` per car copy, keyed by object key.
+- One Rapier world holds every chassis. `PhysicsWorld` methods take the object key.
 - `GarageRuntime.vehicle` is the last seated car. The camera, HUD, and recovery follow it.
 - Every engine steps each frame. Only the seated driver's car reads keys.
+- The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Parts fit only slots with a matching source part type. The source rules decide cross-car fit.
 
 ## Physics fix

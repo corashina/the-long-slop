@@ -14,7 +14,18 @@ from .lighting import rgba
 from .particles import recover_exhaust
 from .wheel_effects import recover_wheel_effects, recover_wheel_voices, effect_gains
 from .player_movement import recover_player_movement, recover_seat_view
-from .vehicles import component_mass, engine_fields, radiator_fields, seat_fields
+from .vehicles import engine_fields, radiator_fields, seat_fields
+
+
+def component_mass(source, components) -> float:
+    """massScript mass plus initial tankscript fluid of one node."""
+    total=0.
+    for reader in components:
+        if reader.type.name!='MonoBehaviour':continue
+        name=source.class_name(reader)
+        if name=='massScript':total+=source.read(reader)['mass']
+        elif name=='tankscript':total+=sum(f['amount'] for f in source.read(reader)['F']['fluids'])
+    return total
 
 
 def fluid_entries(value: dict) -> list[dict]:

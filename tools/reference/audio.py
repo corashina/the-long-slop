@@ -709,7 +709,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             if key(target) not in interior_ids:raise ValueError('Audio route interior outside selected roots')
             default_interiors.append(interior_ids[key(target)])
         audio['routes'].append({'source':source_id(r),'voices':route_voices,'interiors':default_interiors,
-            'has_car':bool(d['def']['m_PathID']),'sensor':sensor(source.resolve(r,d['interiorSens'])),
+            'sensor':sensor(source.resolve(r,d['interiorSens'])),
             'main_mixer':mixer(source.resolve(r,d['GMain'])),'outside_mixer':mixer(source.resolve(r,d['GOutSide'])),
             'car_mixer':mixer(source.resolve(r,d['GCarSounds'])) if d['GCarSounds']['m_PathID'] else None,
             'initial_outside':bool(d['outSide']),'initial_player_inside':bool(d['playerInside']),
@@ -813,6 +813,9 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
         if set(v['curves'])!={'rolloff','spatial_blend','spread','reverb_mix'}:raise ValueError('Missing voice curves')
         if not math.isfinite(v['min_distance']) or not math.isfinite(v['max_distance']) or not 0<v['min_distance']<=v['max_distance']:
             raise ValueError('Invalid audio distance')
+    # The runtime indexes car voice templates by id.
+    if [v['id'] for v in audio['car_voices']]!=list(range(1,len(audio['car_voices'])+1)):
+        raise ValueError('Car voice ids must run 1..n')
     for v in audio['car_voices']:
         s=v['settings']
         if (v['clip'] is not None and v['clip'] not in ids) or v['mixer'] not in mixers:raise ValueError('Unresolved car voice clip or mixer')
