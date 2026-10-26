@@ -559,7 +559,7 @@ impl PhysicsWorld {
 
     /// Source WheelCollider rpm, radius and isGrounded of one wheel slot.
     pub fn wheel_motion(&self, vehicle: usize, wheel: usize) -> (f32, f32, bool) {
-        let w = &self.vehicles[vehicle].wheels[wheel];
+        let w = &self.vehicles[vehicle].wheels.wheels()[wheel];
         (w.rpm(), w.profile.radius, w.contact.is_some())
     }
 
