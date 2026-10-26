@@ -508,6 +508,7 @@ impl AudioReference {
                     && rising(h.temperature)
                     && h.attack_release_rate > 0.
             }) && a.switch.as_ref().is_none_or(shot)
+                && a.doors.iter().all(|d| d.sounds.iter().all(shot))
                 && a.wheels
                     .iter()
                     .all(|w| [w.ground, w.spring, w.slide].iter().all(loop_voice))

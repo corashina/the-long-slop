@@ -311,6 +311,16 @@ pub struct CarAudioReference {
     /// One entry per wheel, in wheel effect order.
     pub wheels: Vec<WheelSoundsReference>,
     pub route: CarRouteReference,
+    /// `busdooropenscript` leaves of a bus, in hierarchy order.
+    pub doors: Vec<BusDoorAudioReference>,
+}
+
+/// Source `busdooropenscript.sounds`: `Open` and `Close` play one at random at the leaf.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusDoorAudioReference {
+    pub source: SourceId,
+    pub sounds: Vec<CarShotReference>,
 }
 
 /// Source `carscript.SHornSound`. Pitch follows the ambient temperature.
