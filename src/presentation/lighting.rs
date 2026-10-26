@@ -353,16 +353,21 @@ pub fn load_lamp_materials(
 }
 
 /// Keep all custom source cookies in the existing single sampled texture slot.
+/// A 256 cookie sits padded in the center of its 512 layer.
 pub(crate) fn pack_custom_cookies(
     images: &mut Assets<Image>,
-    handles: [&Handle<Image>; 3],
+    handles: &[&Handle<Image>],
 ) -> Result<Handle<Image>, String> {
-    let originals = handles.map(|handle| images.get(handle).expect("loaded source cookie"));
+    let originals = handles
+        .iter()
+        .map(|handle| images.get(*handle).expect("loaded source cookie"))
+        .collect::<Vec<_>>();
+    let layers = originals.len();
     for (index, image) in originals.iter().enumerate() {
-        let size = if index == 0 { 512 } else { 256 };
-        if image.width() != size
-            || image.height() != size
-            || image.texture_descriptor.mip_level_count != if index == 0 { 10 } else { 9 }
+        if !matches!(
+            (image.width(), image.texture_descriptor.mip_level_count),
+            (512, 10) | (256, 9)
+        ) || image.height() != image.width()
             || !matches!(
                 image.texture_descriptor.format,
                 TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb
@@ -378,7 +383,7 @@ pub(crate) fn pack_custom_cookies(
         Extent3d {
             width: 512,
             height: 512,
-            depth_or_array_layers: 3,
+            depth_or_array_layers: layers as u32,
         },
         TextureDimension::D2,
         TextureFormat::Rgba8Unorm,
@@ -400,14 +405,15 @@ pub(crate) fn pack_custom_cookies(
             size * size * 4
         })
         .sum::<usize>();
-    let mut data = vec![0; layer_bytes * 3];
+    let mut data = vec![0; layer_bytes * layers];
     for (layer, image) in originals.iter().enumerate() {
         let source = image.data.as_ref().unwrap();
+        let mips = image.texture_descriptor.mip_level_count;
         let mut source_offset = 0;
         let mut target_offset = layer * layer_bytes;
         for level in 0..10 {
             let target_size = 512usize >> level;
-            let source_size = (if layer == 0 { 512usize } else { 256usize } >> level).max(1);
+            let source_size = (image.width() as usize >> level).max(1);
             let pad = (target_size - source_size) / 2;
             for y in 0..target_size {
                 let source_y = y.saturating_sub(pad).min(source_size - 1);
@@ -419,7 +425,8 @@ pub(crate) fn pack_custom_cookies(
                 }
             }
             target_offset += target_size * target_size * 4;
-            if level < 8 || layer == 0 {
+            // The last source mip also fills the smaller target mips.
+            if level + 1 < mips {
                 source_offset += source_size * source_size * 4;
             }
         }
@@ -428,7 +435,9 @@ pub(crate) fn pack_custom_cookies(
     Ok(images.add(array))
 }
 
-pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> [u32; 5] {
+/// Cookie texture ids: the cloud shadow cookie, the default spot cookie, then the custom cookie
+/// array layers: the first lighting spot cookie, both flashlight cookies and the world Light cookies.
+pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> Vec<u32> {
     let r = &reference.lighting;
     let portable = [
         &reference.flashlights.instances[0],
@@ -447,7 +456,7 @@ pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> [u3
             .cookie
             .unwrap()
     });
-    [
+    let mut ids = vec![
         r.cycle.cloud_shadow_cookie,
         r.default_spot_cookie,
         r.lights
@@ -458,21 +467,41 @@ pub(crate) fn cookie_ids(reference: &crate::reference::ReferenceManifest) -> [u3
             .unwrap(),
         portable[0],
         portable[1],
-    ]
+    ];
+    for cookie in &reference.world.light_cookies {
+        if !ids.contains(&cookie.texture) {
+            ids.push(cookie.texture);
+        }
+    }
+    ids
 }
-/// Shader cookie slot of a light: 0 none, then 1 + its index in `cookie_ids`.
-/// A spot light without a cookie uses the default spot cookie. None: the cookie is not bound.
-pub(crate) fn cookie_slot(ids: &[u32; 5], light: &crate::reference::LightReference) -> Option<f32> {
-    match light
+/// Shader cookie rect of a light. x: 0 none, then 1 + its index in `ids` (`cookie_ids`).
+/// w: 1 for a 256 cookie array layer. A spot light without a cookie uses the default spot cookie.
+/// None: the cookie is not bound.
+pub(crate) fn cookie_rect(
+    reference: &crate::reference::ReferenceManifest,
+    ids: &[u32],
+    light: &crate::reference::LightReference,
+) -> Option<Vec4> {
+    let Some(id) = light
         .cookie
         .or((light.kind == LightKind::Spot).then_some(ids[1]))
-    {
-        Some(id) => ids
+    else {
+        return Some(Vec4::ZERO);
+    };
+    let index = ids.iter().position(|c| *c == id)?;
+    let half = index > 1
+        && reference
+            .lighting
+            .textures
             .iter()
-            .position(|c| *c == id)
-            .map(|index| (index + 1) as f32),
-        None => Some(0.),
-    }
+            .any(|t| t.id == id && t.width == 256);
+    Some(Vec4::new(
+        (index + 1) as f32,
+        0.,
+        0.,
+        if half { 1. } else { 0. },
+    ))
 }
 pub(crate) fn bind_lighting(
     mut commands: Commands,
@@ -624,7 +653,7 @@ pub(crate) fn bind_lighting(
             pose,
         });
         source.uniform.lights[index].cookie_rect =
-            Vec4::new(cookie_slot(&cookie_ids, light).unwrap_or(0.), 0., 0., 0.);
+            cookie_rect(&reference.0, &cookie_ids, light).unwrap_or(Vec4::ZERO);
         source.uniform.lights[index].cookie_size = light.cookie_size;
         source.uniform.lights[index].mask = UVec4::new(
             light.culling_mask,
@@ -667,7 +696,7 @@ pub(crate) fn bind_lighting(
             pose: Transform::default(),
         });
         source.uniform.lights[index].cookie_rect =
-            Vec4::new(cookie_slot(&cookie_ids, record).unwrap_or(0.), 0., 0., 0.);
+            cookie_rect(&reference.0, &cookie_ids, record).unwrap_or(Vec4::ZERO);
         source.uniform.lights[index].cookie_size = record.cookie_size;
         source.uniform.lights[index].mask = UVec4::new(record.culling_mask, 0, 0, 0);
     }
@@ -1268,7 +1297,7 @@ pub(crate) fn register_world_light(
     slot: usize,
     node: Entity,
     enabled: bool,
-    cookie: f32,
+    cookie: Vec4,
 ) -> Entity {
     let record = &light.record;
     let index = source.road_lamps.fixed_lights + slot;
@@ -1294,7 +1323,7 @@ pub(crate) fn register_world_light(
     });
     let half = record.full_cone_degrees.to_radians() * 0.5;
     source.uniform.lights[index] = GpuLight {
-        cookie_rect: Vec4::new(cookie, 0., 0., 0.),
+        cookie_rect: cookie,
         mask: UVec4::new(
             record.culling_mask,
             (half.cos() / half.sin()).to_bits(),

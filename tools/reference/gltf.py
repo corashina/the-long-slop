@@ -310,6 +310,7 @@ class GltfExporter(GltfBuilder):
             if identity in mapping:
                 raise ValueError(f'Duplicate export root: {identity}')
             mapping[identity] = index
+        missing_bones = []
         for record in records:
             reader = record['reader']
             identity = key(reader)
@@ -388,18 +389,31 @@ class GltfExporter(GltfBuilder):
                     if renderer.type.name == 'SkinnedMeshRenderer':
                         bones = [self.source.resolve(renderer, pointer) for pointer in renderer_data['m_Bones']]
                         if bones:
-                            if any(key(bone) not in mapping for bone in bones):
+                            if any(bone is not None and key(bone) not in mapping for bone in bones):
                                 raise ValueError(f'Skin joint outside selected hierarchy: {key(reader)}')
-                            matrices = self.source.read(mesh_reader)['m_BindPose']
+                            matrices = list(self.source.read(mesh_reader)['m_BindPose'])
                             if len(matrices) != len(bones):
                                 raise ValueError(f'Skin bind pose count: {key(reader)}')
+                            # A missing bone leaves its vertices in place: a new child of the renderer node
+                            # with an identity bind pose. Each one is a new node, because glTF joints are unique.
+                            joints = []
+                            for i, bone in enumerate(bones):
+                                if bone is None:
+                                    joints.append(len(records) + len(missing_bones))
+                                    missing_bones.append(mapping[identity])
+                                    matrices[i] = {f'e{r}{c}': float(r == c) for r in range(4) for c in range(4)}
+                                else:
+                                    joints.append(mapping[key(bone)])
                             converted = convert_bind_poses(matrices)
                             node.skin = len(self.document.skins)
                             root_bone = self.source.resolve(renderer,renderer_data['m_RootBone'])
-                            self.document.skins.append(gl.Skin(joints=[mapping[key(bone)] for bone in bones],
+                            self.document.skins.append(gl.Skin(joints=joints,
                                 inverseBindMatrices=self.accessor(converted,'MAT4',target=None),
                                 skeleton=mapping[key(root_bone)] if root_bone else None))
             self.document.nodes.append(node)
+        for parent in missing_bones:
+            self.document.nodes[parent].children.append(len(self.document.nodes))
+            self.document.nodes.append(gl.Node(name='missing bone', extras={'missing_bone': True}))
         root_nodes = []
         for record in records:
             index = mapping[key(record['reader'])]

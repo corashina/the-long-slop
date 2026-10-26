@@ -93,7 +93,7 @@ pub struct HomeCableReference {
     pub ropes: Vec<NodeId>,
 }
 
-/// Binds a world Light cookie source to its exported lighting spot cookie texture.
+/// Binds a world spot Light cookie source to its exported lighting texture.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldLightCookie {
@@ -145,7 +145,7 @@ pub struct WorldPrototypeReference {
     #[serde(deserialize_with = "compact_vec")]
     pub deferred_materials: Vec<WorldSourceMaterial>,
     #[serde(deserialize_with = "compact_vec")]
-    /// Skins of world prototype nodes. Bones are prototype node indices.
+    /// Skins of road prototype nodes. Bones are prototype node indices.
     pub skins: Vec<SkinnedMeshReference<u32, u32>>,
     #[serde(deserialize_with = "compact_vec")]
     pub bodies: Vec<WorldPrototypeBody>,
@@ -912,9 +912,6 @@ impl WorldReference {
                 self.light_cookies[..index]
                     .iter()
                     .all(|c| c.source != cookie.source)
-                    && manifest.lighting.lights.iter().any(|l| {
-                        l.kind == super::LightKind::Spot && l.cookie == Some(cookie.texture)
-                    })
                     && manifest
                         .lighting
                         .textures

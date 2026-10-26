@@ -1028,8 +1028,10 @@ impl SourceFixedAssets {
             }
         }
         if self.cookies.is_none() && self.rows.iter().all(|r| r.image.is_some()) {
+            let ids = super::lighting::cookie_ids(reference);
+            let layers = ids.len() - 2;
             let bytes = (0..10)
-                .map(|m| 3 * (512usize >> m).pow(2) * 4)
+                .map(|m| layers * (512usize >> m).pow(2) * 4)
                 .sum::<usize>();
             if crate::reference::fixed_reservation::fixed_room(stream, 2 * bytes, bytes, 0, true)? {
                 let mut next = self.allocation()?;
@@ -1040,7 +1042,6 @@ impl SourceFixedAssets {
                     next.replace(*snapshot, stream.presentation_allocation())?,
                 )?;
                 *snapshot = next;
-                let ids = super::lighting::cookie_ids(reference);
                 let handle = |id| {
                     lighting
                         .textures
@@ -1050,8 +1051,9 @@ impl SourceFixedAssets {
                         .2
                         .clone()
                 };
-                let originals = [handle(ids[2]), handle(ids[3]), handle(ids[4])];
-                let array = super::lighting::pack_custom_cookies(images, originals.each_ref())
+                let originals = ids[2..].iter().map(|id| handle(*id)).collect::<Vec<_>>();
+                let originals = originals.iter().collect::<Vec<_>>();
+                let array = super::lighting::pack_custom_cookies(images, &originals)
                     .map_err(ReferenceError)?;
                 lighting.cookie_handles = Some([handle(ids[0]), handle(ids[1]), array.clone()]);
                 self.uploads

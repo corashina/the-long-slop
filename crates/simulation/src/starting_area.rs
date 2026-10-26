@@ -622,7 +622,7 @@ impl VehicleRuntime {
             return Some(pick(state.lamp_bits & (1 << i) != 0, &lamp.on, &lamp.off));
         }
         if let Some(digit) = r.digits().iter().find(|d| d.node.0 == node) {
-            return Some(pick(state.digits_lit, &digit.on, &digit.off));
+            return digit.material(state.digits_lit);
         }
         r.all_backlights().find_map(|b| match b {
             crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }

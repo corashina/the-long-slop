@@ -85,7 +85,7 @@ struct Out { @builtin(position) position:vec4<f32>, @location(0) world:vec4<f32>
             if lamp.cookie_rect.x==1. {weight*=textureSampleGrad(sun_cookie,sun_cookie_sampler,uv,uv_dx,uv_dy).a;}
             else if lamp.cookie_rect.x==2. {weight*=textureSampleGrad(default_cookie,default_sampler,uv,uv_dx,uv_dy).a;}
             else {
-                let half=lamp.cookie_rect.x>3.0;let scale=select(1.,0.5,half);
+                let half=lamp.cookie_rect.w>0.5;let scale=select(1.,0.5,half);
                 let array_uv=select(uv,uv*0.5+0.25,half);
                 weight*=textureSampleGrad(cookies,cookie_sampler,array_uv,i32(lamp.cookie_rect.x)-3,uv_dx*scale,uv_dy*scale).a;
             }

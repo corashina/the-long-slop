@@ -613,7 +613,7 @@ impl WorldVehicleReference {
                 .digits()
                 .iter()
                 .filter(move |d| d.node.0 == node)
-                .flat_map(|d| [&d.on, &d.off]);
+                .flat_map(DigitReference::materials);
             let backlights = r
                 .all_backlights()
                 .filter_map(move |b| match b {
@@ -846,8 +846,7 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
         && r.digits().iter().all(|d| {
             b.node(d.node.0)
                 && d.axis < 3
-                && b.material(&d.on)
-                && b.material(&d.off)
+                && d.materials().all(|m| b.material(m))
                 && finite(&[d.initial_value, d.initial_angle])
         })
         && r.odometer
@@ -888,10 +887,7 @@ impl GaugePartReference {
                 && self.counters.iter().all(|c| {
                     finite(&[c.initial_value, c.multiplier])
                         && c.digits.iter().all(|d| {
-                            b.node(d.node.0)
-                                && d.axis < 3
-                                && b.material(&d.on)
-                                && b.material(&d.off)
+                            b.node(d.node.0) && d.axis < 3 && d.materials().all(|m| b.material(m))
                         })
                 }),
         )

@@ -540,24 +540,23 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for identity,record in selected.records.items():
         if identity not in records:records[identity]=record
     world['records']=list(records.values())
-    bind_light_cookies(source,world)
+    bind_light_cookies(source,world,output)
     from .world_spawn import project_runtime_receipts
     from .world_fields import project_runtime_fields
     project_runtime_receipts(world,world_probe.PROBE_ROOT)
     project_runtime_fields(world,world_probe.PROBE_ROOT)
     return world
 
-def bind_light_cookies(source, world):
-    """Bind each world Light cookie to the lighting spot cookie texture that renders it."""
-    textures={tuple(t['source'].values()):t['id'] for t in source.lighting_textures.values()}
-    spot={l['cookie'] for l in source.lighting_lights if l['kind']=='spot' and l['cookie'] is not None}
+def bind_light_cookies(source, world, output):
+    """Bind each world spot Light cookie to its lighting texture. The renderer packs these textures."""
+    from .lighting import texture
     bindings={}
     for r in world['records']:
         cookie=r['fields'].get('m_Cookie') if r['class_name']=='Light' else None
         if not cookie or cookie['kind']!='link':continue
         identity=tuple(cookie['value'].values())
-        if r['fields']['m_Type']['value']!=0 or textures.get(identity) not in spot:raise ValueError(f"{r['source']} world light cookie has no lighting spot cookie texture")
-        bindings[identity]={'source':cookie['value'],'texture':textures[identity]}
+        if r['fields']['m_Type']['value']!=0:raise ValueError(f"{r['source']} world light cookie is not on a spot light")
+        bindings[identity]={'source':cookie['value'],'texture':texture(source,source.get(*identity),output)}
     world['light_cookies']=[bindings[i] for i in sorted(bindings)]
 
 def register_mirrors(source, cars):
@@ -794,7 +793,8 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                 data=source.read(component)
                 if component.type.name=='MonoBehaviour' and source.class_name(component)=='roadscript':
                     controls=[mapping[key(source.resolve(component,p))] for p in data['bones']]
-                if component.type.name=='SkinnedMeshRenderer' and data['m_Mesh']['m_PathID']:
+                # Only road deformation reads skin streams. The glTF skin draws other skins.
+                if component.type.name=='SkinnedMeshRenderer' and data['m_Mesh']['m_PathID'] and roles[identity]=='road':
                     skins.append(skin_record(source,exporter,component,mapping[key(n['reader'])],lambda bone:mapping[key(bone)]))
                 if component.type.name in ('BoxCollider','MeshCollider','SphereCollider','CapsuleCollider'):
                     selected.record(component)

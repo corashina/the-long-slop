@@ -52,7 +52,9 @@ class Meters:
             digits.append({'node':self.node(r,digit['T']),'place':digit['helyiertekHatvany'],
                 'axis':next((i for i,x in enumerate(axes) if x),0),'inv':bool(digit['inv']),'direct':bool(digit['direct']),
                 'continuous':bool(digit['continous']),'initial_value':digit['alakiertek'],'initial_angle':digit['angle'],
-                'on':self.material(r,digit['MOn']),'off':self.material(r,digit['MOff'])})
+                # forgoszamlap skips a null material and keeps the current one.
+                'on':self.material(r,digit['MOn']) if digit['MOn']['m_PathID'] else None,
+                'off':self.material(r,digit['MOff']) if digit['MOff']['m_PathID'] else None})
         return {'source':source_id(r),'initial_value':count['value'],'base':d['szamrendszer'],'decimals':d['tizedesjegyek'],
             'use_multiplier':bool(d['useMultiplier']),'multiplier':d['multiplier'],'digits':digits}
 
