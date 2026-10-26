@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 
 mod body;
 pub mod cigarettes;
+mod computers;
 pub(crate) mod hose;
 pub mod spawned;
 mod survival;
@@ -46,6 +47,8 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// gibscript and scaleDestroyScript of spawned gibs.
+    pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
@@ -273,6 +276,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             portable_mass,
         })
@@ -283,6 +287,7 @@ impl StartingArea {
         self.player.rebase(shift);
         self.interaction.rebase(shift);
         self.items.rebase(shift);
+        self.gibs.rebase(shift);
         for (_, previous, current) in &mut self.render_poses {
             for i in 0..3 {
                 previous.position[i] -= shift[i];
@@ -501,6 +506,10 @@ pub struct VehicleRuntime {
     pub(crate) kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
     /// Source `carscript` balance state. It is not saved. Recovery resets it.
     pub balance: crate::simulation::balance::BalanceState,
+    /// Source `bikepedalscript` state. It is not saved.
+    pub pedals: crate::simulation::pedals::PedalState,
+    /// Total pedal turn in degrees, modulo 360. The presentation poses the pedal nodes from it.
+    pub pedal_angle: f32,
 }
 
 impl VehicleRuntime {
@@ -550,6 +559,8 @@ impl VehicleRuntime {
             plates: parts.plates,
             kmh_slots: Vec::new(),
             balance: Default::default(),
+            pedals: Default::default(),
+            pedal_angle: 0.,
         }
     }
     /// The vehicle record of the car prototype.
@@ -571,6 +582,7 @@ impl VehicleRuntime {
             }
             (s.lamp_bits, s.digits_lit).hash(&mut h);
         }
+        self.pedal_angle.to_bits().hash(&mut h);
         if let Some(l) = &self.lever {
             let (t, r) = (l.translation.to_array(), l.rotation.to_array());
             for v in t.iter().chain(&r) {
@@ -1096,6 +1108,7 @@ impl GarageRuntime {
             };
             self.clear_input();
         }
+        self.step_typing(&mut input);
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
@@ -1198,6 +1211,9 @@ impl GarageRuntime {
                     }
                 });
                 if !bus_door
+                    && !self
+                        .stream
+                        .switch_display(knob, reference, &self.area.items)
                     && !self.stream.tune_dial(knob, direction, &mut self.area.items)
                     && !self.stream.switch_detector(knob, &mut self.area.items)
                     && let Some((item, true)) =
@@ -1228,6 +1244,9 @@ impl GarageRuntime {
             }
             _ => {}
         }
+        self.computer_actions(input);
+        self.play_computer_sounds();
+        self.play_computer_notes(&reference.computer.computer);
         while let Some((source, poured_liters, fractions)) =
             self.area.interaction.take_drink_contact()
         {
@@ -1443,7 +1462,7 @@ impl GarageRuntime {
         self.step_body(reference);
         self.sync_mouth();
         self.area.items.sync_poses(&self.physics);
-        self.break_boxes(reference);
+        self.break_targets(reference);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
@@ -1989,7 +2008,16 @@ impl GarageRuntime {
         {
             lever.shift(&reference.driving.lever, last_gear, gear);
         }
-        let throttle = drivetrain.throttle;
+        let record = world_vehicle(reference, vehicle.prototype);
+        // Source `carscript.ControlStuff`: pedals are off while the engine runs.
+        let pedaling = driving
+            && record.pedals.is_some()
+            && !engine.is_some_and(|engine| engine.state.output().running);
+        let throttle = if record.no_gas_while_pedaling && pedaling {
+            0.
+        } else {
+            drivetrain.throttle
+        };
         let brake = drivetrain.brake;
         vehicle.brake = brake;
         let car_controls = chassis_active
@@ -2142,66 +2170,190 @@ impl GarageRuntime {
             );
         }
         if chassis_active {
-            self.physics.apply_vehicle_forces(
-                key,
-                drive,
-                if engine.is_some() {
-                    crate::simulation::drivetrain::transmitted_torques(output, gearbox, gear)
-                } else {
-                    Default::default()
-                },
-            );
+            let mut torques = if engine.is_some() {
+                crate::simulation::drivetrain::transmitted_torques(output, gearbox, gear)
+            } else {
+                Default::default()
+            };
+            if let Some(pedals) = &record.pedals {
+                if driving {
+                    vehicle.pedals.disabled = output.running;
+                }
+                let disabled = vehicle.pedals.disabled;
+                torques.pedal_nm = self.step_pedals(
+                    reference,
+                    key,
+                    vehicle,
+                    pedals,
+                    disabled,
+                    controls.throttle,
+                );
+            }
+            self.physics.apply_vehicle_forces(key, drive, torques);
         }
     }
 
-    /// Source breakablescript on generated boxes: contacts and hazard triggers of this step.
-    fn break_boxes(&mut self, reference: &ReferenceManifest) {
+    /// Source `bikepedalscript.Update()`. Returns the motor torque of each pedal wheel.
+    /// `running`: source `disabled`. `throttle`: source `inputscript.throttle`.
+    fn step_pedals(
+        &self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        vehicle: &mut VehicleRuntime,
+        pedals: &crate::reference::PedalsReference,
+        running: bool,
+        throttle: f32,
+    ) -> Option<f32> {
+        use crate::simulation::pedals;
+        let record = world_vehicle(reference, vehicle.prototype);
+        let seated = self.area.player.seat_vehicle() == Some(key)
+            && self.area.player.seat_source() == Some(&record.seats[pedals.seat as usize].source);
+        let mut rpms = [0.; pedals::MAX_WHEELS];
+        for (rpm, wheel) in rpms.iter_mut().zip(&pedals.driven_wheels) {
+            *rpm = self.physics.wheel_motion(key, *wheel as usize).0;
+        }
+        let mounted = pedals
+            .driven_slots
+            .iter()
+            .filter(|slot| {
+                record.wheels.iter().enumerate().any(|(i, wheel)| {
+                    wheel.slot == **slot && self.physics.wheel_assembly(key, i).has_rim()
+                })
+            })
+            .count();
+        let player = &reference.player;
+        let step = pedals::step(
+            pedals,
+            player.pedaling_nm,
+            player.pedaling_rpm,
+            &mut vehicle.pedals,
+            seated,
+            throttle,
+            &rpms[..pedals.driven_wheels.len()],
+            mounted,
+            running,
+            FIXED_DT,
+        );
+        if step.angle != 0. {
+            vehicle.pedal_angle = (vehicle.pedal_angle + step.angle) % 360.;
+        }
+        step.torque
+    }
+
+    /// Source breakablescript: contacts and hazard triggers of this step, then Break in break order.
+    fn break_targets(&mut self, reference: &ReferenceManifest) {
         self.stream
-            .step_boxes(reference, &self.area.items, &self.physics, FIXED_DT);
-        while let Some(id) = self.stream.take_broken_box() {
+            .step_breakables(reference, &self.area.items, &mut self.physics, FIXED_DT);
+        while let Some((kind, record)) = self.stream.take_break() {
+            let rules = &reference.breakables[record];
+            let item = match kind {
+                crate::damage::BreakKind::Item(item) => item,
+                // Lamp triggers have no gib.
+                crate::damage::BreakKind::Lamp { parent, control } => {
+                    let position = self
+                        .stream
+                        .break_lamp(reference, &mut self.physics, &parent, control, record)
+                        .expect("bound lamp");
+                    if let Some(clip) = self.stream.pick_break_clip(rules)
+                        && let Some(audio) = &mut self.audio
+                        && let Some(position) = position
+                    {
+                        let origin = self.area.origin;
+                        audio.break_clip(
+                            clip,
+                            std::array::from_fn(|i| origin[i] + f64::from(position[i])),
+                        );
+                    }
+                    continue;
+                }
+            };
             // Source Break calls pickupable.Drop2 first.
-            if self.area.interaction.held() == Some(id) {
+            if self.area.interaction.held() == Some(item) {
                 self.area
                     .interaction
                     .drop_held(&mut self.area.items, &mut self.physics);
             }
-            let Some(pose) = self.area.items.get(id).map(|s| s.pose) else {
+            let Some((pose, buried)) = self
+                .area
+                .items
+                .get(item)
+                .filter(|s| {
+                    !s.removed && s.location == crate::interaction::items::ItemLocation::World
+                })
+                .map(|s| (s.pose, s.buried))
+            else {
                 continue;
             };
-            if self
-                .stream
-                .break_box(
-                    id,
-                    &mut self.area.items,
-                    &mut self.area.interaction.storage,
+            // Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
+            if let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) {
+                let prototype = reference
+                    .item_prototypes
+                    .iter()
+                    .position(|p| &p.id == gib)
+                    .expect("validated gib prototype");
+                let gibs = spawned::spawn_prototype(
+                    reference,
+                    &mut self.area,
                     &mut self.physics,
+                    prototype,
+                    pose,
                 )
-                .expect("bound storage")
-                .is_none()
-            {
-                continue;
+                .expect("validated gib prototype");
+                // A buried object makes its gib buried.
+                if buried {
+                    for gib in &gibs {
+                        crate::interaction::buried::bury(
+                            *gib,
+                            &mut self.area.items,
+                            &mut self.physics,
+                        );
+                    }
+                }
+                self.area.gibs.spawn(prototype, gibs, pose);
             }
-            let record = reference
-                .breakable(&reference.acquisition.r#box.breakable)
-                .expect("validated box breakable");
-            // Source Break spawns Gib at the box pose. No reduced-gibs setting exists here.
-            let Some(gib) = record.gib.as_ref().filter(|_| !record.no_gib) else {
-                continue;
-            };
-            let prototype = reference
-                .item_prototypes
-                .iter()
-                .position(|p| &p.id == gib)
-                .expect("validated box debris prototype");
-            spawned::spawn_prototype(
-                reference,
-                &mut self.area,
-                &mut self.physics,
-                prototype,
-                pose,
-            )
-            .expect("validated box debris prototype");
+            if let Some(clip) = self.stream.pick_break_clip(rules)
+                && let Some(audio) = &mut self.audio
+            {
+                let origin = self.area.origin;
+                audio.break_clip(
+                    clip,
+                    std::array::from_fn(|i| origin[i] + f64::from(pose.position[i])),
+                );
+            }
+            if !rules.no_destroy {
+                self.stream
+                    .remove_broken_item(
+                        reference,
+                        record,
+                        item,
+                        &mut self.area.items,
+                        &mut self.area.interaction.storage,
+                        &mut self.physics,
+                    )
+                    .expect("bound storage");
+            }
         }
+        self.step_gibs(reference);
+    }
+
+    /// Gib starts after the breaks of this step, then gib updates and removals.
+    fn step_gibs(&mut self, reference: &ReferenceManifest) {
+        let player = self.area.player.body_pose(&self.physics).position;
+        self.area.gibs.step(
+            reference,
+            self.stream.breakables.random(),
+            player,
+            &mut self.area.items,
+            &mut self.physics,
+            FIXED_DT,
+        );
+        let mut removed = std::mem::take(&mut self.area.gibs.removed);
+        for item in removed.drain(..) {
+            if self.area.spawned.contains(item) {
+                spawned::despawn(&mut self.area, &mut self.physics, item).expect("spawned gib");
+            }
+        }
+        self.area.gibs.removed = removed;
     }
 
     pub fn initialize_storage_frame(&mut self, dt: f32) -> Result<bool, ReferenceError> {
@@ -2222,6 +2374,7 @@ impl GarageRuntime {
     }
 
     pub fn clear_input(&mut self) {
+        self.stream.computers.typing = false;
         self.area.player.cancel_view_input();
         self.sleep.cancel_charge();
         self.clear_driving_input();
@@ -2398,7 +2551,12 @@ impl GarageRuntime {
         }
         Ok(())
     }
-    pub fn align_startup(&mut self, reference: &ReferenceManifest) -> Result<bool, ReferenceError> {
+    /// `calendar` is the local month and day.
+    pub fn align_startup(
+        &mut self,
+        reference: &ReferenceManifest,
+        calendar: [u8; 2],
+    ) -> Result<bool, ReferenceError> {
         if self.startup_aligned {
             return Ok(true);
         }
@@ -2423,8 +2581,46 @@ impl GarageRuntime {
             startup,
             self.area.origin,
         )?;
+        // Source StartDateItems: the pumpkin of a new game in its holiday.
+        let h = &reference.acquisition.holiday_startup;
+        let pumpkin = if holiday_pumpkin(h.start, h.end, calendar) {
+            let parent = h
+                .pose
+                .parent
+                .as_ref()
+                .ok_or_else(|| ReferenceError("Holiday pumpkin parent".into()))?;
+            let pose = crate::world::source_world_pose(
+                &reference.world,
+                startup,
+                parent,
+                &[h.pose.transform],
+            )?;
+            let prototype = reference
+                .item_prototypes
+                .iter()
+                .position(|p| p.source == h.prototype.0)
+                .ok_or_else(|| ReferenceError("Holiday pumpkin prototype".into()))?;
+            Some((prototype, pose))
+        } else {
+            None
+        };
         for (pose, count) in packs {
             self.spawn_pack(reference, pose, count)?;
+        }
+        if let Some((prototype, pose)) = pumpkin {
+            let pose = VehiclePose {
+                position: std::array::from_fn(|i| {
+                    (pose.position[i] as f64 - self.area.origin[i]) as f32
+                }),
+                rotation: pose.rotation,
+            };
+            spawned::spawn_prototype(
+                reference,
+                &mut self.area,
+                &mut self.physics,
+                prototype,
+                pose,
+            )?;
         }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
@@ -2432,6 +2628,26 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, true);
         self.startup_aligned = true;
         Ok(true)
+    }
+}
+
+/// The start pumpkin spawns from `start` to `end`, both inclusive.
+fn holiday_pumpkin(start: [u32; 2], end: [u32; 2], calendar: [u8; 2]) -> bool {
+    let [sm, sd] = start.map(|v| v as u8);
+    let [em, ed] = end.map(|v| v as u8);
+    crate::simulation::radio::in_holiday(calendar, [sm, sd, em, ed])
+}
+
+#[cfg(test)]
+mod holiday_tests {
+    #[test]
+    fn pumpkin_spawns_from_15_october_to_15_november() {
+        let spawns = |month, day| super::holiday_pumpkin([10, 15], [11, 15], [month, day]);
+        assert!(!spawns(10, 14));
+        assert!(spawns(10, 15));
+        assert!(spawns(11, 15));
+        assert!(!spawns(11, 16));
+        assert!(!spawns(1, 1));
     }
 }
 

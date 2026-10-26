@@ -211,6 +211,7 @@ impl WorldStream {
     pub(crate) fn clear_presentation_changes(&mut self) {
         self.presentation_changes.clear();
         self.presentation_lamp_changes.clear();
+        self.cobwebs.changes.clear();
     }
 }
 /// Reused dense selection queue. Producers can name the same instance more than once.

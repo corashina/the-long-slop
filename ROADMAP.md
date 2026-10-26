@@ -115,19 +115,25 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
 28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
 29. Save and load with bus doors open and signalled and with the trailer on the bus.
-30. Other cars (V02): re-export first: new car types, start placements, oil tolerances and car pools. Old saves do not load (save schema 25).
-31. Run `cargo test --lib car_types -- --ignored`.
-32. Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
-33. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
-34. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies.
-35. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
-36. Run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture`. The car pool totals print and no V03 car spawns.
-37. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
-38. Check F3 with several cars in view. Compare with the frame rate rule.
+30. Bikes (V04): re-export first: the bike pool, balance, pedals and car push grips are new. Run `cargo test --lib bike -- --ignored`.
+31. Find Bike01 and Bike03. Ride Bike01: it stays upright, leans into turns, and falls over when nobody rides or pushes it.
+32. Kick start Bike01: ignition on, roll it fast enough, the engine starts with its start sound. No starter motor.
+33. Push a bike and the Lada by hand with their grips. The bike stays upright while you push it.
+34. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
+35. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
+36. Check F3 while riding each bike. Compare with the frame rate rule.
+37. Other cars (V02): re-export first: new car types, start placements, oil tolerances and car pools. Old saves do not load.
+38. Run `cargo test --lib car_types -- --ignored`.
+39. Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
+40. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
+41. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies.
+42. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
+43. Run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture`. The car pool totals print and no V03 car spawns.
+44. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
+45. Check F3 with several cars in view. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 
 ## 5. Later
 
@@ -156,15 +162,22 @@ Run the X01a test pass (player body) in the same run:
 5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
 6. Check the F3 cost of the body.
 
+Run the X02 part 1 test pass (damage and breaking) in the same run:
+
+1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
+2. Run `cargo test --lib breakables -- --ignored`.
+3. Drop and throw beer bottles, the vase and a box. Soft drops keep them whole. Hard hits break them with pieces and a break sound. The pieces scatter and fade.
+4. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
+5. Check F3 near a box pile and while pieces fall. Compare with the frame rate rule.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
-| X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
+| X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
-| X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]

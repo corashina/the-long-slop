@@ -441,7 +441,7 @@ impl GarageRuntime {
                 .apply_inventory_command(command, reference, &mut self.physics)
                 .expect("checked inventory bindings");
         }
-        self.advance_melee(input, dt);
+        self.advance_melee(reference, input, dt);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -521,6 +521,12 @@ impl GarageRuntime {
             &mut self.area.interaction.cleaning,
             &mut self.area.items,
         );
+        self.stream.advance_cobwebs(
+            frame,
+            reference,
+            &mut self.area.interaction.cleaning,
+            &mut self.physics,
+        );
         self.play_small_item_sounds();
         self.area.interaction.cleaning.finish_frame(
             frame,
@@ -535,6 +541,29 @@ impl GarageRuntime {
             .cleaning
             .sync_wash_colliders(&self.area.conditions, &mut self.physics);
         self.sync_tool_audio(reference);
+        let reach = reference.player.aim_reach;
+        let aimed = [
+            self.aim.focus_target,
+            self.aim.grab_target,
+            self.aim.use_target,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|t| t.distance.is_finite() && t.distance <= reach)
+        .map(|t| t.item);
+        self.stream.refill_bottles(
+            &reference.small_items.spray_bottle,
+            crate::world::stream::content_small_items::RefillInput {
+                carried: self.area.interaction.held(),
+                hand: self.area.interaction.equipment.item(),
+                aimed,
+                use_held: input.held & keys::USE != 0,
+                use_released: input.released & keys::USE != 0,
+                reload_held: input.held & keys::RELOAD != 0,
+                reload_released: input.released & keys::RELOAD != 0,
+            },
+            &mut self.area.items,
+        );
         self.area.interaction.equipment_input.finish_frame(input);
         let available = self.area.interaction.available_actions(
             &self.aim,
@@ -614,7 +643,7 @@ impl GarageRuntime {
         );
     }
     /// `weaponhandlingscript` and `meleeweaponscript` for a shovel in the right hand.
-    fn advance_melee(&mut self, input: FrameInput, dt: f32) {
+    fn advance_melee(&mut self, reference: &ReferenceManifest, input: FrameInput, dt: f32) {
         use crate::interaction::melee::MeleeInput;
         let interaction = &mut self.area.interaction;
         let shovel = interaction.equipment.item().filter(|id| {
@@ -640,6 +669,8 @@ impl GarageRuntime {
             &mut self.area.items,
             &mut self.physics,
             &mut interaction.buried,
+            &mut self.stream.breakables,
+            &reference.breakables,
             player,
             self.area.origin,
         );

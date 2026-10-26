@@ -1,6 +1,8 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
 #[path = "stream_tests/bikes.rs"]
 mod bikes;
+#[path = "stream_tests/breakables.rs"]
+mod breakables;
 #[path = "stream_tests/car_types.rs"]
 mod car_types;
 #[path = "stream_tests/cargo.rs"]
@@ -364,7 +366,7 @@ fn prepare_step_for_views(
         )
         .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
-    run.align_startup(reference).unwrap();
+    run.align_startup(reference, [1, 1]).unwrap();
 }
 
 pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
@@ -1285,6 +1287,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         fluids: None,
         valve: None,
         lamp: None,
+        lamp_broken: None,
         dial: None,
         ammo: None,
         glow: None,

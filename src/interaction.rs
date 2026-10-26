@@ -2,6 +2,7 @@ pub mod buried;
 pub mod carry;
 pub mod cigarettes;
 pub mod cleaning;
+pub mod computer;
 pub mod consumption;
 pub mod equipment;
 pub(crate) mod equipment_input;
@@ -666,6 +667,9 @@ impl InteractionState {
     }
     pub fn pickup_rule(&self, id: ItemId) -> Option<&crate::reference::PickupReference> {
         self.carry.rule(id)
+    }
+    pub fn reach(&self) -> f32 {
+        self.reach
     }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()

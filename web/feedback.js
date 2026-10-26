@@ -1,7 +1,9 @@
 import {applyLayout} from './ui-layout.js';
 export function formatGear(gear){return gear<0?'R':gear===0?'N':String(gear);}
-/** Hose prompt bits (Rust `HosePrompt`). */
-export const HOSE={ATTACH:1,COIL:2,DRAIN:4};
+/** Item prompt bits (Rust `ItemPrompt`). */
+export const PROMPT={ATTACH:1,COIL:2,DRAIN:4,RELOAD:8,UNLOAD:16};
+/** Computer prompt bits (Rust `ComputerPrompt`). TYPING routes the keyboard to the computer. */
+export const COMPUTER={TURN_ON:1,TURN_OFF:2,USE:4,CONNECT:8,DISCONNECT:16,TYPING:32};
 export const ACTION={USE:1,DOOR:2,PICKUP:4,DROP:8,MOUNT:16,DISMOUNT:32,FILL:64,TUNE:128,ENTER:256,EXIT:512,SWITCH:1024,PUSH:2048,GRIP:4096,THROW:8192,ROTATE:32768,RELEASE_GRIP:65536,PRIMARY_SWITCH:131072,SCROLL:262144,CONSUME:524288,DRINK:1048576,HELD_SWITCH:2097152,WASH:4194304,SCRUB:8388608,EQUIP:16777216,RECENTER:33554432,RELEASE_EQUIPMENT:67108864,RELEASE_EQUIPMENT_SEATED:134217728,TAKE_ONE:268435456,SMOKE:536870912,PUT_ON:1073741824,CRANK:2147483648};
 const FLUIDS=['Gas','Oil','Alcohol','Water','Blood','Diesel'];
 export function formatRadio(r){if(r.context===11&&Number.isFinite(r.radioVolume))return 'Volume: '+Math.round(r.radioVolume*10).toString().padStart(2,'0');if(r.context===12&&Number.isFinite(r.radioFrequency))return (r.radioAm?'AM '+r.radioFrequency.toFixed(0).padStart(3,'0'):'FM '+r.radioFrequency.toFixed(1).padStart(4,'0'));return '';}
@@ -34,7 +36,7 @@ export function selectIcon(mask,context,carrying) {
  return carrying?'carrying':'default';
 }
 export class FeedbackState {
- constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;this.hose=0;}
+ constructor(){this.visible=false;this.enabled=true;this.active=false;this.fluidText='';this.fluidName=undefined;this.capacity=undefined;this.amountKey=undefined;this.percentKeys=[-1,-1,-1,-1,-1,-1];this.hasName=undefined;this.noText=undefined;this.empty=undefined;this.lmbUse=false;this.actions=-1;this.context=-1;this.carrying=false;this.notice='';this.targetName='';this.condition=-1;this.throwCharge=0;this.throwActive=false;this.prompts=0;this.computer=0;}
  setVisible(active){this.active=active;this.visible=active&&this.enabled;}
  toggle(){this.enabled=!this.enabled;this.visible=this.active&&this.enabled;}
  update(r){
@@ -47,8 +49,8 @@ export class FeedbackState {
   const targetName=r.context===11?'Volume +/-':r.context===12?'Tune':r.name;
   const detailChanged=targetName!==this.targetName||r.condition!==this.condition||r.throwCharge!==this.throwCharge||r.throwActive!==this.throwActive;
   this.targetName=targetName;this.condition=r.condition;this.throwCharge=r.throwCharge;this.throwActive=r.throwActive;
-  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.hose!==this.hose;
-  this.lmbUse=r.lmbUse;this.hose=r.hose;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
+  const actionsChanged=r.actions!==this.actions||r.context!==this.context||r.carrying!==this.carrying||r.notice!==this.notice||r.lmbUse!==this.lmbUse||r.prompts!==this.prompts||r.computer!==this.computer;
+  this.lmbUse=r.lmbUse;this.prompts=r.prompts;this.computer=r.computer;this.actions=r.actions;this.context=r.context;this.carrying=r.carrying;this.notice=r.notice;
   return changed||radioChanged||actionsChanged||detailChanged;
  }
 }
@@ -86,16 +88,23 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   [ACTION.RELEASE_EQUIPMENT,'releaseEquipment','Tab or MMB: release'],
   [ACTION.RELEASE_EQUIPMENT_SEATED,'releaseEquipmentSeated','MMB: release'],
   [ACTION.CRANK,'crank','[E]+[Mouse]: Crank'],
-  [0,'hoseAttach','[F]: '+ui.hose_prompts.attach,HOSE.ATTACH],
-  [0,'coilUp','[R]: '+ui.hose_prompts.coilup,HOSE.COIL],
-  [0,'drain','[LMB]: '+ui.hose_prompts.drain,HOSE.DRAIN]
- ].map(([bit,role,text,hose=0])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,hose,role,n,family:0,top:0,line:0,offset:-1};});
+  [0,'hoseAttach','[F]: '+ui.hose_prompts.attach,PROMPT.ATTACH],
+  [0,'coilUp','[R]: '+ui.hose_prompts.coilup,PROMPT.COIL],
+  [0,'drain','[LMB]: '+ui.hose_prompts.drain,PROMPT.DRAIN],
+  [0,'reload','[R]: '+ui.ammo_prompts.reload,PROMPT.RELOAD],
+  [0,'unload','[E]: '+ui.ammo_prompts.unload,PROMPT.UNLOAD],
+  [0,'computerTurnOn','[R]: '+ui.computer_prompts.turnon,0,COMPUTER.TURN_ON],
+  [0,'computerTurnOff','[R]: '+ui.computer_prompts.turnoff,0,COMPUTER.TURN_OFF],
+  [0,'computerUse','[LMB]: '+ui.computer_prompts.use,0,COMPUTER.USE],
+  [0,'computerConnect','[E]: '+ui.computer_prompts.connect,0,COMPUTER.CONNECT],
+  [0,'computerDisconnect','[E]: '+ui.computer_prompts.disconnect,0,COMPUTER.DISCONNECT]
+ ].map(([bit,role,text,prompt=0,computer=0])=>{const n=document.createElement('p');n.textContent=text;n.className='action-row';n.hidden=true;root.append(n);return {bit,prompt,computer,role,n,family:0,top:0,line:0,offset:-1};});
  const named=Object.fromEntries(rows.map(r=>[r.role,r.n]));
  let lastIcon='',lastFluid='',lastNotice='',lastName='',lastCondition='',lastCharge=-1,lastCarry='',lastDoor='',lastUse='',lastTune='',lastScroll='',lastPrimary='',lastCrank='';
  const translationHelp='[RMB]+[Mouse]: Move\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const rotationHelp='[RMB]+[Mouse]: Move\n[MMB]+[Mouse]: Rotate\n[RMB]+[MMB]+[Mouse]: Roll\n[Scroll]: Distance\n[Q]+[Scroll]: Posture';
  const counts=new Uint8Array(4);
- const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use',hoseAttach:'mount',coilUp:'use',drain:'use'};
+ const destinations={use:'use',door:'use',pickup:'pickup',drop:'pickup',mount:'mount',dismount:'mount',fill:'fill',eat:'use',smoke:'use',takeOne:'use',putOn:'pickup',drink:'use',tune:'use',enter:'use',exit:'use',switch:'use',primary:'use',push:'pickup',grip:'pickup',release:'pickup',throw:'pickup',scroll:'use',heldSwitch:'use',wash:'use',scrub:'use',equip:'pickup',recenter:'pickup',releaseEquipment:'pickup',releaseEquipmentSeated:'pickup',crank:'use',hoseAttach:'mount',coilUp:'use',drain:'use',reload:'use',unload:'use',computerTurnOn:'use',computerTurnOff:'use',computerUse:'use',computerConnect:'use',computerDisconnect:'use'};
  const families={use:0,pickup:1,mount:2,fill:3};
  function placeRows(){
   counts.fill(0);
@@ -116,7 +125,7 @@ export function createFeedback(ui,switchIconUrl,manifest) {
  }
  function paint(){
   root.hidden=!state.visible;
-  for(const r of rows)r.n.hidden=r.hose?!(state.hose&r.hose):!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH))||(r.bit===ACTION.MOUNT&&Boolean(state.hose&HOSE.ATTACH));
+  for(const r of rows)r.n.hidden=r.computer?!(state.computer&r.computer):r.prompt?!(state.prompts&r.prompt):!(state.actions&r.bit)||(r.bit===ACTION.DROP&&Boolean(state.actions&ACTION.THROW))||(r.bit===ACTION.SWITCH&&Boolean(state.actions&ACTION.PRIMARY_SWITCH))||(r.bit===ACTION.MOUNT&&Boolean(state.prompts&PROMPT.ATTACH));
   const doorText=state.context===7?'[LMB]+[Mouse]: Move':'[LMB]+[Mouse]: Open/Close';
   if(doorText!==lastDoor){named.door.textContent=doorText;lastDoor=doorText;}
   const useText=state.context===10?(state.lmbUse&&!(state.actions&ACTION.HELD_SWITCH)?'[E] / [LMB]: Switch':'[E]: Switch'):'[E]: Open/Close';

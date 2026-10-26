@@ -62,7 +62,8 @@ struct FeedbackStamp {
     context: u32,
     light_control: u32,
     lmb_use: bool,
-    hose: u8,
+    prompts: u8,
+    computer: u8,
     item: Option<ItemId>,
     opening: Option<OpeningId>,
     carrying: bool,
@@ -249,6 +250,7 @@ pub fn run(
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
+        .init_resource::<presentation::computer::ComputerScreens>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
         .add_systems(
@@ -278,6 +280,7 @@ pub fn run(
                 presentation::consumables::sync,
                 (
                     presentation::spawned::sync,
+                    presentation::cigarettes::sync,
                     presentation::player_body::sync,
                 )
                     .chain(),
@@ -604,6 +607,16 @@ fn read_input(
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
+        typing: if drive.runtime.stream.computers.typing {
+            let mut typing = crate::simulation::TypingInput {
+                keys: game_typing_keys(),
+                ..Default::default()
+            };
+            typing.len = game_typed_text(&mut typing.text).min(typing.text.len() as u32) as u8;
+            typing
+        } else {
+            crate::simulation::TypingInput::default()
+        },
         gamepad: crate::simulation::GamepadFrame::default(),
     };
     game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
@@ -710,10 +723,8 @@ fn advance_physics(
     let started = game_now();
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
-        let calendar = game_audio_calendar();
-        audio
-            .broadcasts
-            .calendar((calendar / 100) as u8, (calendar % 100) as u8);
+        let [month, day] = local_calendar();
+        audio.broadcasts.calendar(month, day);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
     drive.runtime.area.conditions.update(delta, true);
@@ -900,7 +911,11 @@ fn sync_world(
                 .map_or(&[], crate::world::RequiredViews::as_slice),
             budget_ms,
         )
-        .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
+        .and_then(|_| {
+            runtime
+                .align_startup(&reference.0, local_calendar())
+                .map(|_| ())
+        })
         .and_then(|_| {
             if runtime.has_deferred_save_links() {
                 runtime
@@ -1275,7 +1290,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         },
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
-        hose: available.hose,
+        prompts: available.prompts | runtime.stream.refill_prompt(),
+        computer: runtime.computer_prompt(),
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
@@ -1329,7 +1345,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             stamp.order,
             stamp.light_control,
             stamp.lmb_use,
-            stamp.hose.into(),
+            stamp.prompts.into(),
+            stamp.computer.into(),
         );
         drive.last_feedback = Some(stamp);
     }

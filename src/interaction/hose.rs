@@ -1,6 +1,6 @@
 //! Siphon hose (`tubescript`): rules and runtime.
 
-use super::feedback::HosePrompt;
+use super::feedback::ItemPrompt;
 use super::items::{ItemLocation, ItemStore};
 use super::level::{inverse_lerp, lerp};
 use super::{AimTarget, InteractionState, OpeningState};
@@ -611,16 +611,16 @@ impl InteractionState {
         let Some(index) = self.hoses.find(held) else {
             return (0, None);
         };
-        let mut prompts = HosePrompt::COIL;
+        let mut prompts = ItemPrompt::COIL;
         let cap = filling_target
             .and_then(|t| self.openings.iter().find(|o| o.reference.cap == t.item))
             .filter(|o| self.hoses.attach_end(held, o, items, physics).is_some())
             .map(|o| o.reference.id);
         if cap.is_some() {
-            prompts |= HosePrompt::ATTACH;
+            prompts |= ItemPrompt::ATTACH;
         }
         if self.hoses.hoses[index].can_drain(&self.openings, items) {
-            prompts |= HosePrompt::DRAIN;
+            prompts |= ItemPrompt::DRAIN;
         }
         (prompts, cap)
     }

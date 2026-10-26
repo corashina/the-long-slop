@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod computer;
+pub use computer::*;
 pub mod melee;
 pub use melee::*;
 pub mod breakables;
@@ -681,6 +683,10 @@ pub struct PlayerReference {
     pub grip_force: f32,
     pub grip_speed: f32,
     pub grip_distance: f32,
+    /// Source `fpscontroller.PedalingNm`: bike pedal torque at full gas.
+    pub pedaling_nm: f32,
+    /// Source `fpscontroller.PedalingRpm`: bike pedal rpm at full gas.
+    pub pedaling_rpm: f32,
     pub carry_min_weight: f32,
     pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
@@ -858,6 +864,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub computer: ComputerRecord,
     pub melee: MeleeReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
@@ -1752,6 +1759,12 @@ impl ReferenceManifest {
                 && p.grip_distance > 0.0,
             "push and throw parameters",
         )?;
+        require(
+            finite(&[p.pedaling_nm, p.pedaling_rpm])
+                && p.pedaling_nm >= 0.0
+                && p.pedaling_rpm >= 0.0,
+            "pedaling parameters",
+        )?;
         let mut push_owners = HashSet::new();
         for push in &self.pushables {
             require(
@@ -1839,6 +1852,7 @@ impl ReferenceManifest {
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.computer.validate(self)?;
         self.melee.validate(self)?;
         ids(self.breakables.iter().map(|b| &b.source), "breakable sources")?;
         for breakable in &self.breakables {

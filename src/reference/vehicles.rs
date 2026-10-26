@@ -26,6 +26,10 @@ pub struct WorldVehicleReference {
     pub starter_delay_seconds: f32,
     /// Source `carscript` balance values. None when `balanced` is false.
     pub balance: Option<BalanceReference>,
+    /// Source `carscript.bikepedal`. None: the car has no pedals.
+    pub pedals: Option<PedalsReference>,
+    /// Source `carscript.noGasWhilePedaling`: no engine throttle while pedaling.
+    pub no_gas_while_pedaling: bool,
     pub driving: DrivingVehicleReference,
     pub handbrake: bool,
     pub hub: WheelHubReference,
@@ -127,6 +131,57 @@ impl BalanceReference {
             && (!self.lean
                 || curve_valid(&self.lean_curve)
                     && self.lean_curve.keys.iter().all(|k| k.weighted_mode == 0))
+    }
+}
+
+/// Source `bikepedalscript`. Node ids are prototype node indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PedalsReference {
+    pub source: SourceId,
+    /// `WHDriven`: indices into the vehicle `wheels`.
+    pub driven_wheels: Vec<u32>,
+    /// `DrivenWheelSlots`: `partslotscript` nodes, as wheel `slot`. A slot with a part is mounted.
+    pub driven_slots: Vec<u32>,
+    /// Index into the vehicle `seats`.
+    pub seat: u32,
+    pub pedals: Vec<u32>,
+    pub pedals_inverse: Vec<u32>,
+    pub feet_holders: Vec<u32>,
+    pub axes: Vec<u32>,
+    /// `pedalAxisIndex`: the `axes` entry of each feet holder.
+    pub axis_index: Vec<u32>,
+    pub ratio: f32,
+    /// `pedalingSpeedModifier`.
+    pub speed_modifier: f32,
+    /// `pedalInputDebounce` seconds.
+    pub input_debounce: f32,
+    pub gas_tap: f32,
+    pub player_use: bool,
+}
+
+impl PedalsReference {
+    fn valid(&self, b: PrototypeBounds, wheels: usize, seats: usize) -> bool {
+        finite(&[
+            self.ratio,
+            self.speed_modifier,
+            self.input_debounce,
+            self.gas_tap,
+        ]) && self.ratio > 0.
+            && self.input_debounce >= 0.
+            && self.driven_wheels.len() <= crate::simulation::pedals::MAX_WHEELS
+            && self.driven_wheels.iter().all(|i| (*i as usize) < wheels)
+            && (self.seat as usize) < seats
+            && b.nodes(&self.driven_slots)
+            && b.nodes(&self.pedals)
+            && b.nodes(&self.pedals_inverse)
+            && b.nodes(&self.feet_holders)
+            && b.nodes(&self.axes)
+            && self.axis_index.len() >= self.feet_holders.len()
+            && self
+                .axis_index
+                .iter()
+                .all(|i| (*i as usize) < self.axes.len())
     }
 }
 
@@ -640,6 +695,13 @@ impl WorldVehicleReference {
             s,
             "vehicle balance",
             self.balance.as_ref().is_none_or(BalanceReference::valid),
+        )?;
+        check(
+            s,
+            "vehicle pedals",
+            self.pedals
+                .as_ref()
+                .is_none_or(|p| p.valid(b, self.wheels.len(), self.seats.len())),
         )?;
         check(s, "vehicle wheels", !self.wheels.is_empty())?;
         for (i, w) in self.wheels.iter().enumerate() {

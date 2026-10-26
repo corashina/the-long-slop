@@ -137,6 +137,7 @@ fn tow(run: &mut GarageRuntime, key: &ObjectKey, seconds: f32, input: DriveInput
     let torques = DriveTorques {
         motor_nm,
         engine_brake_nm: 0.,
+        pedal_nm: None,
     };
     for _ in 0..(seconds / FIXED_DT) as usize {
         run.physics.apply_vehicle_forces(key, input, torques);
