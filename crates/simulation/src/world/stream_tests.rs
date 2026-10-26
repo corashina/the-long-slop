@@ -15,6 +15,8 @@ mod garage_controls;
 mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
+#[path = "stream_tests/melee.rs"]
+mod melee;
 #[path = "stream_tests/sled.rs"]
 mod sled;
 #[path = "stream_tests/towing.rs"]

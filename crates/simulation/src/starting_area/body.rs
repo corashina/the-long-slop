@@ -30,6 +30,17 @@ impl GarageRuntime {
             .unwrap_or_default();
         let carry = &area.interaction.carry;
         let double_hand = |item| carry.rule(item).is_some_and(|r| r.double_hand);
+        let rapier = self.physics.rapier();
+        // meleeweaponscript moves the weapon grips. They are item children.
+        let grips = |item| {
+            let root = area.items.get(item).and_then(|i| {
+                Some(*rapier.bodies.get(i.body?)?.position() * to_rapier(i.local_pose))
+            });
+            area.interaction
+                .melee
+                .grips()
+                .map(|g| Some(local(root? * g?)))
+        };
         let input = BodyInputs {
             camera: local(to_rapier(view.camera_pose)),
             head: local(to_rapier(view.head_pose)),
@@ -54,6 +65,7 @@ impl GarageRuntime {
                 .zip(area.pose.anchor(hand))
                 .map(|(item, hand)| InHandItem {
                     hand: local(to_rapier(hand)),
+                    grips: grips(item),
                     double_hand: double_hand(item),
                 }),
             seat: player
@@ -74,7 +86,6 @@ impl GarageRuntime {
                 }),
             point: Some((from_rapier(&player.point().at), player.point().value)),
         };
-        let rapier = self.physics.rapier();
         let mechanisms = &area.interaction.mechanisms;
         area.body.step(&input, FIXED_DT, |target| {
             let frame = match target.frame {

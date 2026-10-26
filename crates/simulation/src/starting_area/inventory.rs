@@ -654,15 +654,13 @@ impl GarageRuntime {
             },
         );
     }
-    /// `weaponhandlingscript` and `meleeweaponscript` for a shovel in the right hand.
+    /// `weaponhandlingscript` and `meleeweaponscript` for a melee weapon in the right hand.
     fn advance_melee(&mut self, reference: &ReferenceManifest, input: FrameInput, dt: f32) {
         use crate::interaction::melee::MeleeInput;
         let interaction = &mut self.area.interaction;
-        let shovel = interaction.equipment.item().filter(|id| {
-            interaction
-                .carry
-                .rule(*id)
-                .is_some_and(|r| interaction.melee.is_shovel(&r.source))
+        let weapon = interaction.equipment.item().and_then(|id| {
+            let rule = interaction.carry.rule(id)?;
+            Some((id, interaction.melee.weapon_for(&rule.source)?))
         });
         let held = |key| input.held & key != 0;
         let melee = MeleeInput {
@@ -677,7 +675,7 @@ impl GarageRuntime {
         interaction.melee.step(
             melee,
             dt,
-            shovel,
+            weapon,
             &mut self.area.items,
             &mut self.physics,
             &mut interaction.buried,

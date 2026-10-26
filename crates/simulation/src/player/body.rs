@@ -44,6 +44,8 @@ pub struct CarriedItem {
 pub struct InHandItem {
     /// The `RH` frame.
     pub hand: VehiclePose,
+    /// `LeftHandPos` and `RightHandPos` when the item sets them.
+    pub grips: [Option<VehiclePose>; 2],
     pub double_hand: bool,
 }
 
@@ -179,6 +181,8 @@ enum HandFrame {
     Node(usize),
     Grab,
     Hand,
+    /// `inHandP.LeftHandPos` or `RightHandPos`.
+    Grip,
     Seat,
     Drive,
     /// `Mutat` pointing.
@@ -516,7 +520,7 @@ impl BodyState {
         (self.rig.target(node), HandFrame::Node(node))
     }
 
-    /// fpscontroller.UpdHandPos without per-item hand frames.
+    /// fpscontroller.UpdHandPos. Item hand frames come only from melee weapon grips.
     fn upd_hand_pos(&mut self, input: &BodyInputs, dt: f32) {
         let def = |i: usize| {
             (
@@ -527,11 +531,12 @@ impl BodyState {
         let mut left = None;
         let mut right = if let Some(h) = input.in_hand {
             let (p, r) = pose(&h.hand);
-            let frame = ((p, r * self.hand_rotation), HandFrame::Hand);
+            let hand = ((p, r * self.hand_rotation), HandFrame::Hand);
+            let grip = |side: usize| h.grips[side].map_or(hand, |g| (pose(&g), HandFrame::Grip));
             if h.double_hand {
-                left = Some(frame);
+                left = Some(grip(0));
             }
-            frame
+            grip(1)
         } else if let Some(seat) = &input.seat {
             self.seat_frame(seat, 1)
         } else {
