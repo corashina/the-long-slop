@@ -159,6 +159,7 @@ pub enum AssetUsage {
     ItemPrototype,
     SkyTraffic,
     PlayerPrototype,
+    RagdollPrototype,
     StationPrototype,
 }
 

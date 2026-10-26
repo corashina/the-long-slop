@@ -12,7 +12,8 @@ MATERIAL_SELECTORS=(132932,150967)
 
 
 def recover_clothing(source,manifest,output):
-    from .postprocessing import recover_glasses_profiles
+    from .postprocessing import recover_glasses_profiles,recover_dead_profile
+    from .ragdoll import recover_ragdoll
     evidence=managed_evidence(source,['w.sunglass = this;', 'mainscript.M.disableSunFlare = disableLensFlare;',
         'mainscript.M.PPVSunGlasses.profile = PP;', 'tipusok[i].objects[j].SetActive(value: false);',
         'tipusok[rtipus].objects[k].SetActive(value: true);'])
@@ -25,7 +26,8 @@ def recover_clothing(source,manifest,output):
     def links(reader,values):return [node(source.resolve(reader,p)) for p in values]
     result={'wearable_type_count':5,'player_root':{'file':'level1','path_id':39843},'anchor_nodes':[],
         'anchors':[{'file':'level1','path_id':p} for p in ANCHORS],'wearables':[],
-        'glasses_profiles':recover_glasses_profiles(source,manifest,output),'evidence':evidence}
+        'glasses_profiles':recover_glasses_profiles(source,manifest,output),
+        'dead_profile':recover_dead_profile(source,manifest,output),'evidence':evidence}
     player=source.get('level1',80125)
     root=source.transform_for(source.resolve(player,source.read(player)['m_GameObject']))
     if key(root)!=('level1',39843):raise ValueError('Player Transform root differs')
@@ -93,11 +95,13 @@ def recover_clothing(source,manifest,output):
     outfit=source.get('level1',70544)
     result['outfit_source']=source_id(outfit)
     result['invisible_material']=source_id(source.resolve(outfit,source.read(outfit)['defInvisible']))
+    result['ragdoll']=recover_ragdoll(source,manifest,output)
     return result
 
 
 def validate_clothing(clothing,manifest):
-    from .postprocessing import validate_glasses_profiles
+    from .postprocessing import validate_glasses_profiles,validate_dead_profile
+    from .ragdoll import validate_ragdoll
     finite_record(clothing)
     from .player_pose import validate_player_pose
     validate_characters(clothing,manifest)
@@ -113,6 +117,8 @@ def validate_clothing(clothing,manifest):
         t=n['transform']
         if n['parent']!=parent or n['coordinate_space']!='source_parent_local' or len(t['translation'])!=3 or len(t['scale'])!=3 or any(v==0 for v in t['scale']) or len(t['rotation'])!=4 or abs(sum(v*v for v in t['rotation'])-1)>.002:raise ValueError('Anchor ancestry pose')
     validate_glasses_profiles(clothing['glasses_profiles'],manifest)
+    validate_dead_profile(clothing['dead_profile'],manifest)
+    validate_ragdoll(clothing['ragdoll'],manifest,clothing)
     if len(clothing['wearables'])!=6:raise ValueError('Selected wearable count')
     nodes={n['id']:n for n in manifest['nodes']}
     for w,(pid,root,item,type_index) in zip(clothing['wearables'],FAMILIES,strict=True):
@@ -192,6 +198,20 @@ CHARACTER_RENDERERS = ((58557,58502,43612,44815),
     (58487,58545,58525,58478,58512,58561,58491,58529,58531,58516,58540,58511,58500,58523,58489,58535,42694,41622))
 
 
+def character_outfit(source,root):
+    """playermodeloutfitscript of a character asset root, or None."""
+    from .survival import component
+    if key(root)==('level1',39843):return source.get('level1',70544)
+    if key(root)==getattr(source,'ragdoll_root',None):return component(source,root,'playermodeloutfitscript')
+    return None
+
+
+def character_renderers(source,outfit):
+    characters=[source.resolve(outfit,p) for p in source.read(outfit)['characters']]
+    if not characters or any(c is None for c in characters):raise ValueError('Missing outfit character')
+    return [source.resolve(c,p) for c in characters for p in source.read(c)['ch']['renderers']]
+
+
 def player_renderers(source):
     result=[]
     for pid,expected in zip((71215,67763),CHARACTER_RENDERERS,strict=True):
@@ -202,14 +222,15 @@ def player_renderers(source):
     return result
 
 
-def recover_characters(source,manifest,output):
+def recover_characters(source,manifest,output,outfit=None):
+    """Characters of the player outfit, or of `outfit` (the ragdoll outfit)."""
     import json
     import colorsys
     from pathlib import Path
     from .player_pose import resolved_transform
     from .gltf import validate_gltf, convert_point
     from .source import vector
-    asset=next(a for a in manifest['assets'] if a['usage']=='player_prototype')
+    asset=next(a for a in manifest['assets'] if a['usage']==('player_prototype' if outfit is None else 'ragdoll_prototype'))
     path=(Path(output) if output is not None else Path('web/assets/reference'))/Path(asset['path']).name
     document=validate_gltf(path)
     nodes={key(source.get(n['source']['file'],n['source']['path_id'])):n for n in manifest['nodes'] if n['asset']==asset['id']}
@@ -218,9 +239,11 @@ def recover_characters(source,manifest,output):
         if key(r) not in nodes:raise ValueError('Character source outside player asset')
         return nodes[key(r)]
     accessor=lambda index:skin_accessor(document,index)
-    outfit=source.get('level1',70544);od=source.read(outfit)
-    if [key(source.resolve(outfit,p)) for p in od['characters']]!=[('level1',71215),('level1',67763)]:raise ValueError('Outfit character order')
-    player_renderers(source)
+    if outfit is None:
+        outfit=source.get('level1',70544)
+        if [key(source.resolve(outfit,p)) for p in source.read(outfit)['characters']]!=[('level1',71215),('level1',67763)]:raise ValueError('Outfit character order')
+        player_renderers(source)
+    od=source.read(outfit)
     characters=[]
     for pointer in od['characters']:
         reader=source.resolve(outfit,pointer);d=source.read(reader)['ch'];root=node(reader)
@@ -367,6 +390,23 @@ def validate_characters(clothing,manifest):
     for anchor in clothing['anchor_nodes']:
         n=next((n for n in nodes.values() if n['source']==anchor['source']),None)
         if n is None or n['asset']!=characters[0]['asset'] or n['transform']!=anchor['transform'] or (nodes[n['parent']]['source'] if n['parent'] else None)!=anchor['parent']:raise ValueError('Retained wearable anchor hierarchy')
+
+
+def validate_character_skins(c,manifest,local):
+    """Structure of one character: local renderers, material dependencies, and skin links."""
+    renderers={r['node']:r for r in c['renderers']}
+    if not renderers or len(renderers)!=len(c['renderers']) or any(not local(r['node']) or not r['materials'] or not 0<=r['gltf_mesh']<c['gltf_mesh_count'] for r in c['renderers']):raise ValueError('Character renderer nodes')
+    for r in c['renderers']:
+        for material in r['materials']:
+            if not any(m['asset']==c['asset'] and m['source']==material for m in manifest['rendering']['materials']):raise ValueError('Character material dependency')
+    if len({s['index'] for s in c['skins']})!=len(c['skins']):raise ValueError('Duplicate character skin')
+    for s in c['skins']:
+        if s['node'] not in renderers or renderers[s['node']]['skin']!=s['index'] or not local(s['skeleton']) or any(not local(j) for j in s['joints']):raise ValueError('Character skin links')
+        if s['inverse_bind']['count']!=len(s['joints']) or len(s['attributes'])!=len(renderers[s['node']]['materials']):raise ValueError('Character skin accessors')
+    for segment in c['segments']:
+        for binding in segment['renderers']:
+            r=renderers.get(binding['node'])
+            if r is None or not 0<=binding['slot']<len(r['materials']):raise ValueError('Character segment material slot')
 
 
 def skin_accessor(document,index):
