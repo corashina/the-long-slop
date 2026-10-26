@@ -619,6 +619,8 @@ mod tests {
     /// expected rate times the observed E[c^2] / E[c] per spawn, and at least the binomial
     /// p(1 - p). Box copies come in clumps, so a plain Poisson bound is too narrow; the sample
     /// variance is too narrow when a rare clump is missed.
+    /// Car pool (`kaszni`, `carfull`) items are rows like other items. No Car06P or Car09T copy
+    /// spawns, and at least one building spawns from the car pools.
     /// Run with `--release`: the run takes about 5 minutes, a debug build about 2.5 times more.
     #[test]
     #[ignore = "requires the installed source export"]
@@ -653,6 +655,13 @@ mod tests {
                 .find(|p| &p.source == prototype)
                 .map_or("?".to_string(), |p| p.nodes[0].name.clone())
         };
+        // V02 car pools: rows of `kaszni` (bare body) and `carfull` (full car) items.
+        let car_pools: Vec<&str> = ["kaszni", "carfull"]
+            .into_iter()
+            .flat_map(|pool| category_items(reference, pool))
+            .map(|i| catalog[i as usize].name.as_str())
+            .collect();
+        let (mut cars_expected, mut cars_counted) = (0., 0.);
         let mut failures = Vec::new();
         for (type_index, kind) in reference.buildings.types.iter().enumerate() {
             let type_start = std::time::Instant::now();
@@ -777,6 +786,18 @@ mod tests {
                 } else {
                     ""
                 };
+                // Car06P and Car09T are V03: no copy spawns.
+                let row = key.trim_start_matches('[').to_lowercase();
+                let status = if sum > 0. && (row.starts_with("car06p") || row.starts_with("car09t"))
+                {
+                    "V03 CAR"
+                } else {
+                    status
+                };
+                if car_pools.contains(&key.as_str()) {
+                    cars_expected += exp;
+                    cars_counted += sum;
+                }
                 if !status.is_empty() {
                     failures.push(format!("type {} {key}: {status}", kind.type_id));
                 }
@@ -789,6 +810,8 @@ mod tests {
             );
         }
         println!("loot audit: {:?}", start.elapsed());
+        println!("car pools: expected {cars_expected:.1}, counted {cars_counted:.0}");
+        assert!(cars_expected > 0., "no building spawns from the car pools");
         assert!(
             failures.is_empty(),
             "loot mismatches:\n{}",
@@ -796,20 +819,15 @@ mod tests {
         );
     }
 
-    /// V03 bus pool: each `bus` category item exports as a car prototype with a vehicle
-    /// record, or a trailer record for the trailer bus (`utanfutoscript`). The building
-    /// audit above then counts the buses at the source rates.
-    #[test]
-    #[ignore = "requires the installed source export"]
-    fn v03_bus_pool_exports_car_prototypes() {
-        let reference = reference();
+    /// Item indices of the catalog category `name` and its child categories.
+    fn category_items(reference: &WorldReference, name: &str) -> Vec<u32> {
         let catalog = &reference.catalog;
         let mut stack = vec![
             catalog
                 .categories
                 .iter()
-                .find(|c| c.name == "bus")
-                .expect("bus category")
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("{name} category"))
                 .index,
         ];
         let (mut seen, mut items) = (Vec::new(), Vec::new());
@@ -822,6 +840,18 @@ mod tests {
             items.extend(row.items.iter().flatten().copied());
             stack.extend(row.categories.iter().flatten().copied());
         }
+        items
+    }
+
+    /// V03 bus pool: each `bus` category item exports as a car prototype with a vehicle
+    /// record, or a trailer record for the trailer bus (`utanfutoscript`). The building
+    /// audit above then counts the buses at the source rates.
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn v03_bus_pool_exports_car_prototypes() {
+        let reference = reference();
+        let catalog = &reference.catalog;
+        let items = category_items(reference, "bus");
         assert!(!items.is_empty());
         for index in items {
             let item = &catalog.items[index as usize];
