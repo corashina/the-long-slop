@@ -75,6 +75,14 @@ impl SaveSnapshot {
                 .get(key)
                 .is_some_and(|c| c.snapshot.is_some()),
         };
+        if let Some(SeatSnapshot {
+            owner: SeatOwnerSnapshot::Item { item },
+            ..
+        }) = &self.player.seat
+        {
+            object(item)?;
+            links(exists(item), "Removed or missing seat item")?;
+        }
         let attachment = |a: &AttachmentSnapshot| -> Result<(), SaveError> {
             local(&LocalPose {
                 position: a.local_pose.position.map(|v| v as f32),

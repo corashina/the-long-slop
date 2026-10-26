@@ -854,6 +854,17 @@ impl InteractionState {
     pub(crate) fn remove_item_seat(&mut self, collider: ColliderHandle) {
         self.item_seats.remove(&collider);
     }
+    /// The bound seat of a world item by its main seatscript.
+    pub(crate) fn find_item_seat(
+        &self,
+        owner: &crate::world::ObjectKey,
+        source: &crate::reference::SourceId,
+    ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
+        self.item_seats
+            .values()
+            .find(|seat| &seat.owner == owner && &seat.seat.source == source)
+            .cloned()
+    }
     #[cfg(test)]
     pub(crate) fn item_seat(
         &self,

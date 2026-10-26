@@ -1,4 +1,4 @@
-//! V04: a world item seat holds the player on the item body.
+//! V04: a world item seat holds the player on the item body and survives save and load.
 use super::*;
 use crate::player::SeatOwner;
 use crate::vehicle::to_rapier;
@@ -49,7 +49,10 @@ fn item_seat_follows_item_body() {
             .player
             .enter_item_seat(owner.clone(), body, &record, pose, &mut run.physics)
     );
-    assert_eq!(run.area.player.seat_owner(), Some(&SeatOwner::Item(owner)));
+    assert_eq!(
+        run.area.player.seat_owner(),
+        Some(&SeatOwner::Item(owner.clone()))
+    );
     assert_eq!(run.area.player.seat(), None);
     let start = run.physics.rapier().bodies[body].translation();
     run.physics.edit_body(body, |b| {
@@ -78,6 +81,58 @@ fn item_seat_follows_item_body() {
             .is_err(),
         "occupied item refuses pickup"
     );
+    let stamp = roadside_stamp(&reference);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            crate::save::CameraSave::FirstPerson,
+            "2026-10-26T12:00:00Z",
+        )
+        .unwrap();
+    let saved: crate::save::SaveSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let seat_save = saved.player.seat.as_ref().expect("saved item seat");
+    assert_eq!(
+        seat_save.owner,
+        crate::save::SeatOwnerSnapshot::Item {
+            item: owner.clone()
+        }
+    );
+    assert!(
+        saved.world.changes.get(&owner).is_some(),
+        "seat item change"
+    );
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
+    assert!(loaded.restore_pending());
+    assert!(
+        !loaded.area.player.seated(),
+        "seat waits for the item binding"
+    );
+    for _ in 0..2000 {
+        prepare_ready(&mut loaded, &reference);
+        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
+            break;
+        }
+    }
+    assert!(!loaded.restore_pending());
+    assert_eq!(
+        loaded.area.player.seat_owner(),
+        Some(&SeatOwner::Item(owner.clone()))
+    );
+    let item = loaded.area.items.resolve_key(&owner).expect("loaded sled");
+    let body = loaded.area.items.get(item).unwrap().body.unwrap();
+    assert_eq!(loaded.area.player.item_seat_body(), Some(body));
+    let expected = *loaded.physics.rapier().bodies[body].position() * to_rapier(pose);
+    let seated = to_rapier(loaded.area.player.body_pose(&loaded.physics));
+    assert!((seated.translation - expected.translation).length() < 1e-3);
     assert!(run.area.player.try_exit(&mut run.physics));
     assert!(!run.area.player.seated());
 }
