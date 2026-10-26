@@ -43,7 +43,7 @@ def dashboard_fixture():
     counter = record(30, dict(szamok=[], szamrendszer=10, tizedesjegyek=1.,
                               useMultiplier=False, multiplier=1.), 'forgoszamlap')
     meter = record(2, dict(R=ptr(0), OnM=ptr(21), OffM=ptr(22), mutatok=needles, leds=[],
-                           szamlapok=[dict(forgo=ptr(30), value=0., name='kilometerszamlalo')]), 'meterscript')
+                           szamlapok=[dict(forgo=ptr(30), value=0., tipus='kilometerszamlalo')]), 'meterscript')
     components = [car, meter, counter] + [records[10 + index] for index in range(3)]
     source = NS(hierarchy=lambda root: [dict(components=components)],
                 read=lambda reader: data[reader.path_id],

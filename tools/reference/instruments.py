@@ -83,7 +83,7 @@ class Meters:
         """Gauge part record: a meterscript that carscript.kmhmeters updates through a slot."""
         md=self.source.read(meter)
         return {'source':source_id(meter),'node':node,**self.meter(meter,md),
-            'counters':[self.counter(meter,c) for c in md['szamlapok'] if c['name'] in DISTANCE_COUNTERS]}
+            'counters':[self.counter(meter,c) for c in md['szamlapok'] if c['tipus'] in DISTANCE_COUNTERS]}
 
 
 def instrument_record(source,car_reader,nodes,asset,material_indices):
