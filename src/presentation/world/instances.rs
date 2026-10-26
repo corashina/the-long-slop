@@ -2,7 +2,7 @@
 use super::{
     grass_jobs::GrassJobs,
     instance_materials::{InstanceMaterial, InstanceMaterials, RendererMaterial, ready},
-    lod::LodGroup,
+    lod::{LodInstance, LodOwner, LodSchedule, LodTable},
     pipelines::{PipelineTicket, WorldPipelines},
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
@@ -63,13 +63,18 @@ struct Instance {
     // VehiclePose changes position and rotation. Retain the original composed scales.
     scales: Vec<(Vec3, Vec3)>,
     renderers: Vec<Renderer>,
-    lods: Vec<LodGroup>,
+    lod: LodInstance,
     ready: bool,
     cpu: usize,
     gpu: usize,
     objects: usize,
     visible: bool,
     origin: [f64; 3],
+}
+impl LodOwner for Instance {
+    fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
+        (!self.retirement.started()).then_some((&mut self.lod, &self.worlds))
+    }
 }
 #[derive(Resource, Default)]
 pub struct SourceInstances {
@@ -83,6 +88,7 @@ pub struct SourceInstances {
     content_instances: HashMap<ContentSlot, Vec<usize>>,
     lamp_instances: HashMap<usize, Vec<usize>>,
     selection: InstanceSelection,
+    lods: LodSchedule,
     cache_bytes: usize,
 }
 impl SourceInstances {
@@ -108,6 +114,7 @@ impl SourceInstances {
                 .sum::<usize>()
             + self.contents.retained_bytes()
             + self.selection.retained_bytes()
+            + self.lods.retained_bytes()
     }
     pub(crate) fn drained(&self) -> bool {
         self.instances
@@ -158,6 +165,7 @@ impl SourceInstances {
         self.content_instances.clear();
         self.lamp_instances.clear();
         self.selection.reset(0);
+        self.lods.reset();
         self.origin = None;
         self.cache_bytes = self.measure_cache_bytes();
     }
@@ -304,9 +312,19 @@ impl SourceInstances {
                 )?;
             if admitted {
                 prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
-                if let Some(loaded) =
-                    prototypes.loaded(stream.frame().request.session, &placement.prototype)
-                {
+                let lods = prototypes.lods(
+                    stream.frame().request.session,
+                    &placement.prototype,
+                    || {
+                        LodTable::for_prototype(&reference.world, prototype, |source| {
+                            stream.lod_owner(source)
+                        })
+                    },
+                )?;
+                if let (Some(loaded), Some(lods)) = (
+                    prototypes.loaded(stream.frame().request.session, &placement.prototype),
+                    lods,
+                ) {
                     if let Some(asset) = assets.get(&loaded.asset) {
                         let count = loaded.plan.nodes.len();
                         let primitives = loaded
@@ -447,10 +465,6 @@ impl SourceInstances {
                                     },
                                 );
                             }
-                            let lods =
-                                LodGroup::for_prototype(&reference.world, prototype, |source| {
-                                    stream.lod_owner(source)
-                                })?;
                             let mut renderers = Vec::with_capacity(primitives);
                             for (source_index, source_node) in prototype.nodes.iter().enumerate() {
                                 if !source_node.renderer_enabled {
@@ -470,12 +484,7 @@ impl SourceInstances {
                                     ReferenceError("Missing generated receiver state".into())
                                 })?;
                                 // LOD uniforms and warm tickets retain each renderer's original handles.
-                                let has_lod = lods.iter().any(|group| {
-                                    group
-                                        .levels
-                                        .iter()
-                                        .any(|level| level.nodes.contains(&source_index))
-                                });
+                                let has_lod = !lods.levels(source_index).is_empty();
                                 for primitive in loaded
                                     .plan
                                     .primitives
@@ -797,7 +806,7 @@ impl SourceInstances {
                                 worlds,
                                 source_worlds,
                                 renderers,
-                                lods,
+                                lod: LodInstance::new(lods.clone()),
                                 ready: false,
                                 cpu,
                                 gpu,
@@ -814,6 +823,7 @@ impl SourceInstances {
                                 continuation.watch_upload(upload.receipt.clone());
                                 instance.continuation = Some(continuation);
                                 instance.upload = Some(upload);
+                                self.lods.spawn(&mut instance.lod, self.instances.len());
                                 self.instances.push(instance);
                                 self.bindings_dirty = true;
                             }
@@ -1174,6 +1184,7 @@ impl SourceInstances {
                     std::mem::swap(&mut renderer.material_source, &mut variant.source);
                     std::mem::swap(&mut renderer.ticket, &mut variant.ticket);
                     renderer.lod_state = None;
+                    self.lods.queue(&mut instance.lod, instance_index);
                     renderer.binding.visible.replace(renderer.entity, commands);
                     renderer.binding.apply_sort(renderer.entity, commands);
                 }
@@ -1200,6 +1211,7 @@ impl SourceInstances {
                     ),
                 ) * Mat4::from_scale(scale);
                 if instance.worlds[index] != world {
+                    self.lods.queue(&mut instance.lod, instance_index);
                     let delta = world * instance.worlds[index].inverse();
                     let source_changed = source_world != instance.source_worlds[index];
                     let source_delta = source_world * instance.source_worlds[index].inverse();
@@ -1250,6 +1262,9 @@ impl SourceInstances {
                 };
                 let index = node.gltf_node as usize;
                 let world = pose_world(instance, index, pose);
+                if instance.worlds[index] != world {
+                    self.lods.queue(&mut instance.lod, instance_index);
+                }
                 instance.worlds[index] = world;
                 let source_scale = instance.scales[index].1;
                 instance.source_worlds[index] = Mat4::from_scale_rotation_translation(
@@ -1296,60 +1311,40 @@ impl SourceInstances {
         materials: &mut InstanceMaterials,
         grass: &mut GrassJobs,
     ) {
-        for instance in &mut self.instances {
-            if instance.retirement.started() {
-                continue;
-            }
-            let prototype = &reference.world.prototypes[instance.prototype];
-            for renderer in &mut instance.renderers {
-                let mut visible = true;
-                let mut fade = 1.0;
-                for group in &instance.lods {
-                    let Some(level) = group
-                        .levels
-                        .iter()
-                        .position(|l| l.nodes.contains(&renderer.node))
-                    else {
+        self.lods.update(
+            view,
+            reference.world.lod.lod_bias,
+            reference.world.lod.maximum_lod as usize,
+            self.origin,
+            &mut self.instances,
+            |instance| {
+                let prototype = &reference.world.prototypes[instance.prototype];
+                for renderer in &mut instance.renderers {
+                    let state = instance.lod.renderer(renderer.node);
+                    if renderer.lod_state == Some(state) {
                         continue;
-                    };
-                    let node = prototype.nodes[group.node].gltf_node as usize;
-                    let selected = group.select(
-                        instance.worlds[node].as_mat4(),
-                        view,
-                        reference.world.lod.lod_bias,
-                        reference.world.lod.maximum_lod as usize,
-                    );
-                    match selected {
-                        Some(value) if level == value.first => {
-                            fade = value.fade;
-                        }
-                        Some(value) if value.transition && level == value.first + 1 => {
-                            fade = value.fade - 1.0;
-                        }
-                        _ => {
-                            visible = false;
-                        }
                     }
+                    renderer.lod_state = Some(state);
+                    let (visible, fade) = state;
+                    commands.entity(renderer.entity).insert(if visible {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    });
+                    let source_position = instance.source_worlds
+                        [prototype.nodes[renderer.node].gltf_node as usize]
+                        .w_axis
+                        .truncate()
+                        * Vec3::new(1., 1., -1.);
+                    materials.fade(&renderer.binding, fade, source_position);
+                    grass.set_fade(renderer.entity, fade, &mut materials.grass);
                 }
-                let state = (visible, fade);
-                if renderer.lod_state == Some(state) {
-                    continue;
-                }
-                renderer.lod_state = Some(state);
-                commands.entity(renderer.entity).insert(if visible {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                });
-                let source_position = instance.source_worlds
-                    [prototype.nodes[renderer.node].gltf_node as usize]
-                    .w_axis
-                    .truncate()
-                    * Vec3::new(1., 1., -1.);
-                materials.fade(&renderer.binding, fade, source_position);
-                grass.set_fade(renderer.entity, fade, &mut materials.grass);
-            }
-        }
+            },
+        );
+        crate::world::stream_profile::count(
+            crate::world::stream_profile::Stage::Lods,
+            self.lods.evaluated(),
+        );
     }
     pub fn request_writers(
         &self,
@@ -1448,6 +1443,10 @@ impl SourceInstances {
                 continue;
             }
             let mut instance = self.instances.swap_remove(index);
+            self.lods.remove(&instance.lod);
+            if let Some(moved) = self.instances.get_mut(index) {
+                self.lods.relocate(&mut moved.lod, index);
+            }
             self.bindings_dirty = true;
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {

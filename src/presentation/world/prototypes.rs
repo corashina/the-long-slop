@@ -27,6 +27,7 @@ struct Entry {
     gpu: usize,
     staging: usize,
     state: State,
+    lods: Option<Arc<super::lod::LodTable>>,
 }
 #[derive(Resource, Default)]
 pub struct SourcePrototypes {
@@ -170,6 +171,7 @@ impl SourcePrototypes {
                 gpu: e.gpu,
                 staging: 0,
                 state: e.state.fork_ready().unwrap(),
+                lods: e.lods.clone(),
             });
         }
         copy.account(stream)?;
@@ -220,6 +222,7 @@ impl SourcePrototypes {
             gpu: 0,
             staging: 0,
             state: State::Queued,
+            lods: None,
         });
         Ok(())
     }
@@ -317,6 +320,26 @@ impl SourcePrototypes {
                 None
             }
         })
+    }
+    /// LOD table of a loaded prototype. The first call builds it.
+    pub fn lods(
+        &mut self,
+        session: u64,
+        source: &SourceId,
+        build: impl FnOnce() -> Result<super::lod::LodTable, ReferenceError>,
+    ) -> Result<Option<Arc<super::lod::LodTable>>, ReferenceError> {
+        let Some(entry) = self.entries.iter_mut().find(|e| {
+            e.session == session
+                && e.source == *source
+                && !e.retired
+                && matches!(e.state, State::Ready(_))
+        }) else {
+            return Ok(None);
+        };
+        if entry.lods.is_none() {
+            entry.lods = Some(Arc::new(build()?));
+        }
+        Ok(entry.lods.clone())
     }
     /// Retirement keeps loader reservations until cancellation or loading has completed.
     pub fn retire(&mut self, source: &SourceId) {
