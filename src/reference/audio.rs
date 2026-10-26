@@ -407,7 +407,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=15 | 17)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=15 | 17 | 21 | 22)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -955,7 +955,8 @@ impl AudioGameplayReference {
             (17, "melee_hit"),
             (18, "metal_detector"),
             (21, "radio_click"),
-            (22, "computer_note"),
+            (22, "break"),
+            (23, "computer_note"),
         ] {
             require(
                 r.bindings
@@ -985,7 +986,7 @@ impl AudioGameplayReference {
         };
         let (zones, sleds) = (optional(19, "ambience_zone"), optional(20, "sled"));
         require(
-            zones <= 1 && sleds <= 1 && r.bindings.len() == 19 + zones + sleds,
+            zones <= 1 && sleds <= 1 && r.bindings.len() == 20 + zones + sleds,
             "required audio roles",
         )?;
         Ok(r)

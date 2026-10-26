@@ -50,9 +50,15 @@ LADA = ('sharedassets1.assets',82556)
 # Catalog categories whose car items export and spawn from pools.
 CAR_CATEGORIES = ('bus', 'bike')
 # Catalog car items that export by name. False: pools do not spawn the item; only start placements do.
-CAR_ITEMS = {name:False for name in ('car01','car01full','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full')}
+CAR_ITEMS = {name:False for name in ('car01','car01full','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full',
+    'car03','car03full','car03k','car03kfull','car08','car08full','car08c','car08cfull',
+    'car09','car09full','car09fullS','car09P','car09Pfull','car10','car10full','car10k','car10kfull')}
 # TerrainGenerationSettings start car fields and the catalog item of their car type. StartCar02 is the Lada.
-START_CARS = {'StartCar01':'car01full','StartCar02':None,'StartCar02k':'car02kfull','StartCar04':'car04full','StartCar05':'car05full','StartCar06':'car06full'}
+START_CARS = {'StartCar01':'car01full','StartCar02':None,'StartCar02k':'car02kfull','StartCar03':'car03full','StartCar03k':'car03kfull',
+    'StartCar04':'car04full','StartCar05':'car05full','StartCar06':'car06full','StartCar08':'car08full','StartCar08c':'car08cfull',
+    'StartCar09':'car09full','StartCar09S':'car09fullS','StartCar09P':'car09Pfull','StartCar10':'car10full','StartCar10k':'car10kfull'}
+# Known scene car roots (level1 GameObject) of start car fields: the Lada and Car09full_slide.
+START_ROOTS = {'StartCar02':17687,'StartCar09S':12382}
 def vehicle_exclusion(root, classes, cars):
     """Car roots outside `cars` stay other_vehicle."""
     return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
@@ -114,8 +120,8 @@ def start_placements(source, settings_owner, settings, catalog, cars):
         roots=[n for n in source.hierarchy(source.transform_for(group)) if 'carscript' in script_classes(source,[n])]
         if len(roots)!=1:raise ValueError('{}:{} {}: {} car roots in the start car group'.format(*key(group),field,len(roots)))
         car=roots[0]
-        if field=='StartCar02' and key(car['game_object'])!=('level1',17687):
-            raise ValueError('{}:{} StartCar02: the Lada root is not level1 GO 17687'.format(*key(car['game_object'])))
+        if field in START_ROOTS and key(car['game_object'])!=('level1',START_ROOTS[field]):
+            raise ValueError('{}:{} {}: the car root is not level1 GO {}'.format(*key(car['game_object']),field,START_ROOTS[field]))
         if item is None:prototype=source.get(*LADA)
         else:
             row=catalog_item(catalog,item)

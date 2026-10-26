@@ -1,15 +1,10 @@
-//! Source boxes: spawnInBoxScript content and breakablescript breaks of generated boxes.
+//! Source boxes: spawnInBoxScript content of generated boxes and its release on a box break.
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
-use crate::interaction::items::{ItemLocation, ItemStore};
-use crate::interaction::storage::StorageLocks;
-use crate::reference::{
-    BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole,
-};
-use crate::vehicle::PhysicsWorld;
+use crate::interaction::items::ItemStore;
+use crate::reference::{ItemId, SourceId};
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
 use rapier3d::math::{Rotation, Vector};
-use rapier3d::prelude::QueryFilter;
 use serde::{Deserialize, Serialize};
 
 /// One broken box. `origin` is its generated pose and `pose` its pose at the break.
@@ -124,181 +119,38 @@ pub(crate) fn relocate(placement: &mut Placement, origin: &AbsolutePose, pose: &
     placement.bounds = bounds;
 }
 
-/// Source breakablescript.OnCollisionEnter: the force passed to TryBreak.
-pub(crate) fn collision_force(rules: &BreakableReference, relative_speed: f32) -> Option<f32> {
-    if rules.no_collider
-        || rules.only_decrease_above && relative_speed < rules.decrease_above_health
-    {
-        return None;
-    }
-    Some(relative_speed)
-}
-/// Source breakablescript.TryBreak(float). True breaks the box.
-pub(crate) fn try_break(rules: &BreakableReference, health: &mut f32, force: f32) -> bool {
-    if force >= *health {
-        return true;
-    }
-    if rules.decrease_after_attack {
-        *health -= force;
-    }
-    false
-}
-
-/// Bound generated box and its current breakablescript health.
-pub(crate) struct BoxBinding {
-    item: ItemId,
-    health: f32,
-}
+/// Change revision whose forgotten box removals are applied.
 #[derive(Default)]
 pub(crate) struct BoxRuntime {
-    bindings: Vec<BoxBinding>,
-    scan: Option<(u64, u64)>,
     changes: Option<u64>,
-    broken: Vec<ItemId>,
 }
 
 impl WorldStream {
-    fn box_rules<'a>(&self, reference: &'a ReferenceManifest) -> &'a BreakableReference {
-        reference
-            .breakable(&reference.acquisition.r#box.breakable)
-            .expect("validated box breakable")
-    }
     /// Box content that waits for its box to break.
     pub(super) fn box_content_withheld(&self, id: &GeneratedId) -> bool {
         self.contents.boxes.withheld(id)
     }
-    fn refresh_boxes(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
-        if self.boxes.changes != Some(self.changes.revision()) {
-            // A forgotten box removal respawns the box and withholds its content again.
-            let changes = &self.changes;
-            self.contents.boxes.retain(|r| {
-                changes
-                    .get(ObjectKey::Generated(r.id.clone()))
-                    .is_some_and(|c| c.snapshot.is_none())
-            });
-            self.boxes.changes = Some(self.changes.revision());
-        }
-        let scan = (self.contents.active_revision(), items.membership_revision());
-        if self.boxes.scan == Some(scan) {
+    pub(super) fn refresh_boxes(&mut self) {
+        if self.boxes.changes == Some(self.changes.revision()) {
             return;
         }
-        self.boxes.scan = Some(scan);
-        let prototype = &reference.acquisition.r#box.prototype.0;
-        let health = self.box_rules(reference).health;
-        let active = &self.contents.active;
-        let bound = |item: ItemId| {
-            items.get(item).is_some_and(|s| !s.removed)
-                && active
-                    .iter()
-                    .any(|c| c.item == Some(item) && &c.content.placement.prototype == prototype)
-        };
-        self.boxes.bindings.retain(|b| bound(b.item));
-        for content in active {
-            let Some(item) = content.item else { continue };
-            if bound(item) && !self.boxes.bindings.iter().any(|b| b.item == item) {
-                self.boxes.bindings.push(BoxBinding { item, health });
-            }
-        }
+        // A forgotten box removal respawns the box and withholds its content again.
+        let changes = &self.changes;
+        self.contents.boxes.retain(|r| {
+            changes
+                .get(ObjectKey::Generated(r.id.clone()))
+                .is_some_and(|c| c.snapshot.is_none())
+        });
+        self.boxes.changes = Some(self.changes.revision());
     }
-    /// Run after the physics step. Queues boxes that break this step.
-    pub fn step_boxes(
-        &mut self,
-        reference: &ReferenceManifest,
-        items: &ItemStore,
-        physics: &PhysicsWorld,
-        dt: f32,
-    ) {
-        self.refresh_boxes(reference, items);
-        if self.boxes.bindings.is_empty() {
-            return;
-        }
-        let rules = self.box_rules(reference);
-        let item_of = |handle| {
-            physics
-                .rapier()
-                .colliders
-                .get(handle)
-                .map(|c| (c.user_data & u32::MAX as u128) as u32)
-                .filter(|id| *id != 0)
-                .map(|id| ItemId(id - 1))
-        };
-        for hit in physics.hits() {
-            for handle in hit.colliders {
-                let Some(item) = item_of(handle) else {
-                    continue;
-                };
-                let Some(binding) = self.boxes.bindings.iter_mut().find(|b| b.item == item) else {
-                    continue;
-                };
-                if let Some(force) = collision_force(rules, hit.speed)
-                    && try_break(rules, &mut binding.health, force)
-                    && !self.boxes.broken.contains(&item)
-                {
-                    self.boxes.broken.push(item);
-                }
-            }
-        }
-        // Source playerdeathtriggerscript.OnTriggerStay. Unity skips sleeping bodies.
-        if self.trigger_roles.is_empty() {
-            return;
-        }
-        let bodies = &physics.rapier().bodies;
-        let filter = QueryFilter::default().exclude_solids();
-        for binding in &mut self.boxes.bindings {
-            let Some(handle) = items.get(binding.item).and_then(|s| s.body) else {
-                continue;
-            };
-            let Some(body) = bodies.get(handle) else {
-                continue;
-            };
-            if !body.is_enabled() || body.is_sleeping() {
-                continue;
-            }
-            for &collider in body.colliders() {
-                let collider = &physics.rapier().colliders[collider];
-                if !collider.is_enabled() || collider.is_sensor() {
-                    continue;
-                }
-                for (trigger, other) in physics
-                    .queries(filter)
-                    .intersect_shape(*collider.position(), collider.shape())
-                {
-                    if let Some(TriggerRole::Hazard {
-                        damage_breakable, ..
-                    }) = self.trigger_roles.get(trigger, other)
-                        && try_break(rules, &mut binding.health, damage_breakable * dt)
-                        && !self.boxes.broken.contains(&binding.item)
-                    {
-                        self.boxes.broken.push(binding.item);
-                    }
-                }
-            }
-        }
-    }
-    /// Next box queued by `step_boxes`. Drop it from the hand before `break_box`.
-    pub fn take_broken_box(&mut self) -> Option<ItemId> {
-        self.boxes.broken.pop()
-    }
-    /// Source breakablescript.Break and mountStuff.Unstore: remove the box, release its content.
-    /// Items locked in the box unlock at their current pose first.
-    pub fn break_box(
-        &mut self,
-        item: ItemId,
-        items: &mut ItemStore,
-        storage: &mut StorageLocks,
-        physics: &mut PhysicsWorld,
-    ) -> Result<Option<BoxRelease>, ReferenceError> {
+    /// mountStuff.Unstore: a broken box releases its content at its current pose.
+    /// Run before `remove_broken_item`. A box releases once.
+    pub(super) fn break_box(&mut self, item: ItemId, items: &ItemStore) {
         let Some(state) = items.get(item) else {
-            return Ok(None);
-        };
-        if state.removed || state.location != ItemLocation::World {
-            return Ok(None);
-        }
-        let Some(body) = state.body else {
-            return Ok(None);
+            return;
         };
         let Some(content) = self.contents.active.iter().find(|c| c.item == Some(item)) else {
-            return Ok(None);
+            return;
         };
         let release = BoxRelease {
             id: content.content.placement.id.clone(),
@@ -309,10 +161,8 @@ impl WorldStream {
             },
         };
         if !self.contents.boxes.release(release.clone()) {
-            return Ok(None);
+            return;
         }
-        storage.unbind_owner(item, |_, _| false, items, physics)?;
-        self.changes.remove(items.object_key(item));
         let contents = &mut self.contents;
         for content in &mut contents.active {
             if contents
@@ -326,15 +176,6 @@ impl WorldStream {
                 );
             }
         }
-        physics.edit_body(body, |body| body.set_enabled(false));
-        physics.refresh_queries();
-        let state = items.get_mut(item).unwrap();
-        state.removed = true;
-        items.mark_dirty(item);
-        self.boxes.bindings.retain(|b| b.item != item);
-        self.boxes.scan = None;
-        self.boxes.changes = Some(self.changes.revision());
-        Ok(Some(release))
     }
 }
 
@@ -345,34 +186,6 @@ mod tests {
     use crate::world::spawn_selection::{box_count, pick_weighted};
     use crate::world::{UnityRandom, WorldBounds};
 
-    /// breakables record of item 62 (box01).
-    fn rules() -> BreakableReference {
-        BreakableReference {
-            source: source(135113),
-            owners: Vec::new(),
-            health: 7.,
-            shoot_health: 0.,
-            shoot_different: false,
-            explosion_health: 0.,
-            explosion_different: false,
-            no_shoot: false,
-            decrease_after_attack: false,
-            only_decrease_above: false,
-            decrease_above_health: 0.,
-            only_velocity: false,
-            mass_modifier: 1.,
-            child_modifier: 0.,
-            children: Vec::new(),
-            no_trigger: true,
-            no_collider: false,
-            no_gib: false,
-            no_destroy: false,
-            gib: None,
-            reduced_gib: None,
-            clips: Vec::new(),
-            lamp: None,
-        }
-    }
     fn source(path_id: i64) -> SourceId {
         SourceId {
             file: "sharedassets1.assets".into(),
@@ -398,30 +211,6 @@ mod tests {
             position,
             rotation: Rotation::from_rotation_y(yaw).to_array(),
         }
-    }
-
-    #[test]
-    fn break_threshold_matches_source_health() {
-        let rules = rules();
-        let mut health = rules.health;
-        assert_eq!(collision_force(&rules, 6.99), Some(6.99));
-        assert!(!try_break(&rules, &mut health, 6.99));
-        assert_eq!(health, 7., "decreaseAfterAttack is off");
-        assert!(try_break(&rules, &mut health, 7.));
-        // A hazard with damageBreakable d breaks the box when d * dt reaches health.
-        assert!(!try_break(&rules, &mut health, 349. * 0.02));
-        assert!(try_break(&rules, &mut health, 350. * 0.02));
-        let mut decreasing = BreakableReference {
-            decrease_after_attack: true,
-            ..rules.clone()
-        };
-        assert!(!try_break(&decreasing, &mut health, 4.));
-        assert!(try_break(&decreasing, &mut health, 3.));
-        decreasing.only_decrease_above = true;
-        decreasing.decrease_above_health = 5.;
-        assert_eq!(collision_force(&decreasing, 4.), None);
-        decreasing.no_collider = true;
-        assert_eq!(collision_force(&decreasing, 40.), None);
     }
 
     #[test]

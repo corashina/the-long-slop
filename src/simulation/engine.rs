@@ -80,6 +80,29 @@ fn drain(container: &mut FluidContainer, liters: f32) -> f32 {
     before - container.total()
 }
 
+/// Source `GetPercent`: the fluid share of the tank. An empty tank gives zero.
+fn share(mixture: &FluidMixture, total: f32, fluid: usize) -> f32 {
+    if total > 0.0 {
+        mixture.amount(fluid) / total
+    } else {
+        0.0
+    }
+}
+
+/// Source two-stroke `OilWeak`: the fuel tank oil share against the engine mix.
+/// A missing fuel tank gives zero oil.
+fn two_stroke_oil_penalty(fuel: Option<&FluidContainer>, reference: &EnginePartReference) -> f32 {
+    let oil_fluid = reference.oil_fluid as usize;
+    let oil = fuel.map_or(0.0, |fuel| share(fuel.mixture(), fuel.total(), oil_fluid));
+    let required = FluidMixture {
+        quantities_liters: reference.fuel_consumption,
+    };
+    let target = share(&required, required.total(), oil_fluid);
+    let low = inverse_lerp(target, target - reference.oil_toleration_min, oil);
+    let high = inverse_lerp(target, target + reference.oil_toleration_max, oil);
+    (low * low).max(high).powi(3)
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InstalledEngineInput {
     pub ignition: bool,
@@ -271,8 +294,10 @@ impl EngineState {
         let required = FluidMixture {
             quantities_liters: reference.fuel_consumption,
         };
-        // A missing oil tank skips the oil rules.
-        if input.installed.is_some()
+        // Two-strokes read the fuel tank mix. A missing oil tank skips the four-stroke rule.
+        if input.installed.is_some() && reference.two_stroke {
+            self.oil_penalty = two_stroke_oil_penalty(fuel.as_deref(), reference);
+        } else if input.installed.is_some()
             && let Some(sump) = sump.as_deref()
         {
             self.oil_penalty = inverse_lerp(
@@ -605,5 +630,37 @@ mod tests {
         // With the clutch open, only the starter can lift the rpm.
         let (output, peak, _) = kick(true, false, 0., 1500.);
         assert!(output.kick_start && peak == 0., "{output:?} {peak}");
+    }
+
+    #[test]
+    fn two_stroke_oil_follows_the_source_formula() {
+        let mut record: EnginePartReference =
+            serde_json::from_value(crate::reference::engine_part_fixture()).unwrap();
+        let oil = record.oil_fluid;
+        record.fuel_consumption = [0.; 6];
+        record.fuel_consumption[2] = 0.975;
+        record.fuel_consumption[oil as usize] = 0.025;
+        record.oil_toleration_min = 0.02;
+        record.oil_toleration_max = 0.3;
+        for (share, expected) in [(0.025, 0.), (0.005, 1.), (0.015, 0.015625), (0.175, 0.125)] {
+            let tank = FluidContainer::new(
+                10.,
+                &[
+                    FluidEntry {
+                        fluid_type: 2,
+                        amount: 1. - share,
+                    },
+                    FluidEntry {
+                        fluid_type: oil,
+                        amount: share,
+                    },
+                ],
+            );
+            let penalty = two_stroke_oil_penalty(Some(&tank), &record);
+            assert!((penalty - expected).abs() < 1e-4, "{share}: {penalty}");
+        }
+        let empty = FluidContainer::new(10., &[]);
+        assert_eq!(two_stroke_oil_penalty(Some(&empty), &record), 1.);
+        assert_eq!(two_stroke_oil_penalty(None, &record), 1.);
     }
 }

@@ -123,8 +123,8 @@ class RopeTests(unittest.TestCase):
 
 class CarAllowListTests(unittest.TestCase):
     """Car items export by name; start-only items stay out of pools; each start car field gives one placement."""
-    def fixture(self, missing=''):
-        from tools.reference.world import CAR_ITEMS, START_CARS, LADA
+    def fixture(self, missing='', roots_at=None):
+        from tools.reference.world import CAR_ITEMS, START_CARS, START_ROOTS, LADA
         objects, data, trees = {}, {}, {}
         def add(file, pid, type_name, fields=None, cls=''):
             reader = NS(assets_file=NS(source_container_path=file), path_id=pid, type=NS(name=type_name), cls=cls)
@@ -154,7 +154,8 @@ class CarAllowListTests(unittest.TestCase):
         cars = {}
         for i, field in enumerate(START_CARS):
             group = node('level1', 3000 + 100 * i, ())
-            car = node('level1', 17686 if field == 'StartCar02' else 3050 + 100 * i, ('carscript',))
+            # A scene GameObject id is its transform id + 1.
+            car = node('level1', (roots_at or START_ROOTS).get(field, 3051 + 100 * i) - 1, ('carscript',))
             trees[key(group['reader'])] = [group, car]
             data['level1', 64898][field] = ptr(group['game_object'])
             cars[field] = car['reader']
@@ -190,3 +191,11 @@ class CarAllowListTests(unittest.TestCase):
         self.assertEqual(by_field['StartCar01']['prototype'], source_id(roots['car01full']))
         self.assertEqual(by_field['StartCar06']['source'], source_id(scene['StartCar06']))
         self.assertEqual(by_field['StartCar06']['pose'], {'node': scene['StartCar06'].path_id})
+        # Car09 starts at one of two roots: the start pick needs both.
+        self.assertEqual(by_field['StartCar09']['prototype'], source_id(roots['car09full']))
+        self.assertEqual(by_field['StartCar09S']['prototype'], source_id(roots['car09fullS']))
+        self.assertEqual(by_field['StartCar09S']['source'], {'file': 'level1', 'path_id': 12381})
+        source, catalog, settings, *_ = self.fixture(roots_at={'StartCar02': 17687})
+        with patch('tools.reference.world.world_pose', lambda s, r: {}), \
+                self.assertRaisesRegex(ValueError, 'StartCar09S: the car root is not level1 GO 12382'):
+            start_placements(source, settings, source.read(settings), catalog, cars)
