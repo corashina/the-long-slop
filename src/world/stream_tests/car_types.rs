@@ -181,6 +181,17 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         entry.prototype.as_ref(),
         "{field}"
     );
+    if field == "StartCar06" {
+        // The root randomTypeSelector variant sets the fuel tank: 0.5 L diesel for the diesel engine.
+        let mounted = run.powertrain.mounted_on(&run.area.items, &key);
+        let engine = run.powertrain.engine(mounted.engine.unwrap()).unwrap();
+        let diesel = engine.record.fuel_consumption[5] > 0.;
+        let tank = run.vehicles[&key].fuel_tank.unwrap();
+        let fuel = run.area.items.get(tank).unwrap().fluid.as_ref().unwrap();
+        let liters = fuel.mixture().quantities_liters;
+        assert_eq!(liters[5] > 0., diesel, "{field}: diesel follows the engine");
+        assert!((fuel.total() - 0.5).abs() < 1e-4, "{field}: start fuel");
+    }
     let deck = insert_deck(&mut run, &key);
     assert!(enter(&mut run, reference), "{field}: driver seat");
     settle(&mut run, reference, 1.);

@@ -28,6 +28,8 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - `car_prototypes` in `tools/reference/world.py` is the allow list. It reads the catalog at export time.
 - The list holds the Lada, each `CAR_CATEGORIES` item root with `carscript`, and each `CAR_ITEMS` item root. Other car roots stay `other_vehicle`. Pools do not spawn them.
 - A `randomTypeSelector` engine part (car06) must be a node of the car prototype. Each engine part then has its engine record.
+- A `randomTypeSelector` variant `tank` replaces that tank's fluids after the random fluids. The `StartCar06` diesel pick puts 0.5 L diesel in the fuel tank. Variant `Move` and `R` are not ported; no V02 car uses them.
+- Pool car copies run the loot steps: `RandomSpawned` (fluids, condition `ir1`/`ir2`), then component Starts (`randomTypeSelector`, `partconditionscript`), then deferred `partslotscript` parts. A start car skips `RandomSpawned`.
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
