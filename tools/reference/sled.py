@@ -27,9 +27,12 @@ def centers_of_mass(source, hierarchy):
     """setcenterofmass.Start sets R.centerOfMass = T.localPosition. Keys are Rigidbody identities."""
     centers={}
     for node in hierarchy:
+        # Start never runs on an inactive node or a disabled component.
+        if not node['active']:continue
         for component in node['components']:
             if component.type.name!='MonoBehaviour' or source.class_name(component)!='setcenterofmass':continue
             data=source.read(component)
+            if not data['m_Enabled']:continue
             body=source.resolve(component,data['R'])
             if body is None:
                 body=next((c for c in node['components'] if c.type.name=='Rigidbody'),None)

@@ -1,6 +1,6 @@
 //! Authored mass, locked cargo mass, and the single carried-body override.
 use super::PhysicsWorld;
-use rapier3d::prelude::RigidBodyHandle;
+use rapier3d::prelude::{RigidBodyAdditionalMassProps, RigidBodyHandle};
 
 /// Preallocated non-vehicle cargo bodies.
 pub(super) const CARGO_BODIES: usize = 64;
@@ -49,7 +49,16 @@ impl PhysicsWorld {
             mass_kg
         };
         self.edit_body(body, |body| {
-            body.set_additional_mass(physical_mass_kg, true)
+            // A setcenterofmass body keeps its center. The inertia scales with the mass.
+            if let Some(RigidBodyAdditionalMassProps::MassProps(properties)) =
+                body.mass_properties().additional_local_mprops.as_deref()
+            {
+                let mut properties = *properties;
+                properties.set_mass(physical_mass_kg, true);
+                body.set_additional_mass_properties(properties, true);
+            } else {
+                body.set_additional_mass(physical_mass_kg, true);
+            }
         });
         self.recompute_body_mass(body);
     }

@@ -80,9 +80,8 @@ impl Sled {
             for &collider in &self.colliders {
                 physics.edit_collider(collider, |c| c.set_sensor(in_use));
             }
-            if in_use {
-                physics.edit_body(body, |b| b.wake_up(true));
-            }
+            // Wake on both edges: a sleeping body would keep its wheel height after use ends.
+            physics.edit_body(body, |b| b.wake_up(true));
         }
         let state = &physics.rapier().bodies[body];
         if state.is_sleeping() && !in_use {
@@ -122,7 +121,7 @@ impl Sled {
         });
         physics.step_wheel_set(&mut self.wheels, &self.torques, &self.steer);
         let grounded = self.wheels.wheels().iter().any(|w| w.contact.is_some());
-        let (volume, pitch) = sled::sound(velocity.length(), grounded, &p);
+        let (volume, pitch) = sled::sound(speed, grounded, &p);
         self.volume = volume;
         if pitch.is_some() {
             self.pitch = pitch;
