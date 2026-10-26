@@ -8,11 +8,13 @@ pub(crate) struct ViewRevision {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CascadeKey {
     pub view: ViewRevision,
+    pub cadence: u64,
     pub bias: [u32; 2],
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CollectorKey {
     pub view: ViewRevision,
+    pub cadence: u64,
     pub projection: [u32; 16],
     pub view_from_world: [u32; 16],
     pub near_far_strength: [u32; 3],

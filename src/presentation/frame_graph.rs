@@ -169,6 +169,7 @@ impl Plugin for SourceFramePlugin {
         super::view_frame::install(app);
         super::shadow_queue::install(app);
         super::caster_material::install(app);
+        super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
         super::source_effects::install(app);
         let render = app.sub_app_mut(RenderApp);
