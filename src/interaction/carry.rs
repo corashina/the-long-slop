@@ -23,6 +23,8 @@ struct HeldState {
     joint: ImpulseJointHandle,
     local_pose: Pose,
     gravity_scale: f32,
+    // CCD of the free body. Held bodies always use CCD.
+    ccd: bool,
 }
 
 pub struct CarryState {
@@ -66,6 +68,7 @@ impl CarryState {
             ));
         }
         let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        let ccd = physics.rapier().bodies[body].is_ccd_enabled();
         physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = physics.insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose));
@@ -80,6 +83,7 @@ impl CarryState {
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
             gravity_scale,
+            ccd,
         });
         physics.edit_body(body, |body| {
             body.enable_ccd(true);
@@ -257,7 +261,8 @@ impl CarryState {
         physics.remove_impulse_joint(held.joint, true);
         physics.set_body_mass_override(held.body, None);
         physics.edit_body(held.body, |body| {
-            body.set_gravity_scale(held.gravity_scale, true)
+            body.set_gravity_scale(held.gravity_scale, true);
+            body.enable_ccd(held.ccd);
         });
         if let Some(item) = items.get_mut(held.item) {
             item.location = ItemLocation::World;
@@ -348,6 +353,7 @@ impl CarryState {
         self.can_acquire(id, point, player, body, physics)?;
         let item = items.get_mut(id).unwrap();
         let gravity_scale = physics.rapier().bodies[body].gravity_scale();
+        let ccd = physics.rapier().bodies[body].is_ccd_enabled();
         physics.set_body_mass_override(body, Some(1.0));
         let pose = *physics.rapier().bodies[body].position();
         let anchor = *self.anchor.get_or_insert_with(|| {
@@ -377,6 +383,7 @@ impl CarryState {
             joint,
             local_pose,
             gravity_scale,
+            ccd,
         });
         item.location = ItemLocation::Held;
         self.cancel_input();

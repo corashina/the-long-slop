@@ -25,7 +25,7 @@ pub(crate) fn spawn_consumable(
     let body = physics.insert_body(
         RigidBodyBuilder::dynamic()
             .pose(to_rapier(pose))
-            .ccd_enabled(true)
+            .ccd_enabled(prototype.collision_detection.ccd())
             .additional_mass(prototype.mass_kg)
             .linear_damping(prototype.linear_damping)
             .angular_damping(prototype.angular_damping),

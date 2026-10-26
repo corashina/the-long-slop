@@ -768,6 +768,7 @@ impl WheelAssemblies {
         physics: &mut PhysicsWorld,
     ) -> RigidBodyHandle {
         let handle = *self.parts[part].free_body.get_or_insert_with(|| {
+            // No source Rigidbody record for a split wheel body: keep CCD.
             physics.insert_body(RigidBodyBuilder::dynamic().pose(world).ccd_enabled(true))
         });
         physics.edit_body(handle, |body| {

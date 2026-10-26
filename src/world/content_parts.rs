@@ -205,6 +205,7 @@ pub(super) fn bind(
             colliders: shape_handles.iter().map(|c| c.0).collect(),
             linear_damping: rigid.linear_damping(),
             angular_damping: rigid.angular_damping(),
+            collision_detection: prototype.bodies[body_index].collision_detection,
             enable_if_mounted: linked_nodes("enableIfMounted")?,
             enable_if_dismounted: linked_nodes("enableIfDismounted")?,
             disable_if_mounted: linked_nodes("disableIfMounted")?,

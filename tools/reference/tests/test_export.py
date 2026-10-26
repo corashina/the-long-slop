@@ -7,7 +7,8 @@ from pathlib import Path
 from tools.reference.export import validate_build
 from tools.reference.gltf import convert_point, convert_rotation, convert_triangles, transform_point
 from tools.reference.source import normalize_arrays
-from tools.reference.collision import bake_points
+from types import SimpleNamespace
+from tools.reference.collision import bake_points, collision_detection
 
 class ReferenceExportTests(unittest.TestCase):
     def test_build_and_conversion(self):
@@ -47,6 +48,13 @@ class ReferenceExportTests(unittest.TestCase):
         normal = (u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0])
         self.assertEqual(normal, convert_point((0., 0., 1.)))
         self.assertEqual(converted, [convert_point(p) for p in points])
+
+    def test_collision_detection_names(self):
+        reader = SimpleNamespace(assets_file=SimpleNamespace(source_container_path='level1'), path_id=7)
+        names = [collision_detection(reader, {'m_CollisionDetection': v}) for v in range(4)]
+        self.assertEqual(names, ['discrete', 'continuous', 'continuous_dynamic', 'continuous_speculative'])
+        with self.assertRaisesRegex(ValueError, 'm_CollisionDetection: 4'):
+            collision_detection(reader, {'m_CollisionDetection': 4})
 
 if __name__ == '__main__':
     unittest.main()

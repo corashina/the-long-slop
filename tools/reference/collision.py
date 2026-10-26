@@ -1,12 +1,22 @@
 """Bake original collider points into converted body-local meters."""
 import math
 from .gltf import convert_point, convert_rotation, transform_point
-from .source import vector
+from .source import source_id, vector
 
 
 def quaternion_product(a,b):
     x,y,z,w=a; i,j,k,l=b
     return (w*i+x*l+y*k-z*j,w*j-x*k+y*l+z*i,w*k+x*j-y*i+z*l,w*l-x*i-y*j-z*k)
+
+
+COLLISION_DETECTION=('discrete','continuous','continuous_dynamic','continuous_speculative')
+
+
+def collision_detection(reader,rigidbody):
+    """Unity `Rigidbody.m_CollisionDetection` as a reference name."""
+    value=rigidbody['m_CollisionDetection']
+    if value not in range(len(COLLISION_DETECTION)):raise ValueError(f'{source_id(reader)} m_CollisionDetection: {value}')
+    return COLLISION_DETECTION[value]
 
 
 def world_pose(source,reader):

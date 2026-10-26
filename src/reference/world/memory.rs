@@ -21,7 +21,8 @@ inline!(
     AssetId,
     Transform,
     WorldPrototypeRole,
-    TriggerRole
+    TriggerRole,
+    crate::reference::CollisionDetection
 );
 impl ImmutableInputBytes for String {
     fn heap_bytes(&self) -> usize {
@@ -143,7 +144,7 @@ fields!(WorldBuildingSide:max_xpos,max_y_angle,min_xpos,min_y_angle);
 fields!(WorldCatalogReference:source,items,categories);
 fields!(WorldCatalogItem:field,compatible_slots,index,name,source,prototype,exclusion,excluded_actions);
 fields!(WorldCategory:invalid_category_indices,initialized,index,name,items,categories,item_chances,category_chances,depend_on_car);
-fields!(WorldPrototypeBody:source,node,mass_kg,linear_damping,angular_damping,kinematic,use_gravity,constraints,pose);
+fields!(WorldPrototypeBody:source,node,mass_kg,linear_damping,angular_damping,collision_detection,kinematic,use_gravity,constraints,pose);
 fields!(WorldPartScopeSlot:source,main_types,part_types);
 fields!(WorldSourceMaterial:source,valid_keywords,shader,source_data,floats,colors,textures,render_targets,texture_coordinates);
 fields!(WorldRenderTarget:property,source,scale,offset);

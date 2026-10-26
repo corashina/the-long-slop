@@ -1,7 +1,7 @@
 """Checked physical templates. All body and collider IDs are prototype-local."""
 from .source import key, source_id
 from .actions import recover_pickup
-from .collision import world_pose, bake_points, quaternion_product, geometry, step_surface, collider_tag
+from .collision import collision_detection, world_pose, bake_points, quaternion_product, geometry, step_surface, collider_tag
 from .gltf import GltfExporter
 from .survival import component, managed_evidence, finite_record
 
@@ -49,7 +49,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             mass = component(source,record['reader'],'massScript')
             bodies.append({'id':len(bodies)+1,'source':source_id(reader),'node':node,'dynamic':not d['m_IsKinematic'],
                 'mass_kg':source.read(mass)['mass'],'linear_damping':d['m_Drag'],'angular_damping':d['m_AngularDrag'],
-                'pose':local_pose,'parent_body':None})
+                'collision_detection':collision_detection(reader,d),'pose':local_pose,'parent_body':None})
             body_nodes[node] = bodies[-1]['id']
         def body_for(node):
             while node is not None:

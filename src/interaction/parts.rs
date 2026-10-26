@@ -588,7 +588,7 @@ impl PartAttachments {
             let body = physics.insert_body(
                 RigidBodyBuilder::dynamic()
                     .enabled(false)
-                    .ccd_enabled(true)
+                    .ccd_enabled(p.reference.collision_detection.ccd())
                     .linear_damping(p.reference.linear_damping)
                     .angular_damping(p.reference.angular_damping),
             );

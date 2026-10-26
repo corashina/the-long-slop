@@ -432,6 +432,7 @@ impl ItemPrototype {
                     && b.linear_damping >= 0.
                     && b.angular_damping.is_finite()
                     && b.angular_damping >= 0.
+                    && b.collision_detection.is_some()
                     && transform(&b.pose)
                     && b.parent_body == self.body_for(m, parent),
                 "prototype body",

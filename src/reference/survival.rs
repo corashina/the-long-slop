@@ -72,6 +72,7 @@ pub struct FoodReference {
     pub mass_kg: f32,
     pub linear_damping: f32,
     pub angular_damping: f32,
+    pub collision_detection: crate::reference::CollisionDetection,
     pub pickup: PickupReference,
     pub parts: Vec<Vec<NodeId>>,
     pub colliders: Vec<FoodCollider>,

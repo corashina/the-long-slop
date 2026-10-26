@@ -164,7 +164,7 @@ impl StructureRecipe {
             let builder = if body.kinematic {
                 RigidBodyBuilder::kinematic_position_based()
             } else {
-                RigidBodyBuilder::dynamic().ccd_enabled(true)
+                RigidBodyBuilder::dynamic().ccd_enabled(body.collision_detection.ccd())
             }
             .enabled(active(body.node as usize))
             .additional_mass(body.mass_kg)

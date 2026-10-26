@@ -1942,6 +1942,7 @@ pub struct WorldPrototypeBody {
     pub mass_kg: f32,
     pub linear_damping: f32,
     pub angular_damping: f32,
+    pub collision_detection: crate::reference::CollisionDetection,
     pub kinematic: bool,
     pub use_gravity: bool,
     pub constraints: u32,
@@ -2168,7 +2169,7 @@ mod tests {
             "source": src(1), "role": "structure", "asset": 5,
             "nodes": [node(1), node(2), node(3), node(4)],
             "controls": [], "excluded_actions": [], "deferred_materials": [], "skins": [],
-            "bodies": [{"source": src(10), "node": 0, "mass_kg": 900.0, "linear_damping": 0.0, "angular_damping": 0.05, "kinematic": false, "use_gravity": true, "constraints": 0, "pose": pose}],
+            "bodies": [{"source": src(10), "node": 0, "mass_kg": 900.0, "linear_damping": 0.0, "angular_damping": 0.05, "collision_detection": "continuous", "kinematic": false, "use_gravity": true, "constraints": 0, "pose": pose}],
             "colliders": [serde_json::to_value(collider(false, "null")).unwrap()],
             "prefab_pose": pose,
             "vehicle": {

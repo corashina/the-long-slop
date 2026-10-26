@@ -180,8 +180,27 @@ pub struct BodyRecord {
     pub mass_kg: f32,
     pub linear_damping: f32,
     pub angular_damping: f32,
+    /// `None` when the body has no Unity `Rigidbody`.
+    pub collision_detection: Option<CollisionDetection>,
     pub pose: Transform,
     pub parent_body: Option<BodyId>,
+}
+
+/// Unity `Rigidbody.collisionDetectionMode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollisionDetection {
+    Discrete,
+    Continuous,
+    ContinuousDynamic,
+    ContinuousSpeculative,
+}
+
+impl CollisionDetection {
+    /// Rapier CCD stands in for every continuous mode.
+    pub fn ccd(self) -> bool {
+        self != Self::Discrete
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -755,6 +774,7 @@ pub struct PartReference {
     pub colliders: Vec<ColliderId>,
     pub linear_damping: f32,
     pub angular_damping: f32,
+    pub collision_detection: CollisionDetection,
     pub enable_if_mounted: Vec<NodeId>,
     pub enable_if_dismounted: Vec<NodeId>,
     pub disable_if_mounted: Vec<NodeId>,
@@ -1336,6 +1356,10 @@ impl ReferenceManifest {
                 "body binding/pose",
             )?;
             require(
+                !r.dynamic || r.collision_detection.is_some(),
+                "dynamic body collision detection",
+            )?;
+            require(
                 r.mass_kg.is_finite() && r.mass_kg >= 0.0 && (!r.dynamic || r.mass_kg > 0.0),
                 "body mass",
             )?;
@@ -1835,5 +1859,23 @@ impl ReferenceManifest {
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CollisionDetection;
+
+    #[test]
+    fn only_continuous_modes_use_ccd() {
+        for (name, ccd) in [
+            ("discrete", false),
+            ("continuous", true),
+            ("continuous_dynamic", true),
+            ("continuous_speculative", true),
+        ] {
+            let mode: CollisionDetection = serde_json::from_value(name.into()).unwrap();
+            assert_eq!(mode.ccd(), ccd, "{name}");
+        }
     }
 }

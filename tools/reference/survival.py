@@ -6,7 +6,7 @@ import re
 import struct
 from pathlib import Path
 from .source import LibrarySource, key, source_id
-from .collision import world_pose, geometry, step_surface, collider_tag
+from .collision import collision_detection, world_pose, geometry, step_surface, collider_tag
 from .gltf import GltfExporter
 from .actions import recover_pickup
 
@@ -67,7 +67,7 @@ def food_record(source, kind, root, manifest):
     edible=component(source,root,'ediblescript');data=source.read(edible)
     if data['continous'] or not data['destroyOnEnd']:raise ValueError('Selected food consumption contract differs')
     groups=part_groups(source,edible)
-    rigid=source.read(component(source,root,'Rigidbody'))
+    rigid_reader=component(source,root,'Rigidbody');rigid=source.read(rigid_reader)
     pose=world_pose(source,root);pose['scale']=[1.,1.,1.]
     exporter=GltfExporter(source,None,source.library)
     physics=next(r for r in source.objects.values() if r.type.name=='PhysicsManager')
@@ -86,7 +86,7 @@ def food_record(source, kind, root, manifest):
         'bites':len(groups),'index':data['index'],'destroy_on_end':bool(data['destroyOnEnd']),
         'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],
         'mass_kg':source.read(component(source,root,'massScript'))['mass'],
-        'linear_damping':rigid['m_Drag'],'angular_damping':rigid['m_AngularDrag'],
+        'linear_damping':rigid['m_Drag'],'angular_damping':rigid['m_AngularDrag'],'collision_detection':collision_detection(rigid_reader,rigid),
         'pickup':recover_pickup(source,component(source,root,'pickupable')),
         'parts':[[nodes[key(part)]['id'] for part in group] for group in groups],
         'colliders':colliders,'particle_type':data['particleType'],'min_particle':data['minParticle'],'max_particle':data['maxParticle'],
