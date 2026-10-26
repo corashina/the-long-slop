@@ -1857,6 +1857,14 @@ impl GarageRuntime {
         }
     }
 
+    /// Per rendered frame work: gauges and gear levers move by render time `dt`.
+    pub fn advance_render_frame(&mut self, reference: &ReferenceManifest, dt: f32) {
+        if self.started && !self.paused {
+            self.advance_instruments(reference, dt, false);
+            // Source `carscript.Update` eases the lever once per frame by scaled frame time.
+            self.advance_levers(reference, dt);
+        }
+    }
     /// Source `carscript.Update`: eases each car gear lever by render time `dt`.
     pub fn advance_levers(&mut self, reference: &ReferenceManifest, dt: f32) {
         for vehicle in self.vehicles.values_mut() {

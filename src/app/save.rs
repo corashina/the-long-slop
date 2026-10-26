@@ -247,15 +247,14 @@ fn process_request(
             drive.skip_elapsed = true;
             drive.last_feedback = None;
             drive.runtime.advance_instruments(&reference, 0., true);
-            let camera = super::active_camera(&drive);
-            let far = drive.runtime.distances.cam2_far_plane;
-            let fov = drive
-                .runtime
-                .area
-                .player
-                .view(&drive.runtime.physics)
-                .fov_degrees;
+            // The new runtime starts a new frame stream: drop the old pose index and tables.
+            let mut sim = SimFrameResource::default();
+            super::fill(&mut drive, &reference, &mut sim);
+            let state = sim.frame.state;
+            let camera = super::active_camera(&drive, &state);
+            let (far, fov) = (state.far_plane, state.fov_degrees);
             drop(drive);
+            world.insert_resource(sim);
             let mut cameras = world.query::<(
                 &mut Transform,
                 &mut Projection,

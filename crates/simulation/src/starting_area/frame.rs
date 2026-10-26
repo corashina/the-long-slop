@@ -1,7 +1,8 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
 use crate::boundary::{
-    Change, CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow,
+    BudgetRow, Change, CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock,
+    ValveRow,
 };
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
@@ -70,7 +71,20 @@ impl GarageRuntime {
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
             motion_revision: self.audio_motion_revision,
             far_plane: self.distances.cam2_far_plane,
-            pad: 0,
+            sleep_camera: self
+                .sleep_camera()
+                .map_or(PoseRow::default(), |camera| PoseRow {
+                    position: self.stream.origin.local(camera.absolute_position),
+                    flags: PoseRow::ACTIVE,
+                    rotation: camera.rotation,
+                }),
+            seat_car: match (area.player.seat_vehicle(), self.vehicle.as_ref()) {
+                (Some(_), Some(key)) => {
+                    PoseRow::new(self.physics.snapshot(key).pose, PoseRow::ACTIVE)
+                }
+                _ => PoseRow::default(),
+            },
+            prepared_roads: self.stream.metrics().prepared_roads as u32,
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -96,6 +110,18 @@ impl GarageRuntime {
         self.fill_particles(reference, frame);
         self.fill_conditions(reference, frame);
         self.fill_followed_car(frame);
+        frame.budgets.clear();
+        if !self.started {
+            let stream = &self.stream;
+            frame.budgets.extend(
+                stream
+                    .presentation_budgets(stream.presentation_allocation())
+                    .map(|b| BudgetRow {
+                        used: b.used as f64,
+                        limit: b.limit as f64,
+                    }),
+            );
+        }
         if let Some(aims) = self.home_cable(reference) {
             frame.changes.push(Change::HomeCable(aims));
         }
