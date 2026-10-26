@@ -935,6 +935,13 @@ impl SourceContents {
     pub fn lamp_states(&self) -> impl Iterator<Item = &(GeneratedId, SourceId, bool)> {
         self.instances().flat_map(|c| &c.inputs.lamps)
     }
+    /// Source `Lamp.broken` bits set by flashlightscript.Break. Bit i is `Lamps[i]`.
+    pub fn broken_lamps(&self, parent: &GeneratedId, source: &SourceId) -> u64 {
+        self.instances()
+            .flat_map(|c| &c.inputs.broken_lamps)
+            .filter(|(p, s, _)| p == parent && s == source)
+            .fold(0, |bits, (_, _, b)| bits | b)
+    }
     pub fn set_lamp(
         &mut self,
         reference: &WorldReference,

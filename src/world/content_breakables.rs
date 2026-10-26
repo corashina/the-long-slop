@@ -229,5 +229,38 @@ impl WorldStream {
                 }
             }
         }
+        // A restored lamp trigger whose lamps are all broken was destroyed by its Break.
+        let mut removed = false;
+        for index in 0..self.breakables.targets().len() {
+            let target = &self.breakables.targets()[index];
+            let BreakKind::Lamp { parent, control } = &target.kind else {
+                continue;
+            };
+            let rules = &records[target.record];
+            let lamps = rules.lamp.as_ref().expect("lamp record");
+            let Some(binding) = self
+                .lamp_bindings
+                .iter()
+                .find(|b| b.control == *control && &b.parent == parent)
+            else {
+                continue;
+            };
+            let broken = self.contents.broken_lamps(parent, &binding.source);
+            if target.removed
+                || rules.no_destroy
+                || lamps.lamps.is_empty()
+                || lamps.lamps.iter().any(|i| broken & (1 << i) == 0)
+            {
+                continue;
+            }
+            self.breakables.remove(index);
+            for collider in self.breakables.colliders_of(index) {
+                physics.edit_collider(collider, |c| c.set_enabled(false));
+            }
+            removed = true;
+        }
+        if removed {
+            physics.refresh_queries();
+        }
     }
 }

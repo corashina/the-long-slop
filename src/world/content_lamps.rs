@@ -129,6 +129,7 @@ impl WorldStream {
                 fluids: None,
                 valve: None,
                 lamp: Some(on),
+                lamp_broken: None,
                 dial: None,
                 ammo: None,
                 glow: None,
@@ -144,19 +145,30 @@ impl WorldStream {
             };
             let mut key = parent.clone();
             key.children.push((source.clone(), 0));
-            if let Some(changed) = self
+            let saved = self
                 .changes
                 .get(ObjectKey::Generated(key))
                 .and_then(|r| r.snapshot.as_ref())
-                .and_then(|s| s.lamp)
-            {
-                self.contents.set_lamp(
-                    &self.reference,
-                    &parent,
-                    &source,
-                    changed,
-                    self.available_staging_bytes(),
-                )?;
+                .map(|s| (s.lamp, s.lamp_broken));
+            if let Some((lamp, broken)) = saved {
+                if let Some(changed) = lamp {
+                    self.contents.set_lamp(
+                        &self.reference,
+                        &parent,
+                        &source,
+                        changed,
+                        self.available_staging_bytes(),
+                    )?;
+                }
+                if let Some(broken) = broken {
+                    self.contents.break_lamps(
+                        &self.reference,
+                        &parent,
+                        &source,
+                        broken,
+                        self.available_staging_bytes(),
+                    )?;
+                }
             }
             let button = self.lamp_button(&parent, &source)?;
             let instance = self
@@ -397,32 +409,19 @@ impl WorldStream {
             !on,
             self.available_staging_bytes(),
         )?;
-        if binding.portable {
-            if let Some(item) = self.portable_lamp_item(&binding.parent) {
-                items.mark_dirty(item);
-            }
-        } else {
-            let mut key = binding.parent.clone();
-            key.children.push((binding.source.clone(), 0));
-            let mut snapshot = binding.baseline.clone();
-            snapshot.lamp = Some(!on);
-            let object = ObjectKey::Generated(key);
-            self.changes
-                .record(object.clone(), snapshot, &binding.baseline);
-            if let Some(origin) = self.contents.replay_origin(&binding.parent).or_else(|| {
-                self.structures
-                    .iter()
-                    .find(|s| s.placement.id == binding.parent)
-                    .map(|s| &s.placement)
-            }) {
-                self.changes.set_replay(&object, origin, &binding.parent);
-            }
+        if binding.portable
+            && let Some(item) = self.portable_lamp_item(&binding.parent)
+        {
+            items.mark_dirty(item);
         }
         let index = self
             .lamp_bindings
             .iter()
             .position(|b| b.control == control)
             .unwrap();
+        if !self.lamp_bindings[index].portable {
+            self.record_structure_lamp(index);
+        }
         self.presentation_lamp_changes.push(index);
         let binding = &mut self.lamp_bindings[index];
         binding.collision_dirty = true;
@@ -472,10 +471,37 @@ impl WorldStream {
             lamps,
             self.available_staging_bytes(),
         )?;
+        self.record_structure_lamp(index);
         self.presentation_lamp_changes.push(index);
         self.lamp_bindings[index].collision_dirty = true;
         self.refresh_lamp_outputs();
         Ok(())
+    }
+    /// Records the on state and broken bits of a structure lamp control as a world change.
+    fn record_structure_lamp(&mut self, index: usize) {
+        let binding = &self.lamp_bindings[index];
+        let on = self
+            .contents
+            .lamp_states()
+            .find(|(p, s, _)| p == &binding.parent && s == &binding.source)
+            .map(|(_, _, on)| *on);
+        let broken = self.contents.broken_lamps(&binding.parent, &binding.source);
+        let mut key = binding.parent.clone();
+        key.children.push((binding.source.clone(), 0));
+        let mut snapshot = binding.baseline.clone();
+        snapshot.lamp = on;
+        snapshot.lamp_broken = (broken != 0).then_some(broken);
+        let object = ObjectKey::Generated(key);
+        self.changes
+            .record(object.clone(), snapshot, &binding.baseline);
+        if let Some(origin) = self.contents.replay_origin(&binding.parent).or_else(|| {
+            self.structures
+                .iter()
+                .find(|s| s.placement.id == binding.parent)
+                .map(|s| &s.placement)
+        }) {
+            self.changes.set_replay(&object, origin, &binding.parent);
+        }
     }
     pub(super) fn sync_moving_lamps(&mut self, items: &crate::interaction::items::ItemStore) {
         for content in &self.contents.active {
@@ -614,6 +640,7 @@ mod tests {
                 fluids: None,
                 valve: None,
                 lamp: Some(false),
+                lamp_broken: None,
                 dial: None,
                 ammo: None,
                 glow: None,

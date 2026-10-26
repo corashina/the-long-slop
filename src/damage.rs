@@ -338,8 +338,9 @@ impl Breakables {
             .filter(move |(_, t)| *t == target)
             .map(|(c, _)| *c)
     }
-    /// Source Break destroys the lamp trigger of a target.
+    /// Source Break destroys the lamp trigger of a target. A destroyed target does not break again.
     pub(crate) fn remove(&mut self, target: usize) {
+        self.targets[target].destroyed = true;
         self.targets[target].removed = true;
     }
     /// True for a collider of a destroyed lamp trigger.

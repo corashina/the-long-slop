@@ -90,6 +90,7 @@ impl GarageRuntime {
                     .map(crate::fluids::FluidSnapshot::from),
                 valve: None,
                 lamp: None,
+                lamp_broken: None,
                 dial: None,
                 ammo: None,
                 glow: None,
