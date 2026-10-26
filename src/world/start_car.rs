@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Source `RandomStartCar` chances, in draw order, by source `TerrainGenerationSettings` field.
 /// A field without an exported start placement is skipped with its chance.
-/// Today car03, car03k, car06p, car08 to car10k have none: PR 2 and V03 add them.
+/// Today `StartCar06p` has none: V03 adds it.
 const CHANCES: [(&str, i32); 15] = [
     ("StartCar01", 100),
     ("StartCar02", 75),
