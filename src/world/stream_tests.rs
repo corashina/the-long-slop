@@ -11,6 +11,8 @@ mod item_seats;
 mod long_trip;
 #[path = "stream_tests/sled.rs"]
 mod sled;
+#[path = "stream_tests/towing.rs"]
+mod towing;
 #[path = "stream_tests/two_cars.rs"]
 mod two_cars;
 

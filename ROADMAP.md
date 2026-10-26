@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-25. Goal: recreate The Long Drive for the web.
+Updated: 2026-10-26. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](src/save/schema.rs).
 
@@ -101,13 +101,19 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 13. Mouse driving (V06): U toggles it in the car. Mouse X steers, mouse up is gas, down is brake, mouse look is off.
 14. Steering wheel (V06): with a real wheel or pad, bind every axis and gear button. Check H-shifter on and off and the live values. Steer a sled with the pad.
 15. Check F3 before and after, driving on sand at speed. Compare with the frame rate rule.
+16. Towing (V05): run `cargo test --lib lada_tows -- --ignored`. Re-export first: prototypes now carry `trailer` and `hitches`.
+17. Find a small trailer and a bus trailer. Pick up the grip and put it on the Lada hitch. Drive, turn, reverse and brake.
+18. Check the trailer rear and brake lamps follow the Lada lights, ignition and brake. Check the bus trailer brake switch.
+19. Pick the grip off the hitch while the car stands and while it rolls. Save and load with the trailer on the hitch.
+20. Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
+21. Check the trailer reflection probe and trailer wheel meshes. Trailer wheel meshes do not turn yet; `PlusWheelToKeepAwake` is not ported.
+22. Check F3 while towing. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
 | V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
-| V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
 
 ## 5. Later
 

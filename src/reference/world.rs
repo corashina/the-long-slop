@@ -8,10 +8,9 @@ mod lod;
 mod memory;
 use super::{
     AssetId, AssetRecord, AssetUsage, ColliderGeometry, EngineGlobals, EnginePartReference,
-    GaugePartReference,
-    LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference, ReferenceError,
-    ReferenceManifest, SourceHash, SourceId, Transform, WorldVehicleReference, finite, hash,
-    require, transform,
+    GaugePartReference, LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference,
+    ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform, WorldHitchReference,
+    WorldTrailerReference, WorldVehicleReference, finite, hash, require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -166,6 +165,10 @@ pub struct WorldPrototypeReference {
     #[serde(default)]
     pub gauges: Vec<GaugePartReference>,
     pub sled: Option<SledReference>,
+    pub trailer: Option<WorldTrailerReference>,
+    /// Trailer hitch targets on this prototype.
+    #[serde(default, deserialize_with = "compact_vec")]
+    pub hitches: Vec<WorldHitchReference>,
 }
 
 impl WorldPrototypeReference {
@@ -1780,6 +1783,12 @@ impl WorldReference {
                 .all(|b| b.center_of_mass.is_none_or(|c| finite(&c)))
                 && p.sled.as_ref().is_none_or(|sled| sled.valid(p)),
             &field(&p.source, "prototype sled/center of mass"),
+        )?;
+        require(
+            p.trailer.as_ref().is_none_or(|t| {
+                t.valid(p) && self.prototypes.iter().any(|g| g.source == t.grip.prototype)
+            }) && p.hitches.iter().all(|h| h.valid(p)),
+            &field(&p.source, "prototype trailer/hitches"),
         )?;
         let doors: Vec<_> = self
             .mechanisms

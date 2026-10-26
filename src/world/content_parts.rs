@@ -10,7 +10,7 @@ pub(super) fn bind(
     prototype: &WorldPrototypeReference,
     rules: &SourceRules,
     reference: &ReferenceManifest,
-    pickup: PickupReference,
+    pickup: Option<PickupReference>,
     layers: u32,
     items: &mut ItemStore,
     interaction: &mut InteractionState,
@@ -31,7 +31,8 @@ pub(super) fn bind(
     }) {
         return Ok(());
     }
-
+    let pickup =
+        pickup.ok_or_else(|| ReferenceError("Generated part owner has no pickupable".into()))?;
     if content.nodes.is_empty() {
         let state = items.get(owner).unwrap();
         content.nodes = interaction.mechanisms.register_generated(
