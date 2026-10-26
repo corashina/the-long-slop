@@ -53,6 +53,16 @@ def radiator_fields(radiator: dict) -> dict:
         **{field:radiator[unity] for field,unity in RADIATOR_FIELDS.items()}}
 
 
+def vehicle_globals(source) -> dict:
+    """Shared engine values of mainscript. The world record holds them once for every car."""
+    reader=source.get('level1',64919);main=source.read(reader)
+    return {'source':source_id(reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],
+        'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],
+        'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],
+        'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],
+        'outside_temperature_modifier':main['outsideTempM'],'min_steam_temperature':main['minSteamTemp']}
+
+
 def component_mass(source, components) -> float:
     """massScript mass plus initial tankscript fluid of one node."""
     total=0.

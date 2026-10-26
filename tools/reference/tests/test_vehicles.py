@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 from tools.reference.source import source_id
-from tools.reference.vehicles import part_records, vehicle_record
+from tools.reference.vehicles import part_records, vehicle_globals, vehicle_record
 
 FILE = NS(name='sharedassets1.assets', source_container_path='sharedassets1.assets')
 LEVEL1 = NS(name='level1', source_container_path='level1')
@@ -111,6 +111,17 @@ class VehicleRecordTests(unittest.TestCase):
         source, hierarchy, bodies, colliders = car_fixture()
         hierarchy[0]['components'] = [c for c in hierarchy[0]['components'] if c.cls != 'carscript']
         self.assertIsNone(vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None))
+
+
+    def test_vehicle_globals_come_once_from_mainscript(self):
+        main = NS(assets_file=LEVEL1, path_id=64919)
+        values = dict(defConsumption=1., defOilConsumption=.1, minCarTemp=-20., maxCarTemp=60., coolantEvaporateRate=.01,
+            tempDifferenceModifier=.5, tempChangeMoveModifier=.2, maxCarVelocity=40., outsideTempM=.3, minSteamTemp=110.)
+        source = NS(get=lambda file, path_id: main, read=lambda reader: values)
+        result = vehicle_globals(source)
+        self.assertEqual(result['source'], source_id(main))
+        self.assertEqual(result['car_temperature_bounds'], [-20., 60.])
+        self.assertEqual(result['min_steam_temperature'], 110.)
 
 
 if __name__ == '__main__':

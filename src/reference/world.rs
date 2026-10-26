@@ -7,9 +7,10 @@ mod initialization;
 mod lod;
 mod memory;
 use super::{
-    AssetId, AssetUsage, ColliderGeometry, EnginePartReference, LibraryProvenance, NodeId,
-    RadiatorPartReference, ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform,
-    WorldVehicleReference, finite, hash, require, transform,
+    AssetId, AssetRecord, AssetUsage, ColliderGeometry, EngineGlobals, EnginePartReference,
+    LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference, ReferenceError,
+    ReferenceManifest, SourceHash, SourceId, Transform, WorldVehicleReference, finite, hash,
+    require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -33,6 +34,8 @@ pub struct WorldReference {
     pub library: LibraryProvenance,
     pub capture_library: LibraryProvenance,
     pub spawn_context: WorldSpawnContext,
+    /// Shared `mainscript` engine values of every car.
+    pub vehicle_globals: EngineGlobals,
     pub initialization: WorldInitialization,
     pub generation_frame: Transform,
     /// Rotation of `mainscript.magneticField`; compasses point along its forward.
@@ -736,6 +739,7 @@ impl WorldReference {
                 && self.spawn_context.startup_draws == 4,
             "world controlled spawn context",
         )?;
+        self.vehicle_globals.validate()?;
         require(!self.source_hashes.is_empty(), "world source hashes")?;
         let mut files = HashSet::new();
         for h in &self.source_hashes {
@@ -1689,8 +1693,27 @@ impl WorldReference {
             .filter(|m| m.prototype == p.source)
             .map(|m| &m.recipe.source)
             .collect();
-        interiors_valid(p, &doors)
+        interiors_valid(p, &doors)?;
+        vehicle_valid(p, a)
     }
+}
+/// Vehicle, engine and radiator records resolve inside the prototype.
+fn vehicle_valid(p: &WorldPrototypeReference, asset: &AssetRecord) -> Result<(), ReferenceError> {
+    if let Some(v) = &p.vehicle {
+        v.validate(PrototypeBounds {
+            nodes: p.nodes.len(),
+            bodies: p.bodies.len(),
+            colliders: p.colliders.len(),
+            asset,
+        })?;
+    }
+    for e in &p.engines {
+        e.validate(p.nodes.len())?;
+    }
+    for r in &p.radiators {
+        r.validate(p.nodes.len())?;
+    }
+    Ok(())
 }
 /// Interior colliders, doors and parents resolve inside the prototype.
 fn interiors_valid(p: &WorldPrototypeReference, doors: &[&SourceId]) -> Result<(), ReferenceError> {
@@ -2004,5 +2027,70 @@ mod tests {
         ] {
             assert!(interiors_valid(&bad, &doors).is_err());
         }
+    }
+
+    #[test]
+    fn vehicle_prototype_ids_resolve_inside_the_prototype() {
+        use serde_json::json;
+        let src = |id: u32| json!({"file": "a", "path_id": id});
+        let pose = json!({"translation": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]});
+        let friction = json!({"extremum_slip": 0.4, "extremum_value": 1.0, "asymptote_slip": 0.8, "asymptote_value": 0.5, "stiffness": 1.0});
+        let node = |id: u32| json!({"source": src(id), "name": "n", "parent": if id == 1 { None } else { Some(0) }, "active": true, "renderer_enabled": true, "layer": 0, "transform": pose, "gltf_node": id - 1, "biome_materials": false});
+        let fixture = json!({
+            "source": src(1), "role": "structure", "asset": 5,
+            "nodes": [node(1), node(2), node(3), node(4)],
+            "controls": [], "excluded_actions": [], "deferred_materials": [], "skins": [],
+            "bodies": [{"source": src(10), "node": 0, "mass_kg": 900.0, "linear_damping": 0.0, "angular_damping": 0.05, "kinematic": false, "use_gravity": true, "constraints": 0, "pose": pose}],
+            "colliders": [serde_json::to_value(collider(false, "null")).unwrap()],
+            "prefab_pose": pose,
+            "vehicle": {
+                "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
+                "fuel_tank": 0, "electronics": null, "starter_delay_seconds": 1.0,
+                "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
+                "handbrake": true, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
+                "wheels": [{"source": src(12), "node": 1, "slot": 2, "mount": 2, "steer": true, "drive": true, "brake": true, "handbrake": true, "sideways_stiffness_modifier": 1.0,
+                    "collider": {"radius": 0.3, "suspension_distance": 0.2, "center": [0, 0, 0], "spring": 1.0, "damper": 1.0, "target_position": 0.5, "forward_friction": friction, "sideways_friction": friction, "wheel_mass_kg": 20.0, "rotational_damping": 0.25, "force_application_distance_m": 0.0}}],
+                "gear_ratios": [-3.0, 0.0, 3.0], "gear_free_run": [false, true, false], "final_drive_ratio": 4.0,
+                "max_steer_degrees": 35.0, "brake_torque_nm": 1000.0, "handbrake_torque_nm": 2000.0,
+                "wheel_slip": [0.0, 1.0, 0.0, 1.0], "rim_slip": [1.0, 1.0], "auto_shift_stop_speed": 1.0,
+                "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
+                "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [],
+                "seats": [{"source": src(13), "node": 3, "sit_node": 3, "hit_nodes": [3], "driver": true, "driving2": true, "yaw_limits_degrees": [-179.0, 179.0], "min_exit_angle_degrees": 65.0, "exit_height": 1.0, "show_sleep_text": false, "default_pitch_degrees": 0.0, "pitch_limits_degrees": [-89.0, 89.0]}],
+                "lights": [], "light_switch": null, "instruments": null, "high_beams": []
+            },
+            "engines": [{"source": src(14), "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false,
+                "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
+                "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0}],
+            "radiators": [{"source": src(15), "node": 2, "coolant_tank": null, "fan_node": 3, "thermostat_range": [80.0, 90.0], "fan_temperature_on": 95.0, "fan_temperature_off": 90.0, "fan_on_when_engine_runs": false, "max_value": 1.0, "max_fan_value": 1.0, "max_fan_speed": 1.0, "max_fluid_loss": 1.0}]
+        });
+        let asset = AssetRecord {
+            mesh_count: 1,
+            material_count: 1,
+            usage: AssetUsage::WorldPrototype,
+            id: AssetId(5),
+            path: "reference/car.gltf".into(),
+            sha256: String::new(),
+            root: SourceId {
+                file: "a".into(),
+                path_id: 1,
+            },
+            dependencies: Vec::new(),
+        };
+        let check = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut value = fixture.clone();
+            edit(&mut value);
+            let p: WorldPrototypeReference = serde_json::from_value(value).unwrap();
+            vehicle_valid(&p, &asset).map_err(|e| e.to_string())
+        };
+        assert_eq!(check(&|_| {}), Ok(()));
+        assert_eq!(
+            check(&|v| v["vehicle"]["wheels"][0]["slot"] = json!(9)),
+            Err("Invalid reference field: a:11 vehicle wheel 0".into())
+        );
+        assert_eq!(
+            check(&|v| v["engines"][0]["oil_tank"] = json!(4)),
+            Err("Invalid reference field: a:14 engine part links".into())
+        );
+        assert!(check(&|v| v["vehicle"]["wheels"] = json!([])).is_err());
     }
 }
