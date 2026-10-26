@@ -563,6 +563,16 @@ fn read_input(
         ],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
+        typing: if drive.runtime.stream.computers.typing {
+            let mut typing = crate::simulation::TypingInput {
+                keys: game_typing_keys(),
+                ..Default::default()
+            };
+            typing.len = game_typed_text(&mut typing.text).min(typing.text.len() as u32) as u8;
+            typing
+        } else {
+            crate::simulation::TypingInput::default()
+        },
     };
     if requests.pending() {
         if cpu_profile::enabled() {

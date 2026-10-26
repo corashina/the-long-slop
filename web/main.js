@@ -94,6 +94,8 @@ window.gameSaveResult=(id,kind,payload,error)=>{
  if(kind==='Commit'&&!error){input.clear();actions=0;}
  settleSave(id,kind,payload,error);
 };
+window.gameTypingKeys=()=>input.state.typingKeys();
+window.gameTypedText=buffer=>input.state.takeText(buffer);
 window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
 window.gamePlayerKeys=()=>frame.playerHeld|(frame.playerPressed<<4)|(frame.playerReleased<<8);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
@@ -125,7 +127,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
 };
 window.gameRadioFeedback=(volume,frequency,am)=>{record.radioVolume=volume;record.radioFrequency=frequency;record.radioAm=am;if(record.context===11||record.context===12)feedback?.update(record);};
 window.gameFeedback=(mask,context,name,notice,carrying,amount,capacity,hasName,noText,fluidName,condition,held,charge,throwing,rpm,ignition,running,starter,seated,handbrake,gas,oil,alcohol,water,blood,diesel,fluidOrder,control,lmbUse,hose,computer)=>{
- record.actions=mask;record.hose=hose;record.computer=computer;record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
+ record.actions=mask;record.hose=hose;record.computer=computer;input?.state.setTyping((computer&32)!==0);record.context=context;record.lmbUse=lmbUse;record.name=name;record.notice=notice;record.carrying=carrying;record.amount=amount;record.capacity=capacity;record.hasName=hasName;record.noText=noText;record.fluidName=fluidName;
  record.condition=condition;record.held=held;record.throwCharge=charge;record.throwActive=throwing;
  const q=record.quantities;q[0]=gas;q[1]=oil;q[2]=alcohol;q[3]=water;q[4]=blood;q[5]=diesel;record.fluidOrder=fluidOrder;
  const state=window.gameState;

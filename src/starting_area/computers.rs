@@ -1,6 +1,7 @@
 //! Computer and TV actions of the player (fpscontroller look-at and held-item code).
 use super::GarageRuntime;
 use crate::interaction::AimTarget;
+use crate::interaction::computer::TypingFrame;
 use crate::interaction::feedback::ComputerPrompt;
 use crate::reference::ItemId;
 use crate::simulation::{FIXED_DT, FrameInput, keys};
@@ -10,13 +11,26 @@ impl GarageRuntime {
     pub(super) fn step_typing(&mut self, input: &mut FrameInput) {
         let blocked = self.needs_output().dead || self.sleeping();
         let computers = &mut self.stream.computers;
-        if computers.typing {
+        let mut frame = None;
+        let was_typing = computers.typing;
+        if was_typing {
             if blocked || input.pressed & keys::PRIMARY != 0 {
                 computers.typing = false;
+            } else {
+                let keys = input.typing.keys;
+                frame = Some(TypingFrame {
+                    text: input.typing.text(),
+                    any_key: keys & 1 << 24 != 0,
+                    arrows: (keys >> 17) as u8 & 15,
+                    piano: keys & 0x1ffff,
+                    pressed: (keys >> 21) as u8 & 7,
+                });
             }
+        }
+        computers.advance(FIXED_DT, frame);
+        if was_typing {
             *input = FrameInput::default();
         }
-        computers.advance(FIXED_DT, None);
     }
     /// The aimed item within reach.
     fn looked_at(&self) -> Option<ItemId> {
