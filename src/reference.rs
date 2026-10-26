@@ -71,8 +71,10 @@ pub mod survival;
 pub use inventory::*;
 pub mod particles;
 pub use particles::*;
+pub mod sky_traffic;
 pub mod weather;
 pub use survival::*;
+pub use sky_traffic::*;
 pub use weather::*;
 pub mod instruments;
 pub mod ui;
@@ -143,6 +145,7 @@ pub enum AssetUsage {
     WorldPrototype,
     WorldMaterial,
     ItemPrototype,
+    SkyTraffic,
     PlayerPrototype,
     StationPrototype,
 }
@@ -846,6 +849,7 @@ pub struct ReferenceManifest {
     pub sleep: SleepReference,
     pub particles: Vec<ParticleReference>,
     pub weather: WeatherReference,
+    pub sky: SkyReference,
     pub ambient: AmbientReference,
     pub world: std::sync::Arc<WorldReference>,
     pub ui: UiReference,
@@ -1094,6 +1098,7 @@ impl ReferenceManifest {
         self.sleep.validate(self)?;
         particles::validate_particles(self)?;
         self.weather.validate(self)?;
+        self.sky.validate(self)?;
         self.ambient.validate()?;
         self.plates.validate(self)?;
         require(

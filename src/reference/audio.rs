@@ -351,8 +351,10 @@ impl AudioReference {
                     && v.gain >= 0.0
                     && v.pitch > 0.0
                     && (0.0..=1.0).contains(&v.spatial_blend)
-                    && v.min_distance > 0.0
+                    // Linear rolloff is defined from distance 0. The airplane source starts there.
+                    && (v.min_distance > 0.0 || (v.min_distance == 0.0 && v.rolloff_mode == 1))
                     && v.max_distance >= v.min_distance
+                    && v.max_distance > 0.0
                     && v.rolloff_mode <= 2
                     && !v.methods.is_empty()
                     && v.methods.iter().all(method),
@@ -734,6 +736,23 @@ impl AudioReference {
                         .all(|b| bindings.contains(b))
                     && method(&l.method),
                 "audio lamp",
+            )?;
+        }
+        for p in &game.sky.prefabs {
+            require(
+                p.voices.iter().all(|id| {
+                    self.voices.iter().any(|v| {
+                        v.id == *id
+                            && self.emitters.iter().any(|e| {
+                                e.id == v.emitter
+                                    && game
+                                        .nodes
+                                        .iter()
+                                        .any(|n| n.id == e.node && n.asset == p.asset)
+                            })
+                    })
+                }),
+                "audio sky voice",
             )?;
         }
         let outside = &self.mixer_controls.outside;
