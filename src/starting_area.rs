@@ -445,6 +445,7 @@ pub struct VehicleState {
     pub handbrake: bool,
     pub trip_m: f64,
     pub requested_headlights: u8,
+    pub steer: f32,
 }
 
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
@@ -455,6 +456,8 @@ pub struct VehicleRuntime {
     pub handbrake: bool,
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
+    /// Source carscript.steer over steerAngle. It keeps its value when nobody drives.
+    pub steer: f32,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
     /// Car root `tankscript` item.
@@ -502,6 +505,7 @@ impl VehicleRuntime {
             prototype,
             handbrake: record.handbrake,
             trip_m: 0.0,
+            steer: 0.,
             ignition: IgnitionState::default(),
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(record.into()),
             lever: record.lever.as_ref().map(|lever| {
@@ -629,6 +633,7 @@ impl VehicleRuntime {
             handbrake: self.handbrake,
             trip_m: self.trip_m,
             requested_headlights: self.requested_headlights,
+            steer: self.steer,
         }
     }
     /// Restores a captured state. The gear must be in the record range.
@@ -647,6 +652,7 @@ impl VehicleRuntime {
         self.handbrake = state.handbrake;
         self.trip_m = state.trip_m;
         self.requested_headlights = state.requested_headlights;
+        self.steer = state.steer;
     }
 }
 
@@ -2058,10 +2064,11 @@ impl GarageRuntime {
             .push_steering()
             .filter(|(body, _)| self.physics.vehicle_of(*body) == Some(key))
             .map(|(_, steer)| steer);
+        vehicle.steer = vehicle_steer(vehicle.steer, pushed, driving.then_some(controls.steer));
         let drive = DriveInput {
             throttle,
             brake,
-            steer: pushed.unwrap_or(controls.steer),
+            steer: vehicle.steer,
             // Source `handbrake` axis beside the lever state.
             handbrake: (vehicle.handbrake as u8 as f32).max(controls.handbrake),
         };
@@ -2450,6 +2457,11 @@ fn transport_body(
     });
 }
 
+/// Source carscript steer: a push grip wins, then the driver. Else the car keeps its steer.
+fn vehicle_steer(current: f32, pushed: Option<f32>, driven: Option<f32>) -> f32 {
+    pushed.or(driven).unwrap_or(current)
+}
+
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }
@@ -2459,4 +2471,16 @@ fn startup_hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+#[cfg(test)]
+mod steer_tests {
+    use super::vehicle_steer;
+
+    #[test]
+    fn push_wins_then_driver_then_last_steer() {
+        assert_eq!(vehicle_steer(0.3, Some(-0.5), Some(1.0)), -0.5);
+        assert_eq!(vehicle_steer(0.3, None, Some(1.0)), 1.0);
+        assert_eq!(vehicle_steer(0.3, None, None), 0.3);
+    }
 }
