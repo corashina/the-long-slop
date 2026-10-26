@@ -170,11 +170,11 @@ impl MotionController {
         let mut position = [0.; 3];
         let mut rotation = Rotation::IDENTITY;
         for track in &clip.tracks {
-            let value = sample_track(track, time);
+            let [x, y, z, _] = sample_track(track, time);
             match track.attribute {
-                1 => position = value,
+                1 => position = [x, y, z],
                 _ => {
-                    let [x, y, z, w] = unity_euler(value);
+                    let [x, y, z, w] = unity_euler([x, y, z]);
                     rotation = Rotation::from_xyzw(x, y, z, w);
                 }
             }
@@ -214,28 +214,26 @@ fn crossed(from: f32, to: f32, exit: f32) -> bool {
 }
 
 /// Unity streamed cubic keys hold polynomial coefficients from each key time.
-fn sample_track(track: &MotionTrack, time: f32) -> [f32; 3] {
+/// Components past the track width stay 0.
+fn sample_track(track: &MotionTrack, time: f32) -> [f32; 4] {
     let times = &track.times;
-    if time <= times[0] {
-        return track.values[0];
+    let i = times.partition_point(|t| *t <= time).saturating_sub(1);
+    let mut out = [0.; 4];
+    let values = &track.values[i];
+    out[..values.len()].copy_from_slice(values);
+    if time <= times[0] || i == times.len() - 1 {
+        return out;
     }
-    let last = times.len() - 1;
-    if time >= times[last] {
-        return track.values[last];
-    }
-    let i = times.partition_point(|t| *t <= time) - 1;
     let Some(coefficients) = track.coefficients.get(i) else {
-        return track.values[i];
+        return out;
     };
     let elapsed = time - times[i];
-    std::array::from_fn(|c| {
-        let value = track.values[i][c];
-        if track.out_tangents[i][c].is_infinite() {
-            return value;
+    for (c, [a, b, d]) in coefficients.iter().enumerate() {
+        if !track.out_tangents[i][c].is_infinite() {
+            out[c] = ((a * elapsed + b) * elapsed + d) * elapsed + values[c];
         }
-        let [a, b, d] = coefficients[c];
-        ((a * elapsed + b) * elapsed + d) * elapsed + value
-    })
+    }
+    out
 }
 
 #[cfg(test)]
@@ -324,7 +322,7 @@ mod tests {
             r#loop: false,
             cycle_offset: 0.,
             tracks: vec![MotionTrack {
-                node: NodeId(0),
+                node: 0,
                 attribute: 1,
                 path_hash: 0,
                 custom_type: 0,
@@ -332,9 +330,9 @@ mod tests {
                 storage: "constant".into(),
                 interpolation: "CONSTANT".into(),
                 times: vec![0.],
-                values: vec![[0., 0., z]],
-                in_tangents: vec![[0.; 3]],
-                out_tangents: vec![[0.; 3]],
+                values: vec![vec![0., 0., z]],
+                in_tangents: vec![vec![0.; 3]],
+                out_tangents: vec![vec![0.; 3]],
                 coefficients: Vec::new(),
             }],
             events: Vec::new(),

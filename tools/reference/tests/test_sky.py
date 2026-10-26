@@ -98,14 +98,17 @@ def manifest(source):
 
 
 def fake_clips(source, identities, animator, bind):
-    """One looping clip with a quaternion track on the wing bone."""
+    """One looping clip on the wing bone: a streamed quaternion track, then constant position and scale tracks."""
     assert animator is source.animator
-    binding = {'type_id': 4, 'attribute': 2, 'dimension': 4, 'is_pptr': False, 'script': None}
-    track = {'node': bind(binding, {'file': ASSETS, 'path_id': 32401}), 'attribute': 2, 'path_hash': 7, 'custom_type': 0, 'curve_offset': 0,
-        'storage': 'dense', 'interpolation': 'LINEAR', 'times': [0., .5], 'values': [[0., 0., 0., 1.], [0., .5, 0., .866]],
-        'in_tangents': [[0.] * 4] * 2, 'out_tangents': [[0.] * 4] * 2, 'coefficients': []}
+    def track(attribute, offset, storage, values, coefficients):
+        binding = {'type_id': 4, 'attribute': attribute, 'dimension': len(values[0]), 'is_pptr': False, 'script': None}
+        return {'node': bind(binding, {'file': ASSETS, 'path_id': 32401}), 'attribute': attribute, 'path_hash': 7, 'custom_type': 0,
+            'curve_offset': offset, 'storage': storage, 'interpolation': 'CUBIC' if coefficients else 'CONSTANT', 'times': [0., .5],
+            'values': values, 'in_tangents': [[0.] * len(values[0])] * 2, 'out_tangents': [[0.] * len(values[0])] * 2, 'coefficients': coefficients}
+    tracks = [track(2, 0, 'streamed', [[0., 0., 0., 1.], [0., .5, 0., .866]], [[[0., 0., 0.]] * 4] * 2),
+        track(1, 4, 'constant', [[0., .1, 0.]] * 2, []), track(3, 7, 'constant', [[1., 1., 1.]] * 2, [])]
     return [{'source': identities[0], 'source_tracks': {'bytes': 1, 'file': 'tracks.json', 'sha256': 'a'}, 'name': 'fly',
-        'start_time': 0., 'stop_time': .5, 'sample_rate': 60., 'loop': True, 'cycle_offset': 0., 'tracks': [track], 'events': []}]
+        'start_time': 0., 'stop_time': .5, 'sample_rate': 60., 'loop': True, 'cycle_offset': 0., 'tracks': tracks, 'events': []}]
 
 
 @mock.patch.object(sky, 'managed_evidence', lambda source, lines: {'assembly_sha256': 'a', 'methods': lines})
@@ -142,7 +145,8 @@ class SkyTests(unittest.TestCase):
                     lambda r: r.update(speed=float('nan')), lambda r: r['prefabs'][0].update(voices=[2]),
                     lambda r: r['flyer'].update(clips=[2]), lambda r: r['flyer'].update(speed_range=[4., 1.]),
                     lambda r: r['flyer']['wing'].update(loop=False), lambda r: r['flyer']['wing']['tracks'][0].update(node=2),
-                    lambda r: r['flyer']['wing']['tracks'][0]['values'].pop()]:
+                    lambda r: r['flyer']['wing']['tracks'][0]['values'].pop(),
+                    lambda r: r['flyer']['wing']['tracks'][2]['values'][0].pop()]:
                 broken = self.recover(source); broken['prefabs'][0]['voices'] = [1]; broken['prefabs'][1]['voices'] = [2]
                 change(broken)
                 with self.subTest(change=change), self.assertRaises(ValueError):
