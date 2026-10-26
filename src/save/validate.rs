@@ -143,6 +143,10 @@ impl SaveSnapshot {
                 "Trip distance",
             )?;
             data(state.requested_headlights <= 2, "Requested headlights")?;
+            data(
+                state.steer.is_finite() && (-1.0..=1.0).contains(&state.steer),
+                "Vehicle steer",
+            )?;
         }
         for (_, e) in changes.engines() {
             super::identity::unsigned(&e.start_draw)?;
@@ -331,6 +335,7 @@ impl SaveSnapshot {
                 && bounded_local(&[p.vertical_velocity]),
             "Player motion",
         )?;
+        data(p.since_wake.is_finite(), "Player sleep cooldown")?;
         if let Some(seat) = &p.seat {
             local(&seat.local_pose)?;
             match &seat.owner {

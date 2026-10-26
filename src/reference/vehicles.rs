@@ -45,6 +45,10 @@ pub struct WorldVehicleReference {
     /// One `talajnezo` per wheel, in `wheels` order. Poses are relative to the prototype root.
     pub wheel_effects: Vec<WheelEffectsReference>,
     pub effect_gains: EffectGains,
+    /// Source `carscript.Transmission`. None: the car has no gear lever.
+    pub lever: Option<LeverReference>,
+    /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
+    pub key_steer_multiplier: f32,
     pub seats: Vec<WorldSeatReference>,
     pub lights: Vec<WorldLightReference>,
     pub light_switch: Option<WorldLightSwitchReference>,
@@ -507,6 +511,23 @@ impl WorldVehicleReference {
                 && self.gear_free_run.len() == self.gear_ratios.len()
                 && self.driving.initial_gear < self.gear_ratios.len(),
         )?;
+        check(
+            s,
+            "vehicle key steer multiplier",
+            self.key_steer_multiplier.is_finite() && self.key_steer_multiplier >= 0.,
+        )?;
+        if let Some(lever) = &self.lever {
+            check(
+                s,
+                "vehicle lever",
+                b.node(lever.node)
+                    && lever.gears.len() == self.gear_ratios.len()
+                    && lever
+                        .gears
+                        .iter()
+                        .all(|gear| transform(&gear.path) && transform(&gear.pos)),
+            )?;
+        }
         check(
             s,
             "vehicle plates",

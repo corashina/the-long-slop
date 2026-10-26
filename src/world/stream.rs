@@ -3464,8 +3464,14 @@ impl WorldStream {
             let layer = work.published.road.map_or(self.terrain_layer, |road| {
                 self.road_layers[road.biome as usize]
             });
+            let surface = &work.published.surface;
+            let tile = self.tiles[0];
+            let grid = (work.published.key.layer == WorldLayer::Terrain
+                && ::terrain::regular_grid(tile, &surface.vertices, &surface.triangles))
+            .then_some(tile.size as f32);
             match physics.insert_source_mesh(
-                &work.published.surface,
+                surface,
+                grid,
                 self.origin.local(work.published.surface.origin),
                 layer,
                 self.reference.collision_rules.layers[layer as usize],

@@ -1,4 +1,4 @@
-use super::{ReferenceError, SourceId, finite, require};
+use super::{ReferenceError, SourceId, Transform, finite, require};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -16,6 +16,8 @@ pub enum DrivingAction {
     Gear4,
     Gear5,
     Gear6,
+    /// Source `IN.togglemousedrive`.
+    MouseDrive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +45,31 @@ pub struct DrivingReference {
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
     pub bindings: Vec<DrivingBinding>,
+    pub mouse_drive: MouseDriveReference,
+    pub lever: LeverTiming,
+}
+
+/// Source `slidersettingscript`: `GetValue` range and default, multiplier applied.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SliderRange {
+    pub default: f32,
+    pub minimum: f32,
+    pub maximum: f32,
+}
+
+impl SliderRange {
+    pub fn contains(&self, value: f32) -> bool {
+        (self.minimum..=self.maximum).contains(&value)
+    }
+}
+
+/// Source `tabControls.sliders[8]`, `[9]` (`FMouseDriveSensX`, `FMouseDriveSensY`).
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MouseDriveReference {
+    pub sensitivity_x: SliderRange,
+    pub sensitivity_y: SliderRange,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,6 +78,31 @@ pub struct DrivingVehicleReference {
     pub initial_gear: usize,
     pub force_automatic: bool,
     pub play_shift_sounds_in_automatic: bool,
+}
+
+/// Source `carscript.gears[i]` lever poses, in the lever parent space.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverGear {
+    pub path: Transform,
+    pub pos: Transform,
+}
+
+/// Source `carscript.Transmission`. `gears` follow `WorldVehicleReference.gear_ratios`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverReference {
+    /// The lever prototype node.
+    pub node: u32,
+    pub gears: Vec<LeverGear>,
+}
+
+/// Source `carscript` `TransmissionLerp` and `transmissionStage1`, `transmissionStage2`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverTiming {
+    pub seconds: f32,
+    pub stages: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -132,10 +184,11 @@ impl DrivingReference {
             "Numpad4",
             "Numpad5",
             "Numpad6",
+            "KeyU",
         ];
         let mut actions = HashSet::new();
         require(
-            self.bindings.len() == 11
+            self.bindings.len() == 12
                 && self.bindings.iter().all(|binding| {
                     actions.insert(binding.action)
                         && !binding.codes.is_empty()
@@ -146,6 +199,27 @@ impl DrivingReference {
                         && binding.codes.iter().collect::<HashSet<_>>().len() == binding.codes.len()
                 }),
             "driving bindings",
+        )?;
+        require(
+            [
+                self.mouse_drive.sensitivity_x,
+                self.mouse_drive.sensitivity_y,
+            ]
+            .iter()
+            .all(|range| {
+                finite(&[range.default, range.minimum, range.maximum])
+                    && range.contains(range.default)
+            }),
+            "mouse driving sensitivity",
+        )?;
+        let lever = &self.lever;
+        require(
+            finite(&[lever.seconds, lever.stages[0], lever.stages[1]])
+                && lever.seconds > 0.0
+                && 0.0 < lever.stages[0]
+                && lever.stages[0] < lever.stages[1]
+                && lever.stages[1] < 1.0,
+            "driving lever timing",
         )?;
         Ok(())
     }

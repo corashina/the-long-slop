@@ -1,58 +1,216 @@
+use crate::reference::MouseDriveReference;
 use crate::simulation::{FIXED_DT, keys};
 use rapier3d::prelude::RigidBodyHandle;
+use serde::Deserialize;
+
+/// Source `inputscript.DriveStuff` mouse axis scale.
+const MOUSE_SCALE: f32 = 0.0125;
+/// Source extra scale on `Mouse X`.
+const MOUSE_STEER_SCALE: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DrivingControls {
+    /// Positive steers left.
     pub steer: f32,
     pub throttle: f32,
     pub brake: f32,
     pub clutch: f32,
 }
 
-/// Source keyboard controls at the fixed gameplay step.
-pub struct KeyboardDriving {
-    controls: DrivingControls,
+/// Player driving settings from the browser (source `settingsscript.S`).
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrivingSettings {
+    /// Source `FMouseDriveSensX`, `FMouseDriveSensY`.
+    pub mouse: [f32; 2],
+}
+
+impl DrivingSettings {
+    pub fn defaults(reference: &MouseDriveReference) -> Self {
+        Self {
+            mouse: [
+                reference.sensitivity_x.default,
+                reference.sensitivity_y.default,
+            ],
+        }
+    }
+
+    pub fn valid(&self, reference: &MouseDriveReference) -> bool {
+        reference.sensitivity_x.contains(self.mouse[0])
+            && reference.sensitivity_y.contains(self.mouse[1])
+    }
+}
+
+/// Source `inputscript.DriveStuff` keyboard and mouse controls at the fixed gameplay step.
+pub struct DrivingInput {
+    keyboard: DrivingControls,
     steering_increment: f32,
     pedal_increment: f32,
     /// The body of the seat that takes the input: the car chassis or the item body.
     seat: Option<RigidBodyHandle>,
+    /// The seat is a car driver seat. Only car driver seats take mouse driving.
+    car: bool,
+    /// Source `mouseDriveToggle`. It stays across seats and pauses.
+    mouse_toggle: bool,
+    /// Source `currentMouseSteer` (positive steers right) and `currentMouseGas`.
+    mouse: [f32; 2],
+    pub settings: DrivingSettings,
 }
 
-impl KeyboardDriving {
-    pub fn new(steering_rate: f32, pedal_rate: f32) -> Self {
+impl DrivingInput {
+    pub fn new(steering_rate: f32, pedal_rate: f32, settings: DrivingSettings) -> Self {
         Self {
-            controls: DrivingControls::default(),
+            keyboard: DrivingControls::default(),
             steering_increment: steering_rate * FIXED_DT,
             pedal_increment: pedal_rate * FIXED_DT,
             seat: None,
+            car: false,
+            mouse_toggle: false,
+            mouse: [0.; 2],
+            settings,
         }
     }
 
     pub fn clear(&mut self) {
-        self.controls = DrivingControls::default();
+        self.keyboard = DrivingControls::default();
+        self.mouse = [0.; 2];
         self.seat = None;
+        self.car = false;
     }
 
-    pub fn step(&mut self, seat: Option<RigidBodyHandle>, held: u32) -> DrivingControls {
+    pub fn toggle_mouse(&mut self) {
+        self.mouse_toggle = !self.mouse_toggle;
+    }
+
+    /// Source `mouseDrive`. Mouse look reads zero while it is on.
+    pub fn mouse_owned(&self) -> bool {
+        self.mouse_toggle && self.car
+    }
+
+    /// `mouse` is the source `Mouse X`, `Mouse Y` sample. `car` is the
+    /// `keySteerSensMultiplier` of the car on a car driver seat, where zero means none.
+    /// None on an item seat: no multiplier and no mouse driving.
+    pub fn step(
+        &mut self,
+        seat: Option<RigidBodyHandle>,
+        held: u32,
+        mouse: [f32; 2],
+        car: Option<f32>,
+    ) -> DrivingControls {
         if self.seat != seat {
             self.clear();
             self.seat = seat;
         }
         if seat.is_none() {
-            return self.controls;
+            return self.keyboard;
         }
+        self.car = car.is_some();
+        let steer_multiplier = car.unwrap_or(0.);
+        let steering_increment = if steer_multiplier != 0. {
+            self.steering_increment * steer_multiplier
+        } else {
+            self.steering_increment
+        };
         let steer =
             ((held & keys::LEFT != 0) as u8 as f32) - ((held & keys::RIGHT != 0) as u8 as f32);
-        self.controls.steer +=
-            (steer - self.controls.steer).clamp(-self.steering_increment, self.steering_increment);
+        self.keyboard.steer +=
+            (steer - self.keyboard.steer).clamp(-steering_increment, steering_increment);
         for (value, bit) in [
-            (&mut self.controls.throttle, keys::FORWARD),
-            (&mut self.controls.brake, keys::BACK),
-            (&mut self.controls.clutch, keys::CLUTCH),
+            (&mut self.keyboard.throttle, keys::FORWARD),
+            (&mut self.keyboard.brake, keys::BACK),
+            (&mut self.keyboard.clutch, keys::CLUTCH),
         ] {
             let target = (held & bit != 0) as u8 as f32;
             *value += (target - *value).clamp(-self.pedal_increment, self.pedal_increment);
         }
-        self.controls
+        if !self.mouse_owned() {
+            self.mouse = [0.; 2];
+            return self.keyboard;
+        }
+        let sensitivity = self.settings.mouse;
+        if mouse.iter().all(|v| v.is_finite()) {
+            self.mouse[0] = (self.mouse[0]
+                + mouse[0] * MOUSE_SCALE * MOUSE_STEER_SCALE * sensitivity[0])
+                .clamp(-1., 1.);
+            self.mouse[1] =
+                (self.mouse[1] + mouse[1] * MOUSE_SCALE * sensitivity[1]).clamp(-1., 1.);
+        }
+        DrivingControls {
+            steer: (self.keyboard.steer - self.mouse[0]).clamp(-1., 1.),
+            throttle: (self.keyboard.throttle + self.mouse[1].clamp(0., 1.)).clamp(0., 1.),
+            brake: (self.keyboard.brake + (-self.mouse[1]).clamp(0., 1.)).clamp(0., 1.),
+            ..self.keyboard
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seat() -> Option<RigidBodyHandle> {
+        Some(RigidBodyHandle::from_raw_parts(1, 0))
+    }
+    const CAR: Option<f32> = Some(0.);
+
+    fn input() -> DrivingInput {
+        DrivingInput::new(2., 5., DrivingSettings { mouse: [1., 1.] })
+    }
+
+    #[test]
+    fn mouse_drives_after_toggle() {
+        let mut driving = input();
+        assert_eq!(
+            driving.step(seat(), 0, [0., 40.], CAR),
+            DrivingControls::default()
+        );
+        driving.toggle_mouse();
+        let up = driving.step(seat(), 0, [0., 40.], CAR);
+        assert!((up.throttle - 0.5).abs() < 1e-6 && up.brake == 0.);
+        let down = driving.step(seat(), 0, [0., -120.], CAR);
+        assert!((down.brake - 1.).abs() < 1e-6 && down.throttle == 0.);
+        // Mouse X has 0.25 of the Y scale. Right is negative steer.
+        let right = driving.step(seat(), 0, [40., 0.], CAR);
+        assert!((right.steer + 0.125).abs() < 1e-6);
+        assert!(driving.mouse_owned());
+    }
+
+    #[test]
+    fn toggle_off_resets_and_seat_gates_mouse() {
+        let mut driving = input();
+        driving.toggle_mouse();
+        assert_eq!(
+            driving.step(None, 0, [40., 40.], CAR),
+            DrivingControls::default()
+        );
+        assert!(!driving.mouse_owned());
+        // Item seats (sleds) take keyboard input only.
+        assert_eq!(
+            driving.step(seat(), 0, [40., 40.], None),
+            DrivingControls::default()
+        );
+        assert!(!driving.mouse_owned());
+        driving.step(seat(), 0, [40., 40.], CAR);
+        driving.toggle_mouse();
+        assert_eq!(
+            driving.step(seat(), 0, [0., 0.], CAR),
+            DrivingControls::default()
+        );
+        assert!(!driving.mouse_owned());
+        driving.toggle_mouse();
+        assert_eq!(
+            driving.step(seat(), 0, [0., 0.], CAR),
+            DrivingControls::default()
+        );
+    }
+
+    #[test]
+    fn keyboard_steer_uses_car_multiplier() {
+        let mut driving = input();
+        let base = driving.step(seat(), keys::LEFT, [0.; 2], CAR).steer;
+        assert!((base - 2. * FIXED_DT).abs() < 1e-6);
+        driving.clear();
+        let scaled = driving.step(seat(), keys::LEFT, [0.; 2], Some(3.)).steer;
+        assert!((scaled - 6. * FIXED_DT).abs() < 1e-6);
     }
 }

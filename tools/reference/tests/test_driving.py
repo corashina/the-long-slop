@@ -55,3 +55,79 @@ class DrivingSourceTests(unittest.TestCase):
         with patch.object(source,'read',side_effect=disabled_clutch):
             result=recover_driving(source)
             self.assertEqual(result['global']['default_assists'],{'automatic_clutch':False,'automatic_gears':False})
+
+
+class LeverSourceTests(unittest.TestCase):
+    """carscript.Transmission with a fake source: no library needed."""
+    def setUp(self):
+        from types import SimpleNamespace
+        file = SimpleNamespace(source_container_path='level1')
+        def transform(father, x, s=1.):
+            return {'m_LocalPosition':{'x':x,'y':0.,'z':0.}, 'm_LocalRotation':{'x':0.,'y':0.,'z':0.,'w':1.},
+                'm_LocalScale':{'x':s,'y':s,'z':s}, 'm_Father':{'m_FileID':0,'m_PathID':father}}
+        # 1 root, 2 lever parent (scale 2), 3 lever, 4-7 gear poses, 8 outside the car.
+        self.data = {1:transform(0,0.), 2:transform(1,1.,2.), 3:transform(2,0.), 4:transform(2,.5), 5:transform(2,.25),
+            6:transform(2,-.5), 7:transform(2,-.25), 8:transform(0,9.)}
+        readers = {i:SimpleNamespace(assets_file=file, path_id=i) for i in self.data}
+        self.source = SimpleNamespace(read=lambda r:self.data[r.path_id],
+            resolve=lambda owner,p:readers.get(p['m_PathID']) if p['m_PathID'] else None,
+            chain=lambda r:[self.data[i] for i in self.ancestors(r.path_id)])
+        self.car_reader = SimpleNamespace(assets_file=file, path_id=100)
+        pointer = lambda i:{'m_FileID':0,'m_PathID':i}
+        self.car = {'Transmission':pointer(3), 'gears':[{'Path':pointer(5),'Pos':pointer(4)}, {'Path':pointer(7),'Pos':pointer(6)}]}
+        self.root = readers[1]; self.pointer = pointer
+
+    def ancestors(self, i):
+        while i:yield i;i = self.data[i]['m_Father']['m_PathID']
+
+    def recover(self):
+        from tools.reference.driving import recover_lever
+        return recover_lever(self.source, self.car_reader, self.car, self.root, {('level1',3):42})
+
+    def test_lever_poses_follow_gears_in_parent_space(self):
+        lever = self.recover()
+        self.assertEqual(lever['node'], 42)
+        self.assertEqual(len(lever['gears']), len(self.car['gears']))
+        self.assertEqual([round(g[k]['translation'][0], 6) for g in lever['gears'] for k in ('path','pos')], [.25, .5, -.25, -.5])
+
+    def test_lever_absent_or_outside_car(self):
+        self.car['Transmission'] = self.pointer(0)
+        self.assertIsNone(self.recover())
+        self.car['Transmission'] = self.pointer(3)
+        self.car['gears'][1]['Pos'] = self.pointer(8)
+        with self.assertRaises(ValueError):self.recover()
+        self.car['gears'][1]['Pos'] = self.pointer(0)
+        with self.assertRaises(ValueError):self.recover()
+
+    def test_lever_constants_must_exist(self):
+        from tools.reference.driving import lever_constants, LEVER_LERPS
+        text = 'private float TransmissionLerp = 0.25f;\nprivate float transmissionStage1 = 0.33333f;\n' + '\n'.join(LEVER_LERPS)
+        with self.assertRaises(ValueError):lever_constants(text)
+        values = lever_constants(text + '\nprivate float transmissionStage2 = 0.66666f;')
+        self.assertEqual(values, {'seconds':.25, 'stage1':.33333, 'stage2':.66666})
+
+
+class MouseDriveSourceTests(unittest.TestCase):
+    """Mouse driving sliders and toggle binding with a fake source: no library needed."""
+    def test_slider_range_applies_multiplier(self):
+        from types import SimpleNamespace
+        from tools.reference.driving import slider_range
+        sliders = {8:{'defValue':1.,'minValue':.1,'maxValue':4.,'valueMultipler':0.},
+            9:{'defValue':2.,'minValue':.5,'maxValue':3.,'valueMultipler':2.}}
+        source = SimpleNamespace(resolve=lambda owner,p:p['m_PathID'] or None, read=lambda r:sliders[r])
+        settings = {'tabControls':{'sliders':[{'m_PathID':i if i in sliders else 0} for i in range(10)]}}
+        self.assertEqual(slider_range(source, None, settings, 8)[0], {'default':1.,'minimum':.1,'maximum':4.})
+        self.assertEqual(slider_range(source, None, settings, 9)[0], {'default':4.,'minimum':1.,'maximum':6.})
+        sliders[9]['defValue'] = 5.
+        with self.assertRaises(ValueError):slider_range(source, None, settings, 9)
+
+    def test_toggle_binding_is_key_u(self):
+        from tools.reference.driving import ACTIONS, recover_bindings
+        names = ['look'] + list(ACTIONS.values())
+        text = 'public enum IN\n{\n' + ',\n'.join(names) + '\n}'
+        defaults = '\n'.join(f'defaultInput[{i}].keys[0].Set(KeyCode.{"U" if n=="togglemousedrive" else "R"});'
+            for i,n in enumerate(names))
+        bindings, evidence = recover_bindings(text, defaults)
+        self.assertIn({'action':'mouse_drive','codes':['KeyU']}, bindings)
+        self.assertEqual(evidence[-1]['source_input'], 'togglemousedrive')
+        with self.assertRaises(ValueError):recover_bindings(text, defaults.replace('KeyCode.U', 'KeyCode.Q').replace(f'defaultInput[{len(names)-1}]', 'x'))

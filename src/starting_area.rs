@@ -445,6 +445,7 @@ pub struct VehicleState {
     pub handbrake: bool,
     pub trip_m: f64,
     pub requested_headlights: u8,
+    pub steer: f32,
 }
 
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
@@ -455,6 +456,8 @@ pub struct VehicleRuntime {
     pub handbrake: bool,
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
+    /// Source carscript.steer over steerAngle. It keeps its value when nobody drives.
+    pub steer: f32,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
     /// Car root `tankscript` item.
@@ -470,6 +473,7 @@ pub struct VehicleRuntime {
     /// Brake input of the last step. The brake lamps read it.
     brake: f32,
     pub wheel_effects: crate::wheel_effects::WheelEffects,
+    pub lever: Option<crate::simulation::lever::LeverState>,
     recovery_bounds: crate::reference::Bounds,
     /// Bodies of the car hierarchy other than the chassis. Recovery moves them with it.
     bodies: Vec<RigidBodyHandle>,
@@ -501,8 +505,12 @@ impl VehicleRuntime {
             prototype,
             handbrake: record.handbrake,
             trip_m: 0.0,
+            steer: 0.,
             ignition: IgnitionState::default(),
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(record.into()),
+            lever: record.lever.as_ref().map(|lever| {
+                crate::simulation::lever::LeverState::rest(lever, record.driving.initial_gear)
+            }),
             exhaust: crate::exhaust::ExhaustState::new(&record.exhaust, parts.seed),
             fuel_tank: parts.fuel_tank,
             starter_delay_seconds: record.starter_delay_seconds,
@@ -549,6 +557,12 @@ impl VehicleRuntime {
                 a.to_bits().hash(&mut h);
             }
             (s.lamp_bits, s.digits_lit).hash(&mut h);
+        }
+        if let Some(l) = &self.lever {
+            let (t, r) = (l.translation.to_array(), l.rotation.to_array());
+            for v in t.iter().chain(&r) {
+                v.to_bits().hash(&mut h);
+            }
         }
         for m in self.lights.materials() {
             m.choice.map(|c| (c.light, c.state, c.on)).hash(&mut h);
@@ -619,15 +633,26 @@ impl VehicleRuntime {
             handbrake: self.handbrake,
             trip_m: self.trip_m,
             requested_headlights: self.requested_headlights,
+            steer: self.steer,
         }
     }
     /// Restores a captured state. The gear must be in the record range.
-    pub fn restore(&mut self, state: &VehicleState) {
+    /// The gear lever rests on the restored gear.
+    pub fn restore(
+        &mut self,
+        record: &crate::reference::WorldVehicleReference,
+        state: &VehicleState,
+    ) {
         self.ignition.ignition = state.ignition;
         self.drivetrain.restore_gear(state.gear);
+        self.lever = record
+            .lever
+            .as_ref()
+            .map(|lever| crate::simulation::lever::LeverState::rest(lever, state.gear));
         self.handbrake = state.handbrake;
         self.trip_m = state.trip_m;
         self.requested_headlights = state.requested_headlights;
+        self.steer = state.steer;
     }
 }
 
@@ -682,7 +707,7 @@ pub struct GarageRuntime {
     pub notice: &'static str,
     pub aim: ResolvedAim,
     pub wheels: crate::interaction::wheels::WheelAssemblies,
-    driving_input: crate::simulation::input::KeyboardDriving,
+    pub driving_input: crate::simulation::input::DrivingInput,
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
@@ -821,9 +846,10 @@ impl GarageRuntime {
             notice: "",
             aim: ResolvedAim::default(),
             wheels,
-            driving_input: crate::simulation::input::KeyboardDriving::new(
+            driving_input: crate::simulation::input::DrivingInput::new(
                 reference.driving.keyboard_steering_rate,
                 reference.driving.pedal_rate,
+                crate::simulation::input::DrivingSettings::defaults(&reference.driving.mouse_drive),
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
@@ -1268,7 +1294,15 @@ impl GarageRuntime {
             input
         };
         let driving = self.area.player.driving();
+        if input.player_pressed & crate::simulation::player_keys::MOUSE_DRIVE != 0 {
+            self.driving_input.toggle_mouse();
+        }
         // The car driver seat and item seats take the driving input. Only sleds read it on item seats.
+        let car = driving
+            .then(|| self.area.player.seat_vehicle())
+            .flatten()
+            .and_then(|key| self.vehicles.get(key))
+            .map(|vehicle| vehicle.record(reference).key_steer_multiplier);
         let controls = self.driving_input.step(
             if driving {
                 self.area.player.seat_body()
@@ -1276,6 +1310,8 @@ impl GarageRuntime {
                 self.area.player.item_seat_body()
             },
             vehicle_input.held,
+            vehicle_input.drive_mouse,
+            car,
         );
         // Source `carscript` cycles off, low, high.
         if (driving || self.area.player.driving2())
@@ -1616,6 +1652,16 @@ impl GarageRuntime {
         }
     }
 
+    /// Source `carscript.Update`: eases each car gear lever by render time `dt`.
+    pub fn advance_levers(&mut self, reference: &ReferenceManifest, dt: f32) {
+        for vehicle in self.vehicles.values_mut() {
+            let record = world_vehicle(reference, vehicle.prototype);
+            if let (Some(lever), Some(r)) = (&mut vehicle.lever, &record.lever) {
+                lever.step(r, &reference.driving.lever, dt);
+            }
+        }
+    }
+
     /// Steps the light controllers of a car.
     fn advance_car_lights(
         &self,
@@ -1862,6 +1908,7 @@ impl GarageRuntime {
                 .sum::<f32>()
                 .sqrt();
         let rolling_rpm = self.physics.driven_wheel_rpm(key);
+        let last_gear = vehicle.drivetrain.gear();
         let drivetrain = vehicle.drivetrain.step(
             controls,
             input.pressed,
@@ -1875,6 +1922,11 @@ impl GarageRuntime {
             driving,
         );
         let gear = drivetrain.gear;
+        if gear != last_gear
+            && let Some(lever) = &mut vehicle.lever
+        {
+            lever.shift(&reference.driving.lever, last_gear, gear);
+        }
         let throttle = drivetrain.throttle;
         let brake = drivetrain.brake;
         vehicle.brake = brake;
@@ -1998,10 +2050,11 @@ impl GarageRuntime {
             .push_steering()
             .filter(|(body, _)| self.physics.vehicle_of(*body) == Some(key))
             .map(|(_, steer)| steer);
+        vehicle.steer = vehicle_steer(vehicle.steer, pushed, driving.then_some(controls.steer));
         let drive = DriveInput {
             throttle,
             brake,
-            steer: pushed.unwrap_or(controls.steer),
+            steer: vehicle.steer,
             handbrake: vehicle.handbrake as u8 as f32,
         };
         if chassis_active {
@@ -2389,6 +2442,11 @@ fn transport_body(
     });
 }
 
+/// Source carscript steer: a push grip wins, then the driver. Else the car keeps its steer.
+fn vehicle_steer(current: f32, pushed: Option<f32>, driven: Option<f32>) -> f32 {
+    pushed.or(driven).unwrap_or(current)
+}
+
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }
@@ -2398,4 +2456,16 @@ fn startup_hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+#[cfg(test)]
+mod steer_tests {
+    use super::vehicle_steer;
+
+    #[test]
+    fn push_wins_then_driver_then_last_steer() {
+        assert_eq!(vehicle_steer(0.3, Some(-0.5), Some(1.0)), -0.5);
+        assert_eq!(vehicle_steer(0.3, None, Some(1.0)), 1.0);
+        assert_eq!(vehicle_steer(0.3, None, None), 0.3);
+    }
 }
