@@ -1,4 +1,11 @@
-import {defaultName,verifyRecord} from './save-storage.js';
+import {verifyRecord} from './save-storage.js';
+const two=value=>String(value).padStart(2,'0');
+function formatDate(date){return `${date.getFullYear()}.${two(date.getMonth()+1)}.${two(date.getDate())}. ${two(date.getHours())}:${two(date.getMinutes())}`;}
+function lastName({saves,autosave,last},buildId){
+ const entry=[...saves,autosave].find(entry=>entry&&entry.name===last);
+ return entry&&entry.version===buildId?last:null;
+}
+export function canLoadLast(list,buildId){return lastName(list,buildId)!==null;}
 
 export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}){
  let sequence=0,active=null,writes=Promise.resolve();
@@ -29,12 +36,20 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
   await runtime.commit(token,()=>{operation.committing=true;});
   operation.candidate=null;
  }
+ const load=name=>run('load',async operation=>{
+  const record=await storage.read(name);
+  if(!current(operation))return;
+  if(record===null)throw new Error('No saved game.');
+  const save=await verifyRecord(record);
+  if(current(operation))await prepare(operation,()=>runtime.prepare(save,operation.controller.signal,drawDistance()));
+ });
  return {
   get pending(){return active!==null;},
-  save(){return run('save',async operation=>{
-   const {save,summary}=await runtime.capture();
+  list(){return storage.list();},
+  save(name,thumbnail,{autosave=false}={}){return run('save',async operation=>{
+   const {save,summary}=await runtime.capture(autosave);
    if(!current(operation))return;
-   const name=defaultName(new Date()),entry={name,date:'',seed:summary.seed,drivenKm:summary.driven_km,version:summary.build_id,thumbnail:null};
+   const entry={name,date:formatDate(new Date()),seed:summary.seed,drivenKm:summary.driven_km,version:summary.build_id,thumbnail};
    // Preserve ordering even when an adapter ignores cancellation during a delayed write.
    const write=writes.then(async()=>{
     if(current(operation))await storage.write(name,save,entry,{signal:operation.controller.signal});
@@ -42,15 +57,13 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
    writes=write.catch(()=>{});
    await write;
   });},
-  load(){return run('load',async operation=>{
-   const {last}=await storage.list();
-   if(!current(operation))return;
-   const record=last===null?null:await storage.read(last);
-   if(!current(operation))return;
-   if(record===null)throw new Error('No saved game.');
-   const save=await verifyRecord(record);
-   if(current(operation))await prepare(operation,()=>runtime.prepare(save,operation.controller.signal,drawDistance()));
-  });},
+  load,
+  remove(name){return run('remove',async()=>{await storage.remove(name);});},
+  async loadLast(buildId){
+   const name=lastName(await storage.list(),buildId);
+   if(name===null)throw new Error('No saved game.');
+   return load(name);
+  },
   newGame(){return run('newGame',operation=>prepare(operation,()=>runtime.prepareNewGame(operation.controller.signal,drawDistance())));},
   cancel(){
    if(!active||active.committing)return false;
