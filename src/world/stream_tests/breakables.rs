@@ -1,5 +1,5 @@
 //! X02: a source bottle stays whole after a soft drop, breaks after a hard drop, spawns its gib
-//! once and stays removed after save and load.
+//! once and stays removed after save and load. A broken lamp stays broken after save and load.
 use super::drive_out::{frame, settle};
 use super::*;
 use crate::damage::BreakKind;
@@ -141,4 +141,152 @@ fn bottle_breaks_on_a_hard_drop_once_and_stays_removed_after_reload() {
         loaded.area.spawned.iter().all(|s| s.prototype != gib),
         "gibs are not saved"
     );
+}
+
+#[test]
+fn broken_lamp_bits_survive_the_change_record() {
+    use crate::world::spawn_state::SpawnInitialization;
+    use crate::world::{ChangeRecords, GeneratedId, ObjectKey, WorldLayer};
+    let source = SourceId {
+        file: "sharedassets1.assets".into(),
+        path_id: 1,
+    };
+    let parent = GeneratedId {
+        layer: WorldLayer::Building,
+        generator: source.clone(),
+        unit: [0; 2],
+        ordinal: 0,
+        children: Vec::new(),
+    };
+    let mut key = parent.clone();
+    key.children.push((source.clone(), 0));
+    let key = ObjectKey::Generated(key);
+    let mut baseline = super::replay_snapshot([0.; 3]);
+    baseline.lamp = Some(true);
+    let mut broken = baseline.clone();
+    broken.lamp_broken = Some(1 << 1);
+    let mut changes = ChangeRecords::default();
+    changes.record(key.clone(), broken.clone(), &baseline);
+    let changes: ChangeRecords =
+        serde_json::from_slice(&serde_json::to_vec(&changes).unwrap()).unwrap();
+    let saved = changes.get(&key).and_then(|c| c.snapshot.as_ref()).unwrap();
+    assert_eq!(saved, &broken);
+    // The rebind applies the saved bits to the spawn inputs.
+    let mut init = SpawnInitialization::default();
+    init.lamps.push((parent.clone(), source.clone(), true));
+    init.break_lamps(&parent, &source, saved.lamp_broken.unwrap());
+    assert!(!init.lamp_broken(&parent, &source, 0));
+    assert!(init.lamp_broken(&parent, &source, 1));
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn shovel_broken_lamp_stays_broken_after_reload() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let records = &reference.breakables;
+    // A bound building lamp trigger that Break destroys.
+    let target = run
+        .stream
+        .breakables
+        .targets()
+        .iter()
+        .position(|t| {
+            matches!(t.kind, BreakKind::Lamp { .. })
+                && !records[t.record].no_destroy
+                && !records[t.record].lamp.as_ref().unwrap().lamps.is_empty()
+        })
+        .expect("lamp trigger near the start");
+    let BreakKind::Lamp { parent, control } = run.stream.breakables.targets()[target].kind.clone()
+    else {
+        unreachable!()
+    };
+    let record = run.stream.breakables.targets()[target].record;
+    let lamps = records[record]
+        .lamp
+        .as_ref()
+        .unwrap()
+        .lamps
+        .iter()
+        .fold(0u64, |bits, i| bits | 1 << i);
+    let source = run
+        .stream
+        .lamp_bindings
+        .iter()
+        .find(|b| b.control == control && b.parent == parent)
+        .unwrap()
+        .source
+        .clone();
+    assert_eq!(
+        run.stream.contents.broken_lamps(&parent, &source) & lamps,
+        0
+    );
+
+    // Shovel hits until the trigger breaks.
+    for _ in 0..100 {
+        if run.stream.breakables.targets()[target].destroyed {
+            break;
+        }
+        run.stream
+            .breakables
+            .try_break_melee(records, target, 10., FIXED_DT);
+        frame(&mut run, &reference);
+    }
+    settle(&mut run, &reference, 0.5);
+    let dark =
+        |run: &GarageRuntime| run.stream.contents.broken_lamps(&parent, &source) & lamps == lamps;
+    assert!(dark(&run), "the hit lamps are broken");
+
+    // Save and load.
+    let stamp = roadside_stamp(&reference);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            crate::save::CameraSave::FirstPerson,
+            "2026-10-26T12:00:00Z",
+        )
+        .unwrap();
+    let saved: crate::save::SaveSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
+    for _ in 0..2000 {
+        prepare_ready(&mut loaded, &reference);
+        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
+            break;
+        }
+    }
+    assert!(!loaded.restore_pending());
+    loaded.started = true;
+    loaded.paused = false;
+    settle(&mut loaded, &reference, 1.);
+    assert!(dark(&loaded), "the lamps stay broken");
+    let target = loaded
+        .stream
+        .breakables
+        .targets()
+        .iter()
+        .position(|t| {
+            t.record == record
+                && matches!(&t.kind, BreakKind::Lamp { parent: p, .. } if p == &parent)
+        })
+        .expect("rebound lamp trigger");
+    let state = &loaded.stream.breakables.targets()[target];
+    assert!(state.destroyed && state.removed);
+    for collider in loaded.stream.breakables.colliders_of(target) {
+        assert!(!loaded.physics.rapier().colliders[collider].is_enabled());
+    }
+    // The destroyed trigger does not break again.
+    loaded
+        .stream
+        .breakables
+        .try_break_melee(records, target, 1e6, FIXED_DT);
+    assert!(loaded.stream.take_break().is_none());
 }

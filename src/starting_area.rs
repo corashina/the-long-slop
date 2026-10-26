@@ -2272,12 +2272,28 @@ impl GarageRuntime {
         self.stream
             .step_breakables(reference, &self.area.items, &mut self.physics, FIXED_DT);
         while let Some((kind, record)) = self.stream.take_break() {
+            let rules = &reference.breakables[record];
             let item = match kind {
                 crate::damage::BreakKind::Item(item) => item,
-                // PR 3: flashlightscript.Break sets the lamps of the control broken.
-                crate::damage::BreakKind::Lamp { .. } => continue,
+                // Lamp triggers have no gib.
+                crate::damage::BreakKind::Lamp { parent, control } => {
+                    let position = self
+                        .stream
+                        .break_lamp(reference, &mut self.physics, &parent, control, record)
+                        .expect("bound lamp");
+                    if let Some(clip) = self.stream.pick_break_clip(rules)
+                        && let Some(audio) = &mut self.audio
+                        && let Some(position) = position
+                    {
+                        let origin = self.area.origin;
+                        audio.break_clip(
+                            clip,
+                            std::array::from_fn(|i| origin[i] + f64::from(position[i])),
+                        );
+                    }
+                    continue;
+                }
             };
-            let rules = &reference.breakables[record];
             // Source Break calls pickupable.Drop2 first.
             if self.area.interaction.held() == Some(item) {
                 self.area

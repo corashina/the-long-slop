@@ -32,6 +32,10 @@ pub struct SpawnInitialization {
     pub paintings: Vec<(GeneratedId, SourceId, i32)>,
     pub scales: Vec<(GeneratedId, SourceId, [f32; 3])>,
     pub lamps: Vec<(GeneratedId, SourceId, bool)>,
+    /// Source `Lamp.broken` set by flashlightscript.Break. Bit i is `Lamps[i]`.
+    /// Runtime state only: spawn boundaries do not keep it.
+    #[serde(skip)]
+    pub broken_lamps: Vec<(GeneratedId, SourceId, u64)>,
     pub(crate) conditions: Vec<super::spawn_conditions::ConditionState>,
     pub initialized: Vec<(GeneratedId, SourceId)>,
     pub selectors: Vec<(GeneratedId, SourceId, usize)>,
@@ -51,6 +55,12 @@ impl SpawnInitialization {
                 .collect(),
             lamps: self
                 .lamps
+                .iter()
+                .filter(|v| &v.0 == parent)
+                .cloned()
+                .collect(),
+            broken_lamps: self
+                .broken_lamps
                 .iter()
                 .filter(|v| &v.0 == parent)
                 .cloned()
@@ -100,6 +110,32 @@ impl SpawnInitialization {
         }
     }
 
+    /// Source flashlightscript.Break: sets the lamps in `lamps` broken. True when one changed.
+    pub fn break_lamps(&mut self, parent: &GeneratedId, source: &SourceId, lamps: u64) -> bool {
+        match self
+            .broken_lamps
+            .iter_mut()
+            .find(|(p, s, _)| p == parent && s == source)
+        {
+            Some((_, _, broken)) => {
+                let old = *broken;
+                *broken |= lamps;
+                *broken != old
+            }
+            None => {
+                self.broken_lamps
+                    .push((parent.clone(), source.clone(), lamps));
+                true
+            }
+        }
+    }
+    /// True when flashlightscript.Break set `Lamps[index]` broken.
+    pub fn lamp_broken(&self, parent: &GeneratedId, source: &SourceId, index: usize) -> bool {
+        self.broken_lamps
+            .iter()
+            .any(|(p, s, bits)| p == parent && s == source && bits & (1 << index) != 0)
+    }
+
     pub fn retained_bytes(&self) -> usize {
         self.paintings.capacity() * std::mem::size_of::<(GeneratedId, SourceId, i32)>()
             + self
@@ -116,6 +152,12 @@ impl SpawnInitialization {
             + self.lamps.capacity() * std::mem::size_of::<(GeneratedId, SourceId, bool)>()
             + self
                 .lamps
+                .iter()
+                .map(|(p, s, _)| identity_bytes(p) + s.file.capacity())
+                .sum::<usize>()
+            + self.broken_lamps.capacity() * std::mem::size_of::<(GeneratedId, SourceId, u64)>()
+            + self
+                .broken_lamps
                 .iter()
                 .map(|(p, s, _)| identity_bytes(p) + s.file.capacity())
                 .sum::<usize>()
