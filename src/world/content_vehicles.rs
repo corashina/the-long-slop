@@ -711,6 +711,9 @@ mod tests {
                 &mut physics,
                 &mut items,
                 &mut vehicles,
+                &mut WheelAssemblies::default(),
+                &[],
+                0.,
                 &mut changes,
             );
             vehicles
