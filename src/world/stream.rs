@@ -5148,6 +5148,8 @@ mod content_dials;
 mod content_musicboxes;
 #[path = "content_radios.rs"]
 mod content_radios;
+#[path = "content_seats.rs"]
+pub(crate) mod content_seats;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;
