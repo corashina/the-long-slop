@@ -1016,6 +1016,7 @@ fn fill_frame(
         .runtime
         .fill_frame(&reference.0, alpha, &mut frame.frame);
     frame.apply_changes(|handle| drive.runtime.release_pose(handle));
+    frame.index_particles();
 }
 fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     let drive = &mut *drive;

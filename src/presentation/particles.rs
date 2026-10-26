@@ -1,9 +1,11 @@
-//! Retained particle uniform buffers. Simulation remains in the runtime owners.
+//! Retained particle uniform buffers. The simulation frame carries the live particles.
 use super::lighting::SourceLighting;
+use super::sim_frame::{ParticleGroupKey, SimFrameResource};
 use crate::{
-    app::{Drive, RuntimeReference},
+    app::RuntimeReference,
     particles::TextureSheet,
-    reference::ParticleReference,
+    reference::{ItemId, ParticleReference},
+    weather::StormId,
 };
 use bevy::mesh::{Indices, MeshVertexBufferLayoutRef};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
@@ -24,6 +26,7 @@ use bevy::{
     prelude::*,
     reflect as bevy_reflect,
 };
+use simulation::boundary::ParticleGroupRow;
 const BATCH: usize = 128;
 #[derive(Clone, Copy, ShaderType)]
 pub struct ParticleUniform {
@@ -248,11 +251,11 @@ enum Owner {
     Outlet(u32),
     /// Spray bottle spray (0) and splash (1).
     SprayBottle(usize),
-    /// One particle system of the car with chassis `car`.
+    /// One particle system (`ParticleGroupRow::CAR_*`) of the car with chassis body index `car`.
     Car {
-        system: CarSystem,
+        system: u32,
         prototype: usize,
-        car: rapier3d::prelude::RigidBodyHandle,
+        car: u32,
     },
     /// Storm dust; `Group::source` is big (0) or small (1).
     Storm(crate::weather::StormId),
@@ -267,55 +270,25 @@ enum Owner {
     /// A washtriggerscript `particleOnDestroy`; the wash effect.
     Cobweb(usize),
 }
-/// The `Group::source` meaning of a car system.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CarSystem {
-    /// Exhaust smoke; the system.
-    Exhaust,
-    /// Wheel effects; wheel * 8 + system (0 dust, 1.. grass).
-    Wheel,
-    /// Skid bursts; `tiresmoke` (0) or `tiresand` (1).
-    Skid,
-}
 /// The particle record of one car group.
 fn car_particle(
     reference: &crate::reference::ReferenceManifest,
-    system: CarSystem,
+    system: u32,
     prototype: usize,
     source: usize,
 ) -> &crate::reference::ParticleReference {
     let record = crate::starting_area::world_vehicle(reference, prototype);
     match system {
-        CarSystem::Exhaust => &record.exhaust[source],
-        CarSystem::Wheel => {
+        ParticleGroupRow::CAR_EXHAUST => &record.exhaust[source],
+        ParticleGroupRow::CAR_WHEEL => {
             let w = &record.wheel_effects[source / 8];
             match source % 8 {
                 0 => w.dust.as_ref().expect("wheel dust group"),
                 system => &w.grass[system - 1],
             }
         }
-        CarSystem::Skid => &reference.skid.particles[source],
+        _ => &reference.skid.particles[source],
     }
-}
-/// The `Group::source` ids of every car system of the car prototype.
-fn car_systems(
-    reference: &crate::reference::ReferenceManifest,
-    prototype: usize,
-) -> impl Iterator<Item = (CarSystem, usize)> + '_ {
-    let record = crate::starting_area::world_vehicle(reference, prototype);
-    let exhaust = (0..record.exhaust.len()).map(|i| (CarSystem::Exhaust, i));
-    let wheels = record
-        .wheel_effects
-        .iter()
-        .enumerate()
-        .flat_map(|(wheel, w)| {
-            let dust = w.dust.iter().map(|_| 0);
-            let grass = 1..=w.grass.len();
-            dust.chain(grass)
-                .map(move |system| (CarSystem::Wheel, wheel * 8 + system))
-        });
-    let skid = (0..2).map(|i| (CarSystem::Skid, i));
-    exhaust.chain(wheels).chain(skid)
 }
 struct Group {
     owner: Owner,
@@ -552,7 +525,7 @@ fn add_group(
 fn sync_particles(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     lighting: Res<SourceLighting>,
     mut state: ResMut<ParticleRender>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -668,131 +641,31 @@ fn sync_particles(
             );
         }
     }
-    // A cigarette ember with live particles holds a group. Free groups serve the next ember.
-    let cigarettes = &drive.runtime.area.cigarettes;
+    let groups = &sim.frame.particle_groups;
+    // A dynamic owner keeps its group while the frame has it. Free groups serve the next owner.
+    for g in &mut state.groups {
+        if matches!(
+            g.owner,
+            Owner::Ember(_) | Owner::Car { .. } | Owner::Storm(_) | Owner::Sky(_)
+        ) {
+            g.active = sim
+                .particle_group(key(g.owner, g.source))
+                .is_some_and(|(row, _)| row.count > 0 || !matches!(g.owner, Owner::Ember(_)));
+        }
+    }
     let ember = crate::presentation::lighting::ember_particle(&reference.0);
-    for g in &mut state.groups {
-        if let Owner::Ember(id) = g.owner {
-            g.active = !cigarettes.ember_particles(id).is_empty();
-        }
-    }
-    if let Some(ember) = ember {
-        for (id, particles) in cigarettes.embers() {
-            let owner = Owner::Ember(id);
-            if particles.is_empty() || state.groups.iter().any(|g| g.active && g.owner == owner) {
-                continue;
-            }
-            if let Some(g) = state
-                .groups
-                .iter_mut()
-                .find(|g| !g.active && matches!(g.owner, Owner::Ember(_)))
-            {
-                g.owner = owner;
-                g.active = true;
-                continue;
-            }
-            add_group(
-                &mut state,
-                owner,
-                0,
-                ember,
-                &lighting,
-                &mut commands,
-                &mut materials,
-            );
-        }
-    }
-    // Car copies come and go. A retired car frees its groups for the next copy of its prototype.
-    let physics = &drive.runtime.physics;
-    for g in &mut state.groups {
-        if let Owner::Car { car, .. } = g.owner {
-            g.active = physics.vehicle_of(car).is_some();
-        }
-    }
-    for (key, vehicle) in &drive.runtime.vehicles {
-        let car = physics.chassis_handle(key);
-        for (system, source) in car_systems(&reference.0, vehicle.prototype) {
-            let owner = Owner::Car {
-                system,
-                prototype: vehicle.prototype,
-                car,
-            };
-            if state
-                .groups
-                .iter()
-                .any(|g| g.active && g.owner == owner && g.source == source)
-            {
-                continue;
-            }
-            if let Some(g) = state.groups.iter_mut().find(|g| {
-                !g.active
-                    && g.source == source
-                    && matches!(g.owner, Owner::Car { system: s, prototype, .. } if s == system && prototype == vehicle.prototype)
-            }) {
-                g.owner = owner;
-                g.active = true;
-                continue;
-            }
-            add_group(
-                &mut state,
-                owner,
-                source,
-                car_particle(&reference.0, system, vehicle.prototype, source),
-                &lighting,
-                &mut commands,
-                &mut materials,
-            );
-        }
-    }
-    let weather = &drive.runtime.weather;
-    for g in &mut state.groups {
-        if let Owner::Storm(id) = g.owner {
-            g.active = weather.storms().iter().any(|s| s.id == id);
-        }
-    }
-    let storms = &reference.0.weather.particles;
-    for storm in weather.storms() {
-        for (system, p) in storms.iter().enumerate() {
-            let owner = Owner::Storm(storm.id);
-            if !state
-                .groups
-                .iter()
-                .any(|g| g.active && g.owner == owner && g.source == system)
-            {
-                add_group(
-                    &mut state,
-                    owner,
-                    system,
-                    p,
-                    &lighting,
-                    &mut commands,
-                    &mut materials,
-                );
-            }
-        }
-    }
-    // A removed plane's retained slots serve the next plane of the same prefab.
-    let sky = drive.runtime.sky();
-    for g in &mut state.groups {
-        if let Owner::Sky(id) = g.owner {
-            g.active = sky
-                .planes()
-                .iter()
-                .any(|p| p.id == id && p.prefab == g.source);
-        }
-    }
-    for plane in sky.planes() {
-        let Some(p) = &reference.0.sky.prefabs[plane.prefab].contrail else {
-            continue;
+    for row in groups.iter().filter(|r| r.kind == ParticleGroupRow::EMBER) {
+        let Some(ember) = ember else {
+            break;
         };
-        let owner = Owner::Sky(plane.id);
-        if state.groups.iter().any(|g| g.active && g.owner == owner) {
+        let owner = Owner::Ember(ItemId(row.a));
+        if row.count == 0 || state.groups.iter().any(|g| g.active && g.owner == owner) {
             continue;
         }
         if let Some(g) = state
             .groups
             .iter_mut()
-            .find(|g| !g.active && g.source == plane.prefab && matches!(g.owner, Owner::Sky(_)))
+            .find(|g| !g.active && matches!(g.owner, Owner::Ember(_)))
         {
             g.owner = owner;
             g.active = true;
@@ -801,22 +674,101 @@ fn sync_particles(
         add_group(
             &mut state,
             owner,
-            plane.prefab,
+            0,
+            ember,
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+    }
+    // Car copies come and go. A retired car frees its groups for the next copy of its prototype.
+    for row in groups.iter().filter(|r| r.kind == ParticleGroupRow::CAR) {
+        let (system, prototype, source) = (row.a, row.b as usize, row.source as usize);
+        let owner = Owner::Car {
+            system,
+            prototype,
+            car: row.c,
+        };
+        if state
+            .groups
+            .iter()
+            .any(|g| g.active && g.owner == owner && g.source == source)
+        {
+            continue;
+        }
+        if let Some(g) = state.groups.iter_mut().find(|g| {
+            !g.active
+                && g.source == source
+                && matches!(g.owner, Owner::Car { system: s, prototype: p, .. } if s == system && p == prototype)
+        }) {
+            g.owner = owner;
+            g.active = true;
+            continue;
+        }
+        add_group(
+            &mut state,
+            owner,
+            source,
+            car_particle(&reference.0, system, prototype, source),
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+    }
+    let storms = &reference.0.weather.particles;
+    for row in groups.iter().filter(|r| r.kind == ParticleGroupRow::STORM) {
+        let owner = Owner::Storm(StormId(row.a));
+        let system = row.source as usize;
+        if !state
+            .groups
+            .iter()
+            .any(|g| g.active && g.owner == owner && g.source == system)
+        {
+            add_group(
+                &mut state,
+                owner,
+                system,
+                &storms[system],
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
+    }
+    // A removed plane's retained slots serve the next plane of the same prefab.
+    for row in groups.iter().filter(|r| r.kind == ParticleGroupRow::SKY) {
+        let prefab = row.source as usize;
+        let Some(p) = &reference.0.sky.prefabs[prefab].contrail else {
+            continue;
+        };
+        let owner = Owner::Sky(row.a);
+        if state.groups.iter().any(|g| g.active && g.owner == owner) {
+            continue;
+        }
+        if let Some(g) = state
+            .groups
+            .iter_mut()
+            .find(|g| !g.active && g.source == prefab && matches!(g.owner, Owner::Sky(_)))
+        {
+            g.owner = owner;
+            g.active = true;
+            continue;
+        }
+        add_group(
+            &mut state,
+            owner,
+            prefab,
             p,
             &lighting,
             &mut commands,
             &mut materials,
         );
     }
-    let origin = drive.runtime.stream.origin.offset;
-    // Contrail positions are anchor offsets.
-    let anchor = drive.runtime.sky_anchor(&reference.0);
-    let sky_origin: [f64; 3] = std::array::from_fn(|i| origin[i] - anchor[i]);
     let Ok(camera) = camera.single() else {
         return;
     };
     let eye = camera.translation();
-    let cycle = drive.runtime.lighting.cycle.output();
+    let cycle = &sim.frame.lighting.cycle;
     let fog = linear(cycle.fog_color);
     let state = &mut *state;
     for g in &mut state.groups {
@@ -840,118 +792,17 @@ fn sync_particles(
             Owner::Exhale => &reference.0.small_items.exhale.particle,
             Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
         };
-        let fluid = match g.owner {
-            Owner::Urine => Some(&drive.runtime.urine),
-            Owner::Outlet(id) => drive
-                .runtime
-                .area
-                .interaction
-                .fluid_particles()
-                .find(|(key, _)| key.0 == id)
-                .map(|(_, p)| p),
-            Owner::Brush(_)
-            | Owner::Spray(_)
-            | Owner::Wash(_)
-            | Owner::SprayBottle(_)
-            | Owner::Car { .. }
-            | Owner::Storm(_)
-            | Owner::Melee
-            | Owner::Sky(_)
-            | Owner::Ember(_)
-            | Owner::Exhale
-            | Owner::Cobweb(_) => None,
-        };
-        let splash = p.role.starts_with("splash") || p.role == "urine_splash";
-        let particles = if let Owner::SprayBottle(index) = g.owner {
-            Some(drive.runtime.stream.small_item_particles(index))
-        } else if let Owner::Wash(wash) = g.owner {
-            Some(
-                drive
-                    .runtime
-                    .area
-                    .interaction
-                    .cleaning
-                    .wash_particles(wash, g.source),
-            )
-        } else if let Owner::Spray(tool) = g.owner {
-            Some(
-                drive
-                    .runtime
-                    .area
-                    .interaction
-                    .cleaning
-                    .spray_particles(tool, g.source),
-            )
-        } else if let Owner::Brush(tool) = g.owner {
-            Some(
-                drive
-                    .runtime
-                    .area
-                    .interaction
-                    .cleaning
-                    .particles(tool, g.source),
-            )
-        } else if let Owner::Car { system, car, .. } = g.owner {
-            Some(
-                physics
-                    .vehicle_of(car)
-                    .and_then(|key| drive.runtime.vehicles.get(key))
-                    .map_or(&[][..], |v| match system {
-                        CarSystem::Exhaust => v.exhaust.particles(g.source),
-                        CarSystem::Wheel => v.wheel_effects.particles(g.source / 8, g.source % 8),
-                        CarSystem::Skid => v.wheel_effects.burst_particles(g.source),
-                    }),
-            )
-        } else if let Owner::Storm(id) = g.owner {
-            Some(
-                weather
-                    .storms()
-                    .iter()
-                    .find(|s| s.id == id)
-                    .map_or(&[][..], |s| s.particles[g.source].particles()),
-            )
-        } else if let Owner::Melee = g.owner {
-            Some(drive.runtime.area.interaction.melee.particles(g.source))
-        } else if let Owner::Sky(id) = g.owner {
-            Some(
-                sky.planes()
-                    .iter()
-                    .find(|p| p.id == id)
-                    .and_then(|p| p.contrail.as_ref())
-                    .map_or(&[][..], |c| c.particles()),
-            )
-        } else if let Owner::Ember(id) = g.owner {
-            Some(cigarettes.ember_particles(id))
-        } else if let Owner::Exhale = g.owner {
-            Some(cigarettes.exhale_particles())
-        } else if let Owner::Cobweb(effect) = g.owner {
-            Some(drive.runtime.stream.cobweb_particles(effect))
-        } else if splash {
-            fluid.map(|f| f.splash())
-        } else {
-            None
-        };
+        let (fluid, particles) = sim
+            .particle_group(key(g.owner, g.source))
+            .map_or((false, &[][..]), |(row, rows)| (row.fluid != 0, rows));
         let count = if !g.active || !p.flags["gameObject.active"] || !p.flags["renderer.enabled"] {
             0
         } else {
-            particles.map_or_else(|| fluid.map_or(0, |f| f.particles().len()), |p| p.len())
+            particles.len()
         };
         g.order.clear();
         g.order.extend(0..count);
-        let origin = if let Owner::Sky(_) = g.owner {
-            sky_origin
-        } else {
-            origin
-        };
-        let position = |i: usize| -> Vec3 {
-            if let Some(p) = particles {
-                Vec3::from_array(std::array::from_fn(|j| {
-                    (p[i].absolute_position[j] - origin[j]) as f32
-                }))
-            } else {
-                Vec3::from_array(fluid.unwrap().particles()[i].position.to_array())
-            }
-        };
+        let position = |i: usize| Vec3::from_array(particles[i].position);
         if p.scalars["renderer.m_SortMode"] == 1. {
             g.order.sort_unstable_by(|a, b| {
                 position(*b)
@@ -981,20 +832,50 @@ fn sync_particles(
             }
             for j in 0..n {
                 let index = g.order[batch * BATCH + j];
-                let (size, color, angle, tile) = if let Some(p) = particles {
-                    let tile = g.sheet.as_ref().map_or(Vec2::ZERO, |s| {
-                        sheet_offset(s.frame(&p[index]), s.tiles) * g.tiling
-                    });
-                    (p[index].size, p[index].color, p[index].rotation, tile)
+                let row = &particles[index];
+                let tile = if fluid {
+                    Vec2::ZERO
                 } else {
-                    let p = &fluid.unwrap().particles()[index];
-                    (p.size, p.color, p.rotation, Vec2::ZERO)
+                    g.sheet.as_ref().map_or(Vec2::ZERO, |s| {
+                        sheet_offset(s.frame_at(row.age, row.lifetime, row.uv_draw), s.tiles)
+                            * g.tiling
+                    })
                 };
-                u.positions[j] = position(index).extend(size);
-                u.colors[j] = Vec4::from_array(linear(color));
-                u.angles[j] = Vec4::new(angle.cos(), angle.sin(), tile.x, tile.y);
+                u.positions[j] = position(index).extend(row.size);
+                u.colors[j] = Vec4::from_array(linear(row.color));
+                u.angles[j] = Vec4::new(row.rotation.cos(), row.rotation.sin(), tile.x, tile.y);
             }
         }
+    }
+}
+
+/// The frame group key of a renderer group.
+fn key(owner: Owner, source: usize) -> ParticleGroupKey {
+    let (kind, a, b, c) = match owner {
+        Owner::Urine => (ParticleGroupRow::URINE, 0, 0, 0),
+        Owner::Brush(tool) => (ParticleGroupRow::BRUSH, tool as u32, 0, 0),
+        Owner::Spray(tool) => (ParticleGroupRow::SPRAY, tool as u32, 0, 0),
+        Owner::Wash(wash) => (ParticleGroupRow::WASH, wash as u32, 0, 0),
+        Owner::Outlet(id) => (ParticleGroupRow::OUTLET, id, 0, 0),
+        Owner::SprayBottle(index) => (ParticleGroupRow::SPRAY_BOTTLE, index as u32, 0, 0),
+        Owner::Car {
+            system,
+            prototype,
+            car,
+        } => (ParticleGroupRow::CAR, system, prototype as u32, car),
+        Owner::Storm(id) => (ParticleGroupRow::STORM, id.0, 0, 0),
+        Owner::Melee => (ParticleGroupRow::MELEE, 0, 0, 0),
+        Owner::Sky(id) => (ParticleGroupRow::SKY, id, 0, 0),
+        Owner::Ember(id) => (ParticleGroupRow::EMBER, id.0, 0, 0),
+        Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),
+        Owner::Cobweb(effect) => (ParticleGroupRow::COBWEB, effect as u32, 0, 0),
+    };
+    ParticleGroupKey {
+        kind,
+        a,
+        b,
+        c,
+        source: source as u32,
     }
 }
 
