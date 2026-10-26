@@ -12,7 +12,7 @@ ENGINE = dict(startChance=.9, starterRpm=300., starterRpmLerp=2., alapRpm=800., 
     engineStartTimeModifier=1., engineHeatGainMin=1., engineHeatGainMax=2., engineHeatLoss=1., temp=20.,
     engineHeatLossSpeedModifier=1., maxRpmDifference=100., modifier=1., Oilfluid=3, autoShiftClutchRpm=1000.,
     autoShiftClutchRpmRange=200., minOptimalTemp1=80., maxOptimalTemp1=90., minOptimalTemp2=70., maxOptimalTemp2=100.,
-    FuelConsumption={'fluids': [{'type': 2, 'amount': 1.}]}, twostroke=0, noOverHeat=0, kickstart=0, defSmokeRate=5.,
+    FuelConsumption={'fluids': [{'type': 2, 'amount': 1.}]}, twostroke=0, oilTolerationMin=.02, oilTolerationMax=.3, noOverHeat=0, kickstart=0, defSmokeRate=5.,
     torqueCurve={'m_Curve': [], 'm_PreInfinity': 2, 'm_PostInfinity': 2})
 CURVE = dict(m_ExtremumSlip=.4, m_ExtremumValue=1., m_AsymptoteSlip=.8, m_AsymptoteValue=.5, m_Stiffness=1.)
 
@@ -95,7 +95,7 @@ def car_fixture():
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
         dontIgniteWithThorttleInAutomatic=0, collisionSoundM=1., psSmoke=[], groundSoundM=.5,
         springSoundM=2., springPitchM=3., slideAngle=20., maxSlideVolumeSpeed=10.,
-        meters=[], kmhmeters=[], lowFuelValue=5., lowOilValue=1., ledOilTestRpm=600., ledBatteryTestRpm=800.)
+        meters=[], kmhmeters=[], lowFuelValue=5., lowOilValue=1., ledOilTestRpm=600., ledBatteryTestRpm=800., ledOilTestTwoStrokeDefault=1)
     # A bike pedal script: two pedals, one feet holder, rear wheel driven. The car links it only in the pedal test.
     pedal_node = node(root); axis = node(pedal_node); crank = node(axis); foot = node(axis)
     component(pedal_node, 'MonoBehaviour', dict(WHDriven=[ptr(wheels[3])], DrivenWheelSlots=[ptr(slot)], seat=ptr(seat),
@@ -162,6 +162,7 @@ class VehicleRecordTests(unittest.TestCase):
         # A car without carscript.Transmission has no lever.
         self.assertIsNone(vehicle['lever'])
         self.assertEqual(vehicle['key_steer_multiplier'], 0)
+        self.assertIs(vehicle['oil_led_two_stroke'], True)
         self.assertIsNone(vehicle['instruments'])
         self.assertEqual(vehicle['kmh_meters'], [])
         self.assertEqual(vehicle['gauge_limits']['electronics_output'], 1.)
@@ -183,6 +184,8 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(hierarchy[engine['node']]['components'][-1].cls, 'enginescript')
         self.assertEqual(engine['oil_tank'], engine['node'] + 1)
         self.assertEqual(engine['fuel_consumption'], [0, 0, 1., 0, 0, 0])
+        # Two-stroke mix tolerances (Car03 engine values).
+        self.assertEqual((engine['oil_toleration_min'], engine['oil_toleration_max']), (.02, .3))
         # A missing radiator is accepted.
         self.assertEqual(radiators, [])
         self.assertEqual(gauges, [])
@@ -214,6 +217,21 @@ class VehicleRecordTests(unittest.TestCase):
                 patch('tools.reference.vehicles.recover_wheel_effects', return_value=[]), \
                 self.assertRaisesRegex(ValueError, 'seat'):
             vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
+
+    def test_collider_bake_runs_only_in_the_editor(self):
+        source, hierarchy, bodies, colliders = car_fixture()
+        bake = NS(assets_file=FILE, path_id=999, type=NS(name='MonoBehaviour'), cls='colliderscaleapplyscript')
+        hierarchy[0]['components'].append(bake)
+        read = source.read
+        for run in (0, 1):
+            source.read = lambda reader, run=run: {'m_Script': {'m_PathID': 1}, 'run': run} if reader is bake else read(reader)
+            with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+                    patch('tools.reference.vehicles.recover_wheel_effects', return_value=[]):
+                if run:
+                    with self.assertRaisesRegex(ValueError, 'colliderscaleapplyscript.run'):
+                        vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
+                else:
+                    self.assertIsNotNone(vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None))
 
     def test_prototype_without_carscript_has_no_vehicle(self):
         source, hierarchy, bodies, colliders = car_fixture()

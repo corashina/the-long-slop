@@ -142,6 +142,8 @@ pub struct WorldStream {
     lamp_bindings: Vec<content_lamps::LampBinding>,
     dial_bindings: Vec<content_dials::DialBinding>,
     pub(crate) small_items: content_small_items::SmallItems,
+    pub(crate) computers: content_computers::Computers,
+    cobwebs: content_cobwebs::Cobwebs,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
     level_bindings: Vec<content_levels::LevelBinding>,
@@ -184,6 +186,8 @@ pub struct WorldStream {
     lamp_binding_revision: u64,
     seed: i32,
     mode: super::GameMode,
+    /// The picked start car. Only its start placement spawns.
+    start_car: super::StartCar,
     package_id: String,
     generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
@@ -228,6 +232,8 @@ pub struct WorldStream {
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
     boxes: content_boxes::BoxRuntime,
+    /// Source breakablescript targets of active content.
+    pub(crate) breakables: crate::damage::Breakables,
     evaluator: TerrainEvaluator,
     biome_materials: super::biome_materials::BiomeMaterials,
     color_foundations: Vec<super::FoundationPoint>,
@@ -265,6 +271,8 @@ pub struct WorldStream {
     startup: Option<StartupTerrain>,
     /// Fixed prototype placements of the startup list, set with `startup`.
     startup_placements: Vec<Placement>,
+    /// StartSpawnItems world prototype copies, such as the spray bottles: prototype and Transform.
+    startup_items: Vec<(crate::reference::SourceId, crate::reference::SourceId)>,
     startup_candidates: Vec<u32>,
     startup_next: usize,
     startup_points: Vec<TerrainRoadPoint>,
@@ -406,6 +414,7 @@ impl WorldStream {
                 placements: self.placements.capture_index(),
             },
             seed: self.seed,
+            start_car: self.start_car,
             changes,
             spawn: self.contents.state.capture_history(),
         }
@@ -453,6 +462,7 @@ impl WorldStream {
         saved: &crate::save::WorldSnapshot,
     ) -> Result<(), ReferenceError> {
         if self.seed != saved.seed
+            || self.start_car != saved.start_car
             || self.initial_generation_ready
             || !self.structures.is_empty()
             || self.roads.coverage() != 0
@@ -657,6 +667,9 @@ impl WorldStream {
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
+    pub fn start_car(&self) -> super::StartCar {
+        self.start_car
+    }
 
     /// Test stream in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -729,7 +742,9 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let mut contents = super::contents::SourceContents::new(world);
+        let start_car = mode.start_car.pick(world, &mut super::menu_random());
+        let mut contents =
+            super::contents::SourceContents::new(world, start_car.current_car(reference)?);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
@@ -773,6 +788,8 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             small_items: content_small_items::SmallItems::new(reference),
+            computers: content_computers::Computers::default(),
+            cobwebs: content_cobwebs::Cobwebs::new(reference),
             dial_scan: None,
             level_bindings: Vec::new(),
             level_scan: None,
@@ -811,6 +828,7 @@ impl WorldStream {
             lamp_binding_revision: 0,
             seed,
             mode,
+            start_car,
             biome_materials,
             structure_helpers,
             building_components: Default::default(),
@@ -864,6 +882,7 @@ impl WorldStream {
             props: super::prop_layers::PropLayers::new(world, seed, &distances)?,
             contents,
             boxes: Default::default(),
+            breakables: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
@@ -901,6 +920,18 @@ impl WorldStream {
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_placements: Vec::new(),
+            startup_items: reference
+                .small_items
+                .spray_bottle
+                .startup
+                .iter()
+                .map(|v| {
+                    (
+                        reference.small_items.spray_bottle.prototype.clone(),
+                        v.transform.clone(),
+                    )
+                })
+                .collect(),
             startup_candidates: Vec::new(),
             startup_next: 0,
             startup_points: Vec::new(),
@@ -1705,7 +1736,8 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
-    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// The startup entries with a prototype become fixed placements. Of the start cars, only
+    /// the picked one spawns. The exported pose is the raw
     /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
     fn startup_placements(
         &self,
@@ -1716,6 +1748,9 @@ impl WorldStream {
             let Some(prototype) = &entry.prototype else {
                 continue;
             };
+            if entry.start_car && entry.group != self.start_car.field() {
+                continue;
+            }
             let offset = startup.chain_offset(&self.reference, &entry.source)?;
             let mut position = entry.pose.translation.map(f64::from);
             position[1] += f64::from(offset);
@@ -1734,6 +1769,40 @@ impl WorldStream {
                     rotation: entry.pose.rotation,
                 },
                 scale: entry.pose.scale,
+                bounds: WorldBounds {
+                    min: position.map(|v| v - radius),
+                    max: position.map(|v| v + radius),
+                },
+                object_seed: 0,
+            });
+        }
+        // StartSpawnItems copies of world prototypes take their aligned scene pose.
+        for (index, (prototype, transform)) in self.startup_items.iter().enumerate() {
+            let pose = super::source_world_pose(&self.reference, startup, transform, &[])?;
+            let scale = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| &p.source == prototype)
+                .ok_or_else(|| ReferenceError("Startup item prototype missing".into()))?
+                .prefab_pose
+                .scale;
+            let position = pose.position.map(f64::from);
+            let radius = self.contents.rules.radius(prototype).unwrap_or(0.);
+            placements.push(Placement {
+                id: super::GeneratedId {
+                    layer: WorldLayer::Startup,
+                    generator: transform.clone(),
+                    unit: [0, 0],
+                    ordinal: (self.reference.startup.len() + index) as u32,
+                    children: Vec::new(),
+                },
+                prototype: prototype.clone(),
+                pose: super::AbsolutePose {
+                    position,
+                    rotation: pose.rotation,
+                },
+                scale,
                 bounds: WorldBounds {
                     min: position.map(|v| v - radius),
                     max: position.map(|v| v + radius),
@@ -4326,6 +4395,14 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_cobwebs(reference, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
+        if let Err(error) = self.sync_computers(reference, items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_level_bindings(&reference.small_items.spirit_level, items) {
             self.binding_reserved = 0;
             return Err(error);
@@ -5026,6 +5103,8 @@ impl WorldStream {
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
                 + self.small_items.heap_bytes()
+                + self.computers.heap_bytes()
+                + self.cobwebs.heap_bytes()
                 + self.level_bindings.capacity()
                     * std::mem::size_of::<content_levels::LevelBinding>()
                 + self
@@ -5387,6 +5466,8 @@ pub(crate) mod content_bindings;
 
 #[path = "content_boxes.rs"]
 pub(crate) mod content_boxes;
+#[path = "content_breakables.rs"]
+mod content_breakables;
 
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
@@ -5409,10 +5490,16 @@ mod content_sleds;
 pub(crate) mod content_trailers;
 
 #[path = "content_small_items.rs"]
-mod content_small_items;
+pub(crate) mod content_small_items;
+
+#[path = "content_computers.rs"]
+pub(crate) mod content_computers;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[path = "content_cobwebs.rs"]
+mod content_cobwebs;
 
 #[path = "content_levels.rs"]
 mod content_levels;

@@ -160,7 +160,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     let items = ItemStore::from_states(Vec::new());
     let r = record.instruments.as_ref().unwrap();
     let limits = &record.gauge_limits;
-    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, limits, 2);
+    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, record, 2);
     let speed = physics.snapshot(&key).speed_mps * 3.6;
     assert_eq!(sample.rpm, 2400.);
     assert!(speed > 3. && sample.speed_kmh == speed, "{speed}");

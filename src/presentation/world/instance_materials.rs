@@ -348,6 +348,70 @@ impl InstanceMaterials<'_> {
         }
         Ok(())
     }
+    /// Source `SetColor("_EmissionColor")` and, with `map`, `SetTexture("_EmissionMap")`.
+    /// `None` keeps the current map. Only a changed value touches the material.
+    /// A shared binding becomes private: bind it private before an entity retains it.
+    pub fn emission(
+        &mut self,
+        binding: &mut RendererMaterial,
+        color: [f32; 4],
+        map: Option<Handle<Image>>,
+    ) -> Result<(), ReferenceError> {
+        assert!(
+            !binding.gpu_props(),
+            "An emission override needs an entity renderer"
+        );
+        self.make_private(binding);
+        let linear = linear_color(color);
+        match &binding.visible {
+            InstanceMaterial::Primary(h) => {
+                materials::write_emission(&mut self.primary, h, linear, map).map_err(ReferenceError)
+            }
+            InstanceMaterial::Specular(_) if map.is_some() => Err(ReferenceError(
+                "Specular texture arrays cannot take an _EmissionMap image".into(),
+            )),
+            InstanceMaterial::Specular(h) => {
+                if self.specular.get(h).is_some_and(|m| m.emission() != linear)
+                    && let Some(mut m) = self.specular.get_mut(h)
+                {
+                    m.set_emission(linear);
+                }
+                Ok(())
+            }
+            _ => Err(ReferenceError(
+                "Emission requires its checked shader property".into(),
+            )),
+        }
+    }
+    /// Source `SetTexture("_EmissionMap", null)`: the white default.
+    pub fn clear_emission_map(
+        &mut self,
+        binding: &mut RendererMaterial,
+    ) -> Result<(), ReferenceError> {
+        assert!(
+            !binding.gpu_props(),
+            "An emission override needs an entity renderer"
+        );
+        self.make_private(binding);
+        match &binding.visible {
+            InstanceMaterial::Primary(h) => {
+                if self
+                    .primary
+                    .get(h)
+                    .is_some_and(|m| m.emission_map().is_some())
+                    && let Some(mut m) = self.primary.get_mut(h)
+                {
+                    m.set_emission_map(None).map_err(ReferenceError)?;
+                }
+                Ok(())
+            }
+            // The checked specular variant has no emission map.
+            InstanceMaterial::Specular(_) => Ok(()),
+            _ => Err(ReferenceError(
+                "Emission requires its checked shader property".into(),
+            )),
+        }
+    }
     /// Linear row color of a GPU prop: the condition color, else the shared material color.
     pub fn row_color(
         &self,
@@ -491,6 +555,17 @@ impl RendererMaterial {
             )>();
         }
     }
+}
+
+/// Prototypes whose renderers take a runtime emission override. Their renderers are
+/// private entities, never GPU prop rows.
+/// ginlampscript.R and displayscript.R take a private material and a runtime emission.
+pub fn emissive_renderer(
+    reference: &ReferenceManifest,
+    renderer: &crate::reference::SourceId,
+) -> bool {
+    *renderer == reference.small_items.genie_lamp.renderer
+        || *renderer == reference.computer.display.renderer
 }
 
 pub fn selected_material<'a>(

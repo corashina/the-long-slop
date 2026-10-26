@@ -41,7 +41,7 @@ impl PlayerPoseState {
         let mut frames = HashMap::new();
         for id in std::iter::once(anchors["RH"].node)
             .chain(r.clothing.pose.wearable_anchors.iter().copied())
-            .chain([inventory])
+            .chain([inventory, r.small_items.exhale.node])
         {
             let mut parent = Some(id);
             let mut head_relative = false;

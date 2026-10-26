@@ -57,6 +57,8 @@ pub struct WorldVehicleReference {
     pub lever: Option<LeverReference>,
     /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
     pub key_steer_multiplier: f32,
+    /// Source `carscript.ledOilTestTwoStrokeDefault`: the oil LED follows the two-stroke mix.
+    pub oil_led_two_stroke: bool,
     pub seats: Vec<WorldSeatReference>,
     pub drive_frames: DriveFrames,
     pub lights: Vec<WorldLightReference>,
@@ -391,6 +393,10 @@ pub struct EnginePartReference {
     /// Source `enginescript.FuelConsumption`, by fluid type.
     pub fuel_consumption: [f32; 6],
     pub two_stroke: bool,
+    /// Source `enginescript.oilTolerationMin`: two-stroke oil share below the target mix.
+    pub oil_toleration_min: f32,
+    /// Source `enginescript.oilTolerationMax`: two-stroke oil share above the target mix.
+    pub oil_toleration_max: f32,
     pub torque_curve: TorqueCurve,
     pub max_rpm_difference: f32,
     pub torque_modifier: f32,
@@ -890,6 +896,8 @@ impl EnginePartReference {
                 self.auto_shift_clutch_rpm,
                 self.auto_shift_clutch_rpm_range,
                 self.smoke_rate,
+                self.oil_toleration_min,
+                self.oil_toleration_max,
             ]) && finite(&self.optimal_temperature)
                 && finite(&self.fuel_consumption)
                 && (0.0..=1.0).contains(&self.start_chance)
@@ -961,7 +969,7 @@ impl EngineGlobals {
 /// A small engine part record for native tests: petrol, 120 Nm, oil fluid 3.
 #[cfg(test)]
 pub(crate) fn engine_part_fixture() -> serde_json::Value {
-    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false,
+    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false, "oil_toleration_min": 0.02, "oil_toleration_max": 0.3,
                 "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
                 "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0, "audio": engine_audio_fixture()})
 }

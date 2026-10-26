@@ -8,6 +8,11 @@ pub struct InstrumentSample {
     pub oil_liters: f32,
     pub temperature: f32,
     pub rpm: f32,
+    /// The engine is a two-stroke.
+    pub two_stroke: bool,
+    pub oil_penalty: f32,
+    /// Source `carscript.ledOilTestTwoStrokeDefault`.
+    pub oil_led_two_stroke: bool,
     pub local_ignition: bool,
     pub headlights: u8,
     pub distance_m: f64,
@@ -30,15 +35,22 @@ pub fn needle_angle(r: &NeedleReference, value: f32) -> f32 {
     }
     lerp(r.min_angle, r.max_angle, t)
 }
+/// Source `carscript` oil LED. The two-stroke rule reads the engine oil penalty.
+fn oil_lamp(limits: &GaugeLimits, s: &InstrumentSample) -> bool {
+    let low_oil = if s.oil_led_two_stroke {
+        s.two_stroke && s.oil_penalty > 0.4
+    } else {
+        s.oil_liters < limits.low_oil
+    };
+    s.local_ignition && (low_oil || s.rpm < limits.oil_test_rpm)
+}
 /// `ledkijelzoscript` lamps: bit i is lamp i on.
 pub fn lamp_bits(lamps: &[LampReference], limits: &GaugeLimits, s: &InstrumentSample) -> u32 {
     let mut bits = 0;
     for (i, l) in lamps.iter().enumerate() {
         let on = match l.signal.as_str() {
             "fuel" => s.local_ignition && s.fuel_liters < limits.low_fuel,
-            "oil" => {
-                s.local_ignition && (s.oil_liters < limits.low_oil || s.rpm < limits.oil_test_rpm)
-            }
+            "oil" => oil_lamp(limits, s),
             "battery" => s.local_ignition && s.rpm < limits.battery_test_rpm,
             "headlight2" => {
                 s.headlights == 2 && limits.electronics_output > limits.electronics_off_threshold
@@ -189,5 +201,74 @@ impl InstrumentState {
                 lerp_angle(self.digit_angles[i], angle, dt * 20.)
             };
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limits() -> GaugeLimits {
+        serde_json::from_value(crate::reference::gauge_limits_fixture()).unwrap()
+    }
+
+    #[test]
+    fn two_stroke_oil_lamp_reads_the_oil_penalty() {
+        let s = InstrumentSample {
+            rpm: 3000.,
+            local_ignition: true,
+            oil_led_two_stroke: true,
+            two_stroke: true,
+            oil_penalty: 0.5,
+            ..Default::default()
+        };
+        assert!(oil_lamp(&limits(), &s));
+        assert!(!oil_lamp(
+            &limits(),
+            &InstrumentSample {
+                oil_penalty: 0.4,
+                ..s
+            }
+        ));
+        assert!(!oil_lamp(
+            &limits(),
+            &InstrumentSample {
+                two_stroke: false,
+                ..s
+            }
+        ));
+        // The sump amount does not count.
+        let s = InstrumentSample {
+            oil_penalty: 0.,
+            ..s
+        };
+        assert!(!oil_lamp(&limits(), &s));
+        assert!(oil_lamp(&limits(), &InstrumentSample { rpm: 100., ..s }));
+    }
+
+    #[test]
+    fn sump_oil_lamp_reads_the_oil_amount() {
+        let s = InstrumentSample {
+            rpm: 3000.,
+            local_ignition: true,
+            oil_liters: 0.5,
+            two_stroke: true,
+            oil_penalty: 1.,
+            ..Default::default()
+        };
+        assert!(oil_lamp(&limits(), &s));
+        let s = InstrumentSample {
+            oil_liters: 2.,
+            ..s
+        };
+        assert!(!oil_lamp(&limits(), &s));
+        assert!(oil_lamp(&limits(), &InstrumentSample { rpm: 100., ..s }));
+        assert!(!oil_lamp(
+            &limits(),
+            &InstrumentSample {
+                rpm: 100.,
+                local_ignition: false,
+                ..s
+            }
+        ));
     }
 }

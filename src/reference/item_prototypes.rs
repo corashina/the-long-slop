@@ -373,7 +373,11 @@ impl ItemPrototype {
         }
         false
     }
-    fn body_for(&self, m: &ReferenceManifest, mut node: Option<NodeId>) -> Option<BodyId> {
+    pub(crate) fn body_for(
+        &self,
+        m: &ReferenceManifest,
+        mut node: Option<NodeId>,
+    ) -> Option<BodyId> {
         for _ in 0..=m.nodes.len() {
             let current = node?;
             if !self.within(m, current) {

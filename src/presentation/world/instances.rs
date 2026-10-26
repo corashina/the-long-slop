@@ -55,6 +55,8 @@ struct Renderer {
     // The static node chain of the renderer is active. Spawned nodes carry their own visibility.
     active: bool,
     settings: Option<GrassSettings>,
+    /// The genie lamp renderer: a private material that takes the lamp emission.
+    emissive: bool,
     /// The renderer node is an enabled Grass displacement writer.
     writer: bool,
 }
@@ -713,6 +715,14 @@ impl SourceInstances {
                                     // A static root renderer with one shared material can be a GPU prop row.
                                     // A row takes its LOD state, color and source position from the row data,
                                     // so its material stays shared.
+                                    let record =
+                                        extras.source_renderer.as_ref().ok_or_else(|| {
+                                            ReferenceError("Missing source renderer record".into())
+                                        })?;
+                                    let emissive = super::instance_materials::emissive_renderer(
+                                        reference,
+                                        &record.source,
+                                    );
                                     let local = meshes
                                         .get(&mesh)
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
@@ -722,14 +732,11 @@ impl SourceInstances {
                                             |w| w.enabled && w.transform == source_node.source,
                                         );
                                     let row = variant_ids.is_empty()
+                                        && !emissive
                                         && node.skin.is_none()
                                         && flat.on_root(node.index as usize)
                                         && local.is_some()
                                         && !writer;
-                                    let record =
-                                        extras.source_renderer.as_ref().ok_or_else(|| {
-                                            ReferenceError("Missing source renderer record".into())
-                                        })?;
                                     let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
@@ -802,6 +809,7 @@ impl SourceInstances {
                                             active: active_nodes[source_index],
                                             shadow: shadow != 0,
                                             settings: None,
+                                            emissive: false,
                                             writer: false,
                                         });
                                         continue;
@@ -809,7 +817,7 @@ impl SourceInstances {
                                     if let Some(color) = color {
                                         materials.color(&mut binding, color)?;
                                     }
-                                    if has_lod {
+                                    if has_lod || emissive {
                                         materials.make_private(&mut binding);
                                     }
                                     let is_grass =
@@ -1018,6 +1026,7 @@ impl SourceInstances {
                                         active: chain_active,
                                         shadow: shadow != 0,
                                         settings,
+                                        emissive,
                                         writer,
                                     });
                                 }
@@ -1187,6 +1196,7 @@ impl SourceInstances {
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
+        screens: &crate::presentation::computer::ComputerScreens,
     ) -> Result<(), ReferenceError> {
         self.rebase(stream.origin, commands);
         let membership = (
@@ -1272,6 +1282,14 @@ impl SourceInstances {
             if let Some(owners) = self.lamp_instances.get(&lamp) {
                 for index in owners {
                     self.selection.push(*index);
+                }
+            }
+        }
+        // Cobweb changes are rare: a cleaned or start-disabled trigger.
+        for id in stream.cobweb_changes() {
+            for (index, instance) in self.instances.iter().enumerate() {
+                if &instance.placement.id == id {
+                    self.selection.push(index);
                 }
             }
         }
@@ -1522,12 +1540,33 @@ impl SourceInstances {
                     frame.origin,
                 )?;
             }
+            if let Some(color) = stream.lamp_emission(&instance.placement.id) {
+                for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
+                    materials.emission(&mut renderer.binding, color, None)?;
+                }
+            }
+            // displayscript.Upd: on shows defMaterial with the computer output as _EmissionMap.
+            if let Some((on, map)) = stream.display_screen(&instance.placement.id) {
+                let color = if on {
+                    reference.computer.display.emission
+                } else {
+                    [0., 0., 0., 1.]
+                };
+                let image = map.and_then(|item| screens.image(item));
+                for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
+                    materials.emission(&mut renderer.binding, color, image.cloned())?;
+                    if image.is_none() {
+                        materials.clear_emission_map(&mut renderer.binding)?;
+                    }
+                }
+            }
             if let Some(level) = stream.level(&instance.placement.id) {
                 for b in level.bubbles() {
                     let node = prototype.nodes[b.node].gltf_node as usize;
                     instance.write_local(transforms, node, local_pose(b.pose), frame.origin)?;
                 }
             }
+            let cobwebs = stream.cobweb_hidden(&instance.placement.id);
             for (i, node) in prototype.nodes.iter().enumerate() {
                 if let Some((_, pose_value)) = instance
                     .lamp_buttons
@@ -1543,6 +1582,7 @@ impl SourceInstances {
                     )?;
                 }
                 let enabled = active_food(prototype, i, appearance, reference, food)
+                    && !cobwebs.contains(&i)
                     && car
                         .and_then(|(record, v)| v.node_visible(record, i as u32))
                         .or_else(|| {

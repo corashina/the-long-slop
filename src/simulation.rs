@@ -74,6 +74,40 @@ pub struct CarryDeltas {
     pub wheel: f32,
 }
 
+/// Keyboard input while the player types on a computer (web/input.js typing keys).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TypingInput {
+    /// Input.inputString bytes: printable ASCII, 8 (Backspace) and 13 (Enter).
+    pub text: [u8; TypingInput::CAPACITY],
+    pub len: u8,
+    /// Held piano keys (bits 0-16), held arrows (17-20), pressed A S X (21-23), any key (24).
+    pub keys: u32,
+}
+impl TypingInput {
+    pub const CAPACITY: usize = 64;
+    const PRESSED: u32 = 7 << 21;
+    pub fn text(&self) -> &[u8] {
+        &self.text[..usize::from(self.len)]
+    }
+    fn merge(&mut self, frame: &Self) {
+        let free = Self::CAPACITY - usize::from(self.len);
+        let n = frame.text().len().min(free);
+        let start = usize::from(self.len);
+        self.text[start..start + n].copy_from_slice(&frame.text()[..n]);
+        self.len += n as u8;
+        self.keys = frame.keys | (self.keys & Self::PRESSED);
+    }
+}
+impl Default for TypingInput {
+    fn default() -> Self {
+        Self {
+            text: [0; Self::CAPACITY],
+            len: 0,
+            keys: 0,
+        }
+    }
+}
+
 /// Raw browser gamepad state: 4 pads, 8 axes and 32 button bits per pad.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GamepadFrame {
@@ -104,6 +138,7 @@ pub struct FrameInput {
     pub drive_mouse: [f32; 2],
     pub wheel: f32,
     pub carry: CarryDeltas,
+    pub typing: TypingInput,
     pub gamepad: GamepadFrame,
 }
 
@@ -145,6 +180,7 @@ impl FrameInput {
         if frame.carry.wheel.is_finite() {
             self.carry.wheel += frame.carry.wheel;
         }
+        self.typing.merge(&frame.typing);
     }
 
     /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
@@ -165,6 +201,10 @@ impl FrameInput {
             held: step.held,
             player_held: step.player_held,
             inventory_held: step.inventory_held,
+            typing: TypingInput {
+                keys: step.typing.keys & !TypingInput::PRESSED,
+                ..TypingInput::default()
+            },
             gamepad: step.gamepad,
             ..Self::default()
         };
@@ -273,5 +313,35 @@ mod step_clock_tests {
 
         assert_eq!(steps, 50);
         assert!((f64::from(FIXED_DT) * steps as f64 - 1.).abs() < 1.0e-6);
+    }
+}
+
+#[cfg(test)]
+mod typing_tests {
+    use super::{FrameInput, TypingInput};
+
+    #[test]
+    fn typed_text_and_music_keys_reach_one_step() {
+        let frame = |text: &[u8], keys: u32| {
+            let mut typing = TypingInput {
+                keys,
+                ..TypingInput::default()
+            };
+            typing.text[..text.len()].copy_from_slice(text);
+            typing.len = text.len() as u8;
+            FrameInput {
+                typing,
+                ..FrameInput::default()
+            }
+        };
+        let mut pending = FrameInput::default();
+        pending.merge(frame(b"ab", 1 | 1 << 21));
+        pending.merge(frame(b"c", 1));
+        let step = pending.take_step();
+        assert_eq!(step.typing.text(), b"abc");
+        assert_eq!(step.typing.keys, 1 | 1 << 21);
+        let next = pending.take_step();
+        assert!(next.typing.text().is_empty());
+        assert_eq!(next.typing.keys, 1, "held keys stay, pressed keys do not");
     }
 }

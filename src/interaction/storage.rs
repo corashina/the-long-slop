@@ -1324,7 +1324,7 @@ mod tests {
         let box_body = rig.carrier;
         let can_body = rig.locks.locked_body(CAN).unwrap();
         let world = rig.world(rig.collider(CAN));
-        // `break_box` unlocks before it disables the box body.
+        // `remove_broken_item` unlocks before it disables the box body.
         rig.locks
             .unbind_owner(BOX, |_, _| false, &mut rig.items, &mut rig.physics)
             .unwrap();

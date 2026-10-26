@@ -249,7 +249,7 @@ pub(crate) mod tests {
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
                 "drive_frames": {"left_hand": null, "right_hand": null, "left_leg": null, "right_leg": null},
                 "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
-                "lever": null, "key_steer_multiplier": 0.0,
+                "lever": null, "key_steer_multiplier": 0.0, "oil_led_two_stroke": false,
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             }
