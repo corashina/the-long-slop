@@ -874,6 +874,13 @@ impl AudioReference {
             )?;
         }
         validate_zones(&self.ambience_zones, &self.survival)?;
+        // Sleds play through the one looped survival row of kind 20.
+        let sled = self.survival.iter().find(|b| b.kind == 20);
+        require(
+            game.world.prototypes.iter().all(|p| p.sled.is_none())
+                || sled.is_some_and(|b| b.role == "sled" && !b.one_shot && !b.clips.is_empty()),
+            "sled playback",
+        )?;
         let f = &self.footsteps;
         require(
             f.surfaces

@@ -1338,11 +1338,12 @@ impl GarageRuntime {
             input
         };
         let driving = self.area.player.driving();
+        // The car driver seat and item seats take the driving input. Only sleds read it on item seats.
         let controls = self.driving_input.step(
             if driving {
-                self.area.player.seat()
+                self.area.player.seat_body()
             } else {
-                None
+                self.area.player.item_seat_body()
             },
             vehicle_input.held,
         );
@@ -1369,6 +1370,15 @@ impl GarageRuntime {
             );
             self.advance_exhaust(reference, index);
         }
+        let sled_seat = match (
+            self.area.player.seat_owner(),
+            self.area.player.item_seat_source(),
+        ) {
+            (Some(crate::player::SeatOwner::Item(owner)), Some(source)) => Some((owner, source)),
+            _ => None,
+        };
+        self.stream
+            .step_sleds(&mut self.physics, sled_seat, controls);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
@@ -1440,6 +1450,19 @@ impl GarageRuntime {
                     } => audio.cap(id, previous, current, tune),
                 }
             }
+            // szankoScript.Update sets the slide volume and pitch of each sled in use.
+            audio.stop_survival_loops(crate::audio::AudioKind::Sled);
+            let origin = self.stream.origin;
+            self.stream
+                .sled_sounds(&self.physics, |item, volume, pitch, position| {
+                    audio.pitched_loop(
+                        crate::audio::AudioKind::Sled,
+                        item.0,
+                        volume,
+                        pitch,
+                        origin.absolute(position),
+                    )
+                });
             let index = audio.vehicle_index;
             let output = self.vehicles[index].engine_output;
             let engine_active = self

@@ -920,6 +920,12 @@ impl PlayerState {
             .filter(|seat| matches!(seat.owner, SeatOwner::Item(_)))
             .map(|seat| seat.body)
     }
+    /// The main seatscript of the occupied item seat. Car seats return `None`.
+    pub fn item_seat_source(&self) -> Option<&crate::reference::SourceId> {
+        self.occupancy
+            .as_ref()
+            .and_then(|seat| seat.source.as_ref())
+    }
     /// seatscript.showSleepText of the occupied seat.
     pub fn show_sleep_text(&self) -> bool {
         self.occupancy

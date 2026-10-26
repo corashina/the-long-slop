@@ -160,6 +160,11 @@ pub struct WorldStream {
     seat_scan: Option<(u64, u64)>,
     /// Seats of world prototypes, read and checked on world load.
     seat_prototypes: Vec<content_seats::PrototypeSeats>,
+    sled_bindings: Vec<content_sleds::SledBinding>,
+    /// Session and active revision whose sled items are all bound.
+    sled_scan: Option<(u64, u64)>,
+    /// Indices of world prototypes with a sled.
+    sled_prototypes: Vec<usize>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
@@ -764,6 +769,15 @@ impl WorldStream {
             seat_bindings: Vec::new(),
             seat_scan: None,
             seat_prototypes,
+            sled_bindings: Vec::new(),
+            sled_scan: None,
+            sled_prototypes: world
+                .prototypes
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.sled.is_some())
+                .map(|(i, _)| i)
+                .collect(),
             detector_bindings: Vec::new(),
             detector_scan: None,
             lamp_binding_revision: 0,
@@ -4174,6 +4188,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_sled_bindings(items, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4860,6 +4878,13 @@ impl WorldStream {
                 + self.seat_prototypes.capacity()
                     * std::mem::size_of::<content_seats::PrototypeSeats>()
                 + content_seats::prototype_seats_heap(&self.seat_prototypes)
+                + self.sled_bindings.capacity() * std::mem::size_of::<content_sleds::SledBinding>()
+                + self
+                    .sled_bindings
+                    .iter()
+                    .map(content_sleds::SledBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.sled_prototypes.capacity() * std::mem::size_of::<usize>()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5172,6 +5197,8 @@ mod content_musicboxes;
 mod content_radios;
 #[path = "content_seats.rs"]
 pub(crate) mod content_seats;
+#[path = "content_sleds.rs"]
+mod content_sleds;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;
