@@ -12,7 +12,7 @@ pub struct GrassPatch {
     pub positions: [Vec3; 3],
     pub uvs: [Vec2; 3],
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct GrassView {
     pub position: Vec3,
     pub screen_height: f32,

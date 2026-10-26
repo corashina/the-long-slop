@@ -253,7 +253,7 @@ pub struct WorldStream {
     saved_locations_pending: bool,
     recipes: HashMap<SourceId, super::StructureRecipe>,
     supplies: Vec<PublishedSupply>,
-    wanted_structures: Vec<Placement>,
+    wanted_structures: pending_structures::PendingStructures,
     ready_structures: Vec<super::GeneratedId>,
     startup: Option<StartupTerrain>,
     /// Fixed prototype placements of the startup list, set with `startup`.
@@ -634,12 +634,17 @@ impl WorldStream {
     pub fn focus(&self) -> [f64; 3] {
         self.request.player
     }
-    pub fn uses_painting_asset(&self, asset: crate::reference::AssetId) -> bool {
-        self.contents.instances().any(|c| {
-            c.appearance
-                .iter()
-                .any(|a| a.primary.is_some_and(|p| p.0 == asset))
-        })
+    /// Writes the primary appearance assets of all contents to `assets`.
+    pub fn primary_assets(&self, assets: &mut Vec<crate::reference::AssetId>) {
+        assets.clear();
+        for content in self.contents.instances() {
+            assets.extend(
+                content
+                    .appearance
+                    .iter()
+                    .filter_map(|a| a.primary.map(|p| p.0)),
+            );
+        }
     }
 
     pub fn mode(&self) -> super::GameMode {
@@ -875,7 +880,7 @@ impl WorldStream {
             recipes: HashMap::new(),
             supplies: Vec::new(),
             // Grows with use. Capacity is charged as retained CPU.
-            wanted_structures: Vec::new(),
+            wanted_structures: Default::default(),
             ready_structures: Vec::with_capacity(32),
             startup: None,
             startup_placements: Vec::new(),
@@ -1766,16 +1771,14 @@ impl WorldStream {
                     .into_iter()
                     .all(|f| source_distance_squared(f, p.pose.position) >= radius * radius)
         });
-        let status = self.placements.update_buildings_in(
-            bounds,
-            self.placements.coverage(),
-            &mut self.wanted_structures,
-            |position| {
+        let placements = &mut self.placements;
+        let status = self.wanted_structures.edit(|list| {
+            placements.update_buildings_in(bounds, placements.coverage(), list, |position| {
                 points
                     .into_iter()
                     .any(|p| source_distance_squared(p, position) < radius * radius)
-            },
-        );
+            })
+        });
         if let Err(error) = status {
             self.failure = Some(error.0);
             return false;
@@ -1808,15 +1811,17 @@ impl WorldStream {
         } else {
             0
         };
-        if let Err(error) = super::building_extras::append_ramps(
+        let (reference, rules, components) = (
             &self.reference,
             &self.contents.rules,
             &mut self.building_components,
-            room,
-            self.seed,
-            &mut self.wanted_structures,
-            self.limits.objects,
-        ) {
+        );
+        let (seed, maximum) = (self.seed, self.limits.objects);
+        if let Err(error) = self.wanted_structures.append(|list| {
+            super::building_extras::append_ramps(
+                reference, rules, components, room, seed, list, maximum,
+            )
+        }) {
             self.failure = Some(error.0);
         }
     }
@@ -4780,6 +4785,15 @@ impl WorldStream {
     pub fn structure_revision(&self) -> u64 {
         self.structure_revision
     }
+    /// Session, published structure revision and pending structure revision.
+    /// Changes when a structure is added to or removed from either list.
+    pub fn structure_membership(&self) -> (u64, u64, u64) {
+        (
+            self.request.session,
+            self.structure_revision,
+            self.wanted_structures.revision(),
+        )
+    }
     pub fn pending_structures(&self) -> &[Placement] {
         &self.wanted_structures
     }
@@ -5361,6 +5375,9 @@ mod content_levels;
 
 #[path = "moving_nodes.rs"]
 mod moving_nodes;
+
+#[path = "pending_structures.rs"]
+mod pending_structures;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]
