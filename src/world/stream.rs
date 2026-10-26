@@ -168,6 +168,11 @@ pub struct WorldStream {
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
+    bus_door_bindings: Vec<content_busdoors::BusDoorBinding>,
+    /// Session and active revision whose bus doors are all bound.
+    bus_door_scan: Option<(u64, u64)>,
+    /// `busdoorscripts` and `dinamiccolliderforbus` sources by prototype.
+    bus_door_scripts: Vec<(SourceId, Option<SourceId>, Vec<SourceId>)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -778,6 +783,9 @@ impl WorldStream {
                 .collect(),
             detector_bindings: Vec::new(),
             detector_scan: None,
+            bus_door_bindings: Vec::new(),
+            bus_door_scan: None,
+            bus_door_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
             mode,
@@ -4293,6 +4301,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_bus_door_bindings(interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_seat_bindings(items, interaction, physics) {
             self.binding_reserved = 0;
             return Err(error);
@@ -5006,6 +5018,15 @@ impl WorldStream {
                     .iter()
                     .map(content_detectors::DetectorBinding::heap_bytes)
                     .sum::<usize>()
+                + self.bus_door_bindings.capacity()
+                    * std::mem::size_of::<content_busdoors::BusDoorBinding>()
+                + self
+                    .bus_door_bindings
+                    .iter()
+                    .map(content_busdoors::BusDoorBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.bus_door_scripts.capacity()
+                    * std::mem::size_of::<(SourceId, Option<SourceId>, Vec<SourceId>)>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -5301,6 +5322,8 @@ pub(crate) mod content_boxes;
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
 
+#[path = "content_busdoors.rs"]
+mod content_busdoors;
 #[path = "content_detectors.rs"]
 mod content_detectors;
 #[path = "content_dials.rs"]

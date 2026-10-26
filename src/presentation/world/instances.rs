@@ -1198,6 +1198,12 @@ impl SourceInstances {
                 let node = prototype.nodes[n.node].gltf_node as usize;
                 instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
             }
+            if let Some(doors) = stream.bus_doors(&instance.placement.id) {
+                for leaf in doors.leaves() {
+                    let node = prototype.nodes[leaf.node].gltf_node as usize;
+                    instance.write_local(transforms, node, local_pose(leaf.pose), frame.origin)?;
+                }
+            }
             if let Some(dial) = stream.dial(&instance.placement.id) {
                 for n in dial.nodes() {
                     let node = prototype.nodes[n.node].gltf_node as usize;

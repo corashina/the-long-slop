@@ -924,6 +924,7 @@ impl GarageRuntime {
 
     fn advance_light_fades(&mut self, reference: &ReferenceManifest, dt: f32) {
         self.stream.advance_generated_lamps(dt);
+        self.stream.advance_bus_doors(dt, &mut self.physics);
         let cycle = &reference.lighting.cycle;
         self.stream.advance_dials(
             dt,
@@ -1145,7 +1146,17 @@ impl GarageRuntime {
                 self.use_light_control(reference, control)
             }
             Some(InteractionAction::DialTune(knob, direction)) => {
-                if !self.stream.tune_dial(knob, direction, &mut self.area.items)
+                let (audio, physics) = (&mut self.audio, &self.physics);
+                let bus_door = self.stream.use_bus_door_button(knob, |key, shot| {
+                    if let Some(audio) = audio.as_mut()
+                        && physics.vehicle_keys().any(|k| k == key)
+                    {
+                        let pose = *physics.rapier().bodies[physics.chassis_handle(key)].position();
+                        audio.car_shot(key, shot, pose);
+                    }
+                });
+                if !bus_door
+                    && !self.stream.tune_dial(knob, direction, &mut self.area.items)
                     && !self.stream.switch_detector(knob, &mut self.area.items)
                     && let Some((item, true)) =
                         self.stream
