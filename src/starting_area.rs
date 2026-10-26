@@ -251,7 +251,7 @@ impl StartingArea {
                 .user_data(
                     VEHICLE_COLLIDER_FLAG
                         | crate::vehicle::SLOT_SENSOR_FLAG
-                        | ((slot.id.0 as u128) << 96)
+                        | ((slot.id.0 as u128) << crate::interaction::wheels::SLOT_ID_SHIFT)
                         | (slot.wheel.0 as u128 + 1),
                 );
 

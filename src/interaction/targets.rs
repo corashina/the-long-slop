@@ -1,9 +1,7 @@
 //! Collider identity and source action owners.
 use super::items::{ItemLocation, ItemStore};
 use super::{AimTarget, InteractionState, SLOT_SENSOR_FLAG, SlotTarget};
-use crate::reference::{
-    ActionBinding, ColliderId, ItemId, ItemKind, LightControlId, NodeId, WheelSlotId,
-};
+use crate::reference::{ActionBinding, ColliderId, ItemId, ItemKind, LightControlId, NodeId};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::math::Vector;
 use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray};
@@ -266,9 +264,9 @@ impl InteractionState {
                 SlotTarget::Wheel(slot) => {
                     if !self.is_wheel(held)
                         || !self
-                            .slot_fits
+                            .wheel_slots
                             .get(&slot)
-                            .is_some_and(|fits| fits.contains(&held))
+                            .is_some_and(|rule| rule.fits.contains(&held))
                     {
                         Some(InteractionBlock::Incompatible)
                     } else if self.parts.covered(held) {
@@ -521,8 +519,8 @@ impl InteractionState {
                 .map(SlotTarget::Attachment)
                 .or_else(|| {
                     (collider.user_data & SLOT_SENSOR_FLAG != 0)
-                        .then_some(SlotTarget::Wheel(WheelSlotId(
-                            (collider.user_data >> 96) as u8,
+                        .then_some(SlotTarget::Wheel(super::wheels::slot_id(
+                            collider.user_data,
                         )))
                         .or_else(|| self.tire_slot_owner(handle, physics).map(SlotTarget::Tire))
                         .or_else(|| {

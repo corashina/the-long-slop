@@ -164,7 +164,7 @@ pub(super) fn bind(
                 "localRotationAfterMount",
             )?),
         };
-        interaction.register_generated_wheel(&recipe, rim.is_some(), wheels.rules(), reference);
+        interaction.register_generated_wheel(&recipe, rim.is_some(), wheels.rules());
         wheels.register_generated(
             recipe,
             rim.is_some(),
@@ -172,7 +172,6 @@ pub(super) fn bind(
             &shapes,
             items,
             physics,
-            reference,
         )?;
     }
     // The checked source rim slot identifies the serialized tire. Reuse assembly relocation.

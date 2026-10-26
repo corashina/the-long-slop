@@ -104,7 +104,7 @@ id!(ColliderId, u32);
 id!(AnchorId, u32);
 id!(SeatId, u32);
 id!(OpeningId, u32);
-id!(WheelSlotId, u8);
+id!(WheelSlotId, u16);
 id!(PartSlotId, u32);
 id!(AttachmentTargetId, u32);
 id!(LightId, u32);
@@ -1439,7 +1439,7 @@ impl ReferenceManifest {
                     .wheel_slots
                     .iter()
                     .enumerate()
-                    .all(|(i, r)| r.id.0 == i as u8),
+                    .all(|(i, r)| r.id.0 == i as u16),
             "dense runtime IDs",
         )?;
         ids(

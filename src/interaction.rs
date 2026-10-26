@@ -226,6 +226,16 @@ struct SeatState {
     usable: Option<ItemId>,
 }
 
+/// Install rules and identity of one wheel slot.
+struct WheelSlotRule {
+    /// The car root item.
+    owner: Option<ItemId>,
+    source: crate::reference::SourceId,
+    rim_main_types: Vec<String>,
+    rim_types: Vec<String>,
+    fits: HashSet<ItemId>,
+}
+
 pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
     pub buried: buried::BuriedItems,
@@ -248,7 +258,7 @@ pub struct InteractionState {
     dial_knobs: HashMap<ColliderId, Knob>,
     fill_opening: Option<OpeningId>,
     kinds: HashMap<ItemId, ItemKind>,
-    slot_fits: HashMap<WheelSlotId, HashSet<ItemId>>,
+    wheel_slots: HashMap<WheelSlotId, WheelSlotRule>,
     tire_fits: HashSet<(ItemId, ItemId)>,
     f_gesture_consumed: bool,
     source_bindings: HashMap<ColliderId, ActionBinding>,
@@ -367,8 +377,17 @@ impl InteractionState {
             + map(&self.dial_knobs)
             + map(&self.item_seats)
             + map(&self.kinds)
-            + map(&self.slot_fits)
-            + self.slot_fits.values().map(set).sum::<usize>()
+            + map(&self.wheel_slots)
+            + self
+                .wheel_slots
+                .values()
+                .map(|r| {
+                    set(&r.fits)
+                        + r.source.file.capacity()
+                        + memory::strings(&r.rim_main_types)
+                        + memory::strings(&r.rim_types)
+                })
+                .sum::<usize>()
             + set(&self.tire_fits)
             + map(&self.pickup_layers)
             + map(&self.removal_layers)
@@ -505,26 +524,43 @@ impl InteractionState {
                 .iter()
                 .any(|item| item.id == id && matches!(item.kind, ItemKind::Rim | ItemKind::Wheel))
         };
-        let slot_fits = reference
+        let wheel_slots = reference
             .wheel_slots
             .iter()
             .map(|slot| {
+                let owner = reference
+                    .items
+                    .iter()
+                    .find(|i| {
+                        reference
+                            .vehicles
+                            .iter()
+                            .any(|v| v.wheel_slots.contains(&slot.id) && i.node == v.root)
+                    })
+                    .map(|i| i.id);
+                let fits = reference
+                    .wheel_parts
+                    .iter()
+                    .filter(|part| {
+                        is_rim(part.item)
+                            && wheels::fits(
+                                &slot.rim_main_types,
+                                &slot.rim_types,
+                                &part.main_types,
+                                &part.part_types,
+                            )
+                    })
+                    .map(|part| part.item)
+                    .collect();
                 (
                     slot.id,
-                    reference
-                        .wheel_parts
-                        .iter()
-                        .filter(|part| {
-                            is_rim(part.item)
-                                && wheels::fits(
-                                    &slot.rim_main_types,
-                                    &slot.rim_types,
-                                    &part.main_types,
-                                    &part.part_types,
-                                )
-                        })
-                        .map(|part| part.item)
-                        .collect(),
+                    WheelSlotRule {
+                        owner,
+                        source: slot.source.clone(),
+                        rim_main_types: slot.rim_main_types.clone(),
+                        rim_types: slot.rim_types.clone(),
+                        fits,
+                    },
                 )
             })
             .collect();
@@ -633,7 +669,7 @@ impl InteractionState {
                 })
                 .map(|c| c.id)
                 .collect(),
-            slot_fits,
+            wheel_slots,
             tire_fits,
             f_gesture_consumed: false,
             pickup_layers,
@@ -902,16 +938,74 @@ impl InteractionState {
             }
         }
     }
+    /// Adds the install rules of a world car wheel slot. `owner` is the car root item.
+    pub(crate) fn register_wheel_slot(
+        &mut self,
+        id: WheelSlotId,
+        owner: ItemId,
+        source: crate::reference::SourceId,
+        slot: &wheels::WorldWheelSlot,
+        rules: &[crate::reference::WheelPartReference],
+    ) {
+        let fits = rules
+            .iter()
+            .filter(|rule| {
+                self.is_wheel(rule.item)
+                    && wheels::fits(
+                        &slot.rim_main_types,
+                        &slot.rim_types,
+                        &rule.main_types,
+                        &rule.part_types,
+                    )
+            })
+            .map(|rule| rule.item)
+            .collect();
+        self.wheel_slots.insert(
+            id,
+            WheelSlotRule {
+                owner: Some(owner),
+                source,
+                rim_main_types: slot.rim_main_types.clone(),
+                rim_types: slot.rim_types.clone(),
+                fits,
+            },
+        );
+    }
+    /// Removes a world car wheel slot and the binding of its sensor.
+    pub(crate) fn remove_wheel_slot(&mut self, id: WheelSlotId, sensor: Option<ColliderHandle>) {
+        self.wheel_slots.remove(&id);
+        if let Some(sensor) = sensor {
+            self.collider_bindings.remove(&sensor);
+        }
+    }
+    /// The car root item and the source slot of a wheel slot.
+    pub(crate) fn wheel_slot_identity(
+        &self,
+        id: WheelSlotId,
+    ) -> Option<(Option<ItemId>, &crate::reference::SourceId)> {
+        self.wheel_slots.get(&id).map(|r| (r.owner, &r.source))
+    }
+    /// The world car wheel slot of car root item `owner` and source slot `source`.
+    pub(crate) fn resolve_wheel_slot(
+        &self,
+        owner: Option<ItemId>,
+        source: &crate::reference::SourceId,
+    ) -> Option<WheelSlotId> {
+        let owner = owner?;
+        self.wheel_slots
+            .iter()
+            .find(|(_, r)| r.owner == Some(owner) && &r.source == source)
+            .map(|(id, _)| *id)
+    }
     pub fn register_generated_wheel(
         &mut self,
         rule: &crate::reference::WheelPartReference,
         rim: bool,
         rules: &[crate::reference::WheelPartReference],
-        reference: &ReferenceManifest,
     ) {
         self.kinds
             .insert(rule.item, if rim { ItemKind::Rim } else { ItemKind::Tire });
-        for slot in &reference.wheel_slots {
+        for slot in self.wheel_slots.values_mut() {
             if rim
                 && wheels::fits(
                     &slot.rim_main_types,
@@ -920,7 +1014,7 @@ impl InteractionState {
                     &rule.part_types,
                 )
             {
-                self.slot_fits.entry(slot.id).or_default().insert(rule.item);
+                slot.fits.insert(rule.item);
             }
         }
         for old in rules {
@@ -981,8 +1075,8 @@ impl InteractionState {
         }
         self.carry.unregister_generated(id);
         self.unregister_hose(id);
-        for fits in self.slot_fits.values_mut() {
-            fits.remove(&id);
+        for slot in self.wheel_slots.values_mut() {
+            slot.fits.remove(&id);
         }
         self.tire_fits
             .retain(|(rim, tire)| *rim != id && *tire != id);

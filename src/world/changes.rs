@@ -580,33 +580,17 @@ pub(crate) fn capture(
         snapshot.attachment = Some(locked_attachment(id, items, &interaction.storage)?);
         return Some(snapshot);
     }
-    let relation =
-        match state.location {
-            ItemLocation::Attached(parent) => Some((Some(parent), None)),
-            ItemLocation::PartSlot(slot) => interaction
-                .parts
-                .slot_identity(slot)
-                .map(|(owner, source)| (owner, Some(source.clone()))),
-            ItemLocation::WheelSlot(slot) => reference
-                .wheel_slots
-                .iter()
-                .find(|s| s.id == slot)
-                .map(|s| {
-                    (
-                        reference
-                            .items
-                            .iter()
-                            .find(|i| {
-                                reference.vehicles.iter().any(|vehicle| {
-                                    vehicle.wheel_slots.contains(&slot) && i.node == vehicle.root
-                                })
-                            })
-                            .map(|i| i.id),
-                        Some(s.source.clone()),
-                    )
-                }),
-            _ => None,
-        };
+    let relation = match state.location {
+        ItemLocation::Attached(parent) => Some((Some(parent), None)),
+        ItemLocation::PartSlot(slot) => interaction
+            .parts
+            .slot_identity(slot)
+            .map(|(owner, source)| (owner, Some(source.clone()))),
+        ItemLocation::WheelSlot(slot) => interaction
+            .wheel_slot_identity(slot)
+            .map(|(owner, source)| (owner, Some(source.clone()))),
+        _ => None,
+    };
     if let Some((parent, slot)) = relation {
         let pose = if let Some(parent) = parent.and_then(|p| items.get(p)) {
             from_rapier(&(to_rapier(parent.pose).inverse() * to_rapier(state.pose)))
