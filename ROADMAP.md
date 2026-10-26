@@ -115,11 +115,17 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
 28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
 29. Save and load with bus doors open and signalled and with the trailer on the bus.
+30. Bikes (V04): re-export first: the bike pool, balance, pedals and car push grips are new. Run `cargo test --lib bike -- --ignored`.
+31. Find Bike01 and Bike03. Ride Bike01: it stays upright, leans into turns, and falls over when nobody rides or pushes it.
+32. Kick start Bike01: ignition on, roll it fast enough, the engine starts with its start sound. No starter motor.
+33. Push a bike and the Lada by hand with their grips. The bike stays upright while you push it.
+34. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
+35. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
+36. Check F3 while riding each bike. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
-| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 
 ## 5. Later
 
