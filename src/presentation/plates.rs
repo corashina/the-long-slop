@@ -469,7 +469,8 @@ pub fn reset_plate_text(world: &mut World) {
     }
 }
 /// Shows the plate labels of each shown world car copy. A copy binds once; its labels leave
-/// with its instance. V03 bridge: the shared material comes from the garage plate bind.
+/// with its instance. The garage plate bind warmed the shared pipeline.
+/// V03 bridge: the shared material comes from the garage plate bind. Task 9 moves it here.
 pub fn bind_world_plate_text(world: &mut World) {
     if !world.resource::<PlateTextStatus>().ready() {
         return;
@@ -480,15 +481,26 @@ pub fn bind_world_plate_text(world: &mut World) {
 }
 fn bind_world(world: &mut World) -> Result<(), String> {
     world.resource_scope(|world, mut status: Mut<PlateTextStatus>| {
-        let Some(labels) = world_labels(world, &mut status)? else {
+        let Some(WorldLabels {
+            root,
+            material,
+            labels,
+        }) = world_labels(world, &mut status)?
+        else {
             return Ok(());
         };
-        let (root, material, labels) = labels;
-        for (node, value, layer, sort, text) in labels {
-            let handle = world.resource_mut::<Assets<Mesh>>().add(value);
+        for WorldLabel {
+            node,
+            mesh,
+            layer,
+            sort,
+            text,
+        } in labels
+        {
+            let handle = world.resource_mut::<Assets<Mesh>>().add(mesh);
             world.spawn((
                 Name::new(format!("Plate text {text}")),
-                Mesh3d(handle.clone()),
+                Mesh3d(handle),
                 MeshMaterial3d(material.clone()),
                 Transform::IDENTITY,
                 Visibility::Inherited,
@@ -497,30 +509,31 @@ fn bind_world(world: &mut World) -> Result<(), String> {
                 sort,
                 bevy::render::batching::NoAutomaticBatching,
             ));
-            super::materials::warm_retained_material(
-                world,
-                handle.id(),
-                material.id().untyped(),
-                "source plate text".into(),
-            );
         }
         status.world.push(root);
         Ok(())
     })
 }
-type WorldLabel = (
-    Entity,
-    Mesh,
-    usize,
-    super::renderer_visibility::SourceSortData,
-    String,
-);
+/// One plate label of a world car copy, ready to spawn.
+struct WorldLabel {
+    node: Entity,
+    mesh: Mesh,
+    layer: usize,
+    sort: super::renderer_visibility::SourceSortData,
+    text: String,
+}
+/// The labels of one car copy: its instance root and the shared material.
+struct WorldLabels {
+    root: Entity,
+    material: Handle<PlateTextMaterial>,
+    labels: Vec<WorldLabel>,
+}
 /// Drops the bindings of removed instances. Returns the labels of one shown car copy that has
 /// none yet: its root, the shared material and each label's node, mesh, layer, sort and text.
 fn world_labels(
     world: &World,
     status: &mut PlateTextStatus,
-) -> Result<Option<(Entity, Handle<PlateTextMaterial>, Vec<WorldLabel>)>, String> {
+) -> Result<Option<WorldLabels>, String> {
     let Some(instances) = world.get_resource::<super::world::instances::SourceInstances>() else {
         return Ok(None);
     };
@@ -574,15 +587,19 @@ fn world_labels(
         }
         let glyphs = layout_text(&record.font, &plate.layout, &record.material, text)
             .map_err(|e| e.to_string())?;
-        labels.push((
-            nodes[node.gltf_node as usize],
-            mesh(glyphs),
+        labels.push(WorldLabel {
+            node: nodes[node.gltf_node as usize],
+            mesh: mesh(glyphs),
             layer,
-            sort_data(record, plate.sorting[0], plate.sorting[1])?,
-            text.clone(),
-        ));
+            sort: sort_data(record, plate.sorting[0], plate.sorting[1])?,
+            text: text.clone(),
+        });
     }
-    Ok(Some((root, material, labels)))
+    Ok(Some(WorldLabels {
+        root,
+        material,
+        labels,
+    }))
 }
 pub fn plate_warmup_pairs(world: &World, pairs: &mut Vec<(AssetId<Mesh>, UntypedAssetId)>) {
     let status = world.resource::<PlateTextStatus>();
