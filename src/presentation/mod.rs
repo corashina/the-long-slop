@@ -16,6 +16,7 @@ pub mod reference;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;
+pub mod sky_traffic;
 pub mod spawned;
 pub mod world;
 pub mod world_metrics;

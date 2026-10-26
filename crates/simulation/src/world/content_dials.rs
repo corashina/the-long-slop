@@ -120,14 +120,29 @@ impl WorldStream {
             let root = &content.content.placement.prototype;
             let rules = &self.contents.rules;
             let script = |class| rules.component(&self.reference, root, class).ok().flatten();
-            let Some(script) = script("compassscript").or_else(|| script("clockscript")) else {
-                continue;
+            let script = match script("compassscript").or_else(|| script("clockscript")) {
+                Some(script) => script.source.clone(),
+                // A car dashboard clock (Car07) is on an active child node of the car root item.
+                None if self
+                    .reference
+                    .prototypes
+                    .iter()
+                    .any(|p| &p.source == root && p.vehicle.is_some()) =>
+                {
+                    let mut clocks = Vec::new();
+                    rules.children(&self.reference, root, "clockscript", false, &mut clocks)?;
+                    match clocks[..] {
+                        [] => continue,
+                        [clock] => clock.clone(),
+                        _ => return Err(ReferenceError("Car has more than one clock".into())),
+                    }
+                }
+                None => continue,
             };
             if !content.restored || items.get(item).and_then(|i| i.body).is_none() {
                 complete = false;
                 continue;
             }
-            let script = script.source.clone();
             let binding = self.bind_dial(items, interaction, physics, slot, item, &script)?;
             self.dial_bindings.push(binding);
         }
@@ -205,10 +220,17 @@ impl WorldStream {
                 });
             }
         }
-        let [face] = array(meter, "szamlapok")? else {
+        // A clock reads only its "time" face. A car dashboard meter also has the odometer face.
+        let mut faces = Vec::new();
+        for f in array(meter, "szamlapok")? {
+            let f = fields(f)?;
+            if s.class_name != "clockscript" || text(f, "tipus")? == "time" {
+                faces.push(f);
+            }
+        }
+        let [face] = faces[..] else {
             return Err(ReferenceError("Dial needs one source face".into()));
         };
-        let face = fields(face)?;
         let [usable] = array(face, "usables")? else {
             return Err(ReferenceError("Dial needs one source knob".into()));
         };

@@ -2,7 +2,7 @@
 import copy
 from . import world_probe
 from .source import key, source_id
-from .world import Selection, RULE_CLASSES, vehicle_exclusion, pool_exclusion, car_prototypes, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
+from .world import Selection, RULE_CLASSES, vehicle_exclusion, car_prototypes, EDIBLE_COMPONENTS, selected_actions, part_scope, _source_root, source_material, export_world_prototypes
 
 
 def extend_spawn_closure(source, reader, output, world):
@@ -11,7 +11,7 @@ def extend_spawn_closure(source, reader, output, world):
     selected.receipts={tuple(r['source'].values()):r for r in world['receipts']}
     baseline=set(selected.records)
     catalog=world['catalog']; categories=catalog['categories']; items=catalog['items']
-    cars,start_only=car_prototypes(source,catalog)
+    cars=car_prototypes(source,catalog)
     prototypes={tuple(p['source'].values()):p for p in world['prototypes']}
     pending=[]; queued=set(); processed=set(); new_roots={}; scopes={}; required=set()
     item_roots={i['index']:_source_root(source,source.get(i['source']['file'],i['source']['path_id'])) for i in items}
@@ -62,10 +62,9 @@ def extend_spawn_closure(source, reader, output, world):
         root_parts=[source.read(c) for c in hierarchy[0]['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='partscript']
         matches,excluded_actions=part_scope(root_parts,world['part_scope_slots'],excluded_actions)
         scopes[identity]=(reason,excluded_actions)
-        item_reason=reason or pool_exclusion(root,start_only)
         for row in items_by_root.get(identity,[]):
             if row['index'] in required:
-                row.update(exclusion=item_reason,excluded_actions=excluded_actions,compatible_slots=matches,prototype=None if item_reason else source_id(root))
+                row.update(exclusion=reason,excluded_actions=excluded_actions,compatible_slots=matches,prototype=None if reason else source_id(root))
         if not reason and identity not in prototypes:new_roots[identity]=root
         if reason:
             initialization={'tosaveitemscript','newAiScript','randomFlyer','nyulscript','partconditionscript','partslotscript','partscript','randomTypeSelector','randomScaleScript','spawnInBoxScript','paintingScript','paintingMain','newRandomStuffSpawnScript','ammoscript','foodscript','tankscript','massScript','childunparent','sprayscript','flashlightscript'}
@@ -118,7 +117,6 @@ def extend_spawn_closure(source, reader, output, world):
                     if cname=='newRandomStuffSpawnScript':
                         for row in data['items']:
                             target=source.resolve(component,row['G'])
-                            if target and key(_source_root(source,target)) in start_only:raise ValueError('{}:{} G: direct link to a start-only car'.format(*key(component)))
                             if target:add(target)
                             elif row['prefab']:named(row['prefab'],bool(row['isitem']))
                     if cname=='partslotscript' and data['enableSpawn'] and not data['part']['m_PathID']:

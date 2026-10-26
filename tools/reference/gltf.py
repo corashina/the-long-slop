@@ -318,7 +318,8 @@ class GltfExporter(GltfBuilder):
             if record['parent'] is None:
                 from .collision import world_pose
                 from .lighting import IDENTITY
-                if identity in getattr(self.source, 'item_geometry_nodes', set()):
+                # Spawn code replaces the root position and rotation of these prefabs.
+                if identity in getattr(self.source, 'item_geometry_nodes', set()) or identity in getattr(self.source, 'sky_roots', set()):
                     transform['translation'] = [0., 0., 0.]
                     transform['rotation'] = [0., 0., 0., 1.]
                 elif key(reader)==getattr(self.source,'lighting_pole_root',None) or key(reader) in getattr(self.source,'world_prototype_roots',set()):

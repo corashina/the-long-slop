@@ -181,6 +181,17 @@ fn start_car_drives_saves_and_loads(reference: &ReferenceManifest, field: &str) 
         entry.prototype.as_ref(),
         "{field}"
     );
+    if field == "StartCar06" {
+        // The root randomTypeSelector variant sets the fuel tank: 0.5 L diesel for the diesel engine.
+        let mounted = run.powertrain.mounted_on(&run.area.items, &key);
+        let engine = run.powertrain.engine(mounted.engine.unwrap()).unwrap();
+        let diesel = engine.record.fuel_consumption[5] > 0.;
+        let tank = run.vehicles[&key].fuel_tank.unwrap();
+        let fuel = run.area.items.get(tank).unwrap().fluid.as_ref().unwrap();
+        let liters = fuel.mixture().quantities_liters;
+        assert_eq!(liters[5] > 0., diesel, "{field}: diesel follows the engine");
+        assert!((fuel.total() - 0.5).abs() < 1e-4, "{field}: start fuel");
+    }
     let deck = insert_deck(&mut run, &key);
     assert!(enter(&mut run, reference), "{field}: driver seat");
     settle(&mut run, reference, 1.);
@@ -314,4 +325,113 @@ fn lada_start_keeps_the_spawn_records() {
     assert_eq!(first.context.current_car, 15);
     assert!(!first.boundaries.is_empty());
     assert_eq!(first, records());
+}
+
+/// The Lada world with a Car07full copy 30 m above `StartCar02`. Returns the copy's startup ordinal.
+fn car07_reference() -> (ReferenceManifest, u32) {
+    let mut reference = reference();
+    let world = std::sync::Arc::make_mut(&mut reference.world);
+    let item = world.catalog.items.iter().find(|i| i.name == "car07full");
+    let source = item
+        .and_then(|i| i.prototype.clone())
+        .expect("car07full prototype");
+    let car = world.prototypes.iter().find(|p| p.source == source);
+    assert!(car.is_some_and(|p| p.vehicle.as_ref().unwrap().driving.force_automatic));
+    let start = world
+        .startup
+        .iter()
+        .position(|s| s.start_car && s.group == StartCar::LADA.field())
+        .expect("StartCar02 placement");
+    let mut copy = world.startup[start].clone();
+    copy.pose.translation[1] += 30.;
+    copy.prototype = Some(source);
+    world.startup.push(copy);
+    let ordinal = world.startup.len() as u32 - 1;
+    (reference, ordinal)
+}
+
+/// Car07 is pool only. With manual assists, its forced automatic still shifts up.
+#[test]
+#[ignore = "requires the installed source export"]
+fn car07_drives_in_forced_automatic() {
+    use crate::player::SeatOwner;
+    let (reference, ordinal) = car07_reference();
+    let mut run = start_world(&reference, StartCar::LADA.field());
+    run.started = true;
+    run.paused = false;
+    run.driving_assists = DrivingAssists {
+        automatic_clutch: false,
+        automatic_gears: false,
+    };
+    let copy = |run: &GarageRuntime| {
+        run.vehicles
+            .keys()
+            .find(|key| {
+                matches!(key, ObjectKey::Generated(id)
+                    if id.layer == WorldLayer::Startup && id.ordinal == ordinal)
+            })
+            .cloned()
+    };
+    for _ in 0..2000 {
+        if copy(&run).is_some() {
+            break;
+        }
+        frame(&mut run, &reference);
+    }
+    let key = copy(&run).expect("Car07 copy");
+    insert_deck(&mut run, &key);
+    let seat = run
+        .physics
+        .rapier()
+        .colliders
+        .iter()
+        .find_map(|(handle, _)| {
+            run.area
+                .interaction
+                .item_seat(handle)
+                .filter(|s| s.owner == SeatOwner::Vehicle(key.clone()) && s.seat.driver)
+        })
+        .expect("Car07 driver seat");
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
+    settle(&mut run, &reference, 1.);
+    fill_fluids(&mut run, &key);
+    // The dashboard clock binds on the car root item.
+    let ObjectKey::Generated(id) = &key else {
+        unreachable!()
+    };
+    assert!(
+        run.stream.dial_bindings.iter().any(|b| &b.parent == id),
+        "Car07 clock binding"
+    );
+
+    let started = hold(
+        &mut run,
+        &reference,
+        keys::IGNITION,
+        keys::IGNITION,
+        20.,
+        |run| running(run, &key),
+    );
+    assert!(started, "Car07 engine starts");
+    let released = FrameInput {
+        released: keys::IGNITION,
+        ..FrameInput::default()
+    };
+    frame_with(&mut run, &reference, released);
+    settle(&mut run, &reference, 1.);
+
+    // Gears R, N, 2.5, 1.68, 1.0: throttle alone selects first and shifts up.
+    let ratios =
+        &crate::starting_area::world_vehicle(&reference, run.vehicles[&key].prototype).gear_ratios;
+    let neutral = ratios.iter().position(|r| *r == 0.).unwrap();
+    let start = absolute(&run, &key).0;
+    let shifted = hold(&mut run, &reference, keys::FORWARD, 0, 30., |run| {
+        run.vehicles[&key].drivetrain.gear() > neutral + 1
+    });
+    assert!(shifted, "Car07 shifts up");
+    let moved = hold(&mut run, &reference, keys::FORWARD, 0, 30., |run| {
+        horizontal(absolute(run, &key).0, start) > 20.
+    });
+    assert!(moved, "Car07 drives 20 m");
+    assert!(running(&run, &key), "Car07 engine runs after the drive");
 }
