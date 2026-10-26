@@ -35,10 +35,16 @@ fn g10_control_restore_has_no_side_effects() {
         .unwrap();
     run.lighting.cycle_headlights(&reference.lighting, 0);
     run.garage_car_mut(0).handbrake = !run.garage_car(0).handbrake;
-    let mut engine = run.garage_engine_save(0);
+    let mut engine = run
+        .engine_part(reference.vehicles[0].engine.item)
+        .state
+        .capture_save();
     engine.rpm = 725.;
     engine.temperature = 65.;
-    run.restore_garage_engine(0, &engine).unwrap();
+    run.engine_part_mut(reference.vehicles[0].engine.item)
+        .state
+        .restore_save(&engine)
+        .unwrap();
     let vehicle = run.garage_car_mut(0);
     vehicle.ignition.ignition = true;
     vehicle.trip_m = 321.;
@@ -79,28 +85,32 @@ fn g10_control_restore_has_no_side_effects() {
     assert_eq!(recaptured.mechanisms, saved.mechanisms);
     assert_eq!(recaptured.lighting, saved.lighting);
     assert_eq!(
-        recaptured.vehicles[0].requested_headlights,
-        saved.vehicles[0].requested_headlights
+        recaptured.garage_vehicle(0).requested_headlights,
+        saved.garage_vehicle(0).requested_headlights
     );
     assert_eq!(
-        recaptured.vehicles[0].handbrake,
-        saved.vehicles[0].handbrake
+        recaptured.garage_vehicle(0).handbrake,
+        saved.garage_vehicle(0).handbrake
     );
-    assert_eq!(recaptured.vehicles[0].engine, saved.vehicles[0].engine);
-    assert_eq!(recaptured.vehicles[0].trip_m, saved.vehicles[0].trip_m);
-    assert!(recaptured.vehicles[0].ignition);
-    assert_eq!(recaptured.vehicles[0].gear, saved.vehicles[0].gear);
+    assert_eq!(
+        recaptured.garage_engine(&reference, 0),
+        saved.garage_engine(&reference, 0)
+    );
+    assert_eq!(
+        recaptured.garage_vehicle(0).trip_m,
+        saved.garage_vehicle(0).trip_m
+    );
+    assert!(recaptured.garage_vehicle(0).ignition);
+    assert_eq!(
+        recaptured.garage_vehicle(0).gear,
+        saved.garage_vehicle(0).gear
+    );
     assert_eq!(recaptured.driving_assists, saved.driving_assists);
     assert_eq!(recaptured.radio, saved.radio);
-    for expected in saved
-        .bodies
-        .iter()
-        .chain(saved.vehicles.iter().map(|v| &v.body))
-    {
+    for expected in &saved.bodies {
         let actual = recaptured
             .bodies
             .iter()
-            .chain(recaptured.vehicles.iter().map(|v| &v.body))
             .find(|body| body.identity == expected.identity)
             .unwrap();
         assert_eq!(actual.linear_velocity, expected.linear_velocity);

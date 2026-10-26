@@ -289,13 +289,17 @@ impl SaveSnapshot {
             }),
             "Generated carry record",
         )?;
-        let vehicle_index = ids
-            .vehicles
-            .iter()
-            .position(|v| v == &self.progress.selected_vehicle)
-            .ok_or_else(|| invalid("Selected vehicle identity"))?;
+        // V03 bridge: only old garage cars select the source spawn car. Task 9 removes it.
+        let garage = self
+            .progress
+            .selected_vehicle
+            .as_ref()
+            .and_then(crate::vehicle::garage_vehicle_index);
         links(
-            self.world.spawn.context.current_car == reference.vehicles[vehicle_index].spawn_car_id,
+            reference.vehicles.iter().enumerate().any(|(index, v)| {
+                v.spawn_car_id == self.world.spawn.context.current_car
+                    && garage.is_none_or(|g| g == index)
+            }),
             "Selected source spawn car",
         )?;
         for record in &self.attachments.parts {

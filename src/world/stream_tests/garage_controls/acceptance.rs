@@ -503,7 +503,11 @@ impl Play {
 
     fn start_engine(&mut self) {
         for _ in 0..300 {
-            if self.run.garage_engine(0).state.output().running {
+            if self
+                .run
+                .engine_output(&crate::vehicle::garage_vehicle_key(0))
+                .running
+            {
                 break;
             }
             self.hold(keys::IGNITION, 1);
@@ -514,7 +518,9 @@ impl Play {
         });
         self.idle(50);
         assert!(
-            self.run.garage_engine(0).state.output().running,
+            self.run
+                .engine_output(&crate::vehicle::garage_vehicle_key(0))
+                .running,
             "engine did not start"
         );
     }
@@ -790,7 +796,9 @@ fn p11_starting_area_loop() {
     let furthest = play.car_absolute();
     println!(
         "far point: engine running {}, fuel {} L",
-        play.run.garage_engine(0).state.output().running,
+        play.run
+            .engine_output(&crate::vehicle::garage_vehicle_key(0))
+            .running,
         play.tank(fuel_tank)
     );
     println!(
@@ -841,7 +849,10 @@ fn p11_starting_area_loop() {
             &saved.saved_at,
         )
         .unwrap();
-    assert_eq!(recaptured.vehicles, saved.vehicles);
+    assert_eq!(
+        recaptured.world.changes.vehicles().collect::<Vec<_>>(),
+        saved.world.changes.vehicles().collect::<Vec<_>>()
+    );
     assert_eq!(recaptured.player, saved.player);
     assert_eq!(recaptured.items.len(), saved.items.len());
     for (before, after) in saved.items.iter().zip(&recaptured.items) {
@@ -878,7 +889,11 @@ fn p11_starting_area_loop() {
     assert!((reloaded - fuel).abs() < 1., "fuel {fuel} -> {reloaded}");
 
     // Continue: start if needed and reverse back out with normal input.
-    if !play.run.garage_engine(0).state.output().running {
+    if !play
+        .run
+        .engine_output(&crate::vehicle::garage_vehicle_key(0))
+        .running
+    {
         play.start_engine();
     }
     let start = play.car_absolute();

@@ -1383,10 +1383,11 @@ fn replay_index_query_matches_old_order_and_exact_bounds() {
         assert!(!actual.contains(&removed));
     }
     assert!(changes.get(&removed).unwrap().snapshot.is_none());
-    // Serialization must contain stable records only.
+    // Serialization must contain stable records and object states only.
     let json = serde_json::to_value(&changes).unwrap();
-    assert_eq!(json.as_object().unwrap().len(), 1);
-    assert!(json.get("records").is_some());
+    let mut fields: Vec<_> = json.as_object().unwrap().keys().collect();
+    fields.sort();
+    assert_eq!(fields, ["engines", "radiators", "records", "vehicles"]);
 }
 
 #[test]

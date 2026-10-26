@@ -4379,6 +4379,9 @@ impl WorldStream {
     pub fn changes(&self) -> &super::ChangeRecords {
         &self.changes
     }
+    pub(crate) fn changes_mut(&mut self) -> &mut super::ChangeRecords {
+        &mut self.changes
+    }
 
     /// Retire only after the replacement collision windows support both receivers.
     pub fn retire_structures(

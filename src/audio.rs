@@ -1731,12 +1731,19 @@ mod tests {
     }
 
     fn seed_running(run: &mut GarageRuntime) {
-        let mut saved = run.garage_engine_save(0);
+        let item = run
+            .mounted_engine(&crate::vehicle::garage_vehicle_key(0))
+            .expect("mounted garage engine")
+            .item;
+        let mut saved = run.engine_part(item).state.capture_save();
         saved.rpm = 2000.;
         saved.elapsed = 1.;
         saved.last_run_time = 1.;
         saved.supplied_fuel = 0.4;
-        run.restore_garage_engine(0, &saved).unwrap();
+        run.engine_part_mut(item)
+            .state
+            .restore_save(&saved)
+            .unwrap();
     }
 
     fn publish(run: &mut GarageRuntime) {
@@ -1823,7 +1830,10 @@ mod tests {
         });
         advance_detached(&mut run, &reference);
         assert!(
-            run.garage_engine(0).state.output().running,
+            run.engine_part(reference.vehicles[0].engine.item)
+                .state
+                .output()
+                .running,
             "source run grace remains active"
         );
         assert_voices(run.audio.as_ref().unwrap(), true);
@@ -1838,12 +1848,22 @@ mod tests {
             .stop_binding
             .unwrap();
         for _ in 0..20 {
-            if !run.garage_engine(0).state.output().running {
+            if !run
+                .engine_part(reference.vehicles[0].engine.item)
+                .state
+                .output()
+                .running
+            {
                 break;
             }
             advance_detached(&mut run, &reference);
         }
-        assert!(!run.garage_engine(0).state.output().running);
+        assert!(
+            !run.engine_part(reference.vehicles[0].engine.item)
+                .state
+                .output()
+                .running
+        );
         let audio = run.audio.as_mut().unwrap();
         let emitter = audio
             .reference
@@ -2025,7 +2045,13 @@ mod tests {
             reference.world.draw_distance.default,
         )
         .unwrap();
-        assert!(restored.garage_engine(0).state.output().running);
+        assert!(
+            restored
+                .engine_part(reference.vehicles[0].engine.item)
+                .state
+                .output()
+                .running
+        );
         assert!(restored.audio.as_ref().unwrap().last_running);
         publish(&mut restored);
         assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);

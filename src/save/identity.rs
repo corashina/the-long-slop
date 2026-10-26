@@ -62,7 +62,6 @@ pub struct IdentityMap {
     pub openings: HashMap<SourceKey, OpeningId>,
     pub lights: HashMap<SourceKey, LightId>,
     pub controllers: HashMap<SourceKey, LightControlId>,
-    pub vehicles: Vec<InstanceId>,
 }
 impl IdentityMap {
     pub fn new(reference: &ReferenceManifest) -> Result<Self, SaveError> {
@@ -85,11 +84,6 @@ impl IdentityMap {
                     .iter()
                     .map(|r| (&r.source, r.id)),
             )?,
-            vehicles: reference
-                .vehicles
-                .iter()
-                .map(|v| InstanceId::initial(&v.source))
-                .collect(),
         })
     }
     pub fn bind_generated(&mut self, items: &crate::interaction::items::ItemStore) {

@@ -65,8 +65,6 @@ pub struct Powertrain {
 pub struct PowertrainParts {
     engines: BTreeMap<ItemId, EnginePart>,
     radiators: BTreeMap<ItemId, RadiatorPart>,
-    /// V03 bridge: engine and radiator items of each old garage car. Task 9 removes it.
-    garage: Vec<(ItemId, ItemId)>,
 }
 
 impl PowertrainParts {
@@ -76,7 +74,6 @@ impl PowertrainParts {
         let mut parts = Self::default();
         for vehicle in &reference.vehicles {
             let e = &vehicle.engine;
-            parts.garage.push((e.item, e.coolant_tank));
             parts.register_engine(EnginePart::new(e.item, garage_engine(e), Some(e.oil_tank)));
             parts.register_radiator(RadiatorPart::new(
                 e.coolant_tank,
@@ -119,18 +116,23 @@ impl PowertrainParts {
     pub fn engine_mut(&mut self, item: ItemId) -> Option<&mut EnginePart> {
         self.engines.get_mut(&item)
     }
+    pub fn engines(&self) -> impl Iterator<Item = &EnginePart> {
+        self.engines.values()
+    }
     pub fn engines_mut(&mut self) -> impl Iterator<Item = &mut EnginePart> {
         self.engines.values_mut()
+    }
+    pub fn radiators(&self) -> impl Iterator<Item = &RadiatorPart> {
+        self.radiators.values()
+    }
+    pub fn radiators_mut(&mut self) -> impl Iterator<Item = &mut RadiatorPart> {
+        self.radiators.values_mut()
     }
     pub fn radiator(&self, item: ItemId) -> Option<&RadiatorPart> {
         self.radiators.get(&item)
     }
     pub fn radiator_mut(&mut self, item: ItemId) -> Option<&mut RadiatorPart> {
         self.radiators.get_mut(&item)
-    }
-    /// V03 bridge: engine and radiator items of old garage car `index`. Task 9 removes it.
-    pub fn garage_parts(&self, index: usize) -> (ItemId, ItemId) {
-        self.garage[index]
     }
     /// The engine and the radiator of one car, both writable.
     pub fn pair_mut(

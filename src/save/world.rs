@@ -99,11 +99,7 @@ impl PersistentWorld {
                 state: None,
             });
         }
-        for body in snapshot
-            .bodies
-            .iter()
-            .chain(snapshot.vehicles.iter().map(|v| &v.body))
-        {
+        for body in &snapshot.bodies {
             let key = match &body.identity {
                 BodyIdentity::Source { source } => Key::Source(
                     *identities

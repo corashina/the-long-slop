@@ -46,10 +46,7 @@ impl RestoreFinalizer<'_> {
         self.area.items.sync_poses(self.physics);
         recompute_dynamic_mass(self.physics);
         restore_body_records(
-            saved
-                .bodies
-                .iter()
-                .chain(saved.vehicles.iter().map(|vehicle| &vehicle.body)),
+            saved.bodies.iter(),
             BodyLookup::Required,
             ids,
             &self.area.bodies,

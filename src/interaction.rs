@@ -857,15 +857,12 @@ impl InteractionState {
     /// The bound item seat of a world item by its main seatscript. Car seats are not saved here.
     pub(crate) fn find_item_seat(
         &self,
-        owner: &crate::world::ObjectKey,
+        owner: &crate::player::SeatOwner,
         source: &crate::reference::SourceId,
     ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
         self.item_seats
             .values()
-            .find(|seat| {
-                matches!(&seat.owner, crate::player::SeatOwner::Item(key) if key == owner)
-                    && &seat.seat.source == source
-            })
+            .find(|seat| &seat.owner == owner && &seat.seat.source == source)
             .cloned()
     }
     #[cfg(test)]

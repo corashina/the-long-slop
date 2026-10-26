@@ -166,8 +166,8 @@ impl EngineState {
     pub fn output(&self) -> EngineOutput {
         self.last_output
     }
-    /// `fan_on` is radiator part state. The caller reads it from the radiator.
-    pub fn capture_save(&self, fan_on: bool) -> crate::save::EngineSnapshot {
+    /// The radiator part saves its own fan state.
+    pub fn capture_save(&self) -> crate::save::EngineSnapshot {
         crate::save::EngineSnapshot {
             rpm: self.rpm,
             temperature: self.temperature,
@@ -176,7 +176,6 @@ impl EngineState {
             last_start_chance_time: self.last_start_chance_time,
             random_start: self.random_start,
             supplied_fuel: self.supplied_fuel,
-            fan_on,
             oil_penalty: self.oil_penalty,
             fuel_suitability: self.fuel_suitability,
             heat_penalty: self.heat_penalty,
@@ -498,7 +497,7 @@ mod tests {
         };
         let mut engine = EngineState::new(source.initial_temperature);
         let mut fan = false;
-        let mut state = engine.capture_save(fan);
+        let mut state = engine.capture_save();
         state.elapsed = 1.;
         state.last_run_time = 1.;
         engine.restore_save(&state).unwrap();

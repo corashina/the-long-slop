@@ -1,7 +1,10 @@
 //! Car prototypes and engine parts of spawned world contents.
 //! A car copy is a vehicle body, a car runtime and the engine and radiator parts on it.
 use crate::interaction::items::ItemStore;
-use crate::reference::{Bounds, ItemId, ReferenceError, WorldPrototypeReference, WorldReference};
+use crate::reference::{
+    Bounds, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
+    WorldPrototypeReference, WorldReference,
+};
 use crate::simulation::powertrain::{EnginePart, PowertrainParts, RadiatorPart};
 use crate::starting_area::VehicleRuntime;
 use crate::vehicle::PhysicsWorld;
@@ -75,24 +78,51 @@ pub(super) fn bind(
             continue;
         };
         let oil_tank = record.oil_tank.and_then(node_item);
-        let mut part = EnginePart::new(item, record.clone(), oil_tank);
-        if let Some(state) = changes.take_engine(&items.object_key(item)) {
-            part.state = state;
-        }
-        powertrain.register_engine(part);
+        register_engine(item, record, oil_tank, items, powertrain, changes)?;
     }
     for record in &prototype.radiators {
         let Some(item) = node_item(record.node) else {
             continue;
         };
         let coolant_tank = record.coolant_tank.and_then(node_item);
-        let mut part = RadiatorPart::new(item, record.clone(), coolant_tank);
-        if let Some(fan_on) = changes.take_radiator(&items.object_key(item)) {
-            part.fan_on = fan_on;
-        }
-        powertrain.register_radiator(part);
+        register_radiator(item, record, coolant_tank, items, powertrain, changes);
     }
     Ok(())
+}
+
+/// Registers the engine part of `item` with its kept state.
+pub(crate) fn register_engine(
+    item: ItemId,
+    record: &EnginePartReference,
+    oil_tank: Option<ItemId>,
+    items: &ItemStore,
+    powertrain: &mut PowertrainParts,
+    changes: &mut ChangeRecords,
+) -> Result<(), ReferenceError> {
+    let mut part = EnginePart::new(item, record.clone(), oil_tank);
+    if let Some(state) = changes.take_engine(&items.object_key(item)) {
+        part.state
+            .restore_save(&state)
+            .map_err(|e| ReferenceError(format!("Saved engine state: {e}")))?;
+    }
+    powertrain.register_engine(part);
+    Ok(())
+}
+
+/// Registers the radiator part of `item` with its kept fan state.
+pub(crate) fn register_radiator(
+    item: ItemId,
+    record: &RadiatorPartReference,
+    coolant_tank: Option<ItemId>,
+    items: &ItemStore,
+    powertrain: &mut PowertrainParts,
+    changes: &mut ChangeRecords,
+) {
+    let mut part = RadiatorPart::new(item, record.clone(), coolant_tank);
+    if let Some(fan_on) = changes.take_radiator(&items.object_key(item)) {
+        part.fan_on = fan_on;
+    }
+    powertrain.register_radiator(part);
 }
 
 /// Makes `chassis` a vehicle and adds its car runtime with the retired state of `key`.
@@ -119,6 +149,9 @@ pub(crate) fn spawn(
     let mut runtime =
         VehicleRuntime::world(index, record, fuel_tank, chassis_bounds(physics, colliders));
     if let Some(state) = changes.take_vehicle(&key) {
+        if state.gear >= record.gear_ratios.len() {
+            return Err(ReferenceError("Saved car gear is out of range".into()));
+        }
         runtime.restore(&state);
     }
     vehicles.insert(key, runtime);
@@ -182,10 +215,10 @@ pub(crate) fn retire_parts(
     changes: &mut ChangeRecords,
 ) {
     if let Some(part) = powertrain.engine(item) {
-        changes.retire_engine(items.object_key(item), part.state.clone());
+        changes.keep_engine(items.object_key(item), part.state.capture_save());
     }
     if let Some(part) = powertrain.radiator(item) {
-        changes.retire_radiator(items.object_key(item), part.fan_on);
+        changes.keep_radiator(items.object_key(item), part.fan_on);
     }
     powertrain.remove(item);
 }
@@ -198,7 +231,7 @@ pub(crate) fn retire_vehicle(
     changes: &mut ChangeRecords,
 ) {
     if let Some(runtime) = vehicles.remove(key) {
-        changes.retire_vehicle(key.clone(), runtime.state());
+        changes.keep_vehicle(key.clone(), runtime.state());
     }
     physics.remove_vehicle(key);
 }
@@ -367,5 +400,124 @@ mod tests {
         }
         // The respawned car drives on.
         assert!(physics.snapshot(&key).speed_mps > 1.);
+    }
+
+    #[test]
+    fn saved_car_returns_with_engine_gear_and_handbrake() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Saved {
+            #[serde(with = "crate::save::identity::lossless")]
+            changes: ChangeRecords,
+        }
+        let prototype = crate::vehicle::car_prototype_fixture();
+        let engine_record: EnginePartReference =
+            serde_json::from_value(crate::reference::engine_part_fixture()).unwrap();
+        let radiator_record: RadiatorPartReference = serde_json::from_value(serde_json::json!({
+            "source": {"file": "a", "path_id": 15}, "node": 2, "coolant_tank": null,
+            "fan_node": 3, "thermostat_range": [80.0, 90.0], "fan_temperature_on": 95.0,
+            "fan_temperature_off": 90.0, "fan_on_when_engine_runs": false, "max_value": 1.0,
+            "max_fan_value": 1.0, "max_fan_speed": 1.0, "max_fluid_loss": 1.0
+        }))
+        .unwrap();
+        let car = GeneratedId {
+            layer: WorldLayer::Prop,
+            generator: SourceId {
+                file: "a".into(),
+                path_id: i64::MIN + 1,
+            },
+            unit: [i64::MAX - 1, -3],
+            ordinal: 3,
+            children: Vec::new(),
+        };
+        let engine = GeneratedId {
+            children: vec![(
+                SourceId {
+                    file: "a".into(),
+                    path_id: -9,
+                },
+                7,
+            )],
+            ..car.clone()
+        };
+        let key = ObjectKey::Generated(car.clone());
+        let engine_key = ObjectKey::Generated(engine.clone());
+        // One session: a car copy with an engine and a radiator part.
+        let run = |changes: &mut ChangeRecords| {
+            let mut physics = PhysicsWorld::empty(1, 2);
+            physics.insert_box([0., -0.5, 0.], [500., 0.5, 500.]);
+            let mut items = ItemStore::from_states(Vec::new());
+            let mut vehicles = BTreeMap::new();
+            let mut powertrain = PowertrainParts::default();
+            spawn_copy(
+                &car,
+                &prototype,
+                &mut physics,
+                &mut items,
+                &mut vehicles,
+                changes,
+            );
+            let pose = AbsolutePose {
+                position: START,
+                rotation: [0., 0., 0., 1.],
+            };
+            let part = items
+                .insert_generated(engine.clone(), &prototype, pose)
+                .unwrap();
+            assert_eq!(items.object_key(part), engine_key);
+            register_engine(part, &engine_record, None, &items, &mut powertrain, changes).unwrap();
+            register_radiator(
+                part,
+                &radiator_record,
+                None,
+                &items,
+                &mut powertrain,
+                changes,
+            );
+            (vehicles, powertrain, part)
+        };
+
+        let mut changes = ChangeRecords::default();
+        let (mut vehicles, mut powertrain, part) = run(&mut changes);
+        let car_state = vehicles.get_mut(&key).unwrap();
+        car_state.drivetrain.restore_gear(2);
+        car_state.handbrake = true;
+        car_state.ignition.ignition = true;
+        let mut engine_state = powertrain.engine(part).unwrap().state.capture_save();
+        engine_state.rpm = 2400.;
+        engine_state.temperature = 86.;
+        engine_state.elapsed = 12.;
+        engine_state.last_run_time = 11.99;
+        engine_state.supplied_fuel = 0.3;
+        engine_state.start_draw = "5".into();
+        powertrain
+            .engine_mut(part)
+            .unwrap()
+            .state
+            .restore_save(&engine_state)
+            .unwrap();
+        powertrain.radiator_mut(part).unwrap().fan_on = true;
+
+        // Save the live states as the game does, through JSON.
+        changes.keep_vehicle(key.clone(), vehicles[&key].state());
+        changes.keep_engine(
+            engine_key.clone(),
+            powertrain.engine(part).unwrap().state.capture_save(),
+        );
+        changes.keep_radiator(engine_key.clone(), true);
+        let json = serde_json::to_vec(&Saved { changes }).unwrap();
+
+        // Load into a new session.
+        let mut loaded = serde_json::from_slice::<Saved>(&json).unwrap().changes;
+        let (vehicles, powertrain, part) = run(&mut loaded);
+        let car_state = &vehicles[&key];
+        assert_eq!(car_state.drivetrain.gear(), 2);
+        assert!(car_state.handbrake);
+        assert!(car_state.ignition.ignition);
+        let restored = &powertrain.engine(part).unwrap().state;
+        assert_eq!(restored.capture_save(), engine_state);
+        assert!(restored.output().running);
+        assert!(powertrain.radiator(part).unwrap().fan_on);
+        // Each object took its state back.
+        assert!(loaded.vehicle(&key).is_none() && loaded.engine(&engine_key).is_none());
     }
 }

@@ -649,8 +649,10 @@ fn world_vehicle(
         .expect("car prototype")
 }
 
-/// Car-side state of a car copy. The world change records keep it while the car is retired.
-#[derive(Clone, Debug, PartialEq)]
+/// Car-side state of a car copy. The world change records keep it while the car is retired
+/// and in the save.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VehicleState {
     pub ignition: bool,
     pub gear: usize,
@@ -2314,33 +2316,17 @@ impl GarageRuntime {
                 .temperature = Some(part.state.temperature);
         }
     }
-    /// V03 bridge: engine part of old garage car `index`, mounted or not. Task 9 removes it.
-    pub fn garage_engine(&self, index: usize) -> &crate::simulation::powertrain::EnginePart {
-        let (engine, _) = self.powertrain.garage_parts(index);
-        self.powertrain.engine(engine).expect("old garage engine")
+    /// Engine part of item `item`, mounted or not.
+    #[cfg(test)]
+    pub(crate) fn engine_part(&self, item: ItemId) -> &crate::simulation::powertrain::EnginePart {
+        self.powertrain.engine(item).expect("engine part")
     }
-    /// V03 bridge: save record of the engine and radiator parts of old garage car `index`.
-    /// Task 8 saves each part on its own object.
-    pub fn garage_engine_save(&self, index: usize) -> crate::save::EngineSnapshot {
-        let (_, radiator) = self.powertrain.garage_parts(index);
-        let fan_on = self.powertrain.radiator(radiator).is_some_and(|r| r.fan_on);
-        self.garage_engine(index).state.capture_save(fan_on)
-    }
-    /// V03 bridge: restores the engine and radiator parts of old garage car `index`. Task 8 replaces it.
-    pub fn restore_garage_engine(
+    #[cfg(test)]
+    pub(crate) fn engine_part_mut(
         &mut self,
-        index: usize,
-        saved: &crate::save::EngineSnapshot,
-    ) -> Result<EngineOutput, crate::save::SaveError> {
-        let (engine, radiator) = self.powertrain.garage_parts(index);
-        if let Some(radiator) = self.powertrain.radiator_mut(radiator) {
-            radiator.fan_on = saved.fan_on;
-        }
-        self.powertrain
-            .engine_mut(engine)
-            .expect("old garage engine")
-            .state
-            .restore_save(saved)
+        item: ItemId,
+    ) -> &mut crate::simulation::powertrain::EnginePart {
+        self.powertrain.engine_mut(item).expect("engine part")
     }
     /// V03 bridge: runtime of old garage car `index`. Task 9 removes it.
     #[cfg(test)]

@@ -85,20 +85,40 @@ pub struct ChangeRecords {
     payload_bytes: usize,
     #[serde(skip)]
     region_bytes: usize,
-    /// Car-side state of retired car copies. Task 8 saves it in the object snapshot.
-    #[serde(skip)]
-    vehicles: HashMap<ObjectKey, crate::starting_area::VehicleState>,
-    /// Engine state of retired engine part items. Task 8 saves it in the object snapshot.
-    #[serde(skip)]
-    engines: HashMap<ObjectKey, crate::simulation::engine::EngineState>,
-    /// Fan state of retired radiator part items. Task 8 saves it in the object snapshot.
-    #[serde(skip)]
-    radiators: HashMap<ObjectKey, bool>,
+    /// Car-side state of car objects. A car takes its state back when it spawns.
+    /// V03 bridge: old garage cars use their bridge key. Task 9 removes it.
+    #[serde(serialize_with = "pairs")]
+    vehicles: BTreeMap<ObjectKey, crate::starting_area::VehicleState>,
+    /// Source `enginescript` state of engine part objects.
+    #[serde(serialize_with = "pairs")]
+    engines: BTreeMap<ObjectKey, crate::save::EngineSnapshot>,
+    /// Source `coolantTankscript` fan state of radiator part objects.
+    #[serde(serialize_with = "pairs")]
+    radiators: BTreeMap<ObjectKey, bool>,
 }
 impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
         self.records == other.records
+            && self.vehicles == other.vehicles
+            && self.engines == other.engines
+            && self.radiators == other.radiators
     }
+}
+/// Writes a map with object keys as a list of pairs. JSON object keys must be strings.
+fn pairs<V: Serialize, S: serde::Serializer>(
+    map: &BTreeMap<ObjectKey, V>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(map.iter())
+}
+/// Reads a list of pairs. A key must occur once.
+fn unique<V, E: serde::de::Error>(pairs: Vec<(ObjectKey, V)>) -> Result<BTreeMap<ObjectKey, V>, E> {
+    let count = pairs.len();
+    let map: BTreeMap<_, _> = pairs.into_iter().collect();
+    if map.len() != count {
+        return Err(E::custom("Duplicate object state identity"));
+    }
+    Ok(map)
 }
 impl<'de> Deserialize<'de> for ChangeRecords {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -106,9 +126,17 @@ impl<'de> Deserialize<'de> for ChangeRecords {
         #[serde(deny_unknown_fields)]
         struct Envelope {
             records: Vec<(ObjectKey, ObjectChange)>,
+            vehicles: Vec<(ObjectKey, crate::starting_area::VehicleState)>,
+            engines: Vec<(ObjectKey, crate::save::EngineSnapshot)>,
+            radiators: Vec<(ObjectKey, bool)>,
         }
         let envelope = Envelope::deserialize(deserializer)?;
-        let mut result = Self::default();
+        let mut result = Self {
+            vehicles: unique(envelope.vehicles)?,
+            engines: unique(envelope.engines)?,
+            radiators: unique(envelope.radiators)?,
+            ..Self::default()
+        };
         for (key, change) in envelope.records {
             if result.identities.contains_key(&key) {
                 return Err(serde::de::Error::custom("Duplicate world change identity"));
@@ -122,8 +150,14 @@ fn region(p: [f64; 3]) -> (i64, i64) {
     ((p[0] / 256.).floor() as i64, (p[2] / 256.).floor() as i64)
 }
 impl ChangeRecords {
+    /// Generated object records and every object state.
     pub(crate) fn generated_records(&self) -> Self {
-        let mut result = Self::default();
+        let mut result = Self {
+            vehicles: self.vehicles.clone(),
+            engines: self.engines.clone(),
+            radiators: self.radiators.clone(),
+            ..Self::default()
+        };
         for (key, change) in self.iter() {
             if matches!(key, ObjectKey::Generated(_)) {
                 result.insert(key.clone(), change.clone());
@@ -427,8 +461,8 @@ impl ChangeRecords {
             }
         }
     }
-    /// Keeps the car-side state of a retired car copy until it spawns again.
-    pub(crate) fn retire_vehicle(
+    /// Keeps the car-side state of car `key` until it spawns again.
+    pub(crate) fn keep_vehicle(
         &mut self,
         key: ObjectKey,
         state: crate::starting_area::VehicleState,
@@ -441,37 +475,47 @@ impl ChangeRecords {
     ) -> Option<crate::starting_area::VehicleState> {
         self.vehicles.remove(key)
     }
-    /// Keeps the state of a retired engine part item until it spawns again.
-    pub(crate) fn retire_engine(
-        &mut self,
-        key: ObjectKey,
-        state: crate::simulation::engine::EngineState,
-    ) {
+    pub fn vehicle(&self, key: &ObjectKey) -> Option<&crate::starting_area::VehicleState> {
+        self.vehicles.get(key)
+    }
+    pub fn vehicles(
+        &self,
+    ) -> impl Iterator<Item = (&ObjectKey, &crate::starting_area::VehicleState)> {
+        self.vehicles.iter()
+    }
+    /// Keeps the state of engine part `key` until it spawns again.
+    pub(crate) fn keep_engine(&mut self, key: ObjectKey, state: crate::save::EngineSnapshot) {
         self.engines.insert(key, state);
     }
-    pub(crate) fn take_engine(
-        &mut self,
-        key: &ObjectKey,
-    ) -> Option<crate::simulation::engine::EngineState> {
+    pub(crate) fn take_engine(&mut self, key: &ObjectKey) -> Option<crate::save::EngineSnapshot> {
         self.engines.remove(key)
     }
-    /// Keeps the fan state of a retired radiator part item until it spawns again.
-    pub(crate) fn retire_radiator(&mut self, key: ObjectKey, fan_on: bool) {
+    pub fn engine(&self, key: &ObjectKey) -> Option<&crate::save::EngineSnapshot> {
+        self.engines.get(key)
+    }
+    pub fn engines(&self) -> impl Iterator<Item = (&ObjectKey, &crate::save::EngineSnapshot)> {
+        self.engines.iter()
+    }
+    /// Keeps the fan state of radiator part `key` until it spawns again.
+    pub(crate) fn keep_radiator(&mut self, key: ObjectKey, fan_on: bool) {
         self.radiators.insert(key, fan_on);
     }
     pub(crate) fn take_radiator(&mut self, key: &ObjectKey) -> Option<bool> {
         self.radiators.remove(key)
     }
+    pub fn radiator(&self, key: &ObjectKey) -> Option<bool> {
+        self.radiators.get(key).copied()
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.vehicles.capacity()
-                * (std::mem::size_of::<(ObjectKey, crate::starting_area::VehicleState)>() + 1)
-            + self.vehicles.keys().map(key_heap).sum::<usize>()
-            + self.engines.capacity()
-                * (std::mem::size_of::<(ObjectKey, crate::simulation::engine::EngineState)>() + 1)
-            + self.engines.keys().map(key_heap).sum::<usize>()
-            + self.radiators.capacity() * (std::mem::size_of::<(ObjectKey, bool)>() + 1)
-            + self.radiators.keys().map(key_heap).sum::<usize>()
+            + object_states_bytes(&self.vehicles)
+            + object_states_bytes(&self.engines)
+            + self
+                .engines
+                .values()
+                .map(|e| e.start_draw.capacity())
+                .sum::<usize>()
+            + object_states_bytes(&self.radiators)
             + self.records.capacity() * std::mem::size_of::<(ObjectKey, ObjectChange)>()
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)
@@ -487,6 +531,11 @@ impl ChangeRecords {
                     + 12 * std::mem::size_of::<usize>()
                     + 64)
     }
+}
+/// B-tree nodes and key heap of an object state map.
+fn object_states_bytes<V>(map: &BTreeMap<ObjectKey, V>) -> usize {
+    map.len() * (std::mem::size_of::<(ObjectKey, V)>() + 16)
+        + map.keys().map(key_heap).sum::<usize>()
 }
 fn attachment_owner(snapshot: &ObjectSnapshot) -> Option<&ObjectKey> {
     snapshot.attachment.as_ref()?.owner.as_ref()

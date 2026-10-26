@@ -211,29 +211,24 @@ impl PlayerState {
         self.posture.restore(saved.posture);
         self.movement_speed = MovementSpeed::default();
         self.running = saved.running;
-        // An item seat waits for its world item binding. See `restore_item_seat`.
+        // A world item or world car seat waits for its binding. See `restore_item_seat`.
         self.occupancy = match saved.seat.as_ref().map(|record| (record, &record.owner)) {
-            Some((record, crate::save::SeatOwnerSnapshot::Vehicle { vehicle })) => {
+            // V03 bridge: an old garage car seat restores at once. Task 9 removes it.
+            Some((record, crate::save::SeatOwnerSnapshot::Vehicle { vehicle }))
+                if crate::vehicle::garage_vehicle_index(vehicle).is_some() =>
+            {
                 let id = ids.seats[&record.source];
                 let seat = self.seats.iter().find(|s| s.id == id).unwrap();
-                let vehicle = crate::vehicle::garage_vehicle_key(
-                    ids.vehicles
-                        .iter()
-                        .position(|v| v == vehicle)
-                        .ok_or_else(|| {
-                            crate::save::SaveError::InvalidLinks("Seat vehicle".into())
-                        })?,
-                );
                 Some(Occupancy {
                     id: Some(id),
                     source: None,
-                    body: physics.chassis_handle(&vehicle),
-                    owner: SeatOwner::Vehicle(vehicle),
+                    body: physics.chassis_handle(vehicle),
+                    owner: SeatOwner::Vehicle(vehicle.clone()),
                     local_pose: to_rapier(crate::save::local_pose(&record.local_pose)),
                     values: SeatValues::car(&self.reference, seat),
                 })
             }
-            Some((_, crate::save::SeatOwnerSnapshot::Item { .. })) | None => None,
+            Some(_) | None => None,
         };
         if let Some(seat) = &self.occupancy {
             self.pose = *physics.rapier().bodies[seat.body].position() * seat.local_pose;
@@ -359,17 +354,23 @@ impl PlayerState {
                 .as_ref()
                 .map(|seat| {
                     let (owner, source) = match (&seat.owner, seat.id) {
-                        // V03 bridge: old garage cars only. Task 8 saves world cars.
+                        // V03 bridge: old garage car seats have a seat record. Task 9 removes it.
                         (SeatOwner::Vehicle(vehicle), Some(id)) => (
                             crate::save::SeatOwnerSnapshot::Vehicle {
-                                vehicle: crate::vehicle::garage_vehicle_index(vehicle)
-                                    .and_then(|index| ids.vehicles.get(index))
-                                    .ok_or_else(|| {
-                                        crate::save::SaveError::InvalidLinks("Seat vehicle".into())
-                                    })?
-                                    .clone(),
+                                vehicle: vehicle.clone(),
                             },
                             crate::save::identity::source_key(&ids.seats, id)?,
+                        ),
+                        (SeatOwner::Vehicle(vehicle), None) => (
+                            crate::save::SeatOwnerSnapshot::Vehicle {
+                                vehicle: vehicle.clone(),
+                            },
+                            seat.source
+                                .as_ref()
+                                .map(crate::save::SourceKey::from)
+                                .ok_or_else(|| {
+                                    crate::save::SaveError::InvalidLinks("Car seat source".into())
+                                })?,
                         ),
                         (SeatOwner::Item(item), None) => (
                             crate::save::SeatOwnerSnapshot::Item { item: item.clone() },
@@ -780,13 +781,13 @@ impl PlayerState {
     /// Finish a saved item seat after the world item binds. View and posture keep their saved values.
     pub(crate) fn restore_item_seat(
         &mut self,
-        owner: crate::world::ObjectKey,
+        owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
         local_pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) {
-        let occupancy = self.item_occupancy(SeatOwner::Item(owner), body, seat, local_pose);
+        let occupancy = self.item_occupancy(owner, body, seat, local_pose);
         self.pose = *physics.rapier().bodies[body].position() * occupancy.local_pose;
         self.occupancy = Some(occupancy);
         self.update_geometry(physics);

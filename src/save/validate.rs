@@ -20,7 +20,7 @@ impl SaveSnapshot {
         let ids = IdentityMap::new(reference)?;
         self.validate_world(reference)?;
         identity::unsigned(&self.progress.start_attempts)?;
-        self.validate_vehicle(reference, &ids)?;
+        self.validate_object_states(reference)?;
         let mut items = HashMap::new();
         for item in &self.items {
             let id = ids.item(&item.instance)?;
@@ -138,57 +138,45 @@ impl SaveSnapshot {
         Ok(())
     }
 
-    fn validate_vehicle(
-        &self,
-        reference: &ReferenceManifest,
-        ids: &IdentityMap,
-    ) -> Result<(), SaveError> {
-        links(
-            self.vehicles.len() == reference.vehicles.len(),
-            "Missing vehicle state",
-        )?;
-        links(
-            ids.vehicles.contains(&self.progress.selected_vehicle),
-            "Selected vehicle identity",
-        )?;
-        let mut seen = HashSet::new();
-        for vehicle in &self.vehicles {
-            let index = ids
-                .vehicles
-                .iter()
-                .position(|id| id == &vehicle.instance)
-                .ok_or_else(|| invalid("Vehicle identity"))?;
-            links(seen.insert(index), "Duplicate vehicle")?;
-            let source = &reference.vehicles[index];
+    /// Car, engine and radiator states in the world records, and the last seated car.
+    fn validate_object_states(&self, reference: &ReferenceManifest) -> Result<(), SaveError> {
+        use crate::vehicle::garage_vehicle_index;
+        let garage = |key: &crate::world::ObjectKey| -> Result<Option<usize>, SaveError> {
+            garage_vehicle_index(key)
+                .map(|index| {
+                    links(index < reference.vehicles.len(), "Garage car identity").map(|_| index)
+                })
+                .transpose()
+        };
+        if let Some(key) = &self.progress.selected_vehicle {
+            garage(key)?;
+        }
+        let changes = &self.world.changes;
+        for (key, state) in changes.vehicles() {
             data(
-                vehicle.trip_m.is_finite() && vehicle.trip_m >= 0.,
+                state.trip_m.is_finite() && state.trip_m >= 0.,
                 "Trip distance",
             )?;
-            let odometer = &source.instruments.odometer;
-            let distance = odometer.initial_value + (vehicle.trip_m / 1000.) as f32;
-            let displayed = if odometer.use_multiplier {
-                distance * odometer.multiplier
-            } else {
-                distance
-            };
-            data(
-                distance.is_finite() && displayed.is_finite(),
-                "Instrument distance",
-            )?;
-            data(vehicle.requested_headlights <= 2, "Requested headlights")?;
-            let BodyIdentity::Source { source } = &vehicle.body.identity else {
-                return Err(SaveError::InvalidLinks("Vehicle body identity".into()));
-            };
-            links(
-                ids.bodies.get(source) == Some(&reference.vehicles[index].body),
-                "Vehicle body",
-            )?;
-            body(&vehicle.body)?;
-            data(
-                vehicle.gear < reference.vehicles[index].gear_ratios.len(),
-                "Vehicle gear",
-            )?;
-            let e = &vehicle.engine;
+            data(state.requested_headlights <= 2, "Requested headlights")?;
+            // V03 bridge: old garage cars check their record here. The binder checks world
+            // cars when they spawn. Task 9 removes it.
+            if let Some(index) = garage(key)? {
+                let source = &reference.vehicles[index];
+                let odometer = &source.instruments.odometer;
+                let distance = odometer.initial_value + (state.trip_m / 1000.) as f32;
+                let displayed = if odometer.use_multiplier {
+                    distance * odometer.multiplier
+                } else {
+                    distance
+                };
+                data(
+                    distance.is_finite() && displayed.is_finite(),
+                    "Instrument distance",
+                )?;
+                data(state.gear < source.gear_ratios.len(), "Vehicle gear")?;
+            }
+        }
+        for (_, e) in changes.engines() {
             super::identity::unsigned(&e.start_draw)?;
             data(
                 finite(&[
@@ -536,28 +524,15 @@ impl SaveSnapshot {
         if let Some(seat) = &p.seat {
             local(&seat.local_pose)?;
             match &seat.owner {
-                SeatOwnerSnapshot::Vehicle { vehicle } => {
-                    let vehicle_index = ids
-                        .vehicles
-                        .iter()
-                        .position(|id| id == vehicle)
-                        .ok_or_else(|| invalid("Seat vehicle"))?;
-                    let record = self
-                        .vehicles
-                        .iter()
-                        .find(|v| v.instance == *vehicle)
-                        .ok_or_else(|| invalid("Seat vehicle"))?;
+                // V03 bridge: an old garage car seat has a seat record. Task 9 removes it.
+                SeatOwnerSnapshot::Vehicle { vehicle }
+                    if crate::vehicle::garage_vehicle_index(vehicle).is_some() =>
+                {
+                    let vehicle_index = crate::vehicle::garage_vehicle_index(vehicle).unwrap();
                     links(
-                        *vehicle == self.progress.selected_vehicle,
+                        vehicle_index < reference.vehicles.len()
+                            && Some(vehicle) == self.progress.selected_vehicle.as_ref(),
                         "Selected seat vehicle",
-                    )?;
-                    data(
-                        p.pose
-                            .position
-                            .iter()
-                            .zip(record.body.pose.position)
-                            .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
-                        "Seat relative position",
                     )?;
                     let seat_id = ids
                         .seats
@@ -574,6 +549,15 @@ impl SaveSnapshot {
                         }),
                         "Seat is detached from vehicle",
                     )?;
+                }
+                // A world car seat binds with its car. The seat binding checks the source.
+                SeatOwnerSnapshot::Vehicle { vehicle } => {
+                    links(
+                        matches!(vehicle, crate::world::ObjectKey::Generated(_))
+                            && Some(vehicle) == self.progress.selected_vehicle.as_ref(),
+                        "Selected seat vehicle",
+                    )?;
+                    seat.source.source_id()?;
                 }
                 // validate_world checks the item key. The seat binding checks the source at restore.
                 SeatOwnerSnapshot::Item { .. } => {
@@ -811,9 +795,6 @@ impl SaveSnapshot {
         items: &HashMap<r::ItemId, &ItemSnapshot>,
     ) -> Result<(), SaveError> {
         let mut identities = HashSet::new();
-        for vehicle in &self.vehicles {
-            identities.insert(&vehicle.body.identity);
-        }
         let mut assemblies = HashSet::new();
         for record in &self.bodies {
             links(
@@ -827,10 +808,6 @@ impl SaveSnapshot {
                         .bodies
                         .get(source)
                         .ok_or_else(|| invalid("Unknown source body"))?;
-                    links(
-                        !reference.vehicles.iter().any(|v| v.body == *id),
-                        "Duplicate vehicle body",
-                    )?;
                     let source_body = reference.bodies.iter().find(|body| body.id == *id).unwrap();
                     links(
                         source_body.parent_body.is_none(),
