@@ -547,7 +547,7 @@ fn read_input(
     let actions = game_actions();
     let held = game_keys();
     let player = game_player_keys();
-    let frame = FrameInput {
+    let mut frame = FrameInput {
         held,
         player_held: player as u8,
         player_pressed: (player >> 8) as u8,
@@ -563,7 +563,9 @@ fn read_input(
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
+        gamepad: crate::simulation::GamepadFrame::default(),
     };
+    game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
     if requests.pending() {
         if cpu_profile::enabled() {
             game_cpu_clear_input();
@@ -604,7 +606,7 @@ fn read_input(
     if let Some(settings) = game_driving_settings()
         && let Ok(settings) =
             serde_json::from_str::<crate::simulation::input::DrivingSettings>(&settings)
-        && settings.valid(&reference.0.driving.mouse_drive)
+        && settings.valid(&reference.0.driving)
     {
         drive.runtime.driving_input.settings = settings;
     }

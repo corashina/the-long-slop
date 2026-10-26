@@ -304,6 +304,9 @@ extern "C" {
     /// Pending `DrivingSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
     pub fn game_driving_settings() -> Option<String>;
+    /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
+    #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
+    pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);
     #[wasm_bindgen(js_namespace = window, js_name = gameBiome)]
     pub fn game_biome() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]

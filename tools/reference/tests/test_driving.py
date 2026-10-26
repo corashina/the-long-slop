@@ -116,10 +116,10 @@ class MouseDriveSourceTests(unittest.TestCase):
             9:{'defValue':2.,'minValue':.5,'maxValue':3.,'valueMultipler':2.}}
         source = SimpleNamespace(resolve=lambda owner,p:p['m_PathID'] or None, read=lambda r:sliders[r])
         settings = {'tabControls':{'sliders':[{'m_PathID':i if i in sliders else 0} for i in range(10)]}}
-        self.assertEqual(slider_range(source, None, settings, 8)[0], {'default':1.,'minimum':.1,'maximum':4.})
-        self.assertEqual(slider_range(source, None, settings, 9)[0], {'default':4.,'minimum':1.,'maximum':6.})
+        self.assertEqual(slider_range(source, None, settings, 'tabControls', 8)[0], {'default':1.,'minimum':.1,'maximum':4.})
+        self.assertEqual(slider_range(source, None, settings, 'tabControls', 9)[0], {'default':4.,'minimum':1.,'maximum':6.})
         sliders[9]['defValue'] = 5.
-        with self.assertRaises(ValueError):slider_range(source, None, settings, 9)
+        with self.assertRaises(ValueError):slider_range(source, None, settings, 'tabControls', 9)
 
     def test_toggle_binding_is_key_u(self):
         from tools.reference.driving import ACTIONS, recover_bindings
@@ -131,3 +131,34 @@ class MouseDriveSourceTests(unittest.TestCase):
         self.assertIn({'action':'mouse_drive','codes':['KeyU']}, bindings)
         self.assertEqual(evidence[-1]['source_input'], 'togglemousedrive')
         with self.assertRaises(ValueError):recover_bindings(text, defaults.replace('KeyCode.U', 'KeyCode.Q').replace(f'defaultInput[{len(names)-1}]', 'x'))
+
+
+class SteeringWheelSourceTests(unittest.TestCase):
+    """tabSteeringWheel defaults with a fake source: no library needed."""
+    def test_refresh_maps_controls_to_axes(self):
+        from types import SimpleNamespace
+        from tools.reference.driving import WHEEL_AXES, recover_steering_wheel
+        lines = ['S.CBHShifter = tabSteeringWheel.toggles[0].toggle.isOn;']
+        toggle = 2; slider = 0
+        for axis in WHEEL_AXES:
+            for flag in ('enable','invert'):
+                lines.append(f'S.CB{flag}{axis} = tabSteeringWheel.toggles[{toggle}].toggle.isOn;'); toggle += 1
+            for part in (('Middle','Dead','Sens','Max') if axis=='Steer' else ('Dead','Sens','Max')):
+                lines.append(f'S.CF{axis}{part} = tabSteeringWheel.sliders[{slider}].GetValue();'); slider += 1
+        refresh = '\n'.join(lines)
+        records = {('t',i):{'def':int(i in (0,2))} for i in range(12)}
+        records.update({('s',i):{'defValue':float(i),'minValue':0.,'maxValue':20.,'valueMultipler':0.5 if i==0 else 0.} for i in range(16)})
+        source = SimpleNamespace(resolve=lambda owner,p:p, read=lambda r:records[r],
+            class_name=lambda r:'togglesetting' if r[0]=='t' else 'slidersettingscript')
+        settings = {'tabSteeringWheel':{'toggles':[('t',i) for i in range(12)],'sliders':[('s',i) for i in range(16)]}}
+        wheel, evidence = recover_steering_wheel(source, None, settings, refresh)
+        self.assertEqual(len(evidence), 27)
+        self.assertTrue(wheel['h_shifter'])
+        self.assertEqual([a['enabled'] for a in wheel['axes']], [True, False, False, False, False])
+        steer, gas, handbrake = wheel['axes'][0], wheel['axes'][1], wheel['axes'][4]
+        self.assertEqual(steer['middle'], {'default':0.,'minimum':0.,'maximum':10.})
+        self.assertEqual(steer['max'], {'default':3.,'minimum':0.,'maximum':20.})
+        self.assertEqual((gas['middle'], gas['dead']['default'], gas['max']['default']), (None, 4., 6.))
+        self.assertEqual(handbrake['sens']['default'], 14.)
+        with self.assertRaises(ValueError):
+            recover_steering_wheel(source, None, settings, refresh.replace('S.CFGasSens', 'S.CFGasX'))

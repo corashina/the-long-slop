@@ -47,6 +47,7 @@ pub struct DrivingReference {
     pub bindings: Vec<DrivingBinding>,
     pub mouse_drive: MouseDriveReference,
     pub lever: LeverTiming,
+    pub steering_wheel: SteeringWheelReference,
 }
 
 /// Source `slidersettingscript`: `GetValue` range and default, multiplier applied.
@@ -70,6 +71,29 @@ impl SliderRange {
 pub struct MouseDriveReference {
     pub sensitivity_x: SliderRange,
     pub sensitivity_y: SliderRange,
+}
+
+/// Source `settingsscript.tabSteeringWheel` defaults, mapped by `RefreshSettings`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringWheelReference {
+    /// Source `CBHShifter`.
+    pub h_shifter: bool,
+    /// Steer, gas, brake, clutch, handbrake.
+    pub axes: [AxisReference; 5],
+}
+
+/// Source `CBenable*`, `CBinvert*`, `CF*Middle`, `CF*Dead`, `CF*Sens`, `CF*Max`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AxisReference {
+    pub enabled: bool,
+    pub invert: bool,
+    /// Steer only.
+    pub middle: Option<SliderRange>,
+    pub dead: SliderRange,
+    pub sens: SliderRange,
+    pub max: SliderRange,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -220,6 +244,24 @@ impl DrivingReference {
                 && lever.stages[0] < lever.stages[1]
                 && lever.stages[1] < 1.0,
             "driving lever timing",
+        )?;
+        require(
+            self.steering_wheel
+                .axes
+                .iter()
+                .enumerate()
+                .all(|(index, axis)| {
+                    axis.middle.is_some() == (index == 0)
+                        && axis
+                            .middle
+                            .iter()
+                            .chain([&axis.dead, &axis.sens, &axis.max])
+                            .all(|range| {
+                                finite(&[range.default, range.minimum, range.maximum])
+                                    && range.contains(range.default)
+                            })
+                }),
+            "steering wheel settings",
         )?;
         Ok(())
     }

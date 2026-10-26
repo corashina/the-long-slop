@@ -843,7 +843,7 @@ impl GarageRuntime {
             driving_input: crate::simulation::input::DrivingInput::new(
                 reference.driving.keyboard_steering_rate,
                 reference.driving.pedal_rate,
-                crate::simulation::input::DrivingSettings::defaults(&reference.driving.mouse_drive),
+                crate::simulation::input::DrivingSettings::defaults(&reference.driving),
             ),
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
@@ -1283,7 +1283,11 @@ impl GarageRuntime {
         }
         let vehicle_input = if previous_seat != self.area.player.seat_body() {
             self.clear_driving_input();
-            FrameInput::default()
+            // Pads stay, so a button held across the seat change gives no edge.
+            FrameInput {
+                gamepad: input.gamepad,
+                ..FrameInput::default()
+            }
         } else {
             input
         };
@@ -1297,15 +1301,15 @@ impl GarageRuntime {
             .flatten()
             .and_then(|key| self.vehicles.get(key))
             .map(|vehicle| vehicle.record(reference).key_steer_multiplier);
-        let controls = self.driving_input.step(
+        let driving_output = self.driving_input.step(
             if driving {
                 self.area.player.seat_body()
             } else {
                 self.area.player.item_seat_body()
             },
-            vehicle_input.held,
-            vehicle_input.drive_mouse,
+            &vehicle_input,
             car,
+            self.driving_assists.automatic_gears,
         );
         // Source `carscript` cycles off, low, high.
         if (driving || self.area.player.driving2())
@@ -1328,7 +1332,14 @@ impl GarageRuntime {
         let mut vehicles = std::mem::take(&mut self.vehicles);
         for (key, vehicle) in &mut vehicles {
             let driven = driving && self.vehicle.as_ref() == Some(key);
-            self.step_vehicle(reference, key, vehicle, vehicle_input, driven, controls);
+            self.step_vehicle(
+                reference,
+                key,
+                vehicle,
+                vehicle_input,
+                driven,
+                driving_output,
+            );
             self.advance_car_lights(reference, key, vehicle);
             self.advance_exhaust(reference, key, vehicle);
             self.advance_wheel_effects(reference, key, vehicle);
@@ -1348,7 +1359,7 @@ impl GarageRuntime {
             _ => None,
         };
         self.stream
-            .step_sleds(&mut self.physics, sled_seat, controls);
+            .step_sleds(&mut self.physics, sled_seat, driving_output.controls);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
@@ -1865,7 +1876,7 @@ impl GarageRuntime {
         vehicle: &mut VehicleRuntime,
         input: FrameInput,
         driving: bool,
-        controls: crate::simulation::input::DrivingControls,
+        driving_output: crate::simulation::input::DrivingOutput,
     ) {
         let chassis = self.physics.chassis_handle(key);
         let chassis_active = self.physics.body_active(chassis);
@@ -1889,8 +1900,11 @@ impl GarageRuntime {
         let snapshot = self.physics.snapshot(key);
         let speed = snapshot.speed_mps;
         let driving = driving && chassis_active;
-        let controls = if driving {
-            controls
+        let crate::simulation::input::DrivingOutput {
+            controls,
+            gear_edges,
+        } = if driving {
+            driving_output
         } else {
             Default::default()
         };
@@ -1905,7 +1919,7 @@ impl GarageRuntime {
         let last_gear = vehicle.drivetrain.gear();
         let drivetrain = vehicle.drivetrain.step(
             controls,
-            input.pressed,
+            gear_edges,
             self.driving_assists,
             engine.map(|engine| (engine.state.output(), &engine.record)),
             vehicle.ignition.ignition,
@@ -2048,7 +2062,8 @@ impl GarageRuntime {
             throttle,
             brake,
             steer: pushed.unwrap_or(controls.steer),
-            handbrake: vehicle.handbrake as u8 as f32,
+            // Source `handbrake` axis beside the lever state.
+            handbrake: (vehicle.handbrake as u8 as f32).max(controls.handbrake),
         };
         if chassis_active {
             self.physics.apply_vehicle_forces(
