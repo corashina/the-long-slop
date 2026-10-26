@@ -1,4 +1,4 @@
-import {verifyRecord} from './save-storage.js';
+import {defaultName,verifyRecord} from './save-storage.js';
 
 export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}){
  let sequence=0,active=null,writes=Promise.resolve();
@@ -32,17 +32,20 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
  return {
   get pending(){return active!==null;},
   save(){return run('save',async operation=>{
-   const {save}=await runtime.capture();
+   const {save,summary}=await runtime.capture();
    if(!current(operation))return;
+   const name=defaultName(new Date()),entry={name,date:'',seed:summary.seed,drivenKm:summary.driven_km,version:summary.build_id,thumbnail:null};
    // Preserve ordering even when an adapter ignores cancellation during a delayed write.
    const write=writes.then(async()=>{
-    if(current(operation))await storage.write(save,{signal:operation.controller.signal});
+    if(current(operation))await storage.write(name,save,entry,{signal:operation.controller.signal});
    });
    writes=write.catch(()=>{});
    await write;
   });},
   load(){return run('load',async operation=>{
-   const record=await storage.read();
+   const {last}=await storage.list();
+   if(!current(operation))return;
+   const record=last===null?null:await storage.read(last);
    if(!current(operation))return;
    if(record===null)throw new Error('No saved game.');
    const save=await verifyRecord(record);
