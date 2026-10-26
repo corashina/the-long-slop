@@ -231,7 +231,7 @@ pub(crate) mod tests {
             "colliders": [], "prefab_pose": pose(0.0, 0.0),
             "vehicle": {
                 "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
-                "fuel_tank": null, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0,
+                "fuel_tank": null, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0, "balance": null,
                 "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
                 "handbrake": false, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
                 "wheels": wheels,

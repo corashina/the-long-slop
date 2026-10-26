@@ -24,6 +24,8 @@ pub struct WorldVehicleReference {
     pub electronics: Option<u32>,
     /// Source `carscript.startingTime`.
     pub starter_delay_seconds: f32,
+    /// Source `carscript` balance values. None when `balanced` is false.
+    pub balance: Option<BalanceReference>,
     pub driving: DrivingVehicleReference,
     pub handbrake: bool,
     pub hub: WheelHubReference,
@@ -63,6 +65,59 @@ pub struct WorldVehicleReference {
     /// The realtime reflection probe that follows this car.
     pub probe: Option<WorldProbeReference>,
     pub audio: Option<CarAudioReference>,
+}
+
+/// Source `carscript` balance values (`Balance()`). Angles are degrees.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BalanceReference {
+    pub lean: bool,
+    pub lean_min_speed: f32,
+    pub lean_max_speed: f32,
+    pub lean_min_angle: f32,
+    pub lean_max_angle: f32,
+    pub lean_angle_lerp: f32,
+    pub lean_curve: TorqueCurve,
+    pub steer_angle_min: f32,
+    pub steer_angle_max: f32,
+    pub steer_angle_speed_min: f32,
+    pub steer_angle_speed_max: f32,
+    pub steer_angle_lerp: f32,
+    pub p: f32,
+    pub i: f32,
+    pub d: f32,
+    pub set_angle: f32,
+    pub use_angle_limit: bool,
+    pub min_angle: f32,
+    pub max_angle: f32,
+    pub max_force: f32,
+}
+
+impl BalanceReference {
+    fn valid(&self) -> bool {
+        finite(&[
+            self.lean_min_speed,
+            self.lean_max_speed,
+            self.lean_min_angle,
+            self.lean_max_angle,
+            self.lean_angle_lerp,
+            self.steer_angle_min,
+            self.steer_angle_max,
+            self.steer_angle_speed_min,
+            self.steer_angle_speed_max,
+            self.steer_angle_lerp,
+            self.p,
+            self.i,
+            self.d,
+            self.set_angle,
+            self.min_angle,
+            self.max_angle,
+            self.max_force,
+        ]) && self.lean_angle_lerp >= 0.
+            && self.steer_angle_lerp >= 0.
+            && self.max_force >= 0.
+            && (!self.lean || curve_valid(&self.lean_curve))
+    }
 }
 
 /// Source `kmhslottype`: the meter of the part in each slot reads `types`, times `modifier`.
@@ -529,6 +584,11 @@ impl WorldVehicleReference {
             s,
             "vehicle probe node",
             self.probe.as_ref().is_none_or(|p| b.node(p.node)),
+        )?;
+        check(
+            s,
+            "vehicle balance",
+            self.balance.as_ref().is_none_or(BalanceReference::valid),
         )?;
         check(s, "vehicle wheels", !self.wheels.is_empty())?;
         for (i, w) in self.wheels.iter().enumerate() {

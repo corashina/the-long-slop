@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import patch
 
 from tools.reference.source import source_id
-from tools.reference.vehicles import part_records, vehicle_globals, vehicle_record
+from tools.reference.vehicles import balance_record, part_records, vehicle_globals, vehicle_record
 
 FILE = NS(name='sharedassets1.assets', source_container_path='sharedassets1.assets')
 LEVEL1 = NS(name='level1', source_container_path='level1')
@@ -85,7 +85,7 @@ def car_fixture():
         m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
     data[car.path_id].update(speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
-        WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), tankslot=ptr(None), carType=1, startingTime=1.,
+        WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), tankslot=ptr(None), balanced=0, carType=1, startingTime=1.,
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
         forceAutomaticTransmission=0, BhandBrake=1, kerekagyType=0, differentialRatio=4., steerAngle=35.,
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
@@ -104,6 +104,22 @@ def car_fixture():
 
 
 class VehicleRecordTests(unittest.TestCase):
+    def test_balance_record(self):
+        key = dict(time=0., value=1., inSlope=0., outSlope=0., inWeight=0., outWeight=0., weightedMode=0)
+        car = dict(balanced=1, balanceLean=1, balanceLeanMinSpeed=1., balanceLeanMaxSpeed=10., balanceLeanMinAngle=2.,
+            balanceLeanMaxAngle=20., balanceLeanAngleLerp=3., balanceLeanCurve={'m_Curve': [key], 'm_PreInfinity': 2,
+            'm_PostInfinity': 2}, balanceSteerAngleMin=4., balanceSteerAngleMax=5., balanceSteerAngleSpeedMin=6.,
+            balanceSteerAngleSpeedMax=7., balanceSteerAngleLerp=8., balanceP=9., balanceI=.1, balanceD=.2,
+            balanceSetAngle=0., balanceUseAngleLimit=1, balanceMinAngle=-45., balanceMaxAngle=45., balanceMaxForce=500.)
+        self.assertIsNone(balance_record({**car, 'balanced': 0}))
+        balance = balance_record(car)
+        self.assertIs(balance['lean'], True)
+        self.assertIs(balance['use_angle_limit'], True)
+        self.assertEqual(balance['lean_curve']['keys'][0]['value'], 1.)
+        self.assertEqual((balance['lean_max_angle'], balance['steer_angle_speed_max'], balance['i'], balance['min_angle'],
+            balance['max_force']), (20., 7., .1, -45., 500.))
+        self.assertEqual(len(balance), 20)
+
     def test_car_prototype_vehicle_and_engine_part(self):
         source, hierarchy, bodies, colliders = car_fixture()
         with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
@@ -125,6 +141,7 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(vehicle['mass_kg'], 800.)
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertIsNone(vehicle['fuel_tank_slot'])
+        self.assertIsNone(vehicle['balance'])
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         self.assertIsNone(vehicle['instruments'])
         self.assertEqual(vehicle['kmh_meters'], [])
