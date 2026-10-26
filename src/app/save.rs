@@ -196,6 +196,11 @@ fn process_request(
                     items.reset(world)
                 },
             );
+            world.resource_scope(
+                |world, mut sky: Mut<crate::presentation::sky_traffic::SkyTrafficVisuals>| {
+                    sky.reset(world)
+                },
+            );
             world.resource_scope(|world, mut drive: Mut<Drive>| {
                 candidate
                     .presentation

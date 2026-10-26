@@ -258,6 +258,8 @@ enum Owner {
     Storm(crate::weather::StormId),
     /// `mainscript` melee hit systems; `Group::source` is the system.
     Melee,
+    /// The contrail of the sky plane with this id; `Group::source` is the prefab.
+    Sky(u32),
 }
 /// The `Group::source` meaning of a car system.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -419,11 +421,11 @@ fn add_group(
     materials: &mut Assets<ParticleMaterial>,
 ) {
     // A removed storm's retained slots serve the next storm of the same system.
-    if let Some(g) = state
-        .groups
-        .iter_mut()
-        .find(|g| matches!(g.owner, Owner::Storm(_)) && !g.active && g.source == index)
-    {
+    if let Some(g) = state.groups.iter_mut().find(|g| {
+        matches!((g.owner, owner), (Owner::Storm(_), Owner::Storm(_)))
+            && !g.active
+            && g.source == index
+    }) {
         g.owner = owner;
         g.active = true;
         return;
@@ -709,7 +711,47 @@ fn sync_particles(
             }
         }
     }
+    // A removed plane's retained slots serve the next plane of the same prefab.
+    let sky = drive.runtime.sky();
+    for g in &mut state.groups {
+        if let Owner::Sky(id) = g.owner {
+            g.active = sky
+                .planes()
+                .iter()
+                .any(|p| p.id == id && p.prefab == g.source);
+        }
+    }
+    for plane in sky.planes() {
+        let Some(p) = &reference.0.sky.prefabs[plane.prefab].contrail else {
+            continue;
+        };
+        let owner = Owner::Sky(plane.id);
+        if state.groups.iter().any(|g| g.active && g.owner == owner) {
+            continue;
+        }
+        if let Some(g) = state
+            .groups
+            .iter_mut()
+            .find(|g| !g.active && g.source == plane.prefab && matches!(g.owner, Owner::Sky(_)))
+        {
+            g.owner = owner;
+            g.active = true;
+            continue;
+        }
+        add_group(
+            &mut state,
+            owner,
+            plane.prefab,
+            p,
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+    }
     let origin = drive.runtime.stream.origin.offset;
+    // Contrail positions are anchor offsets.
+    let anchor = drive.runtime.sky_anchor(&reference.0);
+    let sky_origin: [f64; 3] = std::array::from_fn(|i| origin[i] - anchor[i]);
     let Ok(camera) = camera.single() else {
         return;
     };
@@ -729,6 +771,10 @@ fn sync_particles(
             } => car_particle(&reference.0, system, prototype, g.source),
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
+            Owner::Sky(_) => reference.0.sky.prefabs[g.source]
+                .contrail
+                .as_ref()
+                .expect("sky contrail group"),
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -746,7 +792,8 @@ fn sync_particles(
             | Owner::SprayBottle(_)
             | Owner::Car { .. }
             | Owner::Storm(_)
-            | Owner::Melee => None,
+            | Owner::Melee
+            | Owner::Sky(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -799,6 +846,14 @@ fn sync_particles(
             )
         } else if let Owner::Melee = g.owner {
             Some(drive.runtime.area.interaction.melee.particles(g.source))
+        } else if let Owner::Sky(id) = g.owner {
+            Some(
+                sky.planes()
+                    .iter()
+                    .find(|p| p.id == id)
+                    .and_then(|p| p.contrail.as_ref())
+                    .map_or(&[][..], |c| c.particles()),
+            )
         } else if splash {
             fluid.map(|f| f.splash())
         } else {
@@ -811,6 +866,11 @@ fn sync_particles(
         };
         g.order.clear();
         g.order.extend(0..count);
+        let origin = if let Owner::Sky(_) = g.owner {
+            sky_origin
+        } else {
+            origin
+        };
         let position = |i: usize| -> Vec3 {
             if let Some(p) = particles {
                 Vec3::from_array(std::array::from_fn(|j| {

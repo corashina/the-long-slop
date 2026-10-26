@@ -56,6 +56,9 @@ impl SensorLatch {
 pub const PORTABLE_RADIO_EMITTER: u32 = 0x5000_0000;
 /// Voice slots per world radio voice group.
 pub const PORTABLE_RADIO_SLOTS: usize = 4;
+/// Browser playback kind of voice 0 as an instance. Voice `id` plays as kind `VOICE_KIND + id`.
+/// Each instance is a separate loop, so several copies of one prefab voice play at once.
+pub const VOICE_KIND: u32 = 0x1_0000;
 pub fn source_gain_db(gain: f32) -> f32 {
     gain.clamp(0.001, 1.).ln() * 20.
 }
@@ -114,6 +117,16 @@ struct MechanismSound {
     remaining: f32,
     last_slide_time: f64,
 }
+/// One AudioSource of a sky prefab.
+struct SkyVoice {
+    prefab: usize,
+    voice: u32,
+    clip: u32,
+    gain: f32,
+    pitch: f32,
+    /// Emitter position relative to the prefab root.
+    local: rapier3d::math::Vector,
+}
 struct FluidSound {
     opening: crate::reference::OpeningId,
     index: usize,
@@ -142,6 +155,9 @@ pub struct AudioState {
     origin_shift: [f32; 3],
     voice_indices: HashMap<u32, usize>,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
+    sky_voices: Vec<SkyVoice>,
+    /// Voice instance loops of this step. A loop that is missing stops.
+    pub voice_loops: Vec<cars::CarSignal>,
     pub reference: AudioReference,
     pub session: u32,
     pub game_seconds: f64,
@@ -220,6 +236,8 @@ impl AudioState {
                 .map(|(i, v)| (v.id, i))
                 .collect(),
             emitter_anchors: HashMap::new(),
+            sky_voices: Vec::new(),
+            voice_loops: Vec::with_capacity(16),
             session,
             game_seconds: 0.,
             outside_gain: outside.initial_gain,
@@ -310,6 +328,32 @@ impl AudioState {
                 to_rapier(crate::interaction::items::node_pose(game, id).unwrap()).inverse() * world
             });
             self.emitter_anchors.insert(emitter.id, (node, local));
+        }
+        self.sky_voices.clear();
+        for (prefab, p) in game.sky.prefabs.iter().enumerate() {
+            for &id in &p.voices {
+                let voice = &self.reference.voices[self.voice_indices[&id]];
+                let Some(clip) = voice.clip else {
+                    continue;
+                };
+                let emitter = self
+                    .reference
+                    .emitters
+                    .iter()
+                    .find(|e| e.id == voice.emitter)
+                    .expect("validated sky emitter");
+                // The prefab root has an identity pose, so the node pose is relative to the root.
+                let pose = crate::interaction::items::node_pose(game, emitter.node)
+                    .expect("validated sky emitter node");
+                self.sky_voices.push(SkyVoice {
+                    prefab,
+                    voice: id,
+                    clip,
+                    gain: voice.gain,
+                    pitch: voice.pitch,
+                    local: rapier3d::math::Vector::from_array(pose.position),
+                });
+            }
         }
         self.lamp_controls = self
             .reference
@@ -477,6 +521,27 @@ impl AudioState {
             signal.playing = playing && !self.removed.contains(&signal.emitter);
             signal.gain = gain;
             signal.pitch = pitch;
+        }
+    }
+    /// Loops of the sky prefab voices, one instance per plane. `anchor` is absolute.
+    pub fn sky(&mut self, planes: &[crate::sky_traffic::Plane], anchor: [f64; 3]) {
+        self.voice_loops.clear();
+        for plane in planes {
+            for v in self.sky_voices.iter().filter(|v| v.prefab == plane.prefab) {
+                if self.voice_loops.len() == self.voice_loops.capacity() {
+                    return;
+                }
+                let p = plane.offset + plane.heading * v.local;
+                self.voice_loops.push(cars::CarSignal {
+                    kind: VOICE_KIND + v.voice,
+                    instance: plane.id,
+                    action: AudioAction::Update,
+                    clip: v.clip,
+                    gain: v.gain,
+                    pitch: v.pitch,
+                    position: std::array::from_fn(|i| anchor[i] + f64::from(p[i])),
+                });
+            }
         }
     }
     fn sample(&mut self) -> f32 {
@@ -753,6 +818,7 @@ impl AudioState {
     pub fn reset(&mut self, session: u32) {
         self.survival_events.clear();
         self.survival_loops.clear();
+        self.voice_loops.clear();
         self.sleep_radio_advanced = false;
         // Controls belong to the committed session (fresh or restored); playlists restart.
         self.broadcasts = crate::simulation::radio::RadioBroadcasts::new(

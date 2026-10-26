@@ -81,6 +81,7 @@ pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &Referenc
                     | AssetUsage::SkyPrototype
                     | AssetUsage::ItemPrototype
                     | AssetUsage::PlayerPrototype
+                    | AssetUsage::SkyTraffic
             )
         })
         .count();

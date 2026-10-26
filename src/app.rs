@@ -260,6 +260,7 @@ pub fn run(
                 (
                     presentation::spawned::sync,
                     presentation::player_body::sync,
+                    presentation::sky_traffic::sync,
                 )
                     .chain(),
                 sync_instruments,
@@ -302,6 +303,7 @@ fn setup(
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     commands.insert_resource(presentation::player_body::PlayerBody::default());
+    commands.insert_resource(presentation::sky_traffic::SkyTrafficVisuals::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {
@@ -1461,6 +1463,20 @@ fn publish_audio(
         );
     }
     audio.cars.events.clear();
+    for e in &audio.voice_loops {
+        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
+        game_audio_survival(
+            e.kind,
+            e.instance,
+            e.action as u32,
+            e.clip,
+            e.gain,
+            e.pitch,
+            p[0],
+            p[1],
+            p[2],
+        );
+    }
     while let Some(event) = audio.pop_event() {
         game_audio_event(
             event.session,

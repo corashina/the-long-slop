@@ -1635,6 +1635,16 @@ impl GarageRuntime {
     fn advance_sky(&mut self, reference: &ReferenceManifest, dt: f32) {
         self.sky
             .advance(&reference.sky, self.simulation_seconds, dt);
+        let anchor = self.sky_anchor(reference);
+        let origin = self.stream.origin.offset;
+        self.sky.advance_contrails(
+            dt,
+            std::array::from_fn(|i| origin[i] - anchor[i]),
+            &self.physics,
+        );
+        if let Some(audio) = &mut self.audio {
+            audio.sky(self.sky.planes(), anchor);
+        }
     }
 
     pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {

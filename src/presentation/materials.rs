@@ -452,6 +452,7 @@ pub fn load_materials(
                     | AssetUsage::FoodPrototype
                     | AssetUsage::ItemPrototype
                     | AssetUsage::PlayerPrototype
+                    | AssetUsage::SkyTraffic
             )
         })
         .map(|asset| asset.id)
