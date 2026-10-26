@@ -312,6 +312,9 @@ impl SpawnEvaluation<'_> {
                 self.set_active(parent, self.rules.node(self.reference, root)?.owner, true);
             }
         }
+        if let Some(tank) = optional(selected, "tank")? {
+            self.selector_fluid(parent, tank, fields(value(selected, "fluid")?)?)?;
+        }
         for child in array(f, "childs")? {
             self.refresh_selector(
                 parent,
@@ -319,6 +322,42 @@ impl SpawnEvaluation<'_> {
                 index,
                 depth + 1,
             )?;
+        }
+        Ok(())
+    }
+    /// Source `tipus.tank`: the variant replaces the tank fluids (Car06 start car diesel pick).
+    /// It runs after `RandomSpawned`, so it also replaces a random primary fluid.
+    fn selector_fluid(
+        &mut self,
+        parent: &Placement,
+        tank: &SourceId,
+        fluid: Fields<'_>,
+    ) -> Result<(), ReferenceError> {
+        let capacity = number(
+            fields(value(self.rules.get(self.reference, tank)?.fields, "F")?)?,
+            "maxC",
+        )?;
+        let mut entries = Vec::new();
+        for row in array(fluid, "fluids")? {
+            let row = fields(row)?;
+            let kind = integer(row, "type")?;
+            if !(0..6).contains(&kind) {
+                return Err(ReferenceError("Unsupported source fluid identity".into()));
+            }
+            entries.push(crate::fluids::FluidEntry {
+                fluid_type: kind as u8,
+                amount: number(row, "amount")?,
+            });
+        }
+        if !crate::fluids::validate_fluid_entries(&entries) {
+            return Err(ReferenceError("Invalid source fluid entries".into()));
+        }
+        let container = crate::fluids::FluidContainer::new(capacity, &entries);
+        if let Some(content) = self.output.iter_mut().find(|c| c.placement.id == parent.id) {
+            if content.fluid.is_some() && content.tanks.first().is_some_and(|(s, _)| s == tank) {
+                content.fluid = Some(container.clone());
+            }
+            content.tanks.push((tank.clone(), container));
         }
         Ok(())
     }
