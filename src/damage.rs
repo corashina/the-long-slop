@@ -1,8 +1,8 @@
 //! Source breakablescript damage rules and bound break targets.
 //! The rules are pure functions. `Breakables` holds the targets of active content.
-use crate::reference::{BreakableReference, ItemId, LightControlId, TriggerRole};
+use crate::reference::{BreakableReference, ItemId, LightControlId, SourceId, TriggerRole};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
-use crate::world::{GeneratedId, TriggerRoles};
+use crate::world::{GeneratedId, TriggerRoles, UnityRandom};
 use rapier3d::prelude::{QueryFilter, RigidBodyHandle};
 use std::collections::VecDeque;
 
@@ -102,13 +102,26 @@ pub struct BreakTarget {
 }
 
 /// Break targets of active content and the breaks of this step.
-#[derive(Default)]
 pub struct Breakables {
     targets: Vec<BreakTarget>,
     /// Lamp trigger colliders and their target.
     colliders: Vec<(ColliderHandle, usize)>,
     queue: VecDeque<usize>,
     scan: Option<[u64; 4]>,
+    /// UnityEngine.Random draws of breakablescript.Break.
+    random: UnityRandom,
+}
+
+impl Default for Breakables {
+    fn default() -> Self {
+        Self {
+            targets: Vec::new(),
+            colliders: Vec::new(),
+            queue: VecDeque::new(),
+            scan: None,
+            random: UnityRandom::new(0x6272_6b6c),
+        }
+    }
 }
 
 impl Breakables {
@@ -240,6 +253,14 @@ impl Breakables {
     pub fn take_break(&mut self) -> Option<usize> {
         self.queue.pop_front()
     }
+    /// Source Break: `clips[Random.Range(0, clips.Length)]`. No draw without clips.
+    pub fn pick_clip<'a>(&mut self, record: &'a BreakableReference) -> Option<&'a SourceId> {
+        if record.clips.is_empty() {
+            return None;
+        }
+        let index = self.random.range_int(0, record.clips.len() as i32);
+        record.clips.get(index as usize)
+    }
     /// Stores the binding scan. False when it did not change.
     pub(crate) fn rescan(&mut self, scan: [u64; 4]) -> bool {
         if self.scan == Some(scan) {
@@ -290,7 +311,6 @@ impl Breakables {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reference::SourceId;
 
     fn rules(health: f32) -> BreakableReference {
         BreakableReference {
@@ -460,5 +480,25 @@ mod tests {
             ..shot
         };
         assert!(!try_break_shoot(&no_shoot, &mut state, 100.));
+    }
+
+    #[test]
+    fn break_clip_draws_once_only_with_clips() {
+        let mut breakables = Breakables::default();
+        let mut expected = UnityRandom::new(0x6272_6b6c);
+        assert!(breakables.pick_clip(&rules(6.)).is_none());
+        // Vase (kocsog): three clips, one Random.Range(0, 3) per break.
+        let clip = |path_id| SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id,
+        };
+        let vase = BreakableReference {
+            clips: vec![clip(1), clip(2), clip(3)],
+            ..rules(5.)
+        };
+        for _ in 0..8 {
+            let index = expected.range_int(0, 3) as usize;
+            assert_eq!(breakables.pick_clip(&vase), Some(&vase.clips[index]));
+        }
     }
 }

@@ -1,11 +1,8 @@
 //! Source boxes: spawnInBoxScript content of generated boxes and its release on a box break.
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
-use crate::damage::BreakKind;
-use crate::interaction::items::{ItemLocation, ItemStore};
-use crate::interaction::storage::StorageLocks;
-use crate::reference::{ItemId, ReferenceError, ReferenceManifest, SourceId};
-use crate::vehicle::PhysicsWorld;
+use crate::interaction::items::ItemStore;
+use crate::reference::{ItemId, SourceId};
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
 use rapier3d::math::{Rotation, Vector};
 use serde::{Deserialize, Serialize};
@@ -146,40 +143,14 @@ impl WorldStream {
         });
         self.boxes.changes = Some(self.changes.revision());
     }
-    /// Next box that broke in `step_breakables`. Drop it from the hand before `break_box`.
-    /// Other breaks are dropped until break effects exist for them.
-    pub fn take_broken_box(&mut self, reference: &ReferenceManifest) -> Option<ItemId> {
-        let source = &reference.acquisition.r#box.breakable;
-        while let Some(target) = self.breakables.take_break() {
-            let target = &self.breakables.targets()[target];
-            if let BreakKind::Item(item) = target.kind
-                && &reference.breakables[target.record].source == source
-            {
-                return Some(item);
-            }
-        }
-        None
-    }
-    /// Source breakablescript.Break and mountStuff.Unstore: remove the box, release its content.
-    /// Items locked in the box unlock at their current pose first.
-    pub fn break_box(
-        &mut self,
-        item: ItemId,
-        items: &mut ItemStore,
-        storage: &mut StorageLocks,
-        physics: &mut PhysicsWorld,
-    ) -> Result<Option<BoxRelease>, ReferenceError> {
+    /// mountStuff.Unstore: a broken box releases its content at its current pose.
+    /// Run before `remove_broken_item`. A box releases once.
+    pub(super) fn break_box(&mut self, item: ItemId, items: &ItemStore) {
         let Some(state) = items.get(item) else {
-            return Ok(None);
-        };
-        if state.removed || state.location != ItemLocation::World {
-            return Ok(None);
-        }
-        let Some(body) = state.body else {
-            return Ok(None);
+            return;
         };
         let Some(content) = self.contents.active.iter().find(|c| c.item == Some(item)) else {
-            return Ok(None);
+            return;
         };
         let release = BoxRelease {
             id: content.content.placement.id.clone(),
@@ -190,10 +161,8 @@ impl WorldStream {
             },
         };
         if !self.contents.boxes.release(release.clone()) {
-            return Ok(None);
+            return;
         }
-        storage.unbind_owner(item, |_, _| false, items, physics)?;
-        self.changes.remove(items.object_key(item));
         let contents = &mut self.contents;
         for content in &mut contents.active {
             if contents
@@ -207,13 +176,6 @@ impl WorldStream {
                 );
             }
         }
-        physics.edit_body(body, |body| body.set_enabled(false));
-        physics.refresh_queries();
-        let state = items.get_mut(item).unwrap();
-        state.removed = true;
-        items.mark_dirty(item);
-        self.boxes.changes = Some(self.changes.revision());
-        Ok(Some(release))
     }
 }
 

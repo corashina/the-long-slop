@@ -365,7 +365,8 @@ class HitAudio(unittest.TestCase):
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
                 record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70), record('music_box', 14, True, [6], 128),
-                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6]), record('radio_click', 21, True, [6], 70)]}
+                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6]), record('radio_click', 21, True, [6], 70),
+                record('break', 22, True, [6], 85)]}
         validate_hit_audio(audio, set(range(1, 7)), [])
         for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14), (7, 'settings', {'priority': 100, 'spatial_blend': 1.})]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value

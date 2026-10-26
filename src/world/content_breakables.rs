@@ -1,9 +1,13 @@
-//! Binds source breakablescripts of active content to `damage::Breakables` targets and steps their hits.
+//! Binds source breakablescripts of active content to `damage::Breakables` targets, steps their hits
+//! and removes broken items.
 //! Items bind by their world prototype. Lamp triggers bind by their structure lamp control.
 use super::WorldStream;
 use crate::damage::BreakKind;
-use crate::interaction::items::ItemStore;
-use crate::reference::{BreakableOwnerKind, BreakableReference, ReferenceManifest, SourceId};
+use crate::interaction::items::{ItemLocation, ItemStore};
+use crate::interaction::storage::StorageLocks;
+use crate::reference::{
+    BreakableOwnerKind, BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId,
+};
 use crate::vehicle::PhysicsWorld;
 
 /// The node of the breakablescript in a world prototype.
@@ -33,6 +37,45 @@ impl WorldStream {
             |item| items.get(item).and_then(|s| s.body),
             dt,
         );
+    }
+    /// Next target that broke in `step_breakables`, in break order: its kind and record index.
+    pub fn take_break(&mut self) -> Option<(BreakKind, usize)> {
+        let target = self.breakables.take_break()?;
+        let target = &self.breakables.targets()[target];
+        Some((target.kind.clone(), target.record))
+    }
+    /// Source Break: one random clip of the record.
+    pub fn pick_break_clip<'a>(&mut self, record: &'a BreakableReference) -> Option<&'a SourceId> {
+        self.breakables.pick_clip(record)
+    }
+    /// Source Break destroys the item unless noDestroy. A box releases its content first.
+    /// Items locked in the item unlock at their current pose. The removal is saved.
+    pub fn remove_broken_item(
+        &mut self,
+        reference: &ReferenceManifest,
+        record: usize,
+        item: ItemId,
+        items: &mut ItemStore,
+        storage: &mut StorageLocks,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let Some(body) = items
+            .get(item)
+            .filter(|s| !s.removed && s.location == ItemLocation::World)
+            .and_then(|s| s.body)
+        else {
+            return Ok(());
+        };
+        if reference.breakables[record].source == reference.acquisition.r#box.breakable {
+            self.break_box(item, items);
+        }
+        storage.unbind_owner(item, |_, _| false, items, physics)?;
+        self.changes.remove(items.object_key(item));
+        physics.edit_body(body, |body| body.set_enabled(false));
+        physics.refresh_queries();
+        items.get_mut(item).expect("broken item").removed = true;
+        items.mark_dirty(item);
+        Ok(())
     }
     /// Rebinds targets on a content, item or lamp revision change only.
     fn refresh_breakables(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
