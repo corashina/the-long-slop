@@ -1352,8 +1352,10 @@ impl GarageRuntime {
         let car = driving
             .then(|| self.area.player.seat_vehicle())
             .flatten()
-            .and_then(|key| self.vehicles.get(key))
-            .map(|vehicle| vehicle.record(reference).key_steer_multiplier);
+            .and_then(|key| {
+                let record = self.vehicles.get(key)?.record(reference);
+                Some(record.key_steer(self.physics.snapshot(key).speed_mps * 3.6))
+            });
         let driving_output = self.driving_input.step(
             if driving {
                 self.area.player.seat_body()

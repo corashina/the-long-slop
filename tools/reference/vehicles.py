@@ -307,8 +307,6 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     if not cars:return None
     car_reader=cars[0];car=source.read(car_reader)
     check_collider_bakes(source,proto)
-    if car['speedBasedKeyboardSens']:
-        raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     rigidbody=source.resolve(car_reader,car['RB'])
     body=next((i for i,b in enumerate(bodies) if b['source']==source_id(rigidbody)),None) if rigidbody else None
     if body is None:raise ValueError(f'{key(car_reader)} chassis body outside the prototype')
@@ -359,6 +357,9 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
         # inputscript.DriveStuff uses the multiplier only when it is not zero.
         'key_steer_multiplier':car['keySteerSensMultiplier'],
+        # carscript.GetPlayerInput replaces the multiplier from the car speed each step.
+        'key_steer_speed':{'min_speed':car['keySensMinSpeed'],'max_speed':car['keySensMaxSpeed'],
+            'min_multiplier':car['keySensMinSens'],'max_multiplier':car['keySensMaxSens']} if car['speedBasedKeyboardSens'] else None,
         # Source carscript.ledOilTestTwoStrokeDefault: the oil LED follows the two-stroke mix.
         'oil_led_two_stroke':bool(car['ledOilTestTwoStrokeDefault']),
         'seats':seats,'pedals':pedal_record(source,proto,car_reader,car,wheels,seats),
