@@ -204,7 +204,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 if not value['m_Enabled'] and key(reader) not in retained_colliders:continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
-                    properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
+                    properties=source.read(material);friction=properties['dynamicFriction'];restitution=properties['bounciness']
                 body_id=body_for(node);owner=bodies[body_id-1]
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],

@@ -214,7 +214,7 @@ impl StructureRecipe {
                     Some(WorldValue::Integer(value)) => Ok(*value as f32),
                     _ => Err(ReferenceError(format!("Physical material field {name}"))),
                 };
-                (number("m_DynamicFriction")?, number("m_Bounciness")?)
+                (number("dynamicFriction")?, number("bounciness")?)
             } else {
                 (0.6, 0.0)
             };
