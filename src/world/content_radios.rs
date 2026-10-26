@@ -475,10 +475,7 @@ mod tests {
         assert_eq!(restored.capture_save(), controls);
         assert_eq!(restored.frequency(), state.frequency());
         // Another copy keeps the radioscript defaults.
-        let other = GeneratedId {
-            ordinal: 2,
-            ..car
-        };
+        let other = GeneratedId { ordinal: 2, ..car };
         assert!(saved_controls(&loaded, &other).is_none());
     }
 }

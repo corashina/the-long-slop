@@ -264,7 +264,10 @@ impl AudioState {
                 [0, 0],
             ),
             radio_frame: crate::simulation::radio::RadioFrame::default(),
-            portable_radio_slots: vec![[None; PORTABLE_RADIO_SLOTS]; reference.portable_radios.len()],
+            portable_radio_slots: vec![
+                [None; PORTABLE_RADIO_SLOTS];
+                reference.portable_radios.len()
+            ],
             collider_nodes: HashMap::new(),
             route_sensors: reference
                 .routes

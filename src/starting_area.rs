@@ -707,6 +707,8 @@ pub(crate) struct WorldCarParts {
     pub lights: Vec<crate::simulation::car_lights::CarLightLinks>,
     /// The item of the `carscript.InteractSwitchLights` usable.
     pub light_switch: Option<ItemId>,
+    /// Plate label texts in `WorldVehicleReference::plates` order.
+    pub plates: Vec<String>,
 }
 
 /// Car-side state of a car copy. The world change records keep it while the car is retired
@@ -756,6 +758,9 @@ pub struct VehicleRuntime {
     pub requested_headlights: u8,
     /// The item of the `carscript.InteractSwitchLights` usable of a world car.
     pub(crate) light_switch: Option<ItemId>,
+    /// Plate label texts of a world car, in `WorldVehicleReference::plates` order.
+    /// V03 bridge: old garage cars keep them in `StartingArea::plates`. Task 9 removes it.
+    pub plates: Vec<String>,
 }
 
 impl VehicleRuntime {
@@ -798,6 +803,7 @@ impl VehicleRuntime {
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: parts.light_switch,
+            plates: parts.plates,
         }
     }
     /// A hash of the state that the car copy presents: gauges, lamp materials and node
@@ -958,6 +964,7 @@ impl VehicleRuntime {
             powertrain: Powertrain::default(),
             requested_headlights: 0,
             light_switch: None,
+            plates: Vec::new(),
         })
     }
 }

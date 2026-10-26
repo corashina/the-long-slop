@@ -134,6 +134,18 @@ impl SourceInstances {
             .iter()
             .all(|i| !i.retirement.started() && i.ready && i.visible)
     }
+    /// Ready visible instances: root entity, placement, prototype index and node entities by
+    /// glTF node.
+    pub(crate) fn shown(&self) -> impl Iterator<Item = (Entity, &Placement, usize, &[Entity])> {
+        self.instances
+            .iter()
+            .filter(|i| i.ready && i.visible && !i.retirement.started())
+            .map(|i| (i.root, &i.placement, i.prototype, i.nodes.as_slice()))
+    }
+    /// Whether an instance with root entity `root` exists.
+    pub(crate) fn has_root(&self, root: Entity) -> bool {
+        self.instances.iter().any(|i| i.root == root)
+    }
     pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
         self.instances
             .iter()

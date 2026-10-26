@@ -85,6 +85,48 @@ def _material(source, reader, output):
                 z_test=int(value(p['m_State']['zTest'])),src_blend=int(value(p['m_State']['rtBlend0']['srcBlend'])),
                 dst_blend=int(value(p['m_State']['rtBlend0']['destBlend'])))} for p in passes]},next(r for r in receipts if r['source']['path_id']==366)
 
+def plate_layout(text_data, rect):
+    """TextMeshPro layout of a plate label. `rect` is its RectTransform."""
+    return {'bounds':[rect['m_SizeDelta'][k] for k in ('x','y')],'pivot':[rect['m_Pivot'][k] for k in ('x','y')],
+            'anchor_min':[rect['m_AnchorMin'][k] for k in ('x','y')],'anchor_max':[rect['m_AnchorMax'][k] for k in ('x','y')],
+            'font_size':text_data['m_fontSize'],'font_size_base':text_data['m_fontSizeBase'],
+            'font_size_min':text_data['m_fontSizeMin'],'font_size_max':text_data['m_fontSizeMax'],
+            'font_style':text_data['m_fontStyle'],'font_weight':text_data['m_fontWeight'],
+            'horizontal_alignment':text_data['m_HorizontalAlignment'],'vertical_alignment':text_data['m_VerticalAlignment'],
+            'auto_sizing':bool(text_data['m_enableAutoSizing']),'kerning':bool(text_data['m_enableKerning']),
+            'word_wrapping':bool(text_data['m_enableWordWrapping']),'extra_padding':bool(text_data['m_enableExtraPadding']),
+            'orthographic':bool(text_data['m_isOrthographic']),'rich_text':bool(text_data['m_isRichText']),
+            'overflow_mode':text_data['m_overflowMode'],'max_visible_descender':bool(text_data['m_useMaxVisibleDescender']),
+            'spacing':[text_data[k] for k in ('m_characterSpacing','m_wordSpacing','m_lineSpacing','m_paragraphSpacing')],
+            'margin':[text_data['m_margin'][k] for k in ('x','y','z','w')],
+            'color':[text_data['m_fontColor'][k] for k in ('r','g','b','a')],'transform':converted_transform(rect)}
+
+def prototype_plates(source, proto):
+    """rendszamscript labels of one car prototype. Node ids are prototype node indices.
+
+    `same_as` is the node of the linked label. The font and material must be the shared plate contract.
+    """
+    records=[]
+    for node,reader in proto.scripts('rendszamscript'):
+        data=source.read(reader)
+        text=_required(source,reader,data['text'],'text');text_data=source.read(text)
+        font=_required(source,text,text_data['m_fontAsset'],'m_fontAsset')
+        material=_required(source,text,text_data['m_sharedMaterial'],'m_sharedMaterial')
+        text_node=proto.node(text)
+        rect=source.read(proto.hierarchy[text_node]['reader'])
+        renderers=[c for c in proto.hierarchy[text_node]['components'] if c.type.name=='MeshRenderer']
+        if len(renderers)!=1:raise ValueError(f'{key(reader)} text: required renderer')
+        renderer=source.read(renderers[0])
+        same=source.resolve(reader,data['sameAsThis'])
+        records.append({'source':source_id(reader),'node':node,'text_node':text_node,
+            'same_as':proto.node(same) if same else None,'initial_text':data['S'],'initial_same':bool(data['same']),
+            'font_source':source_id(font),'material_source':source_id(material),
+            'sorting':[renderer['m_SortingLayer'],renderer['m_SortingOrder']],'layout':plate_layout(text_data,rect)})
+    nodes={r['node'] for r in records}
+    if len(nodes)!=len(records) or any(r['same_as'] is not None and r['same_as'] not in nodes-{r['node']} for r in records):
+        raise ValueError('Car plate same_as: invalid sharing')
+    return records
+
 def recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,output) -> dict:
     by_id={n['id']:n for n in nodes}
     found={r.path_id:(node,r) for node,g in components.items() for r in g.get('rendszamscript',[]) if key(r)[0]=='level1'}
@@ -119,19 +161,7 @@ def recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,out
             'dont_remove_attached_when_looking':bool(td['dontRemoveAttachedWhenLookingAtThis'])})
         same=source.resolve(reader,data['sameAsThis']);mass=component('massScript');md=source.read(mass)
         rb=source.resolve(pickup,pd['RB']);rbd=source.read(rb) if rb else None
-        layout={'bounds':[rect['m_SizeDelta'][k] for k in ('x','y')],'pivot':[rect['m_Pivot'][k] for k in ('x','y')],
-            'anchor_min':[rect['m_AnchorMin'][k] for k in ('x','y')],'anchor_max':[rect['m_AnchorMax'][k] for k in ('x','y')],
-            'font_size':text_data['m_fontSize'],'font_size_base':text_data['m_fontSizeBase'],
-            'font_size_min':text_data['m_fontSizeMin'],'font_size_max':text_data['m_fontSizeMax'],
-            'font_style':text_data['m_fontStyle'],'font_weight':text_data['m_fontWeight'],
-            'horizontal_alignment':text_data['m_HorizontalAlignment'],'vertical_alignment':text_data['m_VerticalAlignment'],
-            'auto_sizing':bool(text_data['m_enableAutoSizing']),'kerning':bool(text_data['m_enableKerning']),
-            'word_wrapping':bool(text_data['m_enableWordWrapping']),'extra_padding':bool(text_data['m_enableExtraPadding']),
-            'orthographic':bool(text_data['m_isOrthographic']),'rich_text':bool(text_data['m_isRichText']),
-            'overflow_mode':text_data['m_overflowMode'],'max_visible_descender':bool(text_data['m_useMaxVisibleDescender']),
-            'spacing':[text_data[k] for k in ('m_characterSpacing','m_wordSpacing','m_lineSpacing','m_paragraphSpacing')],
-            'margin':[text_data['m_margin'][k] for k in ('x','y','z','w')],
-            'color':[text_data['m_fontColor'][k] for k in ('r','g','b','a')],'transform':converted_transform(rect)}
+        layout=plate_layout(text_data,rect)
         records.append({'source':source_id(reader),'attachment_source':source_id(attachment),'pickup_source':source_id(pickup),
             'save_source':source_id(save),'text_source':source_id(text),'font_source':source_id(font),'material_source':source_id(material),
             'mass_source':source_id(mass),'item':item_nodes[node],'node':node,'text_node':text_node,

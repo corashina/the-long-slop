@@ -51,7 +51,29 @@ pub struct WorldVehicleReference {
     pub instruments: Option<InstrumentReference>,
     /// Indices of `headlight2` lamps in `instruments.lamps`.
     pub high_beams: Vec<u32>,
+    /// Source `rendszamscript` labels of the license plates.
+    pub plates: Vec<WorldPlateReference>,
     pub audio: Option<CarAudioReference>,
+}
+
+/// A license plate `rendszamscript` label. It uses the shared plate font and material.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPlateReference {
+    pub source: SourceId,
+    /// The plate node with the script.
+    pub node: u32,
+    /// The TextMeshPro node.
+    pub text_node: u32,
+    /// `sameAsThis`: the node of the label that copies this label's text.
+    pub same_as: Option<u32>,
+    pub initial_text: String,
+    pub initial_same: bool,
+    pub font_source: SourceId,
+    pub material_source: SourceId,
+    /// Text renderer sorting layer and order.
+    pub sorting: [i16; 2],
+    pub layout: PlateLayoutReference,
 }
 
 /// A road WheelCollider of `carscript` and its wheel slot.
@@ -415,6 +437,22 @@ impl WorldVehicleReference {
                 && finite(&self.gear_ratios)
                 && self.gear_free_run.len() == self.gear_ratios.len()
                 && self.driving.initial_gear < self.gear_ratios.len(),
+        )?;
+        check(
+            s,
+            "vehicle plates",
+            self.plates.iter().all(|p| {
+                b.node(p.node)
+                    && b.node(p.text_node)
+                    && p.layout.valid()
+                    && p.same_as.is_none_or(|n| {
+                        n != p.node && self.plates.iter().any(|other| other.node == n)
+                    })
+            }) && self
+                .plates
+                .iter()
+                .enumerate()
+                .all(|(i, p)| self.plates[..i].iter().all(|o| o.node != p.node)),
         )?;
         check(s, "vehicle wheels", !self.wheels.is_empty())?;
         for (i, w) in self.wheels.iter().enumerate() {
