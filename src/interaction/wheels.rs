@@ -1083,13 +1083,15 @@ impl WheelAssemblies {
     }
 
     /// Adds the wheel slots of world car `key`, one per wheel in wheel order.
-    /// `base_mass` is the chassis mass without wheel parts. Returns the slot ids.
+    /// `base_mass` is the chassis mass without wheel parts. `saved` replaces the slot rims.
+    /// Returns the slot ids.
     pub(crate) fn add_vehicle(
         &mut self,
         key: ObjectKey,
         owner: ItemId,
         base_mass: f32,
-        slots: Vec<WorldWheelSlot>,
+        slots: &[WorldWheelSlot],
+        saved: Option<Vec<Option<ObjectKey>>>,
         physics: &mut PhysicsWorld,
     ) -> Vec<WheelSlotId> {
         let vehicle = self.vehicles.len();
@@ -1101,7 +1103,12 @@ impl WheelAssemblies {
             last_mass: f32::NAN,
         });
         let mut ids = Vec::with_capacity(slots.len());
-        for (index, slot) in slots.into_iter().enumerate() {
+        let mut saved = saved.map(Vec::into_iter);
+        for (index, slot) in slots.iter().enumerate() {
+            let rim = match &mut saved {
+                Some(rims) => rims.next().flatten(),
+                None => slot.rim.clone(),
+            };
             let mut id = WORLD_SLOT_BASE;
             while self.slots.iter().any(|s| s.id.0 == id) {
                 id += 1;
@@ -1138,11 +1145,11 @@ impl WheelAssemblies {
                 vehicle,
                 index,
                 rim: None,
-                rim_key: slot.rim,
+                rim_key: rim,
                 empty_item: owner,
                 hub_to_mount: slot.hub_to_mount,
-                rim_main_types: slot.rim_main_types,
-                rim_types: slot.rim_types,
+                rim_main_types: slot.rim_main_types.clone(),
+                rim_types: slot.rim_types.clone(),
                 compatible,
                 last_support: None,
                 sensor: Some(sensor),
@@ -1152,13 +1159,18 @@ impl WheelAssemblies {
         ids
     }
 
-    /// Removes the slots of world car `key`. Returns the rim object of each wheel and the
-    /// slot ids. The mounted parts stay registered: the car content removes them.
+    /// Removes the slots and sensors of world car `key`. Returns the rim object of each wheel,
+    /// and the slot ids with their old sensors. The mounted parts stay registered: the car
+    /// content removes them.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn retire_vehicle(
         &mut self,
         key: &ObjectKey,
         physics: &mut PhysicsWorld,
-    ) -> Option<(Vec<Option<ObjectKey>>, Vec<WheelSlotId>)> {
+    ) -> Option<(
+        Vec<Option<ObjectKey>>,
+        Vec<(WheelSlotId, Option<ColliderHandle>)>,
+    )> {
         let vehicle = self.vehicles.iter().position(|v| &v.key == key)?;
         let mut rims = Vec::new();
         let mut ids = Vec::new();
@@ -1176,7 +1188,7 @@ impl WheelAssemblies {
                 rims.resize(slot.index + 1, None);
             }
             rims[slot.index] = slot.rim_key;
-            ids.push(slot.id);
+            ids.push((slot.id, slot.sensor));
         }
         self.vehicles.remove(vehicle);
         for slot in &mut self.slots {

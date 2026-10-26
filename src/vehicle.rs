@@ -467,6 +467,11 @@ impl PhysicsWorld {
         self.apply_center_of_mass(chassis);
     }
 
+    /// The parts on one wheel. `index` is local to the vehicle.
+    pub fn wheel_assembly(&self, key: &ObjectKey, index: usize) -> WheelAssembly {
+        self.vehicle(key).assemblies[index]
+    }
+
     /// Changes the parts on one wheel. `index` is local to the vehicle.
     pub fn set_wheel(&mut self, key: &ObjectKey, index: usize, assembly: WheelAssembly) {
         let vehicle = self.vehicles.get_mut(key).expect("Unknown vehicle");

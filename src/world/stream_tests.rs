@@ -1387,7 +1387,10 @@ fn replay_index_query_matches_old_order_and_exact_bounds() {
     let json = serde_json::to_value(&changes).unwrap();
     let mut fields: Vec<_> = json.as_object().unwrap().keys().collect();
     fields.sort();
-    assert_eq!(fields, ["engines", "radiators", "records", "vehicles"]);
+    assert_eq!(
+        fields,
+        ["engines", "radiators", "records", "vehicles", "wheel_slots"]
+    );
 }
 
 #[test]

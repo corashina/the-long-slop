@@ -662,7 +662,9 @@ impl WorldStream {
                         &reference.skid,
                         &self.contents.rules,
                         items,
+                        interaction,
                         physics,
+                        wheels,
                         vehicles,
                         powertrain,
                         &mut self.changes,
@@ -747,41 +749,60 @@ impl WorldStream {
                     interaction
                         .parts
                         .mount_mechanism(item, &mut interaction.mechanisms);
-                    if let Some(mut snapshot) =
-                        crate::world::changes::capture(item, items, interaction, physics, reference)
-                    {
-                        for owner in &mut self.contents.active {
-                            if owner.item == Some(item) {
-                                snapshot.lamp = owner.content.portable_lamp();
-                                owner.baseline = Some(snapshot);
-                                for binding in &mut owner.bindings {
-                                    binding.baseline = crate::world::changes::capture(
-                                        binding.item,
-                                        items,
-                                        interaction,
-                                        physics,
-                                        reference,
-                                    )
-                                    .unwrap();
-                                }
-                                owner.restored = false;
-                                break;
-                            }
-                            if let Some(binding) =
-                                owner.bindings.iter_mut().find(|b| b.item == item)
-                            {
-                                binding.baseline = snapshot;
-                                owner.restored = false;
-                                break;
-                            }
-                        }
-                    }
+                    self.rebaseline(item, reference, items, interaction, physics);
                     self.contents.active[content_index].slots[slot_index].initialized = true;
                 }
             }
         }
+        // World car wheel slots mount their rim when its item binds.
+        if wheels.install_pending(items, physics)? {
+            for (sensor, rim) in wheels.sensor_rims() {
+                interaction.bind_wheel_sensor(sensor, rim, physics);
+            }
+            for &item in wheels.last_installed() {
+                self.rebaseline(item, reference, items, interaction, physics);
+            }
+        }
         self.restore_content_changes(reference, items, interaction, physics, wheels)?;
         Ok(())
+    }
+    /// A slot part that mounted at binding: its owner content takes the mounted state as
+    /// its baseline.
+    fn rebaseline(
+        &mut self,
+        item: crate::reference::ItemId,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        interaction: &InteractionState,
+        physics: &PhysicsWorld,
+    ) {
+        if let Some(mut snapshot) =
+            crate::world::changes::capture(item, items, interaction, physics, reference)
+        {
+            for owner in &mut self.contents.active {
+                if owner.item == Some(item) {
+                    snapshot.lamp = owner.content.portable_lamp();
+                    owner.baseline = Some(snapshot);
+                    for binding in &mut owner.bindings {
+                        binding.baseline = crate::world::changes::capture(
+                            binding.item,
+                            items,
+                            interaction,
+                            physics,
+                            reference,
+                        )
+                        .unwrap();
+                    }
+                    owner.restored = false;
+                    break;
+                }
+                if let Some(binding) = owner.bindings.iter_mut().find(|b| b.item == item) {
+                    binding.baseline = snapshot;
+                    owner.restored = false;
+                    break;
+                }
+            }
+        }
     }
     fn restore_content_changes(
         &mut self,
@@ -1034,10 +1055,28 @@ impl WorldStream {
                             && owner.slots.iter().any(|s| s.slot == slot)
                     })
             };
+            // A world car slot rim may leave with its car or the car content that spawned it.
+            let local_owner = |item| {
+                local_item(item)
+                    || self.contents.active.iter().any(|owner| {
+                        let parent = &owner.content.placement.id;
+                        let child = &content.content.placement.id;
+                        parent.layer == child.layer
+                            && parent.generator == child.generator
+                            && parent.unit == child.unit
+                            && parent.ordinal == child.ordinal
+                            && child.children.len() > parent.children.len()
+                            && child.children.starts_with(&parent.children)
+                            && owner.item == Some(item)
+                    })
+            };
             let protected_location = |location| match location {
                 crate::interaction::items::ItemLocation::World => false,
                 crate::interaction::items::ItemLocation::Attached(owner) => !local_item(owner),
                 crate::interaction::items::ItemLocation::PartSlot(slot) => !local_slot(slot),
+                crate::interaction::items::ItemLocation::WheelSlot(slot) => {
+                    !wheels.slot_owner(slot).is_some_and(local_owner)
+                }
                 _ => true,
             };
             let mut protected = id
@@ -1102,8 +1141,10 @@ impl WorldStream {
             crate::world::content_vehicles::retire(
                 &content,
                 items,
+                interaction,
                 physics,
                 vehicles,
+                wheels,
                 powertrain,
                 &mut self.changes,
             );
@@ -1553,8 +1594,11 @@ pub(crate) fn restore_item(
     let slot = snapshot.attachment.as_ref().and_then(|a| a.slot.as_ref());
     let volume = snapshot.attachment.as_ref().and_then(|a| a.volume.as_ref());
     let target_slot = slot.and_then(|source| interaction.parts.resolve_slot(resolved, source));
+    // A world car slot mounts its rim from the car slot record.
+    let world_wheel = slot.and_then(|source| interaction.resolve_wheel_slot(resolved, source));
     if slot.is_some()
         && target_slot.is_none()
+        && world_wheel.is_none()
         && !slot.is_some_and(|source| reference.wheel_slots.iter().any(|s| &s.source == source))
     {
         return Ok(false);

@@ -89,6 +89,9 @@ pub struct ChangeRecords {
     /// V03 bridge: old garage cars use their bridge key. Task 9 removes it.
     #[serde(serialize_with = "pairs")]
     vehicles: BTreeMap<ObjectKey, crate::starting_area::VehicleState>,
+    /// The rim object of each wheel slot of car objects, in wheel order.
+    #[serde(serialize_with = "pairs")]
+    wheel_slots: BTreeMap<ObjectKey, Vec<Option<ObjectKey>>>,
     /// Source `enginescript` state of engine part objects.
     #[serde(serialize_with = "pairs")]
     engines: BTreeMap<ObjectKey, crate::save::EngineSnapshot>,
@@ -100,6 +103,7 @@ impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
         self.records == other.records
             && self.vehicles == other.vehicles
+            && self.wheel_slots == other.wheel_slots
             && self.engines == other.engines
             && self.radiators == other.radiators
     }
@@ -127,12 +131,14 @@ impl<'de> Deserialize<'de> for ChangeRecords {
         struct Envelope {
             records: Vec<(ObjectKey, ObjectChange)>,
             vehicles: Vec<(ObjectKey, crate::starting_area::VehicleState)>,
+            wheel_slots: Vec<(ObjectKey, Vec<Option<ObjectKey>>)>,
             engines: Vec<(ObjectKey, crate::save::EngineSnapshot)>,
             radiators: Vec<(ObjectKey, bool)>,
         }
         let envelope = Envelope::deserialize(deserializer)?;
         let mut result = Self {
             vehicles: unique(envelope.vehicles)?,
+            wheel_slots: unique(envelope.wheel_slots)?,
             engines: unique(envelope.engines)?,
             radiators: unique(envelope.radiators)?,
             ..Self::default()
@@ -154,6 +160,7 @@ impl ChangeRecords {
     pub(crate) fn generated_records(&self) -> Self {
         let mut result = Self {
             vehicles: self.vehicles.clone(),
+            wheel_slots: self.wheel_slots.clone(),
             engines: self.engines.clone(),
             radiators: self.radiators.clone(),
             ..Self::default()
@@ -483,6 +490,13 @@ impl ChangeRecords {
     ) -> impl Iterator<Item = (&ObjectKey, &crate::starting_area::VehicleState)> {
         self.vehicles.iter()
     }
+    /// Keeps the rim object of each wheel slot of car `key` until it spawns again.
+    pub(crate) fn keep_wheel_slots(&mut self, key: ObjectKey, rims: Vec<Option<ObjectKey>>) {
+        self.wheel_slots.insert(key, rims);
+    }
+    pub(crate) fn take_wheel_slots(&mut self, key: &ObjectKey) -> Option<Vec<Option<ObjectKey>>> {
+        self.wheel_slots.remove(key)
+    }
     /// Keeps the state of engine part `key` until it spawns again.
     pub(crate) fn keep_engine(&mut self, key: ObjectKey, state: crate::save::EngineSnapshot) {
         self.engines.insert(key, state);
@@ -509,6 +523,15 @@ impl ChangeRecords {
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + object_states_bytes(&self.vehicles)
+            + object_states_bytes(&self.wheel_slots)
+            + self
+                .wheel_slots
+                .values()
+                .map(|rims| {
+                    rims.capacity() * std::mem::size_of::<Option<ObjectKey>>()
+                        + rims.iter().flatten().map(key_heap).sum::<usize>()
+                })
+                .sum::<usize>()
             + object_states_bytes(&self.engines)
             + self
                 .engines

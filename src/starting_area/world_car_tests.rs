@@ -79,11 +79,16 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
                 doors: Vec::new(),
             }],
             light_switch: Some(SWITCH),
+            owner: ItemId(1),
+            wheel_slots: &[],
+            wheel_part_mass: 0.,
         },
         &prototype,
         &crate::wheel_effects::tests::skid(),
         &mut physics,
         &mut vehicles,
+        &mut crate::interaction::wheels::WheelAssemblies::default(),
+        &mut crate::interaction::items::ItemStore::from_states(Vec::new()),
         &mut ChangeRecords::default(),
     )
     .unwrap();
@@ -199,11 +204,16 @@ fn light_switch_click_toggles_world_car_headlights() {
                 doors: Vec::new(),
             }],
             light_switch: Some(SWITCH),
+            owner: ItemId(1),
+            wheel_slots: &[],
+            wheel_part_mass: 0.,
         },
         &prototype,
         &crate::wheel_effects::tests::skid(),
         &mut physics,
         &mut vehicles,
+        &mut crate::interaction::wheels::WheelAssemblies::default(),
+        &mut crate::interaction::items::ItemStore::from_states(Vec::new()),
         &mut ChangeRecords::default(),
     )
     .unwrap();

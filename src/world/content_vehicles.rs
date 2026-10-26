@@ -1,6 +1,9 @@
 //! Car prototypes and engine parts of spawned world contents.
-//! A car copy is a vehicle body, a car runtime and the engine and radiator parts on it.
+//! A car copy is a vehicle body, a car runtime, its wheel slots and the engine and radiator
+//! parts on it.
+use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
+use crate::interaction::wheels::{WheelAssemblies, WorldWheelSlot};
 use crate::reference::{
     Bounds, EnginePartReference, ItemId, RadiatorPartReference, ReferenceError,
     WorldPrototypeReference, WorldReference,
@@ -11,7 +14,7 @@ use crate::starting_area::VehicleRuntime;
 use crate::vehicle::PhysicsWorld;
 use crate::world::changes::ChangeRecords;
 use crate::world::contents::ContentInstance;
-use crate::world::spawn_rules::{SourceRules, number};
+use crate::world::spawn_rules::{SourceRules, number, optional, texts};
 use crate::world::{ObjectKey, StructureInstance};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::BTreeMap;
@@ -26,8 +29,10 @@ pub(super) fn bind(
     world: &WorldReference,
     skid: &crate::reference::SkidReference,
     rules: &SourceRules,
-    items: &ItemStore,
+    items: &mut ItemStore,
+    interaction: &mut InteractionState,
     physics: &mut PhysicsWorld,
+    wheels: &mut WheelAssemblies,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
     powertrain: &mut PowertrainParts,
     changes: &mut ChangeRecords,
@@ -96,9 +101,12 @@ pub(super) fn bind(
             })
             .collect::<Result<Vec<_>, ReferenceError>>()?;
         let electronics = electronics_of(record.electronics)?;
-        spawn(
+        let (slot_sources, wheel_slots) = wheel_slots(content, prototype, world, rules, items)?;
+        let owner = content.item.unwrap();
+        let key = ObjectKey::Generated(content.content.placement.id.clone());
+        let ids = spawn(
             CarCopy {
-                key: ObjectKey::Generated(content.content.placement.id.clone()),
+                key: key.clone(),
                 prototype: index,
                 chassis,
                 colliders: &colliders,
@@ -115,13 +123,29 @@ pub(super) fn bind(
                     .light_switch
                     .as_ref()
                     .and_then(|s| node_item(s.usable)),
+                owner,
+                wheel_slots: &wheel_slots,
+                // The record mass holds the wheel parts of the prototype.
+                wheel_part_mass: content
+                    .bindings
+                    .iter()
+                    .filter_map(|b| wheels.part_mass(b.item))
+                    .sum(),
             },
             prototype,
             skid,
             physics,
             vehicles,
+            wheels,
+            items,
             changes,
         )?;
+        for ((id, source), slot) in ids.into_iter().zip(slot_sources).zip(&wheel_slots) {
+            interaction.register_wheel_slot(id, owner, source, slot, wheels.rules());
+        }
+        for (sensor, rim) in wheels.sensor_rims() {
+            interaction.bind_wheel_sensor(sensor, rim, physics);
+        }
     }
     for record in &prototype.engines {
         // A random part rule can leave the engine node without an item.
@@ -139,6 +163,69 @@ pub(super) fn bind(
         register_radiator(item, record, coolant_tank, items, powertrain, changes);
     }
     Ok(())
+}
+
+/// The source slot and the wheel slot of each record wheel. The slot rim is the prototype
+/// part: the selected embedded part, or the part that the slot spawns.
+fn wheel_slots(
+    content: &ContentInstance,
+    prototype: &WorldPrototypeReference,
+    world: &WorldReference,
+    rules: &SourceRules,
+    items: &ItemStore,
+) -> Result<(Vec<crate::reference::SourceId>, Vec<WorldWheelSlot>), ReferenceError> {
+    use rapier3d::math::{Pose, Vector};
+    let record = prototype.vehicle.as_ref().unwrap();
+    let body = &prototype.bodies[record.body as usize];
+    let to_chassis = crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+        position: body.pose.translation,
+        rotation: body.pose.rotation,
+    })
+    .inverse();
+    let id = &content.content.placement.id;
+    let mut sources = Vec::with_capacity(record.wheels.len());
+    let mut slots = Vec::with_capacity(record.wheels.len());
+    for wheel in &record.wheels {
+        let node = &prototype.nodes[wheel.slot as usize];
+        let slot = rules
+            .component(world, &node.source, "partslotscript")?
+            .ok_or_else(|| ReferenceError("Car wheel slot has no partslotscript".into()))?;
+        let f = slot.fields;
+        let part = content
+            .content
+            .inputs
+            .slot_parts
+            .iter()
+            .find(|(parent, s, _)| parent == id && s == slot.source)
+            .map(|v| &v.2)
+            .or(optional(f, "part")?);
+        let rim = if let Some(part) = part {
+            content
+                .bindings
+                .iter()
+                .find(|b| &b.source == part)
+                .map(|b| items.object_key(b.item))
+        } else {
+            let mut child = id.clone();
+            child.children.push((slot.source.clone(), 0));
+            Some(ObjectKey::Generated(child))
+        };
+        let collider = &wheel.collider;
+        let connection = (to_chassis * prototype.root_relative(wheel.node as usize).0)
+            * Vector::from_array(collider.center);
+        let rest = collider.suspension_distance * (1.0 - collider.target_position);
+        let hub = Pose::from_translation(connection - Vector::Y * rest);
+        let mount = to_chassis * prototype.root_relative(wheel.mount as usize).0;
+        sources.push(slot.source.clone());
+        slots.push(WorldWheelSlot {
+            rim_main_types: texts(f, "maintipus")?,
+            rim_types: texts(f, "tipus")?,
+            hub_to_mount: hub.inverse() * mount,
+            sensor_radius: collider.radius,
+            rim,
+        });
+    }
+    Ok((sources, slots))
 }
 
 /// Registers the engine part of `item` with its kept state.
@@ -215,17 +302,27 @@ pub(crate) struct CarCopy<'a> {
     pub lights: Vec<CarLightLinks>,
     /// The item of the `carscript.InteractSwitchLights` usable.
     pub light_switch: Option<ItemId>,
+    /// The car root item.
+    pub owner: ItemId,
+    /// One slot per record wheel, in wheel order.
+    pub wheel_slots: &'a [WorldWheelSlot],
+    /// Mass of the prototype wheel parts. The record mass holds it.
+    pub wheel_part_mass: f32,
 }
 
-/// Makes the chassis a vehicle and adds its car runtime with the retired state of its key.
+/// Makes the chassis a vehicle and adds its car runtime and wheel slots with the retired
+/// state of its key. Mounts the slot rims that are bound. Returns the wheel slot ids.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn(
     copy: CarCopy,
     prototype: &WorldPrototypeReference,
     skid: &crate::reference::SkidReference,
     physics: &mut PhysicsWorld,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
+    wheels: &mut WheelAssemblies,
+    items: &mut ItemStore,
     changes: &mut ChangeRecords,
-) -> Result<(), ReferenceError> {
+) -> Result<Vec<crate::reference::WheelSlotId>, ReferenceError> {
     let record = prototype
         .vehicle
         .as_ref()
@@ -255,8 +352,26 @@ pub(crate) fn spawn(
         }
         runtime.restore(&state);
     }
-    vehicles.insert(key, runtime);
-    Ok(())
+    let saved = changes.take_wheel_slots(&key);
+    if saved
+        .as_ref()
+        .is_some_and(|rims| rims.len() != copy.wheel_slots.len())
+    {
+        return Err(ReferenceError("Saved car wheel count differs".into()));
+    }
+    vehicles.insert(key.clone(), runtime);
+    let ids = wheels.add_vehicle(
+        key,
+        copy.owner,
+        record.mass_kg - copy.wheel_part_mass,
+        copy.wheel_slots,
+        saved,
+        physics,
+    );
+    wheels.install_pending(items, physics)?;
+    // Empty slots sit on the hub from the first step.
+    wheels.sync(items, physics)?;
+    Ok(ids)
 }
 
 /// Enabled solid chassis colliders in the chassis frame.
@@ -285,11 +400,14 @@ fn chassis_bounds(physics: &PhysicsWorld, colliders: &[ColliderHandle]) -> Bound
 
 /// Keeps the state of a retiring content in the world change records and removes its car
 /// and its engine and radiator parts. Call before its items unload.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn retire(
     content: &ContentInstance,
     items: &ItemStore,
+    interaction: &mut InteractionState,
     physics: &mut PhysicsWorld,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
+    wheels: &mut WheelAssemblies,
     powertrain: &mut PowertrainParts,
     changes: &mut ChangeRecords,
 ) {
@@ -303,7 +421,9 @@ pub(super) fn retire(
     if content.item.is_some() {
         let key = ObjectKey::Generated(content.content.placement.id.clone());
         if vehicles.contains_key(&key) {
-            retire_vehicle(&key, physics, vehicles, changes);
+            for (id, sensor) in retire_vehicle(&key, physics, vehicles, wheels, changes) {
+                interaction.remove_wheel_slot(id, sensor);
+            }
         }
     }
 }
@@ -324,17 +444,29 @@ pub(crate) fn retire_parts(
     powertrain.remove(item);
 }
 
-/// Keeps the car-side state of car `key` and removes its runtime and vehicle body data.
+/// Keeps the car-side state of car `key` and removes its runtime, wheel slots and vehicle
+/// body data. Returns the removed slots and their sensors.
 pub(crate) fn retire_vehicle(
     key: &ObjectKey,
     physics: &mut PhysicsWorld,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
+    wheels: &mut WheelAssemblies,
     changes: &mut ChangeRecords,
-) {
+) -> Vec<(
+    crate::reference::WheelSlotId,
+    Option<rapier3d::prelude::ColliderHandle>,
+)> {
     if let Some(runtime) = vehicles.remove(key) {
         changes.keep_vehicle(key.clone(), runtime.state());
     }
+    let slots = wheels
+        .retire_vehicle(key, physics)
+        .map_or(Vec::new(), |(rims, slots)| {
+            changes.keep_wheel_slots(key.clone(), rims);
+            slots
+        });
     physics.remove_vehicle(key);
+    slots
 }
 
 #[cfg(test)]
@@ -350,13 +482,17 @@ mod tests {
     const START: [f64; 3] = [0., 0.5, 0.];
 
     /// One car copy as the world binder spawns it: instance body, root item with the
-    /// spawn fuel, then the car. Returns the root item.
+    /// spawn fuel, then the car and its wheel slots. Returns the root item.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_copy(
         id: &GeneratedId,
         prototype: &WorldPrototypeReference,
         physics: &mut PhysicsWorld,
         items: &mut ItemStore,
         vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
+        wheels: &mut WheelAssemblies,
+        wheel_slots: &[WorldWheelSlot],
+        wheel_part_mass: f32,
         changes: &mut ChangeRecords,
     ) -> ItemId {
         let pose = AbsolutePose {
@@ -392,11 +528,16 @@ mod tests {
                 electronics: None,
                 lights: Vec::new(),
                 light_switch: None,
+                owner: item,
+                wheel_slots,
+                wheel_part_mass,
             },
             prototype,
             &crate::wheel_effects::tests::skid(),
             physics,
             vehicles,
+            wheels,
+            items,
             changes,
         )
         .unwrap();
@@ -434,6 +575,9 @@ mod tests {
             &mut physics,
             &mut items,
             &mut vehicles,
+            &mut WheelAssemblies::default(),
+            &[],
+            0.,
             &mut changes,
         );
         assert_eq!(vehicles[&key].fuel_tank, Some(item));
@@ -474,7 +618,13 @@ mod tests {
         let body = items.get(item).unwrap().body.unwrap();
         let mut snapshot = items.generated_snapshot(item, None).unwrap();
         snapshot.linear_velocity = physics.rapier().bodies[body].linvel().to_array();
-        retire_vehicle(&key, &mut physics, &mut vehicles, &mut changes);
+        retire_vehicle(
+            &key,
+            &mut physics,
+            &mut vehicles,
+            &mut WheelAssemblies::default(),
+            &mut changes,
+        );
         assert!(vehicles.is_empty());
         assert_eq!(physics.vehicle_count(), 0);
         items.set_body(item, None);
@@ -488,6 +638,9 @@ mod tests {
             &mut physics,
             &mut items,
             &mut vehicles,
+            &mut WheelAssemblies::default(),
+            &[],
+            0.,
             &mut changes,
         );
         assert_eq!(fuel(&items, item), 40., "spawn fuel before the record");
@@ -562,6 +715,9 @@ mod tests {
                 &mut physics,
                 &mut items,
                 &mut vehicles,
+                &mut WheelAssemblies::default(),
+                &[],
+                0.,
                 changes,
             );
             let pose = AbsolutePose {
@@ -627,5 +783,222 @@ mod tests {
         assert!(powertrain.radiator(part).unwrap().fan_on);
         // Each object took its state back.
         assert!(loaded.vehicle(&key).is_none() && loaded.engine(&engine_key).is_none());
+    }
+    /// A rim with a tire, as generated wheel parts on their own bodies. Returns the rim.
+    fn wheel(
+        car: &GeneratedId,
+        prototype: &WorldPrototypeReference,
+        physics: &mut PhysicsWorld,
+        items: &mut ItemStore,
+        wheels: &mut WheelAssemblies,
+    ) -> ItemId {
+        use crate::reference::{ColliderId, WheelPartReference};
+        let part = |n: i64, physics: &mut PhysicsWorld, items: &mut ItemStore| {
+            let mut id = car.clone();
+            id.children.push((
+                SourceId {
+                    file: "a".into(),
+                    path_id: n,
+                },
+                0,
+            ));
+            let pose = AbsolutePose {
+                position: [3., 0.5, 0.],
+                rotation: [0., 0., 0., 1.],
+            };
+            let (body, collider) = physics.insert(
+                RigidBodyBuilder::dynamic().translation(rapier3d::math::Vector::new(3., 0.5, 0.)),
+                ColliderBuilder::ball(0.3),
+            );
+            let item = items.insert_generated(id, prototype, pose).unwrap();
+            items.set_body(item, Some(body));
+            (item, collider)
+        };
+        let rule = |item, types: &str, radius| WheelPartReference {
+            cover_slot: None,
+            item,
+            source: SourceId {
+                file: "a".into(),
+                path_id: item.0 as i64,
+            },
+            radius,
+            main_types: Vec::new(),
+            part_types: vec![types.into()],
+            colliders: Vec::new(),
+            tire_slot_anchor: None,
+            tire_mount: None,
+            tire_main_types: Vec::new(),
+            tire_types: vec!["gumi".into()],
+            local_rotation_after_mount: [0., 0., 0., 1.],
+        };
+        let (rim, rim_collider) = part(40, physics, items);
+        let (tire, tire_collider) = part(41, physics, items);
+        let mut rim_rule = rule(rim, "felni", 0.25);
+        rim_rule.tire_mount = Some(crate::reference::Transform {
+            translation: [0.; 3],
+            rotation: [0., 0., 0., 1.],
+            scale: [1.; 3],
+        });
+        for (rule, rim, mass, collider) in [
+            (rim_rule, true, 10., rim_collider),
+            (rule(tire, "gumi", 0.35), false, 15., tire_collider),
+        ] {
+            wheels
+                .register_generated(
+                    rule,
+                    rim,
+                    mass,
+                    &[(ColliderId(0), collider)],
+                    items,
+                    physics,
+                )
+                .unwrap();
+        }
+        wheels.assemble(rim, tire, items, physics).unwrap();
+        rim
+    }
+
+    #[test]
+    fn world_car_wheel_slot_removes_refits_and_saves_its_rim() {
+        use crate::vehicle::WheelAssembly;
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Saved {
+            #[serde(with = "crate::save::identity::lossless")]
+            changes: ChangeRecords,
+        }
+        let prototype = crate::vehicle::car_prototype_fixture();
+        let car = GeneratedId {
+            layer: WorldLayer::Prop,
+            generator: SourceId {
+                file: "a".into(),
+                path_id: 2,
+            },
+            unit: [0, 0],
+            ordinal: 7,
+            children: Vec::new(),
+        };
+        let key = ObjectKey::Generated(car.clone());
+        struct Session {
+            physics: PhysicsWorld,
+            items: ItemStore,
+            wheels: WheelAssemblies,
+            vehicles: BTreeMap<ObjectKey, VehicleRuntime>,
+            rim: ItemId,
+            root: ItemId,
+        }
+        // One session: the prototype rim of wheel 0, then the car. Wheels 1 to 3 have no rim.
+        let run = |changes: &mut ChangeRecords| {
+            let mut physics = PhysicsWorld::empty(1, 2);
+            physics.insert_box([0., -0.5, 0.], [500., 0.5, 500.]);
+            let mut items = ItemStore::from_states(Vec::new());
+            let mut wheels = WheelAssemblies::default();
+            let mut vehicles = BTreeMap::new();
+            let rim = wheel(&car, &prototype, &mut physics, &mut items, &mut wheels);
+            let slots: Vec<_> = (0..4)
+                .map(|i| WorldWheelSlot {
+                    rim_main_types: Vec::new(),
+                    rim_types: vec!["felni".into()],
+                    hub_to_mount: rapier3d::math::Pose::IDENTITY,
+                    sensor_radius: 0.3,
+                    rim: (i == 0).then(|| items.object_key(rim)),
+                })
+                .collect();
+            let root = spawn_copy(
+                &car,
+                &prototype,
+                &mut physics,
+                &mut items,
+                &mut vehicles,
+                &mut wheels,
+                &slots,
+                25.,
+                changes,
+            );
+            Session {
+                physics,
+                items,
+                wheels,
+                vehicles,
+                rim,
+                root,
+            }
+        };
+        let tire = |s: &Session| s.physics.wheel_assembly(&key, 0);
+        let mass = |s: &Session| s.physics.rapier().bodies[s.physics.chassis_handle(&key)].mass();
+        let save = |s: &Session, mut changes: ChangeRecords| {
+            for (key, rims) in s.wheels.world_slots() {
+                changes.keep_wheel_slots(key.clone(), rims);
+            }
+            let json = serde_json::to_vec(&Saved { changes }).unwrap();
+            serde_json::from_slice::<Saved>(&json).unwrap().changes
+        };
+
+        let mut changes = ChangeRecords::default();
+        let mut s = run(&mut changes);
+        assert_eq!(
+            tire(&s),
+            WheelAssembly::Tire {
+                radius_m: 0.35,
+                mass_kg: 25.,
+                quality: 1.
+            }
+        );
+        assert_eq!(s.physics.wheel_assembly(&key, 1), WheelAssembly::Hub);
+        assert_eq!(
+            s.items.get(s.rim).unwrap().body,
+            Some(s.physics.chassis_handle(&key))
+        );
+        assert!((mass(&s) - 820.).abs() < 1e-3, "{}", mass(&s));
+
+        // Remove: the car sits on the hub and loses the wheel mass.
+        let slot = s.wheels.slot_for_item(s.rim).unwrap();
+        assert_eq!(s.wheels.slot_owner(slot), Some(s.root));
+        s.wheels.remove(slot, &mut s.items, &mut s.physics).unwrap();
+        assert_eq!(tire(&s), WheelAssembly::Hub);
+        assert!((mass(&s) - 795.).abs() < 1e-3, "{}", mass(&s));
+        assert_ne!(
+            s.items.get(s.rim).unwrap().body,
+            Some(s.physics.chassis_handle(&key))
+        );
+
+        // Refit rim and tire: the car drives on the tire.
+        s.wheels
+            .install(s.rim, slot, &mut s.items, &mut s.physics)
+            .unwrap();
+        assert!(matches!(tire(&s), WheelAssembly::Tire { .. }));
+        assert!((mass(&s) - 820.).abs() < 1e-3);
+
+        // Save and load: the slot keeps its rim.
+        let mut loaded = save(&s, ChangeRecords::default());
+        let mut s = run(&mut loaded);
+        assert!(matches!(tire(&s), WheelAssembly::Tire { .. }));
+        assert!(
+            loaded.take_wheel_slots(&key).is_none(),
+            "the car took its record"
+        );
+
+        // Remove, save and load: the slot stays empty, the prototype rim stays loose.
+        let slot = s.wheels.slot_for_item(s.rim).unwrap();
+        s.wheels.remove(slot, &mut s.items, &mut s.physics).unwrap();
+        let mut loaded = save(&s, ChangeRecords::default());
+        let s = run(&mut loaded);
+        assert_eq!(tire(&s), WheelAssembly::Hub);
+        assert_eq!(
+            s.items.get(s.rim).unwrap().location,
+            crate::interaction::items::ItemLocation::World
+        );
+        assert!((mass(&s) - 795.).abs() < 1e-3);
+
+        // Retire: the change records keep the slot rims for the respawn.
+        let mut s = s;
+        let mut changes = ChangeRecords::default();
+        retire_vehicle(
+            &key,
+            &mut s.physics,
+            &mut s.vehicles,
+            &mut s.wheels,
+            &mut changes,
+        );
+        assert_eq!(changes.take_wheel_slots(&key), Some(vec![None; 4]));
     }
 }

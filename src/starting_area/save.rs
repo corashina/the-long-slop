@@ -635,7 +635,8 @@ impl GarageRuntime {
     }
 }
 impl GarageRuntime {
-    /// Writes the state of every live car and engine and radiator part into `changes`.
+    /// Writes the state of every live car, its wheel slots and every engine and radiator part
+    /// into `changes`.
     fn keep_object_states(&self, changes: &mut crate::world::ChangeRecords) {
         for (key, vehicle) in &self.vehicles {
             let mut state = vehicle.state();
@@ -645,6 +646,9 @@ impl GarageRuntime {
                 state.requested_headlights = self.lighting.headlights(index);
             }
             changes.keep_vehicle(key.clone(), state);
+        }
+        for (key, rims) in self.wheels.world_slots() {
+            changes.keep_wheel_slots(key.clone(), rims);
         }
         for part in self.powertrain.engines() {
             changes.keep_engine(
