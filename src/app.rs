@@ -536,6 +536,7 @@ fn read_input(
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     let runtime = &drive.runtime;
     let assists = runtime.driving_assists;
+    let controls = runtime.driving_input.controls;
     game_driving_state(
         runtime
             .vehicle
@@ -543,6 +544,11 @@ fn read_input(
             .map_or(0, |key| runtime.vehicles[key].drivetrain.gear() as i32 - 1),
         assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
         runtime.area.player.driving(),
+        controls.steer,
+        controls.throttle,
+        controls.brake,
+        controls.clutch,
+        controls.handbrake,
     );
     let actions = game_actions();
     let held = game_keys();
@@ -617,6 +623,8 @@ fn read_input(
         }
         drive.frame_input.clear();
         drive.runtime.clear_input();
+        // The Controls screen shows the pad axes while the game is paused.
+        drive.runtime.driving_input.preview(&frame.gamepad);
         return;
     }
     if actions & 22 != 0 {

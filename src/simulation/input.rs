@@ -235,6 +235,8 @@ pub struct DrivingInput {
     /// Bound buttons held at the last step, as keys bits.
     buttons: u32,
     pub settings: DrivingSettings,
+    /// The last step or preview controls, for the Controls screen live values.
+    pub controls: DrivingControls,
 }
 
 impl DrivingInput {
@@ -249,6 +251,7 @@ impl DrivingInput {
             mouse: [0.; 2],
             buttons: 0,
             settings,
+            controls: DrivingControls::default(),
         }
     }
 
@@ -257,6 +260,35 @@ impl DrivingInput {
         self.mouse = [0.; 2];
         self.seat = None;
         self.car = false;
+        self.controls = DrivingControls::default();
+    }
+
+    /// Pad axes only, without a seat, for the live values while the game is paused.
+    pub fn preview(&mut self, gamepad: &GamepadFrame) {
+        let mut controls = DrivingControls::default();
+        self.add_axes(&mut controls, gamepad);
+        self.controls = controls;
+    }
+
+    /// Source `DriveStuff` axes on top of the keyboard values. The handbrake is the axis only.
+    fn add_axes(&self, controls: &mut DrivingControls, gamepad: &GamepadFrame) {
+        let axes = &self.settings.axes;
+        if let Some(axis) = axes[STEER].read(gamepad) {
+            // Source steer is positive right.
+            controls.steer = (controls.steer - axes[STEER].steer(axis)).clamp(-1., 1.);
+        }
+        for (value, index) in [
+            (&mut controls.throttle, GAS),
+            (&mut controls.brake, BRAKE),
+            (&mut controls.clutch, CLUTCH),
+        ] {
+            if let Some(axis) = axes[index].read(gamepad) {
+                *value = (axes[index].pedal(axis) + *value).clamp(0., 1.);
+            }
+        }
+        controls.handbrake = axes[HANDBRAKE]
+            .read(gamepad)
+            .map_or(0., |axis| axes[HANDBRAKE].pedal(axis));
     }
 
     pub fn toggle_mouse(&mut self) {
@@ -273,6 +305,18 @@ impl DrivingInput {
     /// None on an item seat: no multiplier, no mouse driving and no gear requests.
     /// `automatic_gears` is source `BAutoShift`, which clears all gear requests.
     pub fn step(
+        &mut self,
+        seat: Option<RigidBodyHandle>,
+        input: &FrameInput,
+        car: Option<f32>,
+        automatic_gears: bool,
+    ) -> DrivingOutput {
+        let output = self.output(seat, input, car, automatic_gears);
+        self.controls = output.controls;
+        output
+    }
+
+    fn output(
         &mut self,
         seat: Option<RigidBodyHandle>,
         input: &FrameInput,
@@ -315,25 +359,8 @@ impl DrivingInput {
         ] {
             ramp(value, (held & bit != 0) as u8 as f32, self.pedal_increment);
         }
-        let axes = &self.settings.axes;
         let mut controls = self.keyboard;
-        if let Some(axis) = axes[STEER].read(gamepad) {
-            // Source steer is positive right.
-            controls.steer = (controls.steer - axes[STEER].steer(axis)).clamp(-1., 1.);
-        }
-        for (value, index) in [
-            (&mut controls.throttle, GAS),
-            (&mut controls.brake, BRAKE),
-            (&mut controls.clutch, CLUTCH),
-        ] {
-            if let Some(axis) = axes[index].read(gamepad) {
-                *value = (axes[index].pedal(axis) + *value).clamp(0., 1.);
-            }
-        }
-        // Source handbrake comes from the axis only.
-        controls.handbrake = axes[HANDBRAKE]
-            .read(gamepad)
-            .map_or(0., |axis| axes[HANDBRAKE].pedal(axis));
+        self.add_axes(&mut controls, gamepad);
         let gear_edges = if automatic_gears || !self.car {
             0
         } else {
