@@ -54,6 +54,8 @@ pub mod small_items;
 pub use small_items::*;
 pub mod melee;
 pub use melee::*;
+pub mod breakables;
+pub use breakables::*;
 pub mod wheel_effects;
 pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
@@ -853,6 +855,7 @@ pub struct ReferenceManifest {
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
     pub melee: MeleeReference,
+    pub breakables: Vec<BreakableReference>,
     pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
@@ -1832,6 +1835,10 @@ impl ReferenceManifest {
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
         self.melee.validate(self)?;
+        ids(self.breakables.iter().map(|b| &b.source), "breakable sources")?;
+        for breakable in &self.breakables {
+            breakable.validate(self)?;
+        }
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())

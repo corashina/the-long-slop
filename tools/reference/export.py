@@ -353,6 +353,9 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['small_items'] = recover_small_items(source, manifest, output)
     from .melee import recover_melee, validate_melee
     manifest['melee'] = recover_melee(source, output)
+    from .breakables import recover_breakables
+    # Before audio: breakable clips join source.item_clips.
+    manifest['breakables'] = recover_breakables(source, manifest)
     from .wheel_effects import recover_skid, validate_skid
     manifest['skid'] = recover_skid(source, output)
     from .clothing import recover_clothing,validate_clothing
