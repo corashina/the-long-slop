@@ -698,6 +698,7 @@ pub struct GarageRuntime {
     ambient: crate::audio::AmbientState,
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
+    sky: crate::sky_traffic::SkyTraffic,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -846,6 +847,7 @@ impl GarageRuntime {
             ambient: crate::audio::AmbientState::new(&reference.ambient),
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
+            sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -1447,6 +1449,7 @@ impl GarageRuntime {
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
+        self.advance_sky(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1612,7 +1615,13 @@ impl GarageRuntime {
         });
         self.stream.request_at(absolute, car);
         let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
-        let cars = self.vehicles.keys().map(|key| {
+        // Only the start car and the last seated car hold the area. Roadside cars follow the item rule.
+        let last = self.vehicle.as_ref();
+        let cars = self.vehicles.keys().filter(|key| {
+            Some(*key) == last
+                || matches!(key, ObjectKey::Generated(id) if id.layer == crate::world::WorldLayer::Startup)
+        });
+        let cars = cars.map(|key| {
             (
                 physics.chassis_handle(key),
                 world.absolute_vehicle_position(physics, &origin, key),
@@ -1688,6 +1697,36 @@ impl GarageRuntime {
             &reference.lighting.cycle,
             (output.phase == crate::sleep::SleepPhase::Sleeping).then_some(output.progress),
         );
+    }
+
+    /// Planes run in every state, also while the player sits in a car.
+    fn advance_sky(&mut self, reference: &ReferenceManifest, dt: f32) {
+        self.sky
+            .advance(&reference.sky, self.simulation_seconds, dt);
+        let anchor = self.sky_anchor(reference);
+        let origin = self.stream.origin.offset;
+        self.sky.advance_contrails(
+            dt,
+            std::array::from_fn(|i| origin[i] - anchor[i]),
+            &self.physics,
+        );
+        if let Some(audio) = &mut self.audio {
+            audio.sky(self.sky.planes(), anchor);
+        }
+    }
+
+    pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {
+        &self.sky
+    }
+
+    /// Absolute anchor of the plane offsets: player body + up * height.
+    pub fn sky_anchor(&self, reference: &ReferenceManifest) -> [f64; 3] {
+        let mut anchor = self
+            .stream
+            .origin
+            .absolute(self.area.player.body_pose(&self.physics).position);
+        anchor[1] += reference.sky.height as f64;
+        anchor
     }
 
     /// Gauge inputs of car `key`.

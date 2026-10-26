@@ -49,10 +49,11 @@ VEHICLE_CLASSES = {'carscript'}
 LADA = ('sharedassets1.assets',82556)
 # Catalog categories whose car items export and spawn from pools.
 CAR_CATEGORIES = ('bus', 'bike')
-# Catalog car items that export by name. False: pools do not spawn the item; only start placements do.
-CAR_ITEMS = {name:False for name in ('car01','car01full','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full',
-    'car03','car03full','car03k','car03kfull','car08','car08full','car08c','car08cfull',
-    'car09','car09full','car09fullS','car09P','car09Pfull','car10','car10full','car10k','car10kfull')}
+# Catalog car items that export by name and spawn from pools (`kaszni` bare body, `carfull` full car).
+# Car06P and Car09T are V03. The full Lada is LADA; car02 is its bare body.
+CAR_ITEMS = ('car01','car01full','car02','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full',
+    'car03','car03full','car03k','car03kfull','car07','car07full','car08','car08full','car08c','car08cfull',
+    'car09','car09full','car09fullS','car09P','car09Pfull','car10','car10full','car10k','car10kfull')
 # TerrainGenerationSettings start car fields and the catalog item of their car type. StartCar02 is the Lada.
 START_CARS = {'StartCar01':'car01full','StartCar02':None,'StartCar02k':'car02kfull','StartCar03':'car03full','StartCar03k':'car03kfull',
     'StartCar04':'car04full','StartCar05':'car05full','StartCar06':'car06full','StartCar08':'car08full','StartCar08c':'car08cfull',
@@ -62,10 +63,6 @@ START_ROOTS = {'StartCar02':17687,'StartCar09S':12382}
 def vehicle_exclusion(root, classes, cars):
     """Car roots outside `cars` stay other_vehicle."""
     return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
-
-def pool_exclusion(root, start_only):
-    """Pools do not spawn start-only car roots. Their prototypes export for the start placements."""
-    return 'other_vehicle' if key(root) in start_only else ''
 
 def category_items(catalog, name):
     """Item indices of catalog category `name` and its child categories."""
@@ -91,9 +88,9 @@ def script_classes(source, nodes):
         if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
 
 def car_prototypes(source, catalog):
-    """The car roots that export as world prototypes, and the start-only roots that pools do not spawn.
-    Cars: the Lada, the CAR_CATEGORIES pools and the CAR_ITEMS. A trailer root (utanfutoscript) has no carscript and exports as a world prototype too."""
-    cars={LADA};start_only=set()
+    """The car roots that export as world prototypes: the Lada, the CAR_CATEGORIES pools and the CAR_ITEMS.
+    A trailer root (utanfutoscript) has no carscript and exports as a world prototype too."""
+    cars={LADA}
     def root(item):
         return _source_root(source,source.get(item['source']['file'],item['source']['path_id']))
     for name in CAR_CATEGORIES:
@@ -101,14 +98,13 @@ def car_prototypes(source, catalog):
             target=root(catalog['items'][index])
             classes=script_classes(source,source.hierarchy(target))
             if 'carscript' in classes:cars.add(key(target))
-    for name,pool in CAR_ITEMS.items():
+    for name in CAR_ITEMS:
         target=root(catalog_item(catalog,name))
         classes=script_classes(source,source.hierarchy(target))
         if 'carscript' not in classes:
             raise ValueError('{}:{} item {}: root is not a car'.format(*key(target),name))
         cars.add(key(target))
-        if not pool:start_only.add(key(target))
-    return cars,start_only
+    return cars
 
 def start_placements(source, settings_owner, settings, catalog, cars):
     """One start car candidate per START_CARS field, at the scene pose of the car root in its group.
@@ -317,7 +313,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         building_types.append({'type_id':kind,'prototype':add(target,'structure')})
     selected.record(building_owner)
     catalog=recover_catalog(source,reader,selected,database)
-    cars,start_only=car_prototypes(source,catalog)
+    cars=car_prototypes(source,catalog)
     register_mirrors(source,cars)
     part_scope_slots=[]
     for node in source.hierarchy(_source_root(source,source.get('level1',17687))):
@@ -464,8 +460,6 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                         for index,item in enumerate(source.read(component)['items']):
                             target=source.resolve(component,item['G'])
                             if target:
-                                target_root=_source_root(source,target)
-                                if key(target_root) in start_only:raise ValueError('{}:{} items[{}].G: direct link to a start-only car'.format(*key(component),index))
                                 reason,excluded_actions=scope(target)
                                 if reason:
                                     excluded.append({'source':source_id(component),'field':f'items[{index}].G','target':source_id(target),'reason':reason,'catalog':''})
@@ -477,7 +471,6 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             if item['prototype'] is not None or item['exclusion']:continue
             target=source.get(item['source']['file'],item['source']['path_id'])
             reason,excluded_actions=scope(target)
-            reason=reason or pool_exclusion(_source_root(source,target),start_only)
             item['compatible_slots']=part_matches.get(key(_source_root(source,target)),[])
             item['exclusion']=reason
             item['excluded_actions']=excluded_actions

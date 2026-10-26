@@ -122,10 +122,18 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 34. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
 35. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
 36. Check F3 while riding each bike. Compare with the frame rate rule.
+37. Other cars (V02): re-export first: new car types, start placements, oil tolerances and car pools. Old saves do not load.
+38. Run `cargo test --lib car_types -- --ignored`.
+39. Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
+40. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
+41. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies.
+42. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
+43. Run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture`. The car pool totals print and no V03 car spawns.
+44. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
+45. Check F3 with several cars in view. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
 
 ## 5. Later
 
@@ -170,11 +178,17 @@ Run the X02 part 1 test pass (damage and breaking) in the same run:
 4. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 5. Check F3 near a box pile and while pieces fall. Compare with the frame rate rule.
 
+Run the X03a test pass (sky traffic) in the same run:
+
+1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
+2. See planes cross the sky at 600 m with their contrails and engine sound. The first plane comes at start, then one every 50 to 500 s, at most 3. About one in ten is a UFO: it spins and hums.
+3. Check F3 with planes in the sky. Compare with the frame rate rule.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Ragdoll, wearables, sunglasses, appearance editor, female body. [D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
-| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
+| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, UFO, EMP. [H01-H07, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |

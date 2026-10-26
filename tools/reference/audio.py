@@ -400,6 +400,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     # fpscontroller.pointKefe slide voice. The player root is not an audio root.
     point = manifest['conditions']['player_brush']['voice_source']
     if point: voice(source.get(point['file'], point['path_id']))
+    # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
+    for prefab in manifest['sky']['prefabs']:
+        prefab['voices'] = [voice(source.get(v['file'], v['path_id']), [method('AirPlaneSpawnScript', 'Update')]) for v in prefab['voices']]
     audio['shared']['settings'] = source_settings(prefab_data, prefab_data['Priority'])
     audio['shared']['mixer'] = mixer(source.resolve(main_r, main['defGroup']))
     def offset(reader, owner):
@@ -815,7 +818,8 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
         if v['emitter'] not in emitters or v['mixer'] not in mixers:raise ValueError('Unresolved voice owner or mixer')
         if not v['methods'] or any(not m['sha256'] or m['line_start']<=0 for m in v['methods']):raise ValueError('Missing voice method evidence')
         if set(v['curves'])!={'rolloff','spatial_blend','spread','reverb_mix'}:raise ValueError('Missing voice curves')
-        if not math.isfinite(v['min_distance']) or not math.isfinite(v['max_distance']) or not 0<v['min_distance']<=v['max_distance']:
+        # Linear rolloff is defined from distance 0. The airplane source starts there.
+        if not math.isfinite(v['min_distance']) or not math.isfinite(v['max_distance']) or not 0<=v['min_distance']<=v['max_distance'] or v['max_distance']<=0 or v['min_distance']==0 and v['rolloff_mode']!=1:
             raise ValueError('Invalid audio distance')
     # The runtime indexes car voice templates by id.
     if [v['id'] for v in audio['car_voices']]!=list(range(1,len(audio['car_voices'])+1)):
