@@ -12,6 +12,9 @@
 #ifdef SOURCE_LAMPS
 #import "shaders/source_lighting.wgsl"::object_light_mask
 #endif
+#ifdef SOURCE_GPU_PROPS
+#import source_props::{prop_row, prop_world_from_local, prop_normal_local_to_world, prop_tangent_local_to_world}
+#endif
 
 struct SourceVertexOutput {
     // This is `clip position` when the struct is used as a vertex stage output
@@ -23,6 +26,12 @@ struct SourceVertexOutput {
     @location(10) source_fog: f32,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
+#endif
+#ifdef SOURCE_GPU_PROPS
+    // The row LOD fade replaces the material `lod_fade`.
+    @location(13) @interpolate(flat) source_fade: f32,
+    // The row color replaces the material color.
+    @location(14) @interpolate(flat) source_color: vec4<f32>,
 #endif
 #ifdef VERTEX_UVS_A
     @location(2) uv: vec2<f32>,
@@ -82,7 +91,15 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
     var vertex = vertex_no_morph;
 #endif
 
+#ifdef SOURCE_GPU_PROPS
+    // A GPU prop row replaces the mesh uniform. GPU props are not skinned or morphed.
+    let prop = prop_row(vertex_no_morph.instance_index);
+    let mesh_world_from_local = prop_world_from_local(prop);
+    out.source_fade = prop.fade;
+    out.source_color = prop.color;
+#else
     let mesh_world_from_local = mesh_functions::get_world_from_local(vertex_no_morph.instance_index);
+#endif
 
 #ifdef SKINNED
     // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
@@ -99,6 +116,8 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 #ifdef VERTEX_NORMALS
 #ifdef SKINNED
     out.world_normal = skinning::skin_normals(world_from_local, vertex.normal);
+#else ifdef SOURCE_GPU_PROPS
+    out.world_normal = prop_normal_local_to_world(world_from_local, vertex.normal);
 #else
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         vertex.normal,
@@ -122,6 +141,9 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 #endif
 
 #ifdef VERTEX_TANGENTS
+#ifdef SOURCE_GPU_PROPS
+    out.world_tangent = prop_tangent_local_to_world(world_from_local, vertex.tangent);
+#else
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(
         world_from_local,
         vertex.tangent,
@@ -129,6 +151,7 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
         // See https://github.com/gfx-rs/naga/issues/2416
         vertex_no_morph.instance_index
     );
+#endif
     // Unity computes the signed bitangent at each vertex, before interpolation.
     out.world_bitangent = cross(out.world_normal, out.world_tangent.xyz) * out.world_tangent.w;
 #endif

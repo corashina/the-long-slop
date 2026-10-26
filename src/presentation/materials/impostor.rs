@@ -34,10 +34,16 @@ pub struct ImpostorMaterial {
     array_count: u8,
     receiver_mask: u32,
     reflected: bool,
+    /// Static rows draw this material from the GPU prop buffers. Rows hold the fade and source position.
+    gpu_props: bool,
     uploaded:
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<bevy::asset::AssetId<Image>>>>,
 }
 impl ImpostorMaterial {
+    /// Only a shared material can draw GPU prop rows.
+    pub fn use_gpu_props(&mut self) {
+        self.gpu_props = true;
+    }
     pub fn from_source(
         record: &WorldSourceMaterial,
         textures: &WorldTextures,
@@ -126,6 +132,7 @@ impl ImpostorMaterial {
             array_count,
             receiver_mask: mask,
             reflected,
+            gpu_props: false,
             uploaded: textures.upload_receipts(),
             uniform: ImpostorUniform {
                 lod: Vec4::X,
@@ -173,6 +180,7 @@ impl Material for ImpostorMaterial {
         layout: &MeshVertexBufferLayoutRef,
         key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        let (reflected, gpu_props) = key.bind_group_data;
         if !key
             .mesh_key
             .contains(bevy::pbr::MeshPipelineKey::DEPTH_PREPASS)
@@ -191,7 +199,7 @@ impl Material for ImpostorMaterial {
                 ));
                 definitions.push(bevy::shader::ShaderDefVal::Bool(
                     "SOURCE_OBJECT_REFLECTED".into(),
-                    key.bind_group_data,
+                    reflected,
                 ));
             }
             descriptor.layout[0] = crate::presentation::source_lighting::source_camera_layout();
@@ -205,15 +213,32 @@ impl Material for ImpostorMaterial {
                 .0
                 .get_layout(&[Mesh::ATTRIBUTE_POSITION.at_shader_location(0)])?,
         ];
+        if gpu_props {
+            descriptor.layout[2] = crate::presentation::prop_draws::draw_layout();
+            for definitions in [
+                &mut descriptor.vertex.shader_defs,
+                &mut descriptor
+                    .fragment
+                    .as_mut()
+                    .expect("source world fragment")
+                    .shader_defs,
+            ] {
+                definitions.push(bevy::shader::ShaderDefVal::Bool(
+                    "SOURCE_GPU_PROPS".into(),
+                    true,
+                ));
+            }
+        }
         descriptor.primitive.cull_mode = Some(Face::Back);
-        if key.bind_group_data {
+        if reflected {
             descriptor.primitive.front_face = FrontFace::Cw;
         }
         Ok(())
     }
 }
 impl AsBindGroup for ImpostorMaterial {
-    type Data = bool;
+    /// Reflected transform and GPU prop rows.
+    type Data = (bool, bool);
     type Param = (
         <SourceReceiver as AsBindGroup>::Param,
         SRes<RenderAssets<GpuImage>>,
@@ -221,8 +246,8 @@ impl AsBindGroup for ImpostorMaterial {
     fn label() -> &'static str {
         "source impostor"
     }
-    fn bind_group_data(&self) -> bool {
-        self.reflected
+    fn bind_group_data(&self) -> (bool, bool) {
+        (self.reflected, self.gpu_props)
     }
     fn as_bind_group(
         &self,

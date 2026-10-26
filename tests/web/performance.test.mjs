@@ -54,3 +54,16 @@ test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab
  assert.match(root.textContent,/worst: 130\.0 \/ 240\.0 ms/);
  panel.stop();assert.match(root.textContent,/stopped/);
 });
+
+test('the render lines show the GPU prop counters of the world view',t=>{
+ const root={hidden:false,textContent:''};
+ globalThis.document={hidden:false,querySelector:()=>root,addEventListener:()=>{},removeEventListener:()=>{}};
+ globalThis.window={addEventListener:()=>{},removeEventListener:()=>{}};
+ t.after(()=>{delete globalThis.document;delete globalThis.window;});
+ const view={shadow_issued:[1,2,0,0],surface:[0,0,5,0,2],props:[120,40,9]};
+ const panel=createPerformance(()=>0,()=>({graph:{views:[view]}}),()=>0);
+ panel.frame(0,1,2);
+ panel.counters(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+ assert.match(root.textContent,/Draws shadow \/ surface: 3 \/ 7/);
+ assert.match(root.textContent,/GPU props rows \/ visible \/ indirect draws: 120 \/ 40 \/ 9/);
+});

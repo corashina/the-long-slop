@@ -110,7 +110,12 @@ fn stop_failed_renderer(render: &mut World) -> bool {
 
 fn opaque(
     world: &World,
-    view: ViewQuery<(&ExtractedView, &SurfaceViewTargets, &SourceViewLighting)>,
+    view: ViewQuery<(
+        &ExtractedView,
+        &SurfaceViewTargets,
+        &SourceViewLighting,
+        &super::surface_views::SourceSurfaceView,
+    )>,
     opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
     masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     pipelines: Res<SurfacePasses>,
@@ -129,7 +134,7 @@ fn opaque(
         return;
     }
     let entity = view.entity();
-    let (view, targets, lighting) = view.into_inner();
+    let (view, targets, lighting, source) = view.into_inner();
     lighting.begin_draws();
     let (Some(opaque), Some(masked)) = (
         opaque.get(&view.retained_view_entity),
@@ -166,6 +171,14 @@ fn opaque(
         .and_then(|_| masked.render(&mut pass, world, entity));
     if let Err(error) = result {
         status.fail(format!("Source opaque draw: {error:?}"));
+        return;
+    }
+    let (attempted, issued) =
+        super::prop_draws::draw_camera(world, &mut pass, entity, source.index);
+    if attempted != issued {
+        status.fail(format!(
+            "Source GPU prop draw skipped in view {entity:?}: {issued}/{attempted}"
+        ));
     }
 }
 fn transparent(
