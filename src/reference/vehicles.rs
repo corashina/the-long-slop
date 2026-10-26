@@ -247,6 +247,40 @@ fn curve_valid(c: &TorqueCurve) -> bool {
 }
 
 impl WorldVehicleReference {
+    /// Every material that the car can show on renderer node `node`: lamp states, gauge lamps,
+    /// odometer digits and backlights.
+    pub fn renderer_materials(&self, node: u32) -> impl Iterator<Item = &MaterialLink> {
+        let lights = self
+            .lights
+            .iter()
+            .flat_map(|l| &l.states)
+            .filter(move |s| s.renderers.contains(&node))
+            .flat_map(|s| s.on_material.iter().chain(&s.off_material));
+        let instruments = self.instruments.iter().flat_map(move |r| {
+            let lamps = r
+                .lamps
+                .iter()
+                .filter(move |l| l.node.0 == node)
+                .flat_map(|l| [&l.on, &l.off]);
+            let digits = r
+                .odometer
+                .digits
+                .iter()
+                .filter(move |d| d.node.0 == node)
+                .flat_map(|d| [&d.on, &d.off]);
+            let backlights = std::iter::once(&r.backlight)
+                .chain(r.needles.iter().map(|n| &n.backlight))
+                .filter_map(move |b| match b {
+                    MaterialSwitchReference::Renderer { node: n, on, off } if n.0 == node => {
+                        Some([on, off])
+                    }
+                    _ => None,
+                })
+                .flatten();
+            lamps.chain(digits).chain(backlights)
+        });
+        lights.chain(instruments)
+    }
     pub(super) fn validate(&self, b: PrototypeBounds) -> Result<(), ReferenceError> {
         let s = &self.source;
         check(

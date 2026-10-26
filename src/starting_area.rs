@@ -785,6 +785,39 @@ impl VehicleRuntime {
             requested_headlights: 0,
         }
     }
+    /// The material that renderer node `node` of a world car shows. None: the authored material.
+    pub fn renderer_material<'a>(
+        &self,
+        record: &'a crate::reference::WorldVehicleReference,
+        node: u32,
+    ) -> Option<&'a crate::reference::MaterialLink> {
+        if let Some(choice) = self
+            .lights
+            .as_ref()
+            .and_then(|l| l.materials().iter().find(|m| m.node == node))
+            .and_then(|m| m.choice)
+        {
+            return choice.link(record);
+        }
+        let (r, state) = (record.instruments.as_ref()?, self.instruments.as_ref()?);
+        let pick = |on: bool, a, b| if on { a } else { b };
+        if let Some((i, lamp)) = r.lamps.iter().enumerate().find(|(_, l)| l.node.0 == node) {
+            return Some(pick(state.lamp_bits & (1 << i) != 0, &lamp.on, &lamp.off));
+        }
+        if let Some(digit) = r.odometer.digits.iter().find(|d| d.node.0 == node) {
+            return Some(pick(state.digits_lit, &digit.on, &digit.off));
+        }
+        std::iter::once(&r.backlight)
+            .chain(r.needles.iter().map(|n| &n.backlight))
+            .find_map(|b| match b {
+                crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
+                    if n.0 == node =>
+                {
+                    Some(pick(state.digits_lit, on, off))
+                }
+                _ => None,
+            })
+    }
     /// Requested headlight state: off, low or high.
     pub fn headlights(&self, lighting: &crate::lighting::LightingState) -> u8 {
         match self.record {
@@ -1625,6 +1658,11 @@ impl GarageRuntime {
             self.advance_wheel_effects(reference, key, vehicle);
         }
         self.vehicles = vehicles;
+        for (key, vehicle) in &self.vehicles {
+            if let (ObjectKey::Generated(id), Some(lights)) = (key, &vehicle.lights) {
+                self.stream.set_car_lights(id, lights.lights());
+            }
+        }
         self.step_loose_engines(reference);
         let sled_seat = match (
             self.area.player.seat_owner(),

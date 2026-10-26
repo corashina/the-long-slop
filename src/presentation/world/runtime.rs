@@ -483,6 +483,7 @@ impl WorldPresentation<'_, '_> {
             reference,
             physics,
             &area.items,
+            vehicles,
             &mut self.commands,
             &mut self.roots,
             &mut self.materials,

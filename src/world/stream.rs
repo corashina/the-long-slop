@@ -2366,6 +2366,22 @@ impl WorldStream {
                 }
             }
         }
+        if let Some((record, index)) = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .and_then(|p| {
+                let index = p.nodes.iter().position(|n| &n.source == node)?;
+                Some((p.vehicle.as_ref()?, index))
+            })
+        {
+            for link in record.renderer_materials(index as u32) {
+                if !output.contains(&link.source) {
+                    output.push(link.source.clone());
+                }
+            }
+        }
         self.lamp_material_choices
             .push((prototype.clone(), node.clone(), output));
         Ok(&self.lamp_material_choices.last().unwrap().2)

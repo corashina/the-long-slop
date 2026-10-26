@@ -202,6 +202,7 @@ impl SpawnEvaluation<'_> {
                     prototype: parent.prototype.clone(),
                     scale: parent.scale,
                     enabled,
+                    node: Some(node_index as u32),
                 });
             }
         }
