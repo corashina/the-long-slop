@@ -751,6 +751,8 @@ pub struct GarageRuntime {
     /// Simulation time of the next under-map check.
     under_map_check: f64,
     frame_poses: crate::boundary::FramePoses,
+    /// The first frame carries every condition; later frames carry changes.
+    conditions_sent: bool,
 }
 
 impl GarageRuntime {
@@ -906,6 +908,7 @@ impl GarageRuntime {
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
             frame_poses: Default::default(),
+            conditions_sent: false,
         };
         run.refresh_powertrains();
         Ok(run)

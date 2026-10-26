@@ -5,7 +5,9 @@ use crate::interaction::items::ItemLocation;
 use crate::lighting::{
     ControlPoseOutput, CycleOutput, LampMaterialOutput, LightOutput, NodeVisibilityOutput,
 };
-use crate::reference::{BodyId, ItemId, NodeId, OpeningId, ReferenceManifest};
+use crate::reference::{
+    BodyId, ConditionId, ConditionStartup, ItemId, NodeId, OpeningId, ReferenceManifest,
+};
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
 use crate::starting_area::spawned::SpawnedItem;
@@ -155,6 +157,40 @@ impl StateBlock {
 pub struct ValveRow {
     pub opening: u32,
     pub valve: f32,
+}
+
+/// State of one condition owner. Frames carry changed owners; the first frame carries all.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ConditionRow {
+    pub id: u32,
+    pub state: u32,
+    pub state2: u32,
+    pub state3: u32,
+    pub repair_progress: f32,
+    pub color: [f32; 4],
+}
+
+impl ConditionRow {
+    pub fn new(id: ConditionId, s: &ConditionStartup) -> Self {
+        Self {
+            id: id.0,
+            state: u32::from(s.state),
+            state2: s.state2,
+            state3: s.state3,
+            repair_progress: s.repair_progress,
+            color: s.color,
+        }
+    }
+    pub fn startup(&self) -> ConditionStartup {
+        ConditionStartup {
+            state: self.state as u8,
+            state2: self.state2,
+            state3: self.state3,
+            repair_progress: self.repair_progress,
+            color: self.color,
+        }
+    }
 }
 
 /// Per-handle item state. Body rows stay zero.
@@ -321,6 +357,13 @@ pub struct SimFrame {
     pub particle_groups: Vec<ParticleGroupRow>,
     pub particles: Vec<ParticleRow>,
     pub planes: Vec<PlaneRow>,
+    pub conditions: Vec<ConditionRow>,
+    /// 1 when the wash shows, in `ConditionRecord::washes` order.
+    pub washes: Vec<u8>,
+    /// Brush model poses, in `ConditionRecord::brushes` order.
+    pub brush_poses: Vec<PoseRow>,
+    /// Spray colors, in `ConditionRecord::sprays` order.
+    pub spray_colors: Vec<[f32; 4]>,
     pub lighting: FrameLighting,
     /// Lights in `LightingRecord::lights` order.
     pub lights: Vec<LightOutput>,
@@ -367,6 +410,10 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.particle_groups);
     put_rows(out, &frame.particles);
     put_rows(out, &frame.planes);
+    put_rows(out, &frame.conditions);
+    put_rows(out, &frame.washes);
+    put_rows(out, &frame.brush_poses);
+    put_rows(out, &frame.spray_colors);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
     put_list(out, &frame.lamp_materials);
@@ -389,6 +436,10 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.particle_groups)?;
     take_rows(&mut rest, &mut frame.particles)?;
     take_rows(&mut rest, &mut frame.planes)?;
+    take_rows(&mut rest, &mut frame.conditions)?;
+    take_rows(&mut rest, &mut frame.washes)?;
+    take_rows(&mut rest, &mut frame.brush_poses)?;
+    take_rows(&mut rest, &mut frame.spray_colors)?;
     frame.lighting = take_value(&mut rest)?;
     take_list(&mut rest, &mut frame.lights)?;
     take_list(&mut rest, &mut frame.lamp_materials)?;

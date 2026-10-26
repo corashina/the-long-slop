@@ -65,6 +65,17 @@ fn frame_round_trips() {
             offset: [10., 0., 5.],
             heading: [0., 0., 0., 1.],
         }],
+        conditions: vec![ConditionRow {
+            id: 4,
+            state: 2,
+            state2: 1,
+            state3: 0,
+            repair_progress: -0.5,
+            color: [0.2, 0.3, 0.4, 1.],
+        }],
+        washes: vec![1, 0],
+        brush_poses: vec![PoseRow::default()],
+        spray_colors: vec![[1., 0., 0., 1.]],
         lighting: FrameLighting {
             cycle: crate::lighting::CycleOutput {
                 progress: 0.3,
