@@ -1291,6 +1291,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         fluids: None,
         valve: None,
         lamp: None,
+        lamp_broken: None,
         dial: None,
         ammo: None,
         glow: None,

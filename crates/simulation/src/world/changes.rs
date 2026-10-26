@@ -37,6 +37,8 @@ pub struct ObjectSnapshot {
     pub fluids: Option<crate::fluids::FluidSnapshot>,
     pub valve: Option<f32>,
     pub lamp: Option<bool>,
+    /// Source `Lamp.broken` set by flashlightscript.Break. Bit i is `Lamps[i]`. None at spawn.
+    pub lamp_broken: Option<u64>,
     /// Tuned compass bearing or clock offset (meterscript szamlap value).
     pub dial: Option<f32>,
     /// Spray bottle ammoscript count; None at its spawn count.

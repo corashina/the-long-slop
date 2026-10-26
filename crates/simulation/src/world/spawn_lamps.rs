@@ -15,6 +15,12 @@ fn activity(node: SourceId, active: bool) -> NodeAppearance {
         scale: None,
     }
 }
+/// Source flashlightscript.Refresh lamp node fields, in `lamp_activity` order.
+const LAMP_NODES: [&str; 4] = ["Working", "nWorking", "Lights", "nLights"];
+/// Source flashlightscript.Refresh activity of one lamp's `LAMP_NODES`.
+fn lamp_activity(broken: bool, lit: bool) -> [bool; 4] {
+    [!broken, broken, lit, !broken && !lit]
+}
 impl SpawnEvaluation<'_> {
     pub(super) fn bake_lamps(&mut self) -> Result<(), ReferenceError> {
         for content in &mut self.output {
@@ -39,16 +45,12 @@ impl SpawnEvaluation<'_> {
                         ));
                     }
                 }
-                for lamp in array(f, "Lamps")? {
+                for (index, lamp) in array(f, "Lamps")?.iter().enumerate() {
                     let lamp = fields(lamp)?;
-                    let broken = flag(lamp, "broken")?;
+                    let broken = flag(lamp, "broken")?
+                        || self.initialization.lamp_broken(parent, source, index);
                     let lit = *on && powered && !broken;
-                    for (field, active) in [
-                        ("Working", !broken),
-                        ("nWorking", broken),
-                        ("Lights", lit),
-                        ("nLights", !broken && !lit),
-                    ] {
+                    for (field, active) in LAMP_NODES.into_iter().zip(lamp_activity(broken, lit)) {
                         for object in array(lamp, field)? {
                             content.appearance.push(activity(
                                 self.rules
@@ -116,7 +118,7 @@ impl SpawnEvaluation<'_> {
                     let mut count = 0;
                     let mut working = [0.; 3];
                     let mut broken = [0.; 3];
-                    for lamp in lamps {
+                    for (lamp_index, lamp) in lamps.iter().enumerate() {
                         let lamp = fields(lamp)?;
                         let first = array(lamp, "Working")?.first().ok_or_else(|| {
                             ReferenceError("Single lamp has no working position".into())
@@ -127,7 +129,11 @@ impl SpawnEvaluation<'_> {
                                 self.rules.root(self.reference, value_link(first)?)?,
                             )?
                             .position;
-                        let target = if flag(lamp, "broken")? {
+                        let target = if flag(lamp, "broken")?
+                            || self
+                                .initialization
+                                .lamp_broken(owner, controller, lamp_index)
+                        {
                             &mut broken
                         } else {
                             count += 1;
@@ -242,5 +248,42 @@ fn lamp_power(
             Ok(number(f, "maxOutput")? * electronics_factor(f)? > 0.2)
         }
         None => Ok(true),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::spawn_state::SpawnInitialization;
+    use crate::world::{GeneratedId, WorldLayer};
+
+    #[test]
+    fn a_broken_lamp_stays_dark_and_its_neighbor_stays_lit() {
+        let source = SourceId {
+            file: "sharedassets1.assets".into(),
+            path_id: 1,
+        };
+        let parent = GeneratedId {
+            layer: WorldLayer::Building,
+            generator: source.clone(),
+            unit: [0; 2],
+            ordinal: 0,
+            children: Vec::new(),
+        };
+        let mut init = SpawnInitialization::default();
+        init.lamps.push((parent.clone(), source.clone(), true));
+        // A break trigger of lamp 1. A second break changes nothing.
+        assert!(init.break_lamps(&parent, &source, 1 << 1));
+        assert!(!init.break_lamps(&parent, &source, 1 << 1));
+        let activity = |index| {
+            let broken = init.lamp_broken(&parent, &source, index);
+            lamp_activity(broken, !broken)
+        };
+        // Working, nWorking, Lights, nLights.
+        assert_eq!(activity(0), [true, false, true, false]);
+        assert_eq!(activity(1), [false, true, false, false]);
+        // Switched off: lamp 0 shows nLights, lamp 1 stays dark.
+        assert_eq!(lamp_activity(false, false), [true, false, false, true]);
+        assert_eq!(init.for_parent(&parent).broken_lamps, init.broken_lamps);
     }
 }

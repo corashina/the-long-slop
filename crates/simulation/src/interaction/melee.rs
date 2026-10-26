@@ -1,12 +1,14 @@
 //! Source shovel swing: `weaponhandlingscript` (input, animator, swing sound) and
-//! `meleeweaponscript` (hit box, force, hit particles, hit sound, digging).
-//! Damage, breaking and food hurt are not ported.
+//! `meleeweaponscript` (hit box, force, hit particles, hit sound, digging, breakable damage).
+//! Tank, explosive and food hits wait for X02 parts 2 and 4.
 use super::buried::BuriedItems;
 use super::items::ItemStore;
 use crate::animation::controller::{MotionController, StateEvent};
+use crate::damage::Breakables;
 use crate::particles::ParticleState;
 use crate::reference::{
-    ColliderTag, ItemId, ReferenceError, ReferenceManifest, ShovelAcquisitionReference, SourceId,
+    BreakableReference, ColliderTag, ItemId, ReferenceError, ReferenceManifest,
+    ShovelAcquisitionReference, SourceId,
 };
 use crate::simulation::FIXED_DT;
 use crate::vehicle::{PhysicsWorld, VehiclePose, collider_tag, to_rapier};
@@ -225,6 +227,8 @@ impl MeleeState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         buried: &mut BuriedItems,
+        breakables: &mut Breakables,
+        records: &[BreakableReference],
         player: Option<RigidBodyHandle>,
         origin: [f64; 3],
     ) {
@@ -279,6 +283,8 @@ impl MeleeState {
                 items,
                 physics,
                 buried,
+                breakables,
+                records,
                 player,
                 origin,
             );
@@ -348,6 +354,8 @@ impl MeleeState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         buried: &mut BuriedItems,
+        breakables: &mut Breakables,
+        records: &[BreakableReference],
         player: Option<RigidBodyHandle>,
         origin: [f64; 3],
     ) {
@@ -434,6 +442,8 @@ impl MeleeState {
                 && (items.get(id).is_some_and(|i| i.buried) || buried.recently_unburied(id))
             {
                 buried.lift(id, dt, self.shovel.shovel_speed, items, physics, player);
+            } else if let Some(target) = breakables.target_of(physics, self.overlaps[i]) {
+                breakables.try_break_melee(records, target, contact.damage, dt);
             }
             if !self.sounded {
                 self.has_to_sound = true;

@@ -791,6 +791,7 @@ impl ItemStore {
         let state = self.get(id)?;
         Some(crate::world::ObjectSnapshot {
             lamp: None,
+            lamp_broken: None,
             dial: None,
             ammo: None,
             glow: None,
