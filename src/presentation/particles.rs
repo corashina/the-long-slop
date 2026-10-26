@@ -151,6 +151,7 @@ impl Material for ParticleMaterial {
         ])?];
         d.primitive.cull_mode = None;
         if let Some(depth) = d.depth_stencil.as_mut() {
+            depth.format = super::render_targets::DEPTH_FORMAT;
             depth.depth_write_enabled = Some(false);
         }
         Ok(())
