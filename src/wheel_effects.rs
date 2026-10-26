@@ -39,7 +39,6 @@ pub struct WheelEffectsInput {
     pub linear_velocity: Vector,
     /// Source `carscript.speed`: forward speed magnitude in km/h.
     pub car_kmh: f32,
-    pub wheels: [WheelInput; 4],
 }
 
 /// Source AudioSource values of one wheel, for the audio voices.
@@ -73,58 +72,62 @@ pub struct WheelEffect {
     sound: WheelSound,
 }
 
-/// The four wheels of one car and the mainscript `tiresmoke` and `tiresand` bursts.
+/// The wheels of one car and the mainscript `tiresmoke` and `tiresand` bursts.
 #[derive(Debug)]
 pub struct WheelEffects {
-    wheels: [WheelEffect; 4],
+    wheels: Vec<WheelEffect>,
     bursts: [ParticleState; 2],
 }
 
 impl WheelEffects {
-    pub fn new(wheels: &[WheelEffectsReference; 4], skid: &SkidReference, seed: u64) -> Self {
+    pub fn new(wheels: &[WheelEffectsReference], skid: &SkidReference, seed: u64) -> Self {
         Self {
-            wheels: std::array::from_fn(|w| {
-                let r = &wheels[w];
-                let seed = seed.wrapping_add(8 * w as u64);
-                WheelEffect {
-                    dust: r.dust.as_ref().map(|d| ParticleState::new(d, seed)),
-                    grass: r
-                        .grass
-                        .iter()
-                        .enumerate()
-                        .map(|(i, g)| ParticleState::new(g, seed + 1 + i as u64))
-                        .collect(),
-                    hold: 0,
-                    ground: false,
-                    road: false,
-                    last_distance: 0.,
-                    rpm: [0.; RPM_SAMPLES],
-                    sound: WheelSound {
-                        ground_playing: false,
-                        ground_gain: 0.,
-                        spring_playing: false,
-                        spring_gain: 0.,
-                        spring_pitch: 1.,
-                        slide_playing: false,
-                        slide_gain: 0.,
-                        slide_pitch: 1.,
-                        slide_road: false,
-                    },
-                }
-            }),
+            wheels: wheels
+                .iter()
+                .enumerate()
+                .map(|(w, r)| {
+                    let seed = seed.wrapping_add(8 * w as u64);
+                    WheelEffect {
+                        dust: r.dust.as_ref().map(|d| ParticleState::new(d, seed)),
+                        grass: r
+                            .grass
+                            .iter()
+                            .enumerate()
+                            .map(|(i, g)| ParticleState::new(g, seed + 1 + i as u64))
+                            .collect(),
+                        hold: 0,
+                        ground: false,
+                        road: false,
+                        last_distance: 0.,
+                        rpm: [0.; RPM_SAMPLES],
+                        sound: WheelSound {
+                            ground_playing: false,
+                            ground_gain: 0.,
+                            spring_playing: false,
+                            spring_gain: 0.,
+                            spring_pitch: 1.,
+                            slide_playing: false,
+                            slide_gain: 0.,
+                            slide_pitch: 1.,
+                            slide_road: false,
+                        },
+                    }
+                })
+                .collect(),
             bursts: std::array::from_fn(|i| {
                 ParticleState::emit_only(&skid.particles[i], seed.wrapping_add(32 + i as u64))
             }),
         }
     }
 
-    /// One fixed step of every wheel, in source order.
+    /// One fixed step of every wheel, in source order. `wheel` reads one wheel input.
     #[allow(clippy::too_many_arguments)]
     pub fn advance(
         &mut self,
         dt: f32,
         input: &WheelEffectsInput,
-        references: &[WheelEffectsReference; 4],
+        wheel: impl Fn(usize) -> WheelInput,
+        references: &[WheelEffectsReference],
         car_gains: &EffectGains,
         skid: &SkidReference,
         sand_layers: &[u32],
@@ -142,7 +145,7 @@ impl WheelEffects {
         let own = input.chassis;
         for (w, e) in self.wheels.iter_mut().enumerate() {
             let r = &references[w];
-            let wheel = input.wheels[w];
+            let wheel = wheel(w);
             let gains = r.own_gains.unwrap_or(WheelGains {
                 ground: car_gains.ground,
                 spring: car_gains.spring,
@@ -358,7 +361,7 @@ pub fn slide(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::exhaust::tests::smoke;
     use crate::reference::{SourceId, Transform};
@@ -388,9 +391,6 @@ mod tests {
             own_gains: None,
             dust: Some(smoke(2000, 15.)),
             grass: vec![smoke(2000, 15.)],
-            ground_voice: 0,
-            spring_voice: 1,
-            slide_voice: 2,
         }
     }
 
@@ -404,7 +404,7 @@ mod tests {
         }
     }
 
-    fn skid() -> SkidReference {
+    pub(crate) fn skid() -> SkidReference {
         SkidReference {
             source: source(),
             road_clip: 0,
@@ -436,29 +436,34 @@ mod tests {
     }
 
     /// Wheel center at `height`, rolling forward at `speed` m/s.
-    fn input(height: f64, speed: f32) -> WheelEffectsInput {
+    fn input(height: f64, speed: f32) -> (WheelEffectsInput, WheelInput) {
         let wheel = WheelInput {
             rpm: speed / (0.3 * std::f32::consts::TAU) * 60.,
             radius: 0.3,
             forward: -Vector::Z,
             grounded: false,
         };
-        WheelEffectsInput {
+        let input = WheelEffectsInput {
             root_absolute: [0., height, 0.],
             rotation: Rotation::IDENTITY,
             origin: [0.; 3],
             chassis: RigidBodyHandle::invalid(),
             linear_velocity: Vector::new(0., 0., -speed),
             car_kmh: speed * 3.6,
-            wheels: [wheel; 4],
-        }
+        };
+        (input, wheel)
     }
 
-    fn run(effects: &mut WheelEffects, physics: &PhysicsWorld, input: &WheelEffectsInput) {
-        let references = std::array::from_fn(|_| wheel_reference());
+    fn run(
+        effects: &mut WheelEffects,
+        physics: &PhysicsWorld,
+        input: &(WheelEffectsInput, WheelInput),
+    ) {
+        let references: [_; 4] = std::array::from_fn(|_| wheel_reference());
         effects.advance(
             DT,
-            input,
+            &input.0,
+            |_| input.1,
             &references,
             &gains(),
             &skid(),
@@ -468,7 +473,8 @@ mod tests {
     }
 
     fn effects() -> WheelEffects {
-        WheelEffects::new(&std::array::from_fn(|_| wheel_reference()), &skid(), 1)
+        let references: [_; 4] = std::array::from_fn(|_| wheel_reference());
+        WheelEffects::new(&references, &skid(), 1)
     }
 
     #[test]
@@ -548,10 +554,8 @@ mod tests {
         let physics = ground(ROAD);
         let mut e = effects();
         let mut locked = input(0.3, 10.);
-        for w in &mut locked.wheels {
-            w.rpm = 0.;
-            w.grounded = true;
-        }
+        locked.1.rpm = 0.;
+        locked.1.grounded = true;
         run(&mut e, &physics, &locked);
         let s = e.sound(0);
         // Speed difference 36 km/h is past the range: level 1.

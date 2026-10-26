@@ -24,6 +24,7 @@ pub(super) fn bind(
     instance: &StructureInstance,
     prototype: &WorldPrototypeReference,
     world: &WorldReference,
+    skid: &crate::reference::SkidReference,
     rules: &SourceRules,
     items: &ItemStore,
     physics: &mut PhysicsWorld,
@@ -112,6 +113,7 @@ pub(super) fn bind(
                 lights,
             },
             prototype,
+            skid,
             physics,
             vehicles,
             changes,
@@ -213,6 +215,7 @@ pub(crate) struct CarCopy<'a> {
 pub(crate) fn spawn(
     copy: CarCopy,
     prototype: &WorldPrototypeReference,
+    skid: &crate::reference::SkidReference,
     physics: &mut PhysicsWorld,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
     changes: &mut ChangeRecords,
@@ -229,6 +232,7 @@ pub(crate) fn spawn(
     let mut runtime = VehicleRuntime::world(
         copy.prototype,
         record,
+        skid,
         crate::starting_area::WorldCarParts {
             seed: key.seed(),
             fuel_tank: copy.fuel_tank,
@@ -382,6 +386,7 @@ mod tests {
                 lights: Vec::new(),
             },
             prototype,
+            &crate::wheel_effects::tests::skid(),
             physics,
             vehicles,
             changes,

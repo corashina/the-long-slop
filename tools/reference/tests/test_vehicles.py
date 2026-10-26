@@ -67,7 +67,8 @@ def car_fixture():
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
         forceAutomaticTransmission=0, BhandBrake=1, kerekagyType=0, differentialRatio=4., steerAngle=35.,
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
-        dontIgniteWithThorttleInAutomatic=0, collisionSoundM=1., psSmoke=[])
+        dontIgniteWithThorttleInAutomatic=0, collisionSoundM=1., psSmoke=[], groundSoundM=.5,
+        springSoundM=2., springPitchM=3., slideAngle=20., maxSlideVolumeSpeed=10.)
     def transform_for(reader):
         return records[(reader.assets_file.source_container_path, data[reader.path_id]['transform']['m_PathID'])]
     source = NS(read=lambda reader: data[reader.path_id], class_name=lambda reader: reader.cls,
@@ -84,8 +85,13 @@ class VehicleRecordTests(unittest.TestCase):
         source, hierarchy, bodies, colliders = car_fixture()
         view = dict(default_pitch_degrees=0., pitch_limits_degrees=[-89., 89.])
         with patch('tools.reference.vehicles.seat_view', return_value=view), \
-                patch('tools.reference.vehicles.recover_exhaust', return_value=[]):
+                patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+                patch('tools.reference.vehicles.recover_wheel_effects',
+                      lambda source, car_reader, car, root, wheels, index, output: [w.path_id for w in wheels]):
             vehicle = vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
+        # One talajnezo record per wheel, in wheel record order.
+        self.assertEqual(vehicle['wheel_effects'], [w['source']['path_id'] for w in vehicle['wheels']])
+        self.assertEqual(vehicle['effect_gains']['slide_angle'], 20.)
         self.assertEqual(vehicle['body'], 0)
         self.assertEqual(vehicle['colliders'], [0])
         self.assertEqual(len(vehicle['wheels']), 4)

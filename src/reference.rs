@@ -55,7 +55,9 @@ pub use small_items::*;
 pub mod melee;
 pub use melee::*;
 pub mod wheel_effects;
-pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
+pub use wheel_effects::{
+    EffectGains, SkidReference, WheelEffectsReference, WheelGains, WheelVoices,
+};
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -941,6 +943,7 @@ pub struct VehicleReference {
     /// Source `carscript.psSmoke` systems, posed relative to `root`.
     pub exhaust: Vec<ParticleReference>,
     pub wheel_effects: [WheelEffectsReference; 4],
+    pub wheel_voices: [WheelVoices; 4],
     pub effect_gains: EffectGains,
 }
 

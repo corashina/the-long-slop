@@ -659,6 +659,7 @@ impl WorldStream {
                         instance,
                         prototype,
                         &self.reference,
+                        &reference.skid,
                         &self.contents.rules,
                         items,
                         physics,

@@ -1,7 +1,7 @@
 //! Wheel ground effects: source `talajnezo` per wheel, `carscript` gains and `mainscript` skid data.
 use super::*;
 
-/// One source `talajnezo`, in `VehicleReference::wheel_slots` order.
+/// One source `talajnezo`, in car wheel order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WheelEffectsReference {
@@ -18,10 +18,16 @@ pub struct WheelEffectsReference {
     pub dust: Option<ParticleReference>,
     /// grasstrail first if present, then grasss.
     pub grass: Vec<ParticleReference>,
-    /// Audio voice ids of GroundSource, SpringSource and SlideSource.
-    pub ground_voice: u32,
-    pub spring_voice: u32,
-    pub slide_voice: u32,
+}
+
+/// Audio voice ids of one talajnezo GroundSource, SpringSource and SlideSource.
+/// V03 bridge: old garage cars only. Task 9 removes it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WheelVoices {
+    pub ground: u32,
+    pub spring: u32,
+    pub slide: u32,
 }
 
 /// talajnezo groundSoundM, springSoundM and springPitchM.
@@ -65,19 +71,29 @@ pub struct SkidReference {
 }
 
 pub(super) fn validate(m: &ReferenceManifest) -> Result<(), ReferenceError> {
-    for vehicle in &m.vehicles {
-        let g = &vehicle.effect_gains;
+    let garage = m
+        .vehicles
+        .iter()
+        .map(|v| (&v.effect_gains, &v.wheel_effects[..], 4));
+    let world = m
+        .world
+        .prototypes
+        .iter()
+        .filter_map(|p| p.vehicle.as_ref())
+        .map(|v| (&v.effect_gains, &v.wheel_effects[..], v.wheels.len()));
+    for (g, wheels, count) in garage.chain(world) {
         require(
-            finite(&[
-                g.ground,
-                g.spring,
-                g.spring_pitch,
-                g.slide_angle,
-                g.max_slide_volume_speed,
-            ]),
+            wheels.len() == count
+                && finite(&[
+                    g.ground,
+                    g.spring,
+                    g.spring_pitch,
+                    g.slide_angle,
+                    g.max_slide_volume_speed,
+                ]),
             "vehicle effect gains",
         )?;
-        for w in &vehicle.wheel_effects {
+        for w in wheels {
             require(
                 w.rate.is_finite()
                     && w.rate >= 0.

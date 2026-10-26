@@ -104,7 +104,9 @@ def runtime_resources(manifest):
     collect(world.get('material_textures', []))
     for prototype in world.get('prototypes', []):
         collect(prototype.get('deferred_materials', []))
-        collect(prototype.get('vehicle', {}).get('exhaust', []))
+        vehicle=prototype.get('vehicle') or {}
+        collect(vehicle.get('exhaust', []))
+        collect([[w['dust'],w['grass']] for w in vehicle.get('wheel_effects',[])])
     return list(resources.values())
 
 

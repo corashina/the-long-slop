@@ -2148,6 +2148,8 @@ mod tests {
                 "wheel_slip": [0.0, 1.0, 0.0, 1.0], "rim_slip": [1.0, 1.0], "auto_shift_stop_speed": 1.0,
                 "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [],
+                "wheel_effects": [{"source": src(16), "pose": pose, "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []}],
+                "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "seats": [{"source": src(13), "node": 3, "sit_node": 3, "hit_nodes": [3], "driver": true, "driving2": true, "yaw_limits_degrees": [-179.0, 179.0], "min_exit_angle_degrees": 65.0, "exit_height": 1.0, "show_sleep_text": false, "default_pitch_degrees": 0.0, "pitch_limits_degrees": [-89.0, 89.0]}],
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": []
             },

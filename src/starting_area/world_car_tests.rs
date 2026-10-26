@@ -77,6 +77,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
             }],
         },
         &prototype,
+        &crate::wheel_effects::tests::skid(),
         &mut physics,
         &mut vehicles,
         &mut ChangeRecords::default(),

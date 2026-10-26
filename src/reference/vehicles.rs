@@ -41,6 +41,9 @@ pub struct WorldVehicleReference {
     pub collision_gain: f32,
     /// Source `carscript.psSmoke` systems, posed relative to the prototype root.
     pub exhaust: Vec<ParticleReference>,
+    /// One `talajnezo` per wheel, in `wheels` order. Poses are relative to the prototype root.
+    pub wheel_effects: Vec<WheelEffectsReference>,
+    pub effect_gains: EffectGains,
     pub seats: Vec<WorldSeatReference>,
     pub lights: Vec<WorldLightReference>,
     pub light_switch: Option<WorldLightSwitchReference>,

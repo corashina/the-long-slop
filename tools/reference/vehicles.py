@@ -9,6 +9,7 @@ from .driving import car_driving, road_wheels, hub_record, wheel_graphics
 from .instruments import instrument_record
 from .lighting import vehicle_light_links, vehicle_states
 from .particles import recover_exhaust
+from .wheel_effects import recover_wheel_effects, effect_gains
 from .player_movement import seat_view
 
 ENGINE_FIELDS = {'start_chance':'startChance','starter_rpm':'starterRpm','starter_rpm_lerp':'starterRpmLerp',
@@ -241,5 +242,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,
         'collision_gain':car['collisionSoundM'],
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
+        'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
+        'effect_gains':effect_gains(car),
         'seats':seats,'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

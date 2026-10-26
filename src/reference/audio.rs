@@ -839,8 +839,8 @@ impl AudioReference {
         )?;
         require(
             game.vehicles.iter().all(|v| {
-                v.wheel_effects.iter().all(|w| {
-                    [w.ground_voice, w.spring_voice, w.slide_voice]
+                v.wheel_voices.iter().all(|w| {
+                    [w.ground, w.spring, w.slide]
                         .iter()
                         .all(|id| voices.contains(id))
                 })

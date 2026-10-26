@@ -361,6 +361,8 @@ pub(crate) mod tests {
         let wheels: Vec<_> = (0..4).map(|i| json!({"source": src(20 + i), "node": i + 1, "slot": i + 1, "mount": i + 1,
             "steer": i < 2, "drive": i >= 2, "brake": true, "handbrake": i >= 2, "sideways_stiffness_modifier": 1.0,
             "collider": {"radius": 0.3, "suspension_distance": 0.3, "center": [0, 0, 0], "spring": 25000.0, "damper": 1500.0, "target_position": 0.45, "forward_friction": friction, "sideways_friction": friction, "wheel_mass_kg": 20.0, "rotational_damping": 0.25, "force_application_distance_m": 0.0}})).collect();
+        let effects: Vec<_> = (0..4).map(|i| json!({"source": src(30 + i), "pose": pose(corners[i as usize].0, corners[i as usize].1),
+            "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []})).collect();
         let mut nodes = vec![node(1, 0.0, 0.0)];
         nodes.extend((0..4).map(|i| node(i + 2, corners[i as usize].0, corners[i as usize].1)));
         serde_json::from_value(json!({
@@ -379,6 +381,7 @@ pub(crate) mod tests {
                 "wheel_slip": [1.25, 0.75, 1.25, 0.75], "rim_slip": [0.4, 0.3], "auto_shift_stop_speed": 1.0,
                 "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
+                "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": []
             }
         }))

@@ -894,33 +894,28 @@ impl AudioState {
     pub fn wheels(
         &mut self,
         effects: &crate::wheel_effects::WheelEffects,
-        wheels: &[crate::reference::WheelEffectsReference; 4],
+        wheels: &[crate::reference::WheelVoices; 4],
         skid: &crate::reference::SkidReference,
         active: bool,
     ) {
         for (w, r) in wheels.iter().enumerate() {
             let s = effects.sound(w);
             // talajnezo does not set the GroundSource pitch.
-            let pitch = self.reference.voices[self.voice_indices[&r.ground_voice]].pitch;
+            let pitch = self.reference.voices[self.voice_indices[&r.ground]].pitch;
+            self.voice(r.ground, active && s.ground_playing, s.ground_gain, pitch);
             self.voice(
-                r.ground_voice,
-                active && s.ground_playing,
-                s.ground_gain,
-                pitch,
-            );
-            self.voice(
-                r.spring_voice,
+                r.spring,
                 active && s.spring_playing,
                 s.spring_gain,
                 s.spring_pitch,
             );
             self.voice(
-                r.slide_voice,
+                r.slide,
                 active && s.slide_playing,
                 s.slide_gain,
                 s.slide_pitch,
             );
-            self.signals[self.voice_indices[&r.slide_voice]].clip = if s.slide_road {
+            self.signals[self.voice_indices[&r.slide]].clip = if s.slide_road {
                 skid.road_clip
             } else {
                 skid.dirt_clip

@@ -646,6 +646,25 @@ impl VehicleRecord {
             Self::World(index) => &self::world_vehicle(reference, index).exhaust,
         }
     }
+    /// Source `talajnezo` records and `carscript` effect gains of the record.
+    pub fn wheel_effects(
+        self,
+        reference: &ReferenceManifest,
+    ) -> (
+        &[crate::reference::WheelEffectsReference],
+        &crate::reference::EffectGains,
+    ) {
+        match self {
+            Self::Garage(index) => {
+                let v = &reference.vehicles[index];
+                (&v.wheel_effects, &v.effect_gains)
+            }
+            Self::World(index) => {
+                let v = self::world_vehicle(reference, index);
+                (&v.wheel_effects, &v.effect_gains)
+            }
+        }
+    }
 }
 
 /// The vehicle record of car prototype `index`. The binder adds runtimes only for car prototypes.
@@ -712,8 +731,7 @@ pub struct VehicleRuntime {
     pub lights: Option<crate::simulation::car_lights::CarLights>,
     /// Brake input of the last step. The brake lamps read it.
     brake: f32,
-    /// V03 bridge: wheel effects of old garage cars only. Task 9a adds world car records.
-    pub wheel_effects: Option<crate::wheel_effects::WheelEffects>,
+    pub wheel_effects: crate::wheel_effects::WheelEffects,
     recovery_bounds: crate::reference::Bounds,
     /// Bodies of the car hierarchy other than the chassis. Recovery moves them with it.
     bodies: Vec<RigidBodyHandle>,
@@ -731,6 +749,7 @@ impl VehicleRuntime {
     pub(crate) fn world(
         prototype: usize,
         record: &crate::reference::WorldVehicleReference,
+        skid: &crate::reference::SkidReference,
         parts: WorldCarParts,
     ) -> Self {
         Self {
@@ -754,7 +773,11 @@ impl VehicleRuntime {
                 parts.lights,
             )),
             brake: 0.,
-            wheel_effects: None,
+            wheel_effects: crate::wheel_effects::WheelEffects::new(
+                &record.wheel_effects,
+                skid,
+                parts.seed,
+            ),
             recovery_bounds: parts.recovery_bounds,
             bodies: parts.bodies,
             previous: [0.0; 3],
@@ -831,11 +854,11 @@ impl VehicleRuntime {
             )),
             lights: None,
             brake: 0.,
-            wheel_effects: Some(crate::wheel_effects::WheelEffects::new(
+            wheel_effects: crate::wheel_effects::WheelEffects::new(
                 &vehicle.wheel_effects,
                 &reference.skid,
                 vehicle.source.path_id as u64,
-            )),
+            ),
             recovery_bounds,
             bodies,
             previous: [0.0; 3],
@@ -1724,14 +1747,13 @@ impl GarageRuntime {
                 FIXED_DT,
                 audio.game_seconds,
             );
-            if let Some(effects) = &vehicle.wheel_effects {
-                audio.wheels(
-                    effects,
-                    &reference.vehicles[index].wheel_effects,
-                    &reference.skid,
-                    active,
-                );
-            }
+            // V03 bridge: wheel voices of old garage cars only. Task 9 removes it.
+            audio.wheels(
+                &vehicle.wheel_effects,
+                &reference.vehicles[index].wheel_voices,
+                &reference.skid,
+                active,
+            );
         }
         for (key, vehicle) in &mut self.vehicles {
             let current = self.persistent_world.absolute_vehicle_position(
@@ -1981,12 +2003,7 @@ impl GarageRuntime {
         key: &ObjectKey,
         vehicle: &mut VehicleRuntime,
     ) {
-        let (Some(effects), VehicleRecord::Garage(index)) =
-            (vehicle.wheel_effects.as_mut(), vehicle.record)
-        else {
-            return;
-        };
-        let record = &reference.vehicles[index];
+        let (references, gains) = vehicle.record.wheel_effects(reference);
         let chassis = self.physics.chassis_handle(key);
         let body = &self.physics.rapier().bodies[chassis];
         // The chassis body frame is the car root node: reference validation requires it.
@@ -1994,7 +2011,7 @@ impl GarageRuntime {
         let forward = root.rotation * -rapier3d::math::Vector::Z;
         let linear_velocity = body.linvel();
         let physics = &self.physics;
-        let wheels = std::array::from_fn(|w| {
+        let wheel = |w| {
             let (rpm, radius, grounded) = physics.wheel_motion(key, w);
             crate::wheel_effects::WheelInput {
                 rpm,
@@ -2002,13 +2019,13 @@ impl GarageRuntime {
                 forward,
                 grounded,
             }
-        });
+        };
         // Footsteps own the source sand layer list. Without audio, every hit is road.
         let sand_layers = self
             .audio
             .as_ref()
             .map_or(&[][..], |a| &a.reference.footsteps.sand_layers);
-        effects.advance(
+        vehicle.wheel_effects.advance(
             FIXED_DT,
             &crate::wheel_effects::WheelEffectsInput {
                 root_absolute: self.stream.origin.absolute(root.translation.to_array()),
@@ -2017,10 +2034,10 @@ impl GarageRuntime {
                 chassis,
                 linear_velocity,
                 car_kmh: linear_velocity.dot(forward).abs() * 3.6,
-                wheels,
             },
-            &record.wheel_effects,
-            &record.effect_gains,
+            wheel,
+            references,
+            gains,
             &reference.skid,
             sand_layers,
             &self.physics,

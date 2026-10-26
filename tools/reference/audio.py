@@ -675,8 +675,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
     # talajnezo loops 3 sources per wheel. The slide voice switches between the mainscript skid clips.
     for vehicle in manifest['vehicles']:
-        for wheel in vehicle['wheel_effects']:
-            for field in ('ground_voice','spring_voice','slide_voice'):
+        for wheel in vehicle['wheel_voices']:
+            for field in ('ground','spring','slide'):
                 wheel[field]=voice(source.get(wheel[field]['file'],wheel[field]['path_id']),[method('talajnezo','FixedUpdate')])
     skid=manifest['skid']
     for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
