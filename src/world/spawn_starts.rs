@@ -132,6 +132,18 @@ impl SpawnEvaluation<'_> {
                         self.random
                             .range(number(f, "soundMinTime")?, number(f, "soundMaxTime")?);
                     }
+                    "busdooropenscript" => {
+                        if self.mark_started(&parent.id, source) {
+                            let speed = self
+                                .random
+                                .range(number(f, "minspeed")?, number(f, "maxspeed")?);
+                            self.initialization.door_speeds.push((
+                                parent.id.clone(),
+                                source.clone(),
+                                speed,
+                            ));
+                        }
+                    }
                     "nyulscript" => {
                         if !self.mark_started(&parent.id, source) {
                             continue;

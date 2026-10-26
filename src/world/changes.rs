@@ -97,6 +97,9 @@ pub struct ChangeRecords {
     /// Source `coolantTankscript` fan state of radiator part objects.
     #[serde(serialize_with = "pairs")]
     radiators: BTreeMap<ObjectKey, bool>,
+    /// Source `busdoorscripts` door state (`Bopened`, `Bsigned`) of bus objects, in door order.
+    #[serde(serialize_with = "pairs")]
+    bus_doors: BTreeMap<ObjectKey, Vec<[bool; 2]>>,
 }
 impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
@@ -105,6 +108,7 @@ impl PartialEq for ChangeRecords {
             && self.wheel_slots == other.wheel_slots
             && self.engines == other.engines
             && self.radiators == other.radiators
+            && self.bus_doors == other.bus_doors
     }
 }
 /// Writes a map with object keys as a list of pairs. JSON object keys must be strings.
@@ -133,6 +137,7 @@ impl<'de> Deserialize<'de> for ChangeRecords {
             wheel_slots: Vec<(ObjectKey, Vec<Option<ObjectKey>>)>,
             engines: Vec<(ObjectKey, crate::save::EngineSnapshot)>,
             radiators: Vec<(ObjectKey, bool)>,
+            bus_doors: Vec<(ObjectKey, Vec<[bool; 2]>)>,
         }
         let envelope = Envelope::deserialize(deserializer)?;
         let mut result = Self {
@@ -140,6 +145,7 @@ impl<'de> Deserialize<'de> for ChangeRecords {
             wheel_slots: unique(envelope.wheel_slots)?,
             engines: unique(envelope.engines)?,
             radiators: unique(envelope.radiators)?,
+            bus_doors: unique(envelope.bus_doors)?,
             ..Self::default()
         };
         for (key, change) in envelope.records {
@@ -162,6 +168,7 @@ impl ChangeRecords {
             wheel_slots: self.wheel_slots.clone(),
             engines: self.engines.clone(),
             radiators: self.radiators.clone(),
+            bus_doors: self.bus_doors.clone(),
             ..Self::default()
         };
         for (key, change) in self.iter() {
@@ -519,6 +526,13 @@ impl ChangeRecords {
     pub fn radiator(&self, key: &ObjectKey) -> Option<bool> {
         self.radiators.get(key).copied()
     }
+    /// Sets the door state of bus `key`. It stays while the bus is retired.
+    pub(crate) fn set_bus_doors(&mut self, key: ObjectKey, doors: Vec<[bool; 2]>) {
+        self.bus_doors.insert(key, doors);
+    }
+    pub fn bus_doors(&self, key: &ObjectKey) -> Option<&[[bool; 2]]> {
+        self.bus_doors.get(key).map(Vec::as_slice)
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + object_states_bytes(&self.vehicles)
@@ -538,6 +552,12 @@ impl ChangeRecords {
                 .map(|e| e.start_draw.capacity())
                 .sum::<usize>()
             + object_states_bytes(&self.radiators)
+            + object_states_bytes(&self.bus_doors)
+            + self
+                .bus_doors
+                .values()
+                .map(|d| d.capacity() * std::mem::size_of::<[bool; 2]>())
+                .sum::<usize>()
             + self.records.capacity() * std::mem::size_of::<(ObjectKey, ObjectChange)>()
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)
