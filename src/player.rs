@@ -1195,6 +1195,8 @@ mod vehicle_seat_tests {
             "grip_force",
             "grip_speed",
             "grip_distance",
+            "pedaling_nm",
+            "pedaling_rpm",
             "carry_min_weight",
             "carry_max_weight",
             "carry_offset_radius",

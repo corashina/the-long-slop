@@ -681,6 +681,10 @@ pub struct PlayerReference {
     pub grip_force: f32,
     pub grip_speed: f32,
     pub grip_distance: f32,
+    /// Source `fpscontroller.PedalingNm`: bike pedal torque at full gas.
+    pub pedaling_nm: f32,
+    /// Source `fpscontroller.PedalingRpm`: bike pedal rpm at full gas.
+    pub pedaling_rpm: f32,
     pub carry_min_weight: f32,
     pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
@@ -1751,6 +1755,12 @@ impl ReferenceManifest {
                 && p.grip_speed > 0.0
                 && p.grip_distance > 0.0,
             "push and throw parameters",
+        )?;
+        require(
+            finite(&[p.pedaling_nm, p.pedaling_rpm])
+                && p.pedaling_nm >= 0.0
+                && p.pedaling_rpm >= 0.0,
+            "pedaling parameters",
         )?;
         let mut push_owners = HashSet::new();
         for push in &self.pushables {
