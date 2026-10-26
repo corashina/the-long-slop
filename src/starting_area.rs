@@ -703,6 +703,8 @@ pub struct GarageRuntime {
     pub paused: bool,
     pub started: bool,
     pub attempts: u64,
+    /// Km the player drove as driver.
+    pub driven_km: f64,
     pub rebases: u32,
     pub notice: &'static str,
     pub aim: ResolvedAim,
@@ -842,6 +844,7 @@ impl GarageRuntime {
             paused: false,
             started: false,
             attempts: 0,
+            driven_km: 0.,
             rebases: 0,
             notice: "",
             aim: ResolvedAim::default(),
@@ -1451,6 +1454,12 @@ impl GarageRuntime {
                 });
         }
         self.step_car_sounds(reference, input);
+        let driven = self
+            .area
+            .player
+            .seat_vehicle()
+            .filter(|_| self.area.player.driving())
+            .cloned();
         for (key, vehicle) in &mut self.vehicles {
             let current = self.persistent_world.absolute_vehicle_position(
                 &self.physics,
@@ -1461,6 +1470,9 @@ impl GarageRuntime {
             let distance_m =
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
             vehicle.trip_m += distance_m;
+            if driven.as_ref() == Some(key) {
+                self.driven_km += distance_m / 1000.;
+            }
             if vehicle.kmh_slots.is_empty() {
                 continue;
             }

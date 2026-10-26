@@ -414,6 +414,7 @@ impl GarageRuntime {
         candidate.vehicle = saved.progress.selected_vehicle.clone();
         candidate.driving_assists = saved.driving_assists;
         candidate.attempts = crate::save::identity::unsigned(&saved.progress.start_attempts)?;
+        candidate.driven_km = saved.progress.driven_km;
         candidate
             .lighting
             .restore_save(&reference.lighting, &ids, &saved.lighting)?;
@@ -558,6 +559,7 @@ impl GarageRuntime {
             progress: ProgressSnapshot {
                 selected_vehicle: self.vehicle.clone(),
                 start_attempts: self.attempts.to_string(),
+                driven_km: self.driven_km,
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },
