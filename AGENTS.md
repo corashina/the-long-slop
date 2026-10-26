@@ -10,3 +10,4 @@
 - Implement only critical tests.
 - Run targeted checks for changed behavior without asking. Web-only changes: web tests only. Rust changes: native tests and a WASM compile check.
 - Run full checks (`scripts/check.ps1 -Full`), release builds (`scripts/build.ps1`), and browser acceptance only on explicit request or at an agreed milestone. Task completion is not a request.
+- Do not add `Co-Authored-By` or `Claude-Session` trailers to commit messages.
