@@ -92,6 +92,24 @@ fn frame_round_trips() {
         washes: vec![1, 0],
         brush_poses: vec![PoseRow::default()],
         spray_colors: vec![[1., 0., 0., 1.]],
+        audio: vec![
+            AudioCall::Begin {
+                session: 1,
+                started: true,
+                paused: false,
+                seconds: 3.5,
+            },
+            AudioCall::Listener,
+            AudioCall::Radio {
+                emitter: 40,
+                frame: crate::simulation::radio::RadioFrame {
+                    power: true,
+                    frequency: 98.5,
+                    ..Default::default()
+                },
+            },
+            AudioCall::End,
+        ],
         budgets: vec![BudgetRow {
             used: 3.,
             limit: 8.,
