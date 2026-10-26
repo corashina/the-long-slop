@@ -128,6 +128,9 @@ fn fragment(
     let color = source.color;
 #endif
     if !source_lod_keep(in.position.xy, lod_fade) { discard; }
+    let player = source.flags.z == 3u;
+    // Source player_model: discard near the camera of a view with `_Dist`.
+    if player && length(in.world_position.xyz - mesh_view_bindings::view.world_position) < lighting.near_far.z { discard; }
 #ifdef SOURCE_GPU_PROPS
     // Same fields as pbr_input_from_vertex_output, without the mesh uniform flags.
     var pbr = pbr_types::pbr_input_new();
@@ -167,6 +170,7 @@ fn fragment(
 #endif
     if source_flag(5u) { alpha = color.a; }
     if source_flag(9u) && alpha < source.factors.w { discard; }
+    if player && source.factors.w >= alpha { discard; }
     let mask = sample_source(7u, uv, detail_uv, offset).a;
     if source_flag(1u) {
         albedo *= mix(vec3(1.0), sample_source(6u, uv, detail_uv, offset).rgb * 4.59479380, mask);
@@ -180,6 +184,12 @@ fn fragment(
             tangent_normal = mix(tangent_normal, blended, mask);
         }
         pbr.N = normalize(tbn * tangent_normal);
+    }
+    if player {
+        // The player normal texture holds the decoded R*A and G channels.
+        let xy = sample_source(1u, uv, detail_uv, offset).rg * 2.0 - 1.0;
+        let q = vec3(xy, sqrt(1.0 - min(dot(xy, xy), 1.0)));
+        pbr.N = normalize(tbn * mix(vec3(0.5, 0.5, 1.0), q, source.scales.x));
     }
 #endif
     var metallic = source.factors.x;
@@ -205,7 +215,7 @@ fn fragment(
     }
     // Preserve source Standard OutputForward alpha, including premultiplied specular.
     var output_alpha = alpha;
-    if source.flags.z == 0u && !source_flag(8u) && !source_flag(10u) { output_alpha = 1.0; }
+    if (source.flags.z == 0u || player) && !source_flag(8u) && !source_flag(10u) { output_alpha = 1.0; }
 #ifdef SOURCE_UNLIT
     let fog = clamp(source_fog,0.0,1.0);
 #else

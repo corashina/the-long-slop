@@ -1,7 +1,7 @@
 //! V04: the source sled slides on a slope, steers, stops its use on stand up and survives save and load.
 use super::*;
 use crate::player::SeatOwner;
-use crate::simulation::input::KeyboardDriving;
+use crate::simulation::input::{DrivingInput, DrivingSettings};
 use crate::simulation::{FIXED_DT, keys};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderBuilder, ColliderHandle, RigidBodyHandle};
@@ -13,8 +13,18 @@ fn flat_forward(run: &GarageRuntime, body: RigidBodyHandle) -> Vector {
 }
 
 /// One game step of the sled: keyboard input, `step_sleds`, physics.
-fn step_sled(run: &mut GarageRuntime, driving: &mut KeyboardDriving, held: u32) {
-    let controls = driving.step(run.area.player.item_seat_body(), held);
+fn step_sled(run: &mut GarageRuntime, driving: &mut DrivingInput, held: u32) {
+    let controls = driving
+        .step(
+            run.area.player.item_seat_body(),
+            &crate::simulation::FrameInput {
+                held,
+                ..Default::default()
+            },
+            None,
+            false,
+        )
+        .controls;
     let seat = match (
         run.area.player.seat_owner(),
         run.area.player.item_seat_source(),
@@ -101,9 +111,10 @@ fn sled_slides_steers_and_keeps_its_seat() {
             .friction(0.8),
     );
     run.physics.refresh_queries();
-    let mut driving = KeyboardDriving::new(
+    let mut driving = DrivingInput::new(
         reference.driving.keyboard_steering_rate,
         reference.driving.pedal_rate,
+        DrivingSettings::defaults(&reference.driving),
     );
     for _ in 0..(0.5 / FIXED_DT) as usize {
         step_sled(&mut run, &mut driving, 0);
@@ -122,15 +133,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
                 .filter(|seat| seat.seat.source == first.source)
         })
         .expect("bound first sled seat");
-    let (seat_record, seat_item, pose) = (seat.seat.clone(), seat.seat_item, seat.pose);
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Item(owner.clone()),
-        body,
-        &seat_record,
-        seat_item,
-        pose,
-        &mut run.physics
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
 
     // Slide and push forward for 2 s.
     let start = run.physics.rapier().bodies[body].translation();
@@ -169,14 +172,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
     }
 
     // Sit again, save and load.
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Item(owner.clone()),
-        body,
-        &seat_record,
-        seat_item,
-        pose,
-        &mut run.physics
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
     step_sled(&mut run, &mut driving, 0);
     assert!(sled_in_use(&run));
     let stamp = roadside_stamp(&reference);

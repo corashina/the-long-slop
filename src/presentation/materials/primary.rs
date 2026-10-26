@@ -433,6 +433,10 @@ impl SourceMaterials {
                 (jobs + 1, bytes + t.input_staging)
             })
     }
+    /// World primary textures of `asset` are admitted.
+    pub fn holds_world_asset(&self, asset: SourceAssetId) -> bool {
+        self.world_primary.assets.contains_key(&asset)
+    }
     pub fn world_asset_retirable(
         &self,
         asset: SourceAssetId,

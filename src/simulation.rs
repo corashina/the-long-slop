@@ -1,4 +1,5 @@
 pub const FIXED_DT: f32 = 0.01999999955;
+pub mod balance;
 pub mod car_lights;
 pub mod dials;
 pub mod drivetrain;
@@ -7,6 +8,7 @@ pub mod gauges;
 pub mod ignition;
 pub mod input;
 pub mod instruments;
+pub mod lever;
 pub mod metal_detector;
 pub mod music_box;
 pub mod powertrain;
@@ -60,6 +62,8 @@ pub mod player_keys {
     pub const SMOKE: u8 = 4;
     /// Source `input.removeSunglasses` (X).
     pub const TAKE_OFF: u8 = 8;
+    /// Source `IN.togglemousedrive` (U).
+    pub const MOUSE_DRIVE: u8 = 16;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -103,6 +107,21 @@ impl Default for TypingInput {
     }
 }
 
+/// Raw browser gamepad state: 4 pads, 8 axes and 32 button bits per pad.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GamepadFrame {
+    /// Pad `p` axis `a` is at `p * GamepadFrame::AXES + a`.
+    pub axes: [f32; 32],
+    /// Bit `b` of pad `p` is set while button `b` is pressed.
+    pub buttons: [u32; 4],
+}
+
+impl GamepadFrame {
+    pub const PADS: usize = 4;
+    pub const AXES: usize = 8;
+    pub const BUTTONS: usize = 32;
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
@@ -114,9 +133,12 @@ pub struct FrameInput {
     pub inventory_held: u8,
     pub inventory_released: u8,
     pub mouse: [f32; 2],
+    /// Source `Mouse X`, `Mouse Y` axes, without look sensitivity. Y is up.
+    pub drive_mouse: [f32; 2],
     pub wheel: f32,
     pub carry: CarryDeltas,
     pub typing: TypingInput,
+    pub gamepad: GamepadFrame,
 }
 
 impl FrameInput {
@@ -129,7 +151,13 @@ impl FrameInput {
         self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
-        for (pending, delta) in self.mouse.iter_mut().zip(frame.mouse) {
+        self.gamepad = frame.gamepad;
+        for (pending, delta) in self
+            .mouse
+            .iter_mut()
+            .chain(&mut self.drive_mouse)
+            .zip(frame.mouse.into_iter().chain(frame.drive_mouse))
+        {
             if delta.is_finite() {
                 *pending += delta;
             }
@@ -176,6 +204,7 @@ impl FrameInput {
                 keys: step.typing.keys & !TypingInput::PRESSED,
                 ..TypingInput::default()
             },
+            gamepad: step.gamepad,
             ..Self::default()
         };
         step

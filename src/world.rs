@@ -57,6 +57,8 @@ pub use stream::{
     PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
     WorldRequest, WorldStream,
 };
+mod start_car;
+pub use start_car::{StartCar, StartCarChoice, menu_random, start_fields};
 mod startup;
 pub use startup::{StartupTerrain, source_world_pose};
 mod terrain;
@@ -66,10 +68,11 @@ pub use ::terrain::{
 };
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
-/// Game mode biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
+/// Game mode. Biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GameMode {
     pub biome: u8,
+    pub start_car: StartCarChoice,
 }
 
 impl GameMode {
@@ -123,7 +126,6 @@ mod spawn_starts;
 mod structure_helpers;
 
 mod contents;
-pub(crate) use contents::START_CAR;
 
 mod content_containers;
 

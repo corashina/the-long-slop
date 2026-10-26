@@ -17,7 +17,7 @@ use query_bounds::QueryBounds;
 use rapier3d::math::{Pose, Rotation, Vector};
 pub use rapier3d::prelude::ColliderHandle;
 use rapier3d::prelude::{
-    ColliderBuilder, ColliderSet, CollisionEvent, ContactPair, EventHandler, Group,
+    Array2, ColliderBuilder, ColliderSet, CollisionEvent, ContactPair, EventHandler, Group,
     InteractionGroups, InteractionTestMode, QueryFilter, QueryPipeline, RigidBodyHandle,
     RigidBodySet,
 };
@@ -300,10 +300,25 @@ impl PhysicsWorld {
         } else {
             0.0
         };
+        let steering = if input.steer.is_finite() {
+            input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
+        } else {
+            0.0
+        };
+        for (rules, steer) in vehicle.rules.iter().zip(&mut vehicle.steer) {
+            *steer = if rules.steer { steering } else { 0.0 };
+        }
+        // A parked car keeps its steer. Only a steer change wakes it.
+        let steer_changed = vehicle
+            .wheels
+            .wheels()
+            .iter()
+            .zip(&vehicle.steer)
+            .any(|(wheel, steer)| wheel.steering != *steer);
         if pedal(input.throttle) > 0.0
             || brake > 0.0
             || motor_nm != 0.0
-            || input.steer != 0.0
+            || steer_changed
             || handbrake != vehicle.last_handbrake
         {
             self.query_bounds.mark_body(vehicle.chassis);
@@ -314,19 +329,9 @@ impl PhysicsWorld {
                 .mark_if_changed(vehicle.chassis, before, body);
         }
         vehicle.last_handbrake = handbrake;
-        let steering = if input.steer.is_finite() {
-            input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
-        } else {
-            0.0
-        };
         // Source carscript.SetWheel: driven wheels take motor torque and engine brake.
         // Service brake and handbrake add to the wheels in their source lists.
-        for ((rules, torques), steer) in vehicle
-            .rules
-            .iter()
-            .zip(&mut vehicle.torques)
-            .zip(&mut vehicle.steer)
-        {
+        for (rules, torques) in vehicle.rules.iter().zip(&mut vehicle.torques) {
             *torques = WheelTorques::default();
             if rules.drive {
                 torques.motor_nm = motor_nm / drive_count;
@@ -338,7 +343,6 @@ impl PhysicsWorld {
             if rules.handbrake {
                 torques.brake_nm += vehicle.handbrake_torque * handbrake;
             }
-            *steer = if rules.steer { steering } else { 0.0 };
         }
         let own = vehicle.chassis;
         let chassis = &self.chassis;
@@ -596,9 +600,12 @@ impl PhysicsWorld {
     }
 
     /// Fallible source mesh publication leaves existing collision untouched on failure.
+    /// `grid` is the tile size when the surface is a regular terrain grid
+    /// (`terrain::regular_grid`). Such a surface becomes a heightfield, else a triangle mesh.
     pub fn insert_source_mesh(
         &mut self,
         surface: &crate::world::WorldSurface,
+        grid: Option<f32>,
         position: [f32; 3],
         layer: u8,
         filter: u32,
@@ -607,42 +614,42 @@ impl PhysicsWorld {
         available_cpu: usize,
     ) -> Result<(ColliderHandle, usize), ReferenceError> {
         // Reserve vertices, indices, BVH construction and retained collider storage before allocation.
-        let reservation = surface
-            .vertices
-            .len()
-            .saturating_mul(48)
-            .saturating_add(surface.triangles.len().saturating_mul(256))
-            .saturating_add(std::mem::size_of::<rapier3d::prelude::Collider>());
+        let reservation = match grid {
+            Some(_) => surface.vertices.len().saturating_mul(5),
+            None => surface
+                .vertices
+                .len()
+                .saturating_mul(48)
+                .saturating_add(surface.triangles.len().saturating_mul(256)),
+        }
+        .saturating_add(std::mem::size_of::<rapier3d::prelude::Collider>());
         if reservation > available_cpu {
             return Err(ReferenceError(format!(
                 "Source collision reservation exceeds budget: {reservation}"
             )));
         }
-        let mesh = ColliderBuilder::trimesh(
-            surface
-                .vertices
-                .iter()
-                .copied()
-                .map(Vector::from_array)
-                .collect(),
-            surface.triangles.clone(),
-        )
-        .map_err(|error| ReferenceError(format!("Source collision mesh: {error}")))?
-        .friction(friction)
-        .restitution(restitution)
-        .translation(Vector::from_array(position))
-        .collision_groups(InteractionGroups::new(
-            Group::from_bits_truncate(1u32 << layer),
-            Group::from_bits_truncate(filter),
-            InteractionTestMode::And,
-        ))
-        .build();
+        let mesh = source_collider(surface, grid)?
+            .friction(friction)
+            .restitution(restitution)
+            .translation(Vector::from_array(position))
+            .collision_groups(InteractionGroups::new(
+                Group::from_bits_truncate(1u32 << layer),
+                Group::from_bits_truncate(filter),
+                InteractionTestMode::And,
+            ))
+            .build();
+        let shape = mesh.shape();
         let bytes = std::mem::size_of::<rapier3d::prelude::Collider>()
-            + mesh
-                .shape()
-                .as_trimesh()
-                .expect("source triangle mesh")
-                .total_memory_size();
+            + match shape.as_heightfield() {
+                Some(field) => {
+                    std::mem::size_of_val(field.heights().data())
+                        + std::mem::size_of_val(field.cells_statuses().data())
+                }
+                None => shape
+                    .as_trimesh()
+                    .expect("source triangle mesh")
+                    .total_memory_size(),
+            };
         if bytes > available_cpu {
             return Err(ReferenceError(format!(
                 "Source collision allocation exceeds budget: {bytes}"
@@ -800,6 +807,38 @@ pub fn from_rapier(pose: &Pose) -> VehiclePose {
     }
 }
 
+/// Source surface shape in the surface's local frame.
+fn source_collider(
+    surface: &crate::world::WorldSurface,
+    grid: Option<f32>,
+) -> Result<ColliderBuilder, ReferenceError> {
+    let Some(size) = grid else {
+        return ColliderBuilder::trimesh(
+            surface
+                .vertices
+                .iter()
+                .copied()
+                .map(Vector::from_array)
+                .collect(),
+            surface.triangles.clone(),
+        )
+        .map_err(|error| ReferenceError(format!("Source collision mesh: {error}")));
+    };
+    // Vertex rows run from +z to -z. Heightfield rows run from -z, stored column major.
+    let n = surface.vertices.len().isqrt();
+    let mut heights = Vec::with_capacity(n * n);
+    for column in 0..n {
+        for row in (0..n).rev() {
+            heights.push(surface.vertices[row * n + column][1]);
+        }
+    }
+    // The grid diagonal (-x, +z) to (+x, -z) is the default cell split.
+    Ok(ColliderBuilder::heightfield(
+        Array2::new(n, n, heights),
+        Vector::new(size, 1.0, size),
+    ))
+}
+
 #[cfg(test)]
 mod hit_tests {
     use super::*;
@@ -832,5 +871,122 @@ mod hit_tests {
         assert!((3.9..4.8).contains(&hits[0].speed), "{hits:?}");
         assert!(hits[0].point[1].abs() < 0.2, "{hits:?}");
         assert!(drop_box(ActiveEvents::empty()).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod source_collider_tests {
+    use super::*;
+    use rapier3d::parry::query::{Ray, RayCast, ShapeCastOptions, cast_shapes};
+    use rapier3d::parry::shape::Ball;
+
+    /// The heightfield must answer every query like the render triangles.
+    #[test]
+    fn heightfield_matches_triangle_mesh() {
+        let evaluator = terrain::TerrainEvaluator::new(terrain::TerrainSettings {
+            seed: -1705217151,
+            edge: 100000.0,
+            edge_gradient: 5000.0,
+        });
+        let tile = terrain::TerrainTile {
+            tier: 0,
+            size: 100,
+            resolution: 21,
+            draw_distance: 3,
+            y: 0.0,
+            material_scale: 1.0,
+        };
+        let mesh = terrain::surface(
+            [3, -2],
+            terrain::TerrainContext {
+                evaluator: &evaluator,
+                tile,
+                roads: &[],
+                road_radius_squared: None,
+                foundations: &[],
+                holes: &[],
+                biome_override: None,
+            },
+        );
+        assert!(terrain::regular_grid(tile, &mesh.vertices, &mesh.triangles));
+        let surface = crate::world::WorldSurface {
+            vertices: mesh.vertices,
+            triangles: mesh.triangles,
+            ..Default::default()
+        };
+        let top = surface
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::MIN, f32::max)
+            + 5.0;
+        let low = surface
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::MAX, f32::min);
+        assert!(top - low > 6.0, "flat test tile");
+        let triangles = source_collider(&surface, None).unwrap().build();
+        let field = source_collider(&surface, Some(100.0)).unwrap().build();
+        assert!(field.shape().as_heightfield().is_some());
+        let (triangles, field) = (triangles.shape(), field.shape());
+        let close = |a: Vector, b: Vector, what: &str, tolerance: f32| {
+            assert!(
+                (a - b).abs().max_element() < tolerance,
+                "{what}: {a} vs {b}"
+            );
+        };
+        let ray = |ray: Ray| {
+            let a = triangles.cast_ray_and_get_normal(&Pose::IDENTITY, &ray, 1000.0, true);
+            let b = field.cast_ray_and_get_normal(&Pose::IDENTITY, &ray, 1000.0, true);
+            let (a, b) = (a.expect("mesh hit"), b.expect("heightfield hit"));
+            close(
+                ray.point_at(a.time_of_impact),
+                ray.point_at(b.time_of_impact),
+                "ray point",
+                1e-4,
+            );
+            close(a.normal, b.normal, "ray normal", 1e-4);
+        };
+        // Off-grid sample points, so no ray meets a triangle edge.
+        let at = |k: usize, count: usize| (k as f32 + 0.37) * 100.0 / count as f32 - 50.0;
+        for i in 0..32 {
+            for j in 0..32 {
+                ray(Ray::new(Vector::new(at(i, 32), top, at(j, 32)), -Vector::Y));
+            }
+        }
+        for i in 0..64 {
+            let angle = i as f32 * 2.4;
+            let dir = Vector::new(angle.cos() * 0.6, -1.0, angle.sin() * 0.6).normalize();
+            let target = Vector::new(at(i % 8, 8) * 0.8, low, at(i / 8, 8) * 0.8);
+            ray(Ray::new(target - dir * (top - low) * 1.5, dir));
+        }
+        let ball = Ball::new(0.3);
+        let options = ShapeCastOptions::with_max_time_of_impact(1000.0);
+        for i in 0..32 {
+            let start = Pose::translation(at(i % 6, 6) * 0.9, top, at(i / 6, 6) * 0.9);
+            let sweep = |shape: &dyn rapier3d::parry::shape::Shape| {
+                cast_shapes(
+                    &start,
+                    -Vector::Y,
+                    &ball,
+                    &Pose::IDENTITY,
+                    Vector::ZERO,
+                    shape,
+                    options,
+                )
+                .unwrap()
+                .expect("ball hit")
+            };
+            // Both sweeps stop on the iterative GJK tolerance, so allow 1 mm.
+            let (a, b) = (sweep(triangles), sweep(field));
+            close(
+                Vector::splat(a.time_of_impact),
+                Vector::splat(b.time_of_impact),
+                "ball time",
+                1e-3,
+            );
+            close(a.normal2, b.normal2, "ball normal", 1e-3);
+        }
     }
 }

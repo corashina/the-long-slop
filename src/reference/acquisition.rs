@@ -116,22 +116,8 @@ record!(UndergroundAcquisitionReference {
 record!(BoxAcquisitionReference {
     prototype: PrototypeId, source: SourceId, table: Vec<AcquisitionTableEntry>, disable_spawn: bool, spawn_before_open: bool,
     spawned: bool, opened: bool, spawn_position: AcquisitionPose, authored_spawn_position: Option<SourceId>,
-    breakable: SourceId, save: SourceId, break_rules: BoxBreakRules, mount: BoxMountReference, release: Vec<BoxRelease>,
-    debris: PrototypeId, reduced_debris: PrototypeId, clips: Vec<SourceId>, disabled_starter_boxes: Vec<DisabledBox>,
+    breakable: SourceId, save: SourceId, mount: BoxMountReference, release: Vec<BoxRelease>, disabled_starter_boxes: Vec<DisabledBox>,
     content_counts: Vec<BoxContentCount>
-});
-record!(BoxBreakRules {
-    health: f32,
-    decrease_after_attack: bool,
-    only_decrease_above: bool,
-    decrease_above_health: f32,
-    mass_modifier: f32,
-    only_velocity: bool,
-    no_trigger: bool,
-    no_collider: bool,
-    no_destroy: bool,
-    no_gib: bool,
-    destroyed: bool
 });
 record!(BoxMountReference {
     source: SourceId,
@@ -176,6 +162,20 @@ record!(StartupPackReference {
     prototype: PrototypeId, group: SourceId, group_pose: AcquisitionPose, group_active: bool, vehicle: SourceId,
     pack: SourceId, cigarette_prefab: SourceId, ammo: AcquisitionAmmo
 });
+impl StartupPackReference {
+    /// The start car field of the pack group.
+    pub fn start_car(&self) -> &'static str {
+        pack_start_car(self.source.path_id)
+    }
+}
+/// Source `StartCar01` keeps pack 14079, `StartCar02` pack 14082.
+fn pack_start_car(pack: i64) -> &'static str {
+    if pack == 14079 {
+        "StartCar01"
+    } else {
+        "StartCar02"
+    }
+}
 record!(HolidayPumpkinReference {
     source: SourceId, pose: AcquisitionPose, active: bool, save: SourceId, item_id: u32, body: SourceId, pickup: SourceId,
     manual_start: bool, started: bool, loaded: bool, buried: bool, car: Option<SourceId>, fixed_in_car: u32,
@@ -557,13 +557,9 @@ impl AcquisitionReference {
         let behavior = &p.behavior;
         require(
             behavior.spawn.as_ref() == Some(&b.source)
-                && behavior.breakable.as_ref() == Some(&b.breakable)
-                && behavior.debris.as_ref() == Some(&b.debris)
-                && behavior.reduced_debris.as_ref() == Some(&b.reduced_debris),
+                && behavior.breakable.as_ref() == Some(&b.breakable),
             "Box behavior links",
         )?;
-        prototype(&b.debris, None, m)?;
-        prototype(&b.reduced_debris, None, m)?;
         self.table(&b.table, m)?;
         require(
             !b.disable_spawn
@@ -575,20 +571,28 @@ impl AcquisitionReference {
                     && valid_pose(&b.spawn_position)),
             "Box spawn rules",
         )?;
-        let r = &b.break_rules;
+        let box_gib = |id: &Option<PrototypeId>, path: i64| {
+            id.as_ref()
+                .is_some_and(|id| source_is(&id.0, "sharedassets1.assets", path))
+        };
+        let r = m.breakable(&b.breakable);
         require(
-            r.health == 7.
-                && !r.decrease_after_attack
-                && !r.only_decrease_above
-                && r.decrease_above_health == 0.
-                && r.mass_modifier == 0.
-                && !r.only_velocity
-                && r.no_trigger
-                && !r.no_collider
-                && !r.no_destroy
-                && !r.no_gib
-                && !r.destroyed,
-            "Box break thresholds",
+            r.is_some_and(|r| {
+                r.health == 7.
+                    && !r.decrease_after_attack
+                    && !r.only_decrease_above
+                    && r.decrease_above_health == 0.
+                    && r.mass_modifier == 1.
+                    && !r.only_velocity
+                    && r.no_trigger
+                    && !r.no_collider
+                    && !r.no_destroy
+                    && !r.no_gib
+                    && box_gib(&r.gib, item_prototypes::BOX_GIBS[0])
+                    && box_gib(&r.reduced_gib, item_prototypes::BOX_GIBS[1])
+                    && r.clips.iter().map(|c| c.path_id).eq([4223, 4140])
+            }),
+            "Box breakables record",
         )?;
         let mount = &b.mount;
         require(
@@ -614,8 +618,8 @@ impl AcquisitionReference {
             "Box release operation links",
         )?;
         require(
-            b.clips == behavior.clips && b.disabled_starter_boxes.len() == 8,
-            "Box clips and disabled instances",
+            b.disabled_starter_boxes.len() == 8,
+            "Box disabled instances",
         )?;
         for (d, (source, instance)) in b.disabled_starter_boxes.iter().zip(DISABLED_BOXES) {
             require(
@@ -645,13 +649,9 @@ impl AcquisitionReference {
                 .iter()
                 .any(|s| s.prototype.is_some() && s.group == group)
         };
-        let startup_packs = STARTUP_PACKS.iter().filter(|expected| {
-            start_car(if expected[0] == 14079 {
-                "StartCar01"
-            } else {
-                "StartCar02"
-            })
-        });
+        let startup_packs = STARTUP_PACKS
+            .iter()
+            .filter(|expected| start_car(pack_start_car(expected[0])));
         require(
             self.packs.len() == 1 && self.startup_packs.len() == startup_packs.clone().count(),
             "selected packs",
@@ -775,10 +775,9 @@ impl AcquisitionReference {
                 && s.contact_clips == behavior.contact_clips,
             "shovel source contact rules",
         )?;
-        for clip in b
-            .clips
+        for clip in s
+            .attack_clips
             .iter()
-            .chain(&s.attack_clips)
             .chain(s.contact_clips.iter().flatten())
         {
             require(

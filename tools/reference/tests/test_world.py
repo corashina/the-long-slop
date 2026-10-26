@@ -1,5 +1,7 @@
 import unittest
 from types import SimpleNamespace as NS
+from unittest.mock import patch
+from tools.reference.source import key, source_id
 from tools.reference.world import Selection, required_record
 
 class WorldTests(unittest.TestCase):
@@ -37,7 +39,7 @@ class WorldTests(unittest.TestCase):
         cars = {LADA}
         self.assertEqual(vehicle_exclusion(lada, {'carscript'}, cars), '')
         self.assertEqual(vehicle_exclusion(trailer, {'carscript', 'partscript'}, cars), 'other_vehicle')
-        self.assertEqual(vehicle_exclusion(trailer, {'utanfutoscript'}, cars), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(trailer, {'utanfutoscript'}, cars), '')
         self.assertEqual(vehicle_exclusion(trailer, {'partscript'}, cars), '')
 
     def test_bus_pool_items_follow_child_categories(self):
@@ -117,3 +119,74 @@ class RopeTests(unittest.TestCase):
         source = RopeFake()
         prepare_home_cable(source)
         self.assertEqual(source.home_cable_geometry_nodes, {('level1', 2), ('level1', 3)})
+
+
+class CarAllowListTests(unittest.TestCase):
+    """Car items export by name; start-only items stay out of pools; each start car field gives one placement."""
+    def fixture(self, missing=''):
+        from tools.reference.world import CAR_ITEMS, START_CARS, LADA
+        objects, data, trees = {}, {}, {}
+        def add(file, pid, type_name, fields=None, cls=''):
+            reader = NS(assets_file=NS(source_container_path=file), path_id=pid, type=NS(name=type_name), cls=cls)
+            objects[file, pid] = reader; data[file, pid] = {'m_Script': {'m_PathID': 1}, **(fields or {})}
+            return reader
+        def ptr(reader):
+            return {'file': reader.assets_file.source_container_path, 'm_PathID': reader.path_id}
+        def node(file, pid, classes):
+            transform = add(file, pid, 'Transform')
+            game_object = add(file, pid + 1, 'GameObject', {'transform': transform})
+            components = [add(file, pid + 2 + i, 'MonoBehaviour', cls=c) for i, c in enumerate(classes)]
+            return {'reader': transform, 'game_object': game_object, 'components': components}
+        def prefab(pid, classes=('carscript',)):
+            root = node('sharedassets1.assets', pid, classes)
+            trees[key(root['reader'])] = [root]
+            return root['reader']
+        lada = prefab(LADA[1])
+        items = [{'index': 0, 'name': 'bus01', 'source': source_id(prefab(1000))},
+                 {'index': 1, 'name': 'car06p', 'source': source_id(prefab(1010))}]
+        roots = {}
+        for name in CAR_ITEMS:
+            roots[name] = prefab(2000 + 10 * len(roots))
+            if name != missing:
+                items.append({'index': len(items), 'name': name, 'source': source_id(roots[name])})
+        catalog = {'items': items, 'categories': [{'index': 0, 'name': 'bus', 'items': [0], 'categories': None}, {'index': 1, 'name': 'bike', 'items': [], 'categories': None}]}
+        settings = add('level1', 64898, 'MonoBehaviour')
+        cars = {}
+        for i, field in enumerate(START_CARS):
+            group = node('level1', 3000 + 100 * i, ())
+            car = node('level1', 17686 if field == 'StartCar02' else 3050 + 100 * i, ('carscript',))
+            trees[key(group['reader'])] = [group, car]
+            data['level1', 64898][field] = ptr(group['game_object'])
+            cars[field] = car['reader']
+        source = NS(get=lambda f, p: objects[f, p], read=lambda r: data[key(r)], class_name=lambda r: r.cls,
+                    resolve=lambda owner, p: objects[p['file'], p['m_PathID']] if p['m_PathID'] else None,
+                    transform_for=lambda go: data[key(go)]['transform'], hierarchy=lambda root, **_: trees[key(root)])
+        return source, catalog, settings, lada, roots, cars
+
+    def test_car_items_export_and_stay_out_of_pools(self):
+        from tools.reference.world import car_prototypes, pool_exclusion, CAR_ITEMS
+        source, catalog, _, lada, roots, _ = self.fixture()
+        cars, start_only = car_prototypes(source, catalog)
+        bus = source.get('sharedassets1.assets', 1000)
+        self.assertEqual(cars, {key(lada), key(bus), *(key(r) for r in roots.values())})
+        self.assertNotIn(('sharedassets1.assets', 1010), cars)
+        self.assertEqual(start_only, {key(roots[name]) for name, pool in CAR_ITEMS.items() if not pool})
+        self.assertEqual(pool_exclusion(roots['car01full'], start_only), 'other_vehicle')
+        self.assertEqual(pool_exclusion(bus, start_only), '')
+        source, catalog, *_ = self.fixture(missing='car04full')
+        with self.assertRaisesRegex(ValueError, 'level1:66024 item car04full'):
+            car_prototypes(source, catalog)
+
+    def test_start_placements_use_scene_pose_and_prefab(self):
+        from tools.reference.world import car_prototypes, start_placements, START_CARS
+        source, catalog, settings, lada, roots, scene = self.fixture()
+        cars, _ = car_prototypes(source, catalog)
+        with patch('tools.reference.world.world_pose', lambda s, r: {'node': r.path_id}):
+            rows = start_placements(source, settings, source.read(settings), catalog, cars)
+        self.assertEqual([r['group'] for r in rows], list(START_CARS))
+        self.assertTrue(all(r['start_car'] for r in rows))
+        by_field = {r['group']: r for r in rows}
+        self.assertEqual(by_field['StartCar02']['prototype'], source_id(lada))
+        self.assertEqual(by_field['StartCar01']['prototype'], source_id(roots['car01full']))
+        self.assertEqual(by_field['StartCar06']['source'], source_id(scene['StartCar06']))
+        self.assertEqual(by_field['StartCar06']['pose'], {'node': scene['StartCar06'].path_id})

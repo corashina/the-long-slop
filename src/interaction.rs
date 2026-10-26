@@ -10,6 +10,7 @@ pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
+pub mod hitch;
 mod hose;
 mod input;
 pub use input::InteractionOutcome;
@@ -63,6 +64,7 @@ pub enum SlotTarget {
     Wheel(WheelSlotId),
     Tire(ItemId),
     Part(PartSlotId),
+    Hitch(hitch::HitchTarget),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -94,6 +96,8 @@ pub enum InteractionAction {
     Wheel(WheelAction),
     PartRemove(ItemId),
     PartInstall(ItemId),
+    /// A held trailer grip drops onto a hitch target.
+    HitchAttach(ItemId),
     /// One source tune step (+1 or -1) on a generated dial or radio knob, or 0 for a
     /// radio band switch.
     DialTune(ColliderId, f32),
@@ -231,6 +235,7 @@ pub struct InteractionState {
     bodies: HashMap<BodyId, RigidBodyHandle>,
     pub mechanisms: mechanisms::MechanismState,
     pub parts: parts::PartAttachments,
+    pub hitch: hitch::Hitches,
     mechanism_bodies: HashMap<ItemId, BodyId>,
     openings: Vec<OpeningState>,
     hoses: hose::HoseState,
@@ -569,6 +574,7 @@ impl InteractionState {
             bodies: HashMap::with_capacity(reference.bodies.len()),
             mechanisms,
             parts,
+            hitch: hitch::Hitches::default(),
             mechanism_bodies: reference.items.iter().map(|i| (i.id, i.body)).collect(),
             receipt_tanks: fluid_receipts::tank_nodes(reference),
             callback_nodes: Vec::with_capacity(
@@ -785,8 +791,8 @@ impl InteractionState {
     pub(crate) fn item_seat(
         &self,
         collider: ColliderHandle,
-    ) -> Option<&crate::world::stream::content_seats::ItemSeat> {
-        self.item_seats.get(&collider).map(|seat| seat.as_ref())
+    ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
+        self.item_seats.get(&collider).cloned()
     }
     pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
         self.dial_knobs.insert(collider, kind);
@@ -947,6 +953,9 @@ impl InteractionState {
         if let Some(body) = self.mechanism_bodies.remove(&id) {
             self.bodies.remove(&body);
         }
+        if let Some(body) = self.push.remove_generated(id) {
+            self.bodies.remove(&body);
+        }
         if self
             .latched_mechanism
             .is_some_and(|(item, _, _, _)| item == id)
@@ -993,12 +1002,7 @@ impl InteractionState {
         }
     }
 
-    pub fn register_generated_mechanism(
-        &mut self,
-        item: ItemId,
-        body: RigidBodyHandle,
-        colliders: &[(crate::reference::SourceId, ColliderHandle)],
-    ) -> Result<(), ReferenceError> {
+    fn insert_generated_body(&mut self, body: RigidBodyHandle) -> Result<BodyId, ReferenceError> {
         let id = BodyId(
             self.bodies
                 .keys()
@@ -1009,6 +1013,60 @@ impl InteractionState {
                 .ok_or_else(|| ReferenceError("Generated body identity exhausted".into()))?,
         );
         self.bodies.insert(id, body);
+        Ok(id)
+    }
+    /// Binds the source `pushablescript` of a world copy to `item` and its body.
+    /// `colliders` are the copy colliders on that body, with their prototype collider index.
+    pub fn register_generated_push(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        reference: &crate::reference::WorldPushReference,
+        colliders: &[(u32, ColliderHandle)],
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let mut grip = Vec::new();
+        for &(index, handle) in colliders {
+            let mut id = ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+            if id.0 == 0 {
+                id = self.allocate_generated_collider()?;
+                physics.edit_collider(handle, |collider| {
+                    collider.user_data |= (id.0 as u128) << 64;
+                });
+            }
+            self.collider_bindings
+                .entry(handle)
+                .or_insert(ActionBinding {
+                    collider: id,
+                    use_owner: None,
+                    pickup_owner: None,
+                    removal_owner: None,
+                    push_owner: None,
+                })
+                .push_owner = Some(item);
+            if reference
+                .grip
+                .as_ref()
+                .is_some_and(|g| g.colliders.contains(&index))
+            {
+                grip.push(id);
+            }
+        }
+        if reference.grip.is_some() && grip.is_empty() {
+            return Err(ReferenceError("Push grip collider is not published".into()));
+        }
+        let id = self.insert_generated_body(body)?;
+        self.push.register_generated(item, id, reference, grip);
+        Ok(())
+    }
+
+    pub fn register_generated_mechanism(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        colliders: &[(crate::reference::SourceId, ColliderHandle)],
+    ) -> Result<(), ReferenceError> {
+        let id = self.insert_generated_body(body)?;
         self.mechanism_bodies.insert(item, id);
         self.usable_items.insert(item);
         for (_, handle) in colliders {
@@ -1434,6 +1492,10 @@ impl InteractionState {
         {
             return Err(ReferenceError("Item is buried".into()));
         }
+        // Source pickupable.Pick on an attached grip detaches it first.
+        if self.hitch.is_hitched(item) {
+            self.hitch.detach(item, items, physics)?;
+        }
         self.carry.pickup(item, point, player, items, physics)?;
         self.storage.picked_up(item);
         Ok(())
@@ -1617,6 +1679,13 @@ impl InteractionState {
                             tire: held,
                         }));
                     }
+                    SlotTarget::Hitch(target) => {
+                        self.drop_held(items, physics);
+                        self.hitch
+                            .attach(held, target, items, physics)
+                            .expect("validated grip attach");
+                        action = Some(InteractionAction::HitchAttach(held));
+                    }
                     SlotTarget::Part(slot) => {
                         self.drop_held(items, physics);
                         self.parts
@@ -1783,14 +1852,7 @@ impl InteractionState {
                     && seat_release.is_some_and(|press| {
                         press.matches(self.mechanisms.contains(target.item).then_some(target.item))
                     })
-                    && player.enter_item_seat(
-                        seat.owner.clone(),
-                        seat.body,
-                        &seat.seat,
-                        seat.seat_item,
-                        seat.pose,
-                        physics,
-                    )
+                    && player.enter_item_seat(seat, physics)
                 {
                     self.seat_action_latched = true;
                     action = Some(InteractionAction::Seat);
@@ -2055,6 +2117,7 @@ impl InteractionState {
         self.parts
             .capture_mechanisms(items, &self.mechanisms, physics)?;
         self.parts.sync(items, physics)?;
+        self.hitch.sync(items, physics);
         Ok(())
     }
     pub fn sync_mechanisms(&mut self, physics: &mut PhysicsWorld) {
