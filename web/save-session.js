@@ -32,11 +32,11 @@ export function createSaveSession({storage,runtime,drawDistance,onStatus=()=>{}}
  return {
   get pending(){return active!==null;},
   save(){return run('save',async operation=>{
-   const payload=await runtime.capture();
+   const {save}=await runtime.capture();
    if(!current(operation))return;
    // Preserve ordering even when an adapter ignores cancellation during a delayed write.
    const write=writes.then(async()=>{
-    if(current(operation))await storage.write(payload,{signal:operation.controller.signal});
+    if(current(operation))await storage.write(save,{signal:operation.controller.signal});
    });
    writes=write.catch(()=>{});
    await write;

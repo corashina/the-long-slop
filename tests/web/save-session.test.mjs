@@ -6,7 +6,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function record(payload){const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));return {version:1,payload,checksum:Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('')};}
 function setup(overrides={}){
- const calls={commit:[],discard:[],write:[],status:[]};const runtime={capture:async()=>({schema_version:4}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
+ const calls={commit:[],discard:[],write:[],status:[]};const runtime={capture:async()=>({save:{schema_version:4},summary:{seed:1,driven_km:0,build_id:1}}),prepare:async()=>7,commit:async(token,onDispatch)=>{onDispatch();calls.commit.push(token);},discard:token=>calls.discard.push(token),prepareNewGame:async()=>8,...overrides.runtime};
  const storage={read:async()=>await record({schema_version:4}),write:async save=>{calls.write.push(save);},...overrides.storage};
  const session=createSaveSession({runtime,storage,drawDistance:()=>2500,onStatus:status=>calls.status.push(status)});return {calls,session};
 }
@@ -14,10 +14,10 @@ test('canceled_preparation_discards_stale_candidate_without_commit',async()=>{
  const candidate=deferred();const {session,calls}=setup({runtime:{prepareNewGame:()=>candidate.promise}});const operation=session.newGame();session.cancel();assert.equal(session.pending,false);candidate.resolve(11);await operation;assert.deepEqual(calls.discard,[11]);assert.equal(calls.commit.length,0);
 });
 test('stale_capture_does_not_write_or_clear_later_pending_operation',async()=>{
- const capture=deferred(),candidate=deferred();const {session,calls}=setup({runtime:{capture:()=>capture.promise,prepareNewGame:()=>candidate.promise}});const first=session.save();session.cancel();const second=session.newGame();capture.resolve({});await first;assert.equal(session.pending,true);assert.equal(calls.write.length,0);candidate.resolve(9);await second;assert.deepEqual(calls.commit,[9]);
+ const capture=deferred(),candidate=deferred();const {session,calls}=setup({runtime:{capture:()=>capture.promise,prepareNewGame:()=>candidate.promise}});const first=session.save();session.cancel();const second=session.newGame();capture.resolve({save:{}});await first;assert.equal(session.pending,true);assert.equal(calls.write.length,0);candidate.resolve(9);await second;assert.deepEqual(calls.commit,[9]);
 });
 test('delayed_canceled_write_cannot_overwrite_a_later_save',async()=>{
- const delayed=deferred();let stored;let count=0;let signal;const {session}=setup({runtime:{capture:async()=>({value:++count})},storage:{write:async(save,options)=>{signal=options.signal;if(save.value===1)await delayed.promise;stored=save;}}});
+ const delayed=deferred();let stored;let count=0;let signal;const {session}=setup({runtime:{capture:async()=>({save:{value:++count}})},storage:{write:async(save,options)=>{signal=options.signal;if(save.value===1)await delayed.promise;stored=save;}}});
  const first=session.save();await tick();session.cancel();assert.equal(signal.aborted,true);const second=session.save();await tick();assert.equal(stored,undefined);delayed.resolve();await Promise.all([first,second]);assert.deepEqual(stored,{value:2});assert.equal(session.pending,false);
 });
 test('failed_load_keeps_runtime_and_reports_error',async()=>{
