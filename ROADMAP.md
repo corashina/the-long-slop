@@ -108,12 +108,24 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 20. Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
 21. Check the trailer reflection probe and trailer wheel meshes. Trailer wheel meshes do not turn yet; `PlusWheelToKeepAwake` is not ported.
 22. Check F3 while towing. Compare with the frame rate rule.
+23. Buses (V03): re-export first: the bus pool, bus gauges and bus doors are new. Run `cargo test --lib v03_bus_pool -- --ignored`.
+24. Check F3 at the start and near a bus. Compare with the frame rate rule.
+25. Find Bus01, Bus02 and Bus03. Fill a bus with diesel and drive it. With petrol the engine must fail to start.
+26. Bus01: both gauge parts in their kmh slots read speed. Check the counters and the gauge lamps.
+27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
+28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
+29. Save and load with bus doors open and signalled and with the trailer on the bus.
+30. Bikes (V04): re-export first: the bike pool, balance, pedals and car push grips are new. Run `cargo test --lib bike -- --ignored`.
+31. Find Bike01 and Bike03. Ride Bike01: it stays upright, leans into turns, and falls over when nobody rides or pushes it.
+32. Kick start Bike01: ignition on, roll it fast enough, the engine starts with its start sound. No starter motor.
+33. Push a bike and the Lada by hand with their grips. The bike stays upright while you push it.
+34. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
+35. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
+36. Check F3 while riding each bike. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
-| V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
-| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 
 ## 5. Later
 
@@ -133,6 +145,15 @@ Run the X04b test pass (save slots, autosave) in the same run:
 5. Turn on "Load last save at start" and reload the page. The last save loads.
 6. Old saves do not load (save schema 24).
 
+Run the X01a test pass (player body) in the same run:
+
+1. Re-export, then rebuild (X01a added seat, drive and `Th` frames).
+2. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms (twist around the bone axis is a known risk) and hands on the wheel.
+3. Check you cannot see inside the head.
+4. Check the body shadow and the eye shadows. Check the siphon hose shadow follows the hose.
+5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
+6. Check the F3 cost of the body.
+
 Run the X03a test pass (sky traffic) in the same run:
 
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
@@ -141,13 +162,12 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
+| X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, UFO, EMP. [H01-H07, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
-| X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]

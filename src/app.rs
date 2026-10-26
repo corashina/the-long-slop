@@ -62,7 +62,8 @@ struct FeedbackStamp {
     context: u32,
     light_control: u32,
     lmb_use: bool,
-    hose: u8,
+    prompts: u8,
+    computer: u8,
     item: Option<ItemId>,
     opening: Option<OpeningId>,
     carrying: bool,
@@ -112,20 +113,39 @@ struct ManifestShell<'a> {
 struct WorldShell<'a> {
     #[serde(borrow)]
     draw_distance: &'a serde_json::value::RawValue,
+    #[serde(borrow, skip_serializing)]
+    startup: Vec<StartupShell<'a>>,
+    /// Start car fields in export order. The Game mode start car list shows them.
+    #[serde(skip_deserializing)]
+    start_cars: Vec<&'a str>,
+}
+#[derive(serde::Deserialize)]
+struct StartupShell<'a> {
+    group: &'a str,
+    start_car: bool,
 }
 
 #[wasm_bindgen]
 pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
-    let shell: ManifestShell =
+    let mut shell: ManifestShell =
         serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    shell.world.start_cars = shell
+        .world
+        .startup
+        .iter()
+        .filter(|s| s.start_car)
+        .map(|s| s.group)
+        .collect();
     serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// The Game mode biome from the browser. Values above 3 read as Mixed.
-fn game_mode() -> crate::world::GameMode {
+/// The Game mode from the browser. Biome values above 3 read as Mixed.
+/// The start car is -1 (Random) or an index into the manifest start placements.
+fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
     let biome = game_biome();
     crate::world::GameMode {
         biome: if biome > 3 { 0 } else { biome as u8 },
+        start_car: crate::world::StartCarChoice::from_index(&reference.world, game_start_car()),
     }
 }
 
@@ -144,7 +164,7 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, game_mode(), draw_distance)
+    let mut runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,
@@ -230,6 +250,7 @@ pub fn run(
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
+        .init_resource::<presentation::computer::ComputerScreens>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
         .add_systems(
@@ -259,6 +280,7 @@ pub fn run(
                 presentation::consumables::sync,
                 (
                     presentation::spawned::sync,
+                    presentation::cigarettes::sync,
                     presentation::player_body::sync,
                     presentation::sky_traffic::sync,
                 )
@@ -587,6 +609,16 @@ fn read_input(
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
+        typing: if drive.runtime.stream.computers.typing {
+            let mut typing = crate::simulation::TypingInput {
+                keys: game_typing_keys(),
+                ..Default::default()
+            };
+            typing.len = game_typed_text(&mut typing.text).min(typing.text.len() as u32) as u8;
+            typing
+        } else {
+            crate::simulation::TypingInput::default()
+        },
         gamepad: crate::simulation::GamepadFrame::default(),
     };
     game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
@@ -693,10 +725,8 @@ fn advance_physics(
     let started = game_now();
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
     if let Some(audio) = &mut drive.runtime.audio {
-        let calendar = game_audio_calendar();
-        audio
-            .broadcasts
-            .calendar((calendar / 100) as u8, (calendar % 100) as u8);
+        let [month, day] = local_calendar();
+        audio.broadcasts.calendar(month, day);
     }
     let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
     drive.runtime.area.conditions.update(delta, true);
@@ -883,7 +913,11 @@ fn sync_world(
                 .map_or(&[], crate::world::RequiredViews::as_slice),
             budget_ms,
         )
-        .and_then(|_| runtime.align_startup(&reference.0).map(|_| ()))
+        .and_then(|_| {
+            runtime
+                .align_startup(&reference.0, local_calendar())
+                .map(|_| ())
+        })
         .and_then(|_| {
             if runtime.has_deferred_save_links() {
                 runtime
@@ -1258,7 +1292,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         },
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
-        hose: available.hose,
+        prompts: available.prompts | runtime.stream.refill_prompt(),
+        computer: runtime.computer_prompt(),
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
@@ -1312,7 +1347,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             stamp.order,
             stamp.light_control,
             stamp.lmb_use,
-            stamp.hose.into(),
+            stamp.prompts.into(),
+            stamp.computer.into(),
         );
         drive.last_feedback = Some(stamp);
     }

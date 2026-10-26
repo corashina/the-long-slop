@@ -241,5 +241,6 @@ pub fn transmitted_torques(
     DriveTorques {
         motor_nm: engine.torque_nm * ratio * vehicle.final_drive_ratio,
         engine_brake_nm: engine.brake_torque_nm * ratio.abs() * vehicle.final_drive_ratio,
+        pedal_nm: None,
     }
 }

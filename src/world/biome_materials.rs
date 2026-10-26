@@ -117,6 +117,7 @@ mod tests {
             sled: None,
             trailer: None,
             hitches: Vec::new(),
+            pushes: Vec::new(),
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();
         assert_eq!(marked, [false, true, true, false]);

@@ -220,10 +220,7 @@ impl GarageRuntime {
                 .find_item_seat(&owner, &seat.source.source_id()?)
                 .ok_or_else(|| SaveError::InvalidLinks("Seat item is not bound".into()))?;
             self.area.player.restore_item_seat(
-                owner,
-                bound.body,
-                &bound.seat,
-                bound.seat_item,
+                &bound,
                 local_pose(&seat.local_pose),
                 &mut self.physics,
             );
@@ -245,6 +242,11 @@ impl GarageRuntime {
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
+        // The saved start car keeps its start placement.
+        let mode = crate::world::GameMode {
+            start_car: crate::world::StartCarChoice::Field(saved.world.start_car),
+            ..mode
+        };
         let mut candidate =
             Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
         candidate

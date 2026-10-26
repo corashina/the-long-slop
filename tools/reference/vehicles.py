@@ -21,7 +21,8 @@ ENGINE_FIELDS = {'start_chance':'startChance','starter_rpm':'starterRpm','starte
     'heat_gain_max':'engineHeatGainMax','heat_loss':'engineHeatLoss','initial_temperature':'temp',
     'heat_loss_speed_modifier':'engineHeatLossSpeedModifier','max_rpm_difference':'maxRpmDifference',
     'torque_modifier':'modifier','oil_fluid':'Oilfluid','auto_shift_clutch_rpm':'autoShiftClutchRpm',
-    'auto_shift_clutch_rpm_range':'autoShiftClutchRpmRange'}
+    'auto_shift_clutch_rpm_range':'autoShiftClutchRpmRange',
+    'oil_toleration_min':'oilTolerationMin','oil_toleration_max':'oilTolerationMax'}
 RADIATOR_FIELDS = {'fan_temperature_on':'fanOnTemp','fan_temperature_off':'fanOffTemp','max_value':'maxValue',
     'max_fan_value':'maxFanValue','max_fan_speed':'maxFanSpeed','max_fluid_loss':'maxFluidLoss'}
 
@@ -34,18 +35,69 @@ def smoke_rate(engine: dict) -> float:
     return rate
 
 
+def curve_record(curve: dict) -> dict:
+    """Unity AnimationCurve keys and wrap modes."""
+    return {'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],
+        'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],
+        'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}
+
+
+BALANCE_FIELDS = {'lean_min_speed':'balanceLeanMinSpeed','lean_max_speed':'balanceLeanMaxSpeed',
+    'lean_min_angle':'balanceLeanMinAngle','lean_max_angle':'balanceLeanMaxAngle','lean_angle_lerp':'balanceLeanAngleLerp',
+    'steer_angle_min':'balanceSteerAngleMin','steer_angle_max':'balanceSteerAngleMax',
+    'steer_angle_speed_min':'balanceSteerAngleSpeedMin','steer_angle_speed_max':'balanceSteerAngleSpeedMax',
+    'steer_angle_lerp':'balanceSteerAngleLerp','p':'balanceP','i':'balanceI','d':'balanceD',
+    'set_angle':'balanceSetAngle','min_angle':'balanceMinAngle','max_angle':'balanceMaxAngle','max_force':'balanceMaxForce'}
+
+
+def balance_record(car: dict) -> dict | None:
+    """carscript balance values (source Balance). None when the car is not balanced."""
+    if not car['balanced']:return None
+    return {'lean':bool(car['balanceLean']),'lean_curve':curve_record(car['balanceLeanCurve']),
+        'use_angle_limit':bool(car['balanceUseAngleLimit']),**{field:car[unity] for field,unity in BALANCE_FIELDS.items()}}
+
+
+def pedal_record(source, proto, car_reader, car, wheels, seats) -> dict | None:
+    """carscript.bikepedal (bikepedalscript). None for a null link.
+
+    `driven_wheels` index `wheels`. `seat` indexes `seats`. `driven_slots` are partslotscript
+    prototype node ids, as wheel `slot`: a slot with a part is a mounted driven wheel.
+    `pedals`, `pedals_inverse`, `feet_holders` and `axes` are prototype node ids.
+    """
+    reader=source.resolve(car_reader,car['bikepedal'])
+    if reader is None:return None
+    if source.class_name(reader)!='bikepedalscript':raise ValueError(f'{key(car_reader)} bikepedal is not a bikepedalscript')
+    proto.node(reader)
+    value=source.read(reader)
+    def targets(field):
+        found=[source.resolve(reader,p) for p in value[field]]
+        if any(r is None for r in found):raise ValueError(f'{key(reader)} {field} has a null link')
+        return found
+    wheel_index={(w['source']['file'],w['source']['path_id']):i for i,w in enumerate(wheels)}
+    driven=[wheel_index.get(key(w)) for w in targets('WHDriven')]
+    if None in driven:raise ValueError(f'{key(reader)} driven wheel is not a car wheel')
+    slots=targets('DrivenWheelSlots')
+    if any(source.class_name(s)!='partslotscript' for s in slots):raise ValueError(f'{key(reader)} driven wheel slot is not a partslotscript')
+    seat=source.resolve(reader,value['seat'])
+    seat_index=next((i for i,s in enumerate(seats) if seat is not None and s['source']==source_id(seat)),None)
+    if seat_index is None:raise ValueError(f'{key(reader)} seat is not a primary car seat')
+    nodes=lambda field:[proto.node(r) for r in targets(field)]
+    return {'source':source_id(reader),'driven_wheels':driven,'driven_slots':[proto.node(s) for s in slots],'seat':seat_index,
+        'pedals':nodes('pedals'),'pedals_inverse':nodes('pedalsInverse'),'feet_holders':nodes('pedalFeetHolder'),
+        'axes':nodes('Axis'),'axis_index':list(value['pedalAxisIndex']),'ratio':value['ratio'],
+        'speed_modifier':value['pedalingSpeedModifier'],'input_debounce':value['pedalInputDebounce'],
+        'gas_tap':value['gas_tap'],'player_use':bool(value['playerUse'])}
+
+
 def engine_fields(engine: dict) -> dict:
     """enginescript values. The car and mounted parts add tanks, starter delay and electronics."""
-    curve=engine['torqueCurve']
     return {**{field:engine[unity] for field,unity in ENGINE_FIELDS.items()},
         'starting_push_force':engine['maxNm']*9.,
         'optimal_temperature':[engine[k] for k in ('minOptimalTemp1','maxOptimalTemp1','minOptimalTemp2','maxOptimalTemp2')],
         'fuel_consumption':[sum(f['amount'] for f in engine['FuelConsumption']['fluids'] if f['type']==i) for i in range(6)],
         'two_stroke':bool(engine['twostroke']),'no_overheat':bool(engine['noOverHeat']),'kickstart':bool(engine['kickstart']),
         'start_chance_interval_seconds':1.,'smoke_rate':smoke_rate(engine),
-        'torque_curve':{'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],
-            'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],
-            'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}}
+        'torque_curve':curve_record(engine['torqueCurve'])}
 
 
 def radiator_fields(radiator: dict) -> dict:
@@ -142,9 +194,35 @@ def kmh_meters(source, proto, car_reader, car) -> list:
     return rows
 
 
+def selector_engines(source, proto):
+    """Each engine part that a randomTypeSelector mounts (Car06) must be a prototype node, so it has an engine record."""
+    for _,reader in proto.scripts('randomTypeSelector'):
+        for row in source.read(reader)['tipusok']:
+            for part in filter(None,(source.resolve(reader,p) for p in row.get('parts') or [])):
+                owner=part if part.type.name=='GameObject' else source.resolve(part,source.read(part)['m_GameObject'])
+                nodes=source.hierarchy(source.transform_for(owner))
+                if any(c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID'] and source.class_name(c)=='enginescript' for n in nodes for c in n['components']):
+                    proto.node(owner)
+
+def check_collider_bakes(source, proto):
+    """colliderscaleapplyscript (Car10k) is an editor bake helper. With `run` off it does nothing at runtime."""
+    for _,reader in proto.scripts('colliderscaleapplyscript'):
+        if source.read(reader)['run']:raise ValueError(f'{key(reader)} colliderscaleapplyscript.run is set: its bake is not exported')
+
+
+def fuel_tank_slot(source, proto, car_reader, car):
+    """carscript.tankslot. Its part holds the fuel tank when the root has no tankscript."""
+    slot=source.resolve(car_reader,car['tankslot'])
+    if slot is None:return None
+    if source.class_name(slot)!='partslotscript':raise ValueError(f'{key(car_reader)} tankslot is not a partslotscript')
+    proto.node(slot)
+    return source_id(slot)
+
+
 def part_records(source, hierarchy, asset, material_indices) -> tuple[list, list, list]:
     """Engine, radiator and gauge records of the part nodes of one prototype."""
     proto=Prototype(source,hierarchy)
+    selector_engines(source,proto)
     engines=[{'source':source_id(reader),'node':node,'oil_tank':proto.link(reader,value['T']),**engine_fields(value)}
         for node,reader in proto.scripts('enginescript') for value in (source.read(reader),)]
     radiators=[{'source':source_id(reader),'node':node,'coolant_tank':proto.link(reader,value['coolant']),
@@ -228,6 +306,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     cars=[c for i,c in proto.scripts('carscript') if i==0]
     if not cars:return None
     car_reader=cars[0];car=source.read(car_reader)
+    check_collider_bakes(source,proto)
     if car['speedBasedKeyboardSens']:
         raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     rigidbody=source.resolve(car_reader,car['RB'])
@@ -263,8 +342,8 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'colliders':[i for i,c in enumerate(colliders) if c['body']==body and c['enabled']],
         'mass_kg':sum(dry_mass(source,n['components']) for n in hierarchy if n['active']),
         'serialized_mass_kg':source.read(rigidbody)['m_Mass'],
-        'fuel_tank':0 if tanks else None,'electronics':proto.link(car_reader,car['electronics']),
-        'starter_delay_seconds':car['startingTime'],'driving':car_driving(car),'handbrake':bool(car['BhandBrake']),
+        'fuel_tank':0 if tanks else None,'fuel_tank_slot':fuel_tank_slot(source,proto,car_reader,car),'electronics':proto.link(car_reader,car['electronics']),
+        'starter_delay_seconds':car['startingTime'],'balance':balance_record(car),'driving':car_driving(car),'handbrake':bool(car['BhandBrake']),
         'hub':hub_record(main['kerekagyProperties'],car),'wheels':wheels,
         'gear_ratios':[g['ratio'] for g in car['gears']],'gear_free_run':[bool(g['freeRun']) for g in car['gears']],
         'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],
@@ -280,7 +359,10 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
         # inputscript.DriveStuff uses the multiplier only when it is not zero.
         'key_steer_multiplier':car['keySteerSensMultiplier'],
-        'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        # Source carscript.ledOilTestTwoStrokeDefault: the oil LED follows the two-stroke mix.
+        'oil_led_two_stroke':bool(car['ledOilTestTwoStrokeDefault']),
+        'seats':seats,'pedals':pedal_record(source,proto,car_reader,car,wheels,seats),
+        'no_gas_while_pedaling':bool(car['noGasWhilePedaling']),'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

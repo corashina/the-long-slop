@@ -8,7 +8,7 @@ use ik::{Frame, IkChain, MAX_BONES};
 use rapier3d::math::{Rotation, Vector};
 use std::collections::HashMap;
 
-/// Left, then right. Poses are player-local.
+/// Left, then right. Poses are player-local in `BodyInputs` and body-local on a bound seat.
 #[derive(Clone, Copy, Debug)]
 pub struct SeatFrames {
     /// `seatscript.defPose`: the authored sit pose when a seat frame is missing.

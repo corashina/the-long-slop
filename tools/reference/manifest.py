@@ -274,7 +274,8 @@ def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
     player_record.update(source_force_interval=source.read(time_reader)['Fixed Timestep'],
         throw_minimum=player['minThrowForce'],throw_gain=player['throwForceGain'],throw_multiplier=1000.,
         push_force=main['pushForce'],airborne_push_force=main['selfNotGroundedPushForce'],
-        grip_force=player['pushgripForce'],grip_speed=player['FspeedM'],grip_distance=player['pushGripDistance'])
+        grip_force=player['pushgripForce'],grip_speed=player['FspeedM'],grip_distance=player['pushGripDistance'],
+        pedaling_nm=player['PedalingNm'],pedaling_rpm=player['PedalingRpm'])
     player_record['get_out_layer_mask']=player['getOutLayer']['m_Bits']
     # fpscontroller.CanGetOut uses literal capsule endpoints and radius.
     player_record['exit_capsule_half_height']=.568

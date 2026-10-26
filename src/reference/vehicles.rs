@@ -18,10 +18,18 @@ pub struct WorldVehicleReference {
     pub serialized_mass_kg: f32,
     /// Root `tankscript` node.
     pub fuel_tank: Option<u32>,
+    /// Source `carscript.tankslot`. Its part holds the fuel tank when the root has none.
+    pub fuel_tank_slot: Option<SourceId>,
     /// `carscript.electronics` node.
     pub electronics: Option<u32>,
     /// Source `carscript.startingTime`.
     pub starter_delay_seconds: f32,
+    /// Source `carscript` balance values. None when `balanced` is false.
+    pub balance: Option<BalanceReference>,
+    /// Source `carscript.bikepedal`. None: the car has no pedals.
+    pub pedals: Option<PedalsReference>,
+    /// Source `carscript.noGasWhilePedaling`: no engine throttle while pedaling.
+    pub no_gas_while_pedaling: bool,
     pub driving: DrivingVehicleReference,
     pub handbrake: bool,
     pub hub: WheelHubReference,
@@ -49,6 +57,8 @@ pub struct WorldVehicleReference {
     pub lever: Option<LeverReference>,
     /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
     pub key_steer_multiplier: f32,
+    /// Source `carscript.ledOilTestTwoStrokeDefault`: the oil LED follows the two-stroke mix.
+    pub oil_led_two_stroke: bool,
     pub seats: Vec<WorldSeatReference>,
     pub drive_frames: DriveFrames,
     pub lights: Vec<WorldLightReference>,
@@ -66,6 +76,113 @@ pub struct WorldVehicleReference {
     /// The realtime reflection probe that follows this car.
     pub probe: Option<WorldProbeReference>,
     pub audio: Option<CarAudioReference>,
+}
+
+/// Source `carscript` balance values (`Balance()`). Angles are degrees.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BalanceReference {
+    pub lean: bool,
+    pub lean_min_speed: f32,
+    pub lean_max_speed: f32,
+    pub lean_min_angle: f32,
+    pub lean_max_angle: f32,
+    pub lean_angle_lerp: f32,
+    pub lean_curve: TorqueCurve,
+    pub steer_angle_min: f32,
+    pub steer_angle_max: f32,
+    pub steer_angle_speed_min: f32,
+    pub steer_angle_speed_max: f32,
+    pub steer_angle_lerp: f32,
+    pub p: f32,
+    pub i: f32,
+    pub d: f32,
+    pub set_angle: f32,
+    pub use_angle_limit: bool,
+    pub min_angle: f32,
+    pub max_angle: f32,
+    pub max_force: f32,
+}
+
+impl BalanceReference {
+    fn valid(&self) -> bool {
+        finite(&[
+            self.lean_min_speed,
+            self.lean_max_speed,
+            self.lean_min_angle,
+            self.lean_max_angle,
+            self.lean_angle_lerp,
+            self.steer_angle_min,
+            self.steer_angle_max,
+            self.steer_angle_speed_min,
+            self.steer_angle_speed_max,
+            self.steer_angle_lerp,
+            self.p,
+            self.i,
+            self.d,
+            self.set_angle,
+            self.min_angle,
+            self.max_angle,
+            self.max_force,
+        ]) && self.lean_angle_lerp >= 0.
+            && self.steer_angle_lerp >= 0.
+            && self.max_force >= 0.
+            // The curve evaluator has no weighted keys.
+            && (!self.lean
+                || curve_valid(&self.lean_curve)
+                    && self.lean_curve.keys.iter().all(|k| k.weighted_mode == 0))
+    }
+}
+
+/// Source `bikepedalscript`. Node ids are prototype node indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PedalsReference {
+    pub source: SourceId,
+    /// `WHDriven`: indices into the vehicle `wheels`.
+    pub driven_wheels: Vec<u32>,
+    /// `DrivenWheelSlots`: `partslotscript` nodes, as wheel `slot`. A slot with a part is mounted.
+    pub driven_slots: Vec<u32>,
+    /// Index into the vehicle `seats`.
+    pub seat: u32,
+    pub pedals: Vec<u32>,
+    pub pedals_inverse: Vec<u32>,
+    pub feet_holders: Vec<u32>,
+    pub axes: Vec<u32>,
+    /// `pedalAxisIndex`: the `axes` entry of each feet holder.
+    pub axis_index: Vec<u32>,
+    pub ratio: f32,
+    /// `pedalingSpeedModifier`.
+    pub speed_modifier: f32,
+    /// `pedalInputDebounce` seconds.
+    pub input_debounce: f32,
+    pub gas_tap: f32,
+    pub player_use: bool,
+}
+
+impl PedalsReference {
+    fn valid(&self, b: PrototypeBounds, wheels: usize, seats: usize) -> bool {
+        finite(&[
+            self.ratio,
+            self.speed_modifier,
+            self.input_debounce,
+            self.gas_tap,
+        ]) && self.ratio > 0.
+            && self.input_debounce >= 0.
+            && self.driven_wheels.len() <= crate::simulation::pedals::MAX_WHEELS
+            && self.driven_wheels.iter().all(|i| (*i as usize) < wheels)
+            && (self.seat as usize) < seats
+            && b.nodes(&self.driven_slots)
+            && b.nodes(&self.pedals)
+            && b.nodes(&self.pedals_inverse)
+            && b.nodes(&self.feet_holders)
+            && b.nodes(&self.axes)
+            && self.axis_index.len() >= self.feet_holders.len()
+            && self
+                .axis_index
+                .iter()
+                .all(|i| (*i as usize) < self.axes.len())
+    }
 }
 
 /// Source `kmhslottype`: the meter of the part in each slot reads `types`, times `modifier`.
@@ -276,6 +393,10 @@ pub struct EnginePartReference {
     /// Source `enginescript.FuelConsumption`, by fluid type.
     pub fuel_consumption: [f32; 6],
     pub two_stroke: bool,
+    /// Source `enginescript.oilTolerationMin`: two-stroke oil share below the target mix.
+    pub oil_toleration_min: f32,
+    /// Source `enginescript.oilTolerationMax`: two-stroke oil share above the target mix.
+    pub oil_toleration_max: f32,
     pub torque_curve: TorqueCurve,
     pub max_rpm_difference: f32,
     pub torque_modifier: f32,
@@ -570,6 +691,18 @@ impl WorldVehicleReference {
             "vehicle probe node",
             self.probe.as_ref().is_none_or(|p| b.node(p.node)),
         )?;
+        check(
+            s,
+            "vehicle balance",
+            self.balance.as_ref().is_none_or(BalanceReference::valid),
+        )?;
+        check(
+            s,
+            "vehicle pedals",
+            self.pedals
+                .as_ref()
+                .is_none_or(|p| p.valid(b, self.wheels.len(), self.seats.len())),
+        )?;
         check(s, "vehicle wheels", !self.wheels.is_empty())?;
         for (i, w) in self.wheels.iter().enumerate() {
             check(
@@ -763,6 +896,8 @@ impl EnginePartReference {
                 self.auto_shift_clutch_rpm,
                 self.auto_shift_clutch_rpm_range,
                 self.smoke_rate,
+                self.oil_toleration_min,
+                self.oil_toleration_max,
             ]) && finite(&self.optimal_temperature)
                 && finite(&self.fuel_consumption)
                 && (0.0..=1.0).contains(&self.start_chance)
@@ -834,9 +969,23 @@ impl EngineGlobals {
 /// A small engine part record for native tests: petrol, 120 Nm, oil fluid 3.
 #[cfg(test)]
 pub(crate) fn engine_part_fixture() -> serde_json::Value {
-    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false,
+    serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false, "oil_toleration_min": 0.02, "oil_toleration_max": 0.3,
                 "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
-                "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0})
+                "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0, "audio": engine_audio_fixture()})
+}
+
+/// Engine sounds for native tests. Source `SStart` is set.
+#[cfg(test)]
+pub(crate) fn engine_audio_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "idle": {"voice": 1, "position": [0.0, 0.5, 0.0]},
+        "motor": {"voice": 2, "position": [0.0, 0.5, 0.0]},
+        "starter": {"voice": 3, "clip": 7, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
+        "stop": {"voice": 3, "clip": 8, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
+        "idle_rpm": [600.0, 1400.0], "motor_rpm": [500.0, 1300.0],
+        "idle_gain": 0.7, "motor_gain": 0.8,
+        "idle_pitch": [0.9, 1.2], "motor_pitch": [0.8, 1.5]
+    })
 }
 
 /// Gauge limits for native tests: low fuel 5 L, low oil 1 L, full electronics.

@@ -3,6 +3,7 @@ use super::WorldStream;
 use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
 use crate::player::SeatOwner;
+use crate::player::body::SeatFrames;
 use crate::reference::{
     ItemId, ReferenceError, SourceId, Transform, WorldPrototypeReference, WorldReference,
 };
@@ -191,6 +192,8 @@ pub(crate) struct ItemSeat {
     /// Main seatscript node relative to the item body.
     pub node_pose: VehiclePose,
     pub seat: Arc<WorldSeatReference>,
+    /// Player body frames relative to the item body. Car seats add the car drive frames.
+    pub frames: SeatFrames,
 }
 impl ItemSeat {
     /// Source `BcantSitAngle` enter check on the main seatscript node.
@@ -396,6 +399,15 @@ impl WorldStream {
             })
         };
         let body_pose = place(crate::world::placement::node_pose(prototype, body_node));
+        let frame = |node: Option<u32>| {
+            node.map(|n| {
+                from_rapier(
+                    &(body_pose.inverse()
+                        * place(crate::world::placement::node_pose(prototype, n as usize))),
+                )
+            })
+        };
+        let drive = prototype.vehicle.as_ref().map(|v| &v.drive_frames);
         let owner = match physics.vehicle_of(body) {
             Some(vehicle) => SeatOwner::Vehicle(vehicle.clone()),
             None => SeatOwner::Item(items.object_key(item)),
@@ -424,6 +436,15 @@ impl WorldStream {
                 prototype,
                 seat.hit_nodes[0] as usize,
             ));
+            let b = &seat.body_pose;
+            let frames = SeatFrames {
+                def_pose: b.def_pose as usize,
+                driving: seat.driver,
+                hands: [b.left_hand, b.right_hand].map(frame),
+                legs: [b.left_leg, b.right_leg].map(frame),
+                driving_hands: drive.map_or([None; 2], |d| [d.left_hand, d.right_hand].map(frame)),
+                driving_legs: drive.map_or([None; 2], |d| [d.left_leg, d.right_leg].map(frame)),
+            };
             let content = &self.contents.active[slot];
             let mut cursor = Some(seat.hit_nodes[0]);
             let mut seat_item = item;
@@ -448,6 +469,7 @@ impl WorldStream {
                 pose: from_rapier(&(body_pose.inverse() * sit)),
                 node_pose: from_rapier(&(body_pose.inverse() * node)),
                 seat,
+                frames,
             });
             for handle in &colliders {
                 interaction.bind_item_seat(*handle, target.clone());

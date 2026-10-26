@@ -36,6 +36,8 @@ use std::collections::HashMap;
 pub struct DriveTorques {
     pub motor_nm: f32,
     pub engine_brake_nm: f32,
+    /// Source `bikepedalscript` motor torque of each pedal wheel. None: the pedals are off.
+    pub pedal_nm: Option<f32>,
 }
 
 pub const VEHICLE_COLLIDER_FLAG: u128 = 1 << 127;
@@ -295,6 +297,7 @@ impl PhysicsWorld {
         } else {
             0.0
         };
+        let pedal_nm = torques.pedal_nm.filter(|t| t.is_finite());
         let engine_brake_nm = if torques.engine_brake_nm.is_finite() {
             torques.engine_brake_nm.max(0.0)
         } else {
@@ -318,6 +321,7 @@ impl PhysicsWorld {
         if pedal(input.throttle) > 0.0
             || brake > 0.0
             || motor_nm != 0.0
+            || pedal_nm.is_some_and(|t| t != 0.0)
             || steer_changed
             || handbrake != vehicle.last_handbrake
         {
@@ -331,10 +335,16 @@ impl PhysicsWorld {
         vehicle.last_handbrake = handbrake;
         // Source carscript.SetWheel: driven wheels take motor torque and engine brake.
         // Service brake and handbrake add to the wheels in their source lists.
+        // With pedals on, SetWheel keeps the pedal torque unless the engine torque is not 0.
         for (rules, torques) in vehicle.rules.iter().zip(&mut vehicle.torques) {
             *torques = WheelTorques::default();
+            if let (true, Some(pedal)) = (rules.pedal, pedal_nm) {
+                torques.motor_nm = pedal;
+            }
             if rules.drive {
-                torques.motor_nm = motor_nm / drive_count;
+                if motor_nm != 0.0 {
+                    torques.motor_nm = motor_nm / drive_count;
+                }
                 torques.brake_nm = engine_brake_nm / drive_count;
             }
             if rules.brake {

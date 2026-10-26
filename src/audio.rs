@@ -547,6 +547,10 @@ impl AudioState {
     fn sample(&mut self) -> f32 {
         xorshift(&mut self.random)
     }
+    /// mainscript.PlayClipAtPoint randomPitch: Random.Range(0.85, 1.15).
+    pub fn random_pitch(&mut self) -> f32 {
+        0.85 + 0.3 * self.sample()
+    }
     fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
         self.emit_at(id, gain, simulation_seconds, None);
     }
@@ -1094,6 +1098,26 @@ impl AudioState {
             }
         }
     }
+    /// breakablescript.Break: mainscript.PlayClipAtPoint(clip, position, 1f, AudioPriorities[6]).
+    pub fn break_clip(&mut self, clip: &crate::reference::SourceId, position: [f64; 3]) {
+        let clip = self
+            .reference
+            .clips
+            .iter()
+            .find(|c| &c.source == clip)
+            .expect("validated breakable clip")
+            .id;
+        self.survival_event(SurvivalAudioEvent {
+            session: self.session,
+            emitter: 0,
+            kind: AudioKind::Break,
+            action: AudioAction::Start,
+            clip,
+            gain: 1.,
+            pitch: 1.,
+            position,
+        });
+    }
     /// radioscript.TurnRadio and the band switch share Cturned, played at the radio.
     pub fn radio_click_at(&mut self, position: [f64; 3]) {
         let b = self
@@ -1392,6 +1416,8 @@ pub enum AudioKind {
     AmbienceZone = 19,
     Sled = 20,
     RadioClick = 21,
+    Break = 22,
+    ComputerNote = 23,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1456,6 +1482,29 @@ impl AudioState {
         } else if self.survival_loops.len() < self.survival_loops.capacity() {
             self.survival_loops.push(event);
         }
+    }
+    /// computerscript.PlayNote: a looped note. Each step the pitch moves by the random
+    /// difference with probability `chance`.
+    pub fn computer_note(
+        &mut self,
+        emitter: u32,
+        gain: f32,
+        pitch: f32,
+        (detune, chance): (f32, f32),
+        position: [f64; 3],
+    ) {
+        let pitch = if self.sample() < chance {
+            pitch + (self.sample() - 0.5) * detune
+        } else {
+            pitch
+        };
+        self.pitched_loop(
+            AudioKind::ComputerNote,
+            emitter,
+            gain,
+            Some(pitch),
+            position,
+        );
     }
     /// musicboxscript.PlayNote: one note with the source random pitch difference.
     pub fn music_note(&mut self, position: [f64; 3], pitch: f32, detune: f32, chance: f32) {

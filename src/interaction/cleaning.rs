@@ -51,17 +51,75 @@ pub struct ToolSignals {
 pub(crate) enum Target {
     Surface(ConditionId),
     Wash(WashId),
-    /// The washtriggerscript on a generated item, by its owner item.
-    Generated(ItemId),
+    /// A washtriggerscript on generated content.
+    Generated(WashOwner),
     Solid(ColliderHandle),
 }
-/// A washtriggerscript on a generated item, such as the genie lamp.
+/// The owner of a generated washtriggerscript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WashOwner {
+    /// The genie lamp item.
+    Item(ItemId),
+    /// A building cobweb, by its stream id.
+    Cobweb(u32),
+}
+/// A washtriggerscript on generated content, such as the genie lamp or a cobweb.
 struct GeneratedWash {
-    owner: ItemId,
+    owner: WashOwner,
     permission: u8,
     never_repair: bool,
     repair: f32,
     colliders: Vec<(ColliderId, ColliderHandle)>,
+}
+/// Registered generated wash triggers and the ones that got clean.
+#[derive(Default)]
+struct GeneratedWashes {
+    washes: Vec<GeneratedWash>,
+    /// GotClean: the trigger is inactive and no longer registered.
+    cleaned: Vec<WashOwner>,
+}
+impl GeneratedWashes {
+    fn register(
+        &mut self,
+        owner: WashOwner,
+        permission: u8,
+        never_repair: bool,
+        colliders: Vec<(ColliderId, ColliderHandle)>,
+    ) {
+        self.remove(owner);
+        self.washes.push(GeneratedWash {
+            owner,
+            permission,
+            never_repair,
+            repair: 0.,
+            colliders,
+        });
+    }
+    fn remove(&mut self, owner: WashOwner) {
+        self.washes.retain(|w| w.owner != owner);
+    }
+    /// washtriggerscript.Wash. Returns None when the tool cannot wash, else whether it got clean.
+    fn wash(
+        &mut self,
+        owner: WashOwner,
+        tables: &[[bool; 7]],
+        tool: u8,
+        gain: f32,
+    ) -> Option<bool> {
+        let i = self.washes.iter().position(|w| w.owner == owner)?;
+        let w = &mut self.washes[i];
+        if !tables[w.permission as usize][tool as usize] {
+            return None;
+        }
+        w.repair += gain;
+        let clean = w.repair > 1. && !w.never_repair;
+        if clean {
+            // GotClean deactivates the trigger object.
+            self.washes.swap_remove(i);
+            self.cleaned.push(owner);
+        }
+        Some(clean)
+    }
 }
 struct WashEffect {
     particles: Vec<ParticleState>,
@@ -119,7 +177,7 @@ pub struct CleaningTools {
     wash_indices: HashMap<WashId, usize>,
     wash_colliders: Vec<(ColliderHandle, WashId, bool)>,
     collider_enabled: HashMap<ColliderId, bool>,
-    generated_washes: Vec<GeneratedWash>,
+    generated_washes: GeneratedWashes,
     /// Generated items that reserve LMB while equipped, with their LMB text.
     lmb_items: HashMap<ItemId, u32>,
 }
@@ -210,7 +268,7 @@ impl CleaningTools {
             contacts,
             sprays,
             signals,
-            generated_washes: Vec::new(),
+            generated_washes: GeneratedWashes::default(),
             lmb_items: HashMap::new(),
             wash_colliders: Vec::with_capacity(
                 reference
@@ -346,26 +404,29 @@ impl CleaningTools {
     }
     pub(crate) fn register_generated_wash(
         &mut self,
-        owner: ItemId,
+        owner: WashOwner,
         permission: u8,
         never_repair: bool,
         colliders: Vec<(ColliderId, ColliderHandle)>,
     ) {
-        self.remove_generated_wash(owner);
-        self.generated_washes.push(GeneratedWash {
-            owner,
-            permission,
-            never_repair,
-            repair: 0.,
-            colliders,
-        });
+        self.generated_washes
+            .register(owner, permission, never_repair, colliders);
     }
-    pub(crate) fn remove_generated_wash(&mut self, owner: ItemId) {
-        self.generated_washes.retain(|w| w.owner != owner);
+    pub(crate) fn remove_generated_wash(&mut self, owner: WashOwner) {
+        self.generated_washes.remove(owner);
+    }
+    /// Generated triggers that got clean since the last call.
+    pub(crate) fn take_cleaned_washes(&mut self) -> std::vec::Drain<'_, WashOwner> {
+        self.generated_washes.cleaned.drain(..)
     }
     /// ginlampscript reads a positive repairValue as a rub and resets it to 0.
     pub(crate) fn take_generated_rub(&mut self, owner: ItemId) -> bool {
-        let Some(w) = self.generated_washes.iter_mut().find(|w| w.owner == owner) else {
+        let Some(w) = self
+            .generated_washes
+            .washes
+            .iter_mut()
+            .find(|w| w.owner == WashOwner::Item(owner))
+        else {
             return false;
         };
         let rubbed = w.repair > 0.;
@@ -377,25 +438,13 @@ impl CleaningTools {
     /// washtriggerscript.Wash on a generated trigger. Returns true when it is clean.
     fn wash_generated(
         &mut self,
-        owner: ItemId,
+        owner: WashOwner,
         tool: u8,
         gain: f32,
         reference: &ReferenceManifest,
     ) -> Option<bool> {
-        let w = self
-            .generated_washes
-            .iter_mut()
-            .find(|w| w.owner == owner)?;
-        if !reference.conditions.clean_tables[w.permission as usize][tool as usize] {
-            return None;
-        }
-        w.repair += gain;
-        // GotClean also disables the trigger object. Generated trigger objects stay active.
-        let clean = w.repair > 1. && !w.never_repair;
-        if clean {
-            w.repair = 0.;
-        }
-        Some(clean)
+        self.generated_washes
+            .wash(owner, &reference.conditions.clean_tables, tool, gain)
     }
     /// washtriggerscript.Wash on a checked trigger. Returns true when it is clean.
     fn wash_fixed(
@@ -452,6 +501,7 @@ impl CleaningTools {
             }
         }
         self.generated_washes
+            .washes
             .iter()
             .find(|w| {
                 w.colliders
@@ -582,6 +632,7 @@ impl CleaningTools {
     ) -> Option<Target> {
         if let Some(w) = self
             .generated_washes
+            .washes
             .iter()
             .find(|w| w.colliders.iter().any(|&(id, _)| id == collider))
         {
@@ -1249,7 +1300,7 @@ mod spray_tests {
     #[test]
     fn spray_target_order() {
         let wash = Some(Target::Wash(WashId(1)));
-        let lamp = Some(Target::Generated(ItemId(9)));
+        let lamp = Some(Target::Generated(WashOwner::Item(ItemId(9))));
         let part = Some(Target::Surface(ConditionId(3)));
         assert_eq!(spray_order(wash, || lamp), wash, "hit trigger first");
         assert_eq!(spray_order(lamp, || wash), lamp);
@@ -1260,5 +1311,35 @@ mod spray_tests {
         );
         assert_eq!(spray_order(part, || None), part);
         assert_eq!(spray_order(None, || None), None);
+    }
+
+    #[test]
+    fn cobweb_gets_clean_once_and_lamp_never() {
+        let tables = [[true; 7]];
+        let mut washes = GeneratedWashes::default();
+        let web = WashOwner::Cobweb(1);
+        let lamp = WashOwner::Item(ItemId(9));
+        washes.register(web, 0, false, Vec::new());
+        washes.register(lamp, 0, true, Vec::new());
+        assert_eq!(washes.wash(web, &tables, 0, 0.6), Some(false));
+        assert_eq!(
+            washes.wash(web, &tables, 0, 0.6),
+            Some(true),
+            "above 1 gets clean"
+        );
+        assert_eq!(
+            washes.wash(web, &tables, 0, 0.6),
+            None,
+            "GotClean removes the trigger"
+        );
+        assert_eq!(washes.cleaned, [web]);
+        for _ in 0..4 {
+            assert_eq!(
+                washes.wash(lamp, &tables, 0, 0.6),
+                Some(false),
+                "neverRepair"
+            );
+        }
+        assert_eq!(washes.wash(lamp, &[[false; 7]], 0, 0.6), None);
     }
 }

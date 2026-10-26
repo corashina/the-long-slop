@@ -22,6 +22,8 @@ pub(super) struct VehicleWheel {
     pub drive: bool,
     pub brake: bool,
     pub handbrake: bool,
+    /// Source `bikepedalscript.WHDriven`: the wheel takes pedal torque.
+    pub pedal: bool,
 }
 
 /// Steering and brake values of one vehicle.
@@ -150,7 +152,8 @@ impl PhysicsWorld {
         let mounts: Vec<_> = record
             .wheels
             .iter()
-            .map(|wheel| {
+            .enumerate()
+            .map(|(index, wheel)| {
                 let (node, _) = prototype.root_relative(wheel.node as usize);
                 let connection = (to_chassis * node) * Vector::from_array(wheel.collider.center);
                 let rules = VehicleWheel {
@@ -160,6 +163,10 @@ impl PhysicsWorld {
                     drive: wheel.drive,
                     brake: wheel.brake,
                     handbrake: wheel.handbrake,
+                    pedal: record
+                        .pedals
+                        .as_ref()
+                        .is_some_and(|p| p.driven_wheels.contains(&(index as u32))),
                 };
                 (connection, &wheel.collider, rules)
             })
@@ -231,7 +238,7 @@ pub(crate) mod tests {
             "colliders": [], "prefab_pose": pose(0.0, 0.0),
             "vehicle": {
                 "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
-                "fuel_tank": null, "electronics": null, "starter_delay_seconds": 1.0,
+                "fuel_tank": null, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0, "balance": null, "pedals": null, "no_gas_while_pedaling": false,
                 "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
                 "handbrake": false, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
                 "wheels": wheels,
@@ -242,7 +249,7 @@ pub(crate) mod tests {
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
                 "drive_frames": {"left_hand": null, "right_hand": null, "left_leg": null, "right_leg": null},
                 "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
-                "lever": null, "key_steer_multiplier": 0.0,
+                "lever": null, "key_steer_multiplier": 0.0, "oil_led_two_stroke": false,
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             }
@@ -300,6 +307,7 @@ pub(crate) mod tests {
         let torques = DriveTorques {
             motor_nm: 1600.0,
             engine_brake_nm: 0.0,
+            pedal_nm: None,
         };
         let drive = |physics: &mut PhysicsWorld, keys: &[ObjectKey], seconds: f32| {
             for _ in 0..(seconds / FIXED_DT) as usize {
@@ -322,5 +330,41 @@ pub(crate) mod tests {
         let before = physics.snapshot(&keys[1]).speed_mps;
         drive(&mut physics, &keys[1..], 1.0);
         assert!(physics.snapshot(&keys[1]).speed_mps > before + 1.0);
+    }
+
+    #[test]
+    fn pedal_torque_drives_pedal_wheels_until_the_engine_gives_torque() {
+        let mut prototype = car();
+        prototype.vehicle.as_mut().unwrap().pedals = Some(
+            serde_json::from_value(json!({"source": {"file": "a", "path_id": 12},
+                "driven_wheels": [2, 3], "driven_slots": [3, 4], "seat": 0, "pedals": [], "pedals_inverse": [],
+                "feet_holders": [], "axes": [], "axis_index": [], "ratio": 1.0, "speed_modifier": 1.0,
+                "input_debounce": 0.5, "gas_tap": 1.0, "player_use": true}))
+            .unwrap(),
+        );
+        let (mut physics, keys, chassis) = two_cars(&prototype);
+        let throttle = DriveInput {
+            throttle: 1.0,
+            ..Default::default()
+        };
+        let pedal = DriveTorques {
+            pedal_nm: Some(400.0),
+            ..Default::default()
+        };
+        let engine = DriveTorques {
+            motor_nm: -1600.0,
+            ..pedal
+        };
+        for _ in 0..(1.0 / FIXED_DT) as usize {
+            physics.apply_vehicle_forces(&keys[0], throttle, pedal);
+            physics.apply_vehicle_forces(&keys[1], throttle, engine);
+            physics.step_physics();
+        }
+        let [pedaled, driven] = chassis.map(|body| physics.rapier().bodies[body].linvel().z);
+        assert!(pedaled.abs() > 0.5, "{pedaled}");
+        assert!(
+            driven.abs() > 0.5 && driven.signum() != pedaled.signum(),
+            "{driven}"
+        );
     }
 }

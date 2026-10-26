@@ -660,6 +660,7 @@ mod tests {
             sled: None,
             trailer: None,
             hitches: Vec::new(),
+            pushes: Vec::new(),
         };
         let pole = RoadPole {
             node: 1,

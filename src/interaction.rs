@@ -2,6 +2,7 @@ pub mod buried;
 pub mod carry;
 pub mod cigarettes;
 pub mod cleaning;
+pub mod computer;
 pub mod consumption;
 pub mod equipment;
 pub(crate) mod equipment_input;
@@ -667,6 +668,9 @@ impl InteractionState {
     pub fn pickup_rule(&self, id: ItemId) -> Option<&crate::reference::PickupReference> {
         self.carry.rule(id)
     }
+    pub fn reach(&self) -> f32 {
+        self.reach
+    }
     pub fn held(&self) -> Option<ItemId> {
         self.carry.held()
     }
@@ -787,8 +791,8 @@ impl InteractionState {
     pub(crate) fn item_seat(
         &self,
         collider: ColliderHandle,
-    ) -> Option<&crate::world::stream::content_seats::ItemSeat> {
-        self.item_seats.get(&collider).map(|seat| seat.as_ref())
+    ) -> Option<std::sync::Arc<crate::world::stream::content_seats::ItemSeat>> {
+        self.item_seats.get(&collider).cloned()
     }
     pub fn bind_dial_knob(&mut self, collider: ColliderId, kind: Knob) {
         self.dial_knobs.insert(collider, kind);
@@ -949,6 +953,9 @@ impl InteractionState {
         if let Some(body) = self.mechanism_bodies.remove(&id) {
             self.bodies.remove(&body);
         }
+        if let Some(body) = self.push.remove_generated(id) {
+            self.bodies.remove(&body);
+        }
         if self
             .latched_mechanism
             .is_some_and(|(item, _, _, _)| item == id)
@@ -995,12 +1002,7 @@ impl InteractionState {
         }
     }
 
-    pub fn register_generated_mechanism(
-        &mut self,
-        item: ItemId,
-        body: RigidBodyHandle,
-        colliders: &[(crate::reference::SourceId, ColliderHandle)],
-    ) -> Result<(), ReferenceError> {
+    fn insert_generated_body(&mut self, body: RigidBodyHandle) -> Result<BodyId, ReferenceError> {
         let id = BodyId(
             self.bodies
                 .keys()
@@ -1011,6 +1013,60 @@ impl InteractionState {
                 .ok_or_else(|| ReferenceError("Generated body identity exhausted".into()))?,
         );
         self.bodies.insert(id, body);
+        Ok(id)
+    }
+    /// Binds the source `pushablescript` of a world copy to `item` and its body.
+    /// `colliders` are the copy colliders on that body, with their prototype collider index.
+    pub fn register_generated_push(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        reference: &crate::reference::WorldPushReference,
+        colliders: &[(u32, ColliderHandle)],
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let mut grip = Vec::new();
+        for &(index, handle) in colliders {
+            let mut id = ColliderId((physics.rapier().colliders[handle].user_data >> 64) as u32);
+            if id.0 == 0 {
+                id = self.allocate_generated_collider()?;
+                physics.edit_collider(handle, |collider| {
+                    collider.user_data |= (id.0 as u128) << 64;
+                });
+            }
+            self.collider_bindings
+                .entry(handle)
+                .or_insert(ActionBinding {
+                    collider: id,
+                    use_owner: None,
+                    pickup_owner: None,
+                    removal_owner: None,
+                    push_owner: None,
+                })
+                .push_owner = Some(item);
+            if reference
+                .grip
+                .as_ref()
+                .is_some_and(|g| g.colliders.contains(&index))
+            {
+                grip.push(id);
+            }
+        }
+        if reference.grip.is_some() && grip.is_empty() {
+            return Err(ReferenceError("Push grip collider is not published".into()));
+        }
+        let id = self.insert_generated_body(body)?;
+        self.push.register_generated(item, id, reference, grip);
+        Ok(())
+    }
+
+    pub fn register_generated_mechanism(
+        &mut self,
+        item: ItemId,
+        body: RigidBodyHandle,
+        colliders: &[(crate::reference::SourceId, ColliderHandle)],
+    ) -> Result<(), ReferenceError> {
+        let id = self.insert_generated_body(body)?;
         self.mechanism_bodies.insert(item, id);
         self.usable_items.insert(item);
         for (_, handle) in colliders {
@@ -1796,14 +1852,7 @@ impl InteractionState {
                     && seat_release.is_some_and(|press| {
                         press.matches(self.mechanisms.contains(target.item).then_some(target.item))
                     })
-                    && player.enter_item_seat(
-                        seat.owner.clone(),
-                        seat.body,
-                        &seat.seat,
-                        seat.seat_item,
-                        seat.pose,
-                        physics,
-                    )
+                    && player.enter_item_seat(seat, physics)
                 {
                     self.seat_action_latched = true;
                     action = Some(InteractionAction::Seat);
