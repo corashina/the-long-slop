@@ -213,7 +213,7 @@ pub fn despawn(
 }
 
 impl SpawnedItems {
-    /// Every spawned body is saved in the world at its current pose.
+    /// Every spawned body except gibs is saved in the world at its current pose.
     pub fn capture_save(
         &self,
         reference: &ReferenceManifest,
@@ -224,6 +224,9 @@ impl SpawnedItems {
             .items
             .iter()
             .filter_map(|spawned| {
+                let prototype = &reference.item_prototypes[spawned.prototype];
+                // Gib prototypes have no item id. Source gibs are not saved.
+                prototype.item_id?;
                 let state = items.get(spawned.id)?;
                 let pose = state.inactive_pose.unwrap_or(crate::save::AbsolutePose {
                     position: origin.absolute(state.pose.position),
@@ -231,7 +234,7 @@ impl SpawnedItems {
                 });
                 Some(crate::save::SpawnedItemSnapshot {
                     serial: spawned.serial,
-                    prototype: (&reference.item_prototypes[spawned.prototype].source).into(),
+                    prototype: (&prototype.source).into(),
                     pickup: spawned.pickup as u32,
                     pose,
                 })

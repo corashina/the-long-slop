@@ -6,6 +6,8 @@ use crate::world::{GeneratedId, TriggerRoles, UnityRandom};
 use rapier3d::prelude::{QueryFilter, RigidBodyHandle};
 use std::collections::VecDeque;
 
+pub mod gibs;
+
 /// Source breakablescript.velocityToMass.
 const VELOCITY_TO_MASS: f32 = 0.25;
 
@@ -260,6 +262,10 @@ impl Breakables {
         }
         let index = self.random.range_int(0, record.clips.len() as i32);
         record.clips.get(index as usize)
+    }
+    /// UnityEngine.Random of breaks and gib starts.
+    pub fn random(&mut self) -> &mut UnityRandom {
+        &mut self.random
     }
     /// Stores the binding scan. False when it did not change.
     pub(crate) fn rescan(&mut self, scan: [u64; 4]) -> bool {

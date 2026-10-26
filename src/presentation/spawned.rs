@@ -367,9 +367,14 @@ pub(crate) fn sync(
                 )
             });
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
-            transform.set_if_neq(super::transform(from_rapier(
-                &(to_rapier(pose) * instance.body_to_scene),
-            )));
+            // scaleDestroyScript scales the gib about its body node.
+            let scale = area.gibs.scale(item.id).unwrap_or(1.);
+            let mut body_to_scene = instance.body_to_scene;
+            body_to_scene.translation *= scale;
+            transform.set_if_neq(
+                super::transform(from_rapier(&(to_rapier(pose) * body_to_scene)))
+                    .with_scale(Vec3::splat(scale)),
+            );
         }
         let shown = !matches!(state.location, ItemLocation::Stored(_));
         if let Ok(mut v) = visibility.get_mut(instance.root) {

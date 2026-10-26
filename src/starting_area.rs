@@ -44,6 +44,8 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// gibscript and scaleDestroyScript of spawned gibs.
+    pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
@@ -270,6 +272,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             portable_mass,
         })
@@ -280,6 +283,7 @@ impl StartingArea {
         self.player.rebase(shift);
         self.interaction.rebase(shift);
         self.items.rebase(shift);
+        self.gibs.rebase(shift);
         for (_, previous, current) in &mut self.render_poses {
             for i in 0..3 {
                 previous.position[i] -= shift[i];
@@ -2130,14 +2134,15 @@ impl GarageRuntime {
                 .expect("validated gib prototype");
                 // A buried object makes its gib buried.
                 if buried {
-                    for gib in gibs {
+                    for gib in &gibs {
                         crate::interaction::buried::bury(
-                            gib,
+                            *gib,
                             &mut self.area.items,
                             &mut self.physics,
                         );
                     }
                 }
+                self.area.gibs.spawn(prototype, gibs, pose);
             }
             if let Some(clip) = self.stream.pick_break_clip(rules)
                 && let Some(audio) = &mut self.audio
@@ -2161,6 +2166,27 @@ impl GarageRuntime {
                     .expect("bound storage");
             }
         }
+        self.step_gibs(reference);
+    }
+
+    /// Gib starts after the breaks of this step, then gib updates and removals.
+    fn step_gibs(&mut self, reference: &ReferenceManifest) {
+        let player = self.area.player.body_pose(&self.physics).position;
+        self.area.gibs.step(
+            reference,
+            self.stream.breakables.random(),
+            player,
+            &mut self.area.items,
+            &mut self.physics,
+            FIXED_DT,
+        );
+        let mut removed = std::mem::take(&mut self.area.gibs.removed);
+        for item in removed.drain(..) {
+            if self.area.spawned.contains(item) {
+                spawned::despawn(&mut self.area, &mut self.physics, item).expect("spawned gib");
+            }
+        }
+        self.area.gibs.removed = removed;
     }
 
     pub fn initialize_storage_frame(&mut self, dt: f32) -> Result<bool, ReferenceError> {
