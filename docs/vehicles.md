@@ -51,7 +51,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - Leaves lerp their euler angles to `opened` or `closed`. The speed is drawn in `Start` order from `minspeed`..`maxspeed`.
 - A leaf plays a random sound when `minTime` passed since its last use. Colliders below a leaf turn with it.
 - `dinamiccolliderforbus`: each box length follows the `t1`-`t2` distance when a leaf moves.
-- `detachIfOpen` is not ported yet. Opening only clears the link.
+- `detachIfOpen` is null on every bus in the source build. A set link stops the bind with an error.
 - A usable that also slides (world mechanism) slides and works as a door button.
 
 ## Trailers
@@ -65,11 +65,11 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - A hitched grip stays a world item. Its body is disabled. Its shapes ride on the car without contacts or mass.
 - Picking up a hitched grip detaches it. The grip keeps the car speed at the hitch.
 - The trailer uses `CenterOfMassAttached` while hitched, else `CenterOfMass`.
-- Brakes: each wheel gets `brakeForce` while the `brake` flashlightscript is on. Only the bus trailer has one.
+- Brakes: each wheel gets `brakeForce` while the `brake` flashlightscript is on. Only the Bus02 trailers have one (`brakeForce` 100). It is a switch on the trailer, not the car brake lamp.
 - Lamps: `rearlights` follow the towing car: headlights, ignition and brake. With no car, the lamps are off.
 - Save: the grip attachment holds the car key and the target source. No schema change. Load waits for the target and the trailer.
 - The trailer, its grip and the towing car load and unload as one group.
-- Not ported: rope towing (B16 is not in the original), `PlusWheelToKeepAwake`, trailer wheel mesh spin, bus door `detachIfOpen`.
+- Not ported: rope towing (B16 is not in the original), `PlusWheelToKeepAwake`, trailer wheel mesh spin.
 
 ## Physics fix
 

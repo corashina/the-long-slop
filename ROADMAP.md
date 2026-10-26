@@ -108,11 +108,17 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 20. Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
 21. Check the trailer reflection probe and trailer wheel meshes. Trailer wheel meshes do not turn yet; `PlusWheelToKeepAwake` is not ported.
 22. Check F3 while towing. Compare with the frame rate rule.
+23. Buses (V03): re-export first: the bus pool, bus gauges and bus doors are new. Run `cargo test --lib v03_bus_pool -- --ignored`.
+24. Check F3 at the start and near a bus. Compare with the frame rate rule.
+25. Find Bus01, Bus02 and Bus03. Fill a bus with diesel and drive it. With petrol the engine must fail to start.
+26. Bus01: both gauge parts in their kmh slots read speed. Check the counters and the gauge lamps.
+27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
+28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
+29. Save and load with bus doors open and signalled and with the trailer on the bus.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
-| V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 
 ## 5. Later
