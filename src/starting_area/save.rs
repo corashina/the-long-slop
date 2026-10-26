@@ -18,6 +18,16 @@ pub(super) struct PendingRestore {
     seat: Option<SeatSnapshot>,
 }
 impl GarageRuntime {
+    /// Source `mainscript.Update` autosave state, without the seat and the toggles.
+    /// `grab_held` is the pickup and push key (F) in this frame.
+    pub fn autosave_safe(&self, grab_held: bool) -> bool {
+        let area = &self.area;
+        area.player.grounded()
+            && area.interaction.held().is_none()
+            && !area.interaction.push_gripping()
+            && !self.sleeping()
+            && !grab_held
+    }
     pub fn restore_pending(&self) -> bool {
         self.pending_restore.as_ref().is_some_and(|p| !p.ready)
     }

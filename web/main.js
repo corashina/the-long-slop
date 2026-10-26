@@ -113,9 +113,9 @@ window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
   frameSteps: 0, totalSteps: 0, activeSurfaces: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
   originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, preparedRoads: 0, fuelLiters: 0,
-  paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, fluidVolumes:record.quantities };
+  paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, autosaveSafe:false, fluidVolumes:record.quantities };
 window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, absoluteX, absoluteY, absoluteZ,
-  originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started) => {
+  originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started, autosaveSafe, seated) => {
   const now=performance.now();
   if(lastFrameTime!==null)peakFrameMs=Math.max(peakFrameMs,now-lastFrameTime);
   lastFrameTime=now;
@@ -127,6 +127,7 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   state.originX = originX; state.originY = originY; state.originZ = originZ;
   state.rebases = rebases; state.travelM = travelM; state.preparedRoads = preparedRoads;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
+  state.autosaveSafe = autosaveSafe; state.seated = seated;
   menu?.sync(started,paused,travelM);
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
