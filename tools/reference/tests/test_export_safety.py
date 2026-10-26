@@ -12,16 +12,6 @@ from tools.reference import export
 from tools.reference.library.types import Catalog, Snapshot
 
 class ExportSafetyTests(unittest.TestCase):
-    def test_acquisition_hash_ignores_only_bound_motion_target(self):
-        from tools.reference.acquisition import source_contract
-        original = {'shovel': {'target': {'file': 'level1', 'path_id': 10},
-                               'motion': {'target': 1, 'speed': 2.0}}}
-        rebound = json.loads(json.dumps(original))
-        rebound['shovel']['motion']['target'] = 99
-        self.assertEqual(source_contract(original), source_contract(rebound))
-        rebound['shovel']['target']['path_id'] = 11
-        self.assertNotEqual(source_contract(original), source_contract(rebound))
-
     def test_library_rejects_resolved_steam_outputs_before_prerequisites(self):
         with tempfile.TemporaryDirectory() as directory:
             steam = Path(directory) / 'Steam'

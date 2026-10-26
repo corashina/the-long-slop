@@ -147,7 +147,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
         elif item_id==62:
             c=component(source,root,'breakablescript');spawn=component(source,root,'spawnInBoxScript')
             behavior.update(breakable=source_id(c),spawn=source_id(spawn),mount=source_id(link(spawn,'mount','MonoBehaviour')))
-        elif item_id==216:
+        elif any(c.type.name=='MonoBehaviour' and source.class_name(c)=='meleeweaponscript' for c in source.components(root)[1]):
             c=component(source,root,'meleeweaponscript')
             behavior.update(melee=source_id(c),attack_target=source_id(link(c,'T','Transform')),attack_trigger=source_id(link(c,'Trigger','Transform')))
             behavior['clips']=[source_id(source.resolve(c,p)) for p in source.read(c)['attackClips']]

@@ -83,7 +83,7 @@ def food_record(source, kind, root, manifest):
                 'enabled':bool(d['m_Enabled']), 'geometry':geometry(source,exporter,c,n['reader'],pose,True),
                 'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
     return {'source':source_id(edible),'kind':kind,'effect':dict(food=data['foodValue'],water=data['waterValue'],bowel=data['shitValue'],hp=data['hpValue']),
-        'bites':len(groups),'index':data['index'],'destroy_on_end':bool(data['destroyOnEnd']),
+        'bites':len(groups),'index':data['index'],'destroy_on_end':bool(data['destroyOnEnd']),'spawn_if_shot':bool(data['spawnIfShot']),
         'asset':nodes[key(root)]['asset'],'root':nodes[key(root)]['id'],
         'mass_kg':source.read(component(source,root,'massScript'))['mass'],
         'linear_damping':rigid['m_Drag'],'angular_damping':rigid['m_AngularDrag'],
@@ -180,6 +180,7 @@ def validate_survival_export(record: dict, manifest: dict) -> None:
         if not 0<=food['index']<food['bites'] or food['bites']!=len(food['parts']):raise ValueError('Exhausted food index')
         if assets.get(food['asset'],{}).get('usage')!='food_prototype' or nodes.get(food['root'],{}).get('asset')!=food['asset']:raise ValueError('Missing food prototype')
         if food['mass_kg']<=0 or not food['colliders']:raise ValueError('Invalid food geometry')
+        if type(food['spawn_if_shot']) is not bool:raise ValueError(f"Food {food['kind']} spawn_if_shot is not bool")
         for group in food['parts']:
             if not group or any(n not in nodes or nodes[n]['asset']!=food['asset'] for n in group):raise ValueError('Missing food part')
     for name in ('hp','food','water','bowel'):

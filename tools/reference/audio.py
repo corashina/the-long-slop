@@ -562,8 +562,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
         ('rock_heat',13,rocks[0],readers(rocks[0],source.read(rocks[0])['clipsReggel']),prefab,rock['gain'],rock['pitch'])]
     # meleeweaponscript plays mainscript.meleeHitSounds; the runtime picks the group and its hitVolume gain.
-    shovel=next(p['behavior'] for p in manifest['item_prototypes'] if p['behavior']['melee'])
-    survival_groups.append(('melee_hit',17,main,unique(source.get(c['file'],c['path_id']) for group in shovel['contact_clips'] for c in group),prefab,[1.,1.],[1.,1.]))
+    survival_groups.append(('melee_hit',17,main,unique(source.get(c['file'],c['path_id']) for group in manifest['melee']['hit_clips'] for c in group),prefab,[1.,1.],[1.,1.]))
     # breakablescript.Break plays one of its clips through mainscript.PlayClipAtPoint at AudioPriorities[6].
     break_clips=unique(source.get(c['file'],c['path_id']) for b in manifest['breakables'] for c in b['clips'])
     survival_groups.append(('break',22,main,break_clips,prefab,[1.,1.],[1.,1.]))

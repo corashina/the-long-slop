@@ -1,36 +1,47 @@
-"""Selected shovel controller and checked normalized source tracks."""
+"""Melee weapon controllers and checked normalized source tracks."""
 import json
-import math
-from .source import source_id
-from .library.reader import checked
+from .source import key, source_id
 from .survival import finite_record
 
+# The shovel controller keeps its checked source values. Other controllers get structure checks.
+SHOVEL_CONTROLLER = {'file':'sharedassets1.assets', 'path_id':4515}
 CLIPS = (3998, 4001, 3999, 3997, 4002, 4003)
 STATES = (2008834259, 2530234843, 3863879828, 1326377276, 1368685456, 3895914711)
 PARAMETERS = ('AttackLeft', 'AttackRight', 'AttackForward', 'AttackBack', 'AttackStab', 'Speed', 'Hit')
+# weaponhandlingscript RH: every controller animates this node through the hand Animator.
+TARGET = {'file':'level1', 'path_id':23118}
+HANDLER = {'file':'level1', 'path_id':74298}
+ANIMATOR = {'file':'level1', 'path_id':56797}
+# (attribute, custom_type): position and rotation tracks.
+TRACK_TYPES = {1:0, 4:4}
+STORAGE = (('constant','CONSTANT'), ('streamed','CUBIC'))
 
 
-def recover_motion(source, manifest):
-    reader = source.get('sharedassets1.assets', 4515)
+def recover_motion(source, manifest, reader):
+    """Motion of one meleeweaponscript.AnimationController."""
+    from .library.reader import checked
+    name = f'Controller {key(reader)}'
+    if reader.type.name != 'AnimatorController':
+        raise ValueError(f'{name}: unsupported type {reader.type.name}')
+    shovel = source_id(reader) == SHOVEL_CONTROLLER
     controller = source.read(reader)
     slots = [source_id(source.resolve(reader, p)) for p in controller['m_AnimationClips']]
-    if [s['path_id'] for s in slots] != list(CLIPS):
-        raise ValueError('Shovel clip slots differ')
-    node = next(n['id'] for n in manifest['nodes'] if n['source'] == {'file':'level1', 'path_id':23118})
-    handler = source.get('level1', 74298)
-    hd = source.read(handler)
-    animator = source.resolve(handler, hd['anim'])
-    if source_id(animator) != {'file':'level1', 'path_id':56797}:
-        raise ValueError('Shovel Animator owner differs')
+    if shovel and [s['path_id'] for s in slots] != list(CLIPS):
+        raise ValueError(f'{name}: shovel clip slots differ')
+    node = next(n['id'] for n in manifest['nodes'] if n['source'] == TARGET)
+    handler = source.get(HANDLER['file'], HANDLER['path_id'])
+    animator = source.resolve(handler, source.read(handler)['anim'])
+    if source_id(animator) != ANIMATOR:
+        raise ValueError(f'{name}: Animator owner differs')
     names = dict(controller['m_TOS'])
     data = controller['m_Controller']
     if len(data['m_StateMachineArray']) != 1 or len(data['m_LayerArray']) != 1:
-        raise ValueError('Shovel controller layer count differs')
+        raise ValueError(f'{name}: layer count differs')
     machine = data['m_StateMachineArray'][0]['data']
     parameters = []
     for p in data['m_Values']['data']['m_ValueArray']:
         kind = p['m_Type']
-        if kind not in (1,9):raise ValueError('Shovel parameter type differs')
+        if kind not in (1,9):raise ValueError(f'{name}: parameter type differs')
         defaults = data['m_DefaultValues']['data']['m_FloatValues' if kind == 1 else 'm_BoolValues']
         parameters.append({'id':p['m_ID'], 'name':names[p['m_ID']], 'kind':'float' if kind==1 else 'trigger',
                            'index':p['m_Index'], 'default_float':defaults[p['m_Index']] if kind==1 else None,
@@ -46,22 +57,22 @@ def recover_motion(source, manifest):
                 for c in d['m_ConditionConstantArray']]}
     behaviors = [source.resolve(reader, p) for p in controller['m_StateMachineBehaviours']]
     if any(source.class_name(b) != 'animationEventScript' for b in behaviors):
-        raise ValueError('Unsupported shovel state callback')
+        raise ValueError(f'{name}: unsupported state callback')
     vector = controller['m_StateMachineBehaviourVectorDescription']
     callbacks = {}
     for owner, r in vector['m_StateMachineBehaviourRanges']:
         if owner['m_LayerIndex'] != 0 or r['m_Count'] != 1:
-            raise ValueError('Shovel callback range differs')
+            raise ValueError(f'{name}: callback range differs')
         callbacks[owner['m_StateID']] = source_id(behaviors[vector['m_StateMachineBehaviourIndices'][r['m_StartIndex']]])
     states = []
     for state in machine['m_StateConstantArray']:
         d = state['data']
         blends = d['m_BlendTreeConstantArray']
         if len(blends)!=1 or len(blends[0]['data']['m_NodeArray'])!=1 or d['m_BlendTreeConstantIndexArray']!=[0]:
-            raise ValueError('Unsupported shovel blend tree')
+            raise ValueError(f'{name}: unsupported blend tree')
         blend = blends[0]['data']['m_NodeArray'][0]['data']
         if blend['m_ChildIndices'] or blend['m_BlendEventID']!=2**32-1 or blend['m_BlendEventYID']!=2**32-1:
-            raise ValueError('Unsupported shovel blend operation')
+            raise ValueError(f'{name}: unsupported blend operation')
         states.append({'id':d['m_FullPathID'], 'name_id':d['m_NameID'], 'name':names[d['m_NameID']],
             'path_id':d['m_PathID'], 'tag_id':d['m_TagID'], 'clip_slot':blend['m_ClipID'],
             'speed':d['m_Speed'], 'speed_parameter':d['m_SpeedParamID'], 'cycle_offset':d['m_CycleOffset'],
@@ -75,21 +86,22 @@ def recover_motion(source, manifest):
     exports = json.loads(checked(source.library.root,index))['exports']
     clips = []
     for identity in slots:
-        export = next(e for e in exports if e['source']==identity)
+        export = next((e for e in exports if e['source']==identity), None)
+        if export is None:raise ValueError(f'{name}: clip {identity} not in the animation library')
         receipt = next(f for f in export['files'] if f['file']==export['details']['tracks_file'])
         record = json.loads(checked(source.library.root,receipt))
         tracks = []
         for track in record['tracks']:
             b = track['binding']
-            target = next(t for t in b['targets'] if t['owner']==source_id(animator))
-            if b['type_id']!=4 or b['attribute'] not in (1,4) or b['dimension']!=3 or b['is_pptr'] or b['script'] is not None or target['source']!={'file':'level1','path_id':23118}:
-                raise ValueError('Unsupported shovel track binding')
+            target = next((t for t in b['targets'] if t['owner']==ANIMATOR), None)
+            if target is None or b['type_id']!=4 or b['attribute'] not in TRACK_TYPES or b['dimension']!=3 or b['is_pptr'] or b['script'] is not None or target['source']!=TARGET:
+                raise ValueError(f'{name}: unsupported track binding in clip {identity}')
             tracks.append({'node':node, 'attribute':b['attribute'], 'path_hash':b['path_hash'], 'custom_type':b['custom_type'],
                 'curve_offset':b['curve_offset'], 'storage':b['storage'], 'interpolation':track['interpolation'],
                 'times':track['times'], 'values':track['values'], 'in_tangents':track['in_tangents'],
                 'out_tangents':track['out_tangents'], 'coefficients':track['coefficients']})
         if record['events']:
-            raise ValueError('Unexpected shovel clip events; callbacks are state behaviors')
+            raise ValueError(f'{name}: unexpected clip events in {identity}; callbacks are state behaviors')
         muscle = record['settings']['muscle']
         clips.append({'source':identity, 'source_tracks':receipt, 'name':record['settings']['m_Name'],
             'start_time':muscle['m_StartTime'], 'stop_time':muscle['m_StopTime'],
@@ -108,98 +120,117 @@ def recover_motion(source, manifest):
 
 
 def validate_motion(m, manifest):
+    """Structure of every controller. The shovel controller also keeps its checked values."""
     from .acquisition import _shape,_source,_integer,_number,_boolean,_list,_numbers
     _shape(m,'controller handler animator target coordinate_space clip_slots parameters default_state layer_binding layer_weight layer_blending_mode layer_ik_pass states any_state_transitions selectors clips')
     finite_record(m)
-    for field,pid,file in [('controller',4515,'sharedassets1.assets'),('handler',74298,'level1'),('animator',56797,'level1')]:
+    _source(m['controller'])
+    shovel=m['controller']==SHOVEL_CONTROLLER
+    name=f"Controller {m['controller']['file']}:{m['controller']['path_id']}"
+    def fail(text):raise ValueError(f'{name}: {text}')
+    for field,identity in [('handler',HANDLER),('animator',ANIMATOR)]:
         _source(m[field])
-        if m[field]!={'file':file,'path_id':pid}:raise ValueError('Shovel motion source differs')
+        if m[field]!=identity:fail('motion source differs')
     _integer(m['target'])
     node=next((n for n in manifest['nodes'] if n['id']==m['target']),{})
-    if node.get('source')!={'file':'level1','path_id':23118} or m['coordinate_space']!='unity_parent_local':raise ValueError('Shovel motion target or coordinate space differs')
+    if node.get('source')!=TARGET or m['coordinate_space']!='unity_parent_local':fail('motion target or coordinate space differs')
     for identity in _list(m['clip_slots']):_source(identity)
-    if m['clip_slots']!=[{'file':'sharedassets1.assets','path_id':pid} for pid in CLIPS]:raise ValueError('Shovel clip slot links differ')
+    if shovel and m['clip_slots']!=[{'file':'sharedassets1.assets','path_id':pid} for pid in CLIPS]:fail('shovel clip slot links differ')
     parameters={}
-    for p,name in zip(_list(m['parameters']),PARAMETERS,strict=True):
+    if [p.get('name') for p in _list(m['parameters'])]!=list(PARAMETERS):fail('parameter names differ')
+    for p in m['parameters']:
         _shape(p,'id name kind index default_float default_bool');_integer(p['id']);_integer(p['index'])
-        if p['name']!=name or p['id'] in parameters:raise ValueError('Shovel parameter name or identity differs')
+        if p['id'] in parameters:fail('parameter identity differs')
         parameters[p['id']]=p
         if p['kind']=='float':
             _number(p['default_float'])
-            if name!='Speed' or p['default_bool'] is not None or p['default_float']!=0. or p['index']!=0:raise ValueError('Shovel float parameter differs')
+            if p['name']!='Speed' or p['default_bool'] is not None:fail('float parameter differs')
         elif p['kind']=='trigger':
             _boolean(p['default_bool'])
-            if name=='Speed' or p['default_float'] is not None or p['default_bool']:raise ValueError('Shovel trigger parameter differs')
-        else:raise ValueError('Shovel parameter operation differs')
-    if m['parameters']!=MOTION_PARAMETERS:raise ValueError('Shovel parameter source identities differ')
+            if p['name']=='Speed' or p['default_float'] is not None:fail('trigger parameter differs')
+        else:fail('parameter operation differs')
+    if shovel and m['parameters']!=MOTION_PARAMETERS:fail('shovel parameter source identities differ')
+    speed=next(p['id'] for p in m['parameters'] if p['name']=='Speed')
     for f in ('default_state','layer_binding','layer_blending_mode'):_integer(m[f])
     _number(m['layer_weight']);_boolean(m['layer_ik_pass'])
-    if m['default_state']!=0 or m['layer_binding']!=756556552 or m['layer_blending_mode']!=0 or m['layer_weight']!=0. or m['layer_ik_pass']:raise ValueError('Shovel layer contract differs')
+    if shovel and (m['default_state']!=0 or m['layer_binding']!=756556552 or m['layer_blending_mode']!=0 or m['layer_weight']!=0. or m['layer_ik_pass']):fail('shovel layer contract differs')
+    states=_list(m['states'])
+    if m['default_state']>=len(states):fail('default state missing')
+    triggered=set()
     def transition(t):
         _shape(t,'id full_path_id user_id destination duration offset exit_time has_exit_time fixed_duration can_transition_to_self interruption_source ordered_interruption conditions')
         for f in ('id','full_path_id','user_id','destination','interruption_source'):_integer(t[f])
         for f in ('duration','offset','exit_time'):_number(t[f])
         for f in ('has_exit_time','fixed_duration','can_transition_to_self','ordered_interruption'):_boolean(t[f])
-        if t['destination']>=6 or t['duration']<0 or t['interruption_source']!=0 or t['user_id']!=0:raise ValueError('Shovel transition target differs')
+        if t['destination']>=len(states) or t['duration']<0 or t['interruption_source']!=0 or t['user_id']!=0:fail('transition target differs')
         for c in _list(t['conditions']):
             _shape(c,'mode parameter threshold exit_time');_integer(c['mode']);_integer(c['parameter']);_number(c['threshold']);_number(c['exit_time'])
             if c['mode']!=1 or c['parameter'] not in parameters or parameters[c['parameter']]['kind']!='trigger' or c['threshold']!=0. or c['exit_time']!=0.:
-                raise ValueError('Shovel transition condition differs')
-    states=_list(m['states'])
-    if len(states)!=6 or [s['id'] for s in states]!=list(STATES):raise ValueError('Shovel complete states differ')
+                fail('transition condition differs')
+            triggered.add(parameters[c['parameter']]['name'])
+    if shovel and (len(states)!=6 or [s.get('id') for s in states]!=list(STATES)):fail('shovel complete states differ')
     for i,s in enumerate(states):
         _shape(s,'id name_id name path_id tag_id clip_slot speed speed_parameter cycle_offset cycle_offset_parameter time_parameter mirror_parameter mirror loop ik_on_feet write_default_values clip_duration clip_cycle_offset clip_mirror callback transitions')
         for f in ('id','name_id','path_id','tag_id','clip_slot','speed_parameter','cycle_offset_parameter','time_parameter','mirror_parameter'):_integer(s[f])
         for f in ('speed','cycle_offset','clip_duration','clip_cycle_offset'):_number(s[f])
         for f in ('mirror','loop','ik_on_feet','write_default_values','clip_mirror'):_boolean(s[f])
-        if type(s['name']) is not str or s['clip_slot']!=(1,0,2,3,4,5)[i] or s['path_id']!=s['id'] or s['speed']!=1. or s['loop']!=(i==0) or s['speed_parameter']!=(0 if i==0 else 3471299058):raise ValueError('Shovel state clip or speed binding differs')
+        if type(s['name']) is not str or s['clip_slot']>=len(m['clip_slots']) or s['path_id']!=s['id'] or s['speed_parameter'] not in (0,speed):fail('state clip or speed binding differs')
         if s['mirror'] or s['ik_on_feet'] or s['clip_mirror'] or not s['write_default_values'] or any(s[f]!=0 for f in ('tag_id','cycle_offset','cycle_offset_parameter','time_parameter','mirror_parameter','clip_cycle_offset')):
-            raise ValueError('Shovel state operation differs')
-        if (s['name'],s['name_id'],s['clip_duration'])!=STATE_BINDINGS[i]:raise ValueError('Shovel state source fields differ')
-        callback=None if i==0 else {'file':'sharedassets1.assets','path_id':(130091,130154,130160,130158,130156)[i-1]}
+            fail('state operation differs')
+        # Attack states call AttackStart on enter and AttackEnd on exit. The default state has no callback.
         if s['callback'] is not None:_source(s['callback'])
-        if s['callback']!=callback:raise ValueError('Shovel attack callback target differs')
-        if len(_list(s['transitions']))!=(5 if i==0 else 0):raise ValueError('Shovel state transitions incomplete')
-        for t in s['transitions']:transition(t)
-    if len(_list(m['any_state_transitions']))!=7:raise ValueError('Shovel AnyState transitions incomplete')
-    for t in m['any_state_transitions']:transition(t)
-    if m['any_state_transitions']!=ANY_TRANSITIONS or m['states'][0]['transitions']!=IDLE_TRANSITIONS:raise ValueError('Shovel checked transitions differ')
+        if (s['callback'] is None)!=(i==m['default_state']):fail('attack state callback differs')
+        if shovel:
+            if s['clip_slot']!=(1,0,2,3,4,5)[i] or s['speed']!=1. or s['loop']!=(i==0) or s['speed_parameter']!=(0 if i==0 else speed):fail('shovel state clip or speed binding differs')
+            if (s['name'],s['name_id'],s['clip_duration'])!=STATE_BINDINGS[i]:fail('shovel state source fields differ')
+            callback=None if i==0 else {'file':'sharedassets1.assets','path_id':(130091,130154,130160,130158,130156)[i-1]}
+            if s['callback']!=callback:fail('shovel attack callback target differs')
+            if len(_list(s['transitions']))!=(5 if i==0 else 0):fail('shovel state transitions incomplete')
+        for t in _list(s['transitions']):transition(t)
+    for t in _list(m['any_state_transitions']):transition(t)
+    if not set(PARAMETERS[:5])<=triggered:fail('attack triggers lack transitions')
+    if shovel and (m['any_state_transitions']!=ANY_TRANSITIONS or states[0]['transitions']!=IDLE_TRANSITIONS):fail('shovel checked transitions differ')
     for s in _list(m['selectors']):
         _shape(s,'id entry destinations');_integer(s['id']);_boolean(s['entry'])
         for d in _list(s['destinations']):_integer(d)
-    if m['selectors']!=[{'id':756556552,'entry':True,'destinations':[0]},{'id':756556552,'entry':False,'destinations':[30000]}]:raise ValueError('Shovel controller selector differs')
+    if shovel and m['selectors']!=[{'id':756556552,'entry':True,'destinations':[0]},{'id':756556552,'entry':False,'destinations':[30000]}]:fail('shovel controller selector differs')
     clips=_list(m['clips'])
-    if len(clips)!=6:raise ValueError('Shovel complete clips required')
+    if len(clips)!=len(m['clip_slots']):fail('complete clips required')
     for i,c in enumerate(clips):
         _shape(c,'source source_tracks name start_time stop_time sample_rate loop cycle_offset tracks events');_source(c['source'])
-        if c['source']!=m['clip_slots'][i] or type(c['name']) is not str:raise ValueError('Shovel clip identity differs')
+        if c['source']!=m['clip_slots'][i] or type(c['name']) is not str:fail('clip identity differs')
         receipt=c['source_tracks'];_shape(receipt,'bytes file sha256');_integer(receipt['bytes'])
-        if receipt!=TRACK_RECEIPTS[i]:raise ValueError('Shovel checked track receipt differs')
         for f in ('start_time','stop_time','sample_rate','cycle_offset'):_number(c[f])
         _boolean(c['loop'])
-        if c['sample_rate']!=60. or c['start_time']!=0. or c['stop_time']<c['start_time'] or c['cycle_offset']!=0. or c['events']!=[]:raise ValueError('Shovel clip timing or events differ')
-        if c['stop_time']!=CLIP_TIMES[i] or c['loop']!=(i==1):raise ValueError('Shovel source clip length differs')
-        if len(_list(c['tracks']))!=2:raise ValueError('Shovel track count differs')
-        for j,t in enumerate(c['tracks']):
+        if c['start_time']<0 or c['stop_time']<c['start_time'] or c['sample_rate']<=0 or c['cycle_offset']!=0. or c['events']!=[]:fail('clip timing or events differ')
+        tracks=_list(c['tracks'])
+        if not tracks or len({t.get('attribute') for t in tracks})!=len(tracks):fail('clip track attributes differ')
+        if shovel:
+            if receipt!=TRACK_RECEIPTS[i]:fail('shovel checked track receipt differs')
+            if c['sample_rate']!=60. or c['start_time']!=0. or c['stop_time']!=CLIP_TIMES[i] or c['loop']!=(i==1):fail('shovel source clip length differs')
+            if len(tracks)!=2:fail('shovel track count differs')
+        for j,t in enumerate(tracks):
             _shape(t,'node attribute path_hash custom_type curve_offset storage interpolation times values in_tangents out_tangents coefficients')
             for f in ('node','attribute','path_hash','custom_type','curve_offset'):_integer(t[f])
-            if t['node']!=m['target'] or t['attribute']!=(1,4)[j] or t['path_hash']!=0 or t['curve_offset']!=j*3 or t['custom_type']!=(0,4)[j]:raise ValueError('Shovel track binding differs')
-            constant=i==1
-            if (t['storage'],t['interpolation'])!=(('constant','CONSTANT') if constant else ('streamed','CUBIC')):raise ValueError('Shovel track interpolation differs')
+            if t['node']!=m['target'] or TRACK_TYPES.get(t['attribute'])!=t['custom_type'] or t['path_hash']!=0:fail('track binding differs')
+            if (t['storage'],t['interpolation']) not in STORAGE:fail('track interpolation differs')
+            constant=t['storage']=='constant'
             times=_list(t['times'])
-            if len(times)!=(5,1,5,4,3,3)[i] or times[0]!=(.1666666716337204,0.,.1666666716337204,.1666666716337204,0.,.1666666716337204)[i] or times[-1]!=c['stop_time']:raise ValueError('Shovel source key extent differs')
-            if not times or any(b<=a for a,b in zip(times,times[1:])):raise ValueError('Shovel track time order differs')
+            if not times or any(b<=a for a,b in zip(times,times[1:])):fail('track time order differs')
             for time in times:
                 _number(time)
-                if time<0 or time>c['stop_time']+1e-6:raise ValueError('Shovel track time out of clip')
+                if time<0 or time>c['stop_time']+1e-6:fail('track time out of clip')
+            if shovel:
+                if t['attribute']!=(1,4)[j] or t['curve_offset']!=j*3 or constant!=(i==1):fail('shovel track binding differs')
+                if len(times)!=(5,1,5,4,3,3)[i] or times[0]!=(.1666666716337204,0.,.1666666716337204,.1666666716337204,0.,.1666666716337204)[i] or times[-1]!=c['stop_time']:fail('shovel source key extent differs')
             for f in ('values','in_tangents','out_tangents'):
-                if len(_list(t[f]))!=len(times):raise ValueError('Shovel track key count differs')
+                if len(_list(t[f]))!=len(times):fail('track key count differs')
                 for row in t[f]:_numbers(row,3)
             coeff=_list(t['coefficients'])
-            if len(coeff)!=(0 if constant else len(times)):raise ValueError('Shovel polynomial key count differs')
-            for key in coeff:
-                if len(_list(key))!=3:raise ValueError('Shovel polynomial dimension differs')
-                for row in key:_numbers(row,3)
+            if len(coeff)!=(0 if constant else len(times)):fail('polynomial key count differs')
+            for k in coeff:
+                if len(_list(k))!=3:fail('polynomial dimension differs')
+                for row in k:_numbers(row,3)
 
 TRACK_RECEIPTS = [{'bytes': 9870,
   'file': 'animations/clips/sharedassets1.assets/3998/tracks.json',
