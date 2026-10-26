@@ -559,12 +559,13 @@ impl RendererMaterial {
 
 /// Prototypes whose renderers take a runtime emission override. Their renderers are
 /// private entities, never GPU prop rows.
-/// ginlampscript.R takes a private material and a runtime emission.
+/// ginlampscript.R and displayscript.R take a private material and a runtime emission.
 pub fn emissive_renderer(
     reference: &ReferenceManifest,
     renderer: &crate::reference::SourceId,
 ) -> bool {
     *renderer == reference.small_items.genie_lamp.renderer
+        || *renderer == reference.computer.display.renderer
 }
 
 pub fn selected_material<'a>(

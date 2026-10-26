@@ -956,6 +956,7 @@ impl AudioGameplayReference {
             (18, "metal_detector"),
             (21, "radio_click"),
             (22, "break"),
+            (23, "computer_note"),
         ] {
             require(
                 r.bindings

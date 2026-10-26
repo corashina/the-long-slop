@@ -152,7 +152,8 @@ def export_ui(source, output, library):
         sprite(source.get(*identity), 'inventory-item')
     from .hose import hose_prompts
     from .caps import word
+    from .computer import computer_prompts
     # fpscontroller ammo texts: R (canReload, ls.w.reload) and E (ls.w.unload).
     ammo_prompts={'reload':word(source,'reload'),'unload':word(source,'unload')}
-    return {'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    return {'hose_prompts':hose_prompts(source),'ammo_prompts':ammo_prompts,'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}
