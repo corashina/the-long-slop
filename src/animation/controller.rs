@@ -1,8 +1,8 @@
 //! Source Animator state machine for one checked layer: triggers, the `Speed` parameter,
 //! AnyState and state transitions, exit times, fixed-duration crossfades and clip sampling.
 //! Transitions have interruption source None: a crossfade runs to its end.
-use crate::reference::{AcquisitionMotion, MotionTrack, MotionTransition};
-use crate::simulation::dials::unity_euler;
+use super::clip::{LocalPart, sample_clip};
+use crate::reference::{AcquisitionMotion, MotionTransition};
 use crate::vehicle::VehiclePose;
 use rapier3d::math::{Rotation, Vector};
 
@@ -167,23 +167,14 @@ impl MotionController {
             playing.time.clamp(0., 1.)
         };
         let time = clip.start_time + fraction * length.max(0.);
-        let mut position = [0.; 3];
+        let mut position = Vector::ZERO;
         let mut rotation = Rotation::IDENTITY;
-        for track in &clip.tracks {
-            let [x, y, z, _] = sample_track(track, time);
-            match track.attribute {
-                1 => position = [x, y, z],
-                _ => {
-                    let [x, y, z, w] = unity_euler([x, y, z]);
-                    rotation = Rotation::from_xyzw(x, y, z, w);
-                }
-            }
-        }
-        // Source parent-local values: z negates.
-        (
-            Vector::new(position[0], position[1], -position[2]),
-            rotation,
-        )
+        sample_clip(clip, time, |_, part| match part {
+            LocalPart::Position(p) => position = p,
+            LocalPart::Rotation(r) => rotation = r,
+            LocalPart::Scale(_) => {}
+        });
+        (position, rotation)
     }
     /// Animated target pose in its parent frame, in converted space.
     pub fn pose(&self, m: &AcquisitionMotion) -> VehiclePose {
@@ -213,34 +204,12 @@ fn crossed(from: f32, to: f32, exit: f32) -> bool {
     }
 }
 
-/// Unity streamed cubic keys hold polynomial coefficients from each key time.
-/// Components past the track width stay 0.
-fn sample_track(track: &MotionTrack, time: f32) -> [f32; 4] {
-    let times = &track.times;
-    let i = times.partition_point(|t| *t <= time).saturating_sub(1);
-    let mut out = [0.; 4];
-    let values = &track.values[i];
-    out[..values.len()].copy_from_slice(values);
-    if time <= times[0] || i == times.len() - 1 {
-        return out;
-    }
-    let Some(coefficients) = track.coefficients.get(i) else {
-        return out;
-    };
-    let elapsed = time - times[i];
-    for (c, [a, b, d]) in coefficients.iter().enumerate() {
-        if !track.out_tangents[i][c].is_infinite() {
-            out[c] = ((a * elapsed + b) * elapsed + d) * elapsed + values[c];
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::reference::{
-        MotionClip, MotionCondition, MotionParameter, MotionReceipt, MotionState, NodeId, SourceId,
+        MotionClip, MotionCondition, MotionParameter, MotionReceipt, MotionState, MotionTrack,
+        NodeId, SourceId,
     };
 
     const SPEED: u32 = 7;
