@@ -24,6 +24,12 @@ pub const WORLD_VIEWS: usize = 1;
 pub const PROBE_START: usize = WORLD_VIEWS;
 pub const VIEW_COUNT: usize = PROBE_START + 6;
 
+/// Source `playermodeloutfitscript.SetDistance`: `player_model` `_Dist` is 0.35 while the player camera draws.
+/// Other views, such as the probe faces, draw it with 0.
+pub fn player_dist(index: usize) -> f32 {
+    if index < WORLD_VIEWS { 0.35 } else { 0. }
+}
+
 /// The world view precedes six probe faces.
 /// Shadow values come from each view's source fit and sun shadow preparation.
 #[derive(Component, Clone, Copy)]
@@ -217,8 +223,7 @@ pub(crate) fn prepare_views(
             source.shadow_fade,
             source.shadow_fade_center,
             source.clip_from_world,
-            source.near,
-            source.far,
+            Vec4::new(source.near, source.far, player_dist(source.index), 0.),
             sun_shadow.map_or_else(Default::default, |collector| collector.value),
         );
         let glass_value = match GlassViewUniform::new(

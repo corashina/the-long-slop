@@ -630,6 +630,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
                 | AssetUsage::RoadLampPrototype
                 | AssetUsage::SkyPrototype
                 | AssetUsage::ItemPrototype
+                | AssetUsage::PlayerPrototype
         )
     }) {
         let (_, handle) = visuals
