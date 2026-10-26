@@ -4,7 +4,7 @@ import {installGameMode} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
-import {manifestStamp,createSaveStorage,defaultName} from './save-storage.js';
+import {manifestStamp,createSaveStorage} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 import {createThumbnail} from './thumbnail.js';
@@ -16,7 +16,7 @@ import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
 let slider,worldDrawDistance,drivingSettings,steeringWheel;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save'&&operation!=='remove'){worldDrawDistance=slider.value();slider.store();}}});
 import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
@@ -198,7 +198,7 @@ async function load(){
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession:{save:()=>saveSession.save(defaultName(new Date()),lastThumbnail),load:()=>saveSession.loadLast(manifest.build_id),newGame:()=>saveSession.newGame(),cancel:()=>saveSession.cancel()},slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconBytes=await readPackageAsset(manifest.lighting.switch_icon.path);
  const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();
