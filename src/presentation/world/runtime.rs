@@ -484,6 +484,7 @@ impl WorldPresentation<'_, '_> {
             physics,
             &area.items,
             vehicles,
+            powertrain,
             &mut self.commands,
             &mut self.roots,
             &mut self.materials,

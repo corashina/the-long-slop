@@ -17,7 +17,10 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
 - A car can have any wheel count. The radiator is optional.
-- Every `meterscript` in the car prefab adds needles, lamps and a backlight. The odometer is optional.
+- Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
+- Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
+- A `kmhmeters` row reads its `types`, times `modifier`. With `force`, every needle of the gauge reads the speed (source behavior).
+- A gauge adds the driven distance to its `kilometerszamlalo` and `napiszamlalo` counters. A removed gauge keeps its values.
 - Diesel is data only. Each engine part has its `fuel_consumption` mix. Fuel suitability compares the tank mix with it.
 - Pumps and cans take their fluids from the source tanks. Fluid 5 is diesel.
 - `src/world/content_vehicles.rs` binds a car copy: chassis, `VehicleRuntime`, wheel slots, engine and radiator parts.
@@ -33,7 +36,8 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - On retire, the car, engine, radiator and wheel slot states go to the world change records.
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
-- Save schema 20. Older saves are rejected.
+- The save keeps gauge part values per key.
+- Save schema 21. Older saves are rejected.
 
 ## Physics fix
 

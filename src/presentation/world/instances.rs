@@ -1150,6 +1150,7 @@ impl SourceInstances {
             crate::world::ObjectKey,
             crate::starting_area::VehicleRuntime,
         >,
+        powertrain: &crate::simulation::powertrain::PowertrainParts,
         commands: &mut Commands,
         transforms: &mut super::runtime::WorldRoots,
         materials: &mut InstanceMaterials,
@@ -1351,6 +1352,37 @@ impl SourceInstances {
                     instance.write_local(transforms, node, local_pose(n.pose), frame.origin)?;
                 }
             }
+            for gauge in powertrain
+                .gauges()
+                .filter(|g| g.parent == instance.placement.id)
+            {
+                let (r, state) = (&gauge.record, &gauge.state);
+                let needles = r.needles.iter().zip(&state.needle_angles).map(|(n, &a)| {
+                    let mut e = n.rest;
+                    e[n.axis as usize] = a;
+                    (n.node, e)
+                });
+                let digits = r
+                    .counters
+                    .iter()
+                    .flat_map(|c| &c.digits)
+                    .zip(&state.digit_angles)
+                    .map(|(d, &a)| {
+                        let mut e = [0.; 3];
+                        e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
+                        (d.node, e)
+                    });
+                for (node, e) in needles.chain(digits) {
+                    let node = prototype.nodes[node.0 as usize].gltf_node as usize;
+                    if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
+                        let rotation =
+                            Quat::from_array(crate::simulation::instruments::source_rotation(e));
+                        if transform.rotation != rotation {
+                            transform.rotation = rotation;
+                        }
+                    }
+                }
+            }
             if let Some((record, vehicle)) = car
                 && let (Some(r), Some(state)) = (&record.instruments, &vehicle.instruments)
             {
@@ -1431,8 +1463,15 @@ impl SourceInstances {
                 }
             }
             for renderer in &mut instance.renderers {
+                let node = renderer.node as u32;
                 let selected = car
-                    .and_then(|(record, v)| v.renderer_material(record, renderer.node as u32))
+                    .and_then(|(record, v)| v.renderer_material(record, node))
+                    .or_else(|| {
+                        powertrain
+                            .gauges()
+                            .filter(|g| g.parent == instance.placement.id)
+                            .find_map(|g| g.state.renderer_material(&g.record, node))
+                    })
                     .map(|link| &link.source)
                     .or_else(|| {
                         appearance

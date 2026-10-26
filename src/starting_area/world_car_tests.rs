@@ -31,8 +31,7 @@ fn prototype() -> WorldPrototypeReference {
         "states": [state("off", 1, 0.0), state("low", 2, 2.0), state("high", 3, 3.0)]}))
     .unwrap()];
     vehicle.instruments = Some(
-        serde_json::from_value(json!({"backlights": [{"kind": "absent"}], "electronics_output": 1.0,
-            "electronics_off_threshold": 0.2,
+        serde_json::from_value(json!({"backlights": [{"kind": "absent"}],
             "needles": [{"source": src(50), "node": 0, "backlight": {"kind": "absent"}, "signal": "speed",
                 "min_value": 0.0, "max_value": 200.0, "min_angle": 0.0, "max_angle": 270.0, "axis": 2,
                 "rest": [0.0, 0.0, 0.0], "offset": 0.0, "inv": false, "value_smoothing": 8.0,
@@ -40,8 +39,7 @@ fn prototype() -> WorldPrototypeReference {
             "lamps": [{"source": src(51), "node": 0, "signal": "battery", "on": material(52, 1),
                 "off": material(53, 2), "min_value": 1.0, "max_value": 1.0, "stay_on": false}],
             "odometer": {"source": src(54), "initial_value": 0.0, "base": 10, "decimals": 0.0,
-                "use_multiplier": false, "multiplier": 1.0, "digits": []},
-            "low_fuel": 5.0, "low_oil": 1.0, "oil_test_rpm": 500.0, "battery_test_rpm": 500.0}))
+                "use_multiplier": false, "multiplier": 1.0, "digits": []}}))
         .unwrap(),
     );
     prototype
@@ -155,18 +153,20 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     }
     let items = ItemStore::from_states(Vec::new());
     let r = record.instruments.as_ref().unwrap();
-    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, r, 2);
+    let limits = &record.gauge_limits;
+    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, limits, 2);
     let speed = physics.snapshot(&key).speed_mps * 3.6;
     assert_eq!(sample.rpm, 2400.);
     assert!(speed > 3. && sample.speed_kmh == speed, "{speed}");
     assert_eq!(sample.headlights, 2);
     let state = vehicle.instruments.as_mut().unwrap();
-    state.initialize_from_sample(r, sample);
+    state.initialize_from_sample(r, limits, sample);
     assert_eq!(state.needle_angles[0], needle_angle(&r.needles[0], speed));
     assert_eq!(state.lamp_bits, 0, "battery lamp off above the test rpm");
     let mut stalled = InstrumentState::new(r);
     stalled.initialize_from_sample(
         r,
+        limits,
         crate::simulation::instruments::InstrumentSample { rpm: 0., ..sample },
     );
     assert_eq!(stalled.lamp_bits, 1, "battery lamp on below the test rpm");

@@ -583,7 +583,7 @@ impl GarageRuntime {
     }
 }
 impl GarageRuntime {
-    /// Writes the state of every live car, its wheel slots and every engine and radiator part
+    /// Writes the state of every live car, its wheel slots and every engine, radiator and gauge part
     /// into `changes`.
     fn keep_object_states(&self, changes: &mut crate::world::ChangeRecords) {
         for (key, vehicle) in &self.vehicles {
@@ -600,6 +600,12 @@ impl GarageRuntime {
         }
         for part in self.powertrain.radiators() {
             changes.keep_radiator(self.area.items.object_key(part.item), part.fan_on);
+        }
+        for part in self.powertrain.gauges() {
+            changes.keep_gauge(
+                self.area.items.object_key(part.item),
+                part.state.capture_save(),
+            );
         }
     }
 }

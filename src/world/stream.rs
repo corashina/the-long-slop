@@ -2451,6 +2451,19 @@ impl WorldStream {
                 }
             }
         }
+        if let Some((gauges, index)) = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .and_then(|p| Some((&p.gauges, p.nodes.iter().position(|n| &n.source == node)?)))
+        {
+            for link in gauges.iter().flat_map(|g| g.renderer_materials(index as u32)) {
+                if !output.contains(&link.source) {
+                    output.push(link.source.clone());
+                }
+            }
+        }
         self.lamp_material_choices
             .push((prototype.clone(), node.clone(), output));
         Ok(&self.lamp_material_choices.last().unwrap().2)

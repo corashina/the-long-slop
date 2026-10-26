@@ -772,9 +772,10 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle
-        engines,radiators=part_records(source,hierarchy)
+        engines,radiators,gauges=part_records(source,hierarchy,index,report['material_indices'])
         if engines:prototype['engines']=engines
         if radiators:prototype['radiators']=radiators
+        if gauges:prototype['gauges']=gauges
         prototypes.append(prototype)
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes

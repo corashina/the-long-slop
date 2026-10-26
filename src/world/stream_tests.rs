@@ -1391,7 +1391,7 @@ fn replay_index_query_matches_old_order_and_exact_bounds() {
     fields.sort();
     assert_eq!(
         fields,
-        ["engines", "radiators", "records", "vehicles", "wheel_slots"]
+        ["engines", "gauges", "radiators", "records", "vehicles", "wheel_slots"]
     );
 }
 

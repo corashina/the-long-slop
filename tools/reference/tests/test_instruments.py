@@ -18,7 +18,7 @@ def dashboard_fixture():
     record(21, {}, type_name='Material')
     record(22, {}, type_name='Material')
     car = record(1, dict(electronics=ptr(0), lowFuelValue=5., lowOilValue=1.,
-                         ledOilTestRpm=600., ledBatteryTestRpm=800.), 'carscript')
+                         ledOilTestRpm=600., ledBatteryTestRpm=800., meters=[ptr(2)]), 'carscript')
     needles = []
     nodes = []
     for index, signal in enumerate(('speed', 'fuel', 'temp')):
@@ -43,7 +43,7 @@ def dashboard_fixture():
     counter = record(30, dict(szamok=[], szamrendszer=10, tizedesjegyek=1.,
                               useMultiplier=False, multiplier=1.), 'forgoszamlap')
     meter = record(2, dict(R=ptr(0), OnM=ptr(21), OffM=ptr(22), mutatok=needles, leds=[],
-                           szamlapok=[dict(forgo=ptr(30), value=0.)]), 'meterscript')
+                           szamlapok=[dict(forgo=ptr(30), value=0., name='kilometerszamlalo')]), 'meterscript')
     components = [car, meter, counter] + [records[10 + index] for index in range(3)]
     source = NS(hierarchy=lambda root: [dict(components=components)],
                 read=lambda reader: data[reader.path_id],
@@ -99,17 +99,17 @@ class InstrumentTests(unittest.TestCase):
                 self.assertEqual(result[field], dict(source=dict(file='level1', path_id=source),
                                                      asset=7, gltf_material=index))
 
-    def test_gauge_part_meters_add_needles_and_backlights(self):
+    def test_built_in_meters_come_from_carscript_meters(self):
         source, manifest, reports, car = dashboard_fixture()
-        components = source.hierarchy(car)[0]['components']
         meter = source.resolve(car, {'m_PathID': 2})
         gauge = NS(assets_file=meter.assets_file, path_id=3, type=meter.type, class_name='meterscript')
         fields = {**source.read(meter), 'mutatok': source.read(meter)['mutatok'][:1], 'szamlapok': []}
-        records = {3: gauge}
         read, resolve = source.read, source.resolve
         source.read = lambda reader: fields if reader is gauge else read(reader)
-        source.resolve = lambda owner, pointer: records.get(pointer['m_PathID']) or resolve(owner, pointer)
-        source.hierarchy = lambda root: [dict(components=components + [gauge])]
+        source.resolve = lambda owner, pointer: gauge if pointer['m_PathID'] == 3 else resolve(owner, pointer)
+        # A meter outside carscript.meters (a gauge part) is not a built-in meter.
+        self.assertEqual(len(recover_instruments(source, manifest, reports, car)['needles']), 3)
+        source.read(car)['meters'].append({'m_PathID': 3})
         result = recover_instruments(source, manifest, reports, car)
         self.assertEqual(len(result['needles']), 4)
         self.assertEqual(len(result['backlights']), 2)

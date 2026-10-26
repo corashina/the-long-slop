@@ -73,22 +73,16 @@ pub struct OdometerReference {
     pub multiplier: f32,
     pub digits: Vec<DigitReference>,
 }
-/// Gauges of one car: every meter in the car prefab, with any needle and lamp count.
+/// Built-in gauges of one car (`carscript.meters`), with any needle and lamp count.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstrumentReference {
     /// One `meterscript` backlight per meter.
     pub backlights: Vec<MaterialSwitchReference>,
-    pub electronics_output: f32,
-    pub electronics_off_threshold: f32,
     pub needles: Vec<NeedleReference>,
     pub lamps: Vec<LampReference>,
     /// None: no meter has a digit counter.
     pub odometer: Option<OdometerReference>,
-    pub low_fuel: f32,
-    pub low_oil: f32,
-    pub oil_test_rpm: f32,
-    pub battery_test_rpm: f32,
 }
 impl InstrumentReference {
     /// Odometer digits. Empty without an odometer.
@@ -100,5 +94,59 @@ impl InstrumentReference {
         self.backlights
             .iter()
             .chain(self.needles.iter().map(|n| &n.backlight))
+    }
+}
+/// `carscript` lamp thresholds and the electronics output that every gauge of the car reads.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GaugeLimits {
+    pub electronics_output: f32,
+    pub electronics_off_threshold: f32,
+    pub low_fuel: f32,
+    pub low_oil: f32,
+    pub oil_test_rpm: f32,
+    pub battery_test_rpm: f32,
+}
+/// A `meterscript` on a gauge part. `carscript.kmhmeters` updates it while the part is in a
+/// listed slot. Node ids are indices in the prototype that holds the part.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GaugePartReference {
+    pub source: SourceId,
+    /// The meter node. The part item is the nearest item at or above it.
+    pub node: u32,
+    pub backlight: MaterialSwitchReference,
+    pub needles: Vec<NeedleReference>,
+    pub lamps: Vec<LampReference>,
+    /// The `kilometerszamlalo` and `napiszamlalo` counters. Each adds the driven distance.
+    pub counters: Vec<OdometerReference>,
+}
+impl GaugePartReference {
+    pub fn digit_count(&self) -> usize {
+        self.counters.iter().map(|c| c.digits.len()).sum()
+    }
+    /// Every material that the gauge can show on renderer node `node`.
+    pub fn renderer_materials(&self, node: u32) -> impl Iterator<Item = &MaterialLink> {
+        let lamps = self
+            .lamps
+            .iter()
+            .filter(move |l| l.node.0 == node)
+            .flat_map(|l| [&l.on, &l.off]);
+        let digits = self
+            .counters
+            .iter()
+            .flat_map(|c| &c.digits)
+            .filter(move |d| d.node.0 == node)
+            .flat_map(|d| [&d.on, &d.off]);
+        let backlights = std::iter::once(&self.backlight)
+            .chain(self.needles.iter().map(|n| &n.backlight))
+            .filter_map(move |b| match b {
+                MaterialSwitchReference::Renderer { node: n, on, off } if n.0 == node => {
+                    Some([on, off])
+                }
+                _ => None,
+            })
+            .flatten();
+        lamps.chain(digits).chain(backlights)
     }
 }
