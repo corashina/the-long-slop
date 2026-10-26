@@ -43,7 +43,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - A gauge adds the driven distance to its `kilometerszamlalo` and `napiszamlalo` counters. A removed gauge keeps its values.
 - Diesel is data only. Each engine part has its `fuel_consumption` mix. Fuel suitability compares the tank mix with it.
 - Pumps and cans take their fluids from the source tanks. Fluid 5 is diesel.
-- `src/world/content_vehicles.rs` binds a car copy: chassis, `VehicleRuntime`, wheel slots, engine and radiator parts.
+- `crates/simulation/src/world/content_vehicles.rs` binds a car copy: chassis, `VehicleRuntime`, wheel slots, engine and radiator parts.
 - `ObjectKey` keys each car copy. `GarageRuntime.vehicles`, `PhysicsWorld` and wheel slots use this key.
 - One Rapier world holds every chassis. Every engine steps each frame. Only the seated driver's car reads keys.
 - `GarageRuntime.vehicle` is the last seated car. The camera, HUD, and recovery follow it.
@@ -57,7 +57,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The stream spawns only the picked start car, as a fixed placement on the `Startup` layer.
 - The start pack of a group spawns only with its start car (`StartCar01`, `StartCar02`).
 - The Game mode screen has a `#start-car` list: Random, then each manifest start placement. Browser storage keeps it (`gameMode.startCar`, -1 = Random). The menu default is Random.
-- `src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`:
+- `crates/simulation/src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`:
 
 | Field | Chance |
 | --- | --- |
@@ -83,11 +83,11 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
 - The save keeps the start car field. Load spawns its placement and ignores the menu choice. Validation checks the current car against it.
 - Save schema 25. Older saves are rejected.
-- `src/world/stream_tests/car_types.rs` drives, saves and loads each start car. It needs the export.
+- `crates/simulation/src/world/stream_tests/car_types.rs` drives, saves and loads each start car. It needs the export.
 
 ## Bus doors
 
-`src/world/content_busdoors.rs` binds `busdoorscripts`, `busdooropenscript` and `dinamiccolliderforbus` on a car copy.
+`crates/simulation/src/world/content_busdoors.rs` binds `busdoorscripts`, `busdooropenscript` and `dinamiccolliderforbus` on a car copy.
 
 - Each door has `Usign` and `Uopen` usables. Their colliders are switch knobs. One usable can serve more doors.
 - `Usign` sets the signal. `Uopen` toggles the door and clears the signal.
@@ -101,7 +101,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 
 ## Trailers
 
-`src/interaction/hitch.rs` and `src/world/content_trailers.rs` port `utanfutoscript`, `attachgripscript`, `attachablescript` (onlyToPoint) and `attachTargetscript`.
+`crates/simulation/src/interaction/hitch.rs` and `crates/simulation/src/world/content_trailers.rs` port `utanfutoscript`, `attachgripscript`, `attachablescript` (onlyToPoint) and `attachTargetscript`.
 
 - A prototype root with `utanfutoscript` exports a `trailer` record: body, wheels, both centers of mass, brake force, brake switch, grip and rear lamps.
 - `attachTargetscript` entries with type `utanfuto` export as `hitches`: the target node and the one collider on the script node.

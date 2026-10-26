@@ -1,7 +1,5 @@
 use the_long_slop::{
-    particles::ParticleState,
-    reference::ReferenceManifest,
-    vehicle::PhysicsWorld,
+    particles::ParticleState, reference::ReferenceManifest, vehicle::PhysicsWorld,
 };
 
 #[test]
