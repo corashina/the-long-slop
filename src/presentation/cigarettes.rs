@@ -1,10 +1,11 @@
 //! Cigarette ember emission, ember light, and burn-down parts (`emberScript`, `UpdParts`).
 use super::lighting::{SourceLighting, ember_light};
 use super::materials::SourceMaterial;
+use super::sim_frame::SimFrameResource;
 use super::spawned::{SpawnedScene, SpawnedVisuals};
-use crate::app::{Drive, RuntimeReference};
-use crate::interaction::cigarettes::{EmberPhase, part_pose};
-use crate::reference::{NodeId, Transform as SourceTransform};
+use crate::app::RuntimeReference;
+use crate::interaction::cigarettes::part_pose;
+use crate::reference::{ItemId, NodeId, Transform as SourceTransform};
 use bevy::prelude::*;
 
 /// Checked cigarette nodes: each part with its start and end local pose.
@@ -47,7 +48,7 @@ impl CigaretteNodes {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync(
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     mut nodes: Local<Option<CigaretteNodes>>,
     mut spawned: ResMut<SpawnedVisuals>,
     mut assets: ResMut<Assets<SourceMaterial>>,
@@ -62,10 +63,9 @@ pub(crate) fn sync(
     let Some(nodes) = nodes.as_ref() else {
         return;
     };
-    let c = &drive.runtime.area.cigarettes;
-    let rates = &c.rates.ember;
-    for (id, state) in &c.cigarettes {
-        let blend = state.part_blend();
+    for row in &frame.frame.cigarettes {
+        let id = &ItemId(row.item);
+        let blend = row.blend;
         for (part, start, end) in &nodes.parts {
             let Some(entity) = spawned.node(*id, *part) else {
                 continue;
@@ -79,11 +79,10 @@ pub(crate) fn sync(
                 });
             }
         }
-        let out = state.ember.output(rates);
         if let Err(error) = spawned.emission(
             *id,
             nodes.renderer,
-            out.color,
+            row.color,
             None,
             &mut assets,
             &mut bound,
@@ -95,17 +94,7 @@ pub(crate) fn sync(
     let Some(record) = ember_light(manifest) else {
         return;
     };
-    let held = drive.runtime.area.interaction.held();
-    let lit = |id: &crate::reference::ItemId| {
-        c.cigarette(*id)
-            .is_some_and(|s| s.ember.phase != EmberPhase::Start)
-    };
-    let chosen = c
-        .mouth
-        .item
-        .filter(lit)
-        .or(held.filter(lit))
-        .or_else(|| c.cigarettes.iter().map(|(id, _)| *id).find(lit));
+    let chosen = frame.frame.state.ember_light.checked_sub(1).map(ItemId);
     let Some(light) = lighting
         .lights
         .iter_mut()
@@ -120,9 +109,12 @@ pub(crate) fn sync(
             light.item = Some(id);
             light.node = Some(node);
             world.output.enabled = true;
-            world.output.intensity = c
-                .cigarette(id)
-                .map_or(0., |s| s.ember.output(rates).light_intensity);
+            world.output.intensity = frame
+                .frame
+                .cigarettes
+                .iter()
+                .find(|row| row.item == id.0)
+                .map_or(0., |row| row.light_intensity);
         }
         _ => {
             light.item = None;

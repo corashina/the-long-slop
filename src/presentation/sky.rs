@@ -1,10 +1,7 @@
 //! Source sky geometry and persistent GPU values.
+use super::sim_frame::SimFrameResource;
 use super::{lighting::SourceLighting, reference::ReferenceVisuals};
-use crate::{
-    app::{Drive, RuntimeReference},
-    lighting::source_linear,
-    reference::SourceId,
-};
+use crate::{app::RuntimeReference, lighting::source_linear, reference::SourceId};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::{
     self as bevy_ecs,
@@ -543,12 +540,12 @@ fn quad_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, c)
     .with_inserted_indices(Indices::U32(i))
 }
-pub(crate) fn sync_sky(drive: Res<Drive>, mut source: ResMut<SourceLighting>) {
-    let output = drive.runtime.lighting.cycle.output();
+pub(crate) fn sync_sky(sim: Res<SimFrameResource>, mut source: ResMut<SourceLighting>) {
+    let output = &sim.frame.lighting.cycle;
     let sky = &mut source.sky;
     let [x, y, z] = output.directional_euler_degrees.map(f32::to_radians);
     let sun = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::Z;
-    let active = drive.runtime.lighting.cycle.elapsed_seconds();
+    let active = sim.frame.state.cycle_elapsed_seconds;
     let u = &mut sky.uniform;
     u.tint = Vec4::from_array(output.sky_tint.map(source_linear));
     u.ground = Vec4::from_array(output.ground_color.map(source_linear));
