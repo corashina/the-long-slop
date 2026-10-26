@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod computer;
+pub use computer::*;
 pub mod melee;
 pub use melee::*;
 pub mod wheel_effects;
@@ -852,6 +854,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub computer: ComputerRecord,
     pub melee: MeleeReference,
     pub skid: SkidReference,
     pub app_id: u32,
@@ -1831,6 +1834,7 @@ impl ReferenceManifest {
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.computer.validate(self)?;
         self.melee.validate(self)?;
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;

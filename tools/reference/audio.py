@@ -643,6 +643,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         'settings':{'priority':128,'loop':False,'gain':1.,'pitch':1.,'min_distance':1.,'max_distance':500.,'rolloff_mode':0,
             'spatial_blend':1.,'spatial_blend_curve':flat,'rolloff_curve':flat},
         'mixer':notes[0][2],'doppler':1.,'pan':0.,'method':method('musicboxscript','PlayNote')})
+    # computerscript.PlayNote adds one looped 3D AudioSource for each held note.
+    computer=source.get('sharedassets1.assets',133932);cd=source.read(computer)
+    if source.class_name(computer)!='computerscript':raise ValueError('Computer audio source differs')
+    audio['survival'].append({'role':'computer_note','kind':22,'one_shot':False,'source':source_id(computer),'audio_source':source_id(computer),
+        'clips':[clip(source.resolve(computer,cd['musicClip']))],'gain':[cd['musicVolume']]*2,'pitch':[1.,1.],'offset':[0.,0.,0.],
+        'settings':{'priority':128,'loop':True,'gain':1.,'pitch':1.,'min_distance':1.,'max_distance':500.,'rolloff_mode':0,
+            'spatial_blend':1.,'spatial_blend_curve':flat,'rolloff_curve':flat},
+        'mixer':mixer(source.resolve(computer,cd['musicGroup'])),'doppler':1.,'pan':0.,'method':method('computerscript','PlayNote')})
     def control_reader(reader):
         if reader is None: return None
         eid = emitter(reader); node = audio['emitters'][eid-1]['node']

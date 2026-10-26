@@ -151,5 +151,6 @@ def export_ui(source, output, library):
     for identity in sorted(getattr(source, 'pickup_icons', set())):
         sprite(source.get(*identity), 'inventory-item')
     from .hose import hose_prompts
-    return {'hose_prompts':hose_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
+    from .computer import computer_prompts
+    return {'hose_prompts':hose_prompts(source),'computer_prompts':computer_prompts(source),'need_sliders':need_sliders,'sprites':sprites,'pairs':pairs,'icons':icons,'layouts':layouts,
             'overlay_color':[180/255,128/255,70/255,64/255],'frame_color':[180/255,128/255,70/255,1.]}

@@ -351,6 +351,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)
+    from .computer import recover_computer, validate_computer
+    manifest['computer'] = recover_computer(source, manifest)
     from .melee import recover_melee, validate_melee
     manifest['melee'] = recover_melee(source, output)
     from .wheel_effects import recover_skid, validate_skid
@@ -368,6 +370,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_acquisition(manifest['acquisition'], manifest)
     validate_item_prototypes(manifest['item_prototypes'], manifest)
     validate_small_items(manifest['small_items'], manifest)
+    validate_computer(manifest['computer'], manifest)
     validate_melee(manifest['melee'], manifest)
     validate_skid(manifest['skid'])
     validate_clothing(manifest['clothing'],manifest)
