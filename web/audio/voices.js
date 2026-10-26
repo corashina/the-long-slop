@@ -1,6 +1,6 @@
-// World radio voice slots: index group*SLOTS+slot, emitter base+index, voices base+index*4+1..3 (src/audio.rs).
+// World radio voice slots: index group*SLOTS+slot, emitter base+index, voices base+index*4+1..3 (crates/simulation/src/audio.rs).
 export const PORTABLE_RADIO_EMITTER=0x50000000,PORTABLE_RADIO_SLOTS=4;
-// Car voice templates play as survival kind CAR_KIND+id. Instance i routes through CAR_ROUTE+i (src/audio/cars.rs).
+// Car voice templates play as survival kind CAR_KIND+id. Instance i routes through CAR_ROUTE+i (crates/simulation/src/audio/cars.rs).
 export const CAR_KIND=0x100,CAR_ROUTE=0x60000000,CAR_EMITTER=0x40000000+CAR_KIND;
 function wrap(t,first,last,mode){if(t>=first&&t<=last)return t;if(mode===2)return first+((t-first)%(last-first)+(last-first))%(last-first);if(mode===4){const d=last-first,u=((t-first)%(2*d)+2*d)%(2*d);return first+(u>d?2*d-u:u);}return t<first?first:last;}
 export function curveValue(curve,time){const keys=curve.keys;if(keys.length===1)return keys[0].value;time=wrap(time,keys[0].time,keys.at(-1).time,time<keys[0].time?curve.pre_wrap_mode:curve.post_wrap_mode);if(time<=keys[0].time)return keys[0].value;for(let i=1;i<keys.length;i++){const b=keys[i],a=keys[i-1];if(time>b.time)continue;const dt=b.time-a.time;let t=(time-a.time)/dt;const wa=a.weighted_mode&2?a.out_weight:1/3,wb=b.weighted_mode&1?b.in_weight:1/3;let lo=0,hi=1;for(let n=0;n<24;n++){const s=1-t,x=3*s*s*t*wa+3*s*t*t*(1-wb)+t*t*t;if(x<(time-a.time)/dt)lo=t;else hi=t;t=(lo+hi)/2;}const s=1-t;return s*s*s*a.value+3*s*s*t*(a.value+a.out_tangent*dt*wa)+3*s*t*t*(b.value-b.in_tangent*dt*wb)+t*t*t*b.value;}return keys.at(-1).value;}

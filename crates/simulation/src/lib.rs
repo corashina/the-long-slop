@@ -1,0 +1,31 @@
+//! Game simulation: reference data, physics, world and gameplay. No renderer.
+#![recursion_limit = "256"]
+
+pub mod animation;
+pub mod audio;
+pub mod conditions;
+#[cfg(target_arch = "wasm32")]
+pub mod cpu_profile;
+pub mod damage;
+pub mod exhaust;
+pub mod fluids;
+#[cfg(target_arch = "wasm32")]
+pub mod host;
+pub mod interaction;
+pub mod inventory;
+pub mod lighting;
+pub mod particles;
+pub mod plates;
+pub mod player;
+pub mod reference;
+pub mod render_readiness;
+pub mod render_scale;
+pub mod save;
+pub mod simulation;
+pub mod sleep;
+pub mod starting_area;
+pub mod survival;
+pub mod vehicle;
+pub mod weather;
+pub mod wheel_effects;
+pub mod world;

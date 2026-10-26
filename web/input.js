@@ -3,7 +3,7 @@ const PLAYER_BITS={KeyQ:1,KeyZ:2,KeyY:2,CapsLock:4,KeyX:8};
 // Typing keys (Rust TypingInput): piano bits 0-16 (computerscript order), arrows 17-20, music keys A S X 21-23, any key 24.
 const TYPING_HELD={KeyQ:1,Digit2:2,KeyW:4,Digit3:8,KeyE:16,KeyR:32,Digit5:64,KeyT:128,Digit6:256,KeyY:512,KeyZ:512,Digit7:1024,KeyU:2048,KeyI:4096,Digit9:8192,KeyO:16384,Digit0:32768,KeyP:65536,ArrowUp:1<<17,ArrowDown:1<<18,ArrowLeft:1<<19,ArrowRight:1<<20};
 const TYPING_PRESSED={KeyA:1<<21,KeyS:1<<22,KeyX:1<<23},TYPING_ANY=1<<24,TEXT_CAPACITY=64;
-// Driving actions that are player bits (src/simulation.rs player_keys).
+// Driving actions that are player bits (crates/simulation/src/simulation.rs player_keys).
 const PLAYER_ACTIONS={mouse_drive:16};
 const DRIVING_BITS={clutch:2**21,shift_up:2**22,shift_down:2**23,reverse:2**24,neutral:2**25,gear1:2**26,gear2:2**27,gear3:2**28,gear4:2**29,gear5:2**30,gear6:2**31};
 export class InputState {

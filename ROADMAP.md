@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
-Save format authority: [save schema](src/save/schema.rs).
+Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
 ## Frame rate rule
 

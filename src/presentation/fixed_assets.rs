@@ -571,7 +571,7 @@ impl SourceFixedAssets {
                         })?;
                         cpu = checked_sum(&[
                             cpu,
-                            crate::world::metrics::browser::mesh_payload(mesh),
+                            crate::presentation::world_metrics::mesh_payload(mesh),
                             4096,
                         ])?;
                         gpu = checked_sum(&[
@@ -743,7 +743,7 @@ impl SourceFixedAssets {
             {
                 let mesh = meshes.get(handle).unwrap();
                 self.cloud_retained =
-                    checked_sum(&[crate::world::metrics::browser::mesh_payload(mesh), 8192])?;
+                    checked_sum(&[crate::presentation::world_metrics::mesh_payload(mesh), 8192])?;
                 if self.cloud_retained > self.cloud_bound.unwrap().cpu {
                     return Err(ReferenceError(
                         "Cloud retained bytes exceed reservation".into(),
