@@ -1560,7 +1560,13 @@ impl GarageRuntime {
         });
         self.stream.request_at(absolute, car);
         let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
-        let cars = self.vehicles.keys().map(|key| {
+        // Only the start car and the last seated car hold the area. Roadside cars follow the item rule.
+        let last = self.vehicle.as_ref();
+        let cars = self.vehicles.keys().filter(|key| {
+            Some(*key) == last
+                || matches!(key, ObjectKey::Generated(id) if id.layer == crate::world::WorldLayer::Startup)
+        });
+        let cars = cars.map(|key| {
             (
                 physics.chassis_handle(key),
                 world.absolute_vehicle_position(physics, &origin, key),

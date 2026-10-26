@@ -987,7 +987,7 @@ impl WorldStream {
             .find(|c| &c.content.placement.id == id)
             .is_none_or(|c| c.item.is_none() || c.restored)
     }
-    /// Squared distance to the nearest source important object: the player and every car.
+    /// Squared distance to the nearest source important object: the player, the start car and the last seated car.
     /// A car does not count itself: `own` is its chassis.
     fn important_distance(
         &self,
