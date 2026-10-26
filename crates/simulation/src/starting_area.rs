@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 mod body;
 pub mod cigarettes;
 mod computers;
+mod frame;
 pub mod hose;
 pub mod spawned;
 mod survival;
@@ -738,6 +739,7 @@ pub struct GarageRuntime {
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
+    frame_poses: crate::boundary::FramePoses,
 }
 
 impl GarageRuntime {
@@ -882,6 +884,7 @@ impl GarageRuntime {
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
+            frame_poses: Default::default(),
         };
         run.refresh_powertrains();
         Ok(run)

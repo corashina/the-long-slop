@@ -67,7 +67,7 @@ pub mod player_keys {
     pub const MOUSE_DRIVE: u8 = 16;
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CarryDeltas {
     pub owner: Option<crate::reference::ItemId>,
     pub mouse: [f32; 2],
@@ -75,9 +75,10 @@ pub struct CarryDeltas {
 }
 
 /// Keyboard input while the player types on a computer (web/input.js typing keys).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TypingInput {
     /// Input.inputString bytes: printable ASCII, 8 (Backspace) and 13 (Enter).
+    #[serde(with = "typing_text")]
     pub text: [u8; TypingInput::CAPACITY],
     pub len: u8,
     /// Held piano keys (bits 0-16), held arrows (17-20), pressed A S X (21-23), any key (24).
@@ -98,6 +99,23 @@ impl TypingInput {
         self.keys = frame.keys | (self.keys & Self::PRESSED);
     }
 }
+mod typing_text {
+    use super::TypingInput;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+    pub fn serialize<S: Serializer>(
+        text: &[u8; TypingInput::CAPACITY],
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.serialize_bytes(text)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<[u8; TypingInput::CAPACITY], D::Error> {
+        <&[u8]>::deserialize(d)?
+            .try_into()
+            .map_err(D::Error::custom)
+    }
+}
 impl Default for TypingInput {
     fn default() -> Self {
         Self {
@@ -109,7 +127,7 @@ impl Default for TypingInput {
 }
 
 /// Raw browser gamepad state: 4 pads, 8 axes and 32 button bits per pad.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GamepadFrame {
     /// Pad `p` axis `a` is at `p * GamepadFrame::AXES + a`.
     pub axes: [f32; 32],
@@ -123,7 +141,7 @@ impl GamepadFrame {
     pub const BUTTONS: usize = 32;
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
