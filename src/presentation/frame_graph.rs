@@ -19,8 +19,7 @@ use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::render::camera::CameraRenderGraph;
 use bevy::render::{
-    Render, RenderApp, RenderStartup, RenderSystems,
-    batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
+    Render, RenderApp, RenderSystems,
     extract_component::ExtractComponent,
     render_phase::{DrawFunctions, PhaseItem, SortedPhaseItem, ViewSortedRenderPhases},
     render_resource::*,
@@ -176,10 +175,6 @@ impl Plugin for SourceFramePlugin {
         render
             .insert_resource(progress)
             .init_resource::<SkyExtras>()
-            .add_systems(
-                RenderStartup,
-                cpu_batching.after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
-            )
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(Render, release_canvas_texture.after(RenderSystems::Render))
             .add_systems(
@@ -195,6 +190,10 @@ impl Plugin for SourceFramePlugin {
                     .before(super::transparent::prepare_pass_order),
             )
             .add_schedule(Schedule::new(SourceSkySurface))
+            .add_systems(
+                SourceSkySurface,
+                bevy::pbr::early_gpu_preprocess.before(render_sky),
+            )
             .add_systems(SourceSkySurface, render_sky)
             .add_systems(
                 SourceSurface,
@@ -254,6 +253,8 @@ pub fn spawn_cameras(
     commands.spawn((
         SourceSkyCamera,
         Camera3d::default(),
+        // Source passes draw directly. GPU preprocessing builds mesh uniforms only.
+        bevy::render::view::NoIndirectDrawing,
         bevy::light::cluster::ClusterConfig::None,
         bevy::camera::Hdr,
         Camera {
@@ -302,6 +303,7 @@ pub fn spawn_cameras(
         };
         let mut entity = commands.spawn((
             Camera3d::default(),
+            bevy::render::view::NoIndirectDrawing,
             bevy::light::cluster::ClusterConfig::Single,
             bevy::camera::Hdr,
             Camera { order, ..default() },
@@ -538,6 +540,7 @@ pub(crate) fn surface_ready(
     probe: Option<Res<ProbeFrame>>,
     cache: Res<PipelineCache>,
     effects: Option<Res<super::source_effects::SourceEffects>>,
+    preprocess: Res<bevy::pbr::PreprocessPipelines>,
 ) -> bool {
     let index = view.into_inner().index;
     let state = progress.lock();
@@ -549,6 +552,7 @@ pub(crate) fn surface_ready(
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
         && effects.is_some_and(|effects| effects.ready(&cache))
+        && preprocess_ready(&preprocess, &cache)
         && state.audit.sky
         && (index < WORLD_VIEWS
             || (state.audit.presented
@@ -557,6 +561,18 @@ pub(crate) fn surface_ready(
                     p.probes[frame.probe_index].accepts(frame.probe_token)
                         && p.probes[frame.probe_index].filter.ready(&cache)
                 })))
+}
+/// `DrawMesh` skips every draw until both direct and frustum preprocess pipelines exist.
+fn preprocess_ready(pipelines: &bevy::pbr::PreprocessPipelines, cache: &PipelineCache) -> bool {
+    [
+        &pipelines.direct_preprocess,
+        &pipelines.gpu_frustum_culling_preprocess,
+    ]
+    .iter()
+    .all(|p| {
+        p.pipeline_id
+            .is_some_and(|id| cache.get_compute_pipeline(id).is_some())
+    })
 }
 fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<RendererStateHandle>) {
     let mut state = progress.lock();
@@ -652,11 +668,15 @@ fn render_sky(
     loading: Res<super::materials::MaterialLoading>,
     status: Res<RendererStateHandle>,
     progress: Res<RendererStateHandle>,
+    preprocess: Res<bevy::pbr::PreprocessPipelines>,
     mut context: RenderContext,
 ) {
     let entity = view.entity();
     let view = view.into_inner();
-    if frame.sky_clip_from_world.is_none() || !frame.required_views_ready() {
+    if frame.sky_clip_from_world.is_none()
+        || !frame.required_views_ready()
+        || !preprocess_ready(&preprocess, &cache)
+    {
         return;
     }
     let (Some(resources), Some(sky), Some(clouds)) = (resources, sky, clouds) else {
@@ -1161,10 +1181,6 @@ fn resource_stamp<T: Resource>(world: &World) -> Option<u32> {
 /// Source cameras cluster lights on the CPU on every backend. GPU clustering fails on the zero-cluster sky camera.
 fn cpu_clustering(mut settings: ResMut<bevy::light::cluster::GlobalClusterSettings>) {
     settings.gpu_clustering = None;
-}
-/// Source passes draw CPU-batched phases on every backend.
-fn cpu_batching(mut support: ResMut<GpuPreprocessingSupport>) {
-    support.max_supported_mode = GpuPreprocessingMode::None;
 }
 fn gpu_boundaries(
     world: &World,

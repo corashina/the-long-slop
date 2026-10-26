@@ -63,6 +63,13 @@ pub fn install(app: &mut SubApp) {
             )
                 .chain(),
         )
+        // Source views do not run Core3d. Build this view's mesh uniforms before any source pass draws.
+        .add_systems(
+            SourceSurface,
+            bevy::pbr::early_gpu_preprocess
+                .before(SourceSurfaceStage::ShadowAtlas)
+                .run_if(view_active),
+        )
         .add_systems(
             SourceSurface,
             (
@@ -76,6 +83,17 @@ pub fn install(app: &mut SubApp) {
                     .run_if(super::shadow_queue::collector_encoded),
             ),
         );
+}
+
+/// Idle probe faces have no frame view and draw nothing.
+fn view_active(
+    view: ViewQuery<&super::surface_views::SourceSurfaceView>,
+    frame: Res<super::view_frame::SourceViewFrame>,
+) -> bool {
+    frame
+        .views
+        .get(view.into_inner().index)
+        .is_some_and(Option::is_some)
 }
 
 fn stop_failed_renderer(render: &mut World) -> bool {
