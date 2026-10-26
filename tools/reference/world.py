@@ -13,6 +13,7 @@ from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
 from .sled import centers_of_mass, recover_sled
+from .actions import recover_world_pushes
 from .towing import recover_hitches, recover_trailer
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
@@ -46,7 +47,7 @@ def selected_actions(source, scripts, actions):
 VEHICLE_CLASSES = {'carscript'}
 # The start car prefab. car_prototypes adds the bus pool.
 LADA = ('sharedassets1.assets',82556)
-CAR_CATEGORIES = ('bus',)
+CAR_CATEGORIES = ('bus', 'bike')
 def vehicle_exclusion(root, classes, cars):
     """Car roots outside `cars` stay other_vehicle."""
     return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
@@ -768,6 +769,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
+        pushes=recover_world_pushes(local,hierarchy,mapping,bodies,colliders)
         from .vehicles import Prototype, light_records
         trailer=recover_trailer(source,hierarchy,mapping,bodies,lambda transform:world_pose(local,transform)['translation'],
             lambda:light_records(source,Prototype(source,hierarchy),None,None,index,report['material_indices'])[0])
@@ -778,7 +780,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,
+            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,'pushes':pushes,
             'trailer':trailer,'hitches':recover_hitches(source,hierarchy,mapping,colliders)}
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)

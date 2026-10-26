@@ -653,6 +653,15 @@ impl WorldStream {
                         reference,
                         interaction,
                     )?;
+                    bind_push(
+                        id,
+                        body,
+                        body_index,
+                        instance,
+                        prototype,
+                        interaction,
+                        physics,
+                    )?;
                     // The last fallible step: a failed binding leaves no car behind.
                     // Seats bind later and find the vehicle of the chassis.
                     crate::world::content_vehicles::bind(
@@ -1373,6 +1382,50 @@ fn bind_pickup(
         rule,
         layers,
     })
+}
+
+/// Binds the `pushablescript` on the item body. Its colliders at or below the push node
+/// push the item. `InteractionState::unbind_generated` removes the push.
+fn bind_push(
+    id: crate::reference::ItemId,
+    body: rapier3d::prelude::RigidBodyHandle,
+    body_index: usize,
+    instance: &crate::world::StructureInstance,
+    prototype: &crate::reference::WorldPrototypeReference,
+    interaction: &mut InteractionState,
+    physics: &mut PhysicsWorld,
+) -> Result<(), ReferenceError> {
+    // A push on another body has no item of its own here.
+    let Some(push) = prototype
+        .pushes
+        .iter()
+        .find(|p| p.body as usize == body_index)
+    else {
+        return Ok(());
+    };
+    let under = |mut node: u32| loop {
+        if node == push.node {
+            return true;
+        }
+        match prototype.nodes[node as usize].parent {
+            Some(parent) => node = parent,
+            None => return false,
+        }
+    };
+    let colliders: Vec<(u32, rapier3d::prelude::ColliderHandle)> = instance
+        .colliders
+        .iter()
+        .filter_map(|(source, handle)| {
+            let index = prototype
+                .colliders
+                .iter()
+                .position(|c| &c.source == source)?;
+            let collider = &prototype.colliders[index];
+            (collider.body == Some(body_index as u32) && under(collider.node))
+                .then_some((index as u32, *handle))
+        })
+        .collect();
+    interaction.register_generated_push(id, body, push, &colliders, physics)
 }
 
 /// Siphon hose placement: one item per segment body, then one runtime hose.

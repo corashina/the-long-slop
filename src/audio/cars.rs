@@ -61,6 +61,8 @@ pub struct EngineSoundInput<'a> {
     pub rpm: f32,
     pub running: bool,
     pub starter: bool,
+    /// The kick start plays the starter clip once per clip length.
+    pub kick_start: bool,
     /// Engine part pose relative to the physics origin.
     pub pose: Pose,
     /// Mixer of the car that holds the engine. None: the template mixer.
@@ -242,10 +244,18 @@ impl CarSounds {
         }
         self.engines[index].running = input.running;
         // The starter clip repeats each clip length times engineStartTimeModifier.
-        if input.starter
+        // The kick start repeats it each clip length.
+        let modifier = if input.starter {
+            Some(input.start_time_modifier)
+        } else if input.kick_start {
+            Some(1.0)
+        } else {
+            None
+        };
+        if let Some(modifier) = modifier
             && let Some(starter) = &a.starter
             && seconds - self.engines[index].last_start
-                > f64::from(clip_seconds(starter.clip) * input.start_time_modifier)
+                > f64::from(clip_seconds(starter.clip) * modifier)
         {
             self.engines[index].last_start = seconds;
             self.push_shot(instance, starter, input.pose);
@@ -370,16 +380,7 @@ mod tests {
     use super::*;
 
     fn engine_audio() -> EngineAudioReference {
-        serde_json::from_value(serde_json::json!({
-            "idle": {"voice": 1, "position": [0.0, 0.5, 0.0]},
-            "motor": {"voice": 2, "position": [0.0, 0.5, 0.0]},
-            "starter": {"voice": 3, "clip": 7, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
-            "stop": {"voice": 3, "clip": 8, "gain": 0.6, "position": [0.0, 0.0, 0.0]},
-            "idle_rpm": [600.0, 1400.0], "motor_rpm": [500.0, 1300.0],
-            "idle_gain": 0.7, "motor_gain": 0.8,
-            "idle_pitch": [0.9, 1.2], "motor_pitch": [0.8, 1.5]
-        }))
-        .unwrap()
+        serde_json::from_value(crate::reference::engine_audio_fixture()).unwrap()
     }
 
     fn template(id: u32, clip: u32, one_shot: bool) -> CarVoiceReference {
@@ -419,6 +420,7 @@ mod tests {
                     rpm,
                     running,
                     starter: false,
+                    kick_start: false,
                     pose,
                     mixer: Some(4),
                 },

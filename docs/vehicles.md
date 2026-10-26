@@ -1,11 +1,13 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada and the bus pool.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool and the bike pool.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
 | Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
+| Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
+| Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
 Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. See [Trailers](#trailers).
 
@@ -17,6 +19,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
 - A car can have any wheel count. The radiator is optional.
+- The fuel tank is the root `tankscript`. Without it, the tank is the part in `carscript.tankslot` (Bike03).
 - Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
 - Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
 - A `kmhmeters` row reads its `types`, times `modifier`. With `force`, every needle of the gauge reads the speed (source behavior).

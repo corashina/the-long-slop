@@ -147,6 +147,9 @@ impl GarageRuntime {
             )
         })?;
         self.recovering = false;
+        if let Some(car) = self.vehicles.get_mut(vehicle) {
+            car.balance = Default::default();
+        }
         Ok(true)
     }
 }

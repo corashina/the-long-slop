@@ -1226,6 +1226,7 @@ mod world_sync_tests {
             sled: None,
             trailer: None,
             hitches: Vec::new(),
+            pushes: Vec::new(),
         }
     }
     fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {
