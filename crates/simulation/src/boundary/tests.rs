@@ -28,7 +28,9 @@ fn frame_round_trips() {
             ember_light: 8,
             motion_revision: 2,
             far_plane: 1500.,
-            pad: 0,
+            sleep_camera: row(9.),
+            seat_car: PoseRow::default(),
+            prepared_roads: 12,
         },
         previous: vec![row(1.), row(4.)],
         current: vec![row(2.), row(5.)],
@@ -80,6 +82,10 @@ fn frame_round_trips() {
         washes: vec![1, 0],
         brush_poses: vec![PoseRow::default()],
         spray_colors: vec![[1., 0., 0., 1.]],
+        budgets: vec![BudgetRow {
+            used: 3.,
+            limit: 8.,
+        }],
         lighting: FrameLighting {
             cycle: crate::lighting::CycleOutput {
                 progress: 0.3,

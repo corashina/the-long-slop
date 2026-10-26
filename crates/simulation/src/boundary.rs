@@ -147,8 +147,12 @@ pub struct StateBlock {
     pub motion_revision: u32,
     /// Source `Cam2FarPlane` of the draw distance.
     pub far_plane: f32,
-    /// Keeps the block free of implicit padding.
-    pub pad: u32,
+    /// Sleep camera in stream space. `ACTIVE` while the sleep view shows.
+    pub sleep_camera: PoseRow,
+    /// Chassis of the car the player sits in, at the current step. `ACTIVE` while seated.
+    pub seat_car: PoseRow,
+    /// Startup roads with prepared meshes.
+    pub prepared_roads: u32,
 }
 
 impl StateBlock {
@@ -160,6 +164,10 @@ impl StateBlock {
     pub const RECOVERING: u32 = 1 << 5;
     /// The world stream failed.
     pub const WORLD_FAILED: u32 = 1 << 6;
+    /// The initial world generation finished.
+    pub const GENERATION_READY: u32 = 1 << 7;
+    /// The world supports the player and the required content is ready.
+    pub const WORLD_READY: u32 = 1 << 8;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -168,6 +176,14 @@ impl StateBlock {
 pub struct ValveRow {
     pub opening: u32,
     pub valve: f32,
+}
+
+/// Use and limit of one world budget.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct BudgetRow {
+    pub used: f64,
+    pub limit: f64,
 }
 
 /// State of one condition owner. Frames carry changed owners; the first frame carries all.
@@ -387,6 +403,8 @@ pub struct SimFrame {
     pub brush_poses: Vec<PoseRow>,
     /// Spray colors, in `ConditionRecord::sprays` order.
     pub spray_colors: Vec<[f32; 4]>,
+    /// World budgets in `BUDGET_LABELS` order. Empty after the start.
+    pub budgets: Vec<BudgetRow>,
     pub lighting: FrameLighting,
     /// Lights in `LightingRecord::lights` order.
     pub lights: Vec<LightOutput>,
@@ -437,6 +455,7 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.washes);
     put_rows(out, &frame.brush_poses);
     put_rows(out, &frame.spray_colors);
+    put_rows(out, &frame.budgets);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
     put_list(out, &frame.lamp_materials);
@@ -463,6 +482,7 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.washes)?;
     take_rows(&mut rest, &mut frame.brush_poses)?;
     take_rows(&mut rest, &mut frame.spray_colors)?;
+    take_rows(&mut rest, &mut frame.budgets)?;
     frame.lighting = take_value(&mut rest)?;
     take_list(&mut rest, &mut frame.lights)?;
     take_list(&mut rest, &mut frame.lamp_materials)?;
