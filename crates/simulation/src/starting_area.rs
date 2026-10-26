@@ -21,6 +21,7 @@ use rapier3d::prelude::{
 };
 use std::collections::{BTreeMap, HashMap};
 
+mod audio_frame;
 mod body;
 pub mod cigarettes;
 mod computers;
@@ -765,6 +766,8 @@ pub struct GarageRuntime {
     followed_car: Option<(crate::world::GeneratedId, u32)>,
     /// The feedback the renderer last received.
     last_feedback: Option<hud::FeedbackStamp>,
+    /// The last rendered frame input.
+    render_input: crate::boundary::RenderInput,
 }
 
 impl GarageRuntime {
@@ -924,6 +927,7 @@ impl GarageRuntime {
             home_cable_session: None,
             followed_car: None,
             last_feedback: None,
+            render_input: Default::default(),
         };
         run.refresh_powertrains();
         Ok(run)
@@ -1869,12 +1873,18 @@ impl GarageRuntime {
         }
     }
 
-    /// Per rendered frame work: gauges and gear levers move by render time `dt`.
-    pub fn advance_render_frame(&mut self, reference: &ReferenceManifest, dt: f32) {
+    /// Per rendered frame work: gauges and gear levers move by render time.
+    /// `fill_frame` advances the audio with the same input.
+    pub fn advance_render_frame(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: crate::boundary::RenderInput,
+    ) {
+        self.render_input = input;
         if self.started && !self.paused {
-            self.advance_instruments(reference, dt, false);
+            self.advance_instruments(reference, input.dt, false);
             // Source `carscript.Update` eases the lever once per frame by scaled frame time.
-            self.advance_levers(reference, dt);
+            self.advance_levers(reference, input.dt);
         }
     }
     /// Source `carscript.Update`: eases each car gear lever by render time `dt`.

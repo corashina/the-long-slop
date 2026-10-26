@@ -16,7 +16,7 @@ use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
-use simulation::boundary::{HudBlock, PoseRow, StateBlock};
+use simulation::boundary::{AudioCall, HudBlock, PoseRow, RenderInput, StateBlock};
 use simulation::host::{game_cpu_clear_input, game_now};
 use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
@@ -42,6 +42,8 @@ pub(crate) struct Drive {
     physics_ms: f64,
     world_ms: f64,
     pub render_delta_seconds: f32,
+    /// Camera position of the last rendered frame. The simulation assigns radio voices by it.
+    pub listener: Option<[f32; 3]>,
     skip_elapsed: bool,
     pub(crate) ready: bool,
     last_inventory: Option<([u32; 4], u8, u32)>,
@@ -171,6 +173,7 @@ pub fn run(
             physics_ms: 0.,
             world_ms: 0.,
             render_delta_seconds: 0.,
+            listener: None,
             skip_elapsed: false,
             ready: false,
             last_inventory: None,
@@ -979,13 +982,17 @@ pub(crate) fn sync_imported(
 /// Fills the frame after the simulation and world work of this Bevy frame.
 fn fill_frame(
     reference: Res<RuntimeReference>,
+    time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
     mut frame: ResMut<SimFrameResource>,
 ) {
     let drive = &mut *drive;
-    drive
-        .runtime
-        .advance_render_frame(&reference.0, drive.render_delta_seconds);
+    let input = RenderInput {
+        dt: drive.render_delta_seconds,
+        real_dt: time.delta_secs(),
+        listener: drive.listener,
+    };
+    drive.runtime.advance_render_frame(&reference.0, input);
     fill(drive, &reference.0, &mut frame);
 }
 /// Writes the runtime state into `frame` and applies its changes.
@@ -1186,248 +1193,114 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
 }
 
 fn publish_audio(
-    reference: Res<RuntimeReference>,
-    time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
+    sim: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     globals: Query<(&GlobalTransform, &InheritedVisibility)>,
     camera: Query<&GlobalTransform, With<DriveCamera>>,
 ) {
-    let alpha = drive
-        .clock
-        .alpha(drive.runtime.clock_factors(&reference.0).time_scale);
-    let runtime = &mut drive.runtime;
-    let Some(audio) = &mut runtime.audio else {
-        return;
-    };
-    game_audio_begin(
-        audio.session,
-        runtime.started,
-        runtime.paused,
-        audio.game_seconds,
-    );
-    let needs = runtime.survival.output();
-    let level = if needs.dead {
-        (1. - needs.death_seconds as f32 / reference.0.survival.death_seconds).clamp(0.001, 1.)
-    } else {
-        1.
-    };
-    game_audio_survival_master(
-        10_f32.powf(level.ln()),
-        runtime.audio_motion_revision,
-        audio.game_seconds + f64::from(alpha) / 60.,
-    );
-    let shift = audio.take_origin_shift();
-    if shift != [0.; 3] {
-        game_audio_origin_shift(shift[0], shift[1], shift[2]);
-    }
-    let mut listener = None;
-    if let Ok(camera) = camera.single() {
-        let (_, q, p) = camera.to_scale_rotation_translation();
-        listener = Some(p.to_array());
-        game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
-    }
-    let body = crate::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
-    for b in &audio.reference.survival {
-        let p = body * rapier3d::math::Vector::from_array(b.offset);
-        game_audio_survival_emitter(b.kind, p.x, p.y, p.z);
-    }
-    let origin = runtime.stream.origin.offset;
-    for e in &audio.survival_loops {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind as u32,
-            e.emitter,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    for e in &audio.survival_events {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind as u32,
-            e.emitter,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    audio.survival_events.clear();
-    for emitter in &audio.reference.emitters {
-        let alive = audio.owner_alive(emitter.id)
-            && emitter.item.is_none_or(|id| {
-                runtime
-                    .area
-                    .items
-                    .get(id)
-                    .is_some_and(|item| item.inactive_pose.is_none())
-            });
-        if let Some((global, visibility)) = visuals
-            .nodes
-            .get(&emitter.node)
-            .and_then(|&entity| globals.get(entity).ok())
-        {
-            let (_, q, p) = global.to_scale_rotation_translation();
-            game_audio_emitter(
-                emitter.id,
-                p.x,
-                p.y,
-                p.z,
-                q.x,
-                q.y,
-                q.z,
-                q.w,
-                alive && visibility.get(),
-            );
-        }
-    }
-    if runtime.started && !runtime.paused {
-        audio.update_mixers(&runtime.area, &runtime.stream, time.delta_secs());
-    }
-    for (id, db) in audio.mixer_outputs() {
-        game_audio_mixer(id, db);
-    }
-    for (index, route) in audio.reference.routes.iter().enumerate() {
-        for &id in &route.voices {
-            game_audio_route(id, audio.route_mixers[index]);
-        }
-    }
-    for signal in &audio.signals {
-        game_audio_voice(
-            signal.id,
-            signal.playing,
-            signal.gain,
-            signal.pitch,
-            signal.looping,
-            signal.clip,
-        );
-    }
-    // Car voices play through the survival path with one record per car voice template.
-    for &(instance, mixer) in &audio.cars.routes {
-        game_audio_route(crate::audio::cars::CAR_ROUTE + instance, mixer);
-    }
-    for e in audio.cars.loops.iter().chain(&audio.cars.events) {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind,
-            e.instance,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    audio.cars.events.clear();
-    for e in &audio.voice_loops {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind,
-            e.instance,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    while let Some(event) = audio.pop_event() {
-        game_audio_event(
-            event.session,
-            event.sequence,
-            event.binding,
-            event.emitter,
-            event.position[0],
-            event.position[1],
-            event.position[2],
-            event.gain,
-            event.pitch,
-            event.time_seconds,
-        );
-    }
-    let send = |emitter: u32, radio: crate::simulation::radio::RadioFrame| {
-        game_audio_radio(
-            emitter,
-            radio.power,
-            radio.am,
-            radio.frequency,
-            radio.volume,
-            radio.static_gain,
-            radio.primary.clip.unwrap_or(0),
-            radio.primary.offset_seconds,
-            radio.primary.gain,
-            radio.primary.next_clip.unwrap_or(0),
-            radio.secondary.clip.unwrap_or(0),
-            radio.secondary.offset_seconds,
-            radio.secondary.gain,
-            radio.secondary.next_clip.unwrap_or(0),
-        )
-    };
-    let cutoff = audio.reference.radio.electronics_cutoff;
-    let items = &runtime.area.items;
-    let radios = runtime
-        .stream
-        .portable_radios()
-        .filter_map(|(id, script, state, output, _)| {
-            items
-                .get(id)
-                .filter(|item| item.inactive_pose.is_none())
-                .map(|item| (id, script, item.pose.position, state.on && output > cutoff))
-        });
-    if let Some(listener) = listener {
-        audio.assign_portable_radios(listener, radios);
-    }
-    let slots = audio.portable_radio_slots.iter().flatten();
-    for (slot, id) in slots.enumerate() {
-        let Some((item, (_, _, state, output, parent))) = id.and_then(|id| {
-            items
-                .get(id)
-                .zip(runtime.stream.portable_radios().find(|r| r.0 == id))
-        }) else {
-            continue;
-        };
-        let emitter = crate::audio::PORTABLE_RADIO_EMITTER + slot as u32;
-        let [x, y, z] = item.pose.position;
-        let [qx, qy, qz, qw] = item.pose.rotation;
-        game_audio_emitter(emitter, x, y, z, qx, qy, qz, qw, true);
-        send(
-            emitter,
-            audio
-                .broadcasts
-                .frame(state, audio.game_seconds, output, cutoff),
-        );
-        // Source `audioBasedOnInteriorsensscript`: a car radio plays through its car mixer.
-        let car = runtime.vehicles.iter().find_map(|(key, car)| match key {
-            crate::world::ObjectKey::Generated(id) if id == parent => {
-                car.record(&reference.0).audio.as_ref().map(|a| &a.route)
+    let camera = camera
+        .single()
+        .ok()
+        .map(|c| c.to_scale_rotation_translation());
+    drive.listener = camera.map(|(_, _, p)| p.to_array());
+    for call in &sim.frame.audio {
+        match *call {
+            AudioCall::Begin {
+                session,
+                started,
+                paused,
+                seconds,
+            } => game_audio_begin(session, started, paused, seconds),
+            AudioCall::SurvivalMaster {
+                gain,
+                revision,
+                seconds,
+            } => game_audio_survival_master(gain, revision, seconds),
+            AudioCall::OriginShift([x, y, z]) => game_audio_origin_shift(x, y, z),
+            AudioCall::Listener => {
+                if let Some((_, q, p)) = camera {
+                    game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
+                }
             }
-            _ => None,
-        });
-        let group = slot / crate::audio::PORTABLE_RADIO_SLOTS;
-        for (k, voice) in audio.reference.portable_radios[group]
-            .voices
-            .iter()
-            .enumerate()
-        {
-            let mixer = car.map_or(voice.mixer, |route| audio.world_car_mixer(route, parent));
-            game_audio_route(
-                crate::audio::PORTABLE_RADIO_EMITTER + slot as u32 * 4 + k as u32 + 1,
-                mixer,
-            );
+            AudioCall::SurvivalEmitter {
+                kind,
+                position: [x, y, z],
+            } => game_audio_survival_emitter(kind, x, y, z),
+            AudioCall::Survival {
+                kind,
+                emitter,
+                action,
+                clip,
+                gain,
+                pitch,
+                position: [x, y, z],
+            } => game_audio_survival(kind, emitter, action, clip, gain, pitch, x, y, z),
+            AudioCall::NodeEmitter { id, node, alive } => {
+                if let Some((global, visibility)) = visuals
+                    .nodes
+                    .get(&node)
+                    .and_then(|&entity| globals.get(entity).ok())
+                {
+                    let (_, q, p) = global.to_scale_rotation_translation();
+                    game_audio_emitter(
+                        id,
+                        p.x,
+                        p.y,
+                        p.z,
+                        q.x,
+                        q.y,
+                        q.z,
+                        q.w,
+                        alive && visibility.get(),
+                    );
+                }
+            }
+            AudioCall::Emitter {
+                id,
+                position: [x, y, z],
+                rotation: [qx, qy, qz, qw],
+                alive,
+            } => game_audio_emitter(id, x, y, z, qx, qy, qz, qw, alive),
+            AudioCall::Mixer { id, db } => game_audio_mixer(id, db),
+            AudioCall::Route { id, mixer } => game_audio_route(id, mixer),
+            AudioCall::Voice {
+                id,
+                playing,
+                gain,
+                pitch,
+                looping,
+                clip,
+            } => game_audio_voice(id, playing, gain, pitch, looping, clip),
+            AudioCall::Event {
+                session,
+                sequence,
+                binding,
+                emitter,
+                position: [x, y, z],
+                gain,
+                pitch,
+                seconds,
+            } => game_audio_event(
+                session, sequence, binding, emitter, x, y, z, gain, pitch, seconds,
+            ),
+            AudioCall::Radio { emitter, frame } => game_audio_radio(
+                emitter,
+                frame.power,
+                frame.am,
+                frame.frequency,
+                frame.volume,
+                frame.static_gain,
+                frame.primary.clip.unwrap_or(0),
+                frame.primary.offset_seconds,
+                frame.primary.gain,
+                frame.primary.next_clip.unwrap_or(0),
+                frame.secondary.clip.unwrap_or(0),
+                frame.secondary.offset_seconds,
+                frame.secondary.gain,
+                frame.secondary.next_clip.unwrap_or(0),
+            ),
+            AudioCall::End => game_audio_end(),
         }
     }
-    game_audio_end();
 }

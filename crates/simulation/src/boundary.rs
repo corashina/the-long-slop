@@ -182,6 +182,92 @@ pub struct ValveRow {
     pub valve: f32,
 }
 
+/// One browser audio call. The renderer plays the list of a frame in order.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AudioCall {
+    Begin {
+        session: u32,
+        started: bool,
+        paused: bool,
+        seconds: f64,
+    },
+    SurvivalMaster {
+        gain: f32,
+        revision: u32,
+        seconds: f64,
+    },
+    OriginShift([f32; 3]),
+    /// The renderer sends its camera as the listener here.
+    Listener,
+    SurvivalEmitter {
+        kind: u32,
+        position: [f32; 3],
+    },
+    Survival {
+        kind: u32,
+        emitter: u32,
+        action: u32,
+        clip: u32,
+        gain: f32,
+        pitch: f32,
+        position: [f32; 3],
+    },
+    /// A reference emitter at the transform of its node.
+    NodeEmitter {
+        id: u32,
+        node: NodeId,
+        alive: bool,
+    },
+    Emitter {
+        id: u32,
+        position: [f32; 3],
+        rotation: [f32; 4],
+        alive: bool,
+    },
+    Mixer {
+        id: u32,
+        db: f32,
+    },
+    Route {
+        id: u32,
+        mixer: u32,
+    },
+    Voice {
+        id: u32,
+        playing: bool,
+        gain: f32,
+        pitch: f32,
+        looping: bool,
+        clip: u32,
+    },
+    Event {
+        session: u32,
+        sequence: u32,
+        binding: u32,
+        emitter: u32,
+        position: [f32; 3],
+        gain: f32,
+        pitch: f32,
+        seconds: f64,
+    },
+    Radio {
+        emitter: u32,
+        frame: crate::simulation::radio::RadioFrame,
+    },
+    End,
+}
+
+/// Renderer values of one rendered frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RenderInput {
+    /// Simulated seconds of the frame.
+    pub dt: f32,
+    /// Real seconds of the frame.
+    pub real_dt: f32,
+    /// Camera position of the last rendered frame.
+    pub listener: Option<[f32; 3]>,
+}
+
 /// HUD values of one tick.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -493,6 +579,8 @@ pub struct SimFrame {
     pub brush_poses: Vec<PoseRow>,
     /// Spray colors, in `ConditionRecord::sprays` order.
     pub spray_colors: Vec<[f32; 4]>,
+    /// Browser audio calls. Empty without audio.
+    pub audio: Vec<AudioCall>,
     /// World budgets in `BUDGET_LABELS` order. Empty after the start.
     pub budgets: Vec<BudgetRow>,
     pub lighting: FrameLighting,
@@ -553,6 +641,7 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_list(out, &frame.lamp_materials);
     put_list(out, &frame.control_poses);
     put_list(out, &frame.node_visibility);
+    put_list(out, &frame.audio);
     *out = postcard::to_extend(&frame.changes, std::mem::take(out)).expect("frame changes encode");
 }
 
@@ -582,6 +671,7 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_list(&mut rest, &mut frame.lamp_materials)?;
     take_list(&mut rest, &mut frame.control_poses)?;
     take_list(&mut rest, &mut frame.node_visibility)?;
+    take_list(&mut rest, &mut frame.audio)?;
     frame.changes = postcard::from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
     Ok(())
 }
