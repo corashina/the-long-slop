@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 mod body;
 pub mod cigarettes;
 mod computers;
+mod frame;
 pub mod hose;
 mod reach;
 pub mod spawned;
@@ -699,6 +700,7 @@ pub struct GarageRuntime {
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
     sky: crate::sky_traffic::SkyTraffic,
+    pub flyers: crate::flyers::Flyers,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -743,6 +745,7 @@ pub struct GarageRuntime {
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
+    frame_poses: crate::boundary::FramePoses,
 }
 
 impl GarageRuntime {
@@ -763,7 +766,14 @@ impl GarageRuntime {
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
-        Self::new_candidate(reference, true, DEFAULT_SEED as i32, mode, draw_distance)
+        Self::new_candidate(
+            reference,
+            true,
+            DEFAULT_SEED as i32,
+            new_game_date(reference),
+            mode,
+            draw_distance,
+        )
     }
     /// Test runtime in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -778,6 +788,7 @@ impl GarageRuntime {
         reference: &ReferenceManifest,
         stream_world: bool,
         seed: i32,
+        date: [i32; 3],
         mode: crate::world::GameMode,
         draw_distance: f32,
     ) -> Result<Self, ReferenceError> {
@@ -786,7 +797,7 @@ impl GarageRuntime {
         let mut physics = PhysicsWorld::new(reference);
 
         let mut area = StartingArea::new(reference, &mut physics, [0.0; 3])?;
-        let mut stream = WorldStream::new(reference, seed, mode, distances)?;
+        let mut stream = WorldStream::new(reference, seed, date, mode, distances)?;
         if stream_world {
             let spawn = reference.area.player_spawn.translation.map(f64::from);
             stream.request_at(spawn, spawn);
@@ -848,6 +859,7 @@ impl GarageRuntime {
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
+            flyers: crate::flyers::Flyers::new(seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -888,6 +900,7 @@ impl GarageRuntime {
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
+            frame_poses: Default::default(),
         };
         run.refresh_powertrains();
         Ok(run)
@@ -1450,6 +1463,7 @@ impl GarageRuntime {
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
         self.advance_sky(reference, FIXED_DT);
+        self.advance_flyers(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1647,10 +1661,11 @@ impl GarageRuntime {
             let old_origin = self.area.origin;
             self.area.sync_origin(self.stream.origin.offset);
             self.weather.set_origin(self.stream.origin.offset);
-            self.urine
-                .rebase(rapier3d::math::Vector::from_array(std::array::from_fn(
-                    |i| (self.area.origin[i] - old_origin[i]) as f32,
-                )));
+            let shift = rapier3d::math::Vector::from_array(std::array::from_fn(|i| {
+                (self.area.origin[i] - old_origin[i]) as f32
+            }));
+            self.urine.rebase(shift);
+            self.flyers.rebase(shift);
             if let Some(audio) = &mut self.audio {
                 audio.rebase(std::array::from_fn(|i| {
                     (self.area.origin[i] - old_origin[i]) as f32
@@ -1712,6 +1727,37 @@ impl GarageRuntime {
         );
         if let Some(audio) = &mut self.audio {
             audio.sky(self.sky.planes(), anchor);
+        }
+    }
+
+    fn advance_flyers(&mut self, reference: &ReferenceManifest, dt: f32) {
+        let flyer = &reference.sky.flyer;
+        self.flyers.sync(
+            flyer,
+            self.simulation_seconds,
+            self.stream.structure_revision(),
+            self.stream.frame().structures,
+            &self.area.items,
+            &self.physics,
+        );
+        self.flyers.step(
+            flyer,
+            self.simulation_seconds,
+            dt,
+            &self.area.items,
+            &mut self.physics,
+        );
+        if let Some(audio) = &mut self.audio {
+            let (items, physics, origin) = (&self.area.items, &self.physics, &self.stream.origin);
+            audio.flyers(
+                flyer.voice,
+                self.flyers.squeaks(),
+                self.simulation_seconds,
+                |item| {
+                    let body = physics.rapier().bodies.get(items.get(item)?.body?)?;
+                    Some(origin.absolute(body.translation().to_array()))
+                },
+            );
         }
     }
 
@@ -2902,6 +2948,21 @@ fn vehicle_steer(current: f32, pushed: Option<f32>, driven: Option<f32>) -> f32 
     pushed.or(driven).unwrap_or(current)
 }
 
+/// Today's local date as year, month, day.
+#[cfg(target_arch = "wasm32")]
+fn new_game_date(_: &ReferenceManifest) -> [i32; 3] {
+    let today = js_sys::Date::new_0();
+    [
+        today.get_full_year() as i32,
+        today.get_month() as i32 + 1,
+        today.get_date() as i32,
+    ]
+}
+/// Native builds use the fixed reference date, so tests stay deterministic.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_game_date(reference: &ReferenceManifest) -> [i32; 3] {
+    reference.world.spawn_context.date
+}
 fn start_sample(seed: u64, attempt: u64) -> f32 {
     (startup_hash(seed ^ attempt) >> 40) as f32 / 16_777_216.0
 }

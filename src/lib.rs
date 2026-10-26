@@ -2,9 +2,9 @@
 #![recursion_limit = "256"]
 
 pub use ::simulation::{
-    animation, audio, conditions, damage, exhaust, fluids, interaction, inventory, lighting,
-    particles, plates, player, reference, render_readiness, save, simulation, sky_traffic, sleep,
-    starting_area, survival, vehicle, weather, wheel_effects, world,
+    animation, audio, conditions, damage, exhaust, fluids, flyers, interaction, inventory,
+    lighting, particles, plates, player, reference, render_readiness, save, simulation,
+    sky_traffic, sleep, starting_area, survival, vehicle, weather, wheel_effects, world,
 };
 
 #[cfg(target_arch = "wasm32")]

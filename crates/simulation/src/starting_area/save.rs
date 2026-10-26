@@ -249,7 +249,14 @@ impl GarageRuntime {
             ..mode
         };
         let mut candidate =
-            Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
+            Self::new_candidate(
+                reference,
+                false,
+                saved.world.seed,
+                saved.world.date,
+                mode,
+                draw_distance,
+            )?;
         candidate
             .area
             .conditions

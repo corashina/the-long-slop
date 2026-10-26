@@ -8,7 +8,8 @@ class Context {constructor(){this.currentTime=0;}createGain(){return new Node();
 const settings={priority:100,loop:false,min_distance:1,max_distance:10,rolloff_mode:1,spatial_blend_curve:{keys:[{time:0,value:1}]}};
 const record=(kind,one_shot,priority,mixer=1)=>({kind,one_shot,settings:{...settings,priority},pan:0,doppler:0,mixer,audio_source:{file:'a',path_id:1}});
 const raw={emitters:[{id:1}],voices:[],portable_radios:[],clips:[{id:1,source_duration_seconds:.5}],mixers:[{id:1,pitch:1},{id:2,pitch:1},{id:3,pitch:1}],
- car_voices:[{id:1,source:{file:'a',path_id:2},one_shot:false,clip:1,settings:{...settings,priority:80,loop:true},mixer:1,doppler:0,pan:0}],shared:{mixer:1,settings,audio_manager:{real_voices:2,doppler_factor:1}},
+ car_voices:[{id:1,source:{file:'a',path_id:2},one_shot:false,clip:1,settings:{...settings,priority:80,loop:true},mixer:1,doppler:0,pan:0},
+  {id:2,source:{file:'a',path_id:3},one_shot:true,clip:null,settings:{...settings,priority:55},mixer:1,doppler:0,pan:0}],shared:{mixer:1,settings,audio_manager:{real_voices:2,doppler_factor:1}},
  bindings:[80,55].map(priority=>({id:priority,clips:[1],priority,gain:1,mixer:1,emitter:1,trigger:'test'})),
  survival:[record(1,false,55),record(11,true,100),record(12,true,100,3)]};
 function bank(){const b=new VoiceBank(new Context(),raw,{effect:async()=>({duration:.5})},new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});b.begin();b.emitter(1,[0,0,0],[0,0,0,1],true);return b;}
@@ -60,4 +61,15 @@ test('voice_instances_loop_apart_from_car_routes',async()=>{
  b.survival(VOICE_KIND+5,1,1,1,.2,.75,0,0,0);b.survival(VOICE_KIND+5,2,1,1,.2,.75,3,0,0);await tick();
  assert.deepEqual(b.effects.map(s=>[s.playing,s.mixer]),[[true,3],[true,3]],'two instances of one voice play on the voice mixer');
  assert.ok(Number.isFinite(b.effects[0].gain.gain.value)&&Number.isFinite(b.effects[0].wet.gain.value),'linear rolloff from distance 0 is finite');
+});
+
+test('one_shot_updates_move_only_a_playing_instance',async()=>{
+ const b=bank();b.survival(CAR_KIND+2,9,1,1,.5,1,3,0,0);
+ assert.ok(b.effects.every(s=>!s.playing),'an update does not start a one-shot');
+ b.survival(CAR_KIND+2,9,0,1,.5,1,3,0,0);await tick();b.survival(CAR_KIND+2,9,1,1,.5,1,4,0,0);
+ const [s]=b.effects;
+ assert.deepEqual([s.playing,s.survivalLoop,s.position[0]],[true,false,4],'an update moves the playing one-shot');
+ assert.equal(s.source.stopAt,.5);
+ s.source.onended();b.survival(CAR_KIND+2,9,1,1,.5,1,5,0,0);
+ assert.equal(s.playing,false,'an ended one-shot does not restart');
 });
