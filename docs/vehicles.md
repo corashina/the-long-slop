@@ -1,18 +1,22 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada and the bus pool.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool and the V02 PR 1 car items.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
 | Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
+| car01, car02k, car04, car05, car06 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05`, `StartCar06` (not spawned yet) | Petrol; car06 random petrol or diesel |
 
 The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` until the trailer PR.
 
 ## Model
 
 - `car_prototypes` in `tools/reference/world.py` is the allow list. It reads the catalog at export time.
-- The list holds the Lada and each `CAR_CATEGORIES` item root with `carscript`. Other car roots stay `other_vehicle`.
+- The list holds the Lada, each `CAR_CATEGORIES` item root with `carscript`, and each `CAR_ITEMS` item root. Other car roots stay `other_vehicle`.
+- A `CAR_ITEMS` item set to `False` is start-only. Its prototype exports, but its catalog row has no prototype (`other_vehicle`). Pools do not spawn it.
+- Pool spawns of a catalog item need its `prototype`. A direct `G` link to a start-only car stops the export.
+- A `randomTypeSelector` engine part (Car06) must be a node of the car prototype. Each engine part then has its engine record.
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
@@ -31,7 +35,10 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 
 ## Placement and save
 
-- The `world.startup` entry `StartCar02` has a prototype. The stream spawns it as a fixed placement on the `Startup` layer.
+- `start_placements` reads each `START_CARS` field of `TerrainGenerationSettings` (`level1` 64898). The field links the start car group.
+- The group holds one `carscript` root, a scene copy. The entry has its scene pose, the prefab of the catalog item, and `start_car` set.
+- Start car entries are exclusive. The stream spawns only `START_CAR_FIELD` (`StartCar02`) as a fixed placement on the `Startup` layer.
+- The start pack of a group spawns only with `START_CAR_FIELD`.
 - The world generator can place any number of copies at any pose. Each copy has its own key.
 - On retire, the car, engine, radiator and wheel slot states go to the world change records.
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.
@@ -116,8 +123,8 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car's catalog category to `CAR_CATEGORIES` in `tools/reference/world.py`. Its roots then export with a `vehicle` record.
-2. For a start car, add its startup placement next to `StartCar02` in `recover_world`. Check the pose against home colliders and the terrain.
+1. Add the car's catalog items to `CAR_ITEMS` in `tools/reference/world.py`. Its roots then export with a `vehicle` record. Set `True` to enable pools.
+2. For a start car, add its field and full item to `START_CARS`. Check the pose against home colliders and the terrain.
 3. Run the runtime export. The exporter stops when a source record is missing. Car `mountStuff` volumes export by themselves.
 4. Check the prototype node count against the stream limits.
 5. Run the export-based tests with the new manifest.

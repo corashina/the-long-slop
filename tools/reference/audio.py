@@ -467,14 +467,19 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
                 if control is None:raise ValueError('Lamp audio lacks selected light controller')
                 audio['lamps'].append({'source':source_id(c),'control':control,'voices':lamp_voices,
                     'on_binding':on,'off_binding':off,'method':method(cls,'Refresh')})
-    # radioscript settings and stations of the car prototype radio. Every world radio uses them.
-    from .world import LADA
-    car_radios=[c for node in source.hierarchy(source.get(*LADA),activate_root=True) for c in node['components']
+    # radioscript settings and stations of the car prototype radios. Every world radio uses them.
+    car_radios=[c for p in manifest['world']['prototypes'] if p.get('vehicle')
+        for node in source.hierarchy(source.get(p['source']['file'],p['source']['path_id']),activate_root=True) for c in node['components']
         if c.type.name=='MonoBehaviour' and source.class_name(c)=='radioscript']
-    if len(car_radios)!=1:raise ValueError('The car prototype requires one radio')
-    radio_data=source.read(car_radios[0])
+    if not car_radios:raise ValueError('The car prototypes require a radio')
+    def radio_constants(reader):
+        data=source.read(reader)
+        return {k:data[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']}
+    constants=radio_constants(car_radios[0])
+    for reader in car_radios:
+        if radio_constants(reader)!=constants:raise ValueError('{}:{} car radio constants differ'.format(*key(reader)))
     audio['radio'] = {'tuning_repeat_seconds':0.2,'holiday_ranges':[[10,15,11,15],[12,15,1,15]],
-        'constants':{k:radio_data[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']},
+        'constants':constants,
         'fm_tolerance':main['FRTFM'],'am_tolerance':main['FRTAM'],'electronics_cutoff':0.2,
         'time_correction_seconds':0.5,'late_seek_margin_seconds':0.1,'custom_gain':0.5,
         'clock':{'kind':'scaled','selected':method('mainscript','RADIO'),

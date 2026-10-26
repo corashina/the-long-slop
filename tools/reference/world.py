@@ -41,12 +41,21 @@ def selected_actions(source, scripts, actions):
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
 
 VEHICLE_CLASSES = {'carscript','utanfutoscript'}
-# The start car prefab. car_prototypes adds the bus pool.
+# The StartCar02 prefab.
 LADA = ('sharedassets1.assets',82556)
+# Catalog categories whose car items export and spawn from pools.
 CAR_CATEGORIES = ('bus',)
+# Catalog car items that export by name. False: pools do not spawn the item; only start placements do.
+CAR_ITEMS = {name:False for name in ('car01','car01full','car02k','car02kfull','car04','car04full','car05','car05full','car06','car06full')}
+# TerrainGenerationSettings start car fields and the catalog item of their car type. StartCar02 is the Lada.
+START_CARS = {'StartCar01':'car01full','StartCar02':None,'StartCar02k':'car02kfull','StartCar04':'car04full','StartCar05':'car05full','StartCar06':'car06full'}
 def vehicle_exclusion(root, classes, cars):
     """Car roots outside `cars` stay other_vehicle."""
     return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
+
+def pool_exclusion(root, start_only):
+    """Pools do not spawn start-only car roots. Their prototypes export for the start placements."""
+    return 'other_vehicle' if key(root) in start_only else ''
 
 def category_items(catalog, name):
     """Item indices of catalog category `name` and its child categories."""
@@ -57,22 +66,60 @@ def category_items(catalog, name):
         for child in row['categories'] or []:
             if child<len(rows):visit(rows[child])
     matches=[r for r in rows if r['name']==name]
-    if not matches:raise ValueError(f'level1:66024 unknown category {name}')
+    if not matches:raise ValueError(f'level1:{WORLD_DATABASE_ID} unknown category {name}')
     visit(matches[0])
     return sorted(found)
 
+def catalog_item(catalog, name):
+    """The one catalog item named `name`."""
+    matches=[i for i in catalog['items'] if i['name']==name]
+    if len(matches)!=1:raise ValueError(f'level1:{WORLD_DATABASE_ID} item {name}: {len(matches)} catalog matches')
+    return matches[0]
+
+def script_classes(source, nodes):
+    return {source.class_name(c) for n in nodes for c in n['components']
+        if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
+
 def car_prototypes(source, catalog):
-    """The car roots that export as world prototypes: the Lada and the CAR_CATEGORIES pools.
-    A root with utanfutoscript (a trailer) stays other_vehicle."""
-    cars={LADA}
+    """The car roots that export as world prototypes, and the start-only roots that pools do not spawn.
+    Cars: the Lada, the CAR_CATEGORIES pools and the CAR_ITEMS. A root with utanfutoscript (a trailer) stays other_vehicle."""
+    cars={LADA};start_only=set()
+    def root(item):
+        return _source_root(source,source.get(item['source']['file'],item['source']['path_id']))
     for name in CAR_CATEGORIES:
         for index in category_items(catalog,name):
-            item=catalog['items'][index]
-            root=_source_root(source,source.get(item['source']['file'],item['source']['path_id']))
-            classes={source.class_name(c) for n in source.hierarchy(root) for c in n['components']
-                if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
-            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(root))
-    return cars
+            target=root(catalog['items'][index])
+            classes=script_classes(source,source.hierarchy(target))
+            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(target))
+    for name,pool in CAR_ITEMS.items():
+        target=root(catalog_item(catalog,name))
+        classes=script_classes(source,source.hierarchy(target))
+        if 'carscript' not in classes or 'utanfutoscript' in classes:
+            raise ValueError('{}:{} item {}: root is not a car'.format(*key(target),name))
+        cars.add(key(target))
+        if not pool:start_only.add(key(target))
+    return cars,start_only
+
+def start_placements(source, settings_owner, settings, catalog, cars):
+    """One start car candidate per START_CARS field, at the scene pose of the car root in its group.
+    The scene root is a copy of the prefab of the catalog item. The placement uses the prefab."""
+    rows=[]
+    for field,item in START_CARS.items():
+        group=source.resolve(settings_owner,settings[field])
+        if group is None:raise ValueError('{}:{} {}: missing start car group'.format(*key(settings_owner),field))
+        roots=[n for n in source.hierarchy(source.transform_for(group)) if 'carscript' in script_classes(source,[n])]
+        if len(roots)!=1:raise ValueError('{}:{} {}: {} car roots in the start car group'.format(*key(group),field,len(roots)))
+        car=roots[0]
+        if field=='StartCar02' and key(car['game_object'])!=('level1',17687):
+            raise ValueError('{}:{} StartCar02: the Lada root is not level1 GO 17687'.format(*key(car['game_object'])))
+        if item is None:prototype=source.get(*LADA)
+        else:
+            row=catalog_item(catalog,item)
+            prototype=_source_root(source,source.get(row['source']['file'],row['source']['path_id']))
+        if key(prototype) not in cars:raise ValueError('{}:{} {}: start car prefab is not an allowed car'.format(*key(prototype),field))
+        rows.append({'group':field,'source':source_id(car['reader']),'pose':world_pose(source,car['reader']),
+            'prototype':source_id(prototype),'start_car':True})
+    return rows
 
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
@@ -215,7 +262,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     print('World samples verified; selecting source records',flush=True)
     selected=Selection(source,reader)
     settings_owner=source.get('level1',64898)
-    settings=required_record(source,settings_owner,('roadGens','terranGenerator','roadBuildingGeneration','objGeneration','mountainGeneration','desertTowerGeneration','desertBuildingGeneration','Terrain','DistantTerrain','DistantTerrain2'))
+    settings=required_record(source,settings_owner,('roadGens','terranGenerator','roadBuildingGeneration','objGeneration','mountainGeneration','desertTowerGeneration','desertBuildingGeneration','Terrain','DistantTerrain','DistantTerrain2',*START_CARS))
     road_owner=source.get('level1',64771)
     road=required_record(source,road_owner,('settings','terrainGenerator','prefabs','noises','roadBoneNum','roadBoneLength','length'))
     if [key(source.resolve(settings_owner,p)) for p in settings['roadGens']] != [key(road_owner)]:
@@ -260,7 +307,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         building_types.append({'type_id':kind,'prototype':add(target,'structure')})
     selected.record(building_owner)
     catalog=recover_catalog(source,reader,selected,database)
-    cars=car_prototypes(source,catalog)
+    cars,start_only=car_prototypes(source,catalog)
     register_mirrors(source,cars)
     part_scope_slots=[]
     for node in source.hierarchy(_source_root(source,source.get('level1',17687))):
@@ -299,12 +346,13 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for field in ('StartObjs','StartObjsFix','StartObjsDonTMoveOnLoad'):
         for pointer in settings[field]:
             root=source.resolve(settings_owner,pointer)
-            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None})
+            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None,'start_car':False})
             selected.transform_chain(root)
-    # Fixed Lada placement at the scene Lada spot. Startup frames ignore this group; the vehicle binder spawns it.
-    lada=source.transform_for(source.get('level1',17687))
-    selected.transform_chain(lada)
-    startup.append({'group':'StartCar02','source':source_id(lada),'pose':world_pose(source,lada),'prototype':source_id(source.get(*LADA))})
+    # Start car candidates. Startup frames ignore these groups; the vehicle binder spawns the picked one.
+    starts=start_placements(source,settings_owner,settings,catalog,cars)
+    for row in starts:selected.transform_chain(source.get(row['source']['file'],row['source']['path_id']))
+    startup.extend(starts)
+    start_roots={(r['source']['file'],r['source']['path_id']) for r in starts}
     for pid in (79970,68463,72657,77620):
         component=source.get('level1',pid)
         selected.record(component)
@@ -368,7 +416,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             selected.record(node)
             selected.record(game_object)
             if classes & (VEHICLE_CLASSES | actors):
-                reason='startup_vehicle_owned_by_existing_scene' if key(game_object)==('level1',17687) else 'unsupported_startup_vehicle_or_actor'
+                reason='startup_vehicle_owned_by_existing_scene' if key(node) in start_roots else 'unsupported_startup_vehicle_or_actor'
                 excluded.append({'source':source_id(node),'field':'m_GameObject','target':selected.receipt(game_object),'reason':reason,'catalog':''})
                 return
             result.append({'reader':node,'game_object':game_object,'components':components,'parent':parent,'path':path,'active':active})
@@ -403,6 +451,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                             target=source.resolve(component,item['G'])
                             if target:
                                 target_root=_source_root(source,target)
+                                if key(target_root) in start_only:raise ValueError('{}:{} items[{}].G: direct link to a start-only car'.format(*key(component),index))
                                 reason,excluded_actions=scope(target)
                                 if reason:
                                     excluded.append({'source':source_id(component),'field':f'items[{index}].G','target':source_id(target),'reason':reason,'catalog':''})
@@ -414,6 +463,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             if item['prototype'] is not None or item['exclusion']:continue
             target=source.get(item['source']['file'],item['source']['path_id'])
             reason,excluded_actions=scope(target)
+            reason=reason or pool_exclusion(_source_root(source,target),start_only)
             item['compatible_slots']=part_matches.get(key(_source_root(source,target)),[])
             item['exclusion']=reason
             item['excluded_actions']=excluded_actions
