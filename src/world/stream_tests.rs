@@ -1,4 +1,6 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
+#[path = "stream_tests/bikes.rs"]
+mod bikes;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
 #[path = "stream_tests/drive_out.rs"]
