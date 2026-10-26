@@ -235,7 +235,7 @@ impl SourceContents {
             })
     }
 
-    /// `current_car` is the source car type of the start car.
+    /// `current_car` is the source `carTypeToCarID` of the start car.
     pub fn new(reference: &WorldReference, current_car: i32) -> Self {
         Self {
             rules: SourceRules::new(reference),

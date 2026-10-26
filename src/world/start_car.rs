@@ -1,9 +1,9 @@
 //! Start car choice and pick. Source `mainmenuscript.RandomStartCar` and `startscript`.
 use super::UnityRandom;
-use crate::reference::{ReferenceError, WorldReference};
+use crate::reference::{ReferenceError, ReferenceManifest, WorldReference};
 use serde::{Deserialize, Serialize};
 
-/// Source `RandomStartCar` chances, in draw order, by start car field.
+/// Source `RandomStartCar` chances, in draw order, by source `TerrainGenerationSettings` field.
 /// A field without an exported start placement is skipped with its chance.
 /// Today car03, car03k, car06p, car08 to car10k have none: PR 2 and V03 add them.
 const CHANCES: [(&str, i32); 15] = [
@@ -45,8 +45,10 @@ impl StartCar {
             .find(|f| *f == field)
             .map(Self)
     }
-    /// Source car type of the start placement. The spawn context keeps it as the current car.
-    pub fn car_type(self, world: &WorldReference) -> Result<i32, ReferenceError> {
+    /// Source `itemdatabase.carTypeToCarID[carType]` of the start placement car.
+    /// The spawn context keeps it as the current car.
+    pub fn current_car(self, reference: &ReferenceManifest) -> Result<i32, ReferenceError> {
+        let world = &reference.world;
         let prototype = world
             .startup
             .iter()
@@ -57,7 +59,9 @@ impl StartCar {
             .iter()
             .find(|p| Some(&p.source) == prototype)
             .and_then(|p| p.vehicle.as_ref())
-            .map(|v| v.car_type)
+            .and_then(|v| usize::try_from(v.car_type).ok())
+            .and_then(|t| reference.acquisition.rules.car_type_to_item_index.get(t))
+            .map(|id| *id as i32)
             .ok_or_else(|| ReferenceError(format!("{}: no start car placement", self.0)))
     }
 }
@@ -127,12 +131,13 @@ fn pick_random(fields: &[&str], random: &mut UnityRandom) -> StartCar {
         .filter(|(f, _)| available(f))
         .map(|(_, c)| c)
         .sum();
-    let draw = random.range_int(0, sum);
+    // Source: `Random.Range(0f, sum)`, then the first cumulative chance above the draw.
+    let draw = random.range(0., sum as f32);
     let mut cumulative = 0;
     let mut picked = StartCar::LADA.0;
     for (field, chance) in CHANCES.iter().filter(|(f, _)| available(f)) {
         cumulative += chance;
-        if draw < cumulative {
+        if draw < cumulative as f32 {
             picked = field;
             break;
         }

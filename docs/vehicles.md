@@ -46,7 +46,7 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - `src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`: the chances are constants there.
 - A start car field without an exported placement is skipped with its chance. Car09 then takes `StartCar09` or `StartCar09S`, 50/50.
 - The pick uses a menu random from browser entropy. It does not touch the world random state.
-- The spawn context current car is the source car type of the picked car.
+- The spawn context current car is source `itemdatabase.carTypeToCarID[carType]` of the picked car.
 - The world generator can place any number of copies at any pose. Each copy has its own key.
 - On retire, the car, engine, radiator and wheel slot states go to the world change records.
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.

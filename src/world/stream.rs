@@ -725,7 +725,8 @@ impl WorldStream {
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
         let start_car = mode.start_car.pick(world, &mut super::menu_random());
-        let mut contents = super::contents::SourceContents::new(world, start_car.car_type(world)?);
+        let mut contents =
+            super::contents::SourceContents::new(world, start_car.current_car(reference)?);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
