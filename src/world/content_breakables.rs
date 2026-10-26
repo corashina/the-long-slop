@@ -1,9 +1,10 @@
-//! Binds source breakablescripts of active content to `damage::Breakables` targets.
+//! Binds source breakablescripts of active content to `damage::Breakables` targets and steps their hits.
 //! Items bind by their world prototype. Lamp triggers bind by their structure lamp control.
 use super::WorldStream;
 use crate::damage::BreakKind;
 use crate::interaction::items::ItemStore;
 use crate::reference::{BreakableOwnerKind, BreakableReference, ReferenceManifest, SourceId};
+use crate::vehicle::PhysicsWorld;
 
 /// The node of the breakablescript in a world prototype.
 fn world_node(record: &BreakableReference, prototype: &SourceId) -> Option<u32> {
@@ -15,8 +16,26 @@ fn world_node(record: &BreakableReference, prototype: &SourceId) -> Option<u32> 
 }
 
 impl WorldStream {
+    /// Run after the physics step. Queues the targets that break this step.
+    pub fn step_breakables(
+        &mut self,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        dt: f32,
+    ) {
+        self.refresh_boxes();
+        self.refresh_breakables(reference, items);
+        self.breakables.step_hits(
+            &reference.breakables,
+            physics,
+            &self.trigger_roles,
+            |item| items.get(item).and_then(|s| s.body),
+            dt,
+        );
+    }
     /// Rebinds targets on a content, item or lamp revision change only.
-    pub(super) fn refresh_breakables(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
+    fn refresh_breakables(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
         let scan = [
             self.request.session,
             self.contents.active_revision(),

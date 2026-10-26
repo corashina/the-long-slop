@@ -1,14 +1,13 @@
-//! Source boxes: spawnInBoxScript content and contact and hazard breaks of generated boxes.
+//! Source boxes: spawnInBoxScript content of generated boxes and its release on a box break.
 //! Content rolls at generation. It publishes only after its box breaks, at the box pose.
 use super::WorldStream;
-use crate::damage::{BreakKind, collision_force};
+use crate::damage::BreakKind;
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::storage::StorageLocks;
-use crate::reference::{ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole};
+use crate::reference::{ItemId, ReferenceError, ReferenceManifest, SourceId};
 use crate::vehicle::PhysicsWorld;
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
 use rapier3d::math::{Rotation, Vector};
-use rapier3d::prelude::QueryFilter;
 use serde::{Deserialize, Serialize};
 
 /// One broken box. `origin` is its generated pose and `pose` its pose at the break.
@@ -134,7 +133,7 @@ impl WorldStream {
     pub(super) fn box_content_withheld(&self, id: &GeneratedId) -> bool {
         self.contents.boxes.withheld(id)
     }
-    fn refresh_boxes(&mut self) {
+    pub(super) fn refresh_boxes(&mut self) {
         if self.boxes.changes == Some(self.changes.revision()) {
             return;
         }
@@ -147,82 +146,15 @@ impl WorldStream {
         });
         self.boxes.changes = Some(self.changes.revision());
     }
-    /// Run after the physics step. Queues boxes that break this step.
-    pub fn step_boxes(
-        &mut self,
-        reference: &ReferenceManifest,
-        items: &ItemStore,
-        physics: &PhysicsWorld,
-        dt: f32,
-    ) {
-        self.refresh_boxes();
-        self.refresh_breakables(reference, items);
-        let records = &reference.breakables;
-        let box_record = records
-            .iter()
-            .position(|r| r.source == reference.acquisition.r#box.breakable)
-            .expect("validated box breakable");
-        let rules = &records[box_record];
-        let breakables = &mut self.breakables;
-        for hit in physics.hits() {
-            for handle in hit.colliders {
-                let Some(target) = breakables
-                    .target_of(physics, handle)
-                    .filter(|t| breakables.targets()[*t].record == box_record)
-                else {
-                    continue;
-                };
-                if let Some(force) = collision_force(rules, hit.speed) {
-                    breakables.try_break(records, target, force);
-                }
-            }
-        }
-        // Source playerdeathtriggerscript.OnTriggerStay. Unity skips sleeping bodies.
-        if self.trigger_roles.is_empty() {
-            return;
-        }
-        let bodies = &physics.rapier().bodies;
-        let filter = QueryFilter::default().exclude_solids();
-        for target in 0..breakables.targets().len() {
-            let t = &breakables.targets()[target];
-            let BreakKind::Item(item) = t.kind else {
-                continue;
-            };
-            if t.record != box_record || t.destroyed {
-                continue;
-            }
-            let Some(handle) = items.get(item).and_then(|s| s.body) else {
-                continue;
-            };
-            let Some(body) = bodies.get(handle) else {
-                continue;
-            };
-            if !body.is_enabled() || body.is_sleeping() {
-                continue;
-            }
-            for &collider in body.colliders() {
-                let collider = &physics.rapier().colliders[collider];
-                if !collider.is_enabled() || collider.is_sensor() {
-                    continue;
-                }
-                for (trigger, other) in physics
-                    .queries(filter)
-                    .intersect_shape(*collider.position(), collider.shape())
-                {
-                    if let Some(TriggerRole::Hazard {
-                        damage_breakable, ..
-                    }) = self.trigger_roles.get(trigger, other)
-                    {
-                        breakables.try_break(records, target, damage_breakable * dt);
-                    }
-                }
-            }
-        }
-    }
-    /// Next box queued by `step_boxes`. Drop it from the hand before `break_box`.
-    pub fn take_broken_box(&mut self) -> Option<ItemId> {
+    /// Next box that broke in `step_breakables`. Drop it from the hand before `break_box`.
+    /// Other breaks are dropped until break effects exist for them.
+    pub fn take_broken_box(&mut self, reference: &ReferenceManifest) -> Option<ItemId> {
+        let source = &reference.acquisition.r#box.breakable;
         while let Some(target) = self.breakables.take_break() {
-            if let BreakKind::Item(item) = self.breakables.targets()[target].kind {
+            let target = &self.breakables.targets()[target];
+            if let BreakKind::Item(item) = target.kind
+                && &reference.breakables[target.record].source == source
+            {
                 return Some(item);
             }
         }

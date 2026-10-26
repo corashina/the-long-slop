@@ -1,8 +1,9 @@
 //! Source breakablescript damage rules and bound break targets.
 //! The rules are pure functions. `Breakables` holds the targets of active content.
-use crate::reference::{BreakableReference, ItemId, LightControlId};
+use crate::reference::{BreakableReference, ItemId, LightControlId, TriggerRole};
 use crate::vehicle::{ColliderHandle, PhysicsWorld};
-use crate::world::GeneratedId;
+use crate::world::{GeneratedId, TriggerRoles};
+use rapier3d::prelude::{QueryFilter, RigidBodyHandle};
 use std::collections::VecDeque;
 
 /// Source breakablescript.velocityToMass.
@@ -170,6 +171,71 @@ impl Breakables {
             self.queue.push_back(target);
         }
     }
+    /// Run after the physics step. Source breakablescript.OnCollisionEnter for started contacts
+    /// and playerdeathtriggerscript.OnTriggerStay for item bodies in hazard triggers.
+    /// Source OnTriggerEnter is not bound: only Cacti has `no_trigger` false, and it binds no target.
+    pub fn step_hits(
+        &mut self,
+        records: &[BreakableReference],
+        physics: &PhysicsWorld,
+        roles: &TriggerRoles,
+        body_of: impl Fn(ItemId) -> Option<RigidBodyHandle>,
+        dt: f32,
+    ) {
+        if self.targets.is_empty() {
+            return;
+        }
+        for hit in physics.hits() {
+            for handle in hit.colliders {
+                let Some(target) = self.target_of(physics, handle) else {
+                    continue;
+                };
+                if let Some(force) =
+                    collision_force(&records[self.targets[target].record], hit.speed)
+                {
+                    self.try_break(records, target, force);
+                }
+            }
+        }
+        // Unity skips sleeping bodies in OnTriggerStay.
+        if roles.is_empty() {
+            return;
+        }
+        let rapier = physics.rapier();
+        let filter = QueryFilter::default().exclude_solids();
+        for target in 0..self.targets.len() {
+            let t = &self.targets[target];
+            let BreakKind::Item(item) = t.kind else {
+                continue;
+            };
+            if t.destroyed {
+                continue;
+            }
+            let Some(body) = body_of(item).and_then(|h| rapier.bodies.get(h)) else {
+                continue;
+            };
+            if !body.is_enabled() || body.is_sleeping() {
+                continue;
+            }
+            for &collider in body.colliders() {
+                let collider = &rapier.colliders[collider];
+                if !collider.is_enabled() || collider.is_sensor() {
+                    continue;
+                }
+                for (trigger, other) in physics
+                    .queries(filter)
+                    .intersect_shape(*collider.position(), collider.shape())
+                {
+                    if let Some(TriggerRole::Hazard {
+                        damage_breakable, ..
+                    }) = roles.get(trigger, other)
+                    {
+                        self.try_break(records, target, damage_breakable * dt);
+                    }
+                }
+            }
+        }
+    }
     /// Next broken target, in break order.
     pub fn take_break(&mut self) -> Option<usize> {
         self.queue.pop_front()
@@ -322,6 +388,45 @@ mod tests {
         assert_eq!(item(&breakables, first), BreakKind::Item(ItemId(3)));
         let second = breakables.take_break().unwrap();
         assert_eq!(item(&breakables, second), BreakKind::Item(ItemId(2)));
+        assert!(breakables.take_break().is_none(), "a target breaks once");
+    }
+
+    #[test]
+    fn hazard_damage_adds_up_and_breaks_an_item_once() {
+        use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
+        let records = [BreakableReference {
+            decrease_after_attack: true,
+            ..rules(7.)
+        }];
+        let mut physics = PhysicsWorld::empty_for_tests();
+        let hazard = physics.insert_collider(ColliderBuilder::cuboid(2., 2., 2.).sensor(true));
+        let (body, _) = physics.insert(
+            RigidBodyBuilder::dynamic(),
+            ColliderBuilder::cuboid(0.2, 0.2, 0.2),
+        );
+        physics.refresh_queries();
+        let mut roles = TriggerRoles::default();
+        roles.insert(
+            hazard,
+            TriggerRole::Hazard {
+                damage_player: 0.,
+                damage_breakable: 100.,
+            },
+        );
+        let mut breakables = Breakables::default();
+        breakables.bind(BreakKind::Item(ItemId(4)), 0, &records[0]);
+        let mut step = |b: &mut Breakables| {
+            b.step_hits(&records, &physics, &roles, |_| Some(body), 0.02);
+        };
+        // 2 per step: health 7 goes to 1 after three steps and breaks at the fourth.
+        for _ in 0..3 {
+            step(&mut breakables);
+        }
+        assert!(breakables.take_break().is_none());
+        for _ in 0..3 {
+            step(&mut breakables);
+        }
+        assert_eq!(breakables.take_break(), Some(0));
         assert!(breakables.take_break().is_none(), "a target breaks once");
     }
 

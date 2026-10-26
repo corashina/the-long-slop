@@ -2085,11 +2085,11 @@ impl GarageRuntime {
         }
     }
 
-    /// Source breakablescript on generated boxes: contacts and hazard triggers of this step.
+    /// Source breakablescript: contacts and hazard triggers of this step. Only boxes break today.
     fn break_boxes(&mut self, reference: &ReferenceManifest) {
         self.stream
-            .step_boxes(reference, &self.area.items, &self.physics, FIXED_DT);
-        while let Some(id) = self.stream.take_broken_box() {
+            .step_breakables(reference, &self.area.items, &self.physics, FIXED_DT);
+        while let Some(id) = self.stream.take_broken_box(reference) {
             // Source Break calls pickupable.Drop2 first.
             if self.area.interaction.held() == Some(id) {
                 self.area
