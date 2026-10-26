@@ -79,7 +79,7 @@ pub fn step(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::reference::{CurveKey, TorqueCurve};
     use rapier3d::math::Rotation;
@@ -88,7 +88,7 @@ mod tests {
     /// Converted forward is -Z.
     const FORWARD: Vector = Vector::NEG_Z;
 
-    fn reference() -> BalanceReference {
+    pub(crate) fn reference() -> BalanceReference {
         let key = |time, value| CurveKey {
             time,
             value,

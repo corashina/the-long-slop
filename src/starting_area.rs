@@ -492,6 +492,8 @@ pub struct VehicleRuntime {
     pub plates: Vec<String>,
     /// `carscript.kmhmeters` slots: (row, slot) pairs.
     pub(crate) kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
+    /// Source `carscript` balance state. It is not saved. Recovery resets it.
+    pub balance: crate::simulation::balance::BalanceState,
 }
 
 impl VehicleRuntime {
@@ -536,6 +538,7 @@ impl VehicleRuntime {
             handbrake_lever: parts.handbrake_lever,
             plates: parts.plates,
             kmh_slots: Vec::new(),
+            balance: Default::default(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -2011,6 +2014,26 @@ impl GarageRuntime {
             steer: pushed.unwrap_or(controls.steer),
             handbrake: vehicle.handbrake as u8 as f32,
         };
+        // Source `carscript.Update` calls `Balance()` for a seated driver or an in-use push grip.
+        // A push leaves source `isteer` at 0 after `ResetInput`, so the balance steer is 0.
+        if chassis_active
+            && (driving || pushed.is_some())
+            && let Some(balance) = &world_vehicle(reference, vehicle.prototype).balance
+        {
+            let steer = if driving {
+                controls.steer.clamp(-1., 1.)
+            } else {
+                0.
+            };
+            apply_balance(
+                &mut self.physics,
+                chassis,
+                balance,
+                &mut vehicle.balance,
+                speed.abs() * 3.6,
+                steer,
+            );
+        }
         if chassis_active {
             self.physics.apply_vehicle_forces(
                 key,
@@ -2389,6 +2412,32 @@ pub(crate) fn instrument_sample(
             && limits.electronics_output > limits.electronics_off_threshold,
         distance_m: vehicle.trip_m,
     }
+}
+
+/// Source `carscript.Balance()` for one fixed step: the roll torque as an angular impulse.
+/// `speed_kmh`: source `speed`. `steer`: source `isteer`, -1..1.
+fn apply_balance(
+    physics: &mut PhysicsWorld,
+    chassis: RigidBodyHandle,
+    reference: &crate::reference::BalanceReference,
+    state: &mut crate::simulation::balance::BalanceState,
+    speed_kmh: f32,
+    steer: f32,
+) {
+    let rotation = *physics.rapier().bodies[chassis].rotation();
+    let torque = crate::simulation::balance::step(
+        reference,
+        state,
+        speed_kmh,
+        steer,
+        rotation * rapier3d::math::Vector::Y,
+        rotation * -rapier3d::math::Vector::Z,
+        FIXED_DT,
+    );
+    // Source `AddRelativeTorque`: chassis-local torque.
+    physics.edit_body(chassis, |body| {
+        body.apply_torque_impulse(rotation * torque * FIXED_DT, true)
+    });
 }
 
 fn transport_body(
