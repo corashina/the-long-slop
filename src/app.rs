@@ -1138,6 +1138,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         fuel,
         runtime.paused,
         runtime.started,
+        runtime.autosave_safe(drive.input.held & keys::GRAB != 0),
+        runtime.area.player.seated(),
     );
     let available = runtime.area.interaction.available_actions(
         &runtime.aim,

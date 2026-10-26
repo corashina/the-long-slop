@@ -37,6 +37,11 @@ test('cancel_after_synchronous_dispatch_keeps_pending_and_completion',async()=>{
  host.gameSaveResult(commit.id,commit.kind,'','');await operation;
  assert.deepEqual(states,[['pending',true],['success',false]]);assert.equal(host.gameHasSaveRequest(),false);
 });
+test('capture_sends_autosave_flag_and_returns_summary',async()=>{
+ const host={},runtime=createSaveBridge(host);const pending=runtime.capture(true);const request=JSON.parse(host.gameSaveRequest());
+ assert.equal(request.kind,'Capture');assert.equal(request.payload.autosave,true);assert.equal(typeof request.payload.date,'string');
+ const result={save:{schema_version:20},summary:{seed:3,driven_km:1.5,build_id:7}};host.gameSaveResult(request.id,'Capture',JSON.stringify(result),'');assert.deepEqual(await pending,result);
+});
 test('prepare_carries_save_and_draw_distance',()=>{
  const host={},runtime=createSaveBridge(host);runtime.prepare({schema_version:4},undefined,9000).catch(()=>{});
  assert.deepEqual(JSON.parse(host.gameSaveRequest()).payload,{save:{schema_version:4},draw_distance:9000});
