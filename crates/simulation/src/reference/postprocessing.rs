@@ -625,3 +625,114 @@ impl GlassesProfile {
         Ok(())
     }
 }
+
+/// Main camera `PostProcessLayer.volumeLayer` (layers 8 and 21).
+pub const MAIN_VOLUME_MASK: u32 = 2097408;
+
+/// `fpscontroller.DeadV`: a global volume over the main stack. `mainscript.Died` enables it.
+/// While dead, its weight is `InverseLerp(0, 14, t - deathTime)`; `survival` holds both constants.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeadProfile {
+    /// `PostProcessVolume`.
+    pub source: super::SourceId,
+    pub enabled: bool,
+    pub global: bool,
+    pub blend_distance: f32,
+    /// Authored weight. The death fade replaces it.
+    pub weight: f32,
+    pub priority: f32,
+    pub layer: u32,
+    /// `PostProcessVolume.sharedProfile`.
+    pub profile: super::SourceId,
+    pub effects: Vec<VolumeEffect>,
+    pub evidence: super::ManagedEvidence,
+}
+
+/// One profile effect with every serialized parameter, by source field name.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeEffect {
+    /// Snake case class name, such as `color_grading` or `vignette`.
+    pub kind: String,
+    pub source: super::SourceId,
+    pub active: bool,
+    pub parameters: std::collections::BTreeMap<String, VolumeParameter>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum VolumeParameter {
+    Texture(SourceTextureParameter),
+    Spline(SourceParameter<SourceGradingSpline>),
+    Bool(SourceParameter<bool>),
+    Number(SourceParameter<f32>),
+    /// Color (rgba) or vector (xy, xyz or xyzw).
+    Vector(SourceParameter<Vec<f32>>),
+}
+
+impl VolumeParameter {
+    pub fn override_state(&self) -> bool {
+        match self {
+            Self::Texture(p) => p.override_state,
+            Self::Spline(p) => p.override_state,
+            Self::Bool(p) => p.override_state,
+            Self::Number(p) => p.override_state,
+            Self::Vector(p) => p.override_state,
+        }
+    }
+}
+
+impl DeadProfile {
+    pub fn validate(&self, m: &super::ReferenceManifest) -> Result<(), super::ReferenceError> {
+        use super::{finite, ids, require};
+        require(
+            self.source.file == "level1"
+                && self.global
+                && finite(&[self.blend_distance, self.weight, self.priority])
+                && (0. ..=1.).contains(&self.weight)
+                && self.layer < 32
+                && MAIN_VOLUME_MASK & (1 << self.layer) != 0
+                && !self.effects.is_empty()
+                && self.evidence.valid(),
+            "dead volume",
+        )?;
+        ids(
+            self.effects.iter().map(|e| &e.source),
+            "duplicate dead effect",
+        )?;
+        for e in &self.effects {
+            require(
+                !e.kind.is_empty()
+                    && e.kind
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                    && matches!(e.parameters.get("enabled"), Some(VolumeParameter::Bool(_))),
+                "dead effect",
+            )?;
+            for p in e.parameters.values() {
+                require(
+                    match p {
+                        VolumeParameter::Texture(t) => match (&t.value, t.texture) {
+                            (Some(s), Some(id)) => m
+                                .lighting
+                                .textures
+                                .iter()
+                                .any(|v| v.id == id && &v.source == s),
+                            (None, None) => true,
+                            _ => false,
+                        },
+                        VolumeParameter::Spline(s) => s.value.valid(),
+                        VolumeParameter::Bool(_) => true,
+                        VolumeParameter::Number(n) => n.value.is_finite(),
+                        VolumeParameter::Vector(v) => {
+                            (2..=4).contains(&v.value.len()) && finite(&v.value)
+                        }
+                    },
+                    "dead effect parameter",
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
