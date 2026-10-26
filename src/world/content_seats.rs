@@ -24,8 +24,15 @@ pub(crate) struct WorldSeatReference {
     /// `sitPos`, or the seatscript node.
     pub sit_node: u32,
     /// Nodes of the main seatscript and of all seatscripts whose `mainseat` is this seat.
+    /// The first node is the main seatscript node.
     pub hit_nodes: Vec<u32>,
     pub yaw_limits_degrees: [f32; 2],
+    /// `limitLessRot`: no yaw clamp.
+    pub yaw_unlimited: bool,
+    /// `FcantSitAngle` when `BcantSitAngle` is set.
+    pub cant_sit_angle_degrees: Option<f32>,
+    /// `lookInsteadOfLean`.
+    pub look_instead_of_lean: bool,
     pub pitch_limits_degrees: [f32; 2],
     pub default_pitch_degrees: f32,
     pub min_exit_angle_degrees: f32,
@@ -99,12 +106,6 @@ fn main_seat(
     node: u32,
     node_of: &impl Fn(&SourceId) -> Result<u32, ReferenceError>,
 ) -> Result<WorldSeatReference, ReferenceError> {
-    // The port has only the clamped yaw lean look of the selected car seats.
-    for unsupported in ["lookInsteadOfLean", "BcantSitAngle", "limitLessRot"] {
-        if flag(f, unsupported)? {
-            return Err(ReferenceError(format!("unsupported {unsupported}")));
-        }
-    }
     let sit_node = match optional(f, "sitPos")? {
         Some(sit) => node_of(sit)?,
         None => node,
@@ -115,6 +116,13 @@ fn main_seat(
         sit_node,
         hit_nodes: vec![node],
         yaw_limits_degrees: [-rot_limit, rot_limit],
+        yaw_unlimited: flag(f, "limitLessRot")?,
+        cant_sit_angle_degrees: if flag(f, "BcantSitAngle")? {
+            Some(number(f, "FcantSitAngle")?)
+        } else {
+            None
+        },
+        look_instead_of_lean: flag(f, "lookInsteadOfLean")?,
         pitch_limits_degrees: SEAT_PITCH_LIMITS_DEGREES,
         default_pitch_degrees: number(f, "defYrot")?,
         min_exit_angle_degrees: number(f, "minGetUpAnlge")?,
@@ -126,6 +134,7 @@ fn main_seat(
         seat.default_pitch_degrees,
         seat.min_exit_angle_degrees,
         seat.exit_height,
+        seat.cant_sit_angle_degrees.unwrap_or(0.),
     ];
     if values.iter().any(|v| !v.is_finite())
         || rot_limit < 0.
@@ -144,7 +153,31 @@ pub(crate) struct ItemSeat {
     pub body: RigidBodyHandle,
     /// sitPos relative to the item body.
     pub pose: VehiclePose,
+    /// Main seatscript node relative to the item body.
+    pub node_pose: VehiclePose,
     pub seat: Arc<WorldSeatReference>,
+}
+impl ItemSeat {
+    /// Source `BcantSitAngle` enter check on the main seatscript node.
+    pub fn can_sit(&self, physics: &PhysicsWorld) -> bool {
+        let node = *physics.rapier().bodies[self.body].position() * to_rapier(self.node_pose);
+        sit_angle_allows(
+            node.rotation * rapier3d::math::Vector::Y,
+            self.seat.cant_sit_angle_degrees,
+        )
+    }
+}
+
+/// `!BcantSitAngle || Vector3.Angle(seat.up, Vector3.up) < FcantSitAngle`.
+fn sit_angle_allows(up: rapier3d::math::Vector, cant_sit_angle_degrees: Option<f32>) -> bool {
+    cant_sit_angle_degrees.is_none_or(|limit| {
+        up.normalize_or_zero()
+            .dot(rapier3d::math::Vector::Y)
+            .clamp(-1., 1.)
+            .acos()
+            .to_degrees()
+            < limit
+    })
 }
 
 /// The seats of one spawned world item and their hit colliders.
@@ -337,11 +370,16 @@ impl WorldStream {
                 prototype,
                 seat.sit_node as usize,
             ));
+            let node = place(crate::world::placement::node_pose(
+                prototype,
+                seat.hit_nodes[0] as usize,
+            ));
             let target = Arc::new(ItemSeat {
                 item,
                 owner: owner.clone(),
                 body,
                 pose: from_rapier(&(body_pose.inverse() * sit)),
+                node_pose: from_rapier(&(body_pose.inverse() * node)),
                 seat,
             });
             for handle in &colliders {
@@ -354,5 +392,20 @@ impl WorldStream {
             item,
             seats: bound,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sit_angle_allows;
+    use rapier3d::math::Vector;
+
+    #[test]
+    fn cant_sit_angle_limits_tilted_seats() {
+        let tilted = Vector::new(1., 1., 0.);
+        assert!(sit_angle_allows(tilted, None));
+        assert!(sit_angle_allows(tilted, Some(50.)));
+        assert!(!sit_angle_allows(tilted, Some(40.)));
+        assert!(!sit_angle_allows(-Vector::Y, Some(90.)));
     }
 }

@@ -1827,6 +1827,7 @@ impl InteractionState {
                 if use_input.released & keys::USE != 0
                     && !released_mechanism
                     && let Some(seat) = self.item_seats.get(&target.collider)
+                    && seat.can_sit(physics)
                     && seat_release.is_some_and(|press| {
                         press.matches(self.mechanisms.contains(target.item).then_some(target.item))
                     })

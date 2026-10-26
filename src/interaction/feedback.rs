@@ -232,7 +232,10 @@ impl InteractionState {
                 }
             }
             if (self.seats.iter().any(|s| s.item == t.item)
-                || self.item_seats.contains_key(&t.collider))
+                || self
+                    .item_seats
+                    .get(&t.collider)
+                    .is_some_and(|seat| seat.can_sit(physics)))
                 && !player.seated()
             {
                 a.actions.0 |= ActionMask::ENTER;

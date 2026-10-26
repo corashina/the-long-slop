@@ -100,6 +100,10 @@ pub enum SeatOwner {
 #[derive(Clone, Copy, Debug)]
 pub struct SeatValues {
     pub yaw_limits_degrees: [f32; 2],
+    /// Source `limitLessRot`: no yaw clamp.
+    pub yaw_unlimited: bool,
+    /// Source `lookInsteadOfLean`: lean input turns the camera, and recenter does nothing.
+    pub look_instead_of_lean: bool,
     pub pitch_limits_degrees: [f32; 2],
     pub default_pitch_degrees: f32,
     pub driver: bool,
@@ -112,6 +116,8 @@ impl SeatValues {
     pub fn car(player: &PlayerReference, seat: &SeatReference) -> Self {
         Self {
             yaw_limits_degrees: seat.yaw_limits_degrees,
+            yaw_unlimited: false,
+            look_instead_of_lean: false,
             pitch_limits_degrees: seat.pitch_limits_degrees,
             default_pitch_degrees: seat.default_pitch_degrees,
             driver: seat.driver,
@@ -127,12 +133,21 @@ impl SeatValues {
     ) -> Self {
         Self {
             yaw_limits_degrees: seat.yaw_limits_degrees,
+            yaw_unlimited: seat.yaw_unlimited,
+            look_instead_of_lean: seat.look_instead_of_lean,
             pitch_limits_degrees: seat.pitch_limits_degrees,
             default_pitch_degrees: seat.default_pitch_degrees,
             driver: false,
             driving2: false,
             show_sleep_text: seat.show_sleep_text,
             exit: ExitReference::new(player, player.exit_distance, seat.min_exit_angle_degrees),
+        }
+    }
+    fn clamp_yaw(&self, yaw: f32) -> f32 {
+        if self.yaw_unlimited {
+            yaw
+        } else {
+            yaw.clamp(self.yaw_limits_degrees[0], self.yaw_limits_degrees[1])
         }
     }
 }
@@ -373,7 +388,12 @@ impl PlayerState {
             return;
         }
         let seated = self.occupancy.is_some();
+        let look_mode = self
+            .occupancy
+            .as_ref()
+            .is_some_and(|seat| seat.values.look_instead_of_lean);
         if let Some(seat) = &self.occupancy
+            && !seat.values.look_instead_of_lean
             && !context.recenter_consumed
             && input.held & keys::RECENTER != 0
         {
@@ -388,6 +408,7 @@ impl PlayerState {
             context,
             self.posture.value(),
             seated,
+            look_mode,
             head_rotation,
             dt,
         );
@@ -401,9 +422,8 @@ impl PlayerState {
         }
         self.pitch = self.pitch.clamp(-89.0, 89.0);
         if let Some(seat) = &self.occupancy {
-            let [yaw_min, yaw_max] = seat.values.yaw_limits_degrees;
             let [pitch_min, pitch_max] = seat.values.pitch_limits_degrees;
-            self.yaw = self.yaw.clamp(yaw_min, yaw_max);
+            self.yaw = seat.values.clamp_yaw(self.yaw);
             self.pitch = self.pitch.clamp(pitch_min, pitch_max);
         } else {
             self.yaw = (self.yaw + 180.0).rem_euclid(360.0) - 180.0;
@@ -740,10 +760,7 @@ impl PlayerState {
         let local_pose = to_rapier(pose);
         let seated_pose = *physics.rapier().bodies[body].position() * local_pose;
         let head_in_seat = seated_pose.inverse() * old_head;
-        self.yaw = yaw_from_rotation(head_in_seat.rotation);
-        self.yaw = self
-            .yaw
-            .clamp(values.yaw_limits_degrees[0], values.yaw_limits_degrees[1]);
+        self.yaw = values.clamp_yaw(yaw_from_rotation(head_in_seat.rotation));
         self.occupancy = Some(Occupancy {
             id,
             owner,
@@ -1075,4 +1092,34 @@ fn groups(membership: u32, filter: u32) -> InteractionGroups {
         Group::from_bits_retain(filter),
         InteractionTestMode::And,
     )
+}
+
+#[cfg(test)]
+mod seat_values_tests {
+    use super::{ExitReference, SeatValues};
+
+    #[test]
+    fn unlimited_yaw_skips_the_clamp() {
+        let mut values = SeatValues {
+            yaw_limits_degrees: [-60., 60.],
+            yaw_unlimited: false,
+            look_instead_of_lean: false,
+            pitch_limits_degrees: [-89., 89.],
+            default_pitch_degrees: 0.,
+            driver: false,
+            driving2: false,
+            show_sleep_text: false,
+            exit: ExitReference {
+                distance: 1.,
+                minimum_look_angle_degrees: 0.,
+                horizontal_step: 0.,
+                vertical_step: 0.,
+                horizontal_steps: 0,
+                vertical_steps: 0,
+            },
+        };
+        assert_eq!(values.clamp_yaw(200.), 60.);
+        values.yaw_unlimited = true;
+        assert_eq!(values.clamp_yaw(200.), 200.);
+    }
 }
