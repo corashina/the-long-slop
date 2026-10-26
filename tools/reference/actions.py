@@ -150,39 +150,78 @@ def recover_pickup(source, reader):
         'keep_when_stored': link('dontDisableWhenStored', 'Transform'), 'inventory_icon': link('invImg', 'Sprite')}
 
 
-def recover_pushables(source, nodes, components, item_nodes, colliders, bodies, mask):
+def push_record(source, reader, node, body_pose, grips, node_of, colliders_of):
+    """pushablescript values and the pushgripable whose car is on `node`.
+    `node_of` maps a Transform to a node id. `colliders_of` maps a node id to its collider ids.
+    The grip pose is relative to the body of `body_pose`."""
     from .source import source_id
     from .collision import world_pose, bake_points, quaternion_product
-    records = []
+    fields = source.read(reader)
+    record = {'source': source_id(reader), 'modifier': fields['modifier'],
+        'only_projected': bool(fields['onlyProjected']), 'both': bool(fields['both']),
+        'push_even_if_same_parent': bool(fields['pushEvenIfSameParent']), 'grip': None}
+    for grip_reader in grips:
+        grip = source.read(grip_reader)
+        car = source.resolve(grip_reader, grip['car'])
+        if car is None:
+            raise ValueError(f'pushgripable.car: missing carscript: {key(grip_reader)}')
+        car_go = source.resolve(car, source.read(car)['m_GameObject'])
+        if node_of(source.transform_for(car_go)) != node:
+            continue
+        if record['grip'] is not None:
+            raise ValueError(f'Multiple push grips on one car: {key(reader)}')
+        transform = source.transform_for(source.resolve(grip_reader, grip['m_GameObject']))
+        grip_node = node_of(transform)
+        # A null HT moves the nearest hand to the grip Transform.
+        hand = source.resolve(grip_reader, grip['HT'])
+        rotation = body_pose['rotation']
+        inverse = [-rotation[0], -rotation[1], -rotation[2], rotation[3]]
+        record['grip'] = {'source': source_id(grip_reader), 'node': grip_node,
+            'hand_node': node_of(hand) if hand is not None else None,
+            'colliders': colliders_of(grip_node),
+            'local_pose': {'translation': bake_points([(0., 0., 0.)], source.chain(transform), body_pose)[0],
+                'rotation': list(quaternion_product(inverse, world_pose(source, transform)['rotation'])), 'scale': [1., 1., 1.]},
+            'in_use': bool(grip['inuse'])}
+    return record
+
+
+def recover_pushables(source, nodes, components, item_nodes, colliders, bodies, mask):
     by_source = {(n['source']['file'], n['source']['path_id']): n['id'] for n in nodes}
+    grips = [reader for node, group in components.items() if nodes[node - 1]['active']
+        for reader in group.get('pushgripable', [])]
+    records = []
     for node, group in components.items():
         if not nodes[node - 1]['active']:
             continue
         for reader in group.get('pushablescript', []):
-            fields = source.read(reader)
-            if not fields['m_Enabled']:
+            if not source.read(reader)['m_Enabled']:
                 continue
             body = next(b for b in bodies if b['node'] == node)
-            record = {'source': source_id(reader), 'owner': item_nodes[node], 'body': body['id'],
-                'mask': mask, 'modifier': fields['modifier'], 'only_projected': bool(fields['onlyProjected']),
-                'both': bool(fields['both']), 'push_even_if_same_parent': bool(fields['pushEvenIfSameParent']), 'grip': None}
-            for grip_node, grip_group in components.items():
-                for grip_reader in grip_group.get('pushgripable', []):
-                    if not nodes[grip_node - 1]['active']:
-                        continue
-                    grip = source.read(grip_reader)
-                    car = source.resolve(grip_reader, grip['car'])
-                    car_go = source.resolve(car, source.read(car)['m_GameObject'])
-                    if by_source[key(source.transform_for(car_go))] != node:
-                        continue
-                    if record['grip'] is not None:
-                        raise ValueError('Multiple selected push grips')
-                    go = source.resolve(grip_reader, grip['m_GameObject'])
-                    pose = world_pose(source, source.transform_for(go))
-                    # Root-local pose uses the same scene transform conversion as other anchors.
-                    record['grip'] = {'source': source_id(grip_reader), 'node': grip_node,
-                        'hand_node': by_source[key(source.resolve(grip_reader, grip['HT']))],
-                        'colliders': [c['id'] for c in colliders if c['node'] == grip_node],
-                        'local_pose': {'translation': bake_points([(0.,0.,0.)], source.chain(source.transform_for(go)), body['pose'])[0], 'rotation': quaternion_product([-body['pose']['rotation'][0], -body['pose']['rotation'][1], -body['pose']['rotation'][2], body['pose']['rotation'][3]], pose['rotation']), 'scale': [1.,1.,1.]}, 'in_use': bool(grip['inuse'])}
-            records.append(record)
+            record = push_record(source, reader, node, body['pose'], grips, lambda t: by_source[key(t)],
+                lambda n: [c['id'] for c in colliders if c['node'] == n])
+            records.append({'owner': item_nodes[node], 'body': body['id'], 'mask': mask, **record})
+    return records
+
+
+def recover_world_pushes(source, hierarchy, mapping, bodies, colliders):
+    """pushablescript records of one world prototype. Ids are prototype node, body and collider indices.
+    `source.chain` must stop at the prototype root. pushablescript.Push needs a Rigidbody on its node."""
+    def scripts(name):
+        return [(i, c) for i, n in enumerate(hierarchy) if n['active'] for c in n['components']
+            if c.type.name == 'MonoBehaviour' and source.class_name(c) == name]
+    grips = [c for _, c in scripts('pushgripable')]
+    records = []
+    for node, reader in scripts('pushablescript'):
+        if not source.read(reader)['m_Enabled']:
+            continue
+        body = next((i for i, b in enumerate(bodies) if b['node'] == node), None)
+        if body is None:
+            continue
+        def node_of(transform):
+            if key(transform) not in mapping:
+                raise ValueError(f'pushgripable: Transform outside its prototype: {key(transform)}')
+            return mapping[key(transform)]
+        record = push_record(source, reader, node, bodies[body]['pose'], grips, node_of,
+            lambda n: [i for i, c in enumerate(colliders) if c['node'] == n])
+        records.append({'node': node, 'body': body, **record})
     return records

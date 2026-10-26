@@ -28,7 +28,10 @@ pub struct SourcePresentationAllocation {
     lamps: (usize, usize, usize),
     imported_writers: Vec<(Entity, Handle<Mesh>)>,
     writers_bound: bool,
-    retired_materials: Vec<crate::reference::SourceId>,
+    /// Prototype indices of retired prototypes whose materials wait for release.
+    retired_materials: Vec<usize>,
+    /// Primary appearance assets of the contents, reused each frame.
+    primary_assets: Vec<crate::reference::AssetId>,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
@@ -158,6 +161,7 @@ impl WorldPresentation<'_, '_> {
             crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::RenderPreparation);
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
+        self.grass.set_view(view);
         super::preflight::configure_staging(stream, &reference.file_catalog)?;
         let mut failure = self
             .fixed
@@ -290,21 +294,20 @@ impl WorldPresentation<'_, '_> {
         stream.select_required(required_views);
         timer.next(crate::world::stream_profile::Stage::MaterialRetirement);
         while let Some(source) = self.prototypes.take_retired() {
-            self.allocation.retired_materials.push(source);
-        }
-        let mut index = 0;
-        while index < self.allocation.retired_materials.len() {
-            let source = &self.allocation.retired_materials[index];
-            if self.prototypes.requested(source) {
-                self.allocation.retired_materials.swap_remove(index);
-                continue;
-            }
             let prototype = reference
                 .world
                 .prototypes
-                .iter()
-                .find(|p| p.source == *source)
+                .index(&source)
                 .expect("retired prototype");
+            self.allocation.retired_materials.push(prototype);
+        }
+        let mut index = 0;
+        while index < self.allocation.retired_materials.len() {
+            let prototype = &reference.world.prototypes[self.allocation.retired_materials[index]];
+            if self.prototypes.requested(&prototype.source) {
+                self.allocation.retired_materials.swap_remove(index);
+                continue;
+            }
             if !self.materials.cache.world_asset_retirable(
                 prototype.asset,
                 &self.chains,
@@ -367,14 +370,23 @@ impl WorldPresentation<'_, '_> {
             }
             self.allocation.retired_materials.swap_remove(index);
         }
+        // Contents are read once, and only when a held painting asset could be released.
+        let mut contents_read = false;
         for binding in &reference.world.painting_materials {
-            if !stream.uses_painting_asset(binding.asset)
-                && self.materials.cache.world_asset_retirable(
+            if !self.materials.cache.holds_world_asset(binding.asset)
+                || !self.materials.cache.world_asset_retirable(
                     binding.asset,
                     &self.chains,
                     &self.server,
                 )
             {
+                continue;
+            }
+            if !contents_read {
+                stream.primary_assets(&mut self.allocation.primary_assets);
+                contents_read = true;
+            }
+            if !self.allocation.primary_assets.contains(&binding.asset) {
                 self.materials.cache.release_world_asset(
                     binding.asset,
                     &mut self.images,
@@ -573,8 +585,6 @@ impl WorldPresentation<'_, '_> {
             &mut self.pipelines,
             &self.fixed,
         )?;
-        self.instances
-            .request_grass(stream, &mut self.grass, view)?;
         timer.next(crate::world::stream_profile::Stage::Capture);
         stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
         timer.next(crate::world::stream_profile::Stage::FinalCleanup);

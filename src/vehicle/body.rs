@@ -231,7 +231,7 @@ pub(crate) mod tests {
             "colliders": [], "prefab_pose": pose(0.0, 0.0),
             "vehicle": {
                 "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
-                "fuel_tank": null, "electronics": null, "starter_delay_seconds": 1.0,
+                "fuel_tank": null, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0, "balance": null,
                 "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
                 "handbrake": false, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
                 "wheels": wheels,
@@ -240,7 +240,9 @@ pub(crate) mod tests {
                 "wheel_slip": [1.25, 0.75, 1.25, 0.75], "rim_slip": [0.4, 0.3], "auto_shift_stop_speed": 1.0,
                 "auto_shift_min_rpm": 1500.0, "auto_shift_max_rpm": 4000.0, "dont_ignite_with_throttle_in_automatic": false,
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [], "seats": [],
+                "drive_frames": {"left_hand": null, "right_hand": null, "left_leg": null, "right_leg": null},
                 "wheel_effects": effects, "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
+                "lever": null, "key_steer_multiplier": 0.0,
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             }

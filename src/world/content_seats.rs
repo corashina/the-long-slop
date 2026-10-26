@@ -3,6 +3,7 @@ use super::WorldStream;
 use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
 use crate::player::SeatOwner;
+use crate::player::body::SeatFrames;
 use crate::reference::{
     ItemId, ReferenceError, SourceId, Transform, WorldPrototypeReference, WorldReference,
 };
@@ -15,6 +16,8 @@ use std::sync::Arc;
 
 /// Player view pitch clamp of the source seat look (`FyRot = Mathf.Clamp(FyRot, -89f, 89f)`).
 const SEAT_PITCH_LIMITS_DEGREES: [f32; 2] = [-89.0, 89.0];
+/// Length of each player sit pose array (`LHSitPose` and the others).
+const SIT_POSE_COUNT: u32 = 3;
 
 /// One main seatscript of a world prototype. Node values are prototype node indices.
 /// The exit distance is `PlayerReference::exit_distance`.
@@ -42,6 +45,19 @@ pub(crate) struct WorldSeatReference {
     /// `driverSeat0` and `driverSeat1` of a car seat, from the prototype vehicle record.
     pub driver: bool,
     pub driving2: bool,
+    pub body_pose: WorldSeatBodyPose,
+}
+
+/// Seated player body inputs of a main seatscript. Nodes are prototype node indices.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WorldSeatBodyPose {
+    /// `defPose`: the index into the player sit poses.
+    pub def_pose: u32,
+    /// `LHpos`, `RHpos`, `LLpos`, `RLpos`. `None` for a null link.
+    pub left_hand: Option<u32>,
+    pub right_hand: Option<u32>,
+    pub left_leg: Option<u32>,
+    pub right_leg: Option<u32>,
 }
 
 /// Active seatscript seats of a prototype, in source hierarchy order.
@@ -115,6 +131,11 @@ fn main_seat(
         None => node,
     };
     let rot_limit = number(f, "rotLimit")?;
+    let frame = |n| optional(f, n)?.map(node_of).transpose();
+    let def_pose = u32::try_from(integer(f, "defPose")?)
+        .ok()
+        .filter(|p| *p < SIT_POSE_COUNT)
+        .ok_or_else(|| ReferenceError("invalid seat defPose".into()))?;
     let seat = WorldSeatReference {
         source: script.clone(),
         sit_node,
@@ -134,6 +155,13 @@ fn main_seat(
         show_sleep_text: flag(f, "showSleepText")?,
         driver: false,
         driving2: false,
+        body_pose: WorldSeatBodyPose {
+            def_pose,
+            left_hand: frame("LHpos")?,
+            right_hand: frame("RHpos")?,
+            left_leg: frame("LLpos")?,
+            right_leg: frame("RLpos")?,
+        },
     };
     let values = [
         rot_limit,
@@ -164,6 +192,8 @@ pub(crate) struct ItemSeat {
     /// Main seatscript node relative to the item body.
     pub node_pose: VehiclePose,
     pub seat: Arc<WorldSeatReference>,
+    /// Player body frames relative to the item body. Car seats add the car drive frames.
+    pub frames: SeatFrames,
 }
 impl ItemSeat {
     /// Source `BcantSitAngle` enter check on the main seatscript node.
@@ -369,6 +399,15 @@ impl WorldStream {
             })
         };
         let body_pose = place(crate::world::placement::node_pose(prototype, body_node));
+        let frame = |node: Option<u32>| {
+            node.map(|n| {
+                from_rapier(
+                    &(body_pose.inverse()
+                        * place(crate::world::placement::node_pose(prototype, n as usize))),
+                )
+            })
+        };
+        let drive = prototype.vehicle.as_ref().map(|v| &v.drive_frames);
         let owner = match physics.vehicle_of(body) {
             Some(vehicle) => SeatOwner::Vehicle(vehicle.clone()),
             None => SeatOwner::Item(items.object_key(item)),
@@ -397,6 +436,15 @@ impl WorldStream {
                 prototype,
                 seat.hit_nodes[0] as usize,
             ));
+            let b = &seat.body_pose;
+            let frames = SeatFrames {
+                def_pose: b.def_pose as usize,
+                driving: seat.driver,
+                hands: [b.left_hand, b.right_hand].map(frame),
+                legs: [b.left_leg, b.right_leg].map(frame),
+                driving_hands: drive.map_or([None; 2], |d| [d.left_hand, d.right_hand].map(frame)),
+                driving_legs: drive.map_or([None; 2], |d| [d.left_leg, d.right_leg].map(frame)),
+            };
             let content = &self.contents.active[slot];
             let mut cursor = Some(seat.hit_nodes[0]);
             let mut seat_item = item;
@@ -421,6 +469,7 @@ impl WorldStream {
                 pose: from_rapier(&(body_pose.inverse() * sit)),
                 node_pose: from_rapier(&(body_pose.inverse() * node)),
                 seat,
+                frames,
             });
             for handle in &colliders {
                 interaction.bind_item_seat(*handle, target.clone());
@@ -437,8 +486,60 @@ impl WorldStream {
 
 #[cfg(test)]
 mod tests {
-    use super::sit_angle_allows;
+    use super::{Fields, ReferenceError, SourceId, main_seat, sit_angle_allows};
+    use crate::reference::{WorldInitField, WorldValue};
     use rapier3d::math::Vector;
+
+    #[test]
+    fn seat_body_pose_reads_frames_and_checks_def_pose() {
+        // Level1 seatscript 79163 has defPose 1. Two frames are null here to check None.
+        let id = |path_id| SourceId {
+            file: "level1".into(),
+            path_id,
+        };
+        let fields = |def_pose| {
+            [
+                ("defPose", WorldValue::Integer(def_pose)),
+                ("LHpos", WorldValue::Link(id(26412))),
+                ("RHpos", WorldValue::Empty),
+                ("LLpos", WorldValue::Empty),
+                ("RLpos", WorldValue::Link(id(27202))),
+                ("sitPos", WorldValue::Empty),
+                ("rotLimit", WorldValue::Number(90.)),
+                ("limitLessRot", WorldValue::Integer(0)),
+                ("BcantSitAngle", WorldValue::Integer(0)),
+                ("lookInsteadOfLean", WorldValue::Integer(0)),
+                ("defYrot", WorldValue::Number(0.)),
+                ("minGetUpAnlge", WorldValue::Number(65.)),
+                ("getOutHeight", WorldValue::Number(1.)),
+                ("showSleepText", WorldValue::Integer(0)),
+            ]
+            .into_iter()
+            .map(|(name, value)| WorldInitField {
+                name: name.into(),
+                value,
+            })
+            .collect::<Vec<_>>()
+        };
+        let node_of = |s: &SourceId| -> Result<u32, ReferenceError> {
+            Ok(if s.path_id == 26412 { 4 } else { 7 })
+        };
+        let f = fields(1);
+        let seat = main_seat(&id(79163), Fields::Compact(&f), 2, &node_of).unwrap();
+        let p = seat.body_pose;
+        assert_eq!(
+            (
+                p.def_pose,
+                p.left_hand,
+                p.right_hand,
+                p.left_leg,
+                p.right_leg
+            ),
+            (1, Some(4), None, None, Some(7))
+        );
+        let f = fields(3);
+        assert!(main_seat(&id(79163), Fields::Compact(&f), 2, &node_of).is_err());
+    }
 
     #[test]
     fn cant_sit_angle_limits_tilted_seats() {

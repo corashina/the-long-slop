@@ -451,15 +451,25 @@ pub fn load_materials(
                     | AssetUsage::SkyPrototype
                     | AssetUsage::FoodPrototype
                     | AssetUsage::ItemPrototype
+                    | AssetUsage::PlayerPrototype
             )
         })
         .map(|asset| asset.id)
         .collect();
+    // The player asset draws only character 0. Other player materials stay unloaded.
+    let body = &reference.clothing.characters[0];
     let records: Vec<_> = reference
         .rendering
         .materials
         .iter()
-        .filter(|record| fixed_assets.contains(&record.asset))
+        .filter(|record| {
+            fixed_assets.contains(&record.asset)
+                && (record.asset != body.asset
+                    || body
+                        .renderers
+                        .iter()
+                        .any(|renderer| renderer.materials.contains(&record.source)))
+        })
         .map(|record| Arc::new(record.clone()))
         .collect();
     let mut textures = Vec::new();
@@ -775,6 +785,11 @@ fn make_material(
             flags |= 1 << bit;
         }
     }
+    let player = record.shader_family == ShaderFamily::PlayerModel;
+    // Source player_model has no keywords. It always clips alpha, also in the caster.
+    if player {
+        flags |= 1 << 9;
+    }
     let mut data = SourceUniform {
         color: Vec4::from_array(
             Color::srgba(
@@ -795,10 +810,10 @@ fn make_material(
             factor("_Cutoff", 0.5),
         ),
         scales: Vec4::new(
-            if record.shader_family == ShaderFamily::StainedGlass {
-                factor("_BumpAmt", 0.)
-            } else {
-                factor("_BumpScale", 1.)
+            match record.shader_family {
+                ShaderFamily::StainedGlass => factor("_BumpAmt", 0.),
+                ShaderFamily::PlayerModel => factor("_BumpStrength", 1.),
+                _ => factor("_BumpScale", 1.),
             },
             factor("_DetailNormalMapScale", 1.),
             factor("_OcclusionStrength", 1.),
@@ -812,7 +827,7 @@ fn make_material(
                 ShaderFamily::UnlitColor => 1,
                 ShaderFamily::StainedGlass => 2,
                 ShaderFamily::AmplifyRope => unreachable!("rope uses its master surface"),
-                ShaderFamily::PlayerModel => unreachable!("inactive player material"),
+                ShaderFamily::PlayerModel => 3,
             },
             factor("_UVSec", 0.) as u32,
         ),
@@ -870,9 +885,6 @@ fn make_material(
             }
         }
     }
-    record
-        .validate_active_use()
-        .expect("validated active material usage");
     let alpha_mode = match record.state.alpha_mode {
         source::AlphaMode::Opaque => AlphaMode::Opaque,
         source::AlphaMode::Mask => AlphaMode::Mask(data.factors.w),
@@ -936,7 +948,8 @@ fn make_material(
                     src: record.state.src_blend,
                     dst: record.state.dst_blend,
                     reflected,
-                    standard: record.shader_family == ShaderFamily::Standard,
+                    // Player model has the Standard pass set: ForwardBase, ForwardAdd and ShadowCaster.
+                    standard: record.shader_family == ShaderFamily::Standard || player,
                     unlit: record.shader_family == ShaderFamily::UnlitColor,
                     transparent: matches!(
                         record.state.alpha_mode,
@@ -1816,11 +1829,6 @@ pub fn bind_materials(
         let Some(base) = originals.get(&handle.0).cloned() else {
             continue;
         };
-        if shadow_mode.is_some_and(|mode| mode.0 == 3) {
-            commands
-                .entity(entity)
-                .insert(bevy::camera::visibility::RenderLayers::none());
-        }
         let material = cache
             .converted
             .entry((handle.0.id(), mask))

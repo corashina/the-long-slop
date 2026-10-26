@@ -4,14 +4,31 @@ import {installGameMode} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
-import {manifestStamp,createSaveStorage} from './save-storage.js';
+import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
+import {createThumbnail} from './thumbnail.js';
+import {createAutosave} from './autosave.js';
+import {readAutosaveToggles} from './save-screen.js';
 export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
-let slider,worldDrawDistance;
+import {installDrivingSettings} from './driving-settings.js';
+import {createGamepad} from './gamepad.js';
+import {installSteeringWheel} from './steering-wheel.js';
+const gamepad=createGamepad(()=>navigator.getGamepads?.());
+let slider,worldDrawDistance,drivingSettings,steeringWheel;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state!=='success'||operation==='remove')return;autosave.reset(performance.now()/1000);if(operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
+const autosave=createAutosave(),autosaveNotice=document.querySelector('#autosave-notice');
+let toggleStorage=null;try{toggleStorage=window.localStorage;}catch{}
+// Toggles change only on the save screen, so read them when play resumes, not every frame.
+let toggles=readAutosaveToggles(toggleStorage),wasPlaying=false,autosaving=false,noticeTimer=0;
+async function runAutosave(){
+ autosaving=true;clearTimeout(noticeTimer);autosaveNotice.textContent='Autosaving...';autosaveNotice.hidden=false;
+ try{const blob=await thumbnail.capture();if(!saveSession.pending)await saveSession.save(AUTOSAVE,blob,{autosave:true});autosaveNotice.hidden=true;}
+ catch(error){autosaveNotice.textContent=error?.message??String(error);noticeTimer=setTimeout(()=>{autosaveNotice.hidden=true;},3000);}
+ finally{autosave.reset(performance.now()/1000);autosaving=false;}
+}
 import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
@@ -53,7 +70,8 @@ window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
 window.sourceInputMetadataBytes=worldInputMetadataBytes;
 const canvas=document.querySelector('#game'),status=document.querySelector('#status'),runtimeError=document.querySelector('#runtime-error');
-const loading=createLoading();
+const loading=createLoading(),thumbnail=createThumbnail(canvas);
+let lastThumbnail=null;
 performance.setResourceTimingBufferSize?.(16000);
 let startupFailureDetails=null,startupDone=false,startupReady=false;
 function fetched(record){
@@ -97,19 +115,23 @@ window.gameSaveResult=(id,kind,payload,error)=>{
 window.gameTypingKeys=()=>input.state.typingKeys();
 window.gameTypedText=buffer=>input.state.takeText(buffer);
 window.gameInventoryKeys=()=>frame.inventoryHeld|(frame.inventoryReleased<<4);
-window.gamePlayerKeys=()=>frame.playerHeld|(frame.playerPressed<<4)|(frame.playerReleased<<8);
+window.gamePlayerKeys=()=>frame.playerHeld|(frame.playerPressed<<8)|(frame.playerReleased<<16);
 window.gameKeys=()=>{frame=input.takeFrame();return frame.held;};
 window.gamePressed=()=>frame.pressed;window.gameReleased=()=>frame.released;
 window.gameMouseX=()=>frame.mouseX;window.gameMouseY=()=>frame.mouseY;window.gameWheel=()=>frame.wheel;
 window.gameDrivingAssists=()=>menu?.takeDrivingAssists()??0;
-window.gameDrivingState=(gear,assists,seated)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);};
+window.gameDrivingSettings=()=>drivingSettings?.take();
+// Rust passes its `GamepadFrame` arrays once per frame.
+window.gameGamepad=(axes,buttons)=>{gamepad.poll();axes.set(gamepad.axes);buttons.set(gamepad.buttons);};
+// `steer` to `handbrake` are the last Rust `DrivingControls`, shown only on the Controls screen.
+window.gameDrivingState=(gear,assists,seated,steer,throttle,brake,clutch,handbrake)=>{window.gameState.gear=gear;window.gameState.drivingAssists=assists;menu?.drivingState(assists);feedback?.drivingState(gear,seated);if(menu?.model.state==='controls')steeringWheel?.live(steer,throttle,brake,clutch,handbrake);};
 window.gameActions=()=>{const a=actions;actions=0;return a;};
 window.gameState = { speedKmh: 0, camera: 'First person', x: 0, y: 0, z: 0, contacts: 0,
   frameSteps: 0, totalSteps: 0, activeSurfaces: 0, colliderCount: 0, absoluteX: 0, absoluteY: 0, absoluteZ: 0,
   originX: 0, originY: 0, originZ: 0, rebases: 0, travelM: 0, preparedRoads: 0, fuelLiters: 0,
-  paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, fluidVolumes:record.quantities };
+  paused: false, started: false, target: '', targetAction: 0, carrying:false, heldItem:'', rpm:0, ignition:false, running:false, starter:false, seated:false, handbrake:true, throwCharge:0, throwActive:false, autosaveSafe:false, fluidVolumes:record.quantities };
 window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, absoluteX, absoluteY, absoluteZ,
-  originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started) => {
+  originX, originY, originZ, rebases, travelM, preparedRoads, fuelLiters, paused, started, autosaveSafe, seated) => {
   const now=performance.now();
   if(lastFrameTime!==null)peakFrameMs=Math.max(peakFrameMs,now-lastFrameTime);
   lastFrameTime=now;
@@ -121,7 +143,12 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   state.originX = originX; state.originY = originY; state.originZ = originZ;
   state.rebases = rebases; state.travelM = travelM; state.preparedRoads = preparedRoads;
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
+  state.autosaveSafe = autosaveSafe; state.seated = seated;
   menu?.sync(started,paused,travelM);
+  const playing=menu?.model.state==='playing';
+  if(playing&&!wasPlaying)toggles=readAutosaveToggles(toggleStorage);
+  wasPlaying=playing;
+  if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending)runAutosave();
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
@@ -179,6 +206,8 @@ async function load(){
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
  configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
  startup.end('manifest');startup.begin('interface');
+ drivingSettings=installDrivingSettings(()=>localStorage,[document.querySelector('#mouse-drive-x'),document.querySelector('#mouse-drive-y')],[document.querySelector('#mouse-drive-x-value'),document.querySelector('#mouse-drive-y-value')],manifest.driving);
+ steeringWheel=installSteeringWheel(document.querySelector('#steering-wheel'),drivingSettings,manifest.driving.steering_wheel,gamepad,callback=>requestAnimationFrame(callback));
  input=createInput(canvas,()=>menu?.model.state==='playing' && document.pointerLockElement===canvas,manifest.driving.bindings,cpuProfile);
  bootstrap.manifestUtf16PayloadBytes=text.length*2;
  status.textContent='Loading interface assets...';
@@ -187,7 +216,7 @@ async function load(){
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,slider,audio,clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconBytes=await readPackageAsset(manifest.lighting.switch_icon.path);
  const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();

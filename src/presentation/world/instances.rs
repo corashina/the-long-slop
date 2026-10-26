@@ -57,6 +57,8 @@ struct Renderer {
     settings: Option<GrassSettings>,
     /// The genie lamp renderer: a private material that takes the lamp emission.
     emissive: bool,
+    /// The renderer node is an enabled Grass displacement writer.
+    writer: bool,
 }
 impl Renderer {
     fn entity(&self) -> Option<Entity> {
@@ -182,6 +184,17 @@ pub struct SourceInstances {
     lods: LodSchedule,
     cache_bytes: usize,
     props: GpuProps,
+    /// Changes when an instance is added or removed.
+    revision: u64,
+    /// `WorldStream::structure_membership` of the last full retirement pass.
+    retire_key: Option<(u64, u64, u64)>,
+    /// Indices of instances whose retirement started.
+    retiring: Vec<usize>,
+    /// Indices of instances that are not ready.
+    not_ready: Vec<usize>,
+    /// Indices of instances with a Grass displacement writer.
+    writer_instances: Vec<usize>,
+    writers_dirty: bool,
 }
 impl SourceInstances {
     pub fn props(&self) -> &GpuProps {
@@ -259,10 +272,13 @@ impl SourceInstances {
     pub(crate) fn has_root(&self, root: Entity) -> bool {
         self.instances.iter().any(|i| i.root == root)
     }
-    pub(crate) fn uses_prototype(&self, source: &crate::reference::SourceId) -> bool {
-        self.instances
-            .iter()
-            .any(|i| i.placement.prototype == *source)
+    /// Changes when an instance is added or removed.
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+    /// Prototype index of each instance.
+    pub(crate) fn prototypes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.instances.iter().map(|i| i.prototype)
     }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
         self.instances.iter().map(|i| i.root)
@@ -288,6 +304,12 @@ impl SourceInstances {
         self.selection.reset(0);
         self.lods.reset();
         self.origin = None;
+        self.revision = self.revision.wrapping_add(1);
+        self.retire_key = None;
+        self.retiring.clear();
+        self.not_ready.clear();
+        self.writer_instances.clear();
+        self.writers_dirty = true;
         self.cache_bytes = self.measure_cache_bytes();
     }
 
@@ -357,12 +379,10 @@ impl SourceInstances {
             if prototypes.requested(source) {
                 continue;
             }
-            let prototype = reference
-                .world
-                .prototypes
-                .iter()
-                .find(|p| p.source == *source)
-                .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
+            let prototype =
+                reference.world.prototypes.get(source).ok_or_else(|| {
+                    ReferenceError("Missing generated structure prototype".into())
+                })?;
             prototypes.request(stream, &prototype.source)?;
         }
         Ok(())
@@ -416,8 +436,7 @@ impl SourceInstances {
             let child = reference
                 .world
                 .prototypes
-                .iter()
-                .find(|p| p.source == placement.prototype)
+                .get(&placement.prototype)
                 .is_some_and(|p| {
                     p.deferred_materials
                         .iter()
@@ -428,8 +447,7 @@ impl SourceInstances {
             let prototype_index = reference
                 .world
                 .prototypes
-                .iter()
-                .position(|p| p.source == placement.prototype)
+                .index(&placement.prototype)
                 .ok_or_else(|| ReferenceError("Missing generated structure prototype".into()))?;
             let prototype = &reference.world.prototypes[prototype_index];
             let admitted = prototypes
@@ -709,14 +727,16 @@ impl SourceInstances {
                                         .get(&mesh)
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
                                         .and_then(bevy::camera::primitives::MeshAabb::compute_aabb);
+                                    let writer =
+                                        reference.world.grass_displacement.writers.iter().any(
+                                            |w| w.enabled && w.transform == source_node.source,
+                                        );
                                     let row = variant_ids.is_empty()
                                         && !emissive
                                         && node.skin.is_none()
                                         && flat.on_root(node.index as usize)
                                         && local.is_some()
-                                        && !reference.world.grass_displacement.writers.iter().any(
-                                            |w| w.enabled && w.transform == source_node.source,
-                                        );
+                                        && !writer;
                                     let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
@@ -790,6 +810,7 @@ impl SourceInstances {
                                             shadow: shadow != 0,
                                             settings: None,
                                             emissive: false,
+                                            writer: false,
                                         });
                                         continue;
                                     }
@@ -985,7 +1006,6 @@ impl SourceInstances {
                                                 Arc::clone(&patches),
                                                 settings,
                                                 handle.clone(),
-                                                view,
                                                 shadow != 0,
                                                 bounds,
                                             )?;
@@ -1007,6 +1027,7 @@ impl SourceInstances {
                                         shadow: shadow != 0,
                                         settings,
                                         emissive,
+                                        writer,
                                     });
                                 }
                             }
@@ -1060,8 +1081,11 @@ impl SourceInstances {
                                 instance.continuation = Some(continuation);
                                 instance.upload = Some(upload);
                                 self.lods.spawn(&mut instance.lod, self.instances.len());
+                                self.not_ready.push(self.instances.len());
                                 self.instances.push(instance);
                                 self.bindings_dirty = true;
+                                self.writers_dirty = true;
+                                self.revision = self.revision.wrapping_add(1);
                             }
                             Err(error) => {
                                 commands.entity(root).despawn();
@@ -1093,10 +1117,17 @@ impl SourceInstances {
                 }
             }
         }
-        for instance in &mut self.instances {
-            if instance.retirement.started()
-                || instance.ready
-                || instance.session != stream.frame().request.session
+        // Visit not ready instances in instance order.
+        self.not_ready.sort_unstable();
+        let mut at = 0;
+        while at < self.not_ready.len() {
+            let instance = &mut self.instances[self.not_ready[at]];
+            if instance.retirement.started() {
+                self.not_ready.remove(at);
+                continue;
+            }
+            at += 1;
+            if instance.session != stream.frame().request.session
                 || !stream
                     .pending_structures()
                     .iter()
@@ -1145,6 +1176,8 @@ impl SourceInstances {
                 instance.ready = true;
                 instance.continuation = None;
                 instance.upload = None;
+                at -= 1;
+                self.not_ready.remove(at);
             }
         }
         Ok(())
@@ -1273,6 +1306,17 @@ impl SourceInstances {
                 }
             }
         }
+        for (body, lights) in stream.trailers() {
+            let Some(owners) = self.bodies.get(&body) else {
+                continue;
+            };
+            let signature = lights.signature();
+            for &index in owners {
+                if self.instances[index].car_signature != signature {
+                    self.selection.push(index);
+                }
+            }
+        }
         let frame = stream.frame();
         let selected = self.selection.len();
         for selected_index in 0..selected {
@@ -1309,6 +1353,14 @@ impl SourceInstances {
             });
             if let Some((_, vehicle)) = car {
                 instance.car_signature = vehicle.presentation_signature();
+            }
+            // The lamp state of a trailer copy.
+            let trailer = prototype.trailer.as_ref().and_then(|record| {
+                let handle = published.bodies.get(record.body as usize)?;
+                Some((record, stream.trailer_lights(*handle)?))
+            });
+            if let Some((_, lights)) = trailer {
+                instance.car_signature = lights.signature();
             }
             if !instance.caps_bound {
                 for cap in content.caps() {
@@ -1431,6 +1483,18 @@ impl SourceInstances {
                     }
                 }
             }
+            // Source `carscript.Transmission`: the lever pose in its parent space.
+            if let Some((record, vehicle)) = car
+                && let (Some(r), Some(lever)) = (&record.lever, &vehicle.lever)
+            {
+                let node = &prototype.nodes[r.node as usize];
+                let pose = Transform {
+                    translation: Vec3::from_array(lever.translation.to_array()),
+                    rotation: Quat::from_array(lever.rotation.to_array()),
+                    scale: Vec3::from_array(node.transform.scale),
+                };
+                instance.write_local(transforms, node.gltf_node as usize, pose, frame.origin)?;
+            }
             if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
                 && let Some(n) = prototype
                     .nodes
@@ -1489,6 +1553,14 @@ impl SourceInstances {
                     && !cobwebs.contains(&i)
                     && car
                         .and_then(|(record, v)| v.node_visible(record, i as u32))
+                        .or_else(|| {
+                            trailer.and_then(|(_, l)| {
+                                l.visibility()
+                                    .iter()
+                                    .find(|(n, _)| *n == i as u32)
+                                    .map(|(_, visible)| *visible)
+                            })
+                        })
                         .unwrap_or(true);
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
@@ -1512,6 +1584,15 @@ impl SourceInstances {
                 let node = renderer.node as u32;
                 let selected = car
                     .and_then(|(record, v)| v.renderer_material(record, node))
+                    .or_else(|| {
+                        let (record, lights) = trailer?;
+                        lights
+                            .materials()
+                            .iter()
+                            .find(|m| m.node == node)
+                            .and_then(|m| m.choice)
+                            .and_then(|c| c.link(&record.lights))
+                    })
                     .or_else(|| {
                         powertrain
                             .gauges()
@@ -1698,55 +1779,40 @@ impl SourceInstances {
         );
     }
     pub fn request_writers(
-        &self,
+        &mut self,
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
         writers: &mut crate::presentation::materials::grass::writers::GrassWriters,
         meshes: &Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
-        for instance in &self.instances {
+        if self.writers_dirty {
+            self.writers_dirty = false;
+            self.writer_instances.clear();
+            for (index, instance) in self.instances.iter().enumerate() {
+                if instance.renderers.iter().any(|r| r.writer) {
+                    self.writer_instances.push(index);
+                }
+            }
+        }
+        // Each request also carries the current writer pose and retries a deferred writer.
+        for &index in &self.writer_instances {
+            let instance = &self.instances[index];
             if instance.retirement.started() {
                 continue;
             }
             let prototype = &reference.world.prototypes[instance.prototype];
-            for renderer in &instance.renderers {
+            for renderer in instance.renderers.iter().filter(|r| r.writer) {
                 let Some(entity) = renderer.entity() else {
                     continue;
                 };
                 let node = &prototype.nodes[renderer.node];
-                if reference
-                    .world
-                    .grass_displacement
-                    .writers
-                    .iter()
-                    .any(|w| w.enabled && w.transform == node.source)
-                {
-                    writers.request(
-                        stream,
-                        entity,
-                        renderer.mesh.clone(),
-                        instance.worlds[node.gltf_node as usize].as_mat4(),
-                        meshes,
-                    )?;
-                }
-            }
-        }
-        Ok(())
-    }
-    pub fn request_grass(
-        &self,
-        stream: &mut WorldStream,
-        grass: &mut GrassJobs,
-        view: GrassView,
-    ) -> Result<(), ReferenceError> {
-        for instance in &self.instances {
-            if instance.retirement.started() {
-                continue;
-            }
-            for renderer in &instance.renderers {
-                if let (Some(_), Some(entity)) = (&renderer.settings, renderer.entity()) {
-                    grass.request_view(stream, entity, view)?;
-                }
+                writers.request(
+                    stream,
+                    entity,
+                    renderer.mesh.clone(),
+                    instance.worlds[node.gltf_node as usize].as_mat4(),
+                    meshes,
+                )?;
             }
         }
         Ok(())
@@ -1760,23 +1826,36 @@ impl SourceInstances {
         grass: &mut GrassJobs,
         writers: &mut crate::presentation::materials::grass::writers::GrassWriters,
     ) -> Result<(), ReferenceError> {
-        let mut index = 0;
-        while index < self.instances.len() {
-            let id = &self.instances[index].placement.id;
+        // Wanted instances change only with the structure lists or the session.
+        let key = stream.structure_membership();
+        if self.retire_key != Some(key) {
+            self.retire_key = Some(key);
             let frame = stream.frame();
-            // A valid cached structure index proves publication without a scan.
-            let published = frame
-                .structures
-                .get(self.instances[index].structure)
-                .is_some_and(|s| &s.placement.id == id);
-            let wanted = self.instances[index].session == frame.request.session
-                && (published
-                    || stream.pending_structures().iter().any(|p| &p.id == id)
-                    || frame.structures.iter().any(|s| &s.placement.id == id));
-            if self.instances[index].retirement.keep(wanted) {
-                index += 1;
-                continue;
+            for (index, instance) in self.instances.iter_mut().enumerate() {
+                if instance.retirement.started() {
+                    continue;
+                }
+                let id = &instance.placement.id;
+                // A valid cached structure index proves publication without a scan.
+                let published = frame
+                    .structures
+                    .get(instance.structure)
+                    .is_some_and(|s| &s.placement.id == id);
+                let wanted = instance.session == frame.request.session
+                    && (published
+                        || stream.pending_structures().iter().any(|p| &p.id == id)
+                        || frame.structures.iter().any(|s| &s.placement.id == id));
+                if !instance.retirement.keep(wanted) {
+                    self.retiring.push(index);
+                }
             }
+        }
+        // Descending order: `swap_remove` on this list only moves a visited entry.
+        self.retiring.sort_unstable();
+        let mut at = self.retiring.len();
+        while at > 0 {
+            at -= 1;
+            let index = self.retiring[at];
             if let Some(parent) = &self.instances[index].continuation {
                 parent.stop_flight();
             }
@@ -1796,15 +1875,24 @@ impl SourceInstances {
                 .retirement
                 .drained(parent_drained, grass_drained)
             {
-                index += 1;
                 continue;
             }
+            self.retiring.swap_remove(at);
+            self.not_ready.retain(|&i| i != index);
             let mut instance = self.instances.swap_remove(index);
             self.lods.remove(&instance.lod);
+            let last = self.instances.len();
             if let Some(moved) = self.instances.get_mut(index) {
                 self.lods.relocate(&mut moved.lod, index);
+                for i in self.retiring.iter_mut().chain(&mut self.not_ready) {
+                    if *i == last {
+                        *i = index;
+                    }
+                }
             }
             self.bindings_dirty = true;
+            self.writers_dirty = true;
+            self.revision = self.revision.wrapping_add(1);
             commands.entity(instance.root).despawn();
             for renderer in instance.renderers {
                 match renderer.target {

@@ -291,7 +291,7 @@ impl InteractionState {
                         None
                     }
                 }
-                SlotTarget::Part(_) => None,
+                SlotTarget::Part(_) | SlotTarget::Hitch(_) => None,
             }
         })
     }
@@ -448,6 +448,11 @@ impl InteractionState {
                 QueryAction::Install if collider.user_data & SLOT_SENSOR_FLAG != 0 => {
                     (collider.user_data as u32).checked_sub(1).map(ItemId)
                 }
+                QueryAction::Install if self.held().is_some_and(|id| self.hitch.is_grip(id)) => {
+                    self.hitch
+                        .collider_target(ColliderId((collider.user_data >> 64) as u32))
+                        .and_then(|target| self.hitch.target_owner(target))
+                }
                 QueryAction::Install => self.tire_slot_owner(handle, physics),
                 QueryAction::Focus => self
                     .tire_slot_owner(handle, physics)
@@ -502,6 +507,15 @@ impl InteractionState {
                     self.parts
                         .slot_target(ColliderId((collider.user_data >> 64) as u32))
                         .map(SlotTarget::Part)
+                })
+                .or_else(|| {
+                    self.hitch
+                        .collider_target(ColliderId((collider.user_data >> 64) as u32))
+                        .filter(|_| {
+                            matches!(action, QueryAction::Install)
+                                && self.held().is_some_and(|id| self.hitch.is_grip(id))
+                        })
+                        .map(SlotTarget::Hitch)
                 }),
         })
     }
