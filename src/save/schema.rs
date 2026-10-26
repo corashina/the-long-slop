@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 24;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 24;
+pub const SAVE_SCHEMA_VERSION: u32 = 25;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 25;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -146,6 +146,8 @@ pub struct BodySnapshot {
 pub struct WorldSnapshot {
     pub generation: crate::world::GenerationSnapshot,
     pub seed: i32,
+    /// The picked start car. Load spawns its start placement.
+    pub start_car: crate::world::StartCar,
     #[serde(with = "super::identity::lossless")]
     pub changes: crate::world::ChangeRecords,
     #[serde(with = "super::identity::lossless")]
@@ -412,7 +414,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 25] {
+        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -423,9 +425,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 24 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 25 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":24}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":25}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

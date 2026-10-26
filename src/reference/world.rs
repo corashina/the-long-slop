@@ -525,6 +525,8 @@ pub struct WorldStartupReference {
     pub pose: Transform,
     /// Fixed placement of this world prototype at `pose`. Helper frames have none.
     pub prototype: Option<SourceId>,
+    /// A start car candidate. `group` is its source start car field. Only the picked one spawns.
+    pub start_car: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

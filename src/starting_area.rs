@@ -2425,7 +2425,12 @@ impl GarageRuntime {
         self.area
             .player
             .align_startup(startup.player_offset, &mut self.physics);
-        let packs = cigarettes::start_pack_poses(reference, startup, self.area.origin)?;
+        let packs = cigarettes::start_pack_poses(
+            reference,
+            self.stream.start_car(),
+            startup,
+            self.area.origin,
+        )?;
         // Source StartDateItems: the pumpkin of a new game in its holiday.
         let h = &reference.acquisition.holiday_startup;
         let pumpkin = if holiday_pumpkin(h.start, h.end, calendar) {

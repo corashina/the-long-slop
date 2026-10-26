@@ -113,20 +113,39 @@ struct ManifestShell<'a> {
 struct WorldShell<'a> {
     #[serde(borrow)]
     draw_distance: &'a serde_json::value::RawValue,
+    #[serde(borrow, skip_serializing)]
+    startup: Vec<StartupShell<'a>>,
+    /// Start car fields in export order. The Game mode start car list shows them.
+    #[serde(skip_deserializing)]
+    start_cars: Vec<&'a str>,
+}
+#[derive(serde::Deserialize)]
+struct StartupShell<'a> {
+    group: &'a str,
+    start_car: bool,
 }
 
 #[wasm_bindgen]
 pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
-    let shell: ManifestShell =
+    let mut shell: ManifestShell =
         serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    shell.world.start_cars = shell
+        .world
+        .startup
+        .iter()
+        .filter(|s| s.start_car)
+        .map(|s| s.group)
+        .collect();
     serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// The Game mode biome from the browser. Values above 3 read as Mixed.
-fn game_mode() -> crate::world::GameMode {
+/// The Game mode from the browser. Biome values above 3 read as Mixed.
+/// The start car is -1 (Random) or an index into the manifest start placements.
+fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
     let biome = game_biome();
     crate::world::GameMode {
         biome: if biome > 3 { 0 } else { biome as u8 },
+        start_car: crate::world::StartCarChoice::from_index(&reference.world, game_start_car()),
     }
 }
 
@@ -145,7 +164,7 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, game_mode(), draw_distance)
+    let mut runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,

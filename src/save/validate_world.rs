@@ -289,7 +289,8 @@ impl SaveSnapshot {
             "Generated carry record",
         )?;
         links(
-            self.world.spawn.context.current_car == crate::world::START_CAR,
+            self.world.start_car.current_car(reference).ok()
+                == Some(self.world.spawn.context.current_car),
             "Selected source spawn car",
         )?;
         for record in &self.attachments.parts {

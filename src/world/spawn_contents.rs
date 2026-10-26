@@ -223,6 +223,9 @@ impl<'a> SpawnEvaluation<'a> {
                 }
             }
         }
+        // A catalog item without a prototype runs its start rules but does not spawn,
+        // such as a start-only car whose root is a prototype of a start placement.
+        let mut spawns = true;
         let target = if let Some(target) = optional(row, "G")? {
             Some(target)
         } else if selected.is_some() {
@@ -237,8 +240,10 @@ impl<'a> SpawnEvaluation<'a> {
             if let Some(item) = item {
                 self.note_selection(item);
             }
-            item.and_then(|i| reference.catalog.items.get(i))
-                .map(|i| &i.source)
+            item.and_then(|i| reference.catalog.items.get(i)).map(|i| {
+                spawns = i.prototype.is_some();
+                &i.source
+            })
         } else {
             None
         };
@@ -297,11 +302,12 @@ impl<'a> SpawnEvaluation<'a> {
                     (fluid, tanks, ammo) = self.random_spawned(save, &row)?;
                 }
                 self.start_save(&child, save, 0)?;
-                if self
-                    .reference
-                    .prototypes
-                    .iter()
-                    .any(|p| p.source == child.prototype)
+                if spawns
+                    && self
+                        .reference
+                        .prototypes
+                        .iter()
+                        .any(|p| p.source == child.prototype)
                 {
                     self.push(SpawnedContent {
                         inputs: super::spawn_state::SpawnInitialization::default(),
