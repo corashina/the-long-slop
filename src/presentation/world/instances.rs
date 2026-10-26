@@ -1413,6 +1413,18 @@ impl SourceInstances {
                     }
                 }
             }
+            // Source `carscript.Transmission`: the lever pose in its parent space.
+            if let Some((record, vehicle)) = car
+                && let (Some(r), Some(lever)) = (&record.lever, &vehicle.lever)
+            {
+                let node = &prototype.nodes[r.node as usize];
+                let pose = Transform {
+                    translation: Vec3::from_array(lever.translation.to_array()),
+                    rotation: Quat::from_array(lever.rotation.to_array()),
+                    scale: Vec3::from_array(node.transform.scale),
+                };
+                instance.write_local(transforms, node.gltf_node as usize, pose, frame.origin)?;
+            }
             if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
                 && let Some(n) = prototype
                     .nodes

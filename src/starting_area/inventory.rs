@@ -539,10 +539,15 @@ impl GarageRuntime {
             &self.physics,
             self.needs_output(),
         );
+        let mut look_input = input;
+        if self.driving_input.mouse_owned() {
+            // Source `inputscript.mouseDrive`: mouse look axes read zero.
+            look_input.mouse = [0.; 2];
+        }
         let mut fixed_input =
             self.area
                 .interaction
-                .route_frame_input(input, &available, &self.area.player);
+                .route_frame_input(look_input, &available, &self.area.player);
         let view_recentering = context.seated && context.carried.is_none();
         if !view_recentering {
             fixed_input.held &= !keys::RECENTER;

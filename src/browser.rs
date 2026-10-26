@@ -301,6 +301,9 @@ extern "C" {
     pub fn game_actions() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingAssists)]
     pub fn game_driving_assists() -> u32;
+    /// Pending `DrivingSettings` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
+    pub fn game_driving_settings() -> Option<String>;
     #[wasm_bindgen(js_namespace = window, js_name = gameBiome)]
     pub fn game_biome() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]

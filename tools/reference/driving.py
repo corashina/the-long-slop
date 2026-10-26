@@ -6,10 +6,10 @@ from .source import key, source_id
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 DECOMPILED_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 ACTIONS = {'clutch':'clutch', 'shift_up':'shiftup', 'shift_down':'shiftdown', 'reverse':'gearr',
-    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}}
+    'neutral':'gearn', **{f'gear{i}':f'gear{i}' for i in range(1,7)}, 'mouse_drive':'togglemousedrive'}
 KEY_CODES = {'LeftControl':'ControlLeft', 'RightControl':'ControlRight', 'UpArrow':'ArrowUp',
     'DownArrow':'ArrowDown', 'KeypadPlus':'NumpadAdd', 'KeypadMinus':'NumpadSubtract',
-    'R':'KeyR', 'N':'KeyN', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
+    'R':'KeyR', 'N':'KeyN', 'U':'KeyU', **{f'Alpha{i}':f'Digit{i}' for i in range(7)},
     **{f'Keypad{i}':f'Numpad{i}' for i in range(7)}}
 
 
@@ -68,6 +68,80 @@ def checked_methods(source):
     return bodies, evidence, float(minimum[1]), text
 
 
+LEVER_FIELDS = {'seconds':'TransmissionLerp', 'stage1':'transmissionStage1', 'stage2':'transmissionStage2'}
+LEVER_LERPS = [f'Transmission.{part} = {kind}.Lerp(Transmission.{part}, gears[{gear} + 1].{target}.{part}, transMissionLerp3);'
+    for gear,target in (('lastgear','Path'),('gear','Path'),('gear','Pos'))
+    for part,kind in (('position','Vector3'),('rotation','Quaternion'))]
+
+
+def lever_constants(text):
+    """carscript lever timing from the private field initializers."""
+    values = {}
+    for name,field in LEVER_FIELDS.items():
+        match = re.search(rf'private float {field} = ([\d.]+)f;', text)
+        if match is None:raise ValueError(f'Missing lever constant: {field}')
+        values[name] = float(match[1])
+    if any(line not in text for line in LEVER_LERPS):raise ValueError('Lever lerp source differs')
+    return values
+
+
+def recover_lever(source, car_reader, car, root, node_ids):
+    """carscript.Transmission and gear Path/Pos, posed in the lever parent space, or None
+    when the car has no lever. `node_ids` maps source Transform keys to prototype node indices.
+    The source writes world poses. The runtime writes the node local pose."""
+    from .collision import world_pose
+    from .particles import relative_pose
+    lever = source.resolve(car_reader, car['Transmission'])
+    if lever is None:return None
+    def inside(reader):
+        while reader is not None:
+            if key(reader)==key(root):return True
+            reader = source.resolve(reader, source.read(reader)['m_Father'])
+        return False
+    parent = source.resolve(lever, source.read(lever)['m_Father'])
+    if parent is None or not inside(parent):raise ValueError(f'Lever parent is outside the car: {source_id(lever)}')
+    if key(lever) not in node_ids:raise ValueError(f'Missing lever node: {key(lever)}')
+    scale = world_pose(source, parent)['scale']
+    if max(scale)-min(scale) > 1e-5 * max(abs(v) for v in scale):raise ValueError(f'Lever parent scale is not uniform: {source_id(lever)}')
+    def pose(pointer):
+        reader = source.resolve(car_reader, pointer)
+        if reader is None:raise ValueError(f'Missing lever gear pose: {source_id(car_reader)}')
+        if not inside(reader):raise ValueError(f'Lever gear pose is outside the car: {source_id(car_reader)}')
+        value = relative_pose(source, reader, parent)
+        value['translation'] = [v/scale[0] for v in value['translation']]
+        return value
+    return {'node':node_ids[key(lever)], 'gears':[{'path':pose(g['Path']), 'pos':pose(g['Pos'])} for g in car['gears']]}
+
+
+MOUSE_DRIVE_LINES = ['currentMouseSteer = Mathf.Clamp(currentMouseSteer + Input.GetAxis("Mouse X") * 0.0125f * 0.25f * settingsscript.s.S.FMouseDriveSensX, -1f, 1f);',
+    'currentMouseGas = Mathf.Clamp(currentMouseGas + Input.GetAxis("Mouse Y") * 0.0125f * settingsscript.s.S.FMouseDriveSensY, -1f, 1f);']
+
+
+def slider_range(source, settings_reader, settings, index):
+    """slidersettingscript value range: clamp to minValue..maxValue, then GetValue multiplies."""
+    reader = source.resolve(settings_reader, settings['tabControls']['sliders'][index])
+    if reader is None:raise ValueError(f'Unresolved control slider: {index}')
+    value = source.read(reader)
+    multiplier = value['valueMultipler'] if value['valueMultipler'] else 1.
+    if not value['minValue'] <= value['defValue'] <= value['maxValue']:raise ValueError(f'Control slider default outside range: {index}')
+    return {'default':value['defValue']*multiplier, 'minimum':value['minValue']*multiplier, 'maximum':value['maxValue']*multiplier}, reader
+
+
+def recover_bindings(text, defaults):
+    """inputscript.IN default keys from InitDefault, by enum index."""
+    enum = re.search(r'public enum IN\s*\{([^}]+)\}',text)
+    if enum is None:raise ValueError('Missing driving input enum')
+    names=[name.strip() for name in enum[1].split(',') if name.strip()]
+    bindings=[];evidence=[]
+    for action,name in ACTIONS.items():
+        index=names.index(name)
+        keys=re.findall(rf'defaultInput\[{index}\]\.keys\[\d+\]\.Set\(KeyCode\.(\w+)\);',defaults)
+        if not keys:raise ValueError(f'Unresolved driving input: {name}')
+        bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
+        evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
+    return bindings, evidence
+
+
 def car_driving(car):
     """Per-car startup gear and transmission flags of one carscript."""
     initial=car['gear']+1
@@ -106,6 +180,7 @@ def wheel_graphics(source, nodes, road):
 def recover_driving(source):
     """Resolve the shared driving controls; fail on missing records or links."""
     bodies, methods, minimum, text = checked_methods(source)
+    constants = lever_constants(text)
     drive = bodies['public void DriveStuff()']
     rates = [float(value) for value in re.findall(r'B(?:Gas|Brake|Clutch) = Mathf.MoveTowards\([^;]+Time.deltaTime \* ([\d.]+)f\);',drive)]
     if len(rates)!=3 or len(set(rates))!=1:raise ValueError('Driving pedal rates differ')
@@ -135,23 +210,18 @@ def recover_driving(source):
     if slider is None:raise ValueError('Unresolved steering slider')
     steering=source.read(slider)
     steering_rate=steering['defValue']*(steering['valueMultipler'] if steering['valueMultipler'] else 1.)
-    enum = re.search(r'public enum IN\s*\{([^}]+)\}',text)
-    if enum is None:raise ValueError('Missing driving input enum')
-    names=[name.strip() for name in enum[1].split(',') if name.strip()]
-    defaults=bodies['private void InitDefault()']
-    bindings=[];binding_evidence=[]
-    for action,name in ACTIONS.items():
-        index=names.index(name)
-        keys=re.findall(rf'defaultInput\[{index}\]\.keys\[\d+\]\.Set\(KeyCode\.(\w+)\);',defaults)
-        if not keys:raise ValueError(f'Unresolved driving input: {name}')
-        bindings.append({'action':action,'codes':[KEY_CODES[value] for value in keys]})
-        binding_evidence.append({'action':action,'source_input':name,'index':index,'keys':keys})
+    if any(line not in drive for line in MOUSE_DRIVE_LINES):raise ValueError('Mouse driving source differs')
+    mouse_x,mouse_x_slider=slider_range(source,settings_reader,settings,8)
+    mouse_y,mouse_y_slider=slider_range(source,settings_reader,settings,9)
+    bindings,binding_evidence=recover_bindings(text,bodies['private void InitDefault()'])
     global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'keyboard_steering_rate':steering_rate, 'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
-            'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings}
+            'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings,
+        'mouse_drive':{'sensitivity_x':mouse_x,'sensitivity_y':mouse_y},
+        'lever':{'seconds':constants['seconds'],'stages':[constants['stage1'],constants['stage2']]}}
     return {'global':global_record,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,
-            'steering_source':source_id(slider),'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
+            'steering_source':source_id(slider),'mouse_drive_sources':[source_id(mouse_x_slider),source_id(mouse_y_slider)],'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},
             'startup':'FStart -> LoadSettings -> ResetSettings(true) -> DoReset (one yielded frame) -> tab.PressedReset -> togglesetting.ResetToDefault -> ResetCustomRadioPath -> OnChangedAnything -> RefreshSettings. The settled fresh reset applies true/true; serialized S contains true/false. Static source evidence, without a native startup measurement.',
             'shift_sounds':'Private bool has no initializer or assignment; CLR startup value is false.'}}

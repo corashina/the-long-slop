@@ -83,6 +83,11 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #driving-assists input {margin:0;width:20px;height:20px;accent-color:#b48046;}
 #driving-assists input:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #driving-assists label:has(input:disabled) {opacity:.45;cursor:default;}
+#mouse-driving {border:0;margin:0 0 24px;padding:0;font-size:18px;text-shadow:2px 2px 2px #000;}
+#mouse-driving legend {margin-bottom:8px;}
+#mouse-driving label {display:flex;align-items:center;gap:12px;min-height:44px;}
+#mouse-driving input {flex:1;min-width:0;accent-color:#b48046;}
+#mouse-driving output {min-width:3em;}
 #driving-gear {position:absolute;left:50%;bottom:96px;margin:0;transform:translateX(-50%);font-size:18px;font-variant-numeric:tabular-nums;}
 #inventory{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:6px}
 #inventory>div{position:relative;width:58px;height:58px;border:1px solid #888;background:#0008;box-sizing:border-box}
