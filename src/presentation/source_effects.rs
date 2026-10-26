@@ -132,6 +132,7 @@ pub fn install(app: &mut App) {
             (
                 encode_ao
                     .in_set(SourceSurfaceStage::AfterOpaque)
+                    .after(super::depth_resolve::resolve)
                     .run_if(super::frame_graph::surface_ready)
                     .run_if(super::shadow_queue::collector_encoded),
                 encode_post

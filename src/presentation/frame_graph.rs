@@ -199,11 +199,12 @@ impl Plugin for SourceFramePlugin {
                 SourceSurface,
                 (
                     clear_capture
-                        .before(SourceSurfaceStage::CameraDepth)
+                        .before(SourceSurfaceStage::Opaque)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::graph_ready),
                     render_capture_sky
                         .in_set(SourceSurfaceStage::AfterOpaque)
+                        .after(super::depth_resolve::resolve)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::collector_encoded),
                     super::shadow_atlas::render_atlas
@@ -754,7 +755,6 @@ fn finish_surface(
         &super::shadow_collector::CollectorView,
         &super::source_lighting::SourceViewLighting,
         &super::shadow_phase::ShadowDrawState,
-        &super::camera_depth::CameraDepthState,
         &super::surface_graph::SurfaceViewTargets,
         &super::stained_glass::SourceGlassView,
     )>,
@@ -768,7 +768,7 @@ fn finish_surface(
     status: Res<RendererStateHandle>,
     mut context: RenderContext,
 ) {
-    let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
+    let (source, target, collector, lighting, shadow, targets, glass) = view.into_inner();
     if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
@@ -780,7 +780,6 @@ fn finish_surface(
     state.audit.views[source.index] = ViewAudit {
         frame: frame.frame,
         glass: glass.audit(),
-        camera_depth: depth.counts(),
         surface: lighting.draws(),
         surface_instances: lighting.instances(),
         shadow_epoch,
@@ -980,7 +979,6 @@ fn submitted(
 struct ViewAudit {
     frame: u32,
     glass: super::stained_glass::GlassAudit,
-    camera_depth: [u32; 3],
     surface: [u32; 5],
     surface_instances: [u32; 4],
     shadow_epoch: u32,
