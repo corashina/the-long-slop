@@ -118,12 +118,21 @@ Run the X05 part 1 test pass on Tomasz's PC:
 3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 4. Old saves do not load (save schema 23).
 
+Run the X04b test pass (save slots, autosave) in the same run:
+
+1. Run `cargo test --lib x04b -- --ignored`.
+2. Save under two names. Each tile shows a game thumbnail (WebGPU canvas copy), date, seed, km and version.
+3. Overwrite, Load and Delete ask Yes/No in game. Load last loads the newest save.
+4. Play 2 minutes on foot. The autosave tile appears. Check the F3 frame cost of the autosave frame.
+5. Turn on "Load last save at start" and reload the page. The last save loads.
+6. Old saves do not load (save schema 24).
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
+| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |
