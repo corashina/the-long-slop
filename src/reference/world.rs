@@ -151,6 +151,7 @@ pub struct WorldPrototypeReference {
     pub prefab_pose: Transform,
     #[serde(default, deserialize_with = "compact_vec")]
     pub interiors: Vec<WorldInteriorReference>,
+    pub sled: Option<SledReference>,
 }
 
 impl WorldPrototypeReference {
@@ -191,6 +192,89 @@ pub struct WorldInteriorReference {
     pub invert_doors: Vec<bool>,
     pub parent_door: Option<SourceId>,
     pub method: super::AudioMethod,
+}
+
+/// Source `szankoScript` of a world prototype. Node and body values are prototype indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SledReference {
+    pub source: SourceId,
+    /// `rb`, or the Rigidbody of the script object.
+    pub body: u32,
+    pub slide_above_mass: f32,
+    pub move_force: f32,
+    pub max_speed: f32,
+    pub velocity_forward_lerp: f32,
+    pub turn_force: f32,
+    pub angular_velocity_lerp: f32,
+    pub sound_min_speed: f32,
+    pub sound_max_speed: f32,
+    pub sound_max_volume: f32,
+    pub sound_pitch_min_speed: f32,
+    pub sound_pitch_max_speed: f32,
+    pub sound_min_pitch: f32,
+    pub sound_max_pitch: f32,
+    pub wheels: Vec<SledWheelReference>,
+    /// `cols`: prototype colliders that become triggers while the sled is in use.
+    pub colliders: Vec<SourceId>,
+    /// `seats`: main seatscript sources, as `WorldSeatReference::source`.
+    pub seats: Vec<SourceId>,
+    pub audio_source: SourceId,
+    /// Audio clip id of the `source` clip.
+    pub clip: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SledWheelReference {
+    pub source: SourceId,
+    pub node: u32,
+    pub collider: super::WheelColliderReference,
+}
+
+impl SledReference {
+    fn valid(&self, p: &WorldPrototypeReference) -> bool {
+        finite(&[
+            self.slide_above_mass,
+            self.move_force,
+            self.max_speed,
+            self.velocity_forward_lerp,
+            self.turn_force,
+            self.angular_velocity_lerp,
+            self.sound_min_speed,
+            self.sound_max_speed,
+            self.sound_max_volume,
+            self.sound_pitch_min_speed,
+            self.sound_pitch_max_speed,
+            self.sound_min_pitch,
+            self.sound_max_pitch,
+        ]) && self.slide_above_mass >= 0.
+            && self.move_force >= 0.
+            && self.max_speed >= 0.
+            && self.velocity_forward_lerp >= 0.
+            && self.angular_velocity_lerp >= 0.
+            && self.sound_min_speed >= 0.
+            && self.sound_max_speed >= self.sound_min_speed
+            && self.sound_max_volume >= 0.
+            && self.sound_pitch_min_speed >= 0.
+            && self.sound_pitch_max_speed >= self.sound_pitch_min_speed
+            && self.sound_min_pitch > 0.
+            && self.sound_max_pitch >= self.sound_min_pitch
+            && p.bodies
+                .get(self.body as usize)
+                .is_some_and(|b| b.center_of_mass.is_some())
+            && !self.wheels.is_empty()
+            && self
+                .wheels
+                .iter()
+                .all(|w| (w.node as usize) < p.nodes.len() && w.collider.valid())
+            && self
+                .colliders
+                .iter()
+                .all(|s| p.colliders.iter().any(|c| &c.source == s))
+            && !self.seats.is_empty()
+            && self.clip > 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1668,6 +1752,13 @@ impl WorldReference {
                 require(collider_valid(shape), &f)?;
             }
         }
+        require(
+            p.bodies
+                .iter()
+                .all(|b| b.center_of_mass.is_none_or(|c| finite(&c)))
+                && p.sled.as_ref().is_none_or(|sled| sled.valid(p)),
+            &field(&p.source, "prototype sled/center of mass"),
+        )?;
         let doors: Vec<_> = self
             .mechanisms
             .iter()
@@ -1782,6 +1873,8 @@ pub struct WorldPrototypeBody {
     pub use_gravity: bool,
     pub constraints: u32,
     pub pose: Transform,
+    /// `setcenterofmass`: `T.localPosition` in the body frame.
+    pub center_of_mass: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

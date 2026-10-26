@@ -30,6 +30,14 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(part_scope([{'maintipus': [1], 'tipus': [2]}], slots, []), (['s'], []))
         self.assertEqual(part_scope([], slots, []), ([], []))
 
+    def test_sled_values_stop_on_a_missing_value(self):
+        from tools.reference.sled import VALUES, LINKS, sled_values
+        data = {**{field: 1. for field in VALUES}, **{field: None for field in LINKS}}
+        self.assertEqual(sled_values(data)['slide_above_mass'], 1.)
+        for field in ('soundMaxPitch', 'cols'):
+            with self.assertRaises(ValueError): sled_values({k: v for k, v in data.items() if k != field})
+        with self.assertRaises(ValueError): sled_values({**data, 'maxSpeed': None})
+
 
 class LightCookieTests(unittest.TestCase):
     def test_world_light_cookie_binds_to_lighting_spot_cookie(self):

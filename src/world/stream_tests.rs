@@ -9,6 +9,8 @@ mod garage_controls;
 mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
+#[path = "stream_tests/sled.rs"]
+mod sled;
 
 use super::*;
 use crate::starting_area::GarageRuntime;

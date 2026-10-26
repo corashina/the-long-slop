@@ -1,5 +1,5 @@
-use crate::reference::SeatId;
 use crate::simulation::{FIXED_DT, keys};
+use rapier3d::prelude::RigidBodyHandle;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DrivingControls {
@@ -14,7 +14,8 @@ pub struct KeyboardDriving {
     controls: DrivingControls,
     steering_increment: f32,
     pedal_increment: f32,
-    seat: Option<SeatId>,
+    /// The body of the seat that takes the input: the car chassis or the item body.
+    seat: Option<RigidBodyHandle>,
 }
 
 impl KeyboardDriving {
@@ -32,7 +33,7 @@ impl KeyboardDriving {
         self.seat = None;
     }
 
-    pub fn step(&mut self, seat: Option<SeatId>, held: u32) -> DrivingControls {
+    pub fn step(&mut self, seat: Option<RigidBodyHandle>, held: u32) -> DrivingControls {
         if self.seat != seat {
             self.clear();
             self.seat = seat;

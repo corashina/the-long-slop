@@ -1516,6 +1516,7 @@ pub enum AudioKind {
     MeleeHit = 17,
     MetalDetector = 18,
     AmbienceZone = 19,
+    Sled = 20,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
