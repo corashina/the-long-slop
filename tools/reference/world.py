@@ -707,6 +707,8 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
+        # The runtime receipts check runs before audio.recover_audio replaces the clip source.
+        if sled:selected.receipt(source.get(sled['clip']['file'],sled['clip']['path_id']))
         for node in hierarchy:
             for component in node['components']:
                 if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass'):selected.record(component)
