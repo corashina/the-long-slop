@@ -412,7 +412,7 @@ pub(crate) fn spawn(
         if state.gear >= record.gear_ratios.len() {
             return Err(ReferenceError("Saved car gear is out of range".into()));
         }
-        runtime.restore(&state);
+        runtime.restore(record, &state);
     }
     let saved = changes.take_wheel_slots(&key);
     if saved

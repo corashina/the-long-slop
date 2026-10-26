@@ -54,6 +54,8 @@ pub mod small_items;
 pub use small_items::*;
 pub mod melee;
 pub use melee::*;
+pub mod breakables;
+pub use breakables::*;
 pub mod wheel_effects;
 pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
@@ -80,6 +82,8 @@ pub mod lighting;
 pub use lighting::*;
 pub mod vehicles;
 pub use vehicles::*;
+pub mod towing;
+pub use towing::*;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
@@ -853,6 +857,8 @@ pub struct ReferenceManifest {
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
     pub melee: MeleeReference,
+    pub breakables: Vec<BreakableReference>,
+    pub gib_constants: GibConstants,
     pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
@@ -1060,7 +1066,7 @@ impl ReferenceManifest {
                 .filter(|a| a.usage == AssetUsage::PlayerPrototype)
                 .count()
                 == 1,
-            "exactly one inactive player asset",
+            "exactly one player asset",
         )?;
         require(
             self.library.schema_version == 1
@@ -1832,6 +1838,11 @@ impl ReferenceManifest {
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
         self.melee.validate(self)?;
+        ids(self.breakables.iter().map(|b| &b.source), "breakable sources")?;
+        for breakable in &self.breakables {
+            breakable.validate(self)?;
+        }
+        self.gib_constants.validate()?;
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())

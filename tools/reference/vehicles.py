@@ -5,7 +5,7 @@ Ids are local to one world prototype: node, body and collider indices.
 import math
 from .source import key, source_id
 from .wheels import wheel_collider_record
-from .driving import car_driving, road_wheels, hub_record, wheel_graphics
+from .driving import car_driving, road_wheels, hub_record, wheel_graphics, recover_lever
 from .instruments import instrument_record, gauge_limits, Meters
 from .lighting import vehicle_light_links, vehicle_states
 from .particles import recover_exhaust
@@ -69,6 +69,10 @@ def dry_mass(source, components) -> float:
     """massScript mass of one node. The runtime adds tank fluids at 1 kg per liter."""
     return sum(source.read(r)['mass'] for r in components
         if r.type.name=='MonoBehaviour' and source.class_name(r)=='massScript')
+
+
+# carscript player body frames while driving.
+DRIVE_FRAMES=(('left_hand','LHDrivePos'),('right_hand','RHDrivePos'),('left_leg','LLDrivePos'),('right_leg','RLDrivePos'))
 
 
 def seat_fields(source, reader, value, car_reader) -> dict:
@@ -170,9 +174,10 @@ def material_link(source, owner, pointer, asset, material_indices):
 
 
 def light_records(source, proto, car_reader, car, asset, material_indices):
-    """headlightscript and rearlights controllers and the light switch of one car prototype."""
+    """headlightscript and rearlights controllers and the light switch of one car or trailer prototype."""
     scripts=[c for n in proto.hierarchy for c in n['components'] if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']]
-    routes,switches=vehicle_light_links(source,scripts,car_reader)
+    # A trailer has no carscript: no cabin routes, no switch and no electronics.
+    routes,switches=vehicle_light_links(source,scripts,car_reader) if car_reader else ({},[])
     if len(switches)>1:raise ValueError(f'{key(car_reader)} has more than one light switch')
     def lights(owner,pointers):
         result=[]
@@ -194,9 +199,10 @@ def light_records(source, proto, car_reader, car, asset, material_indices):
         def intensity(pointers,reader=reader):
             found=lights(reader,pointers)
             return source.read(found[0])['m_Intensity'] if found else 0.
-        electronics=car['electronics'] if kind=='rear' else f.get('electronics',{'m_PathID':0})
+        if kind=='rear':owner,electronics=(car_reader,car['electronics']) if car_reader else (reader,{'m_PathID':0})
+        else:owner,electronics=reader,f.get('electronics',{'m_PathID':0})
         record={'source':source_id(reader),'kind':kind,'node':node,
-            'electronics':proto.link(car_reader if kind=='rear' else reader,electronics),
+            'electronics':proto.link(owner,electronics),
             'startup_on':bool(f.get('ON',False)),'current_state':f.get('currentState',0),'requested_state':f.get('switchToState',0),
             'energy':f.get('energy',1.),'energy_move':f.get('energyMove',0.),'enabled':bool(f['m_Enabled']),
             'reverse_switch':bool(f.get('reverseSwitch',False)),'states':vehicle_states(f,kind,state,intensity),'cabin':None}
@@ -234,7 +240,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     cars=[c for i,c in proto.scripts('carscript') if i==0]
     if not cars:return None
     car_reader=cars[0];car=source.read(car_reader)
-    if car['speedBasedKeyboardSens'] or car['keySteerSensMultiplier']!=0:
+    if car['speedBasedKeyboardSens']:
         raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     rigidbody=source.resolve(car_reader,car['RB'])
     body=next((i for i,b in enumerate(bodies) if b['source']==source_id(rigidbody)),None) if rigidbody else None
@@ -283,7 +289,10 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),
-        'seats':seats,'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
+        # inputscript.DriveStuff uses the multiplier only when it is not zero.
+        'key_steer_multiplier':car['keySteerSensMultiplier'],
+        'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

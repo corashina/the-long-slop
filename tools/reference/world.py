@@ -13,6 +13,7 @@ from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
 from .sled import centers_of_mass, recover_sled
+from .towing import recover_hitches, recover_trailer
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
 WORLD_DATABASE_ID = 66024
@@ -33,14 +34,16 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Digging and detection (W06): metal detector.
     'metalDetectorScript',
     # Power cables (W04): rope segments and their pole targets.
-    'ropeScript'}
+    'ropeScript',
+    # Towing (V05): the trailer grip spawns at Start.
+    'attachgripscript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
 
-VEHICLE_CLASSES = {'carscript','utanfutoscript'}
+VEHICLE_CLASSES = {'carscript'}
 # The StartCar02 prefab.
 LADA = ('sharedassets1.assets',82556)
 # Catalog categories whose car items export and spawn from pools.
@@ -82,7 +85,7 @@ def script_classes(source, nodes):
 
 def car_prototypes(source, catalog):
     """The car roots that export as world prototypes, and the start-only roots that pools do not spawn.
-    Cars: the Lada, the CAR_CATEGORIES pools and the CAR_ITEMS. A root with utanfutoscript (a trailer) stays other_vehicle."""
+    Cars: the Lada, the CAR_CATEGORIES pools and the CAR_ITEMS. A trailer root (utanfutoscript) has no carscript and exports as a world prototype too."""
     cars={LADA};start_only=set()
     def root(item):
         return _source_root(source,source.get(item['source']['file'],item['source']['path_id']))
@@ -90,11 +93,11 @@ def car_prototypes(source, catalog):
         for index in category_items(catalog,name):
             target=root(catalog['items'][index])
             classes=script_classes(source,source.hierarchy(target))
-            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(target))
+            if 'carscript' in classes:cars.add(key(target))
     for name,pool in CAR_ITEMS.items():
         target=root(catalog_item(catalog,name))
         classes=script_classes(source,source.hierarchy(target))
-        if 'carscript' not in classes or 'utanfutoscript' in classes:
+        if 'carscript' not in classes:
             raise ValueError('{}:{} item {}: root is not a car'.format(*key(target),name))
         cars.add(key(target))
         if not pool:start_only.add(key(target))
@@ -437,6 +440,10 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                 if component.type.name in ('MeshRenderer','SkinnedMeshRenderer','MeshFilter','LODGroup','Light'):selected.record(component)
                 if component.type.name!='MonoBehaviour':continue
                 cname=source.class_name(component)
+                if cname=='attachgripscript':
+                    # attachgripscript.Start instantiates GripPrefab: the grip is its own prototype.
+                    prefab=source.resolve(component,source.read(component)['GripPrefab'])
+                    if prefab:add(prefab,'nested')
                 if cname in RULE_CLASSES or key(component) in EDIBLE_COMPONENTS:
                     rule=selected.record(component)
                     selected.record(node['reader'])
@@ -811,14 +818,18 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
+        from .vehicles import Prototype, light_records
+        trailer=recover_trailer(source,hierarchy,mapping,bodies,lambda transform:world_pose(local,transform)['translation'],
+            lambda:light_records(source,Prototype(source,hierarchy),None,None,index,report['material_indices'])[0])
         for node in hierarchy:
             for component in node['components']:
-                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass'):selected.record(component)
+                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass','utanfutoscript','attachTargetscript','attachablescript'):selected.record(component)
                 selected.component_record(component)
         prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled}
+            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,
+            'trailer':trailer,'hitches':recover_hitches(source,hierarchy,mapping,colliders)}
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle

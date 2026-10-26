@@ -45,6 +45,17 @@ pub(crate) struct Drive {
     last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
+impl Drive {
+    /// Player body pose at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self) -> VehiclePose {
+        let mut pose = self.runtime.area.player.body_pose(&self.runtime.physics);
+        for i in 0..3 {
+            pose.position[i] += self.rendered.position[i] - self.current.position[i];
+        }
+        pose
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct FeedbackStamp {
     actions: u32,
@@ -265,7 +276,11 @@ pub fn run(
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
-                presentation::spawned::sync,
+                (
+                    presentation::spawned::sync,
+                    presentation::player_body::sync,
+                )
+                    .chain(),
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
@@ -305,6 +320,7 @@ fn setup(
 ) {
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
+    commands.insert_resource(presentation::player_body::PlayerBody::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {
@@ -555,6 +571,7 @@ fn read_input(
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     let runtime = &drive.runtime;
     let assists = runtime.driving_assists;
+    let controls = runtime.driving_input.controls;
     game_driving_state(
         runtime
             .vehicle
@@ -562,15 +579,20 @@ fn read_input(
             .map_or(0, |key| runtime.vehicles[key].drivetrain.gear() as i32 - 1),
         assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
         runtime.area.player.driving(),
+        controls.steer,
+        controls.throttle,
+        controls.brake,
+        controls.clutch,
+        controls.handbrake,
     );
     let actions = game_actions();
     let held = game_keys();
     let player = game_player_keys();
-    let frame = FrameInput {
+    let mut frame = FrameInput {
         held,
-        player_held: player as u8 & 15,
-        player_pressed: (player >> 4) as u8 & 15,
-        player_released: (player >> 8) as u8 & 15,
+        player_held: player as u8,
+        player_pressed: (player >> 8) as u8,
+        player_released: (player >> 16) as u8,
         pressed: game_pressed(),
         released: game_released(),
         inventory_held: game_inventory_keys() as u8 & 15,
@@ -579,9 +601,12 @@ fn read_input(
             game_mouse_x() * reference.0.player.look_sensitivity[0],
             game_mouse_y() * reference.0.player.look_sensitivity[1],
         ],
+        drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
+        gamepad: crate::simulation::GamepadFrame::default(),
     };
+    game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
     if requests.pending() {
         if cpu_profile::enabled() {
             game_cpu_clear_input();
@@ -618,6 +643,14 @@ fn read_input(
                 automatic_gears: requested & 2 != 0,
             });
     }
+    // The browser validates stored settings. A refused value keeps the current settings.
+    if let Some(settings) = game_driving_settings()
+        && let Ok(settings) =
+            serde_json::from_str::<crate::simulation::input::DrivingSettings>(&settings)
+        && settings.valid(&reference.0.driving)
+    {
+        drive.runtime.driving_input.settings = settings;
+    }
     if !drive.ready || !drive.runtime.started || drive.runtime.paused {
         drive.input.clear();
         if cpu_profile::enabled() {
@@ -625,6 +658,8 @@ fn read_input(
         }
         drive.frame_input.clear();
         drive.runtime.clear_input();
+        // The Controls screen shows the pad axes while the game is paused.
+        drive.runtime.driving_input.preview(&frame.gamepad);
         return;
     }
     if actions & 22 != 0 {
@@ -962,6 +997,8 @@ fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) 
     if drive.runtime.started && !drive.runtime.paused {
         let dt = drive.render_delta_seconds;
         drive.runtime.advance_instruments(&reference.0, dt, false);
+        // Source `carscript.Update` eases the lever once per frame by scaled frame time.
+        drive.runtime.advance_levers(&reference.0, dt);
     }
 }
 fn active_camera(drive: &Drive) -> Transform {
@@ -1136,6 +1173,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         fuel,
         runtime.paused,
         runtime.started,
+        runtime.autosave_safe(drive.input.held & keys::GRAB != 0),
+        runtime.area.player.seated(),
     );
     let available = runtime.area.interaction.available_actions(
         &runtime.aim,

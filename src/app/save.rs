@@ -2,7 +2,7 @@ use super::*;
 use crate::presentation::save::PreparedPresentation;
 use crate::save::fresh_permit::FreshSessionPermit;
 use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceHash, SourceStamp};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Resource)]
 pub struct SaveRequests {
@@ -108,6 +108,17 @@ pub fn dispatch(world: &mut World) {
         }
     });
 }
+#[derive(Serialize)]
+struct CaptureResult<'a> {
+    save: &'a SaveSnapshot,
+    summary: CaptureSummary,
+}
+#[derive(Serialize)]
+struct CaptureSummary {
+    seed: i32,
+    driven_km: f64,
+    build_id: u32,
+}
 fn process_request(
     world: &mut World,
     requests: &mut SaveRequests,
@@ -199,7 +210,9 @@ fn process_request(
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
             // Assignment drops the old stream and terminates its road actor first.
+            let settings = drive.runtime.driving_input.settings;
             drive.runtime = candidate.runtime;
+            drive.runtime.driving_input.settings = settings;
             drive
                 .runtime
                 .stream
@@ -273,12 +286,20 @@ fn process_request(
             if !drive.ready {
                 return Err(invalid("The garage is not ready"));
             }
-            if drive.runtime.started && !drive.runtime.paused {
+            let autosave = request.kind == "Capture"
+                && request
+                    .payload
+                    .get("autosave")
+                    .and_then(serde_json::Value::as_bool)
+                    .ok_or_else(|| invalid("Missing autosave flag"))?;
+            if !autosave && drive.runtime.started && !drive.runtime.paused {
                 return Err(invalid("Pause the game first"));
             }
             if request.kind == "Capture" {
                 let mut drive = world.resource_mut::<Drive>();
-                super::clear_input(&mut drive);
+                if !autosave {
+                    super::clear_input(&mut drive);
+                }
                 let snapshot = drive.runtime.capture_save(
                     &reference,
                     &requests.source,
@@ -289,11 +310,19 @@ fn process_request(
                     },
                     request
                         .payload
-                        .as_str()
+                        .get("date")
+                        .and_then(serde_json::Value::as_str)
                         .ok_or_else(|| invalid("Missing capture date"))?,
                 )?;
-                return serde_json::to_string(&snapshot)
-                    .map_err(|error| SaveError::CorruptData(error.to_string()));
+                return serde_json::to_string(&CaptureResult {
+                    save: &snapshot,
+                    summary: CaptureSummary {
+                        seed: snapshot.world.seed,
+                        driven_km: snapshot.progress.driven_km,
+                        build_id: snapshot.source.build_id,
+                    },
+                })
+                .map_err(|error| SaveError::CorruptData(error.to_string()));
             }
             if requests.pending.is_some() {
                 return Err(invalid("A prepared session is pending"));

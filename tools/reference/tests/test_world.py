@@ -39,7 +39,7 @@ class WorldTests(unittest.TestCase):
         cars = {LADA}
         self.assertEqual(vehicle_exclusion(lada, {'carscript'}, cars), '')
         self.assertEqual(vehicle_exclusion(trailer, {'carscript', 'partscript'}, cars), 'other_vehicle')
-        self.assertEqual(vehicle_exclusion(trailer, {'utanfutoscript'}, cars), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(trailer, {'utanfutoscript'}, cars), '')
         self.assertEqual(vehicle_exclusion(trailer, {'partscript'}, cars), '')
 
     def test_bus_pool_items_follow_child_categories(self):

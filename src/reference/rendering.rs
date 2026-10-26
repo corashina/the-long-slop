@@ -49,14 +49,6 @@ pub struct MaterialRecord {
 }
 
 impl MaterialRecord {
-    /// Source player operations require a camera-specific renderer.
-    pub fn validate_active_use(&self) -> Result<(), ReferenceError> {
-        require(
-            self.shader_family != ShaderFamily::PlayerModel,
-            "player_model active preparation: camera distance clip and custom normal operation unsupported",
-        )
-    }
-
     /// Keep MainTex at bank zero for the existing alpha caster material.
     pub fn texture_banks(&self) -> Result<[Option<u8>; 9], ReferenceError> {
         let mut banks = [None; 9];
