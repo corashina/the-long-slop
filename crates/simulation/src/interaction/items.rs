@@ -672,10 +672,11 @@ impl ItemStore {
         id: ItemId,
         prototype_index: usize,
         reference: &FoodReference,
+        bite: u8,
         pose: VehiclePose,
         body: RigidBodyHandle,
     ) -> Result<(), ReferenceError> {
-        if self.indices.contains_key(&id) || reference.index >= reference.bites {
+        if self.indices.contains_key(&id) || bite > reference.bites {
             return Err(ReferenceError("Invalid consumable identity".into()));
         }
         self.indices.insert(id, self.states.len());
@@ -696,7 +697,7 @@ impl ItemStore {
             inactive_pose: None,
             food: Some(FoodState {
                 prototype_index,
-                bite: reference.index,
+                bite,
             }),
             hit_sound: None,
             removed: false,

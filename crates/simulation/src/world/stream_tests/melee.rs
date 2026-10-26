@@ -1,5 +1,6 @@
 //! X02 part 2: every melee weapon swings. A katana breaks a bottle. Only a weapon with
-//! `shovel_speed` digs: the shovel lifts a buried item, the crowbar does not.
+//! `shovel_speed` digs: the shovel lifts a buried item, the crowbar does not. A `hurt_food`
+//! weapon cuts food, and the pieces reload with their bites.
 use super::drive_out::{frame, settle};
 use super::*;
 use crate::damage::BreakKind;
@@ -211,4 +212,77 @@ fn digs(shovel: bool) -> bool {
 fn crowbar_hit_does_not_lift_a_buried_item() {
     assert!(digs(true), "the shovel digs");
     assert!(!digs(false), "the crowbar does not dig");
+}
+
+/// Remaining bites of each live food piece: the starter food and runtime copies.
+fn pieces(run: &GarageRuntime, reference: &ReferenceManifest) -> Vec<u8> {
+    std::iter::once(reference.survival.starter_food)
+        .chain(run.area.foods.iter().copied())
+        .filter_map(|id| run.area.items.get(id).filter(|s| !s.removed)?.food)
+        .map(|f| reference.survival.foods[f.prototype_index].bites - f.bite)
+        .collect()
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn shovel_cuts_food_and_the_pieces_reload() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    let shovel = reference.melee.shovel(&reference).unwrap();
+    assert!(shovel.contact.hurt_food);
+    let food = reference.survival.starter_food;
+    let state = run.area.items.get(food).unwrap().food.unwrap();
+    assert!(reference.survival.foods[state.prototype_index].spawn_if_shot);
+    let before = pieces(&run, &reference);
+    assert_eq!(before.len(), 1);
+    assert!(before[0] >= 2);
+    let item = equip(&mut run, &reference, shovel);
+    for i in 0..10 * SWING_FRAMES {
+        let at = trigger(&run, &reference, shovel, item).translation;
+        place(&mut run, food, at);
+        swing_frame(&mut run, &reference, i);
+        if !run.area.foods.is_empty() {
+            break;
+        }
+        frame(&mut run, &reference);
+    }
+    let mut cut = pieces(&run, &reference);
+    assert!(cut.len() >= 2, "the shovel cuts the food");
+    assert_eq!(
+        cut.iter().sum::<u8>(),
+        before[0],
+        "the pieces keep every bite"
+    );
+
+    let stamp = super::roadside_stamp(&reference);
+    let saved = run
+        .capture_save(
+            &reference,
+            &stamp,
+            crate::save::CameraSave::FirstPerson,
+            "2026-10-26T12:00:00Z",
+        )
+        .unwrap();
+    let saved: crate::save::SaveSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert_eq!(saved.foods.len(), cut.len() - 1);
+    let mut loaded = GarageRuntime::from_save(
+        &reference,
+        &stamp,
+        &saved,
+        crate::world::GameMode::default(),
+        reference.world.draw_distance.default,
+    )
+    .unwrap();
+    for _ in 0..2000 {
+        super::prepare_ready(&mut loaded, &reference);
+        if loaded.advance_saved_restore(&reference).unwrap() && !loaded.restore_pending() {
+            break;
+        }
+    }
+    assert!(!loaded.restore_pending());
+    let mut reloaded = pieces(&loaded, &reference);
+    cut.sort();
+    reloaded.sort();
+    assert_eq!(reloaded, cut, "the pieces reload with their bites");
 }
