@@ -115,10 +115,18 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
 28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
 29. Save and load with bus doors open and signalled and with the trailer on the bus.
+30. Other cars (V02): re-export first: new car types, start placements, oil tolerances and car pools. Old saves do not load (save schema 25).
+31. Run `cargo test --lib car_types -- --ignored`.
+32. Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
+33. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
+34. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies.
+35. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
+36. Run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture`. The car pool totals print and no V03 car spawns.
+37. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
+38. Check F3 with several cars in view. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 
 ## 5. Later
