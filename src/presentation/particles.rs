@@ -597,7 +597,7 @@ fn sync_particles(
             }
         }
         for (tool, b) in reference.0.conditions.brushes.iter().enumerate() {
-            for (particle, p) in b.particles.iter().enumerate() {
+            for (particle, p) in b.tool.particles.iter().enumerate() {
                 add_group(
                     &mut state,
                     Owner::Brush(tool),
@@ -780,7 +780,7 @@ fn sync_particles(
     for g in &mut state.groups {
         let p = match g.owner {
             Owner::Spray(tool) => &reference.0.conditions.sprays[tool].particles[g.source],
-            Owner::Brush(tool) => &reference.0.conditions.brushes[tool].particles[g.source],
+            Owner::Brush(tool) => &reference.0.conditions.brushes[tool].tool.particles[g.source],
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,

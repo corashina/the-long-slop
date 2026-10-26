@@ -10,7 +10,7 @@ pub fn display_name<'a>(
         return items.name(id).unwrap_or("");
     };
     if let Some(tool) = reference.conditions.brushes.iter().find(|b| b.item == id) {
-        return if tool.cleaning_type == 1 {
+        return if tool.tool.cleaning_type == 1 {
             "Brush"
         } else {
             "Sponge"

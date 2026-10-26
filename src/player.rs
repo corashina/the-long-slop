@@ -1163,7 +1163,7 @@ mod vehicle_seat_tests {
             "source": src, "capsule_source": src, "camera_source": src,
             "action_masks": {"use_mask": 0, "pickup_mask": 0, "attach_mask": 0, "push_mask": 0},
             "get_out_layer_mask": 0, "exit_steps_vertical": 4, "exit_steps_horizontal": 4,
-            "carry_anchor_offset": [0, 0, 0], "look_sensitivity": [1, 1], "camera_culling_mask": 0,
+            "carry_anchor_offset": [0, 0, 0], "look_sensitivity": [1, 1], "camera_culling_mask": 0, "pointing_layer": 0,
         });
         for name in [
             "prone_multiplier",
@@ -1206,6 +1206,8 @@ mod vehicle_seat_tests {
             "obj_move_sensitivity",
             "obj_rotation_sensitivity",
             "scroll_sensitivity",
+            "point_range",
+            "point_range2",
         ] {
             player[name] = json!(0.5);
         }

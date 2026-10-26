@@ -64,6 +64,8 @@ pub mod player_keys {
     pub const TAKE_OFF: u8 = 8;
     /// Source `IN.togglemousedrive` (U).
     pub const MOUSE_DRIVE: u8 = 16;
+    /// Source `input.point` (`IN.pointrubwave`, Left Alt): point, rub and wave.
+    pub const POINT: u8 = 32;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

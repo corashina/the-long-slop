@@ -53,8 +53,8 @@ test('F07 typing routes keys to the computer and blocks game bits',()=>{
  i.setTyping(false);assert.equal(i.typingKeys(),0);
 });
 
-test('mouse_drive_binding_sets_the_player_bit',()=>{
- const i=new InputState([{action:'mouse_drive',codes:['KeyU']}]);
- i.code('KeyU',true);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.playerHeld,16);assert.equal(f.playerPressed,16);
+test('player_bindings_set_player_bits',()=>{
+ const i=new InputState([{action:'mouse_drive',codes:['KeyU']},{action:'point',codes:['AltLeft']}]);
+ i.code('KeyU',true);i.code('AltLeft',true);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.playerHeld,48);assert.equal(f.playerPressed,48);
  assert.throws(()=>new InputState([{action:'unknown',codes:['KeyU']}]));
 });

@@ -296,7 +296,7 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
     from .particles import particle
     import json
     repair,clean,managed=permission_tables(source)
-    result={'surfaces':[],'brushes':[],'sprays':[],'washes':[],'collider_bindings':[],
+    result={'surfaces':[],'brushes':[],'player_brush':None,'sprays':[],'washes':[],'collider_bindings':[],
             'repair_tables':repair,'clean_tables':clean,'repair_rate':source.read(source.get('level1',64919))['repairValueIncrease'],
             'repair_decay_rate':source.read(source.get('level1',64919))['repairValueDecrease']}
     surface_ids={identity:i+1 for i,identity in enumerate(source.condition_readers)}
@@ -354,24 +354,28 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
             'same_state_as_parent':bool(d['sameStateAsParent']),'child_new_color':bool(d['isChildnewColor']),
             'random_start_state3':bool(d['randomStartState3InFStart']),'loaded':bool(d['loaded']),
             'renderers':renderers})
+    def brush_tool(reader,d,slide_overrides):
+        """drotkefescript and its objSlideOnColliderScript slide. `slide_overrides` replaces slide fields set at Start."""
+        slide=required(reader,d['slide'],'slide');sd={**source.read(slide),**slide_overrides}
+        return {'source':source_id(reader),'slide':source_id(slide),
+            'cleaning_type':d['cleaningType'],'can_ruin':bool(d['canRuin']),'repair_modifier':d['repairModifier'],
+            'min_force':d['minForce'],'wash_radius':d['washRadius'],'wash_mask':d['washMask']['m_Bits'],
+            'text':d['text'],'show_text':not bool(d['dontshowtext']),
+            'scrub_node':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
+            'model':pointer_node(slide,sd['model']) if sd['model']['m_PathID'] else None,
+            'model_equip':pointer_node(slide,sd['modelEquipPos']),'model_default':pointer_node(slide,sd['modelDefPos']),
+            'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],
+            'contact_offset':sd['modelDistfromCollider'],'minimum_displacement':sd['minSpeed'],'maximum_displacement':sd['maxSpeed'],
+            'disabled':bool(sd['disabled']),'both_work':bool(sd['bothWork']),'sound_when_disabled':bool(sd['soundWhenDisabled']),'has_sound':bool(sd['hasSound']),
+            'max_volume':sd['maxVolume'],'volume_lerp':sd['volumeLerp'],'voice_source':sid(linked(slide,sd['SSource'])),'voice':None,
+            'particles':[particle(source,required(slide,sd[field],field),f'cleaning-{reader.path_id}-{field}',sd[rate],output,source.transform_for(source.resolve(reader,d['m_GameObject'])))
+                    for flag,field,rate in [('hasParticle1','particle','maxRate'),('hasParticle2','particle2','maxRate2')] if sd[flag]]}
     for node,group in components.items():
         for reader in group.get('drotkefescript',[]):
             if key(reader) not in {('level1',r[0]) for r in CLEANING_ROOTS}:continue
-            d=source.read(reader);slide=required(reader,d['slide'],'slide');sd=source.read(slide)
-            record=tool_owner(reader,d)
-            record.update({'slide':source_id(slide),'own_condition':cid(required(reader,d['ownCondition'],'ownCondition'),'ownCondition'),
-                'cleaning_type':d['cleaningType'],'can_ruin':bool(d['canRuin']),'repair_modifier':d['repairModifier'],
-                'min_force':d['minForce'],'wash_radius':d['washRadius'],'wash_mask':d['washMask']['m_Bits'],
-                'text':d['text'],'show_text':not bool(d['dontshowtext']),
-                'scrub_node':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
-                'model':pointer_node(slide,sd['model']) if sd['model']['m_PathID'] else None,
-                'model_equip':pointer_node(slide,sd['modelEquipPos']),'model_default':pointer_node(slide,sd['modelDefPos']),
-                'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],
-                'contact_offset':sd['modelDistfromCollider'],'minimum_displacement':sd['minSpeed'],'maximum_displacement':sd['maxSpeed'],
-                'disabled':bool(sd['disabled']),'both_work':bool(sd['bothWork']),'sound_when_disabled':bool(sd['soundWhenDisabled']),'has_sound':bool(sd['hasSound']),
-                'max_volume':sd['maxVolume'],'volume_lerp':sd['volumeLerp'],'voice_source':sid(linked(slide,sd['SSource'])),'voice':None,
-                'particles':[particle(source,required(slide,sd[field],field),f'cleaning-{reader.path_id}-{field}',sd[rate],output,source.transform_for(source.resolve(reader,d['m_GameObject'])))
-                    for flag,field,rate in [('hasParticle1','particle','maxRate'),('hasParticle2','particle2','maxRate2')] if sd[flag]]})
+            d=source.read(reader);record=tool_owner(reader,d);del record['source']
+            record['own_condition']=cid(required(reader,d['ownCondition'],'ownCondition'),'ownCondition')
+            record['tool']=brush_tool(reader,d,{})
             result['brushes'].append(record)
         for reader in group.get('sprayscript',[]):
             if key(reader) not in {('level1',r[0]) for r in CLEANING_ROOTS}:continue
@@ -409,6 +413,11 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
                 'repair_progress':d['repairValue'],'active':active,'on':bool(d['ON']),
                 'never_repair':bool(d['neverRepair']),'destroy_on_repair':bool(d['destroyOnRepair']),
                 'wash_on_shoot':bool(d['washOnShoot']),'chance_to_start_disabled':chance,'particles':effects})
+    # fpscontroller.pointKefe: the player brush. fpscontroller.Start sets slide.LM and slide.distance.
+    player=source.get('level1',80125);pd=source.read(player)
+    point=required(player,pd['pointKefe'],'pointKefe');point_data=source.read(point)
+    if point_data['ownCondition']['m_PathID']:raise ValueError(f'{key(point)} player brush ownCondition is not exported')
+    result['player_brush']=brush_tool(point,point_data,{'LM':pd['pointingLayer'],'distance':pd['pointRange']})
     washes={key(source.get(w['source']['file'],w['source']['path_id'])):w['id'] for w in result['washes']}
     slots={key(source.get(s['source']['file'],s['source']['path_id'])):s['id'] for s in source.condition_part_slots}
     anchors={a['id']:a for a in source.condition_anchors}
@@ -449,7 +458,7 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
 
 def bind_condition_audio(record,audio):
     voices={(v['source']['file'],v['source']['path_id']):v['id'] for v in audio['voices']}
-    for tool in [*record['brushes'],*record['sprays']]:
+    for tool in [*(b['tool'] for b in record['brushes']),record['player_brush'],*record['sprays']]:
         source=tool['voice_source']
         if source:
             identity=(source['file'],source['path_id'])

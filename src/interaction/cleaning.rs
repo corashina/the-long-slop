@@ -188,12 +188,13 @@ impl CleaningTools {
         let mut signals = Vec::with_capacity(reference.conditions.brushes.len());
         for b in &reference.conditions.brushes {
             let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
+            let t = &b.tool;
             let root = to_rapier(super::items::node_pose(reference, item.node)?);
             let equip =
-                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_equip)?);
+                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_equip)?);
             let default =
-                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_default)?);
-            let model = b.model.map_or(Ok(root), |n| {
+                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_default)?);
+            let model = t.model.map_or(Ok(root), |n| {
                 super::items::node_pose(reference, n).map(to_rapier)
             })?;
             contacts.push(Contact {
@@ -209,11 +210,11 @@ impl CleaningTools {
                 sampled: false,
                 equip,
                 default,
-                particles: b
+                particles: t
                     .particles
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| ParticleState::new(p, b.source.path_id as u64 + i as u64))
+                    .map(|(i, p)| ParticleState::new(p, t.source.path_id as u64 + i as u64))
                     .collect(),
             });
             signals.push(ToolSignals {
@@ -313,8 +314,8 @@ impl CleaningTools {
                 .conditions
                 .brushes
                 .iter()
-                .filter(|b| b.show_text)
-                .map(|b| (b.item, b.text))
+                .filter(|b| b.tool.show_text)
+                .map(|b| (b.item, b.tool.text))
                 .collect(),
             bindings: reference
                 .conditions
@@ -336,7 +337,7 @@ impl CleaningTools {
                     item: t.item,
                     quantity: None,
                     color: None,
-                    disabled: t.disabled,
+                    disabled: t.tool.disabled,
                     valve: 0.,
                 })
                 .chain(reference.conditions.sprays.iter().map(|t| ToolState {
@@ -777,8 +778,9 @@ impl CleaningTools {
     )> {
         let view = to_rapier(frame.view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        let b = &reference.conditions.brushes[index];
-        let own_body = items.get(b.item).and_then(|i| i.body);
+        let brush = &reference.conditions.brushes[index];
+        let b = &brush.tool;
+        let own_body = items.get(brush.item).and_then(|i| i.body);
         let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
             c.is_enabled()
                 && (own_body.is_none() || c.parent() != own_body)
@@ -829,7 +831,8 @@ impl CleaningTools {
         };
         let c = &self.contacts[index];
         let s = &self.signals[index];
-        let b = &reference.conditions.brushes[index];
+        let brush = &reference.conditions.brushes[index];
+        let b = &brush.tool;
         // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
         if c.origin == frame.origin
             && c.sampled
@@ -861,7 +864,7 @@ impl CleaningTools {
                 Target::Solid(_) => {}
             }
             if completed && b.can_ruin {
-                self.states[index].disabled = conditions.wear(b.own_condition);
+                self.states[index].disabled = conditions.wear(brush.own_condition);
             }
         }
     }
@@ -877,9 +880,10 @@ impl CleaningTools {
         let hit = self.contacts[index].hit;
         let view = to_rapier(frame.view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        let b = &reference.conditions.brushes[index];
+        let brush = &reference.conditions.brushes[index];
+        let b = &brush.tool;
         let root = items
-            .get(b.item)
+            .get(brush.item)
             .map(|i| to_rapier(i.pose))
             .unwrap_or(self.contacts[index].model);
         let c = &mut self.contacts[index];
@@ -1185,7 +1189,7 @@ impl CleaningTools {
                     .brushes
                     .iter()
                     .find(|b| b.item == t.item)
-                    .map(|b| &b.source)
+                    .map(|b| &b.tool.source)
                     .or_else(|| {
                         reference
                             .conditions
@@ -1220,7 +1224,7 @@ impl CleaningTools {
                 .brushes
                 .iter()
                 .find(|b| b.item == t.item)
-                .map(|b| &b.source)
+                .map(|b| &b.tool.source)
                 .or_else(|| {
                     reference
                         .conditions
@@ -1270,7 +1274,7 @@ pub(crate) fn validate_tools(
     for r in &reference.conditions.brushes {
         let mut matches = saved
             .iter()
-            .filter(|v| v.source == SourceKey::from(&r.source));
+            .filter(|v| v.source == SourceKey::from(&r.tool.source));
         let v = matches.next().ok_or_else(invalid)?;
         if matches.next().is_some() || v.quantity.is_some() || v.color.is_some() {
             return Err(invalid());

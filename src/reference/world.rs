@@ -946,7 +946,8 @@ impl WorldReference {
             require(
                 row.recipe.driven_nodes.iter().all(|n| node(*n))
                     && node(row.recipe.drag.node)
-                    && node(row.recipe.drag.node2),
+                    && node(row.recipe.drag.node2)
+                    && row.recipe.hand_target.is_none_or(node),
                 "world mechanism targets",
             )?;
             if let Some(rotation) = &row.recipe.rotation {
@@ -2305,7 +2306,7 @@ mod tests {
                 "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "lever": null, "key_steer_multiplier": 0.0, "oil_led_two_stroke": false,
                 "seats": [{"source": src(13), "driver": true, "driving2": true}],
-                "drive_frames": {"left_hand": 2, "right_hand": null, "left_leg": null, "right_leg": null},
+                "drive_frames": {"left_hand": 2, "right_hand": null, "left_leg": null, "right_leg": null}, "reach": crate::reference::reach_fixture(),
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             },

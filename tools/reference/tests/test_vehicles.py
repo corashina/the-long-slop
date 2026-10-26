@@ -60,7 +60,10 @@ def car_fixture():
     engine_node = node(root)
     oil = node(engine_node)
     oil_tank = component(oil, 'MonoBehaviour', {'F': {'fluids': []}}, 'tankscript')
-    component(engine_node, 'MonoBehaviour', {**ENGINE, 'T': ptr(oil_tank)}, 'enginescript')
+    shift_hand = node(engine_node)
+    stick = component(node(engine_node), 'MonoBehaviour', dict(TransmissionHandPos=ptr(shift_hand['reader']),
+        KickNitionHandPos=ptr(None)), 'gearstickScript')
+    component(engine_node, 'MonoBehaviour', {**ENGINE, 'T': ptr(oil_tank), 'gearstick': ptr(stick)}, 'enginescript')
     # Two plates: the second label links the first with sameAsThis.
     layout = dict(m_fontSize=10., m_fontSizeBase=10., m_fontSizeMin=1., m_fontSizeMax=20., m_fontStyle=1, m_fontWeight=400,
         m_HorizontalAlignment=2, m_VerticalAlignment=512, m_enableAutoSizing=0, m_enableKerning=1, m_enableWordWrapping=0,
@@ -85,6 +88,12 @@ def car_fixture():
         m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
     # Only the right hand has a drive frame, as a node under the root.
     hand = node(root)
+    # Only the horn has a reach target. Vinv inverts the first five limb flags.
+    horn = node(root)
+    reach = {f: ptr(None) for f in ('LightHandPos', 'IgnitionHandPos', 'HandBrakeHandPos', 'TransmissionHandPos',
+        'GasLegPos', 'BrakeLegPos', 'ClutchLegPos', 'DefLLPos', 'DefRLPos')}
+    data[car.path_id].update(**reach, HornHandPos=ptr(horn['reader']), Vinv=1, VLegShift=1, VHandGas=0, VHandBrake=0,
+        VHandClutch=0, VLegHandbrake=0, VLegIgnition=1, VNoClutch=0, VDontHoldIgnitionWhenStart=1)
     data[car.path_id].update(LHDrivePos=ptr(None), RHDrivePos=ptr(hand['reader']), LLDrivePos=ptr(None), RLDrivePos=ptr(None),
         speedBasedKeyboardSens=0, keySteerSensMultiplier=0, Transmission=ptr(None), RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
@@ -180,6 +189,21 @@ class VehicleRecordTests(unittest.TestCase):
         # A missing radiator is accepted.
         self.assertEqual(radiators, [])
         self.assertEqual(gauges, [])
+
+    def test_reach_targets_flags_and_gear_stick(self):
+        source, hierarchy, bodies, colliders = car_fixture()
+        with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+                patch('tools.reference.vehicles.recover_wheel_effects', return_value=[]):
+            reach = vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)['reach']
+        car = source.read(next(c for c in hierarchy[0]['components'] if c.cls == 'carscript'))
+        self.assertEqual(hierarchy[reach['horn']]['reader'].path_id, car['HornHandPos']['m_PathID'])
+        self.assertIsNone(reach['gas'])
+        self.assertEqual((reach['leg_shift'], reach['hand_gas'], reach['leg_handbrake'], reach['leg_ignition'],
+            reach['no_clutch'], reach['dont_hold_ignition_when_start']), (False, True, True, True, False, True))
+        [engine], _, _ = part_records(source, hierarchy, 5, {})
+        stick = engine['gear_stick']
+        self.assertEqual(hierarchy[stick['transmission']]['parent'], hierarchy[engine['node']]['reader'])
+        self.assertIsNone(stick['kick_ignition'])
 
     def test_collider_bake_runs_only_in_the_editor(self):
         source, hierarchy, bodies, colliders = car_fixture()

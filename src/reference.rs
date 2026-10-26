@@ -324,6 +324,14 @@ pub struct MechanismReference {
     pub reaction: EndpointReactionReference,
     pub slide: Option<SlideReference>,
     pub turn: Option<TurnReference>,
+    /// Source `usablescript.handTarget`: the using hand parent. When null, the slide door or the hit serves.
+    pub hand_target: Option<NodeId>,
+    /// Source `usablescript.rightHand`: the right hand uses it.
+    pub right_hand: bool,
+    /// Source `usablescript.leftHand`: the left hand uses it.
+    pub left_hand: bool,
+    /// Source `usablescript.notNearestHand`: the hand farther from the target uses it.
+    pub not_nearest_hand: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -477,6 +485,8 @@ pub struct PickupReference {
     pub right_hand_rotation: [f32; 4],
     pub right_hand_grip: Option<SourceId>,
     pub left_hand_grip: Option<SourceId>,
+    /// Source `pickupable.doubleHand`: both hands hold it, as when mass exceeds `onehandLimit`.
+    pub double_hand: bool,
     pub disable_when_stored: Option<SourceId>,
     pub keep_when_stored: Option<SourceId>,
     pub inventory_icon: Option<SourceId>,
@@ -697,6 +707,12 @@ pub struct PlayerReference {
     pub look_sensitivity: [f32; 2],
     pub scroll_sensitivity: f32,
     pub camera_culling_mask: u32,
+    /// Source `fpscontroller.pointRange`: pointing ray length.
+    pub point_range: f32,
+    /// Source `fpscontroller.pointRange2`: pointing distance without a hit.
+    pub point_range2: f32,
+    /// Source `fpscontroller.pointingLayer` bits.
+    pub pointing_layer: u32,
 }
 
 /// Source WheelCollider values.
@@ -1512,6 +1528,7 @@ impl ReferenceManifest {
                     })
                     && node_ids.contains(&r.drag.node)
                     && node_ids.contains(&r.drag.node2)
+                    && r.hand_target.is_none_or(|n| node_ids.contains(&n))
                     && finite(&r.drag.axis)
                     && r.drag.axes2.iter().all(|a| finite(a)),
                 "mechanism binding",
@@ -1718,6 +1735,13 @@ impl ReferenceManifest {
                 && p.exit_capsule_half_height > 0.0
                 && p.exit_capsule_radius > 0.0,
             "player parameters",
+        )?;
+        require(
+            finite(&[p.point_range, p.point_range2])
+                && p.point_range > 0.0
+                && p.point_range2 >= 0.0
+                && p.pointing_layer != 0,
+            "player pointing",
         )?;
         let bob = [
             p.walk_bob_speed,

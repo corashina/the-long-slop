@@ -298,9 +298,11 @@ fn prepare(
     for tool in &reference.conditions.brushes {
         result.tools.push((
             tool.own_condition,
-            tool.model
+            tool.tool
+                .model
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
-            tool.scrub_node
+            tool.tool
+                .scrub_node
                 .map(|n| world.resource::<ReferenceVisuals>().nodes[&n]),
         ));
     }

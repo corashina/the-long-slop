@@ -397,6 +397,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if (r := source.resolve(c, d[field])) is not None}
     for c in components:
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
+    # fpscontroller.pointKefe slide voice. The player root is not an audio root.
+    point = manifest['conditions']['player_brush']['voice_source']
+    if point: voice(source.get(point['file'], point['path_id']))
     audio['shared']['settings'] = source_settings(prefab_data, prefab_data['Priority'])
     audio['shared']['mixer'] = mixer(source.resolve(main_r, main['defGroup']))
     def offset(reader, owner):
