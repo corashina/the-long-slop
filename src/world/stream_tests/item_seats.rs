@@ -42,18 +42,23 @@ fn item_seat_follows_item_body() {
                 .filter(|seat| seat.seat.source == first.source)
         })
         .expect("bound first sled seat");
-    assert_eq!((seat.item, seat.body, &seat.owner), (item, body, &owner));
-    let (record, pose) = (seat.seat.clone(), seat.pose);
-    assert!(
-        run.area
-            .player
-            .enter_item_seat(owner.clone(), body, &record, pose, &mut run.physics)
+    assert_eq!(
+        (seat.item, seat.body, &seat.owner),
+        (item, body, &SeatOwner::Item(owner.clone()))
     );
+    let (record, pose) = (seat.seat.clone(), seat.pose);
+    assert!(run.area.player.enter_item_seat(
+        SeatOwner::Item(owner.clone()),
+        body,
+        &record,
+        seat.item,
+        pose,
+        &mut run.physics
+    ));
     assert_eq!(
         run.area.player.seat_owner(),
         Some(&SeatOwner::Item(owner.clone()))
     );
-    assert_eq!(run.area.player.seat(), None);
     let start = run.physics.rapier().bodies[body].translation();
     run.physics.edit_body(body, |b| {
         b.set_linvel(Vector::new(1., 0., 0.), true);

@@ -151,6 +151,7 @@ impl Material for ParticleMaterial {
         ])?];
         d.primitive.cull_mode = None;
         if let Some(depth) = d.depth_stencil.as_mut() {
+            depth.format = super::render_targets::DEPTH_FORMAT;
             depth.depth_write_enabled = Some(false);
         }
         Ok(())
@@ -247,16 +248,66 @@ enum Owner {
     Outlet(u32),
     /// Spray bottle spray (0) and splash (1).
     SprayBottle(usize),
-    /// Vehicle exhaust smoke; `Group::source` is the system.
-    Exhaust(usize),
+    /// One particle system of the car with chassis `car`.
+    Car {
+        system: CarSystem,
+        prototype: usize,
+        car: rapier3d::prelude::RigidBodyHandle,
+    },
     /// Storm dust; `Group::source` is big (0) or small (1).
     Storm(crate::weather::StormId),
     /// `mainscript` melee hit systems; `Group::source` is the system.
     Melee,
-    /// Vehicle wheel effects; `Group::source` is wheel * 8 + system (0 dust, 1.. grass).
-    Wheel(usize),
-    /// Vehicle skid bursts; `Group::source` is `tiresmoke` (0) or `tiresand` (1).
-    Skid(usize),
+}
+/// The `Group::source` meaning of a car system.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CarSystem {
+    /// Exhaust smoke; the system.
+    Exhaust,
+    /// Wheel effects; wheel * 8 + system (0 dust, 1.. grass).
+    Wheel,
+    /// Skid bursts; `tiresmoke` (0) or `tiresand` (1).
+    Skid,
+}
+/// The particle record of one car group.
+fn car_particle(
+    reference: &crate::reference::ReferenceManifest,
+    system: CarSystem,
+    prototype: usize,
+    source: usize,
+) -> &crate::reference::ParticleReference {
+    let record = crate::starting_area::world_vehicle(reference, prototype);
+    match system {
+        CarSystem::Exhaust => &record.exhaust[source],
+        CarSystem::Wheel => {
+            let w = &record.wheel_effects[source / 8];
+            match source % 8 {
+                0 => w.dust.as_ref().expect("wheel dust group"),
+                system => &w.grass[system - 1],
+            }
+        }
+        CarSystem::Skid => &reference.skid.particles[source],
+    }
+}
+/// The `Group::source` ids of every car system of the car prototype.
+fn car_systems(
+    reference: &crate::reference::ReferenceManifest,
+    prototype: usize,
+) -> impl Iterator<Item = (CarSystem, usize)> + '_ {
+    let record = crate::starting_area::world_vehicle(reference, prototype);
+    let exhaust = (0..record.exhaust.len()).map(|i| (CarSystem::Exhaust, i));
+    let wheels = record
+        .wheel_effects
+        .iter()
+        .enumerate()
+        .flat_map(|(wheel, w)| {
+            let dust = w.dust.iter().map(|_| 0);
+            let grass = 1..=w.grass.len();
+            dust.chain(grass)
+                .map(move |system| (CarSystem::Wheel, wheel * 8 + system))
+        });
+    let skid = (0..2).map(|i| (CarSystem::Skid, i));
+    exhaust.chain(wheels).chain(skid)
 }
 struct Group {
     owner: Owner,
@@ -588,44 +639,47 @@ fn sync_particles(
                 &mut materials,
             );
         }
-        for (vehicle, v) in reference.0.vehicles.iter().enumerate() {
-            for (system, p) in v.exhaust.iter().enumerate() {
-                add_group(
-                    &mut state,
-                    Owner::Exhaust(vehicle),
-                    system,
-                    p,
-                    &lighting,
-                    &mut commands,
-                    &mut materials,
-                );
+    }
+    // Car copies come and go. A retired car frees its groups for the next copy of its prototype.
+    let physics = &drive.runtime.physics;
+    for g in &mut state.groups {
+        if let Owner::Car { car, .. } = g.owner {
+            g.active = physics.vehicle_of(car).is_some();
+        }
+    }
+    for (key, vehicle) in &drive.runtime.vehicles {
+        let car = physics.chassis_handle(key);
+        for (system, source) in car_systems(&reference.0, vehicle.prototype) {
+            let owner = Owner::Car {
+                system,
+                prototype: vehicle.prototype,
+                car,
+            };
+            if state
+                .groups
+                .iter()
+                .any(|g| g.active && g.owner == owner && g.source == source)
+            {
+                continue;
             }
-            for (wheel, w) in v.wheel_effects.iter().enumerate() {
-                let dust = w.dust.iter().map(|p| (0, p));
-                let grass = w.grass.iter().enumerate().map(|(i, p)| (i + 1, p));
-                for (system, p) in dust.chain(grass) {
-                    add_group(
-                        &mut state,
-                        Owner::Wheel(vehicle),
-                        wheel * 8 + system,
-                        p,
-                        &lighting,
-                        &mut commands,
-                        &mut materials,
-                    );
-                }
+            if let Some(g) = state.groups.iter_mut().find(|g| {
+                !g.active
+                    && g.source == source
+                    && matches!(g.owner, Owner::Car { system: s, prototype, .. } if s == system && prototype == vehicle.prototype)
+            }) {
+                g.owner = owner;
+                g.active = true;
+                continue;
             }
-            for (burst, p) in reference.0.skid.particles.iter().enumerate() {
-                add_group(
-                    &mut state,
-                    Owner::Skid(vehicle),
-                    burst,
-                    p,
-                    &lighting,
-                    &mut commands,
-                    &mut materials,
-                );
-            }
+            add_group(
+                &mut state,
+                owner,
+                source,
+                car_particle(&reference.0, system, vehicle.prototype, source),
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
         }
     }
     let weather = &drive.runtime.weather;
@@ -670,17 +724,11 @@ fn sync_particles(
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
-            Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
+            Owner::Car {
+                system, prototype, ..
+            } => car_particle(&reference.0, system, prototype, g.source),
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
-            Owner::Wheel(vehicle) => {
-                let w = &reference.0.vehicles[vehicle].wheel_effects[g.source / 8];
-                match g.source % 8 {
-                    0 => w.dust.as_ref().expect("wheel dust group"),
-                    system => &w.grass[system - 1],
-                }
-            }
-            Owner::Skid(_) => &reference.0.skid.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
         };
         let fluid = match g.owner {
@@ -696,11 +744,9 @@ fn sync_particles(
             | Owner::Spray(_)
             | Owner::Wash(_)
             | Owner::SprayBottle(_)
-            | Owner::Exhaust(_)
+            | Owner::Car { .. }
             | Owner::Storm(_)
-            | Owner::Melee
-            | Owner::Wheel(_)
-            | Owner::Skid(_) => None,
+            | Owner::Melee => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -732,8 +778,17 @@ fn sync_particles(
                     .cleaning
                     .particles(tool, g.source),
             )
-        } else if let Owner::Exhaust(vehicle) = g.owner {
-            Some(drive.runtime.vehicles[vehicle].exhaust.particles(g.source))
+        } else if let Owner::Car { system, car, .. } = g.owner {
+            Some(
+                physics
+                    .vehicle_of(car)
+                    .and_then(|key| drive.runtime.vehicles.get(key))
+                    .map_or(&[][..], |v| match system {
+                        CarSystem::Exhaust => v.exhaust.particles(g.source),
+                        CarSystem::Wheel => v.wheel_effects.particles(g.source / 8, g.source % 8),
+                        CarSystem::Skid => v.wheel_effects.burst_particles(g.source),
+                    }),
+            )
         } else if let Owner::Storm(id) = g.owner {
             Some(
                 weather
@@ -744,18 +799,6 @@ fn sync_particles(
             )
         } else if let Owner::Melee = g.owner {
             Some(drive.runtime.area.interaction.melee.particles(g.source))
-        } else if let Owner::Wheel(vehicle) = g.owner {
-            Some(
-                drive.runtime.vehicles[vehicle]
-                    .wheel_effects
-                    .particles(g.source / 8, g.source % 8),
-            )
-        } else if let Owner::Skid(vehicle) = g.owner {
-            Some(
-                drive.runtime.vehicles[vehicle]
-                    .wheel_effects
-                    .burst_particles(g.source),
-            )
         } else if splash {
             fluid.map(|f| f.splash())
         } else {

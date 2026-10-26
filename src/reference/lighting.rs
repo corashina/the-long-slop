@@ -200,27 +200,10 @@ pub struct AnimatedLightPose {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CabinInputReference {
-    pub source: SourceId,
-    pub switch_source: SourceId,
-    pub switch_node: NodeId,
-    pub modes: Vec<u8>,
-    pub startup_mode: usize,
-    pub door_slots: Vec<SourceId>,
-    pub door_nodes: Vec<NodeId>,
-    pub door_usable_sources: Vec<SourceId>,
-    pub threshold: f32,
-    pub include_children: bool,
-    pub missing_slot_is_same: bool,
-    pub target: LightControlId,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LightControllerReference {
     pub id: LightControlId,
     pub source: SourceId,
     pub kind: LightControllerKind,
-    pub vehicle: Option<usize>,
     pub node: NodeId,
     pub aim_colliders: Vec<ColliderId>,
     pub animated_poses: Vec<AnimatedLightPose>,
@@ -237,8 +220,6 @@ pub struct LightControllerReference {
     pub states: Vec<LampStateReference>,
     pub usable_source: Option<SourceId>,
     pub usable_event: Option<String>,
-    pub cabin_input: Option<CabinInputReference>,
-    pub vehicle_switch: Option<VehicleLightSwitchReference>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -257,18 +238,6 @@ pub struct RoadLampReference {
     pub global_enabled: bool,
     pub startup_on: bool,
     pub electronics_threshold: f32,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HighBeamLampReference {
-    pub source: SourceId,
-    pub node: NodeId,
-    pub signal: String,
-    pub on: LightingMaterialLink,
-    pub off: LightingMaterialLink,
-    pub min_value: f32,
-    pub max_value: f32,
-    pub stay_on: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -305,7 +274,6 @@ pub struct LightingRecord {
     pub lights: Vec<LightReference>,
     pub cycle: CycleReference,
     pub controllers: Vec<LightControllerReference>,
-    pub high_beams: Vec<HighBeamLampReference>,
     pub road_lamp: RoadLampReference,
     pub textures: Vec<LightingTextureRecord>,
     pub materials: Vec<MaterialBindingReference>,
@@ -724,36 +692,6 @@ impl LightingRecord {
                 "material asset",
             )?;
         }
-        check(
-            self.high_beams.len() == manifest.vehicles.len(),
-            &self.source,
-            "high-beam instruments",
-        )?;
-        for lamp in &self.high_beams {
-            check(
-                valid_source(&lamp.source)
-                    && lamp.signal == "headlight2"
-                    && node(lamp.node)
-                        .is_some_and(|n| n.asset == lamp.on.asset && n.asset == lamp.off.asset)
-                    && finite(&[lamp.min_value, lamp.max_value])
-                    && material(&lamp.on)
-                    && material(&lamp.off)
-                    && lamp.on.source != lamp.off.source,
-                &lamp.source,
-                "high-beam instrument",
-            )?;
-        }
-        for vehicle in 0..manifest.vehicles.len() {
-            for kind in [LightControllerKind::Headlight, LightControllerKind::Rear] {
-                check(
-                    self.controllers
-                        .iter()
-                        .any(|control| control.kind == kind && control.vehicle == Some(vehicle)),
-                    &self.source,
-                    "vehicle controllers missing",
-                )?;
-            }
-        }
         for control in &self.controllers {
             let owner = node(control.node);
             check(
@@ -773,14 +711,13 @@ impl LightingRecord {
                     && control.energy_move >= 0.
                     && control.electronics_output >= 0.
                     && control.electronics_source.as_ref().is_none_or(valid_source)
-                    && control.vehicle.is_none_or(|v| v < manifest.vehicles.len())
-                    && control.vehicle.is_some()
-                        == matches!(
-                            control.kind,
-                            LightControllerKind::Headlight
-                                | LightControllerKind::Rear
-                                | LightControllerKind::Cabin
-                        ),
+                    // Car controllers belong to the car prototypes.
+                    && !matches!(
+                        control.kind,
+                        LightControllerKind::Headlight
+                            | LightControllerKind::Rear
+                            | LightControllerKind::Cabin
+                    ),
                 &control.source,
                 "controller state/node",
             )?;
@@ -868,38 +805,6 @@ impl LightingRecord {
                     state.renderers.is_empty() || state.off_material.is_some(),
                     &control.source,
                     "off material",
-                )?;
-            }
-            check(
-                control.kind != LightControllerKind::Cabin || control.cabin_input.is_some(),
-                &control.source,
-                "cabin input missing",
-            )?;
-            if let Some(input) = &control.cabin_input {
-                check(
-                    valid_source(&input.source)
-                        && valid_source(&input.switch_source)
-                        && local(input.switch_node)
-                        && input.switch_node == control.node
-                        && input.target == control.id
-                        && input.modes == [0, 1, 2]
-                        && input.startup_mode < input.modes.len()
-                        && input.threshold.is_finite()
-                        && input.door_nodes.iter().all(|id| local(*id))
-                        && input
-                            .door_slots
-                            .iter()
-                            .chain(&input.door_usable_sources)
-                            .all(valid_source),
-                    &control.source,
-                    "cabin input",
-                )?;
-                check(
-                    input.door_slots.len() == 4
-                        && input.door_usable_sources.len() == 4
-                        && input.door_nodes.len() == 4,
-                    &control.source,
-                    "cabin door links",
                 )?;
             }
         }
@@ -1019,25 +924,6 @@ impl LightingRecord {
                 "camera planes",
             )?;
         }
-        for control in &self.controllers {
-            if let Some(switch) = &control.vehicle_switch {
-                let asset = node(control.node).unwrap().asset;
-                check(
-                    valid_source(&switch.source)
-                        && switch
-                            .nodes
-                            .iter()
-                            .chain(switch.state_nodes.iter().flatten())
-                            .all(|id| node(*id).is_some_and(|n| n.asset == asset))
-                        && switch
-                            .state_nodes
-                            .iter()
-                            .all(|v| v.len() == switch.nodes.len()),
-                    &control.source,
-                    "vehicle switch poses",
-                )?;
-            }
-        }
         for flare in &self.cycle.sun_flares {
             check(
                 finite(&flare.color)
@@ -1098,13 +984,6 @@ impl LightingRecord {
         )?;
         Ok(())
     }
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VehicleLightSwitchReference {
-    pub source: SourceId,
-    pub nodes: Vec<NodeId>,
-    pub state_nodes: [Vec<NodeId>; 3],
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

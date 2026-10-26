@@ -5,8 +5,6 @@ use the_long_slop::reference::{MAX_MANIFEST_BYTES, ReferenceManifest};
 fn installed_startup_selects_only_garage_lada() {
     let bytes = std::fs::read("web/assets/reference/manifest.json").unwrap();
     let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-    assert_eq!(reference.vehicles.len(), 1);
-    assert_eq!(reference.vehicles[0].source.path_id, 77839);
     let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(
         manifest["assets"]

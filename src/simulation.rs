@@ -1,14 +1,18 @@
 pub const FIXED_DT: f32 = 0.01999999955;
+pub mod car_lights;
 pub mod dials;
-pub mod metal_detector;
 pub mod drivetrain;
 pub mod engine;
+pub mod gauges;
 pub mod ignition;
 pub mod input;
 pub mod instruments;
 pub mod lever;
+pub mod metal_detector;
 pub mod music_box;
+pub mod powertrain;
 pub mod radio;
+pub mod sled;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = FIXED_DT as f64;
 /// Steps per frame at time scale 1. Slow frames drop extra time, so step cost cannot grow frame time.

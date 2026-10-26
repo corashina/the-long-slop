@@ -1,11 +1,10 @@
-"""Critical source radio display links."""
+"""Critical source radio display materials."""
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
-from tools.reference.radio import recover_radio_visuals
 from tools.reference.tests.test_instruments import dashboard_fixture
 
 
@@ -26,27 +25,6 @@ def radio_fixture():
 
 
 class RadioTests(unittest.TestCase):
-    def test_radio_visual_source_links(self):
-        source, manifest, reports, owner = radio_fixture()
-        result = recover_radio_visuals(source, owner, manifest, reports)
-        self.assertEqual([result[k] for k in ('needle', 'start', 'end')], [100, 101, 102])
-        for name, node, on, off in [('screen', 502, 21, 22), ('indicator', 400, 23, 24)]:
-            switch = result[name]
-            self.assertEqual(switch['kind'], 'renderer')
-            self.assertEqual(switch['node'], node)
-            for field, identity in [('on', on), ('off', off)]:
-                self.assertEqual(switch[field], dict(source=dict(file='level1', path_id=identity),
-                    asset=7, gltf_material=reports['car']['material_indices'][f'level1:{identity}']))
-        for field in ('RS', 'SOn', 'SOff', 'RMutato', 'MutatoOn', 'MutatoOff', 'TMutato', 'ST1', 'ST2'):
-            original = source.read(owner)[field]
-            source.read(owner)[field] = {'m_PathID': 0}
-            with self.assertRaises(ValueError, msg=field):
-                recover_radio_visuals(source, owner, manifest, reports)
-            source.read(owner)[field] = original
-        reports['car']['material_indices'].clear()
-        with self.assertRaises(ValueError):
-            recover_radio_visuals(source, owner, manifest, reports)
-
     def test_radio_material_variants_are_exported(self):
         from tools.reference.gltf import GltfExporter
         import pygltflib as gl

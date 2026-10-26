@@ -22,6 +22,7 @@ pub mod world;
 pub use world::*;
 pub mod rendering;
 pub mod shadow_bounds;
+pub mod shadow_cadence;
 pub mod shadow_candidates;
 pub mod shadow_frame;
 pub mod shadow_planes;
@@ -48,7 +49,6 @@ pub use flashlights::*;
 pub mod storage;
 pub use storage::{
     PrototypeStorageFlag, PrototypeVolumeReference, StorageFlag, StoragePolicy, StorageRecord,
-    StorageVolumeReference,
 };
 pub mod small_items;
 pub use small_items::*;
@@ -78,13 +78,17 @@ pub use instruments::*;
 pub use ui::*;
 pub mod lighting;
 pub use lighting::*;
+pub mod vehicles;
+pub use vehicles::*;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
 
 macro_rules! id {
     ($name:ident, $inner:ty) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(pub $inner);
     };
@@ -98,11 +102,8 @@ id!(NodeId, u32);
 id!(BodyId, u32);
 id!(ColliderId, u32);
 id!(AnchorId, u32);
-id!(SeatId, u32);
 id!(OpeningId, u32);
-id!(WheelSlotId, u8);
 id!(PartSlotId, u32);
-id!(AttachmentTargetId, u32);
 id!(LightId, u32);
 id!(LightControlId, u32);
 
@@ -551,7 +552,6 @@ pub struct TankReference {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TankRole {
-    Vehicle,
     Portable,
     Supply,
     Fixed,
@@ -579,52 +579,6 @@ pub struct TorqueCurve {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EngineReference {
-    pub source: SourceId,
-    pub item: ItemId,
-    pub fuel_tank: ItemId,
-    pub oil_tank: ItemId,
-    pub coolant_tank: ItemId,
-    pub start_chance: f32,
-    pub starter_delay_seconds: f32,
-    pub starter_rpm: f32,
-    pub starter_rpm_lerp: f32,
-    pub idle_rpm: f32,
-    pub max_rpm: f32,
-    pub shutdown_rpm: f32,
-    pub max_torque_nm: f32,
-    pub starting_push_force: f32,
-    pub consumption_modifier: f32,
-    pub oil_consumption_modifier: f32,
-    pub engine_brake_modifier: f32,
-    pub rpm_change_modifier: f32,
-    pub engine_start_time_modifier: f32,
-    pub heat_gain_min: f32,
-    pub heat_gain_max: f32,
-    pub heat_loss: f32,
-    pub optimal_temperature: [f32; 4],
-    pub fuel_consumption: [f32; 6],
-    pub two_stroke: bool,
-    pub electronics_enabled: bool,
-    pub torque_curve: TorqueCurve,
-    pub globals: EngineGlobals,
-    pub radiator: RadiatorReference,
-    pub initial_temperature: f32,
-    pub heat_loss_speed_modifier: f32,
-    pub max_rpm_difference: f32,
-    pub torque_modifier: f32,
-    pub oil_fluid: u8,
-    pub no_overheat: bool,
-    pub kickstart: bool,
-    pub start_chance_interval_seconds: f32,
-    pub auto_shift_clutch_rpm: f32,
-    pub auto_shift_clutch_rpm_range: f32,
-    /// Source `enginescript.defSmokeRate`.
-    pub smoke_rate: f32,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EngineGlobals {
     pub source: SourceId,
     pub fuel_consumption: f32,
@@ -637,22 +591,6 @@ pub struct EngineGlobals {
     pub max_car_velocity: f32,
     pub outside_temperature_modifier: f32,
     pub min_steam_temperature: f32,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RadiatorReference {
-    pub source: SourceId,
-    pub thermostat_range: [f32; 2],
-    pub fan_temperature_on: f32,
-    pub fan_temperature_off: f32,
-    pub fan_on_when_engine_runs: bool,
-    pub max_value: f32,
-    pub max_fan_value: f32,
-    pub max_fan_speed: f32,
-    pub max_fluid_loss: f32,
-    /// Source `Fan`, spun while the fan is on.
-    pub fan_node: Option<NodeId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -753,26 +691,6 @@ pub struct PlayerReference {
     pub camera_culling_mask: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SeatReference {
-    pub default_pitch_degrees: f32,
-    pub pitch_limits_degrees: [f32; 2],
-    pub id: SeatId,
-    pub source: SourceId,
-    pub item: ItemId,
-    pub anchor: AnchorId,
-    pub vehicle: usize,
-    pub driver: bool,
-    pub driving2: bool,
-    pub hit_nodes: Vec<NodeId>,
-    pub yaw_limits_degrees: [f32; 2],
-    pub exit_distance: f32,
-    pub min_exit_angle_degrees: f32,
-    pub exit_height: f32,
-    pub show_sleep_text: bool,
-}
-
 /// Source WheelCollider values.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -813,29 +731,6 @@ impl WheelColliderReference {
             && self.rotational_damping >= 0.0
             && self.force_application_distance_m >= 0.0
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WheelSlotReference {
-    pub id: WheelSlotId,
-    pub source: SourceId,
-    pub anchor: AnchorId,
-    pub mount_anchor: AnchorId,
-    pub wheel: ItemId,
-    pub tire: ItemId,
-    pub rim: ItemId,
-    pub collider: WheelColliderReference,
-    pub steer: bool,
-    pub drive: bool,
-    pub brake: bool,
-    pub handbrake: bool,
-    pub sideways_stiffness_modifier: f32,
-    pub hub: WheelHubReference,
-    pub tire_condition_range: [u8; 2],
-    pub rim_condition_range: [u8; 2],
-    pub rim_main_types: Vec<String>,
-    pub rim_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -903,46 +798,6 @@ pub struct WheelPartReference {
     pub local_rotation_after_mount: [f32; 4],
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct VehicleReference {
-    pub driving: DrivingVehicleReference,
-    pub spawn_car_id: i32,
-    pub engine: EngineReference,
-    pub instruments: InstrumentReference,
-    pub handbrake: bool,
-    pub source: SourceId,
-    pub body: BodyId,
-    pub root: NodeId,
-    pub mass_kg: f32,
-    pub serialized_mass_kg: f32,
-    pub wheel_slots: [WheelSlotId; 4],
-    pub colliders: Vec<ColliderId>,
-    pub gear_ratios: Vec<f32>,
-    pub final_drive_ratio: f32,
-    pub max_steer_degrees: f32,
-    pub keyboard_steering_rate: f32,
-    pub brake_torque_nm: f32,
-    pub handbrake_torque_nm: f32,
-    pub wheel_slip: [f32; 4],
-    /// Bare rim forward and sideways stiffness (source WheelSlip1, WheelSlip2).
-    pub rim_slip: [f32; 2],
-    pub auto_shift_stop_speed: f32,
-    pub auto_shift_min_rpm: f32,
-    pub auto_shift_max_rpm: f32,
-    pub gear_free_run: Vec<bool>,
-    pub dont_ignite_with_throttle_in_automatic: bool,
-    pub auto_move_min: f32,
-    pub collision_gain: f32,
-    /// Source `carscript.psSmoke` systems, posed relative to `root`.
-    pub exhaust: Vec<ParticleReference>,
-    pub wheel_effects: [WheelEffectsReference; 4],
-    pub effect_gains: EffectGains,
-    pub lever: Option<LeverReference>,
-    /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
-    pub key_steer_multiplier: f32,
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bounds {
@@ -958,9 +813,6 @@ pub struct StartingAreaReference {
     pub home_pose: Transform,
     pub home_bounds: Bounds,
     pub player_spawn: Transform,
-    pub car_pose: Transform,
-    pub driveway_bounds: Bounds,
-    pub driveway_height: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1014,7 +866,6 @@ pub struct ReferenceManifest {
     pub pushables: Vec<PushReference>,
     pub anchors: Vec<AnchorRecord>,
     pub mechanisms: Vec<MechanismReference>,
-    pub wheel_slots: Vec<WheelSlotReference>,
     pub wheel_parts: Vec<WheelPartReference>,
     pub part_scan: PartScanReference,
     pub parts: Vec<PartReference>,
@@ -1024,8 +875,6 @@ pub struct ReferenceManifest {
     pub tanks: Vec<TankReference>,
     pub fluid_rules: FluidRulesReference,
     pub player: PlayerReference,
-    pub seats: Vec<SeatReference>,
-    pub vehicles: Vec<VehicleReference>,
     pub area: StartingAreaReference,
 }
 
@@ -1204,7 +1053,7 @@ impl ReferenceManifest {
             }
         }
 
-        self.driving.validate(self)?;
+        self.driving.validate()?;
         require(
             self.assets
                 .iter()
@@ -1267,29 +1116,11 @@ impl ReferenceManifest {
         let asset_ids = ids(self.assets.iter().map(|r| r.id), "duplicate asset ID")?;
         let node_ids = ids(self.nodes.iter().map(|r| r.id), "duplicate node ID")?;
         self.ui.validate()?;
-        require(!self.vehicles.is_empty(), "vehicles")?;
-        for v in &self.vehicles {
-            v.instruments.validate(&node_ids, &self.assets)?;
-        }
         let body_ids = ids(self.bodies.iter().map(|r| r.id), "duplicate body ID")?;
         let collider_ids = ids(self.colliders.iter().map(|r| r.id), "duplicate collider ID")?;
         let anchor_ids = ids(self.anchors.iter().map(|r| r.id), "duplicate anchor ID")?;
         let item_ids = ids(self.items.iter().map(|r| r.id), "duplicate item ID")?;
         let opening_ids = ids(self.openings.iter().map(|r| r.id), "duplicate opening ID")?;
-        ids(self.seats.iter().map(|r| r.id), "duplicate seat ID")?;
-        let wheel_ids = ids(self.wheel_slots.iter().map(|r| r.id), "duplicate wheel ID")?;
-        ids(
-            self.wheel_slots.iter().map(|r| r.rim),
-            "duplicate mounted rim",
-        )?;
-        ids(
-            self.wheel_slots.iter().map(|r| r.tire),
-            "duplicate mounted tire",
-        )?;
-        ids(
-            self.wheel_slots.iter().map(|r| r.wheel),
-            "duplicate mounted wheel",
-        )?;
         let part_ids = ids(self.parts.iter().map(|p| p.item), "duplicate part item")?;
         require(
             self.part_scan.mask != 0
@@ -1426,17 +1257,7 @@ impl ReferenceManifest {
                     .items
                     .iter()
                     .enumerate()
-                    .all(|(i, r)| r.id.0 == i as u32 + 1)
-                && self
-                    .seats
-                    .iter()
-                    .enumerate()
-                    .all(|(i, r)| r.id.0 == i as u32 + 1)
-                && self
-                    .wheel_slots
-                    .iter()
-                    .enumerate()
-                    .all(|(i, r)| r.id.0 == i as u8),
+                    .all(|(i, r)| r.id.0 == i as u32 + 1),
             "dense runtime IDs",
         )?;
         ids(
@@ -1850,127 +1671,6 @@ impl ReferenceManifest {
                 && p.exit_steps_horizontal <= 100,
             "effective player geometry/exit scan",
         )?;
-        for v in &self.vehicles {
-            let e = &v.engine;
-            require(
-                item_ids.contains(&e.item)
-                    && [e.fuel_tank, e.oil_tank, e.coolant_tank]
-                        .iter()
-                        .all(|id| self.tanks.iter().any(|t| t.item == *id)),
-                "engine tank bindings",
-            )?;
-            require(
-                finite(&[
-                    e.start_chance,
-                    e.starter_delay_seconds,
-                    e.starter_rpm,
-                    e.starter_rpm_lerp,
-                    e.idle_rpm,
-                    e.max_rpm,
-                    e.shutdown_rpm,
-                    e.max_torque_nm,
-                    e.starting_push_force,
-                    e.consumption_modifier,
-                    e.oil_consumption_modifier,
-                    e.engine_brake_modifier,
-                    e.rpm_change_modifier,
-                    e.engine_start_time_modifier,
-                    e.heat_gain_min,
-                    e.heat_gain_max,
-                    e.heat_loss,
-                ]) && finite(&e.optimal_temperature)
-                    && finite(&e.fuel_consumption),
-                "engine parameters",
-            )?;
-            require(
-                (0.0..=1.0).contains(&e.start_chance)
-                    && e.shutdown_rpm > 0.0
-                    && e.max_rpm > e.idle_rpm
-                    && e.max_torque_nm > 0.0,
-                "engine limits",
-            )?;
-            require(
-                e.torque_curve.keys.len() >= 2 && e.torque_curve.keys.len() <= 1024,
-                "torque curve",
-            )?;
-            for k in &e.torque_curve.keys {
-                require(
-                    finite(&[
-                        k.time,
-                        k.value,
-                        k.in_tangent,
-                        k.out_tangent,
-                        k.in_weight,
-                        k.out_weight,
-                    ]) && k.weighted_mode <= 3,
-                    "curve key",
-                )?;
-            }
-            require(
-                e.torque_curve
-                    .keys
-                    .windows(2)
-                    .all(|k| k[0].time < k[1].time),
-                "curve key order",
-            )?;
-            require(
-                finite(&[
-                    e.auto_shift_clutch_rpm,
-                    e.auto_shift_clutch_rpm_range,
-                    v.auto_shift_stop_speed,
-                    v.auto_shift_min_rpm,
-                    v.auto_shift_max_rpm,
-                ]) && v.auto_shift_min_rpm < v.auto_shift_max_rpm,
-                "automatic shift thresholds",
-            )?;
-            require(
-                e.oil_fluid < 6
-                    && finite(&[
-                        e.max_rpm_difference,
-                        e.torque_modifier,
-                        e.start_chance_interval_seconds,
-                        e.globals.min_steam_temperature,
-                    ])
-                    && e.max_rpm_difference > 0.0
-                    && e.start_chance_interval_seconds > 0.0
-                    && e.smoke_rate.is_finite()
-                    && e.smoke_rate >= 0.0
-                    && e.globals.temperature_difference_modifier > 0.0
-                    && e.globals.max_car_velocity > 0.0,
-                "engine scalar bounds",
-            )?;
-            require(
-                finite(&[
-                    e.initial_temperature,
-                    e.heat_loss_speed_modifier,
-                    e.globals.fuel_consumption,
-                    e.globals.oil_consumption,
-                    e.globals.rpm_change,
-                    e.globals.coolant_evaporate_rate,
-                    e.globals.temperature_difference_modifier,
-                    e.globals.temperature_move_modifier,
-                    e.globals.max_car_velocity,
-                    e.globals.outside_temperature_modifier,
-                ]) && finite(&e.globals.car_temperature_bounds),
-                "engine globals",
-            )?;
-            require(
-                finite(&e.radiator.thermostat_range)
-                    && finite(&[
-                        e.radiator.fan_temperature_on,
-                        e.radiator.fan_temperature_off,
-                        e.radiator.max_value,
-                        e.radiator.max_fan_value,
-                        e.radiator.max_fan_speed,
-                        e.radiator.max_fluid_loss,
-                    ]),
-                "radiator parameters",
-            )?;
-            require(
-                e.radiator.fan_node.is_none_or(|id| node_ids.contains(&id)),
-                "radiator fan node",
-            )?;
-        }
         require(
             finite(&[
                 self.fluid_rules.pour_speed,
@@ -2084,64 +1784,6 @@ impl ReferenceManifest {
             }),
             "push action owner",
         )?;
-        let mut seat_hit_nodes = HashSet::new();
-        for r in &self.seats {
-            r.validate_view()?;
-            require(
-                item_ids.contains(&r.item)
-                    && anchor_ids.contains(&r.anchor)
-                    && !r.hit_nodes.is_empty()
-                    && r.hit_nodes.iter().all(|node| {
-                        node_ids.contains(node)
-                            && seat_hit_nodes.insert(*node)
-                            && self
-                                .nodes
-                                .iter()
-                                .any(|record| record.id == *node && record.active)
-                    })
-                    && finite(&r.yaw_limits_degrees)
-                    && r.yaw_limits_degrees[0] <= r.yaw_limits_degrees[1]
-                    && r.exit_distance.is_finite()
-                    && r.exit_distance > 0.0
-                    && r.vehicle < self.vehicles.len(),
-                "seat binding/limits",
-            )?;
-        }
-        for vehicle in 0..self.vehicles.len() {
-            require(
-                self.seats
-                    .iter()
-                    .filter(|s| s.driver && s.vehicle == vehicle)
-                    .count()
-                    == 1,
-                "driver seat",
-            )?;
-        }
-        for r in &self.wheel_slots {
-            require(
-                anchor_ids.contains(&r.anchor)
-                    && [r.wheel, r.tire, r.rim]
-                        .iter()
-                        .all(|id| item_ids.contains(id)),
-                "wheel bindings",
-            )?;
-            require(
-                r.collider.valid()
-                    && finite(&[
-                        r.sideways_stiffness_modifier,
-                        r.hub.radius_m,
-                        r.hub.mass_kg,
-                        r.hub.forward_stiffness,
-                        r.hub.sideways_stiffness,
-                    ])
-                    && r.sideways_stiffness_modifier >= 0.0
-                    && r.hub.radius_m > 0.0
-                    && r.hub.mass_kg > 0.0
-                    && r.hub.forward_stiffness >= 0.0
-                    && r.hub.sideways_stiffness >= 0.0,
-                "wheel parameters",
-            )?;
-        }
         ids(
             self.wheel_parts.iter().map(|part| part.item),
             "duplicate wheel part",
@@ -2167,84 +1809,18 @@ impl ReferenceManifest {
                 "wheel part geometry/fit",
             )?;
         }
-        require(
-            self.wheel_slots.iter().all(|slot| {
-                self.wheel_parts.iter().any(|part| part.item == slot.rim)
-                    && self.wheel_parts.iter().any(|part| part.item == slot.tire)
-                    && anchor_ids.contains(&slot.mount_anchor)
-            }),
-            "wheel mount bindings",
-        )?;
-        require(
-            wheel_ids.len() == 4 * self.vehicles.len()
-                && self
-                    .vehicles
-                    .iter()
-                    .flat_map(|v| v.wheel_slots)
-                    .collect::<HashSet<_>>()
-                    .len()
-                    == wheel_ids.len(),
-            "four road wheels per vehicle",
-        )?;
-        for v in &self.vehicles {
-            require(
-                body_ids.contains(&v.body)
-                    && node_ids.contains(&v.root)
-                    // Exhaust and other root-relative poses use the chassis body frame.
-                    && self.bodies.iter().any(|b| b.id == v.body && b.node == v.root)
-                    && v.wheel_slots.iter().all(|id| wheel_ids.contains(id))
-                    && v.colliders.iter().all(|id| collider_ids.contains(id)),
-                "vehicle bindings",
-            )?;
-            require(
-                v.spawn_car_id >= 0
-                    && self
-                        .world
-                        .catalog
-                        .items
-                        .iter()
-                        .any(|i| i.index == v.spawn_car_id as u32),
-                "Source vehicle spawn selector",
-            )?;
-            require(
-                v.wheel_slots.iter().collect::<HashSet<_>>().len() == 4 && !v.colliders.is_empty(),
-                "four road wheels/colliders",
-            )?;
-            require(
-                finite(&[
-                    v.mass_kg,
-                    v.serialized_mass_kg,
-                    v.final_drive_ratio,
-                    v.max_steer_degrees,
-                    v.keyboard_steering_rate,
-                    v.brake_torque_nm,
-                    v.handbrake_torque_nm,
-                ]) && finite(&v.gear_ratios)
-                    && finite(&v.wheel_slip)
-                    && finite(&v.rim_slip)
-                    && v.wheel_slip.iter().chain(&v.rim_slip).all(|s| *s >= 0.0)
-                    && v.gear_ratios.iter().any(|ratio| *ratio == 0.0)
-                    && v.gear_free_run.len() == v.gear_ratios.len()
-                    && v.mass_kg > 0.0
-                    && v.keyboard_steering_rate > 0.0,
-                "vehicle parameters",
-            )?;
-        }
         let a = &self.area;
         require(
             node_ids.contains(&a.home_root)
                 && transform(&a.home_pose)
-                && transform(&a.player_spawn)
-                && transform(&a.car_pose),
+                && transform(&a.player_spawn),
             "area binding/poses",
         )?;
-        for b in [&a.home_bounds, &a.driveway_bounds] {
-            require(
-                finite(&b.min) && finite(&b.max) && (0..3).all(|i| b.min[i] <= b.max[i]),
-                "area bounds",
-            )?;
-        }
-        require(a.driveway_height.is_finite(), "driveway height")?;
+        let b = &a.home_bounds;
+        require(
+            finite(&b.min) && finite(&b.max) && (0..3).all(|i| b.min[i] <= b.max[i]),
+            "area bounds",
+        )?;
         let cable = &self.world.home_cable;
         require(
             !cable.ropes.is_empty()

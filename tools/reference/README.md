@@ -54,7 +54,7 @@ Library-only verification does not use Docker.
 
 The exporter accepts Steam app `1017180`, build `11140890`, with Unity `2021.3.18f1`.
 It preserves the installed tree and complete object graph before converting development assets.
-It derives the garage, Lada, supplies, road pole, sky, and selected world prototypes from the accepted library.
+It derives the garage, supplies, road pole, sky, and selected world prototypes from the accepted library. The Lada is a world prototype.
 Git ignores recovered files and decompiled code. The exporter leaves Steam files unchanged.
 
 ## Full managed reference
@@ -158,8 +158,8 @@ Keep the shared cache: native records depend on its bound `records/manifest.json
 ## Selected runtime rules
 
 The home link comes from `homesickscript.FirstHome`.
-The Lada link comes from `TerrainGenerationSettings.StartCar02` and its `Car02Full` scene child.
-The exporter checks the shared prefab hierarchy before reading scene startup values.
+The Lada is the world prototype `sharedassets1.assets` 82556. The startup entry `StartCar02` places it at the scene Lada spot.
+The plate font and material, the reflection probe, the radio settings and the car hit route come from this prototype.
 
 `Source` caches resolved object IDs and generated type trees.
 It repairs the MonoBehaviour header and generated array container types.

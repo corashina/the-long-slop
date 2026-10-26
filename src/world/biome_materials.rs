@@ -110,6 +110,11 @@ mod tests {
             colliders: Vec::new(),
             prefab_pose: transform.clone(),
             interiors: Vec::new(),
+            vehicle: None,
+            engines: Vec::new(),
+            radiators: Vec::new(),
+            gauges: Vec::new(),
+            sled: None,
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();
         assert_eq!(marked, [false, true, true, false]);

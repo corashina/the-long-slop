@@ -411,9 +411,6 @@ impl GarageRuntime {
         if body_id.0 != u32::MAX {
             self.area.bodies.remove(&body_id);
             self.area.render_poses.retain(|(id, _, _)| *id != body_id);
-            self.area
-                .compound_colliders
-                .retain(|collider| collider.body != body_id);
         }
         self.area.item_render_poses.retain(|(id, _, _)| *id != item);
         let state = self.area.items.set_body(item, None).unwrap();

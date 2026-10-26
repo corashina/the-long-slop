@@ -53,8 +53,6 @@ pub struct CaptureFace {
 #[serde(deny_unknown_fields)]
 pub struct ProbeRecord {
     pub source: SourceId,
-    pub node: NodeId,
-    pub world_pose: Transform,
     pub enabled: bool,
     pub bounds_size: [f32; 3],
     pub bounds_offset: [f32; 3],
@@ -141,14 +139,9 @@ impl LightRecord {
     }
 }
 impl ProbeRecord {
-    pub fn validate(&self, nodes: &[NodeRecord]) -> Result<(), ReferenceError> {
+    pub fn validate(&self) -> Result<(), ReferenceError> {
         let label = format!("probe {}:{}", self.source.file, self.source.path_id);
-        require(
-            valid_source(&self.source)
-                && valid_pose(&self.world_pose)
-                && nodes.iter().any(|node| node.id == self.node),
-            &format!("{label}: node or pose"),
-        )?;
+        require(valid_source(&self.source), &format!("{label}: source"))?;
         require(
             self.bounds_size == [6., 2.5, 6.]
                 && self.importance == 1

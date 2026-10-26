@@ -1,5 +1,5 @@
 use super::dials::{digit_angle, lerp, lerp_angle};
-use crate::reference::{InstrumentReference, NeedleReference};
+use crate::reference::{GaugeLimits, InstrumentReference, LampReference, NeedleReference};
 use rapier3d::math::Rotation;
 #[derive(Clone, Copy, Default)]
 pub struct InstrumentSample {
@@ -12,12 +12,13 @@ pub struct InstrumentSample {
     pub headlights: u8,
     pub distance_m: f64,
 }
+/// Gauge state of one car, for any needle, lamp and digit count. Lamp bits hold up to 32 lamps.
 pub struct InstrumentState {
-    signals: [f32; 3],
-    values: [f32; 3],
-    digit_values: [f32; 5],
-    pub needle_angles: [f32; 3],
-    pub digit_angles: [f32; 5],
+    signals: Vec<f32>,
+    values: Vec<f32>,
+    digit_values: Vec<f32>,
+    pub needle_angles: Vec<f32>,
+    pub digit_angles: Vec<f32>,
     pub lamp_bits: u32,
     pub digits_lit: bool,
     pub distance_km: f32,
@@ -29,6 +30,32 @@ pub fn needle_angle(r: &NeedleReference, value: f32) -> f32 {
     }
     lerp(r.min_angle, r.max_angle, t)
 }
+/// `ledkijelzoscript` lamps: bit i is lamp i on.
+pub fn lamp_bits(lamps: &[LampReference], limits: &GaugeLimits, s: &InstrumentSample) -> u32 {
+    let mut bits = 0;
+    for (i, l) in lamps.iter().enumerate() {
+        let on = match l.signal.as_str() {
+            "fuel" => s.local_ignition && s.fuel_liters < limits.low_fuel,
+            "oil" => {
+                s.local_ignition && (s.oil_liters < limits.low_oil || s.rpm < limits.oil_test_rpm)
+            }
+            "battery" => s.local_ignition && s.rpm < limits.battery_test_rpm,
+            "headlight2" => {
+                s.headlights == 2 && limits.electronics_output > limits.electronics_off_threshold
+            }
+            _ => false,
+        };
+        let v = if on { 1. } else { 0. };
+        if v >= l.min_value && (v <= l.max_value || l.stay_on) {
+            bits |= 1 << i;
+        }
+    }
+    bits
+}
+/// Source METERUPD2 `lampak`: the meter lights with low or high headlights and local ignition.
+pub fn meter_lit(s: &InstrumentSample) -> bool {
+    s.local_ignition && matches!(s.headlights, 1 | 2)
+}
 pub fn source_rotation(e: [f32; 3]) -> [f32; 4] {
     let q = (Rotation::from_rotation_y(e[1].to_radians())
         * Rotation::from_rotation_x(e[0].to_radians())
@@ -38,33 +65,59 @@ pub fn source_rotation(e: [f32; 3]) -> [f32; 4] {
 }
 impl InstrumentState {
     pub fn new(r: &InstrumentReference) -> Self {
-        Self {
-            signals: [0.; 3],
-            values: [0.; 3],
-            digit_values: std::array::from_fn(|i| r.odometer.digits[i].initial_value),
-            needle_angles: std::array::from_fn(|i| needle_angle(&r.needles[i], 0.)),
-            digit_angles: std::array::from_fn(|i| r.odometer.digits[i].initial_angle),
+        let mut state = Self {
+            signals: vec![0.; r.needles.len()],
+            values: vec![0.; r.needles.len()],
+            digit_values: vec![0.; r.digits().len()],
+            needle_angles: vec![0.; r.needles.len()],
+            digit_angles: vec![0.; r.digits().len()],
             lamp_bits: 0,
             digits_lit: false,
-            distance_km: r.odometer.initial_value,
-        }
+            distance_km: 0.,
+        };
+        state.reset(r);
+        state
     }
+    /// Startup values. Keeps the buffers.
     pub fn reset(&mut self, r: &InstrumentReference) {
-        *self = Self::new(r);
+        self.signals.fill(0.);
+        self.values.fill(0.);
+        for (i, d) in r.digits().iter().enumerate() {
+            self.digit_values[i] = d.initial_value;
+            self.digit_angles[i] = d.initial_angle;
+        }
+        for (i, n) in r.needles.iter().enumerate() {
+            self.needle_angles[i] = needle_angle(n, 0.);
+        }
+        self.lamp_bits = 0;
+        self.digits_lit = false;
+        self.distance_km = r.odometer.as_ref().map_or(0., |o| o.initial_value);
     }
-    pub fn initialize_from_sample(&mut self, r: &InstrumentReference, s: InstrumentSample) {
+    pub fn initialize_from_sample(
+        &mut self,
+        r: &InstrumentReference,
+        limits: &GaugeLimits,
+        s: InstrumentSample,
+    ) {
         self.reset(r);
-        self.evaluate(r, s, 0., true);
+        self.evaluate(r, limits, s, 0., true);
     }
-    pub fn update(&mut self, r: &InstrumentReference, s: InstrumentSample, dt: f32) {
+    pub fn update(
+        &mut self,
+        r: &InstrumentReference,
+        limits: &GaugeLimits,
+        s: InstrumentSample,
+        dt: f32,
+    ) {
         if !dt.is_finite() || dt <= 0. {
             return;
         }
-        self.evaluate(r, s, dt, false);
+        self.evaluate(r, limits, s, dt, false);
     }
     fn evaluate(
         &mut self,
         r: &InstrumentReference,
+        limits: &GaugeLimits,
         s: InstrumentSample,
         dt: f32,
         initialize: bool,
@@ -72,6 +125,7 @@ impl InstrumentState {
         for (i, n) in r.needles.iter().enumerate() {
             let target = match n.signal.as_str() {
                 "speed" => s.speed_kmh.abs(),
+                "rpm" => s.rpm,
                 "fuel" => {
                     if s.local_ignition {
                         s.fuel_liters
@@ -104,25 +158,13 @@ impl InstrumentState {
             };
             self.needle_angles[i] = needle_angle(n, self.values[i]);
         }
-        self.lamp_bits = 0;
-        for (i, l) in r.lamps.iter().enumerate() {
-            let on = match l.signal.as_str() {
-                "fuel" => s.local_ignition && s.fuel_liters < r.low_fuel,
-                "oil" => s.local_ignition && (s.oil_liters < r.low_oil || s.rpm < r.oil_test_rpm),
-                "battery" => s.local_ignition && s.rpm < r.battery_test_rpm,
-                "headlight2" => {
-                    s.headlights == 2 && r.electronics_output > r.electronics_off_threshold
-                }
-                _ => false,
-            };
-            let v = if on { 1. } else { 0. };
-            if v >= l.min_value && (v <= l.max_value || l.stay_on) {
-                self.lamp_bits |= 1 << i;
-            }
-        }
-        self.digits_lit = s.local_ignition && matches!(s.headlights, 1 | 2);
-        self.distance_km = r.odometer.initial_value + (s.distance_m / 1000.) as f32;
-        let o = &r.odometer;
+        self.lamp_bits = lamp_bits(&r.lamps, limits, &s);
+        self.digits_lit = meter_lit(&s);
+        self.distance_km =
+            r.odometer.as_ref().map_or(0., |o| o.initial_value) + (s.distance_m / 1000.) as f32;
+        let Some(o) = &r.odometer else {
+            return;
+        };
         let value = if o.use_multiplier {
             self.distance_km * o.multiplier
         } else {
@@ -147,19 +189,5 @@ impl InstrumentState {
                 lerp_angle(self.digit_angles[i], angle, dt * 20.)
             };
         }
-    }
-}
-
-pub fn update_high_beam(
-    lamp: &crate::reference::HighBeamLampReference,
-    high_beam: bool,
-) -> crate::lighting::LampMaterialOutput {
-    let value = high_beam as u8 as f32;
-    let on = value >= lamp.min_value && (value <= lamp.max_value || lamp.stay_on);
-    let material = if on { &lamp.on } else { &lamp.off };
-    crate::lighting::LampMaterialOutput {
-        renderer: lamp.node,
-        asset: material.asset,
-        material_index: material.gltf_material,
     }
 }

@@ -14,6 +14,38 @@ pub struct StartupTerrain {
 }
 
 impl StartupTerrain {
+    /// Sum of the startup root offsets on the Transform chain of `transform`.
+    pub(crate) fn chain_offset(
+        &self,
+        reference: &WorldReference,
+        transform: &crate::reference::SourceId,
+    ) -> Result<f32, ReferenceError> {
+        let mut offset = 0.;
+        let mut current = Some(transform);
+        while let Some(source) = current {
+            offset += self
+                .root_offsets
+                .iter()
+                .filter(|(id, _)| id == source)
+                .map(|(_, value)| *value)
+                .sum::<f32>();
+            let record = reference
+                .records
+                .iter()
+                .find(|r| &r.source == source && r.class_name == "Transform")
+                .ok_or_else(|| {
+                    ReferenceError(format!(
+                        "{}:{} startup Transform",
+                        source.file, source.path_id
+                    ))
+                })?;
+            current = match record.fields.get("m_Father") {
+                Some(WorldValue::Link(parent)) => Some(parent),
+                _ => None,
+            };
+        }
+        Ok(offset)
+    }
     pub(crate) fn body_offsets(&self, reference: &ReferenceManifest) -> Vec<(BodyId, f32)> {
         use std::collections::HashMap;
         let nodes: HashMap<_, _> = reference.nodes.iter().map(|node| (node.id, node)).collect();

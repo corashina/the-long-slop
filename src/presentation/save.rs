@@ -223,7 +223,13 @@ impl PreparedPresentation {
         } else if mode == super::camera::CameraMode::Chase
             && candidate.area.player.seat_vehicle().is_some()
         {
-            super::camera::pose(mode, candidate.physics.snapshot(candidate.vehicle).pose)
+            super::camera::pose(
+                mode,
+                candidate
+                    .physics
+                    .snapshot(candidate.vehicle.as_ref().unwrap())
+                    .pose,
+            )
         } else {
             super::transform(pose)
         };
@@ -266,8 +272,6 @@ impl PreparedPresentation {
             camera.to_matrix(),
             self.aspect_ratio,
             self.screen_height,
-            world,
-            &self.updates,
             &mut self.required_views,
         )?;
         self.poses.0.clear();
@@ -312,6 +316,8 @@ impl PreparedPresentation {
                 &mut candidate.physics,
                 &mut candidate.area,
                 &mut candidate.wheels,
+                &mut candidate.vehicles,
+                &mut candidate.powertrain,
                 view,
                 candidate.lighting.cycle.output().shader_time_seconds as f32,
                 lod,
@@ -394,8 +400,6 @@ impl PreparedPresentation {
                 camera.to_matrix(),
                 self.aspect_ratio,
                 self.screen_height,
-                world,
-                &self.updates,
                 &mut self.required_views,
             )?;
             validate_assets(reference, world)?;
@@ -665,8 +669,6 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     if materials.state != materials::RenderingState::Ready {
         return Err(fail("Material assets are not ready".into()));
     }
-    let instruments = world.resource::<super::instruments::InstrumentVisuals>();
-    instruments.validate_assets(world.resource::<Assets<materials::SourceMaterial>>())?;
     for light in &source.lights {
         if world.get::<lighting::SourceLight>(light.entity).is_none()
             || light
@@ -741,45 +743,12 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
     Ok(())
 }
 
-fn candidate_node_pose(
-    node: crate::reference::NodeId,
-    world: &World,
-    updates: &[(Entity, Transform, Visibility)],
-) -> Result<Mat4, SaveError> {
-    let entity = *world
-        .resource::<ReferenceVisuals>()
-        .nodes
-        .get(&node)
-        .ok_or_else(|| SaveError::InvalidLinks("Missing candidate view node".into()))?;
-    let mut current = Some(entity);
-    let mut matrix = Mat4::IDENTITY;
-    let mut depth = 0;
-    while let Some(node) = current {
-        let pose = updates
-            .iter()
-            .find(|(id, _, _)| *id == node)
-            .map(|(_, pose, _)| pose)
-            .or_else(|| world.get::<Transform>(node))
-            .ok_or_else(|| SaveError::InvalidLinks("Missing candidate view transform".into()))?;
-        matrix = pose.to_matrix() * matrix;
-        current = world.get::<ChildOf>(node).map(ChildOf::parent);
-        depth += 1;
-        if depth > world.resource::<ReferenceVisuals>().nodes.len() + 4 {
-            return Err(SaveError::InvalidLinks(
-                "Cyclic candidate view transform".into(),
-            ));
-        }
-    }
-    Ok(matrix)
-}
 fn candidate_required_views(
     reference: &ReferenceManifest,
     candidate: &GarageRuntime,
     camera: Mat4,
     aspect: f32,
     height: f32,
-    world: &World,
-    updates: &[(Entity, Transform, Visibility)],
     views: &mut Option<Box<crate::world::RequiredViews>>,
 ) -> Result<(), SaveError> {
     use super::view_frame::{camera_snapshot, required_view};
@@ -813,16 +782,9 @@ fn candidate_required_views(
     )?;
     let views = views.get_or_insert_with(|| Box::new(crate::world::RequiredViews::new(first)));
     views.reset(first);
-    let mut positions = [Vec3::ZERO; super::lighting_scene::PROBE_COUNT];
-    let mut enabled = [false; super::lighting_scene::PROBE_COUNT];
-    for (index, probe) in lighting.probes.iter().enumerate() {
-        enabled[index] = probe.enabled;
-        if probe.enabled {
-            positions[index] = candidate_node_pose(probe.node, world, updates)?
-                .w_axis
-                .truncate();
-        }
-    }
+    // The car probe binds with the car copy after load. It has no required view yet.
+    let positions = [Vec3::ZERO; super::lighting_scene::PROBE_COUNT];
+    let enabled = [false; super::lighting_scene::PROBE_COUNT];
     super::view_frame::append_probe_required_views(
         views,
         &lighting.probes,

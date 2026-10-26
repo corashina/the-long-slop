@@ -1,10 +1,11 @@
 //! Selected source audio. Validation has a separate gameplay failure boundary.
 use super::{
-    ColliderId, CurveKey, ItemId, LightControlId, MaterialSwitchReference, MechanismId, NodeId,
+    CarAudioReference, CarShotReference, CarSoundReference, ColliderId, CurveKey,
+    EngineAudioReference, ItemId, LightControlId, MechanismId, NodeId,
     PartSlotId, ReferenceError, ReferenceManifest, SourceId, Transform, hash, ids, require,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 macro_rules! record {
     ($name:ident { $($field:ident: $ty:ty),* $(,)? }) => {
@@ -51,25 +52,7 @@ record!(AudioEventBinding {
     id: u32, source: SourceId, trigger: String, emitter: u32, clips: Vec<u32>, gain: f32,
     pitch_range: [f32; 2], priority: u8, mixer: u32, voice: Option<u32>, method: AudioMethod
 });
-record!(EngineAudioReference {
-    source: SourceId, emitter: u32, idle_voice: u32, motor_voice: u32,
-    starter_binding: Option<u32>, stop_binding: Option<u32>,
-    constants: BTreeMap<String, f32>, method: AudioMethod
-});
-record!(HornAudioReference {
-    source: SourceId, voice: u32, attack_release_rate: f32, pitch_min: f32, pitch_max: f32,
-    temperature_min: f32, temperature_max: f32, switches: Vec<SourceId>, method: AudioMethod
-});
 record!(AudioControlReference { source: SourceId, node: NodeId, mechanism: Option<MechanismId> });
-record!(RadioControlReference {
-    source: SourceId,
-    node: NodeId,
-    item: ItemId,
-    enabled: bool,
-    tune: bool,
-    turnable: bool
-});
-record!(RadioControls { volume: Option<RadioControlReference>, tuning: Option<RadioControlReference>, band: Option<RadioControlReference> });
 record!(RadioStationReference {
     id: u32, band: String, frequency: f32, name: String, custom: bool, content: String,
     initial_music: bool, start_time: f32, initial_time: f32, initial_max_time: f32, initial_gain: f32,
@@ -83,66 +66,15 @@ record!(RadioClockReference {
     talk_start: AudioMethod,
     multiplayer: AudioMethod
 });
+// radioscript settings and stations shared by all world radios.
 record!(RadioAudioReference {
-    source: SourceId, emitter: u32, voices: [u32; 3], controls: RadioControls, visuals: RadioVisualReference,
-    constants: BTreeMap<String, f32>, initial_on: bool, initial_am: bool,
-    initial_tuning: f32, initial_volume: f32, fm_tolerance: f32, am_tolerance: f32,
+    constants: BTreeMap<String, f32>, fm_tolerance: f32, am_tolerance: f32,
     electronics_cutoff: f32, time_correction_seconds: f32, late_seek_margin_seconds: f32,
-    custom_gain: f32, clock: RadioClockReference, click_binding: Option<u32>, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
-    electronics_source: SourceId, electronics_output: f32, tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
+    custom_gain: f32, clock: RadioClockReference, stations: Vec<RadioStationReference>, methods: Vec<AudioMethod>,
+    tuning_repeat_seconds: f32, holiday_ranges: [[u8;4];2]
 });
-// radioscript SS, SC and SC2 settings shared by every portable radio's voice slot.
+// radioscript SS, SC and SC2 settings shared by the world radios in `sources` (portable and car radios).
 record!(PortableRadioAudioReference { sources: Vec<SourceId>, voices: [AudioVoiceReference; 3] });
-record!(RadioVisualReference {
-    screen: MaterialSwitchReference,
-    indicator: MaterialSwitchReference,
-    needle: NodeId,
-    start: NodeId,
-    end: NodeId
-});
-impl RadioVisualReference {
-    fn validate(&self, game: &ReferenceManifest) -> Result<(), ReferenceError> {
-        let mut asset = None;
-        for switch in [&self.screen, &self.indicator] {
-            let MaterialSwitchReference::Renderer { node, on, off } = switch else {
-                return Err(ReferenceError("Required radio renderer".into()));
-            };
-            let renderer = game
-                .nodes
-                .iter()
-                .find(|n| n.id == *node)
-                .ok_or_else(|| ReferenceError("Missing radio renderer node".into()))?;
-            require(
-                asset.is_none_or(|id| id == renderer.asset),
-                "radio renderer asset",
-            )?;
-            asset = Some(renderer.asset);
-            for material in [on, off] {
-                require(
-                    material.asset == renderer.asset
-                        && game.assets.iter().any(|a| {
-                            a.id == material.asset && material.gltf_material < a.material_count
-                        })
-                        && game.rendering.materials.iter().any(|m| {
-                            m.asset == material.asset
-                                && m.gltf_material == material.gltf_material
-                                && m.source == material.source
-                        }),
-                    "radio material",
-                )?;
-            }
-        }
-        for id in [self.needle, self.start, self.end] {
-            require(
-                game.nodes
-                    .iter()
-                    .any(|n| n.id == id && Some(n.asset) == asset),
-                "radio transform",
-            )?;
-        }
-        Ok(())
-    }
-}
 record!(MechanismAudioReference {
     source: SourceId, emitter: u32, movement_voice: Option<u32>, audio_multiplier: f32,
     slide_multiplier: f32, rotation_gain: f32, slide_gain: f32, gain_smoothing: f32,
@@ -193,7 +125,7 @@ record!(AudioInteriorReference { id: u32, source: SourceId, node: NodeId, collid
     removable_doors: bool, use_value: bool, value: f32, doors: Vec<AudioControlReference>,
     door_slots: Vec<PartSlotId>, invert_doors: Vec<bool>, invert_slots: Vec<bool>,
     parent_door: Option<AudioControlReference>, parent_slot: Option<PartSlotId>, method: AudioMethod });
-record!(AudioRouteReference { source: SourceId, voices: Vec<u32>, interiors: Vec<u32>, has_car: bool,
+record!(AudioRouteReference { source: SourceId, voices: Vec<u32>, interiors: Vec<u32>,
     sensor: AudioSensorReference, main_mixer: u32, outside_mixer: u32, car_mixer: Option<u32>,
     initial_outside: bool, initial_player_inside: bool, methods: Vec<AudioMethod> });
 record!(AudioSharedReference {
@@ -206,9 +138,9 @@ record!(AudioOutsideReference { default_interior_gain: f32, gain_smoothing: f32,
 record!(AudioMixerControls { outside: AudioOutsideReference, source: SourceId, parameter_indices: Vec<u32>, parameter_name_hashes: Vec<u32>, parameter_names: Vec<String>, methods: Vec<AudioMethod> });
 record!(AudioReference {
     schema_version: u32, clips: Vec<AudioClipReference>, emitters: Vec<AudioEmitterReference>,
-    voices: Vec<AudioVoiceReference>, mixers: Vec<AudioMixerReference>, bindings: Vec<AudioEventBinding>,
-    engine: EngineAudioReference, horn: HornAudioReference, radio: RadioAudioReference,
-    portable_radio: PortableRadioAudioReference,
+    voices: Vec<AudioVoiceReference>, car_voices: Vec<CarVoiceReference>, mixers: Vec<AudioMixerReference>,
+    bindings: Vec<AudioEventBinding>, radio: RadioAudioReference,
+    portable_radios: Vec<PortableRadioAudioReference>,
     mechanisms: Vec<MechanismAudioReference>, fluids: Vec<FluidAudioReference>,
     interiors: Vec<AudioInteriorReference>, routes: Vec<AudioRouteReference>, lamps: Vec<LampAudioReference>,
     silent_actions: Vec<String>, managed: AudioManagedEvidence, native: AudioNativeEvidence,
@@ -216,6 +148,11 @@ record!(AudioReference {
     survival: Vec<SurvivalAudioReference>, collisions: CollisionAudioReference,
     ambience: Vec<AmbienceReference>, ambience_zones: Vec<AmbienceZoneReference>,
     footsteps: FootstepAudioReference
+});
+// A voice template of car and engine part sounds. Car records name it by id.
+record!(CarVoiceReference {
+    id: u32, source: SourceId, one_shot: bool, clip: Option<u32>, settings: AudioSourceSettings,
+    mixer: u32, doppler: f32, pan: f32
 });
 record!(CarTierReference { threshold: f32, clips: Vec<u32>, fixed_gain: Option<f32> });
 record!(CollisionAudioReference {
@@ -381,7 +318,19 @@ impl AudioReference {
                 })
                 && curve.keys.windows(2).all(|ks| ks[0].time < ks[1].time)
         };
-        let portable = self.portable_radio.voices.iter().map(|v| (true, v));
+        let mut radio_sources = HashSet::new();
+        require(
+            !self.portable_radios.is_empty()
+                && self.portable_radios.iter().all(|g| {
+                    !g.sources.is_empty() && g.sources.iter().all(|s| radio_sources.insert(s))
+                }),
+            "world radio voice groups",
+        )?;
+        let portable = self
+            .portable_radios
+            .iter()
+            .flat_map(|g| &g.voices)
+            .map(|v| (true, v));
         for (portable, v) in self.voices.iter().map(|v| (false, v)).chain(portable) {
             require(
                 (if portable {
@@ -458,7 +407,7 @@ impl AudioReference {
             let s = &b.settings;
             require(
                 mixers.contains(&b.mixer)
-                    && b.one_shot == matches!(b.kind, 0 | 10..=16)
+                    && b.one_shot == matches!(b.kind, 0 | 10..=15 | 17)
                     && b.source.path_id != 0
                     && b.audio_source.path_id != 0
                     && method(&b.method)
@@ -499,71 +448,101 @@ impl AudioReference {
                 "audio event binding",
             )?;
         }
-        require(
-            emitters.contains(&self.engine.emitter)
-                && voices.contains(&self.engine.idle_voice)
-                && voices.contains(&self.engine.motor_voice)
-                && self
-                    .engine
-                    .starter_binding
-                    .is_none_or(|id| bindings.contains(&id))
-                && self
-                    .engine
-                    .stop_binding
-                    .is_none_or(|id| bindings.contains(&id))
-                && method(&self.engine.method),
-            "audio engine",
-        )?;
-        require(
-            game.vehicles
-                .iter()
-                .filter(|v| v.engine.source == self.engine.source)
-                .count()
-                == 1,
-            "audio engine vehicle",
-        )?;
-        for key in [
-            "SMinAlapRpm",
-            "SMaxAlapRpm",
-            "SMinMotorRpm",
-            "SMaxMotorRpm",
-            "SMaxAlapSound",
-            "SMaxMotorSound",
-            "minAlapPitch",
-            "maxAlapPitch",
-            "minMotorPitch",
-            "maxMotorPitch",
-            "maxRpm",
-            "engineStartTimeModifier",
-            "SStartVolume",
-            "SStopVolume",
-        ] {
+        for v in &self.car_voices {
+            let s = &v.settings;
             require(
-                self.engine
-                    .constants
-                    .get(key)
-                    .is_some_and(|v| v.is_finite() && *v >= 0.0),
-                "audio engine constants",
+                mixers.contains(&v.mixer)
+                    && v.clip.is_none_or(|c| clips.contains(&c))
+                    && values([
+                        s.gain,
+                        s.pitch,
+                        s.min_distance,
+                        s.max_distance,
+                        s.spatial_blend,
+                        v.doppler,
+                        v.pan,
+                    ])
+                    && s.pitch > 0.
+                    && s.min_distance > 0.
+                    && s.max_distance >= s.min_distance
+                    && s.rolloff_mode <= 2
+                    && valid_curve(&s.rolloff_curve)
+                    && valid_curve(&s.spatial_blend_curve),
+                "car voice",
             )?;
         }
+        let loop_voice = |s: &CarSoundReference| {
+            values(s.position)
+                && self
+                    .car_voices
+                    .iter()
+                    .any(|v| v.id == s.voice && !v.one_shot && v.clip.is_some())
+        };
+        let shot = |s: &CarShotReference| {
+            values(s.position)
+                && s.gain.is_finite()
+                && s.gain >= 0.
+                && clips.contains(&s.clip)
+                && self
+                    .car_voices
+                    .iter()
+                    .any(|v| v.id == s.voice && v.one_shot)
+        };
+        let rising = |v: [f32; 2]| values(v) && v[1] > v[0];
+        let engine = |a: &EngineAudioReference| {
+            loop_voice(&a.idle)
+                && loop_voice(&a.motor)
+                && a.starter.as_ref().is_none_or(shot)
+                && a.stop.as_ref().is_none_or(shot)
+                && rising(a.idle_rpm)
+                && rising(a.motor_rpm)
+                && values(a.idle_pitch)
+                && values(a.motor_pitch)
+                && values([a.idle_gain, a.motor_gain])
+        };
+        let car = |a: &CarAudioReference, interiors: usize| {
+            a.horn.as_ref().is_none_or(|h| {
+                loop_voice(&h.sound)
+                    && values(h.pitch)
+                    && h.pitch[0] > 0.
+                    && rising(h.temperature)
+                    && h.attack_release_rate > 0.
+            }) && a.switch.as_ref().is_none_or(shot)
+                && a.doors.iter().all(|d| d.sounds.iter().all(shot))
+                && a.wheels
+                    .iter()
+                    .all(|w| [w.ground, w.spring, w.slide].iter().all(loop_voice))
+                && {
+                    let r = &a.route;
+                    r.interiors.iter().all(|&i| (i as usize) < interiors)
+                        && [r.main_mixer, r.outside_mixer]
+                            .iter()
+                            .chain(&r.car_mixer)
+                            .all(|m| mixers.contains(m))
+                }
+        };
+        for p in &game.world.prototypes {
+            require(
+                p.engines
+                    .iter()
+                    .all(|e| e.audio.as_ref().is_none_or(engine))
+                    && p.vehicle.as_ref().is_none_or(|v| {
+                        v.audio.as_ref().is_none_or(|a| {
+                            a.wheels.len() == v.wheel_effects.len() && car(a, p.interiors.len())
+                        })
+                    }),
+                "world car audio",
+            )?;
+        }
+        // Voice ids run 1..n in table order: the runtime indexes templates by id.
         require(
-            voices.contains(&self.horn.voice)
-                && values([
-                    self.horn.attack_release_rate,
-                    self.horn.pitch_min,
-                    self.horn.pitch_max,
-                    self.horn.temperature_min,
-                    self.horn.temperature_max,
-                ])
-                && self.horn.attack_release_rate > 0.0
-                && self.horn.pitch_min > 0.0
-                && self.horn.pitch_max >= self.horn.pitch_min
-                && self.horn.temperature_max > self.horn.temperature_min
-                && method(&self.horn.method),
-            "audio horn",
+            self.car_voices
+                .iter()
+                .enumerate()
+                .all(|(i, v)| v.id as usize == i + 1),
+            "car voice IDs",
         )?;
         let r = &self.radio;
-        r.visuals.validate(game)?;
         require(
             r.clock.kind == "scaled"
                 && r.clock.selected.class == "mainscript"
@@ -585,13 +564,7 @@ impl AudioReference {
             "audio radio clock",
         )?;
         require(
-            emitters.contains(&r.emitter)
-                && r.voices.iter().all(|v| voices.contains(v))
-                && r.controls.volume.is_some()
-                && r.controls.tuning.is_some()
-                && values([
-                    r.initial_tuning,
-                    r.initial_volume,
+            values([
                     r.fm_tolerance,
                     r.am_tolerance,
                     r.electronics_cutoff,
@@ -599,11 +572,8 @@ impl AudioReference {
                     r.late_seek_margin_seconds,
                     r.custom_gain,
                 ])
-                && (0.0..=1.0).contains(&r.initial_tuning)
-                && (0.0..=1.0).contains(&r.initial_volume)
                 && r.fm_tolerance > 0.0
                 && r.am_tolerance > 0.0
-                && r.click_binding.is_none_or(|b| bindings.contains(&b))
                 && r.methods.iter().all(method),
             "audio radio",
         )?;
@@ -712,22 +682,8 @@ impl AudioReference {
                 && s.radius.is_none_or(|r| r.is_finite() && r > 0.0)
                 && s.local_position.is_none_or(|p| values(p))
         };
-        for c in [&r.controls.volume, &r.controls.tuning, &r.controls.band]
-            .into_iter()
-            .flatten()
-        {
-            require(
-                game.items
-                    .iter()
-                    .any(|i| i.id == c.item && i.node == c.node),
-                "audio radio control",
-            )?;
-        }
         require(
-            r.electronics_output.is_finite()
-                && r.electronics_output >= 0.
-                && r.electronics_source.path_id != 0
-                && r.tuning_repeat_seconds.is_finite()
+            r.tuning_repeat_seconds.is_finite()
                 && r.tuning_repeat_seconds > 0.
                 && r.holiday_ranges.iter().all(|&[sm, sd, em, ed]| {
                     (1..=12).contains(&sm)
@@ -826,11 +782,7 @@ impl AudioReference {
                 i.collision_clip.is_none_or(|id| clips.contains(&id))
                     && i.collision_gain.is_finite()
                     && i.collision_gain >= 0.
-            }) && game
-                .vehicles
-                .iter()
-                .all(|v| v.collision_gain.is_finite() && v.collision_gain >= 0.)
-                && game.world.pickup_hits.iter().all(|h| {
+            }) && game.world.pickup_hits.iter().all(|h| {
                     clips.contains(&h.collision_clip)
                         && h.collision_gain.is_finite()
                         && h.collision_gain >= 0.
@@ -838,15 +790,8 @@ impl AudioReference {
             "audio collision gains",
         )?;
         require(
-            game.vehicles.iter().all(|v| {
-                v.wheel_effects.iter().all(|w| {
-                    [w.ground_voice, w.spring_voice, w.slide_voice]
-                        .iter()
-                        .all(|id| voices.contains(id))
-                })
-            }) && clips.contains(&game.skid.road_clip)
-                && clips.contains(&game.skid.dirt_clip),
-            "audio wheel effects",
+            clips.contains(&game.skid.road_clip) && clips.contains(&game.skid.dirt_clip),
+            "audio skid clips",
         )?;
         for a in &self.ambience {
             require(
@@ -885,6 +830,13 @@ impl AudioReference {
             )?;
         }
         validate_zones(&self.ambience_zones, &self.survival)?;
+        // Sleds play through the one looped survival row of kind 20.
+        let sled = self.survival.iter().find(|b| b.kind == 20);
+        require(
+            game.world.prototypes.iter().all(|p| p.sled.is_none())
+                || sled.is_some_and(|b| b.role == "sled" && !b.one_shot && !b.clips.is_empty()),
+            "sled playback",
+        )?;
         let f = &self.footsteps;
         require(
             f.surfaces
@@ -1002,6 +954,7 @@ impl AudioGameplayReference {
             (16, "storm_inside"),
             (17, "melee_hit"),
             (18, "metal_detector"),
+            (21, "radio_click"),
         ] {
             require(
                 r.bindings
@@ -1022,14 +975,16 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        // The ambience zone row exists only when the world has zones.
-        let zones = r
-            .bindings
-            .iter()
-            .filter(|b| b.kind == 19 && b.role == "ambience_zone" && !b.clips.is_empty())
-            .count();
+        // The ambience zone and sled rows exist only when the world has zones or sleds.
+        let optional = |kind: u32, role: &str| {
+            r.bindings
+                .iter()
+                .filter(|b| b.kind == kind && b.role == role && !b.clips.is_empty())
+                .count()
+        };
+        let (zones, sleds) = (optional(19, "ambience_zone"), optional(20, "sled"));
         require(
-            zones <= 1 && r.bindings.len() == 18 + zones,
+            zones <= 1 && sleds <= 1 && r.bindings.len() == 19 + zones + sleds,
             "required audio roles",
         )?;
         Ok(r)

@@ -6,11 +6,9 @@ from .gltf import convert_point, convert_rotation, transform_point
 from .collision import quaternion_product
 from .managed_code import managed_code, class_code, method, require
 
-VOLUMES=(65838,65854,67560,79410,77806,78464,79301,69971)
-OWNER=73405
-TYPES=(0,0,5,5,5,5,3,4)
-SLOTS=((),(),(),(),(),(),(77859,),(77842,))
-# World prototype mountStuff: Box, Fridge, Raklap (pallet), Coffin (4).
+# Car mountStuff types 3 (trunk) and 4 (hood room) wait for a closed part in their one gate slot.
+GATED_TYPES=(3,4)
+# World prototype mountStuff: Box, Fridge, Raklap (pallet), Coffin (4). Car volumes come from each car prefab.
 PROTOTYPE_FILE='sharedassets1.assets'
 PROTOTYPE_VOLUMES=(146589,146111,133282,144518,150537,134531,153699)
 SETTING=2
@@ -38,13 +36,6 @@ def check_policy(dropdown, settings_linked, mask):
     if not dropdown['useDefInt'] or dropdown['defInt']!=SETTING or not settings_linked:raise ValueError('Storage fresh default differs')
     if mask!=MASK:raise ValueError('level1:64919 storage layer mask differs')
 
-def check_volume(volume, owner, slots, expected):
-    """Require the selected Lada owner, type, gate slots, and an active automatic lock."""
-    kind,expected_slots=expected
-    if (owner!=OWNER or volume['storage_type']!=kind or slots!=expected_slots
-            or volume['usables'] or volume['only_manual'] or volume['no_physics_lock'] or not volume['active']):
-        raise ValueError(f"{volume['source']} storage policy differs")
-
 def box_shape(fields):
     return {'center':list(convert_point(vector(fields['m_Center']))),'half_extents':[x*0.5 for x in vector(fields['m_Size'])]}
 
@@ -65,10 +56,10 @@ def containing(prototypes, node):
     return [(p['source'],i) for p in prototypes for i,n in enumerate(p['nodes']) if n['source']==node]
 
 def check_prototype_volume(name, fields, active, homes, usables, mechanisms):
-    """Require an ungated, active volume inside a prototype whose usables are mechanisms.
+    """Require an active volume inside a prototype whose usables are mechanisms.
     An onlyManual volume is kept: it skips the periodic Upd scan."""
     if not homes:raise ValueError(f'{name} storage volume is outside the world prototypes')
-    if fields['slot'] or fields['noPhysicsLock'] or not active:
+    if fields['noPhysicsLock'] or not active:
         raise ValueError(f'{name} storage policy differs')
     for prototype,_ in homes:
         for usable in usables:
@@ -80,25 +71,9 @@ def flag_entries(entries, field='item'):
     return [{field:owner,'dont_mount':bool(f['dontMount']),'dont_mount_till_pickup':bool(f['dontMountTillPickup'])}
             for owner,f in entries if f['dontMount'] or f['dontMountTillPickup']]
 
-def prepare_storage_roots(source):
-    source.storage_collider_keys={key(source.resolve(r,source.read(r)['col'])) for r in (source.get('level1',i) for i in VOLUMES)}
-
-def recover_storage(source, pointer_node, item_nodes, components, colliders, part_slots, output):
+def recover_storage(source, item_nodes, components, output):
     def linked(reader,pointer):return source.resolve(reader,pointer) if pointer['m_PathID'] else None
-    def sid(reader,pointer):
-        target=linked(reader,pointer)
-        return source_id(target) if target else None
-    evidence={'managed':managed_contract(source),'volumes':[]}
-    slot_ids={(s['source']['file'],s['source']['path_id']):s['id'] for s in part_slots}
-    collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
-    volumes=[]
-    for i,kind,slots in zip(VOLUMES,TYPES,SLOTS):
-        r=source.get('level1',i);f=source.read(r);col=linked(r,f['col']);owner=pointer_node(r,f['parentTosave'])
-        if col is None or col.type.name!='BoxCollider':raise ValueError(f'level1:{i} storage collider is not a BoxCollider')
-        cf=source.read(col)
-        volume={'source':source_id(r),'node':pointer_node(r,f['m_GameObject']),'owner':item_nodes[owner],'collider':collider_ids[key(col)],**box_shape(cf),'storage_type':f['sType'],'only_manual':bool(f['onlyManual']),'no_physics_lock':bool(f['noPhysicsLock']),'owner_pickup':sid(r,f['Pick']),'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp']),'slots':[slot_ids[key(linked(r,p))] for p in f['slot']],'usables':[sid(r,p) for p in f['susable']],'active':bool(f['m_Enabled']) and bool(source.read(source.resolve(r,f['m_GameObject']))['m_IsActive'])}
-        check_volume(volume,f['parentTosave']['m_PathID'],tuple(linked(r,p).path_id for p in f['slot']),(kind,slots))
-        volumes.append(volume);evidence['volumes'].append({'source':source_id(r),'fields':f,'collider':cf})
+    evidence={'managed':managed_contract(source)}
     dropdown=source.get('level1',70023);df=source.read(dropdown);settings=source.get('level1',65886);source.read(settings)
     main=source.get('level1',64919);mask=source.read(main)['mountLayerMask']['m_Bits']
     check_policy(df,key(linked(dropdown,df['setting']))==key(settings),mask)
@@ -106,16 +81,18 @@ def recover_storage(source, pointer_node, item_nodes, components, colliders, par
     evidence.update(dropdown=df,mask=mask,flags=flags)
     (output/'storage-evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
     return {'policy':{'settings_source':source_id(settings),'default_setting':df['defInt'],'mount_mask':mask,'drop_delay_seconds':DROP_DELAY,'scan_interval_seconds':SCAN_INTERVAL},
-            'volumes':volumes,'prototype_volumes':[],'flags':flags,'prototype_flags':[]}
+            'prototype_volumes':[],'flags':flags,'prototype_flags':[]}
 
 def recover_prototype_storage(source, manifest, output):
     """Fill world prototype volumes and prototype flags after the world record exists."""
     world=manifest['world'];prototypes=world['prototypes']
     mechanisms={(m['prototype']['file'],m['prototype']['path_id'],m['recipe']['source']['file'],m['recipe']['source']['path_id']) for m in world['mechanisms']}
     def transform(owner,pointer):return source.transform_for(source.resolve(owner,pointer))
+    cars=[c for p in prototypes if p.get('vehicle') for node in source.hierarchy(source.get(p['source']['file'],p['source']['path_id']),activate_root=True)
+        for c in node['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='mountStuff']
     volumes=[];evidence=[]
-    for i in PROTOTYPE_VOLUMES:
-        name=f'{PROTOTYPE_FILE}:{i}';r=source.get(PROTOTYPE_FILE,i)
+    for r in [*(source.get(PROTOTYPE_FILE,i) for i in PROTOTYPE_VOLUMES),*cars]:
+        name=f'{r.assets_file.name}:{r.path_id}'
         if r.type.name!='MonoBehaviour' or source.class_name(r)!='mountStuff':raise ValueError(f'{name} is not mountStuff')
         f=source.read(r);node=transform(r,f['m_GameObject'])
         col=source.resolve(r,f['col']) if f['col']['m_PathID'] else None
@@ -123,6 +100,10 @@ def recover_prototype_storage(source, manifest, output):
         cf=source.read(col);col_node=transform(col,cf['m_GameObject'])
         usables=[source_id(source.resolve(r,p)) for p in f['susable'] if p['m_PathID']]
         if len(usables)!=len(f['susable']):raise ValueError(f'{name} has an empty usable')
+        slots=[source.resolve(r,p) for p in f['slot'] if p['m_PathID']]
+        if len(slots)!=len(f['slot']) or any(source.class_name(slot)!='partslotscript' for slot in slots):
+            raise ValueError(f'{name} gate slot is not a partslotscript')
+        if f['sType'] in GATED_TYPES and key(r) in {key(c) for c in cars} and len(slots)!=1:raise ValueError(f'{name} car gate slot differs')
         homes=containing(prototypes,source_id(node))
         # Upd needs activeInHierarchy below each prototype root. The stored root is inactive; the spawn activates it.
         # Scan reads only the collider box, so a disabled collider or inactive collider object still counts.
@@ -132,9 +113,12 @@ def recover_prototype_storage(source, manifest, output):
         check_prototype_volume(name,f,active,homes,usables,mechanisms)
         for (prototype,index),root in zip(homes,roots):
             if not any(p==prototype for p,_ in containing(prototypes,source_id(col_node))):raise ValueError(f'{name} collider is outside {prototype}')
+            for slot in slots:
+                slot_node=transform(slot,source.read(slot)['m_GameObject'])
+                if not any(p==prototype for p,_ in containing(prototypes,source_id(slot_node))):raise ValueError(f'{name} gate slot is outside {prototype}')
             chain=source.chain(col_node)[:-len(source.chain(root))]
             volumes.append({'prototype':prototype,'source':source_id(r),'node':index,**root_box(chain,cf),'storage_type':f['sType'],
-                            'only_manual':bool(f['onlyManual']),'usables':usables,'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp'])})
+                            'only_manual':bool(f['onlyManual']),'usables':usables,'slots':[source_id(slot) for slot in slots],'dont_lock_if_owner_picked_up':bool(f['dontLockIfPickedUp'])})
         evidence.append({'source':source_id(r),'fields':f,'collider':cf})
     entries=[]
     for prototype in prototypes:

@@ -2,6 +2,7 @@
 use super::WorldStream;
 use crate::interaction::InteractionState;
 use crate::interaction::items::ItemStore;
+use crate::player::SeatOwner;
 use crate::reference::{
     ItemId, ReferenceError, SourceId, Transform, WorldPrototypeReference, WorldReference,
 };
@@ -38,6 +39,9 @@ pub(crate) struct WorldSeatReference {
     pub min_exit_angle_degrees: f32,
     pub exit_height: f32,
     pub show_sleep_text: bool,
+    /// `driverSeat0` and `driverSeat1` of a car seat, from the prototype vehicle record.
+    pub driver: bool,
+    pub driving2: bool,
 }
 
 /// Active seatscript seats of a prototype, in source hierarchy order.
@@ -128,6 +132,8 @@ fn main_seat(
         min_exit_angle_degrees: number(f, "minGetUpAnlge")?,
         exit_height: number(f, "getOutHeight")?,
         show_sleep_text: flag(f, "showSleepText")?,
+        driver: false,
+        driving2: false,
     };
     let values = [
         rot_limit,
@@ -146,10 +152,12 @@ fn main_seat(
     Ok(seat)
 }
 
-/// One seat of a spawned world item.
+/// One seat of a spawned world item. A car copy owns its seats as a vehicle.
 pub(crate) struct ItemSeat {
     pub item: ItemId,
-    pub owner: ObjectKey,
+    /// The nearest item that holds the main seatscript node: a seat part or the item itself.
+    pub seat_item: ItemId,
+    pub owner: SeatOwner,
     pub body: RigidBodyHandle,
     /// sitPos relative to the item body.
     pub pose: VehiclePose,
@@ -197,8 +205,11 @@ impl SeatBinding {
                     std::mem::size_of::<ItemSeat>()
                         + colliders.capacity() * std::mem::size_of::<ColliderHandle>()
                         + match &seat.owner {
-                            ObjectKey::Generated(id) => crate::world::contents::identity_heap(id),
-                            ObjectKey::Imported(_) => 0,
+                            SeatOwner::Vehicle(ObjectKey::Generated(id))
+                            | SeatOwner::Item(ObjectKey::Generated(id)) => {
+                                crate::world::contents::identity_heap(id)
+                            }
+                            _ => 0,
                         }
                 })
                 .sum::<usize>()
@@ -227,13 +238,22 @@ pub(crate) fn prototype_seats_heap(seats: &[PrototypeSeats]) -> usize {
 }
 
 /// The seats of every world prototype that has seats. The world load stops on an unreadable seat.
+/// Car seats take their driver roles from the prototype vehicle record.
 pub(crate) fn world_seats(
     reference: &WorldReference,
     rules: &SourceRules,
 ) -> Result<Vec<PrototypeSeats>, ReferenceError> {
     let mut seats = Vec::new();
     for prototype in &reference.prototypes {
-        let records = prototype_seats(reference, rules, prototype)?;
+        let mut records = prototype_seats(reference, rules, prototype)?;
+        if let Some(vehicle) = &prototype.vehicle {
+            for seat in &mut records {
+                if let Some(record) = vehicle.seats.iter().find(|r| r.source == seat.source) {
+                    seat.driver = record.driver;
+                    seat.driving2 = record.driving2;
+                }
+            }
+        }
         if !records.is_empty() {
             seats.push((
                 prototype.source.clone(),
@@ -349,7 +369,10 @@ impl WorldStream {
             })
         };
         let body_pose = place(crate::world::placement::node_pose(prototype, body_node));
-        let owner = items.object_key(item);
+        let owner = match physics.vehicle_of(body) {
+            Some(vehicle) => SeatOwner::Vehicle(vehicle.clone()),
+            None => SeatOwner::Item(items.object_key(item)),
+        };
         let mut bound = Vec::with_capacity(seats.len());
         for seat in seats {
             let mut colliders = Vec::new();
@@ -374,8 +397,25 @@ impl WorldStream {
                 prototype,
                 seat.hit_nodes[0] as usize,
             ));
+            let content = &self.contents.active[slot];
+            let mut cursor = Some(seat.hit_nodes[0]);
+            let mut seat_item = item;
+            while let Some(n) = cursor {
+                if let Some(found) = crate::world::content_mechanisms::node_item(
+                    content,
+                    prototype,
+                    &self.reference,
+                    &self.contents.rules,
+                    n as usize,
+                ) {
+                    seat_item = found;
+                    break;
+                }
+                cursor = prototype.nodes[n as usize].parent;
+            }
             let target = Arc::new(ItemSeat {
                 item,
+                seat_item,
                 owner: owner.clone(),
                 body,
                 pose: from_rapier(&(body_pose.inverse() * sit)),

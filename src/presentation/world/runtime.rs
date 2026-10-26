@@ -92,6 +92,11 @@ impl WorldPresentation<'_, '_> {
         physics: &mut PhysicsWorld,
         area: &mut StartingArea,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            crate::world::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
@@ -110,6 +115,8 @@ impl WorldPresentation<'_, '_> {
                 physics,
                 area,
                 wheels,
+                vehicles,
+                powertrain,
                 view,
                 time,
                 lod_view,
@@ -133,6 +140,11 @@ impl WorldPresentation<'_, '_> {
         physics: &mut PhysicsWorld,
         area: &mut StartingArea,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            crate::world::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
@@ -455,6 +467,8 @@ impl WorldPresentation<'_, '_> {
             &mut area.interaction,
             physics,
             wheels,
+            vehicles,
+            powertrain,
         )?;
         timer.next(crate::world::stream_profile::Stage::SurfaceSync);
         self.surfaces.sync(
@@ -469,6 +483,8 @@ impl WorldPresentation<'_, '_> {
             reference,
             physics,
             &area.items,
+            vehicles,
+            powertrain,
             &mut self.commands,
             &mut self.roots,
             &mut self.materials,
@@ -555,7 +571,14 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Capture);
         stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
         timer.next(crate::world::stream_profile::Stage::FinalCleanup);
-        stream.retire_structures(physics, &mut area.items, &mut area.interaction, wheels)?;
+        stream.retire_structures(
+            physics,
+            &mut area.items,
+            &mut area.interaction,
+            wheels,
+            vehicles,
+            powertrain,
+        )?;
         self.instances.retire(
             stream,
             &mut self.commands,

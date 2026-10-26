@@ -1,10 +1,10 @@
 use super::*;
-use crate::reference::{
-    AnchorId, ItemId, SourceId, WheelColliderReference, WheelHubReference, WheelSlotId,
-};
+use crate::reference::{ItemId, WheelColliderReference, WheelHubReference};
 use crate::simulation::{DriveInput, FIXED_DT};
+use crate::vehicle::body::{VehicleBody, VehicleControls, VehicleWheel};
 use crate::vehicle::query_bounds::QueryBounds;
-use crate::vehicle::{DriveTorques, PhysicsWorld, VehicleBody, WheelMount, WheelSet};
+use crate::vehicle::{DriveTorques, PhysicsWorld};
+use crate::world::ObjectKey;
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
 // Exported Lada values (Steam build 11140890).
@@ -22,18 +22,18 @@ const RIM: WheelAssembly = WheelAssembly::Rim {
     mass_kg: 10.0,
 };
 
-fn lada_slot(steer: bool, drive: bool) -> WheelSlotReference {
-    WheelSlotReference {
-        id: WheelSlotId(0),
-        source: SourceId {
-            file: "fixture".into(),
-            path_id: 0,
-        },
-        anchor: AnchorId(0),
-        mount_anchor: AnchorId(0),
-        wheel: ItemId(0),
-        tire: ItemId(0),
-        rim: ItemId(0),
+/// One Lada wheel: its collider and drive rules.
+struct Slot {
+    collider: WheelColliderReference,
+    rules: VehicleWheel,
+}
+
+fn garage_vehicle_key(_: u8) -> ObjectKey {
+    ObjectKey::Imported(ItemId(1))
+}
+
+fn lada_slot(steer: bool, drive: bool) -> Slot {
+    Slot {
         collider: WheelColliderReference {
             radius: 0.3,
             suspension_distance: 0.3,
@@ -59,21 +59,19 @@ fn lada_slot(steer: bool, drive: bool) -> WheelSlotReference {
             rotational_damping: 0.25,
             force_application_distance_m: 0.0,
         },
-        steer,
-        drive,
-        brake: true,
-        handbrake: steer,
-        sideways_stiffness_modifier: 0.0,
-        hub: WheelHubReference {
-            radius_m: 0.04,
-            mass_kg: 5.0,
-            forward_stiffness: 0.1,
-            sideways_stiffness: 1.0,
+        rules: VehicleWheel {
+            steer,
+            drive,
+            brake: true,
+            handbrake: steer,
+            sideways_stiffness_modifier: 0.0,
+            hub: WheelHubReference {
+                radius_m: 0.04,
+                mass_kg: 5.0,
+                forward_stiffness: 0.1,
+                sideways_stiffness: 1.0,
+            },
         },
-        tire_condition_range: [1, 4],
-        rim_condition_range: [1, 4],
-        rim_main_types: Vec::new(),
-        rim_types: Vec::new(),
     }
 }
 
@@ -85,11 +83,12 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         inactive_bodies: Default::default(),
         body_mass_override: None,
         body_cargo: Vec::new(),
+        center_of_mass: Vec::new(),
         physics,
         query_bounds: QueryBounds::default(),
         presentation_bodies: Default::default(),
         chassis: Vec::new(),
-        vehicles: Vec::new(),
+        vehicles: Default::default(),
         hit_collector: Default::default(),
         hits: Vec::new(),
         ignored: Default::default(),
@@ -100,27 +99,36 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
         ColliderBuilder::cuboid(0.8, 0.25, 2.0).mass(960.0),
     );
     let corners = [(-0.7, -1.2), (-0.7, 1.2), (0.7, 1.2), (0.7, -1.2)];
-    let references: [WheelSlotReference; 4] =
+    let references: [Slot; 4] =
         std::array::from_fn(|i| lada_slot(i == 0 || i == 3, i == 1 || i == 2));
-    let mounts: [WheelMount; 4] = std::array::from_fn(|i| WheelMount {
-        connection: Vector::new(corners[i].0, 0.0, corners[i].1),
-        collider: &references[i].collider,
-        profile: resolve_profile(&references[i], &SLIP, assembly),
-    });
-    let wheels = WheelSet::new(chassis, &mounts);
-    world.chassis.push(chassis);
-    world.vehicles.push(VehicleBody {
+    let mounts: Vec<_> = (0..4)
+        .map(|i| {
+            (
+                Vector::new(corners[i].0, 0.0, corners[i].1),
+                &references[i].collider,
+                references[i].rules,
+            )
+        })
+        .collect();
+    let mut vehicle = VehicleBody::new(
         chassis,
-        slip: SLIP,
-        wheels,
-        wheel_references: references,
-        max_steer: 40f32.to_radians(),
-        brake_torque: 600.0,
-        handbrake_torque: 600.0,
-        assemblies: [assembly; 4],
-        last_handbrake: 0.0,
-        cargo_mass: 0.0,
-    });
+        SLIP,
+        &mounts,
+        VehicleControls {
+            max_steer_degrees: 40.0,
+            brake_torque_nm: 600.0,
+            handbrake_torque_nm: 600.0,
+            handbrake: false,
+        },
+    );
+    for index in 0..4 {
+        vehicle.assemblies[index] = assembly;
+        vehicle.wheels.set_profile(
+            index,
+            resolve_profile(&vehicle.rules[index], &SLIP, assembly),
+        );
+    }
+    world.insert_vehicle(garage_vehicle_key(0), vehicle);
     world.refresh_queries();
     world
 }
@@ -128,7 +136,7 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
 fn drive(world: &mut PhysicsWorld, seconds: f32, input: DriveInput, motor_nm: f32) {
     for _ in 0..(seconds / FIXED_DT) as usize {
         world.apply_vehicle_forces(
-            0,
+            &garage_vehicle_key(0),
             input,
             DriveTorques {
                 motor_nm,
@@ -160,13 +168,13 @@ fn friction_curve_follows_source_points() {
 #[test]
 fn profiles_follow_source_wheel_support() {
     let slot = lada_slot(false, true);
-    let new = resolve_profile(&slot, &SLIP, TIRE);
+    let new = resolve_profile(&slot.rules, &SLIP, TIRE);
     assert_eq!(
         (new.forward_stiffness, new.sideways_stiffness),
         (1.25, 1.25)
     );
     let worn = resolve_profile(
-        &slot,
+        &slot.rules,
         &SLIP,
         WheelAssembly::Tire {
             radius_m: 0.3,
@@ -178,12 +186,12 @@ fn profiles_follow_source_wheel_support() {
         (worn.forward_stiffness, worn.sideways_stiffness),
         (0.75, 0.75)
     );
-    let rim = resolve_profile(&slot, &SLIP, RIM);
+    let rim = resolve_profile(&slot.rules, &SLIP, RIM);
     assert_eq!(
         (rim.radius, rim.forward_stiffness, rim.sideways_stiffness),
         (0.2, 0.4, 0.3)
     );
-    let hub = resolve_profile(&slot, &SLIP, WheelAssembly::Hub);
+    let hub = resolve_profile(&slot.rules, &SLIP, WheelAssembly::Hub);
     assert_eq!(
         (hub.radius, hub.forward_stiffness, hub.sideways_stiffness),
         (0.04, 0.1, 1.0)
@@ -194,7 +202,11 @@ fn profiles_follow_source_wheel_support() {
 #[test]
 fn brake_holds_a_wheel_and_motor_overcomes_it() {
     let slot = lada_slot(false, true);
-    let mut wheel = WheelState::new(Vector::ZERO, resolve_profile(&slot, &SLIP, TIRE), 0.135);
+    let mut wheel = WheelState::new(
+        Vector::ZERO,
+        resolve_profile(&slot.rules, &SLIP, TIRE),
+        0.135,
+    );
     let frame = WheelFrame {
         up: Vector::Y,
         axle: Vector::X,
@@ -220,10 +232,10 @@ fn brake_holds_a_wheel_and_motor_overcomes_it() {
 fn car_settles_on_source_suspension() {
     let mut world = lada(TIRE);
     drive(&mut world, 3.0, DriveInput::default(), 0.0);
-    let snapshot = world.snapshot(0);
-    assert!(snapshot.wheels_contact.iter().all(|c| *c));
+    let snapshot = world.snapshot(&garage_vehicle_key(0));
+    assert!(world.wheel_contacts(&garage_vehicle_key(0)).all(|c| c));
     assert!(snapshot.absolute_speed_kmh() < 0.5);
-    for wheel in world.vehicles[0].wheels.wheels() {
+    for wheel in world.vehicles[&garage_vehicle_key(0)].wheels.wheels() {
         assert!(
             (wheel.suspension_length - 0.135).abs() < 0.02,
             "{}",
@@ -238,10 +250,10 @@ fn tires_launch_and_wheels_spin_with_the_road() {
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
     // First gear at peak torque: about 100 Nm * 3.75 * 4.3.
     drive(&mut world, 3.0, throttle(), 1600.0);
-    let speed = world.snapshot(0).speed_mps;
+    let speed = world.snapshot(&garage_vehicle_key(0)).speed_mps;
     assert!(speed > 5.0, "{speed}");
     let road_rpm = speed / 0.3 * 60.0 / std::f32::consts::TAU;
-    let wheel_rpm = world.driven_wheel_rpm(0);
+    let wheel_rpm = world.driven_wheel_rpm(&garage_vehicle_key(0));
     assert!(
         wheel_rpm > road_rpm && wheel_rpm < road_rpm * 1.5,
         "{wheel_rpm} {road_rpm}"
@@ -253,8 +265,9 @@ fn excess_torque_spins_the_driven_wheels() {
     let mut world = lada(TIRE);
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
     drive(&mut world, 0.5, throttle(), 12000.0);
-    let road_rpm = world.snapshot(0).speed_mps / 0.3 * 60.0 / std::f32::consts::TAU;
-    assert!(world.driven_wheel_rpm(0) > road_rpm * 2.0);
+    let road_rpm =
+        world.snapshot(&garage_vehicle_key(0)).speed_mps / 0.3 * 60.0 / std::f32::consts::TAU;
+    assert!(world.driven_wheel_rpm(&garage_vehicle_key(0)) > road_rpm * 2.0);
 }
 
 #[test]
@@ -265,7 +278,10 @@ fn bare_rims_grip_less_than_tires() {
         drive(world, 2.0, DriveInput::default(), 0.0);
         drive(world, 2.0, throttle(), 3000.0);
     }
-    assert!(rims.snapshot(0).speed_mps < tires.snapshot(0).speed_mps * 0.8);
+    assert!(
+        rims.snapshot(&garage_vehicle_key(0)).speed_mps
+            < tires.snapshot(&garage_vehicle_key(0)).speed_mps * 0.8
+    );
 }
 
 #[test]
@@ -273,7 +289,7 @@ fn service_brake_works_while_throttle_is_held() {
     let mut world = lada(TIRE);
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
     drive(&mut world, 3.0, throttle(), 1600.0);
-    let before = world.snapshot(0).speed_mps;
+    let before = world.snapshot(&garage_vehicle_key(0)).speed_mps;
     let both = DriveInput {
         throttle: 1.0,
         brake: 1.0,
@@ -281,7 +297,7 @@ fn service_brake_works_while_throttle_is_held() {
     };
     drive(&mut world, 1.0, both, 1600.0);
     // 2400 Nm of brakes beat 1600 Nm of motor torque.
-    assert!(world.snapshot(0).speed_mps < before - 2.0);
+    assert!(world.snapshot(&garage_vehicle_key(0)).speed_mps < before - 2.0);
 }
 
 #[test]
@@ -294,14 +310,14 @@ fn handbrake_stops_a_rolling_car() {
         ..Default::default()
     };
     drive(&mut world, 6.0, handbrake, 0.0);
-    assert!(world.snapshot(0).speed_mps.abs() < 0.3);
+    assert!(world.snapshot(&garage_vehicle_key(0)).speed_mps.abs() < 0.3);
 }
 
 #[test]
 fn sideways_slide_stops_on_tires() {
     let mut world = lada(TIRE);
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
-    let chassis = world.chassis[0];
+    let chassis = world.chassis_handle(&garage_vehicle_key(0));
     world.physics.bodies[chassis].set_linvel(Vector::X * 5.0, true);
     drive(&mut world, 2.0, DriveInput::default(), 0.0);
     assert!(world.physics.bodies[chassis].linvel().x.abs() < 0.3);
@@ -316,7 +332,7 @@ fn handbrake_holds_a_parked_car_against_a_walking_push() {
             ..Default::default()
         };
         drive(&mut world, 2.0, parked, 0.0);
-        let chassis = world.chassis[0];
+        let chassis = world.chassis_handle(&garage_vehicle_key(0));
         let start = world.physics.bodies[chassis].translation();
         // The player pushes before the car step, as in the garage frame.
         for _ in 0..(2.0 / FIXED_DT) as usize {

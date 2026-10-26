@@ -160,9 +160,19 @@ pub struct WorldStream {
     seat_scan: Option<(u64, u64)>,
     /// Seats of world prototypes, read and checked on world load.
     seat_prototypes: Vec<content_seats::PrototypeSeats>,
+    sled_bindings: Vec<content_sleds::SledBinding>,
+    /// Session and active revision whose sled items are all bound.
+    sled_scan: Option<(u64, u64)>,
+    /// Indices of world prototypes with a sled.
+    sled_prototypes: Vec<usize>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
+    bus_door_bindings: Vec<content_busdoors::BusDoorBinding>,
+    /// Session and active revision whose bus doors are all bound.
+    bus_door_scan: Option<(u64, u64)>,
+    /// `busdoorscripts` and `dinamiccolliderforbus` sources by prototype.
+    bus_door_scripts: Vec<(SourceId, Option<SourceId>, Vec<SourceId>)>,
     // Membership and order only, independent of button animation.
     lamp_binding_revision: u64,
     seed: i32,
@@ -195,8 +205,10 @@ pub struct WorldStream {
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
     request: WorldRequest,
-    /// Absolute positions of every car, as source important objects.
-    cars: Vec<[f64; 3]>,
+    /// Chassis and absolute position of every car, as source important objects.
+    cars: Vec<(rapier3d::prelude::RigidBodyHandle, [f64; 3])>,
+    /// Bodies whose contents never retire: the seat owner and the last seated car.
+    kept: [Option<rapier3d::prelude::RigidBodyHandle>; 2],
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
@@ -244,6 +256,8 @@ pub struct WorldStream {
     wanted_structures: Vec<Placement>,
     ready_structures: Vec<super::GeneratedId>,
     startup: Option<StartupTerrain>,
+    /// Fixed prototype placements of the startup list, set with `startup`.
+    startup_placements: Vec<Placement>,
     startup_candidates: Vec<u32>,
     startup_next: usize,
     startup_points: Vec<TerrainRoadPoint>,
@@ -608,12 +622,6 @@ impl WorldStream {
             self.select_changed_destinations();
         }
     }
-    pub fn select_source_car(&mut self, car_id: i32) {
-        if self.contents.state.context.current_car != car_id {
-            self.contents.state.context.current_car = car_id;
-            self.revise_selection();
-        }
-    }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn lod_owner(&self, source: &SourceId) -> Option<&SourceId> {
         self.contents
@@ -764,8 +772,20 @@ impl WorldStream {
             seat_bindings: Vec::new(),
             seat_scan: None,
             seat_prototypes,
+            sled_bindings: Vec::new(),
+            sled_scan: None,
+            sled_prototypes: world
+                .prototypes
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.sled.is_some())
+                .map(|(i, _)| i)
+                .collect(),
             detector_bindings: Vec::new(),
             detector_scan: None,
+            bus_door_bindings: Vec::new(),
+            bus_door_scan: None,
+            bus_door_scripts: Vec::new(),
             lamp_binding_revision: 0,
             seed,
             mode,
@@ -809,6 +829,7 @@ impl WorldStream {
                 vehicle: [0.0; 3],
             },
             cars: Vec::new(),
+            kept: [None; 2],
             recovery: None,
             recovery_search: None,
             roads,
@@ -857,6 +878,7 @@ impl WorldStream {
             wanted_structures: Vec::new(),
             ready_structures: Vec::with_capacity(32),
             startup: None,
+            startup_placements: Vec::new(),
             startup_candidates: Vec::new(),
             startup_next: 0,
             startup_points: Vec::new(),
@@ -1320,10 +1342,17 @@ impl WorldStream {
         self.recipes.remove(source);
         Ok(())
     }
-    /// Sets every car position for item freeze and removal.
-    pub fn request_cars(&mut self, cars: impl IntoIterator<Item = [f64; 3]>) {
+    /// Sets every car chassis and position for item freeze and removal.
+    pub fn request_cars(
+        &mut self,
+        cars: impl IntoIterator<Item = (rapier3d::prelude::RigidBodyHandle, [f64; 3])>,
+    ) {
         self.cars.clear();
         self.cars.extend(cars);
+    }
+    /// Sets the seat owner body and the last seated car chassis. Their contents never retire.
+    pub fn request_kept(&mut self, kept: [Option<rapier3d::prelude::RigidBodyHandle>; 2]) {
+        self.kept = kept;
     }
     pub fn request_at(&mut self, player: [f64; 3], vehicle: [f64; 3]) {
         if self.recovery.is_some() {
@@ -1642,6 +1671,10 @@ impl WorldStream {
                 }
                 self.color_foundations = Vec::with_capacity(count);
                 self.color_helpers = Vec::with_capacity(helpers);
+                match self.startup_placements(&startup) {
+                    Ok(placements) => self.startup_placements = placements,
+                    Err(error) => self.failure = Some(error.0),
+                }
                 self.startup = Some(startup);
             }
             Err(error) => self.failure = Some(error.0),
@@ -1650,6 +1683,73 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
+    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
+    fn startup_placements(
+        &self,
+        startup: &StartupTerrain,
+    ) -> Result<Vec<Placement>, ReferenceError> {
+        let mut placements = Vec::new();
+        for (ordinal, entry) in self.reference.startup.iter().enumerate() {
+            let Some(prototype) = &entry.prototype else {
+                continue;
+            };
+            let offset = startup.chain_offset(&self.reference, &entry.source)?;
+            let mut position = entry.pose.translation.map(f64::from);
+            position[1] += f64::from(offset);
+            let radius = self.contents.rules.radius(prototype).unwrap_or(0.);
+            placements.push(Placement {
+                id: super::GeneratedId {
+                    layer: WorldLayer::Startup,
+                    generator: entry.source.clone(),
+                    unit: [0, 0],
+                    ordinal: ordinal as u32,
+                    children: Vec::new(),
+                },
+                prototype: prototype.clone(),
+                pose: super::AbsolutePose {
+                    position,
+                    rotation: entry.pose.rotation,
+                },
+                scale: entry.pose.scale,
+                bounds: WorldBounds {
+                    min: position.map(|v| v - radius),
+                    max: position.map(|v| v + radius),
+                },
+                object_seed: 0,
+            });
+        }
+        Ok(placements)
+    }
+    /// Fixed startup placements request their contents within the item spawn distance.
+    /// A changed placement returns through the changed destination replay instead.
+    fn refresh_startup_placements(&mut self) {
+        let radius = self.distances.item_spawn_dist;
+        let points = [self.request.player, self.request.vehicle];
+        let near = |p: &Placement| {
+            points
+                .into_iter()
+                .any(|f| source_distance_squared(f, p.pose.position) < radius * radius)
+        };
+        let changes = &self.changes;
+        let wanted = |p: &Placement| {
+            near(p)
+                && changes
+                    .get(super::ObjectKey::Generated(p.id.clone()))
+                    .is_none()
+        };
+        let active = &self.contents.active;
+        self.wanted_structures.retain(|p| {
+            p.id.layer != WorldLayer::Startup
+                || wanted(p)
+                || active.iter().any(|c| c.content.placement.id == p.id)
+        });
+        for placement in &self.startup_placements {
+            if wanted(placement) && !self.wanted_structures.iter().any(|p| p.id == placement.id) {
+                self.wanted_structures.push(placement.clone());
+            }
+        }
+    }
     fn refresh_structures(&mut self) -> bool {
         let radius = self.distances.building_gen_dist;
         let points = [self.request.player, self.request.vehicle];
@@ -1694,6 +1794,7 @@ impl WorldStream {
         }
         self.append_ramps();
         self.refresh_poles();
+        self.refresh_startup_placements();
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
         removed || count != self.wanted_structures.iter().filter(|p| numeric(p)).count()
@@ -2339,6 +2440,35 @@ impl WorldStream {
                     if !output.contains(material) {
                         output.push(material.clone());
                     }
+                }
+            }
+        }
+        if let Some((record, index)) = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .and_then(|p| {
+                let index = p.nodes.iter().position(|n| &n.source == node)?;
+                Some((p.vehicle.as_ref()?, index))
+            })
+        {
+            for link in record.renderer_materials(index as u32) {
+                if !output.contains(&link.source) {
+                    output.push(link.source.clone());
+                }
+            }
+        }
+        if let Some((gauges, index)) = self
+            .reference
+            .prototypes
+            .iter()
+            .find(|p| &p.source == prototype)
+            .and_then(|p| Some((&p.gauges, p.nodes.iter().position(|n| &n.source == node)?)))
+        {
+            for link in gauges.iter().flat_map(|g| g.renderer_materials(index as u32)) {
+                if !output.contains(&link.source) {
+                    output.push(link.source.clone());
                 }
             }
         }
@@ -4101,6 +4231,7 @@ impl WorldStream {
     }
 
     /// Call after publication and before movement or recovery. Repeated calls preserve stock and valves.
+    #[allow(clippy::too_many_arguments)]
     pub fn sync_supplies(
         &mut self,
         reference: &ReferenceManifest,
@@ -4108,6 +4239,11 @@ impl WorldStream {
         interaction: &mut crate::interaction::InteractionState,
         physics: &mut PhysicsWorld,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            super::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         let owned = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
@@ -4128,7 +4264,15 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
-        if let Err(error) = self.sync_contents(reference, items, interaction, physics, wheels) {
+        if let Err(error) = self.sync_contents(
+            reference,
+            items,
+            interaction,
+            physics,
+            wheels,
+            vehicles,
+            powertrain,
+        ) {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
@@ -4170,7 +4314,15 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_bus_door_bindings(interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_seat_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
+        if let Err(error) = self.sync_sled_bindings(items, physics) {
             self.binding_reserved = 0;
             return Err(error);
         }
@@ -4345,6 +4497,11 @@ impl WorldStream {
         items: &mut crate::interaction::items::ItemStore,
         interaction: &mut crate::interaction::InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            super::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         if self.recovery.is_some()
             || self.plan_revision != self.request.revision
@@ -4353,7 +4510,7 @@ impl WorldStream {
         {
             return Ok(());
         }
-        self.retire_contents(physics, items, interaction, wheels)?;
+        self.retire_contents(physics, items, interaction, wheels, vehicles, powertrain)?;
         let mut index = 0;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;
@@ -4860,6 +5017,13 @@ impl WorldStream {
                 + self.seat_prototypes.capacity()
                     * std::mem::size_of::<content_seats::PrototypeSeats>()
                 + content_seats::prototype_seats_heap(&self.seat_prototypes)
+                + self.sled_bindings.capacity() * std::mem::size_of::<content_sleds::SledBinding>()
+                + self
+                    .sled_bindings
+                    .iter()
+                    .map(content_sleds::SledBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.sled_prototypes.capacity() * std::mem::size_of::<usize>()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -4867,6 +5031,15 @@ impl WorldStream {
                     .iter()
                     .map(content_detectors::DetectorBinding::heap_bytes)
                     .sum::<usize>()
+                + self.bus_door_bindings.capacity()
+                    * std::mem::size_of::<content_busdoors::BusDoorBinding>()
+                + self
+                    .bus_door_bindings
+                    .iter()
+                    .map(content_busdoors::BusDoorBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.bus_door_scripts.capacity()
+                    * std::mem::size_of::<(SourceId, Option<SourceId>, Vec<SourceId>)>()
                 + self.contents.retained_bytes()
                 + self.props.retained_bytes()
                 + self.presentation.active_cpu
@@ -5162,6 +5335,8 @@ pub(crate) mod content_boxes;
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
 
+#[path = "content_busdoors.rs"]
+mod content_busdoors;
 #[path = "content_detectors.rs"]
 mod content_detectors;
 #[path = "content_dials.rs"]
@@ -5172,6 +5347,8 @@ mod content_musicboxes;
 mod content_radios;
 #[path = "content_seats.rs"]
 pub(crate) mod content_seats;
+#[path = "content_sleds.rs"]
+mod content_sleds;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;
@@ -5181,6 +5358,9 @@ mod content_lamps;
 
 #[path = "content_levels.rs"]
 mod content_levels;
+
+#[path = "moving_nodes.rs"]
+mod moving_nodes;
 
 #[cfg(test)]
 #[path = "stream_tests.rs"]

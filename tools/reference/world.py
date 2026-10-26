@@ -12,6 +12,7 @@ from .collision import geometry, step_surface, collider_tag, world_pose
 from .triggers import recover_trigger_role
 from . import world_probe
 from . import draw_distance
+from .sled import centers_of_mass, recover_sled
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
 WORLD_DATABASE_ID = 66024
@@ -38,6 +39,40 @@ EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134
 def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
+
+VEHICLE_CLASSES = {'carscript','utanfutoscript'}
+# The start car prefab. car_prototypes adds the bus pool.
+LADA = ('sharedassets1.assets',82556)
+CAR_CATEGORIES = ('bus',)
+def vehicle_exclusion(root, classes, cars):
+    """Car roots outside `cars` stay other_vehicle."""
+    return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
+
+def category_items(catalog, name):
+    """Item indices of catalog category `name` and its child categories."""
+    rows=catalog['categories'];found=set();seen=set()
+    def visit(row):
+        if row['index'] in seen:return
+        seen.add(row['index']);found.update(row['items'] or [])
+        for child in row['categories'] or []:
+            if child<len(rows):visit(rows[child])
+    matches=[r for r in rows if r['name']==name]
+    if not matches:raise ValueError(f'level1:66024 unknown category {name}')
+    visit(matches[0])
+    return sorted(found)
+
+def car_prototypes(source, catalog):
+    """The car roots that export as world prototypes: the Lada and the CAR_CATEGORIES pools.
+    A root with utanfutoscript (a trailer) stays other_vehicle."""
+    cars={LADA}
+    for name in CAR_CATEGORIES:
+        for index in category_items(catalog,name):
+            item=catalog['items'][index]
+            root=_source_root(source,source.get(item['source']['file'],item['source']['path_id']))
+            classes={source.class_name(c) for n in source.hierarchy(root) for c in n['components']
+                if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
+            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(root))
+    return cars
 
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
@@ -225,6 +260,8 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
         building_types.append({'type_id':kind,'prototype':add(target,'structure')})
     selected.record(building_owner)
     catalog=recover_catalog(source,reader,selected,database)
+    cars=car_prototypes(source,catalog)
+    register_mirrors(source,cars)
     part_scope_slots=[]
     for node in source.hierarchy(_source_root(source,source.get('level1',17687))):
         for component in node['components']:
@@ -262,8 +299,12 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for field in ('StartObjs','StartObjsFix','StartObjsDonTMoveOnLoad'):
         for pointer in settings[field]:
             root=source.resolve(settings_owner,pointer)
-            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root)})
+            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None})
             selected.transform_chain(root)
+    # Fixed Lada placement at the scene Lada spot. Startup frames ignore this group; the vehicle binder spawns it.
+    lada=source.transform_for(source.get('level1',17687))
+    selected.transform_chain(lada)
+    startup.append({'group':'StartCar02','source':source_id(lada),'pose':world_pose(source,lada),'prototype':source_id(source.get(*LADA))})
     for pid in (79970,68463,72657,77620):
         component=source.get('level1',pid)
         selected.record(component)
@@ -299,19 +340,18 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     scope_cache={}
     part_matches={}
     actors={'aiscript','newAiScript','nyulscript','vultureAI','movecreaturescript'}
-    vehicles={'carscript','utanfutoscript'}
     actions={'GunAim','GunShoot','bbgunscript','meleeweaponscript','weaponscript','weaponhandlingscript','wearable','ediblescript','survivalscript','cigiscript'}
     def scope(target):
         root=_source_root(source,target)
         if key(root) not in scope_cache:
             root_scripts=[c for c in source.components(root)[1] if c.type.name=='MonoBehaviour']
             root_classes={source.class_name(c) for c in root_scripts}
-            if root_classes & vehicles:result=('other_vehicle',[])
+            if vehicle_exclusion(root,root_classes,cars):result=('other_vehicle',[])
             elif root_classes & actors:result=('actor_behavior',[])
             else:
                 scripts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour']
                 classes={source.class_name(c) for c in scripts}
-                result=('other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else '',selected_actions(source,scripts,actions))
+                result=(vehicle_exclusion(root,classes,cars) or ('actor_behavior' if classes & actors else ''),selected_actions(source,scripts,actions))
                 parts=[source.read(c) for c in root_scripts if source.class_name(c)=='partscript']
                 part_matches[key(root)],excluded_actions=part_scope(parts,part_scope_slots,result[1])
                 result=(result[0],excluded_actions)
@@ -327,7 +367,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             classes={source.class_name(c) for c in components if c.type.name=='MonoBehaviour'}
             selected.record(node)
             selected.record(game_object)
-            if classes & (vehicles | actors):
+            if classes & (VEHICLE_CLASSES | actors):
                 reason='startup_vehicle_owned_by_existing_scene' if key(game_object)==('level1',17687) else 'unsupported_startup_vehicle_or_actor'
                 excluded.append({'source':source_id(node),'field':'m_GameObject','target':selected.receipt(game_object),'reason':reason,'catalog':''})
                 return
@@ -335,8 +375,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             for child in source.read(node)['m_Children']:visit(source.resolve(node,child),node,path,active)
         visit(root,None,'',True)
         return result
+    for identity in sorted(cars):add(source.get(*identity),'nested')
     scanned=set()
-    startup_pending=[source.get(r['source']['file'],r['source']['path_id']) for r in startup if r['source']['path_id'] not in (21819,39843)]
+    startup_pending=[source.get(r['source']['file'],r['source']['path_id']) for r in startup if r['prototype'] is None and r['source']['path_id'] not in (21819,39843)]
     while startup_pending or set(roots)-scanned:
         startup_root=bool(startup_pending)
         root=startup_pending.pop(0) if startup_root else roots[next(k for k in roots if k not in scanned)]
@@ -413,8 +454,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     road_fields=('length','roadBoneNum','roadBoneLength','roadSegmentLength','roadAboveTerrain','width','scale','XmaxAngle','YmaxAngle','startStraight','straightModifier','alignEdgeOfTheWorld','aliignRoad','alignBuildings','forceHomesick','noises','defPointRange','defPointStep','addPoint','buildingBoneNum')
     assembled=samples['assembled'][0]
     draw_settings=source.get('level0',16865)
+    from .vehicles import vehicle_globals
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':provenance(reader.receipt),'capture_library':capture_library,
-        'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
+        'spawn_context':recover_spawn_context(samples),'vehicle_globals':vehicle_globals(source),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),'homesickMode':main['GSettings']['homesickMode']},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
@@ -460,6 +502,19 @@ def bind_light_cookies(source, world):
         if r['fields']['m_Type']['value']!=0 or textures.get(identity) not in spot:raise ValueError(f"{r['source']} world light cookie has no lighting spot cookie texture")
         bindings[identity]={'source':cookie['value'],'texture':textures[identity]}
     world['light_cookies']=[bindings[i] for i in sorted(bindings)]
+
+def register_mirrors(source, cars):
+    """Disabled mirrors of each car show the source noMirrorMaterial glass."""
+    main=source.get('level1',64919)
+    glass=source.resolve(main,source.read(main)['noMirrorMaterial'])
+    source.mirror_renderers={}
+    for identity in sorted(cars):
+        for node in source.hierarchy(source.get(*identity),activate_root=True):
+            for reader in node['components']:
+                if reader.type.name=='MonoBehaviour' and source.class_name(reader)=='mirrorscript':
+                    data=source.read(reader)['M']
+                    if data['R']['m_PathID'] and data['C']['m_PathID']:
+                        source.mirror_renderers[key(source.resolve(reader,data['R']))]=glass
 
 def recover_catalog(source, reader, selected, database):
     """Read source initializer tables without retaining method bodies in runtime output."""
@@ -664,6 +719,7 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         ancestor_count=len(source.chain(root))
         local.chain=lambda transform: source.chain(transform)[:-ancestor_count]
         bodies=[];body_nodes={}
+        centers=centers_of_mass(source,hierarchy)
         for n in hierarchy:
             for component in n['components']:
                 if component.type.name!='Rigidbody':continue
@@ -672,7 +728,9 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                 bodies.append({'source':source_id(component),'node':mapping[key(n['reader'])],
                     'mass_kg':data['m_Mass'],'linear_damping':data['m_Drag'],'angular_damping':data['m_AngularDrag'],
                     'kinematic':bool(data['m_IsKinematic']),'use_gravity':bool(data['m_UseGravity']),
-                    'constraints':data['m_Constraints'],'pose':world_pose(local,n['reader'])})
+                    'constraints':data['m_Constraints'],'pose':world_pose(local,n['reader']),
+                    'center_of_mass':centers.pop(key(component),None)})
+        if centers:raise ValueError(f'{name}: setcenterofmass Rigidbody outside its prototype')
         skins=[];colliders=[];controls=[]
         for n in hierarchy:
             for component in n['components']:
@@ -702,12 +760,23 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                     colliders.append({'source':source_id(component),'node':mapping[key(n['reader'])],'enabled':bool(data['m_Enabled']),
                         'body':body,'trigger':bool(data['m_IsTrigger']),'material':selected.receipt(physical_material) if physical_material else None,'deformed_skin':0 if skin_collider else None,'source_empty_mesh':empty_mesh,'geometry':shape,'role':role,
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
+        sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
         for node in hierarchy:
-            for component in node['components']:selected.component_record(component)
-        prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
+            for component in node['components']:
+                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass'):selected.record(component)
+                selected.component_record(component)
+        prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']]})
+            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled}
+        from .vehicles import vehicle_record, part_records
+        vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
+        if vehicle:prototype['vehicle']=vehicle
+        engines,radiators,gauges=part_records(source,hierarchy,index,report['material_indices'])
+        if engines:prototype['engines']=engines
+        if radiators:prototype['radiators']=radiators
+        if gauges:prototype['gauges']=gauges
+        prototypes.append(prototype)
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes
 

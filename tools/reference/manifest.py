@@ -1,19 +1,27 @@
 """Build typed runtime records from selected scene components."""
 import math
 from .source import key, source_id, vector
-from .gltf import GltfExporter, convert_point, convert_rotation, transform_point
+from .gltf import GltfExporter, convert_rotation, transform_point
 from .collision import world_pose, quaternion_product, bake_points, geometry, step_surface, collider_tag
 from .actions import recover_masks, recover_bindings, recover_pickup, recover_pushables
 from .caps import cap_flow, default_words, opening_metadata
 from .mechanisms import recover_mechanisms, bind_mechanisms
 from .visibility import recover_camera_visibility
-from .parts import recover_parts
+from .parts import recover_part_slots
 from .driving import recover_driving
-from .wheels import wheel_collider_record
 from .lighting import rgba
-from .particles import recover_exhaust
-from .wheel_effects import recover_wheel_effects, effect_gains
-from .player_movement import recover_player_movement, recover_seat_view
+from .player_movement import recover_player_movement
+
+
+def component_mass(source, components) -> float:
+    """massScript mass plus initial tankscript fluid of one node."""
+    total=0.
+    for reader in components:
+        if reader.type.name!='MonoBehaviour':continue
+        name=source.class_name(reader)
+        if name=='massScript':total+=source.read(reader)['mass']
+        elif name=='tankscript':total+=sum(f['amount'] for f in source.read(reader)['F']['fluids'])
+    return total
 
 
 def fluid_entries(value: dict) -> list[dict]:
@@ -42,16 +50,8 @@ def burn_colors(main: dict) -> list[list[float]]:
     return colors
 
 
-def smoke_rate(engine: dict) -> float:
-    """Read enginescript.defSmokeRate."""
-    rate = engine['defSmokeRate']
-    if not math.isfinite(rate) or rate < 0:
-        raise ValueError('Invalid engine smoke rate')
-    return rate
-
-
-def build_manifest(source, roots, reports, hashes, library, cars, output):
-    """`cars` names the vehicle roots in manifest order."""
+def build_manifest(source, roots, reports, hashes, library, car_prefab, output):
+    """`car_prefab` is the car prototype that holds the shared plate font and material."""
     nodes=[]; by_source={}; objects={}; components={}; node_readers={}
     assets=[]
     for asset_id,(name,readers) in enumerate(roots.items(),1):
@@ -88,23 +88,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     def total_mass(node):
         total=0.
         for child in descendants(node):
-            if not nodes[child-1]['active']:continue
-            mass=data(child,'massScript')
-            if mass:total+=mass['mass']
-            tank=data(child,'tankscript')
-            if tank:total+=sum(f['amount'] for f in tank['F']['fluids'])
+            if nodes[child-1]['active']:total+=component_mass(source,[r for group in components[child].values() for r in group])
         return total
     home_root=by_source[key(roots['home'][0])]
-    car_roots=[by_source[key(roots[name][0])] for name in cars]
-    car_readers=[components[root]['carscript'][0] for root in car_roots]
-    car_data=[source.read(reader) for reader in car_readers]
-    def within(node,root):
-        while node is not None:
-            if node==root:return True
-            node=nodes[node-1]['parent']
-        return False
-    def car_of(node):
-        return next((index for index,root in enumerate(car_roots) if within(node,root)),None)
     main_reader=source.get('level1',64919);main=source.read(main_reader)
     player_reader=source.get('level1',80125);player=source.read(player_reader)
     physics=next(reader for reader in source.objects.values() if reader.type.name=='PhysicsManager')
@@ -120,7 +106,6 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             'angular_damping':rigidbody['m_AngularDrag'] if rigidbody is not None else 0.}
         bodies.append(value);body_roots[node]=value['id'];return value['id']
     body(home_root,False,0.,node_readers[home_root])
-    car_bodies=[body(root,True,total_mass(root),source.resolve(reader,data['RB'])) for root,reader,data in zip(car_roots,car_readers,car_data)]
     for root in roots['items']:
         node=by_source[key(root)];rigidbody=components[node].get('Rigidbody',[])
         body(node,bool(rigidbody),source.read(components[node]['massScript'][0])['mass'] if key(root) in getattr(source,'flashlight_root_keys',set()) else total_mass(node),rigidbody[0] if rigidbody else root)
@@ -193,7 +178,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 collider=candidates[0]
             identities.append(key(collider));detachable_colliders.add(key(collider))
         if 'wheelscript' in group or 'gumiscript' in group:wheel_parts_source.append((node,part,part_data,identities))
-    retained_colliders=detachable_colliders | getattr(source,'storage_collider_keys',set())
+    retained_colliders=detachable_colliders
     for node,group in components.items():
         food_geometry=key(node_readers[node]) in source.food_geometry_nodes
         if not nodes[node-1]['active'] and not food_geometry and key(node_readers[node]) not in getattr(source,'flashlight_inactive_nodes',set()) and key(node_readers[node]) not in getattr(source,'condition_geometry_nodes',set()) and not any(key(reader) in retained_colliders for readers in group.values() for reader in readers):continue
@@ -204,7 +189,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 if not value['m_Enabled'] and key(reader) not in retained_colliders:continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
-                    properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
+                    properties=source.read(material);friction=properties['dynamicFriction'];restitution=properties['bounciness']
                 body_id=body_for(node);owner=bodies[body_id-1]
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
@@ -218,7 +203,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             owner=body_for(node)
             tanks.append({'item':item_components[key(reader)],'source':source_id(reader),'capacity_liters':value['maxC'],'fluids':fluid_entries(value),'openings':[],
                 'no_drink':bool(full['noDrink']),'no_fill_this':bool(full['noFillThis']),'no_fill_from':bool(full['noFillFrom']),'slow_oil':bool(full['slowOil']),
-                'role':'vehicle' if owner in car_bodies else 'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
+                'role':'portable' if bodies[owner-1]['dynamic'] else 'fixed'})
     for node,group in components.items():
         if not nodes[node-1]['active']:continue
         for reader in group.get('tankcapscript',[]):
@@ -233,60 +218,6 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             if not value['canToggle'] and value['noAngle'] and not tank_record['no_fill_from'] and not bodies[body_for(node)-1]['dynamic']:
                 tank_record['role']='supply'
     bind_mechanisms(source,mechanisms,nodes,components,items,item_nodes)
-    seats=[]
-    seat_hits={}
-    for node,group in components.items():
-        if not nodes[node-1]['active']:continue
-        for reader in group.get('seatscript',[]):
-            value=source.read(reader)
-            primary=source.resolve(reader,value['mainseat']) if value['mainseat']['m_PathID'] else reader
-            seat_hits.setdefault(key(primary),[]).append(node)
-    for node,group in components.items():
-        if not nodes[node-1]['active']:continue
-        for reader in group.get('seatscript',[]):
-            value=source.read(reader)
-            if value['mainseat']['m_PathID']:continue
-            seat_node=pointer_node(reader,value['sitPos']) if value['sitPos']['m_PathID'] else node
-            vehicle=car_of(node)
-            if vehicle is None:raise ValueError(f'Seat outside selected cars: {key(reader)}')
-            seats.append({'id':len(seats)+1,'source':source_id(reader),'item':item_nodes[node],'anchor':anchor(seat_node),'vehicle':vehicle,
-                'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
-                'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
-                'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],'show_sleep_text':bool(value['showSleepText']),**recover_seat_view(source,reader)})
-    wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
-    mount_links={}
-    for group in components.values():
-        for graphics in group.get('wheelgraphicsscript',[]):
-            value=source.read(graphics);collider=source.resolve(graphics,value['W']);slot=source.resolve(graphics,value['slot'])
-            if key(collider) in mount_links:raise ValueError('Duplicate wheel graphics collider link')
-            mount_links[key(collider)]=slot
-    for car_reader,car in zip(car_readers,car_data):
-        driven={key(source.resolve(car_reader,p)) for p in car['WHDriven']};steer={key(source.resolve(car_reader,p)) for p in car['WHSteer']};brake={key(source.resolve(car_reader,p)) for p in car['WHBrakeOnly']}
-        handbrake={key(source.resolve(car_reader,p)) for p in car['WHHandBrake']}
-        road=driven|steer|brake;first=len(wheel_slots)
-        for identity in sorted(road):
-            reader=source.get(*identity);value=source.read(reader);node=node_of(reader)
-            wheel_readers.append(reader)
-            slot=mount_links.get(identity)
-            if slot is None:raise ValueError(f'Wheel slot missing: {identity}')
-            part=source.resolve(slot,source.read(slot)['part']);wheel_node=node_of(part)
-            wheel_script=components[wheel_node]['wheelscript'][0]
-            tire_slot=source.resolve(wheel_script,source.read(wheel_script)['gumi'])
-            tire_part=source.resolve(tire_slot,source.read(tire_slot)['part']);tire_node=node_of(tire_part)
-            wheel_slots.append({'id':len(wheel_slots),'source':source_id(slot),'anchor':anchor(node),'wheel':item_nodes[wheel_node],
-                'tire':item_nodes[tire_node],'rim':item_nodes[wheel_node],'collider':wheel_collider_record(value),
-                'steer':identity in steer,'drive':identity in driven,'brake':identity in brake,'handbrake':identity in handbrake,
-                'tire_condition_range':[1,4],'rim_condition_range':[1,4]})
-            wheel_slots[-1]['mount_anchor']=anchor(pointer_node(slot,source.read(slot)['T']))
-            wheel_slots[-1].update(rim_main_types=source.read(slot)['maintipus'],rim_types=source.read(slot)['tipus'])
-        car_wheel_slots.append([w['id'] for w in wheel_slots[first:]])
-    driving=recover_driving(source,car_readers,wheel_readers,by_source)
-    for slot,record in zip(wheel_slots,driving['slots']):
-        if slot['source'] != record['source']:raise ValueError('Driving wheel slot order differs')
-        for field in ('sideways_stiffness_modifier','hub'):
-            slot[field]=record[field]
-    source.driving_evidence=driving
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
     wheel_parts=[]
     def euler_quaternion(value):
@@ -308,45 +239,13 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         wheel_parts.append({'item':item_nodes[node],'source':source_id(part),'radius':radius,'main_types':value['maintipus'],'part_types':value['tipus'],
             'colliders':[collider_ids[identity] for identity in identities],'tire_slot_anchor':tire_anchor,'tire_mount':tire_mount,
             'tire_main_types':tire_main,'tire_types':tire_types,'local_rotation_after_mount':euler_quaternion(vector(value['localRotationAfterMount'])),'cover_slot':value['cover_CantCraftIfCovered']['m_PathID'] or None})
-    for slot in wheel_slots:
-        owner=source.get(slot['source']['file'],slot['source']['path_id'])
-        if source.read(owner)['disableCollidersOnCraft']:
-            for part in wheel_parts:
-                if part['item'] in (slot['rim'],slot['tire']):
-                    for collider_id in part['colliders']:colliders[collider_id-1]['enabled']=False
     # A tire owns its listed shapes if a parent rim lists the same shapes.
     tire_colliders={collider_id for part in wheel_parts if 'gumi' in part['part_types'] for collider_id in part['colliders']}
     for part in wheel_parts:
         if 'felni' in part['part_types']:part['colliders']=[collider_id for collider_id in part['colliders'] if collider_id not in tire_colliders]
-    parts,part_slots=recover_parts(source,nodes,components,item_nodes,node_readers,colliders,car_roots,pointer_node,anchor,euler_quaternion)
-    def car_components(root,name):
-        return [r for node,group in components.items() if nodes[node-1]['active'] and within(node,root) for r in group.get(name,[])]
-    def engine_for(car_root,car_reader,car):
-        engines=car_components(car_root,'enginescript');radiators=car_components(car_root,'coolantTankscript')
-        if len(engines)!=1 or len(radiators)!=1:raise ValueError(f'Car needs one engine and one radiator: {key(car_reader)}')
-        engine_reader=engines[0];engine=source.read(engine_reader)
-        radiator_reader=radiators[0];radiator=source.read(radiator_reader)
-        oil=source.resolve(engine_reader,engine['T']);coolant=source.resolve(radiator_reader,radiator['coolant']);fuel=components[car_root]['tankscript'][0]
-        engine_record={'source':source_id(engine_reader),'item':item_components[key(engine_reader)],'fuel_tank':item_components[key(fuel)],'oil_tank':item_components[key(oil)],'coolant_tank':item_components[key(coolant)]}
-        for field,unity in {'start_chance':'startChance','starter_delay_seconds':None,'starter_rpm':'starterRpm','starter_rpm_lerp':'starterRpmLerp','idle_rpm':'alapRpm','max_rpm':'maxRpm','shutdown_rpm':'shutdownRpm','max_torque_nm':'maxNm','consumption_modifier':'consumptionM','oil_consumption_modifier':'OilConsumptionModifier','engine_brake_modifier':'motorBrakeModifier','rpm_change_modifier':'rpmChangeModifier','engine_start_time_modifier':'engineStartTimeModifier','heat_gain_min':'engineHeatGainMin','heat_gain_max':'engineHeatGainMax','heat_loss':'engineHeatLoss','initial_temperature':'temp','heat_loss_speed_modifier':'engineHeatLossSpeedModifier'}.items():
-            engine_record[field]=engine[unity] if unity else car['startingTime']
-        electronics=source.resolve(car_reader,car['electronics']);electronics_data=source.read(electronics) if electronics else None
-        engine_record.update(starting_push_force=engine['maxNm']*9.,optimal_temperature=[engine[k] for k in ('minOptimalTemp1','maxOptimalTemp1','minOptimalTemp2','maxOptimalTemp2')],
-            fuel_consumption=[sum(f['amount'] for f in engine['FuelConsumption']['fluids'] if f['type']==i) for i in range(6)],two_stroke=bool(engine['twostroke']),
-            electronics_enabled=electronics is None or electronics_data['maxOutput']*(1.-min(1.,max(0.,electronics_data['jamValue']/(electronics_data['overRideMaxJamValue'] if electronics_data['overRideMaxJamValue']>0 else 0.3))))>0.2)
-        engine_record.update(max_rpm_difference=engine['maxRpmDifference'],torque_modifier=engine['modifier'],oil_fluid=engine['Oilfluid'],
-            no_overheat=bool(engine['noOverHeat']),kickstart=bool(engine['kickstart']),start_chance_interval_seconds=1.,smoke_rate=smoke_rate(engine))
-        engine_record.update(auto_shift_clutch_rpm=engine['autoShiftClutchRpm'],auto_shift_clutch_rpm_range=engine['autoShiftClutchRpmRange'])
-        curve=engine['torqueCurve'];engine_record['torque_curve']={'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}
-        engine_record['globals']={'source':source_id(main_reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],'outside_temperature_modifier':main['outsideTempM']}
-        engine_record['globals']['min_steam_temperature']=main['minSteamTemp']
-        engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss'],
-            'fan_node':pointer_node(radiator_reader,radiator['Fan']) if radiator['Fan']['m_PathID'] else None}
-        return engine_record
-    engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]
-    exhaust_records=[recover_exhaust(source,reader,data,node_readers[root],index,output) for index,(root,reader,data) in enumerate(zip(car_roots,car_readers,car_data))]
-    wheel_effect_records=[recover_wheel_effects(source,reader,data,node_readers[root],[wheel_readers[i] for i in slots],index,output)
-        for index,(root,reader,data,slots) in enumerate(zip(car_roots,car_readers,car_data,car_wheel_slots))]
+    part_slots=recover_part_slots(source,nodes,components,item_nodes,colliders,pointer_node,anchor,euler_quaternion)
+    driving=recover_driving(source)
+    source.driving_evidence=driving
     capsule=source.get('level1',58456);camera=source.get('level1',40241)
     player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'aim_reach':player['FrayRange']}
     player_record.update(recover_player_movement(source))
@@ -363,9 +262,6 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         slider=source.resolve(settings_reader,settings['tabControls']['sliders'][index]);definition=source.read(slider)
         multiplier=definition['valueMultipler'] if definition['valueMultipler'] else 1.
         defaults.append(definition['defValue']*multiplier)
-    for car_reader,car in zip(car_readers,car_data):
-        if car['speedBasedKeyboardSens']:
-            raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     player_record.update(carry_min_distance=max(0.,math.sqrt(sum(value**2 for value in held_offset))-player['maxPickupDist']),
         carry_max_distance=math.sqrt(sum(value**2 for value in held_offset))+player['maxPickupDist'],obj_move_sensitivity=defaults[3],
         obj_rotation_sensitivity=defaults[4],look_sensitivity=[defaults[0]*defaults[1],defaults[0]*defaults[2]])
@@ -383,15 +279,14 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     # fpscontroller.CanGetOut uses literal capsule endpoints and radius.
     player_record['exit_capsule_half_height']=.568
     player_record['exit_capsule_radius']=.3-.05
-    # The first car starts in the garage. The area derives from its source spot.
-    home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,node_readers[car_roots[0]])
+    # The start Lada stands in the garage. The player spawn derives from its source spot.
+    home_pose=world_pose(source,node_readers[home_root]);car_pose=world_pose(source,source.transform_for(source.get('level1',17687)))
     world_points=[]
     for collider in colliders:
         if collider['body']==body_roots[home_root] and not collider['sensor'] and 'points' in collider['geometry']:
             owner=bodies[collider['body']-1]['pose'];world_points.extend(transform_point(point,owner['translation'],owner['rotation'],[1.,1.,1.]) for point in collider['geometry']['points'])
     bounds={'min':[min(p[i] for p in world_points) for i in range(3)],'max':[max(p[i] for p in world_points) for i in range(3)]}
-    # Sample authored floor triangles under the car and standing position.
-    # The garage spawn and driveway join are explicit project changes.
+    # Sample authored floor triangles under the standing position. The garage spawn is an explicit project change.
     faces=[(0,1,3),(0,3,2),(4,6,7),(4,7,5),(0,4,5),(0,5,1),(2,3,7),(2,7,6),(0,2,6),(0,6,4),(1,5,7),(1,7,3)]
     def floor_at(x,z,ceiling):
         hits=[]
@@ -423,30 +318,17 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     lower=min(posture['prone_head']['translation'][1], posture['feet']['center'][1]-posture['maximum_radius'])
     position[1]=floor-lower+source.read(physics)['m_DefaultContactOffset']
     spawn={'translation':position,'rotation':list(quaternion_product(car_pose['rotation'],[0.,-math.sqrt(.5),0.,math.sqrt(.5)])),'scale':[1.,1.,1.]}
-    wheel_floors=[]
-    for slot in wheel_slots[:4]:
-        point=transform_point(anchors[slot['anchor']-1]['transform']['translation'],car_pose['translation'],car_pose['rotation'],[1.,1.,1.])
-        wheel_floors.append(floor_at(point[0],point[2],car_pose['translation'][1]))
-    driveway_height=max(hit[0] for hit in wheel_floors)
-    driveway_points=[point for height,points in wheel_floors if abs(height-driveway_height)<0.001 for point in points]
-    driveway_bounds={'min':[min(p[i] for p in driveway_points) for i in range(3)],'max':[max(p[i] for p in driveway_points) for i in range(3)]}
-    driveway_bounds['min'][1]=driveway_height;driveway_bounds['max'][1]=driveway_height
-    result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_slots':wheel_slots,'wheel_parts':wheel_parts,'parts':parts,'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
+    result={'driving':driving['global'],'app_id':1017180,'build_id':11140890,'source_hashes':hashes,'assets':assets,'nodes':nodes,'bodies':bodies,'colliders':colliders,'anchors':anchors,'mechanisms':mechanisms,'wheel_parts':wheel_parts,'parts':[],'part_slots':part_slots,'part_scan':{'source':source_id(main_reader),'mask':main['scanLayer']['m_Bits'],'radius':main['defScanRadius']},'items':items,'openings':openings,'tanks':tanks,
         'fluid_rules':{'source':source_id(main_reader),'pour_speed':main['pourSpeed'],'slow_oil_modifier':main['slowOilModifier'],'fluid_tune_speed':main['fluidTuneSpeed'],'burn_colors':burn_colors(main),
-            'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,'seats':seats,
-        'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
-            'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
-            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM'],'exhaust':exhaust,
-            'wheel_effects':wheel_effects,'effect_gains':effect_gains(car),'lever':drive['lever'],'key_steer_multiplier':drive['key_steer_multiplier']}
-            for engine,exhaust,wheel_effects,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,exhaust_records,wheel_effect_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
-        'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
+            'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,
+        'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)
         for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}
     result['pushables']=recover_pushables(source,nodes,components,item_nodes,colliders,bodies,player_record['action_masks']['push_mask'])
-    result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings,seats)
+    result['action_bindings']=recover_bindings(source,nodes,components,item_nodes,colliders,mechanisms,openings)
     from .plates import recover_plates, plate_resources
-    result['plates']=recover_plates(source,nodes,components,pointer_node,item_nodes,colliders,output)
-    assets[1]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in plate_resources(result['plates']))
+    result['plates']=recover_plates(source,car_prefab,output)
+    assets[0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in plate_resources(result['plates']))
     result['lighting']=source.lighting
     result['render_lighting']=source.render_lighting
     collider_ids={(c['source']['file'],c['source']['path_id']):c['id'] for c in colliders}
@@ -458,12 +340,11 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     from .flashlights import recover_flashlights
     result['flashlights']=recover_flashlights(source,pointer_node,item_nodes,result['lighting']['controllers'],output)
     from .storage import recover_storage
-    result['storage']=recover_storage(source,pointer_node,item_nodes,components,colliders,part_slots,output)
+    result['storage']=recover_storage(source,item_nodes,components,output)
     from .conditions import recover_conditions
     source.condition_bodies=bodies
     source.condition_items=items
     source.condition_part_slots=part_slots
-    source.condition_wheel_slots=wheel_slots
     source.condition_wheel_parts=wheel_parts
     source.condition_anchors=anchors
     result['conditions']=recover_conditions(source,nodes,components,pointer_node,item_nodes,colliders,output)

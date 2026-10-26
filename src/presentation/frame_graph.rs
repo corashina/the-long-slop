@@ -19,8 +19,7 @@ use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::render::camera::CameraRenderGraph;
 use bevy::render::{
-    Render, RenderApp, RenderStartup, RenderSystems,
-    batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport},
+    Render, RenderApp, RenderSystems,
     extract_component::ExtractComponent,
     render_phase::{DrawFunctions, PhaseItem, SortedPhaseItem, ViewSortedRenderPhases},
     render_resource::*,
@@ -169,16 +168,13 @@ impl Plugin for SourceFramePlugin {
         super::view_frame::install(app);
         super::shadow_queue::install(app);
         super::caster_material::install(app);
+        super::shadow_atlas::install(app);
         super::shadow_collector::install(app);
         super::source_effects::install(app);
         let render = app.sub_app_mut(RenderApp);
         render
             .insert_resource(progress)
             .init_resource::<SkyExtras>()
-            .add_systems(
-                RenderStartup,
-                cpu_batching.after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
-            )
             .add_systems(Render, gpu_boundaries.in_set(RenderSystems::Cleanup))
             .add_systems(Render, release_canvas_texture.after(RenderSystems::Render))
             .add_systems(
@@ -194,16 +190,21 @@ impl Plugin for SourceFramePlugin {
                     .before(super::transparent::prepare_pass_order),
             )
             .add_schedule(Schedule::new(SourceSkySurface))
+            .add_systems(
+                SourceSkySurface,
+                bevy::pbr::early_gpu_preprocess.before(render_sky),
+            )
             .add_systems(SourceSkySurface, render_sky)
             .add_systems(
                 SourceSurface,
                 (
                     clear_capture
-                        .before(SourceSurfaceStage::CameraDepth)
+                        .before(SourceSurfaceStage::Opaque)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::graph_ready),
                     render_capture_sky
                         .in_set(SourceSurfaceStage::AfterOpaque)
+                        .after(super::depth_resolve::resolve)
                         .run_if(surface_ready)
                         .run_if(super::shadow_queue::collector_encoded),
                     super::shadow_atlas::render_atlas
@@ -252,6 +253,8 @@ pub fn spawn_cameras(
     commands.spawn((
         SourceSkyCamera,
         Camera3d::default(),
+        // Source passes draw directly. GPU preprocessing builds mesh uniforms only.
+        bevy::render::view::NoIndirectDrawing,
         bevy::light::cluster::ClusterConfig::None,
         bevy::camera::Hdr,
         Camera {
@@ -300,6 +303,7 @@ pub fn spawn_cameras(
         };
         let mut entity = commands.spawn((
             Camera3d::default(),
+            bevy::render::view::NoIndirectDrawing,
             bevy::light::cluster::ClusterConfig::Single,
             bevy::camera::Hdr,
             Camera { order, ..default() },
@@ -536,6 +540,7 @@ pub(crate) fn surface_ready(
     probe: Option<Res<ProbeFrame>>,
     cache: Res<PipelineCache>,
     effects: Option<Res<super::source_effects::SourceEffects>>,
+    preprocess: Res<bevy::pbr::PreprocessPipelines>,
 ) -> bool {
     let index = view.into_inner().index;
     let state = progress.lock();
@@ -547,6 +552,7 @@ pub(crate) fn surface_ready(
         && camera.ready()
         && resources.is_some_and(|r| r.display.ready(&cache))
         && effects.is_some_and(|effects| effects.ready(&cache))
+        && preprocess_ready(&preprocess, &cache)
         && state.audit.sky
         && (index < WORLD_VIEWS
             || (state.audit.presented
@@ -555,6 +561,18 @@ pub(crate) fn surface_ready(
                     p.probes[frame.probe_index].accepts(frame.probe_token)
                         && p.probes[frame.probe_index].filter.ready(&cache)
                 })))
+}
+/// `DrawMesh` skips every draw until both direct and frustum preprocess pipelines exist.
+fn preprocess_ready(pipelines: &bevy::pbr::PreprocessPipelines, cache: &PipelineCache) -> bool {
+    [
+        &pipelines.direct_preprocess,
+        &pipelines.gpu_frustum_culling_preprocess,
+    ]
+    .iter()
+    .all(|p| {
+        p.pipeline_id
+            .is_some_and(|id| cache.get_compute_pipeline(id).is_some())
+    })
 }
 fn begin_frame(frame: Res<SourceViewFrame>, progress: Res<RendererStateHandle>) {
     let mut state = progress.lock();
@@ -650,11 +668,15 @@ fn render_sky(
     loading: Res<super::materials::MaterialLoading>,
     status: Res<RendererStateHandle>,
     progress: Res<RendererStateHandle>,
+    preprocess: Res<bevy::pbr::PreprocessPipelines>,
     mut context: RenderContext,
 ) {
     let entity = view.entity();
     let view = view.into_inner();
-    if frame.sky_clip_from_world.is_none() || !frame.required_views_ready() {
+    if frame.sky_clip_from_world.is_none()
+        || !frame.required_views_ready()
+        || !preprocess_ready(&preprocess, &cache)
+    {
         return;
     }
     let (Some(resources), Some(sky), Some(clouds)) = (resources, sky, clouds) else {
@@ -754,7 +776,6 @@ fn finish_surface(
         &super::shadow_collector::CollectorView,
         &super::source_lighting::SourceViewLighting,
         &super::shadow_phase::ShadowDrawState,
-        &super::camera_depth::CameraDepthState,
         &super::surface_graph::SurfaceViewTargets,
         &super::stained_glass::SourceGlassView,
     )>,
@@ -766,9 +787,10 @@ fn finish_surface(
     cache: Res<PipelineCache>,
     effects: Res<super::source_effects::SourceEffects>,
     status: Res<RendererStateHandle>,
+    props: Res<super::prop_draws::PropDraws>,
     mut context: RenderContext,
 ) {
-    let (source, target, collector, lighting, shadow, depth, targets, glass) = view.into_inner();
+    let (source, target, collector, lighting, shadow, targets, glass) = view.into_inner();
     if collector.encoded_frame() != frame.frame || glass.audit().frame != frame.frame {
         return;
     }
@@ -780,13 +802,13 @@ fn finish_surface(
     state.audit.views[source.index] = ViewAudit {
         frame: frame.frame,
         glass: glass.audit(),
-        camera_depth: depth.counts(),
         surface: lighting.draws(),
         surface_instances: lighting.instances(),
         shadow_epoch,
         shadow_attempts,
         shadow_issued,
         shadow_instances: shadow.instance_counts(),
+        props: props.audit(source.index),
         collector_frame: collector.encoded_frame(),
         atlas_size: targets.0.atlas_size,
         physical_extent: [targets.0.colors.width, targets.0.colors.height],
@@ -980,13 +1002,14 @@ fn submitted(
 struct ViewAudit {
     frame: u32,
     glass: super::stained_glass::GlassAudit,
-    camera_depth: [u32; 3],
     surface: [u32; 5],
     surface_instances: [u32; 4],
     shadow_epoch: u32,
     shadow_attempts: [u32; 4],
     shadow_issued: [u32; 4],
     shadow_instances: [[u32; 4]; 2],
+    /// GPU prop rows, camera-visible rows and issued indirect draws.
+    props: [u32; 3],
     collector_frame: u32,
     atlas_size: u32,
     physical_extent: [u32; 2],
@@ -1162,10 +1185,6 @@ fn resource_stamp<T: Resource>(world: &World) -> Option<u32> {
 /// Source cameras cluster lights on the CPU on every backend. GPU clustering fails on the zero-cluster sky camera.
 fn cpu_clustering(mut settings: ResMut<bevy::light::cluster::GlobalClusterSettings>) {
     settings.gpu_clustering = None;
-}
-/// Source passes draw CPU-batched phases on every backend.
-fn cpu_batching(mut support: ResMut<GpuPreprocessingSupport>) {
-    support.max_supported_mode = GpuPreprocessingMode::None;
 }
 fn gpu_boundaries(
     world: &World,

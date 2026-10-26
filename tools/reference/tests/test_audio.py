@@ -1,41 +1,17 @@
 """Critical selected-audio contract checks."""
 import copy
-import ast
 import hashlib
-import inspect
 import json
 import tempfile
 import unittest
 import wave
 from pathlib import Path
 from types import SimpleNamespace as NS
-from unittest.mock import patch
 from tools.reference.library.reader import LibraryReader
 from tools.reference.library.types import ObjectId
 from tools.reference.source import key, source_id
 
 class SelectedAudio(unittest.TestCase):
-    def test_audio_requires_gltf_reports(self):
-        from tools.reference.audio import recover_audio
-        signature = inspect.signature(recover_audio)
-        self.assertEqual(list(signature.parameters), ['source', 'roots', 'manifest', 'library', 'output', 'reports'])
-        self.assertIs(signature.parameters['reports'].default, inspect.Parameter.empty)
-
-    def test_audio_exporter_passes_gltf_reports(self):
-        from tools.reference.audio import recover_audio
-        from tools.reference.export import _export_selected
-        tree = ast.parse(inspect.getsource(_export_selected))
-        call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name) and node.func.id == 'recover_audio')
-        reports = {'lada': {'material_indices': {'level1:21': 3}}}
-        def bind(*args, **kwargs):
-            arguments = inspect.signature(recover_audio).bind(*args, **kwargs).arguments
-            self.assertIs(arguments['reports'], reports)
-            return arguments
-        scope = dict(source=object(), roots={}, CARS={}, manifest={}, library=object(),
-                     output=Path('.'), report=reports, recover_audio=bind)
-        eval(compile(ast.Expression(call), '<audio export caller>', 'eval'), scope)
-
     def accepted_source_fixture(self, directory):
         root=Path(directory)
         library,identity,_=self.fixture(directory)
@@ -389,7 +365,7 @@ class HitAudio(unittest.TestCase):
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
                 record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70), record('music_box', 14, True, [6], 128),
-                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6])]}
+                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6]), record('radio_click', 21, True, [6], 70)]}
         validate_hit_audio(audio, set(range(1, 7)), [])
         for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14), (7, 'settings', {'priority': 100, 'spatial_blend': 1.})]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value
@@ -441,3 +417,45 @@ class HitAudio(unittest.TestCase):
                 lambda a: a['survival'][0]['settings'].update(loop=False), lambda a: a['survival'][0]['settings'].update(spatial_blend=1.)]:
             changed = copy.deepcopy(audio); change(changed)
             with self.assertRaises(ValueError): validate_ambience_zones(changed, {7, 8})
+
+class CarAudio(unittest.TestCase):
+    def test_car_radio_exports_its_own_voices(self):
+        from tools.reference.audio import radio_voice_groups
+        voices = lambda source, gain: [{'id': 0, 'source': source + k, 'gain': gain} for k in range(3)]
+        groups = radio_voice_groups([('portable1', voices(10, 1.)), ('car', voices(20, .5)), ('portable2', voices(30, 1.))])
+        # Equal settings share one group; the car radio keeps its own voices.
+        self.assertEqual([g['sources'] for g in groups], [['portable1', 'portable2'], ['car']])
+        self.assertEqual(groups[1]['voices'][0]['gain'], .5)
+
+    def test_engine_part_sounds_and_shared_templates(self):
+        from tools.reference.audio import car_voice, engine_audio, PRIORITIES
+        file = NS(source_container_path='sharedassets1.assets')
+        objects = {}
+        def add(path_id, data):
+            obj = NS(assets_file=file, path_id=path_id); objects[path_id] = (obj, data); return obj
+        go = add(1, {}); owner = add(2, {})
+        idle = add(3, {}); motor = add(4, {}); clip = add(5, {})
+        constants = dict(SMinAlapRpm=600, SMaxAlapRpm=1400, SMinMotorRpm=500, SMaxMotorRpm=1300, SMaxAlapSound=.7,
+            SMaxMotorSound=.8, minAlapPitch=.9, maxAlapPitch=1.2, minMotorPitch=.8, maxMotorPitch=1.5,
+            SStartVolume=.6, SStopVolume=.5)
+        ptr = lambda o: {'m_PathID': o.path_id if o else 0}
+        engine = add(6, {'m_GameObject': ptr(go), 'SAlap': ptr(idle), 'SMotor': ptr(motor), 'SStart': ptr(clip),
+            'SStop': ptr(None), **constants})
+        source = NS(read=lambda o: objects[o.path_id][1], transform_for=lambda o: owner,
+            resolve=lambda o, p: objects[p['m_PathID']][0] if p['m_PathID'] else None)
+        templates = []
+        sound = lambda r, o, priority: {'voice': car_voice(templates, {'source': r.path_id, 'priority': priority}), 'owner': o}
+        shot = lambda o, p, gain, r, at: None if not p['m_PathID'] else {'voice': car_voice(templates, {'source': 0}), 'gain': gain}
+        record = engine_audio(source, engine, sound, shot)
+        self.assertEqual([record['idle']['voice'], record['motor']['voice']], [1, 2])
+        self.assertIs(record['idle']['owner'], owner)
+        self.assertEqual(templates[0]['priority'], PRIORITIES[5])
+        self.assertEqual(record['starter'], {'voice': 3, 'gain': .6})
+        self.assertIsNone(record['stop'], 'a null clip has no sound')
+        self.assertEqual((record['idle_rpm'], record['motor_pitch'], record['motor_gain']), ([600, 1400], [.8, 1.5], .8))
+        # Equal templates share one id.
+        self.assertEqual(car_voice(templates, {'source': 3, 'priority': PRIORITIES[5]}), 1)
+        self.assertEqual(len(templates), 3)
+        engine_null = add(7, {**objects[6][1], 'SAlap': {'m_PathID': 0}})
+        with self.assertRaises(ValueError): engine_audio(source, engine_null, sound, shot)
+

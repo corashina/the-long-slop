@@ -4,22 +4,7 @@ use rapier3d::math::Vector;
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
 fn empty_world() -> PhysicsWorld {
-    let mut physics = rapier3d::prelude::PhysicsWorld::new();
-    physics.integration_parameters.dt = crate::simulation::FIXED_DT;
-    physics.gravity = Vector::ZERO;
-    PhysicsWorld {
-        body_mass_override: None,
-        body_cargo: Vec::new(),
-        inactive_bodies: Default::default(),
-        physics,
-        query_bounds: Default::default(),
-        presentation_bodies: Default::default(),
-        chassis: Vec::new(),
-        vehicles: Vec::new(),
-        hit_collector: Default::default(),
-        hits: Vec::new(),
-        ignored: Default::default(),
-    }
+    PhysicsWorld::empty_for_tests()
 }
 
 #[test]

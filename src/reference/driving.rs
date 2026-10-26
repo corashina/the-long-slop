@@ -1,6 +1,4 @@
-use super::{
-    NodeId, ReferenceError, ReferenceManifest, SourceId, Transform, finite, require, transform,
-};
+use super::{ReferenceError, SourceId, Transform, finite, require};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -41,11 +39,14 @@ pub struct DrivingBinding {
 pub struct DrivingReference {
     pub source: SourceId,
     pub pedal_rate: f32,
+    /// Settings steering slider value: keyboard steer change per second.
+    pub keyboard_steering_rate: f32,
     pub force_manual: bool,
     pub min_motor_torque_nm: f32,
     pub default_assists: DrivingAssists,
     pub bindings: Vec<DrivingBinding>,
     pub mouse_drive: MouseDriveReference,
+    pub lever: LeverTiming,
 }
 
 /// Source `slidersettingscript`: `GetValue` range and default, multiplier applied.
@@ -87,12 +88,19 @@ pub struct LeverGear {
     pub pos: Transform,
 }
 
-/// Source `carscript.Transmission`. `gears` follow `VehicleReference.gear_ratios`.
+/// Source `carscript.Transmission`. `gears` follow `WorldVehicleReference.gear_ratios`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeverReference {
-    pub node: NodeId,
+    /// The lever prototype node.
+    pub node: u32,
     pub gears: Vec<LeverGear>,
+}
+
+/// Source `carscript` `TransmissionLerp` and `transmissionStage1`, `transmissionStage2`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeverTiming {
     pub seconds: f32,
     pub stages: [f32; 2],
 }
@@ -134,14 +142,18 @@ pub struct WheelHubReference {
 }
 
 impl DrivingReference {
-    pub(super) fn validate(&self, manifest: &ReferenceManifest) -> Result<(), ReferenceError> {
+    pub(super) fn validate(&self) -> Result<(), ReferenceError> {
         require(
             self.source.file == "level0" && self.source.path_id == 16865,
             "driving settings source",
         )?;
         require(
-            finite(&[self.pedal_rate, self.min_motor_torque_nm])
-                && self.pedal_rate > 0.0
+            finite(&[
+                self.pedal_rate,
+                self.keyboard_steering_rate,
+                self.min_motor_torque_nm,
+            ]) && self.pedal_rate > 0.0
+                && self.keyboard_steering_rate > 0.0
                 && self.min_motor_torque_nm >= 0.0,
             "driving parameters",
         )?;
@@ -189,40 +201,26 @@ impl DrivingReference {
             "driving bindings",
         )?;
         require(
-            [self.mouse_drive.sensitivity_x, self.mouse_drive.sensitivity_y]
-                .iter()
-                .all(|range| {
-                    finite(&[range.default, range.minimum, range.maximum])
-                        && range.contains(range.default)
-                }),
+            [
+                self.mouse_drive.sensitivity_x,
+                self.mouse_drive.sensitivity_y,
+            ]
+            .iter()
+            .all(|range| {
+                finite(&[range.default, range.minimum, range.maximum])
+                    && range.contains(range.default)
+            }),
             "mouse driving sensitivity",
         )?;
-        for vehicle in &manifest.vehicles {
-            require(
-                vehicle.driving.initial_gear < vehicle.gear_ratios.len(),
-                "driving startup gear",
-            )?;
-            require(
-                vehicle.key_steer_multiplier.is_finite() && vehicle.key_steer_multiplier >= 0.0,
-                "key steer multiplier",
-            )?;
-            if let Some(lever) = &vehicle.lever {
-                require(
-                    manifest.nodes.iter().any(|node| node.id == lever.node)
-                        && lever.gears.len() == vehicle.gear_ratios.len()
-                        && lever
-                            .gears
-                            .iter()
-                            .all(|gear| transform(&gear.path) && transform(&gear.pos))
-                        && finite(&[lever.seconds, lever.stages[0], lever.stages[1]])
-                        && lever.seconds > 0.0
-                        && 0.0 < lever.stages[0]
-                        && lever.stages[0] < lever.stages[1]
-                        && lever.stages[1] < 1.0,
-                    "driving lever",
-                )?;
-            }
-        }
+        let lever = &self.lever;
+        require(
+            finite(&[lever.seconds, lever.stages[0], lever.stages[1]])
+                && lever.seconds > 0.0
+                && 0.0 < lever.stages[0]
+                && lever.stages[0] < lever.stages[1]
+                && lever.stages[1] < 1.0,
+            "driving lever timing",
+        )?;
         Ok(())
     }
 }

@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 19;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 19;
+pub const SAVE_SCHEMA_VERSION: u32 = 22;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 22;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -32,15 +32,12 @@ pub struct SaveSnapshot {
     pub player: PlayerSnapshot,
     pub needs: NeedsSnapshot,
     pub inventory: InventorySnapshot,
-    pub vehicles: Vec<VehicleSnapshot>,
     pub bodies: Vec<BodySnapshot>,
     pub items: Vec<ItemSnapshot>,
     pub attachments: AttachmentsSnapshot,
     pub mechanisms: MechanismsSnapshot,
     pub progress: ProgressSnapshot,
     pub lighting: LightingSnapshot,
-    /// save_radioscript controls; absent only when the audio export is unavailable.
-    pub radio: Option<RadioSnapshot>,
     pub conditions: ConditionSnapshot,
     pub view: ViewSnapshot,
     /// Runtime item prototype copies.
@@ -190,8 +187,10 @@ pub struct SeatSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SeatOwnerSnapshot {
+    /// A car.
     Vehicle {
-        vehicle: InstanceId,
+        #[serde(with = "super::identity::lossless")]
+        vehicle: crate::world::ObjectKey,
     },
     Item {
         #[serde(with = "super::identity::lossless")]
@@ -221,18 +220,7 @@ pub struct FoodSnapshot {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VehicleSnapshot {
-    pub instance: InstanceId,
-    pub body: BodySnapshot,
-    pub engine: EngineSnapshot,
-    pub ignition: bool,
-    pub gear: usize,
-    pub handbrake: bool,
-    pub trip_m: f64,
-    pub requested_headlights: u8,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Source `enginescript` state of one engine part object.
 pub struct EngineSnapshot {
     pub rpm: f32,
     pub temperature: f32,
@@ -241,7 +229,6 @@ pub struct EngineSnapshot {
     pub last_start_chance_time: f32,
     pub random_start: f32,
     pub supplied_fuel: f32,
-    pub fan_on: bool,
     pub oil_penalty: f32,
     pub fuel_suitability: f32,
     pub heat_penalty: f32,
@@ -272,16 +259,8 @@ pub enum ItemLocationSave {
     PartSlot {
         slot: SourceKey,
     },
-    WheelSlot {
-        slot: SourceKey,
-    },
     Attached {
         owner: InstanceId,
-    },
-    /// Physics lock in a storage volume. `local_pose` is the pose to the owner.
-    Locked {
-        owner: InstanceId,
-        volume: SourceKey,
     },
     GeneratedAttachment {
         #[serde(with = "super::identity::lossless")]
@@ -292,29 +271,12 @@ pub enum ItemLocationSave {
 #[serde(deny_unknown_fields)]
 pub struct AttachmentsSnapshot {
     pub parts: Vec<PartAttachment>,
-    pub wheels: Vec<WheelAttachment>,
-    pub tires: Vec<TireAttachment>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartAttachment {
     pub slot: SourceKey,
     pub part: Option<InstanceId>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WheelAttachment {
-    pub slot: SourceKey,
-    pub rim: Option<InstanceId>,
-    pub rotation: f32,
-    pub rpm: f32,
-    pub previous_rotation: f32,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TireAttachment {
-    pub rim: InstanceId,
-    pub tire: InstanceId,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -340,7 +302,9 @@ pub struct OpeningSnapshot {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgressSnapshot {
-    pub selected_vehicle: InstanceId,
+    /// The last seated car.
+    #[serde(with = "super::identity::lossless")]
+    pub selected_vehicle: Option<crate::world::ObjectKey>,
     pub start_attempts: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -368,7 +332,6 @@ pub struct ControllerSnapshot {
     pub energy: f32,
     pub enabled: bool,
     pub on: bool,
-    pub cabin_mode: Option<usize>,
     pub switch_motion: Option<SwitchMotionSave>,
     pub switch_poses: Vec<SwitchPoseSnapshot>,
 }
@@ -445,7 +408,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20] {
+        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -456,9 +419,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 19 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 22 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":19}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":22}"#),
             Err(SaveError::CorruptData(_))
         ));
     }
@@ -485,9 +448,7 @@ mod g04_ordered_state {
         };
         for owner in [
             SeatOwnerSnapshot::Vehicle {
-                vehicle: InstanceId::Initial {
-                    source: source.clone(),
-                },
+                vehicle: crate::world::ObjectKey::Generated(generated.clone()),
             },
             SeatOwnerSnapshot::Item {
                 item: crate::world::ObjectKey::Generated(generated),
@@ -503,3 +464,4 @@ mod g04_ordered_state {
         }
     }
 }
+

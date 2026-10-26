@@ -206,7 +206,7 @@ def validate_clock_export(manifest: dict, library) -> None:
     source = LibrarySource(LibraryReader(library))
     main = source.read(source.get('level1', 64919))
     survival = source.read(source.get('level1', 73239))
-    if any(v['engine']['globals']['outside_temperature_modifier'] != main['outsideTempM'] for v in manifest['vehicles']):
+    if manifest['world']['vehicle_globals']['outside_temperature_modifier'] != main['outsideTempM']:
         raise ValueError('Outside temperature modifier differs from mainscript.outsideTempM')
     if manifest['sleep']['need_modifier'] != survival['sleepModifier']:
         raise ValueError('Sleep need modifier differs from survivalscript.sleepModifier')

@@ -84,12 +84,24 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 
 ## 4. More cars
 
+Run these checks in the section 4 test pass on Tomasz's PC:
+
+1. Re-export, then rebuild. Old exports and saves do not load (V04 changed wheel slots, world bodies and the save schema).
+2. Run `cargo test --lib item_seat -- --ignored` and `cargo test --lib sled -- --ignored`.
+3. Sit on the WC and on each sled seat. Stand up. Check the view limits and the prompt.
+4. Sled (V04): slide down a slope, steer, reverse, stop. Check the slide sound follows speed and stops in the air. Load the sled with items above its slide mass: it slides without a rider.
+5. Ride a sled away from its building: it must not freeze or vanish. You cannot pick up or store a sled you sit on.
+6. Save and load seated on the sled and on the WC.
+7. Check F3 near a parked sled and while sliding. Compare with the frame rate rule.
+8. Loader (V03 PR 1): New game. The Lada stands at its garage spot. Drive it, use lights, gauges, radio, horn, wheels off and on, cargo in the trunk. Save and load.
+9. Run `cargo test --lib two_ladas -- --ignored` and `cargo test --lib installed_lada -- --ignored`.
+10. Drive the Lada far from the garage and back: it must not vanish. Check F3 at the start and while driving.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V01 | Add a general vehicle loader. [Vehicles](docs/vehicles.md) | L | One export record per car, per-car instruments and lights. Needed by V02-V06. [B01, B19] |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
-| V03 | Add buses. | XL | Diesel rules, three buses, doors, door lamps, bus trailer. [B05, B08-B11] |
-| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle, sled. [B12-B14] |
+| V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
+| V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 | V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
 | V06 | Complete driving input and effects. | M | Gear stick animation, mouse driving, wheel and joystick axes, wheel dust and ground sounds. [B18, B20-B22] |
 

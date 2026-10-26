@@ -1,4 +1,4 @@
-//! Depth and shadow draws share the surface alpha data, without surface lighting textures.
+//! Shadow draws share the surface alpha data, without surface lighting textures.
 use super::{
     gpu_prepare::GpuPreparation,
     materials::{SourceMaterial, SourceUniform, specular::SpecularMaterial},
@@ -56,6 +56,11 @@ struct Material {
 pub struct CasterMaterials {
     revision: u64,
     materials: BTreeMap<AssetId<SourceMaterial>, Material>,
+}
+impl CasterMaterials {
+    pub fn group(&self, id: AssetId<SourceMaterial>) -> Option<&BindGroup> {
+        self.materials.get(&id).map(|material| &material.group)
+    }
 }
 pub fn layout() -> BindGroupLayoutDescriptor {
     BindGroupLayoutDescriptor::new(

@@ -123,12 +123,14 @@ mod spawn_starts;
 mod structure_helpers;
 
 mod contents;
+pub(crate) use contents::START_CAR;
 
 mod content_containers;
 
 mod content_parts;
 
 mod content_slots;
+pub(crate) mod content_vehicles;
 mod content_wheels;
 
 mod content_mechanisms;

@@ -12,16 +12,6 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 storage.check_policy(*args)
 
-    def test_volume_rejects_changed_owner_type_or_slots(self):
-        volume = {'source': {}, 'storage_type': 3, 'usables': [], 'only_manual': False,
-                  'no_physics_lock': False, 'active': True}
-        storage.check_volume(volume, 73405, (77859,), (3, (77859,)))
-        for args in ((volume, 1, (77859,), (3, (77859,))), (volume, 73405, (), (3, (77859,))),
-                     (dict(volume, storage_type=5), 73405, (77859,), (3, (77859,))),
-                     (dict(volume, active=False), 73405, (77859,), (3, (77859,)))):
-            with self.assertRaises(ValueError):
-                storage.check_volume(*args)
-
     def test_box_shape_converts_center_and_halves_size(self):
         shape = storage.box_shape({'m_Center': dict(x=1., y=2., z=3.), 'm_Size': dict(x=2., y=4., z=6.)})
         self.assertEqual(shape, {'center': [1., 2., -3.], 'half_extents': [1., 2., 3.]})
@@ -59,7 +49,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(homes, [(home, 1)])
         storage.check_prototype_volume('v', fields, True, homes, [usable], {('f', 7, 'f', 9)})
         for args in (('v', fields, True, [], [], set()), ('v', fields, False, homes, [], set()),
-                     ('v', dict(fields, slot=[1]), True, homes, [], set()), ('v', fields, True, homes, [usable], set())):
+                     ('v', dict(fields, noPhysicsLock=1), True, homes, [], set()), ('v', fields, True, homes, [usable], set())):
             with self.assertRaises(ValueError):
                 storage.check_prototype_volume(*args)
 

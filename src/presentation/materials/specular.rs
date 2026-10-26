@@ -24,6 +24,8 @@ pub struct SpecularMaterial {
     array_count: u8,
     receiver_mask: u32,
     reflected: bool,
+    /// Static rows draw this material from the GPU prop buffers.
+    gpu_props: bool,
     uploaded:
         std::sync::Arc<std::sync::Mutex<std::collections::HashSet<bevy::asset::AssetId<Image>>>>,
 }
@@ -35,9 +37,17 @@ impl SpecularMaterial {
         )
     }
 
-    pub fn set_color(&mut self, color: Color) {
+    /// Only a shared material can draw GPU prop rows.
+    pub fn use_gpu_props(&mut self) {
+        self.gpu_props = true;
+    }
+    /// Linear color.
+    pub fn color(&self) -> Vec4 {
+        self.uniform.color
+    }
+    pub fn set_color(&mut self, color: Color, linear: Vec4) {
         self.base.base_color = color;
-        self.uniform.color = Vec4::from_array(color.to_linear().to_f32_array());
+        self.uniform.color = linear;
     }
     pub fn from_source(
         record: &WorldSourceMaterial,
@@ -153,6 +163,7 @@ impl SpecularMaterial {
             array_count,
             receiver_mask: mask,
             reflected,
+            gpu_props: false,
             uploaded: textures.upload_receipts(),
         })
     }
@@ -213,26 +224,40 @@ impl Material for SpecularMaterial {
         if let Some(depth) = &mut descriptor.depth_stencil {
             depth.format = crate::presentation::render_targets::DEPTH_FORMAT;
         }
+        let (reflected, gpu_props) = key.bind_group_data;
         descriptor.vertex.shader_defs.push(ShaderDefVal::Bool(
             "SOURCE_OBJECT_REFLECTED".into(),
-            key.bind_group_data,
+            reflected,
         ));
-        if key.bind_group_data {
+        if reflected {
             descriptor.primitive.front_face = FrontFace::Cw;
+        }
+        if gpu_props {
+            descriptor.layout[2] = crate::presentation::prop_draws::draw_layout();
+            descriptor
+                .vertex
+                .shader_defs
+                .push(ShaderDefVal::Bool("SOURCE_GPU_PROPS".into(), true));
         }
         if let Some(fragment) = &mut descriptor.fragment {
             fragment.shader_defs.extend([
                 ShaderDefVal::Bool("SOURCE_SURFACE".into(), true),
                 ShaderDefVal::Bool("SOURCE_STANDARD".into(), true),
-                ShaderDefVal::Bool("SOURCE_OBJECT_REFLECTED".into(), key.bind_group_data),
+                ShaderDefVal::Bool("SOURCE_OBJECT_REFLECTED".into(), reflected),
                 ShaderDefVal::Bool("WORLD_TEXTURE_ARRAYS".into(), true),
             ]);
+            if gpu_props {
+                fragment
+                    .shader_defs
+                    .push(ShaderDefVal::Bool("SOURCE_GPU_PROPS".into(), true));
+            }
         }
         Ok(())
     }
 }
 impl AsBindGroup for SpecularMaterial {
-    type Data = bool;
+    /// Reflected transform and GPU prop rows.
+    type Data = (bool, bool);
     type Param = (
         <SourceReceiver as AsBindGroup>::Param,
         SRes<RenderAssets<GpuImage>>,
@@ -241,8 +266,8 @@ impl AsBindGroup for SpecularMaterial {
     fn label() -> &'static str {
         "source specular surface"
     }
-    fn bind_group_data(&self) -> bool {
-        self.reflected
+    fn bind_group_data(&self) -> (bool, bool) {
+        (self.reflected, self.gpu_props)
     }
     fn as_bind_group(
         &self,

@@ -2,10 +2,10 @@ use super::StartingArea;
 use crate::interaction::{items::ItemStore, wheels::WheelAssemblies};
 use crate::reference::{BodyId, ReferenceManifest};
 use crate::save::{
-    BodyIdentity, BodySnapshot, IdentityMap, ItemLocationSave, ItemSnapshot, PersistentWorld,
-    SaveError, SaveSnapshot, SourceKey,
+    BodyIdentity, BodySnapshot, IdentityMap, ItemSnapshot, PersistentWorld, SaveError,
+    SaveSnapshot,
 };
-use crate::vehicle::{PhysicsWorld, to_rapier};
+use crate::vehicle::PhysicsWorld;
 use crate::world::{ChangeRecords, WorldStream};
 use rapier3d::prelude::RigidBodyHandle;
 use std::collections::HashMap;
@@ -29,7 +29,6 @@ impl RestoreFinalizer<'_> {
             .sync(reference, self.area, self.wheels, self.stream, self.physics)?;
         self.area.interaction.sync_mechanisms(self.physics);
         self.area.sync_attachments(self.physics, false);
-        self.area.sync_compound(self.physics);
         self.area
             .interaction
             .sync_parts(&mut self.area.items, self.physics)?;
@@ -42,14 +41,10 @@ impl RestoreFinalizer<'_> {
             .sync_parts(&mut self.area.items, self.physics)?;
         self.area.sync_portable_mass(self.physics);
         self.wheels.sync(&mut self.area.items, self.physics)?;
-        lock_saved_items(reference, ids, &saved.items, self.area, self.physics)?;
         self.area.items.sync_poses(self.physics);
         recompute_dynamic_mass(self.physics);
         restore_body_records(
-            saved
-                .bodies
-                .iter()
-                .chain(saved.vehicles.iter().map(|vehicle| &vehicle.body)),
+            saved.bodies.iter(),
             BodyLookup::Required,
             ids,
             &self.area.bodies,
@@ -102,55 +97,6 @@ impl RestoreFinalizer<'_> {
         self.physics.refresh_queries();
         Ok(())
     }
-}
-
-/// Locks saved items into their volumes at once. Owners lock before the items that ride on them.
-fn lock_saved_items(
-    reference: &ReferenceManifest,
-    ids: &IdentityMap,
-    saved: &[ItemSnapshot],
-    area: &mut StartingArea,
-    physics: &mut PhysicsWorld,
-) -> Result<(), SaveError> {
-    // Validation rejects owner cycles. The bound only stops a bad chain.
-    fn depth<'a>(saved: &'a [ItemSnapshot], mut item: &'a ItemSnapshot) -> usize {
-        let mut depth = 0;
-        while let ItemLocationSave::Locked { owner, .. } | ItemLocationSave::Attached { owner } =
-            &item.location
-        {
-            depth += 1;
-            match saved.iter().find(|i| i.instance == *owner) {
-                Some(next) if depth <= saved.len() => item = next,
-                _ => break,
-            }
-        }
-        depth
-    }
-    let mut locked: Vec<_> = saved
-        .iter()
-        .filter(|item| matches!(item.location, ItemLocationSave::Locked { .. }))
-        .map(|item| (depth(saved, item), item))
-        .collect();
-    locked.sort_by_key(|(depth, _)| *depth);
-    for (_, record) in locked {
-        let ItemLocationSave::Locked { volume, .. } = &record.location else {
-            unreachable!()
-        };
-        let volume = reference
-            .storage
-            .volumes
-            .iter()
-            .position(|v| SourceKey::from(&v.source) == *volume)
-            .ok_or_else(|| SaveError::InvalidLinks("Unknown storage volume".into()))?;
-        area.interaction.storage.lock_saved(
-            ids.item(&record.instance)?,
-            volume as u16,
-            to_rapier(crate::save::local_pose(&record.local_pose)),
-            &mut area.items,
-            physics,
-        )?;
-    }
-    Ok(())
 }
 
 enum BodyLookup {

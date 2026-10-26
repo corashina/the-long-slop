@@ -1,7 +1,7 @@
 use the_long_slop::{
     particles::ParticleState,
     reference::ReferenceManifest,
-    vehicle::{PhysicsWorld, VehiclePose},
+    vehicle::PhysicsWorld,
 };
 
 #[test]
@@ -48,11 +48,7 @@ fn cleaning_particles_keep_source_force_acceleration() {
         curve.mode = 0;
         curve.scalar = value;
     }
-    let pose = VehiclePose {
-        position: [0.; 3],
-        rotation: [0., 0., 0., 1.],
-    };
-    let physics = PhysicsWorld::new(&reference, &vec![pose; reference.vehicles.len()]).unwrap();
+    let physics = PhysicsWorld::new(&reference);
     let mut state = ParticleState::new(&particle, 1);
     state.advance(0.1, [0.; 3], 1., &physics);
     assert_eq!(state.particles().len(), 1);

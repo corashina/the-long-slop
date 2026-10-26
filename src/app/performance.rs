@@ -2,16 +2,18 @@ use super::Drive;
 use crate::browser::{game_performance_counters, game_performance_frame};
 use bevy::prelude::*;
 
-pub(super) fn publish(drive: Res<Drive>) {
+pub(super) fn publish(drive: Res<Drive>, archetypes: &bevy::ecs::archetype::Archetypes) {
     if !game_performance_frame(drive.physics_ms, drive.world_ms) {
         return;
     }
     let runtime = &drive.runtime;
     let counters = runtime.stream.performance_counters();
-    let snapshot = runtime.physics.snapshot(runtime.vehicle);
+    let contacts = runtime.vehicle.as_ref().map_or(0, |key| {
+        runtime.physics.wheel_contacts(key).filter(|v| *v).count() as u32
+    });
     game_performance_counters(
         drive.frame_steps,
-        snapshot.wheels_contact.into_iter().filter(|v| *v).count() as u32,
+        contacts,
         runtime.physics.rapier().bodies.len() as u32,
         runtime.physics.collider_count() as u32,
         counters.roads as u32,
@@ -24,5 +26,6 @@ pub(super) fn publish(drive: Res<Drive>) {
         runtime.weather.storms().len() as u32,
         runtime.weather.influence().strength,
         runtime.weather.particle_count() as u32,
+        archetypes.iter().map(|a| a.len()).sum(),
     );
 }

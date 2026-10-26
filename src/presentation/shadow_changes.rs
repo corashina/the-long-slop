@@ -47,6 +47,32 @@ impl ShadowMaterials<'_> {
             || self.grass.is_changed()
             || self.impostors.is_changed()
     }
+    /// Caster state of a GPU prop row material, as `has_caster` gives it for an entity.
+    pub fn row_caster(&self, id: bevy::asset::UntypedAssetId) -> Result<bool, &'static str> {
+        use std::any::TypeId;
+        let available = match id.type_id() {
+            t if t == TypeId::of::<SourceMaterial>() => {
+                return self
+                    .source
+                    .get(id.typed::<SourceMaterial>())
+                    .map(|material| material.extension.has_caster())
+                    .ok_or("Missing source shadow material");
+            }
+            t if t == TypeId::of::<SpecularMaterial>() => (
+                self.specular.contains(id.typed::<SpecularMaterial>()),
+                "Missing source specular material",
+            ),
+            t if t == TypeId::of::<ImpostorMaterial>() => (
+                self.impostors.contains(id.typed::<ImpostorMaterial>()),
+                "Missing source impostor material",
+            ),
+            _ => return Err("Unsupported GPU prop material"),
+        };
+        match available {
+            (true, _) => Ok(true),
+            (false, error) => Err(error),
+        }
+    }
     pub fn has_caster(&self, mesh: &ShadowMeshItem<'_, '_>) -> Result<Option<bool>, &'static str> {
         if let Some(handle) = mesh.material {
             return self

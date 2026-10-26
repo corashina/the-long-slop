@@ -12,6 +12,9 @@ const COLOR_INTERVAL: f32 = 2.;
 pub struct ExhaustInput<'a> {
     pub running: bool,
     pub rpm: f32,
+    /// Mounted engine `maxRpm` and `defSmokeRate`.
+    pub max_rpm: f32,
+    pub smoke_rate: f32,
     pub tank: Option<&'a FluidContainer>,
     /// Absolute position of the car root node.
     pub root_absolute: [f64; 3],
@@ -25,21 +28,17 @@ pub struct ExhaustInput<'a> {
 #[derive(Debug)]
 pub struct ExhaustState {
     systems: Vec<ParticleState>,
-    max_rpm: f32,
-    smoke_rate: f32,
     next_color: f32,
     elapsed: f32,
 }
 impl ExhaustState {
-    pub fn new(systems: &[ParticleReference], max_rpm: f32, smoke_rate: f32, seed: u64) -> Self {
+    pub fn new(systems: &[ParticleReference], seed: u64) -> Self {
         Self {
             systems: systems
                 .iter()
                 .enumerate()
                 .map(|(i, r)| ParticleState::new(r, seed.wrapping_add(i as u64)))
                 .collect(),
-            max_rpm,
-            smoke_rate,
             next_color: 0.,
             elapsed: 0.,
         }
@@ -56,7 +55,7 @@ impl ExhaustState {
             self.next_color = self.elapsed + COLOR_INTERVAL;
             input.tank.map_or([0.; 4], |tank| burn_color(tank, colors))
         });
-        let strength = smoke_rate(input.running, input.rpm, self.max_rpm, self.smoke_rate);
+        let strength = smoke_rate(input.running, input.rpm, input.max_rpm, input.smoke_rate);
         for system in &mut self.systems {
             if color.is_some() {
                 system.start_color = color;
@@ -257,6 +256,8 @@ pub(crate) mod tests {
         ExhaustInput {
             running,
             rpm: 6600.,
+            max_rpm: 6600.,
+            smoke_rate: 175.,
             tank: Some(tank),
             root_absolute: [10., 1., -3.],
             rotation: Rotation::IDENTITY,
@@ -269,7 +270,7 @@ pub(crate) mod tests {
         let physics = PhysicsWorld::empty(0, 0);
         let fuel = tank(&[(0, 10.)]);
         for (capacity, expected) in [(2000, 175), (100, 100)] {
-            let mut exhaust = ExhaustState::new(&[smoke(capacity, 15.)], 6600., 175., 1);
+            let mut exhaust = ExhaustState::new(&[smoke(capacity, 15.)], 1);
             for _ in 0..60 {
                 exhaust.advance(1. / 60., input(true, &fuel), &COLORS, &physics);
             }
@@ -282,7 +283,7 @@ pub(crate) mod tests {
     fn stopped_engine_emits_none_and_smoke_lives_out() {
         let physics = PhysicsWorld::empty(0, 0);
         let fuel = tank(&[(0, 10.)]);
-        let mut exhaust = ExhaustState::new(&[smoke(2000, 2.)], 6600., 175., 1);
+        let mut exhaust = ExhaustState::new(&[smoke(2000, 2.)], 1);
         for _ in 0..4 {
             exhaust.advance(0.25, input(true, &fuel), &COLORS, &physics);
         }
@@ -307,7 +308,7 @@ pub(crate) mod tests {
         let physics = PhysicsWorld::empty(0, 0);
         let red = tank(&[(0, 10.)]);
         let blue = tank(&[(2, 10.)]);
-        let mut exhaust = ExhaustState::new(&[smoke(2000, 15.)], 6600., 175., 1);
+        let mut exhaust = ExhaustState::new(&[smoke(2000, 15.)], 1);
         exhaust.advance(0.25, input(false, &red), &COLORS, &physics);
         assert_eq!(
             exhaust.systems[0].start_color, None,

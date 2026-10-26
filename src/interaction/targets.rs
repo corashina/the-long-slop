@@ -1,9 +1,7 @@
 //! Collider identity and source action owners.
 use super::items::{ItemLocation, ItemStore};
 use super::{AimTarget, InteractionState, SLOT_SENSOR_FLAG, SlotTarget};
-use crate::reference::{
-    ActionBinding, ColliderId, ItemId, ItemKind, LightControlId, NodeId, WheelSlotId,
-};
+use crate::reference::{ActionBinding, ColliderId, ItemId, ItemKind, LightControlId, NodeId};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use rapier3d::math::Vector;
 use rapier3d::prelude::{ColliderHandle, QueryFilter, Ray};
@@ -196,9 +194,6 @@ impl InteractionState {
                     {
                         self.carry.allows_pickup(target.item, false, true)
                     }
-                    ItemLocation::Attached(_) if self.attachments.target(target.item).is_some() => {
-                        self.carry.allows_pickup(target.item, false, true)
-                    }
                     ItemLocation::Locked { .. } => {
                         self.carry.allows_pickup(target.item, false, false)
                             && self.storage.locked_body(target.item).is_some()
@@ -266,9 +261,9 @@ impl InteractionState {
                 SlotTarget::Wheel(slot) => {
                     if !self.is_wheel(held)
                         || !self
-                            .slot_fits
+                            .wheel_slots
                             .get(&slot)
-                            .is_some_and(|fits| fits.contains(&held))
+                            .is_some_and(|rule| rule.fits.contains(&held))
                     {
                         Some(InteractionBlock::Incompatible)
                     } else if self.parts.covered(held) {
@@ -296,7 +291,7 @@ impl InteractionState {
                         None
                     }
                 }
-                SlotTarget::Part(_) | SlotTarget::Attachment(_) => None,
+                SlotTarget::Part(_) => None,
             }
         })
     }
@@ -394,15 +389,10 @@ impl InteractionState {
                             if let Some(rim) = self.tire_slot_owner(handle, physics) {
                                 return self.attached_tire(rim, items);
                             }
-                            self.attachments
-                                .collider_target(binding.collider)
-                                .and_then(|target| self.attachments.removal_member(target))
-                                .or_else(|| {
-                                    self.parts
-                                        .slot_target(binding.collider)
-                                        .map(|s| self.parts.slot_item(s))
-                                        .unwrap_or(binding.removal_owner)
-                                })
+                            self.parts
+                                .slot_target(binding.collider)
+                                .map(|s| self.parts.slot_item(s))
+                                .unwrap_or(binding.removal_owner)
                         } else {
                             binding.pickup_owner
                         }
@@ -440,7 +430,6 @@ impl InteractionState {
                                     }
                                     _ => false,
                                 }))
-                            || self.attachments.target(*id).is_some()
                             || (self.parts.contains(*id)
                                 && matches!(
                                     items.get(*id).map(|i| i.location),
@@ -456,13 +445,6 @@ impl InteractionState {
                         && self.parts.slot_target(binding.unwrap().collider).is_none()
                         && collider.user_data & SLOT_SENSOR_FLAG == 0
                 }),
-                QueryAction::Install
-                    if self.held().is_some_and(|id| self.attachments.contains(id)) =>
-                {
-                    self.attachments
-                        .collider_target(ColliderId((collider.user_data >> 64) as u32))
-                        .and_then(|id| self.attachments.target_owner(id))
-                }
                 QueryAction::Install if collider.user_data & SLOT_SENSOR_FLAG != 0 => {
                     (collider.user_data as u32).checked_sub(1).map(ItemId)
                 }
@@ -511,25 +493,15 @@ impl InteractionState {
             item,
             distance: hit.time_of_impact,
             point: ray.point_at(hit.time_of_impact).to_array(),
-            slot: self
-                .attachments
-                .collider_target(ColliderId((collider.user_data >> 64) as u32))
-                .filter(|_| {
-                    matches!(action, QueryAction::Install)
-                        && self.held().is_some_and(|id| self.attachments.contains(id))
-                })
-                .map(SlotTarget::Attachment)
+            slot: (collider.user_data & SLOT_SENSOR_FLAG != 0)
+                .then_some(SlotTarget::Wheel(super::wheels::slot_id(
+                    collider.user_data,
+                )))
+                .or_else(|| self.tire_slot_owner(handle, physics).map(SlotTarget::Tire))
                 .or_else(|| {
-                    (collider.user_data & SLOT_SENSOR_FLAG != 0)
-                        .then_some(SlotTarget::Wheel(WheelSlotId(
-                            (collider.user_data >> 96) as u8,
-                        )))
-                        .or_else(|| self.tire_slot_owner(handle, physics).map(SlotTarget::Tire))
-                        .or_else(|| {
-                            self.parts
-                                .slot_target(ColliderId((collider.user_data >> 64) as u32))
-                                .map(SlotTarget::Part)
-                        })
+                    self.parts
+                        .slot_target(ColliderId((collider.user_data >> 64) as u32))
+                        .map(SlotTarget::Part)
                 }),
         })
     }

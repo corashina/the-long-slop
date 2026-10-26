@@ -638,15 +638,22 @@ impl AcquisitionReference {
                 "Box content count source",
             )?;
         }
-        let startup_packs = STARTUP_PACKS.iter().filter(|expected| {
-            m.vehicles
+        // Source DestroyOthers keeps the pack of each start car group with a car placement.
+        let start_car = |group: &str| {
+            m.world
+                .startup
                 .iter()
-                .any(|car| source_is(&car.source, "level1", expected[5]))
+                .any(|s| s.prototype.is_some() && s.group == group)
+        };
+        let startup_packs = STARTUP_PACKS.iter().filter(|expected| {
+            start_car(if expected[0] == 14079 {
+                "StartCar01"
+            } else {
+                "StartCar02"
+            })
         });
         require(
-            self.packs.len() == 1
-                && self.startup_packs.len() == m.vehicles.len()
-                && self.startup_packs.len() == startup_packs.clone().count(),
+            self.packs.len() == 1 && self.startup_packs.len() == startup_packs.clone().count(),
             "selected packs",
         )?;
         let pack = &self.packs[0];
@@ -673,8 +680,7 @@ impl AcquisitionReference {
                 ]
                 .iter()
                 .zip(expected)
-                .all(|(s, id)| source_is(s, "level1", *id))
-                    && m.vehicles.iter().any(|car| car.source == v.vehicle),
+                .all(|(s, id)| source_is(s, "level1", *id)),
                 "selected startup pack sources",
             )?;
             validate_ammo(&v.ammo, "level1", expected[7])?;
@@ -863,6 +869,7 @@ const CONTENT_COUNTS: &[(i64, i64, u32)] = &[
     (63605, 134243, 3),
     (63259, 141432, 0),
     (54495, 134663, 0),
+    (51557, 137709, 0),
 ];
 const STARTUP_PACKS: &[[i64; 8]] = &[
     [14079, 72692, 50432, 75069, 298, 69517, 70704, 70998],

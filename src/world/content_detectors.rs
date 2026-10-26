@@ -381,6 +381,29 @@ impl WorldStream {
             }
         }
     }
+    /// Marks the active content of placement `parent` for presentation. `hint` caches its slot.
+    pub(crate) fn mark_presentation(&mut self, parent: &GeneratedId, hint: &mut usize) {
+        if self
+            .contents
+            .active
+            .get(*hint)
+            .is_none_or(|c| &c.content.placement.id != parent)
+        {
+            let Some(slot) = self
+                .contents
+                .active
+                .iter()
+                .position(|c| &c.content.placement.id == parent)
+            else {
+                return;
+            };
+            *hint = slot;
+        }
+        let slot = ContentSlot::Active(*hint);
+        if !self.presentation_changes.contains(&slot) {
+            self.presentation_changes.push(slot);
+        }
+    }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn detector(&self, parent: &GeneratedId) -> Option<&DetectorBinding> {
         self.detector_bindings.iter().find(|b| &b.parent == parent)

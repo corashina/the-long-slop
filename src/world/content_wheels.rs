@@ -164,7 +164,7 @@ pub(super) fn bind(
                 "localRotationAfterMount",
             )?),
         };
-        interaction.register_generated_wheel(&recipe, rim.is_some(), wheels.rules(), reference);
+        interaction.register_generated_wheel(&recipe, rim.is_some(), wheels.rules());
         wheels.register_generated(
             recipe,
             rim.is_some(),
@@ -172,23 +172,39 @@ pub(super) fn bind(
             &shapes,
             items,
             physics,
-            reference,
         )?;
     }
     // The checked source rim slot identifies the serialized tire. Reuse assembly relocation.
-    if let Some(rim) = rules.component(&reference.world, &prototype.source, "wheelscript")? {
-        let slot = rules.get(&reference.world, link(rim.fields, "gumi")?)?;
-        if let Some(part) = optional(slot.fields, "part")? {
-            if let Some(binding) = content.bindings.iter().find(|b| &b.source == part) {
-                wheels.assemble(owner, binding.item, items, physics)?;
-                let binding = content
-                    .bindings
-                    .iter_mut()
-                    .find(|b| &b.source == part)
-                    .unwrap();
-                binding.baseline = items.generated_snapshot(binding.item, None).unwrap();
-            }
+    // Each rim of the prototype takes its embedded tire: a loose rim or the rims of a car.
+    for (node_index, node) in prototype.nodes.iter().enumerate() {
+        if !super::spawn_appearance::node_active(prototype, node_index, &content.content.appearance)
+        {
+            continue;
         }
+        let Some(rim) = rules.component(&reference.world, &node.source, "wheelscript")? else {
+            continue;
+        };
+        let rim_item = if node_index == 0 {
+            owner
+        } else {
+            let part = rules
+                .component(&reference.world, &node.source, "partscript")?
+                .ok_or_else(|| ReferenceError("Generated wheel has no source part".into()))?;
+            match content.bindings.iter().find(|b| b.source == *part.source) {
+                Some(binding) => binding.item,
+                None => continue,
+            }
+        };
+        let slot = rules.get(&reference.world, link(rim.fields, "gumi")?)?;
+        let Some(part) = optional(slot.fields, "part")? else {
+            continue;
+        };
+        let Some(index) = content.bindings.iter().position(|b| &b.source == part) else {
+            continue;
+        };
+        let tire = content.bindings[index].item;
+        wheels.assemble(rim_item, tire, items, physics)?;
+        content.bindings[index].baseline = items.generated_snapshot(tire, None).unwrap();
     }
     Ok(())
 }

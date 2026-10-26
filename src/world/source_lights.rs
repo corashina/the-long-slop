@@ -20,6 +20,8 @@ pub struct WorldLight {
     pub range: f32,
     pub enabled: bool,
     pub intensity: f32,
+    /// Prototype node of a structure light. None: a road light.
+    pub node: Option<u32>,
 }
 impl WorldLight {
     /// Structure lights append their component identity; road lights share the pole identity.
@@ -391,6 +393,7 @@ impl SourceRoadLight {
             scale: recipe.reference.road_pose.scale,
             enabled: true,
             intensity: recipe.light.startup_intensity,
+            node: None,
         })
     }
 }

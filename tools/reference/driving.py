@@ -85,8 +85,9 @@ def lever_constants(text):
     return values
 
 
-def recover_lever(source, car_reader, car, root, node_ids, constants):
-    """carscript.Transmission and gear Path/Pos, posed in the lever parent space.
+def recover_lever(source, car_reader, car, root, node_ids):
+    """carscript.Transmission and gear Path/Pos, posed in the lever parent space, or None
+    when the car has no lever. `node_ids` maps source Transform keys to prototype node indices.
     The source writes world poses. The runtime writes the node local pose."""
     from .collision import world_pose
     from .particles import relative_pose
@@ -104,12 +105,12 @@ def recover_lever(source, car_reader, car, root, node_ids, constants):
     if max(scale)-min(scale) > 1e-5 * max(abs(v) for v in scale):raise ValueError(f'Lever parent scale is not uniform: {source_id(lever)}')
     def pose(pointer):
         reader = source.resolve(car_reader, pointer)
-        if reader is None or not inside(reader):raise ValueError(f'Lever gear pose is outside the car: {source_id(car_reader)}')
+        if reader is None:raise ValueError(f'Missing lever gear pose: {source_id(car_reader)}')
+        if not inside(reader):raise ValueError(f'Lever gear pose is outside the car: {source_id(car_reader)}')
         value = relative_pose(source, reader, parent)
         value['translation'] = [v/scale[0] for v in value['translation']]
         return value
-    return {'node':node_ids[key(lever)], 'gears':[{'path':pose(g['Path']), 'pos':pose(g['Pos'])} for g in car['gears']],
-        'seconds':constants['seconds'], 'stages':[constants['stage1'], constants['stage2']]}
+    return {'node':node_ids[key(lever)], 'gears':[{'path':pose(g['Path']), 'pos':pose(g['Pos'])} for g in car['gears']]}
 
 
 MOUSE_DRIVE_LINES = ['currentMouseSteer = Mathf.Clamp(currentMouseSteer + Input.GetAxis("Mouse X") * 0.0125f * 0.25f * settingsscript.s.S.FMouseDriveSensX, -1f, 1f);',
@@ -141,9 +142,43 @@ def recover_bindings(text, defaults):
     return bindings, evidence
 
 
-def recover_driving(source, car_readers, wheel_readers, node_ids):
-    """Resolve selected cars and wheel owners; fail on missing records or links.
-    `node_ids` maps source Transform keys to manifest node ids."""
+def car_driving(car):
+    """Per-car startup gear and transmission flags of one carscript."""
+    initial=car['gear']+1
+    if not 0<=initial<len(car['gears']):raise ValueError('Driving startup gear outside source gear list')
+    return {'initial_gear':initial,'force_automatic':bool(car['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False}
+
+
+def road_wheels(source, reader, car):
+    """WheelCollider identities that carscript drives, steers or brakes."""
+    return {key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in car[field]}
+
+
+def hub_record(hubs, car):
+    """mainscript.kerekagyProperties[carscript.kerekagyType]."""
+    index=car['kerekagyType']
+    if not 0<=index<len(hubs):raise ValueError('Driving hub selection outside source properties')
+    hub=hubs[index]
+    return {'radius_m':hub['radius'],'mass_kg':hub['mass'],'forward_stiffness':hub['slip1'],'sideways_stiffness':hub['slip2']}
+
+
+def wheel_graphics(source, nodes, road):
+    """Active wheelgraphicsscript per road wheel identity, from hierarchy records."""
+    graphics={}
+    for node in nodes:
+        if not node['active']:continue
+        for component in node['components']:
+            if component.type.name!='MonoBehaviour' or source.class_name(component)!='wheelgraphicsscript':continue
+            raw=source.read(component);wheel=source.resolve(component,raw['W'])
+            if wheel is None:raise ValueError('Unresolved driving wheel collider')
+            if key(wheel) in road:
+                if key(wheel) in graphics:raise ValueError('Duplicate driving wheel graphics owner')
+                graphics[key(wheel)]=(component,raw)
+    return graphics
+
+
+def recover_driving(source):
+    """Resolve the shared driving controls; fail on missing records or links."""
     bodies, methods, minimum, text = checked_methods(source)
     constants = lever_constants(text)
     drive = bodies['public void DriveStuff()']
@@ -179,54 +214,12 @@ def recover_driving(source, car_readers, wheel_readers, node_ids):
     mouse_x,mouse_x_slider=slider_range(source,settings_reader,settings,8)
     mouse_y,mouse_y_slider=slider_range(source,settings_reader,settings,9)
     bindings,binding_evidence=recover_bindings(text,bodies['private void InitDefault()'])
-    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0], 'force_manual':toggles[2]['default'],
+    global_record={'source':source_id(settings_reader),'pedal_rate':rates[0],'keyboard_steering_rate':steering_rate, 'force_manual':toggles[2]['default'],
         'min_motor_torque_nm':minimum,'default_assists':{'automatic_clutch':toggles[0]['default'],
             'automatic_gears':toggles[1]['default'] and toggles[0]['default']},'bindings':bindings,
-        'mouse_drive':{'sensitivity_x':mouse_x,'sensitivity_y':mouse_y}}
-    main_reader=source.get('level1',64919)
-    if source.class_name(main_reader)!='mainscript':raise ValueError('Driving hub owner differs')
-    hubs=source.read(main_reader)['kerekagyProperties']
-    cars={};vehicles=[];owners={};graphics={}
-    for reader in car_readers:
-        if source.class_name(reader)!='carscript':raise ValueError('Driving car owner differs')
-        value=source.read(reader);identity=key(reader);cars[identity]=(reader,value)
-        initial=value['gear']+1
-        if not 0<=initial<len(value['gears']):raise ValueError('Driving startup gear outside source gear list')
-        transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
-        vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':{'initial_gear':initial,
-            'force_automatic':bool(value['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False},
-            'lever':recover_lever(source,reader,value,transform,node_ids,constants),
-            # inputscript.DriveStuff uses the multiplier only when it is not zero.
-            'key_steer_multiplier':value['keySteerSensMultiplier']})
-        road={key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in value[field]}
-        if len(road)!=4 or any(k in owners for k in road):raise ValueError('Driving car must own four wheels')
-        owners.update({k:identity for k in road})
-        for node in source.hierarchy(transform,activate_root=True):
-            if not node['active']:continue
-            for component in node['components']:
-                if component.type.name!='MonoBehaviour' or source.class_name(component)!='wheelgraphicsscript':continue
-                raw=source.read(component);wheel=source.resolve(component,raw['W'])
-                if wheel is None:raise ValueError('Unresolved driving wheel collider')
-                if key(wheel) in road:
-                    if key(wheel) in graphics:raise ValueError('Duplicate driving wheel graphics owner')
-                    graphics[key(wheel)]=(component,raw)
-    if {key(r) for r in wheel_readers}!=set(owners) or len(wheel_readers)!=len(owners):
-        raise ValueError('Driving wheel selection differs from car roles')
-    slots=[]
-    for reader in wheel_readers:
-        identity=key(reader);car_reader,car=cars[owners[identity]]
-        graphic,raw=graphics[identity]
-        linked_car=source.resolve(graphic,raw['car']);slot=source.resolve(graphic,raw['slot'])
-        if linked_car is None or key(linked_car)!=key(car_reader) or slot is None:
-            raise ValueError('Unresolved driving wheel hub link')
-        hub_index=car['kerekagyType']
-        if not 0<=hub_index<len(hubs):raise ValueError('Driving hub selection outside source properties')
-        hub=hubs[hub_index]
-        slots.append({'source':source_id(slot),'collider_source':source_id(reader),'graphics_source':source_id(graphic),
-            'vehicle_source':source_id(car_reader),'hub_source':source_id(main_reader),'hub_index':hub_index,
-            'sideways_stiffness_modifier':raw['sideStiffnessModifier'],
-            'hub':{'radius_m':hub['radius'],'mass_kg':hub['mass'],'forward_stiffness':hub['slip1'],'sideways_stiffness':hub['slip2']}})
-    return {'global':global_record,'vehicles':vehicles,'slots':slots,'keyboard_steering_rate':steering_rate,
+        'mouse_drive':{'sensitivity_x':mouse_x,'sensitivity_y':mouse_y},
+        'lever':{'seconds':constants['seconds'],'stages':[constants['stage1'],constants['stage2']]}}
+    return {'global':global_record,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,
             'steering_source':source_id(slider),'mouse_drive_sources':[source_id(mouse_x_slider),source_id(mouse_y_slider)],'serialized_assists':{name:bool(settings['S'][name]) for name in ('BAutoClutch','BAutoShift','BForceManual')},

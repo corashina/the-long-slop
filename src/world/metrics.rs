@@ -357,7 +357,10 @@ pub(crate) mod browser {
         }
         let runtime = &drive.runtime;
         let frame = runtime.stream.frame();
-        let car = runtime.physics.snapshot(runtime.vehicle);
+        let Some(car_key) = runtime.vehicle.as_ref() else {
+            return;
+        };
+        let car = runtime.physics.snapshot(car_key);
         let snapshot = Snapshot {
             session: frame.request.session,
             revision: frame.request.revision,
@@ -365,11 +368,11 @@ pub(crate) mod browser {
             startup: serde_json::json!({
                 "fixed": fixed.startup_audit(),
                 "simulation_seconds": runtime.simulation_seconds,
-                "vehicles": (0..runtime.vehicles.len()).map(|index| serde_json::json!({
-                    "index": index,
-                    "active": runtime.physics.body_active(runtime.physics.chassis_handle(index)),
+                "vehicles": runtime.vehicles.keys().map(|key| serde_json::json!({
+                    "key": key,
+                    "active": runtime.physics.body_active(runtime.physics.chassis_handle(key)),
                     "absolute_position": runtime.persistent_world.absolute_vehicle_position(
-                        &runtime.physics, &frame.origin, index),
+                        &runtime.physics, &frame.origin, key),
                 })).collect::<Vec<_>>(),
                 "retained_source_bodies": runtime.area.bodies.iter().filter_map(|(id, handle)| {
                     let record = reference.0.bodies.iter().find(|body| body.id == *id)?;
@@ -386,7 +389,7 @@ pub(crate) mod browser {
                 "vehicle": {
                     "position": car.pose.position, "rotation": car.pose.rotation,
                     "velocity": car.linear_velocity, "angular_velocity": car.angular_velocity,
-                    "wheel_contacts": car.wheels_contact,
+                    "wheel_contacts": runtime.physics.wheel_contacts(car_key).collect::<Vec<_>>(),
                 },
                 "supported": runtime.world_supported(),
                 "required_ready": runtime.stream.required_ready(),

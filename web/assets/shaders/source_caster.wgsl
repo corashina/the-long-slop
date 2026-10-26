@@ -1,5 +1,8 @@
 #import bevy_pbr::{mesh_functions, mesh_bindings::mesh, forward_io::Vertex, pbr_bindings}
 #import bevy_render::maths::mat2x4_f32_to_mat3x3_unpack
+#ifdef SOURCE_GPU_PROPS
+#import source_props::{prop_row, prop_world_from_local, prop_normal_local_to_world}
+#endif
 #import source_caster_math::{caster_transform, caster_normal_bias, caster_clip_bias, caster_cutout_margin, caster_premultiplied_alpha, caster_dither_coordinate}
 
 struct CasterView {
@@ -30,19 +33,34 @@ struct CasterMaterial {
 struct CasterOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+#ifdef SOURCE_GPU_PROPS
+    // The row color alpha replaces the material color alpha.
+    @location(1) @interpolate(flat) color_alpha: f32,
+#endif
 }
 @vertex
 fn vertex(input: Vertex) -> CasterOutput {
+#ifdef SOURCE_GPU_PROPS
+    // The caster ignores the LOD fade, as the entity caster does.
+    let prop = prop_row(input.instance_index);
+    let model = prop_world_from_local(prop);
+    let position = caster_transform(model, vec4(input.position, 1.0));
+    let normal = prop_normal_local_to_world(model, input.normal);
+#else
     let model = mesh_functions::get_world_from_local(input.instance_index);
     let position = caster_transform(model, vec4(input.position, 1.0));
     let normal_matrix = mat2x4_f32_to_mat3x3_unpack(mesh[input.instance_index].local_from_world_transpose_a, mesh[input.instance_index].local_from_world_transpose_b);
     let raw_normal = normal_matrix * input.normal;
     let normal = raw_normal * inverseSqrt(dot(raw_normal, raw_normal));
+#endif
     let displaced = caster_normal_bias(position.xyz, normal, normalize(caster_view.direction_to_light.xyz), caster_view.bias.z);
     let clip = caster_transform(caster_view.clip_from_world, vec4(displaced, position.w));
     var output: CasterOutput;
     output.position = caster_clip_bias(clip, caster_view.bias.xy);
     output.uv = vec2(0.0);
+#ifdef SOURCE_GPU_PROPS
+    output.color_alpha = prop.color.a;
+#endif
 #ifdef VERTEX_UVS_A
     output.uv = fma(input.uv, material.uv[0].xy, material.uv[0].zw);
 #endif
@@ -50,6 +68,11 @@ fn vertex(input: Vertex) -> CasterOutput {
 }
 @fragment
 fn fragment(input: CasterOutput) {
+#ifdef SOURCE_GPU_PROPS
+    let color_alpha = input.color_alpha;
+#else
+    let color_alpha = material.color.a;
+#endif
     if (material.flags.x & ((1u << 9u) | (1u << 8u))) == 0u { return; }
     var main_alpha = material.defaults[0].a;
     if (material.flags.y & 1u) != 0u {
@@ -67,9 +90,9 @@ fn fragment(input: CasterOutput) {
 #endif
     }
     if (material.flags.x & (1u << 9u)) != 0u {
-        if caster_cutout_margin(main_alpha, material.color.a, material.factors.w) < 0.0 { discard; }
+        if caster_cutout_margin(main_alpha, color_alpha, material.factors.w) < 0.0 { discard; }
     } else {
-        let alpha = caster_premultiplied_alpha(main_alpha, material.color.a, material.factors.x);
+        let alpha = caster_premultiplied_alpha(main_alpha, color_alpha, material.factors.x);
         // WGPU fragment position is top-left, matching source SV_POSITION. Native A8 maps to target R8.
         let coordinate = caster_dither_coordinate(input.position.xy, alpha);
         if textureSample(caster_dither, caster_dither_sampler, coordinate).r - 0.01 < 0.0 { discard; }

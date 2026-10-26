@@ -10,7 +10,7 @@ SKID_PARTICLES=(('tiresmoke',5),('tiresand',6))
 EVIDENCE=[
     'mainscript.M.Particle(mainscript.particle.tiresmoke, hit.point, W.transform.forward * Mathf.Sign(0f - wrpm), (int)(mainscript.M.tireSmokeRate * num5));',
     'mainscript.M.Particle(mainscript.particle.tiresand, hit.point, W.transform.forward * Mathf.Sign(0f - wrpm), (int)(mainscript.M.tireSmokeRate * num5));']
-VOICES=(('ground_voice','GroundSource'),('spring_voice','SpringSource'),('slide_voice','SlideSource'))
+VOICES=(('ground','GroundSource'),('spring','SpringSource'),('slide','SlideSource'))
 
 
 def wheel_scripts(source, root):
@@ -19,20 +19,24 @@ def wheel_scripts(source, root):
         if c.type.name=='MonoBehaviour' and source.class_name(c)=='talajnezo' and source.read(c)['m_Enabled']]
 
 
-def recover_wheel_effects(source, car_reader, car, root, wheels, index, output):
-    """One record per road wheel, in `wheels` order. `root` is the car root Transform.
-    Voice fields hold AudioSource ids; recover_audio replaces them with voice ids."""
-    if len(wheels)!=4:raise ValueError(f'Car needs 4 road wheels for wheel effects: {source_id(car_reader)}')
+def wheel_links(source, root, wheels):
+    """(talajnezo, data) of each road wheel, in `wheels` order."""
+    if not wheels:raise ValueError(f'Car has no road wheels for wheel effects: {key(root)}')
     scripts={}
     for script in wheel_scripts(source,root):
         d=source.read(script);collider=source.resolve(script,d['W'])
         if collider is None:continue
         if key(collider) in scripts:raise ValueError(f'Duplicate talajnezo wheel link: {key(collider)}')
         scripts[key(collider)]=(script,d)
-    result=[]
-    for w,wheel in enumerate(wheels):
+    for wheel in wheels:
         if key(wheel) not in scripts:raise ValueError(f'Wheel needs talajnezo: {key(wheel)}')
-        script,d=scripts[key(wheel)]
+    return [scripts[key(wheel)] for wheel in wheels]
+
+
+def recover_wheel_effects(source, car_reader, car, root, wheels, index, output):
+    """One record per road wheel, in `wheels` order. `root` is the car root Transform."""
+    result=[]
+    for w,(script,d) in enumerate(wheel_links(source,root,wheels)):
         # A null Car is legal: the wheel uses its own gains and has no slide sound.
         linked=source.resolve(script,d['Car'])
         if linked is not None and key(linked)!=key(car_reader):raise ValueError(f'talajnezo Car link differs: {source_id(script)}')
@@ -46,6 +50,15 @@ def recover_wheel_effects(source, car_reader, car, root, wheels, index, output):
             'dust':particle(source,dust,f'wheel_{index}_{w}_dust',1.,output,root) if dust else None,
             'grass':[particle(source,g,f'wheel_{index}_{w}_grass_{i}',source.read(g)['EmissionModule']['rateOverTime']['scalar'],output,root)
                 for i,g in enumerate(grass)]}
+        result.append(record)
+    return result
+
+
+def recover_wheel_voices(source, root, wheels):
+    """AudioSource ids of each wheel talajnezo, in `wheels` order. recover_audio replaces them with voice ids."""
+    result=[]
+    for script,d in wheel_links(source,root,wheels):
+        record={}
         for field,name in VOICES:
             audio=source.resolve(script,d[name])
             if audio is None:raise ValueError(f'talajnezo {name} is null: {source_id(script)}')

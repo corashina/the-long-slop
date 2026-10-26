@@ -233,16 +233,6 @@ pub(super) fn validate_particles(m: &ReferenceManifest) -> Result<(), ReferenceE
     for p in &m.particles {
         validate_particle(p)?;
     }
-    for (v, vehicle) in m.vehicles.iter().enumerate() {
-        require(!vehicle.exhaust.is_empty(), "vehicle exhaust")?;
-        for (s, p) in vehicle.exhaust.iter().enumerate() {
-            require(
-                p.role == format!("exhaust_{v}_{s}"),
-                "exhaust particle role",
-            )?;
-            validate_particle(p)?;
-        }
-    }
     Ok(())
 }
 /// Checks one particle record that the runtime simulates in custom space.

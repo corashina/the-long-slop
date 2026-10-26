@@ -25,7 +25,8 @@ test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab
  t.after(()=>{delete globalThis.document;delete globalThis.window;});
  const panel=createPerformance(()=>64*1048576,()=>null,()=>2500);
  assert.equal(panel.frame(0,1,2),true);
- panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576,2,0.5,300);
+ panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576,2,0.5,300,1234);
+ assert.match(root.textContent,/ECS entities: 1234/);
  assert.match(root.textContent,/WASM: 64\.0 MiB/);
  assert.match(root.textContent,/Storms \/ strongest influence \/ particles: 2 \/ 0\.50 \/ 300/);
  assert.match(root.textContent,/JS heap: unavailable/);
@@ -34,7 +35,7 @@ test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab
  assert.match(root.textContent,/World render CPU reserve: 8\.0 MiB/);
  for(let now=20;now<260;now+=20)assert.equal(panel.frame(now,1,2),false);
  assert.equal(panel.frame(260,1,2),true);
- panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576,0,0,0);
+ panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576,0,0,0,0);
  assert.match(root.textContent,/FPS: 50/);
  assert.match(root.textContent,/Frame avg \/ worst: 20\.0 \/ 20\.0 ms/);
  const f3={code:'F3',repeat:false,preventDefault(){}};
@@ -46,10 +47,23 @@ test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab
  assert.equal(panel.frame(20000,1,2),false);
  document.hidden=false;listeners.get('visibilitychange')();
  assert.equal(panel.frame(30000,1,2),true);
- panel.counters(0,0,10,20,30,40,50,0,0,0,0,0,0,0);
+ panel.counters(0,0,10,20,30,40,50,0,0,0,0,0,0,0,0);
  assert.match(root.textContent,/FPS: --/);
  panel.frame(30020,1,2);panel.frame(30260,1,2);
- panel.counters(0,0,10,20,30,40,50,0,0,0,0,0,0,0);
+ panel.counters(0,0,10,20,30,40,50,0,0,0,0,0,0,0,0);
  assert.match(root.textContent,/worst: 130\.0 \/ 240\.0 ms/);
  panel.stop();assert.match(root.textContent,/stopped/);
+});
+
+test('the render lines show the GPU prop counters of the world view',t=>{
+ const root={hidden:false,textContent:''};
+ globalThis.document={hidden:false,querySelector:()=>root,addEventListener:()=>{},removeEventListener:()=>{}};
+ globalThis.window={addEventListener:()=>{},removeEventListener:()=>{}};
+ t.after(()=>{delete globalThis.document;delete globalThis.window;});
+ const view={shadow_issued:[1,2,0,0],surface:[0,0,5,0,2],props:[120,40,9]};
+ const panel=createPerformance(()=>0,()=>({graph:{views:[view]}}),()=>0);
+ panel.frame(0,1,2);
+ panel.counters(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+ assert.match(root.textContent,/Draws shadow \/ surface: 3 \/ 7/);
+ assert.match(root.textContent,/GPU props rows \/ visible \/ indirect draws: 120 \/ 40 \/ 9/);
 });

@@ -19,7 +19,6 @@ use std::sync::Arc;
 pub struct SourceSurface;
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SourceSurfaceStage {
-    CameraDepth,
     ShadowAtlas,
     Collector,
     Opaque,
@@ -54,7 +53,6 @@ pub fn install(app: &mut SubApp) {
         .configure_sets(
             SourceSurface,
             (
-                SourceSurfaceStage::CameraDepth,
                 SourceSurfaceStage::ShadowAtlas,
                 SourceSurfaceStage::Collector,
                 SourceSurfaceStage::Opaque,
@@ -65,13 +63,16 @@ pub fn install(app: &mut SubApp) {
             )
                 .chain(),
         )
+        // Source views do not run Core3d. Build this view's mesh uniforms before any source pass draws.
+        .add_systems(
+            SourceSurface,
+            bevy::pbr::early_gpu_preprocess
+                .before(SourceSurfaceStage::ShadowAtlas)
+                .run_if(view_active),
+        )
         .add_systems(
             SourceSurface,
             (
-                super::camera_depth::camera_depth
-                    .in_set(SourceSurfaceStage::CameraDepth)
-                    .run_if(super::frame_graph::surface_ready)
-                    .run_if(super::shadow_queue::graph_ready),
                 opaque
                     .in_set(SourceSurfaceStage::Opaque)
                     .run_if(super::frame_graph::surface_ready)
@@ -82,6 +83,17 @@ pub fn install(app: &mut SubApp) {
                     .run_if(super::shadow_queue::collector_encoded),
             ),
         );
+}
+
+/// Idle probe faces have no frame view and draw nothing.
+fn view_active(
+    view: ViewQuery<&super::surface_views::SourceSurfaceView>,
+    frame: Res<super::view_frame::SourceViewFrame>,
+) -> bool {
+    frame
+        .views
+        .get(view.into_inner().index)
+        .is_some_and(Option::is_some)
 }
 
 fn stop_failed_renderer(render: &mut World) -> bool {
@@ -98,7 +110,12 @@ fn stop_failed_renderer(render: &mut World) -> bool {
 
 fn opaque(
     world: &World,
-    view: ViewQuery<(&ExtractedView, &SurfaceViewTargets, &SourceViewLighting)>,
+    view: ViewQuery<(
+        &ExtractedView,
+        &SurfaceViewTargets,
+        &SourceViewLighting,
+        &super::surface_views::SourceSurfaceView,
+    )>,
     opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
     masked: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
     pipelines: Res<SurfacePasses>,
@@ -117,7 +134,7 @@ fn opaque(
         return;
     }
     let entity = view.entity();
-    let (view, targets, lighting) = view.into_inner();
+    let (view, targets, lighting, source) = view.into_inner();
     lighting.begin_draws();
     let (Some(opaque), Some(masked)) = (
         opaque.get(&view.retained_view_entity),
@@ -154,6 +171,14 @@ fn opaque(
         .and_then(|_| masked.render(&mut pass, world, entity));
     if let Err(error) = result {
         status.fail(format!("Source opaque draw: {error:?}"));
+        return;
+    }
+    let (attempted, issued) =
+        super::prop_draws::draw_camera(world, &mut pass, entity, source.index);
+    if attempted != issued {
+        status.fail(format!(
+            "Source GPU prop draw skipped in view {entity:?}: {issued}/{attempted}"
+        ));
     }
 }
 fn transparent(
