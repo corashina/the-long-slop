@@ -2186,6 +2186,7 @@ mod tests {
                 "wheel_effects": [{"source": src(16), "pose": pose, "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []}],
                 "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
                 "seats": [{"source": src(13), "driver": true, "driving2": true}],
+                "drive_frames": {"left_hand": 2, "right_hand": null, "left_leg": null, "right_leg": null},
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             },

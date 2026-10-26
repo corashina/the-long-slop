@@ -83,7 +83,10 @@ def car_fixture():
         m_CustomBakedTexture=ptr(None), m_Enabled=1, m_BoxSize=dict(x=6., y=2.5, z=6.), m_BoxOffset=dict(x=0., y=0., z=1.),
         m_BlendDistance=1., m_IntensityMultiplier=1., m_Importance=1, m_NearClip=.3, m_FarClip=100.,
         m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
-    data[car.path_id].update(speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
+    # Only the right hand has a drive frame, as a node under the root.
+    hand = node(root)
+    data[car.path_id].update(LHDrivePos=ptr(None), RHDrivePos=ptr(hand['reader']), LLDrivePos=ptr(None), RLDrivePos=ptr(None),
+        speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
         WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), carType=1, startingTime=1.,
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
@@ -121,6 +124,10 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertTrue(all(w['mount'] == w['slot'] for w in vehicle['wheels']))
         self.assertEqual([s['driver'] for s in vehicle['seats']], [True])
         self.assertEqual(set(vehicle['seats'][0]), {'source', 'driver', 'driving2'})
+        frames = vehicle['drive_frames']
+        car = next(c for c in hierarchy[0]['components'] if c.cls == 'carscript')
+        self.assertEqual(hierarchy[frames['right_hand']]['reader'].path_id, source.read(car)['RHDrivePos']['m_PathID'])
+        self.assertEqual({k: v for k, v in frames.items() if k != 'right_hand'}, dict(left_hand=None, left_leg=None, right_leg=None))
         # Dry massScript mass. The runtime adds the 20 L of tank fluid.
         self.assertEqual(vehicle['mass_kg'], 800.)
         self.assertEqual(vehicle['fuel_tank'], 0)
