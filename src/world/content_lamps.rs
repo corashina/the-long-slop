@@ -249,9 +249,12 @@ impl WorldStream {
                     .iter()
                     .find(|c| &c.source == source)
                     .unwrap();
+                // Source Break destroys a lamp trigger unless noDestroy.
+                let removed = self.breakables.removed_collider(*handle);
                 physics.edit_collider(*handle, |state| {
                     state.set_enabled(
                         collider.enabled
+                            && !removed
                             && super::super::spawn_appearance::node_active(
                                 prototype,
                                 collider.node as usize,
@@ -445,6 +448,34 @@ impl WorldStream {
         }
         self.refresh_lamp_outputs();
         Ok(true)
+    }
+    /// Source flashlightscript.Break: sets the lamps in `lamps` of a structure control broken
+    /// and refreshes their nodes and lights. Bit i is `Lamps[i]`.
+    pub(super) fn break_generated_lamps(
+        &mut self,
+        parent: &GeneratedId,
+        control: LightControlId,
+        lamps: u64,
+    ) -> Result<(), ReferenceError> {
+        let Some(index) = self
+            .lamp_bindings
+            .iter()
+            .position(|b| b.control == control && &b.parent == parent)
+        else {
+            return Ok(());
+        };
+        let binding = &self.lamp_bindings[index];
+        self.contents.break_lamps(
+            &self.reference,
+            &binding.parent,
+            &binding.source,
+            lamps,
+            self.available_staging_bytes(),
+        )?;
+        self.presentation_lamp_changes.push(index);
+        self.lamp_bindings[index].collision_dirty = true;
+        self.refresh_lamp_outputs();
+        Ok(())
     }
     pub(super) fn sync_moving_lamps(&mut self, items: &crate::interaction::items::ItemStore) {
         for content in &self.contents.active {

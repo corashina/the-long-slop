@@ -6,9 +6,11 @@ use crate::damage::BreakKind;
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::storage::StorageLocks;
 use crate::reference::{
-    BreakableOwnerKind, BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId,
+    BreakableOwnerKind, BreakableReference, ItemId, LightControlId, ReferenceError,
+    ReferenceManifest, SourceId,
 };
 use crate::vehicle::PhysicsWorld;
+use crate::world::GeneratedId;
 use rapier3d::prelude::ActiveEvents;
 
 /// The node of the breakablescript in a world prototype.
@@ -77,6 +79,45 @@ impl WorldStream {
         items.get_mut(item).expect("broken item").removed = true;
         items.mark_dirty(item);
         Ok(())
+    }
+    /// Source Break of a lamp trigger: flashlightscript.Break, then Destroy unless noDestroy.
+    /// Returns the trigger position for the break clip.
+    pub fn break_lamp(
+        &mut self,
+        reference: &ReferenceManifest,
+        physics: &mut PhysicsWorld,
+        parent: &GeneratedId,
+        control: LightControlId,
+        record: usize,
+    ) -> Result<Option<[f32; 3]>, ReferenceError> {
+        let rules = &reference.breakables[record];
+        let lamps = rules
+            .lamp
+            .as_ref()
+            .expect("lamp record")
+            .lamps
+            .iter()
+            .fold(0u64, |bits, i| bits | 1 << i);
+        self.break_generated_lamps(parent, control, lamps)?;
+        let Some(target) = self.breakables.targets().iter().position(|t| {
+            t.record == record
+                && matches!(&t.kind, BreakKind::Lamp { parent: p, control: c } if p == parent && *c == control)
+        }) else {
+            return Ok(None);
+        };
+        let position = self
+            .breakables
+            .colliders_of(target)
+            .next()
+            .map(|c| physics.rapier().colliders[c].translation().to_array());
+        if !rules.no_destroy {
+            self.breakables.remove(target);
+            for collider in self.breakables.colliders_of(target) {
+                physics.edit_collider(collider, |c| c.set_enabled(false));
+            }
+            physics.refresh_queries();
+        }
+        Ok(position)
     }
     /// Rebinds targets on a content, item or lamp revision change only.
     fn refresh_breakables(

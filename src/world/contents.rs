@@ -943,17 +943,45 @@ impl SourceContents {
         on: bool,
         staging: usize,
     ) -> Result<(), ReferenceError> {
+        self.refresh_lamp(reference, parent, source, staging, |inputs| {
+            let state = &mut inputs
+                .lamps
+                .iter_mut()
+                .find(|(p, s, _)| p == parent && s == source)
+                .expect("generated lamp state")
+                .2;
+            let changed = *state != on;
+            *state = on;
+            changed
+        })
+    }
+    /// Source flashlightscript.Break: sets the lamps in `lamps` broken. Bit i is `Lamps[i]`.
+    pub fn break_lamps(
+        &mut self,
+        reference: &WorldReference,
+        parent: &GeneratedId,
+        source: &SourceId,
+        lamps: u64,
+        staging: usize,
+    ) -> Result<(), ReferenceError> {
+        self.refresh_lamp(reference, parent, source, staging, |inputs| {
+            inputs.break_lamps(parent, source, lamps)
+        })
+    }
+    /// Source flashlightscript.Refresh after `change` edits the lamp inputs. `change` returns
+    /// true when the lamp changed.
+    fn refresh_lamp(
+        &mut self,
+        reference: &WorldReference,
+        parent: &GeneratedId,
+        source: &SourceId,
+        staging: usize,
+        change: impl Fn(&mut super::spawn_state::SpawnInitialization) -> bool,
+    ) -> Result<(), ReferenceError> {
         let current = self
             .instances()
             .find(|c| &c.placement.id == parent)
             .ok_or_else(|| ReferenceError("Generated lamp instance missing".into()))?;
-        let lamp_changed = current
-            .inputs
-            .lamps
-            .iter()
-            .find(|(p, s, _)| p == parent && s == source)
-            .map(|(_, _, value)| *value)
-            != Some(on);
         let required = current.inputs.retained_bytes().saturating_mul(4)
             + current.appearance.capacity() * std::mem::size_of::<super::NodeAppearance>() * 2
             + current.lights.capacity() * std::mem::size_of::<super::WorldLight>() * 2
@@ -965,12 +993,7 @@ impl SourceContents {
         }
         let mut inputs = current.inputs.clone();
         let current = current.clone();
-        inputs
-            .lamps
-            .iter_mut()
-            .find(|(p, s, _)| p == parent && s == source)
-            .unwrap()
-            .2 = on;
+        let lamp_changed = change(&mut inputs);
         let mut random = super::UnityRandom::restore(self.state.live_state());
         let mut pools = Vec::new();
         let mut evaluation = SpawnEvaluation::new(
@@ -995,13 +1018,13 @@ impl SourceContents {
             cursor.inputs = evaluation.initialization;
         }
         for batch in &mut self.deferred {
-            if let Some(state) = batch
+            if batch
                 .inputs
                 .lamps
-                .iter_mut()
-                .find(|(p, s, _)| p == parent && s == source)
+                .iter()
+                .any(|(p, s, _)| p == parent && s == source)
             {
-                state.2 = on;
+                change(&mut batch.inputs);
             }
         }
         if let Some(active) = self

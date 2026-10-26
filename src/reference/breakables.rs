@@ -183,9 +183,14 @@ impl BreakableReference {
                     WorldValue::Array(lamps) => Some(lamps.len()),
                     _ => None,
                 });
+            // The runtime keeps the broken lamps of a control as u64 bits.
             require(
                 count.is_some_and(|n| {
-                    !lamp.lamps.is_empty() && lamp.lamps.iter().all(|i| (*i as usize) < n)
+                    !lamp.lamps.is_empty()
+                        && lamp
+                            .lamps
+                            .iter()
+                            .all(|i| (*i as usize) < n && *i < u64::BITS)
                 }),
                 "breakable lamp control",
             )?;

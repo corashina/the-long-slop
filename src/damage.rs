@@ -101,6 +101,8 @@ pub struct BreakTarget {
     pub health: BreakHealth,
     /// Source breakablescript.destroyed: a target breaks once.
     pub destroyed: bool,
+    /// Source Break destroyed the lamp trigger: its colliders stay disabled.
+    pub removed: bool,
 }
 
 /// Break targets of active content and the breaks of this step.
@@ -322,11 +324,29 @@ impl Breakables {
                 record,
                 health: BreakHealth::new(rules),
                 destroyed: false,
+                removed: false,
             });
         }
     }
     pub(crate) fn bind_collider(&mut self, collider: ColliderHandle, target: usize) {
         self.colliders.push((collider, target));
+    }
+    /// The lamp trigger colliders of a target.
+    pub fn colliders_of(&self, target: usize) -> impl Iterator<Item = ColliderHandle> + '_ {
+        self.colliders
+            .iter()
+            .filter(move |(_, t)| *t == target)
+            .map(|(c, _)| *c)
+    }
+    /// Source Break destroys the lamp trigger of a target.
+    pub(crate) fn remove(&mut self, target: usize) {
+        self.targets[target].removed = true;
+    }
+    /// True for a collider of a destroyed lamp trigger.
+    pub fn removed_collider(&self, collider: ColliderHandle) -> bool {
+        self.colliders
+            .iter()
+            .any(|(c, t)| *c == collider && self.targets[*t].removed)
     }
 }
 
