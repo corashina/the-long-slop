@@ -26,6 +26,7 @@ pub mod cigarettes;
 mod computers;
 mod frame;
 mod frame_particles;
+mod home_cable;
 pub mod hose;
 mod reach;
 pub mod spawned;
@@ -753,6 +754,10 @@ pub struct GarageRuntime {
     frame_poses: crate::boundary::FramePoses,
     /// The first frame carries every condition; later frames carry changes.
     conditions_sent: bool,
+    /// World session whose home cable is done.
+    home_cable_session: Option<u64>,
+    /// The followed car the renderer last received.
+    followed_car: Option<(crate::world::GeneratedId, u32)>,
 }
 
 impl GarageRuntime {
@@ -909,6 +914,8 @@ impl GarageRuntime {
             under_map_check: 0.,
             frame_poses: Default::default(),
             conditions_sent: false,
+            home_cable_session: None,
+            followed_car: None,
         };
         run.refresh_powertrains();
         Ok(run)

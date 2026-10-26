@@ -12,6 +12,7 @@ use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
 use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
+use crate::world::GeneratedId;
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use serde::de::DeserializeOwned;
@@ -120,6 +121,10 @@ pub struct StateBlock {
     pub origin: [f64; 3],
     /// Day cycle active seconds.
     pub cycle_elapsed_seconds: f64,
+    /// World stream session.
+    pub session: u64,
+    /// Required content selection revision.
+    pub selection_revision: u64,
     /// Interpolation from `SimFrame::previous` to `SimFrame::current`.
     pub alpha: f32,
     /// Sleep clock factor on frame time.
@@ -138,6 +143,10 @@ pub struct StateBlock {
     pub sky_anchor: [f32; 3],
     /// Cigarette that owns the ember light, as `ItemId + 1`. 0 is none.
     pub ember_light: u32,
+    /// Bumps when the audio motion history restarts.
+    pub motion_revision: u32,
+    /// Source `Cam2FarPlane` of the draw distance.
+    pub far_plane: f32,
     /// Keeps the block free of implicit padding.
     pub pad: u32,
 }
@@ -149,6 +158,8 @@ impl StateBlock {
     pub const SLEEPING: u32 = 1 << 3;
     pub const DEAD: u32 = 1 << 4;
     pub const RECOVERING: u32 = 1 << 5;
+    /// The world stream failed.
+    pub const WORLD_FAILED: u32 = 1 << 6;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -337,7 +348,19 @@ pub enum Change {
     PlayerRig(Vec<NodeId>),
     /// The renderer drops the handle, then releases it.
     Retire(Handle),
+    /// Home cable rope aims. Empty: no pole in range, the root stays hidden.
+    HomeCable(Vec<RopeAim>),
+    /// The world car the player last sat in, else the start car: id and prototype.
+    FollowedCar(Option<(GeneratedId, u32)>),
     Failure(String),
+}
+
+/// Local rotation and z scale of one home cable rope.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RopeAim {
+    pub node: NodeId,
+    pub rotation: [f32; 4],
+    pub scale_z: f32,
 }
 
 /// The simulation output of one tick.

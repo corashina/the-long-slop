@@ -343,7 +343,7 @@ pub fn spawn_cameras(
 }
 
 pub(crate) fn sync_sky_camera(
-    drive: Res<crate::app::Drive>,
+    sim: Res<super::sim_frame::SimFrameResource>,
     main: Query<&Transform, (With<super::camera::DriveCamera>, Without<SourceSkyCamera>)>,
     mut sky: Query<
         (&mut Transform, &mut Projection),
@@ -351,12 +351,7 @@ pub(crate) fn sync_sky_camera(
     >,
 ) {
     let Ok(main) = main.single() else { return };
-    let fov = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .fov_degrees;
+    let fov = sim.frame.state.fov_degrees;
     for (mut transform, mut projection) in &mut sky {
         *transform = Transform::from_rotation(main.rotation);
         super::camera_projection::sync_player_projection(&mut projection, true, fov);

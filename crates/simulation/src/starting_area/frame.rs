@@ -1,11 +1,12 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
 use crate::boundary::{
-    CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow,
+    Change, CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow,
 };
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
+use crate::world::{ObjectKey, WorldLayer};
 
 impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
@@ -19,6 +20,10 @@ impl GarageRuntime {
             (self.sleeping(), StateBlock::SLEEPING),
             (self.needs_output().dead, StateBlock::DEAD),
             (self.recovering, StateBlock::RECOVERING),
+            (
+                self.stream.frame().failure.is_some(),
+                StateBlock::WORLD_FAILED,
+            ),
         ] {
             if on {
                 flags |= flag;
@@ -51,6 +56,8 @@ impl GarageRuntime {
             simulation_seconds: self.simulation_seconds,
             origin: area.origin,
             cycle_elapsed_seconds: self.lighting.cycle.elapsed_seconds(),
+            session: self.stream.frame().request.session,
+            selection_revision: self.stream.required_content().selection_revision,
             alpha,
             time_scale: self.clock_factors(reference).time_scale,
             flags,
@@ -61,6 +68,8 @@ impl GarageRuntime {
             joint_scale: area.body.joint_scale(),
             sky_anchor: std::array::from_fn(|i| (anchor[i] - offset[i]) as f32),
             ember_light: ember_light.map_or(0, |id| id.0 + 1),
+            motion_revision: self.audio_motion_revision,
+            far_plane: self.distances.cam2_far_plane,
             pad: 0,
         };
         frame.valves.clear();
@@ -86,6 +95,10 @@ impl GarageRuntime {
             }));
         self.fill_particles(reference, frame);
         self.fill_conditions(reference, frame);
+        self.fill_followed_car(frame);
+        if let Some(aims) = self.home_cable(reference) {
+            frame.changes.push(Change::HomeCable(aims));
+        }
         frame.planes.clear();
         frame
             .planes
@@ -147,6 +160,24 @@ impl GarageRuntime {
                 .iter()
                 .map(|t| cleaning.get(t.item).unwrap().color.unwrap()),
         );
+    }
+    /// Source probe follow: the world car the player last sat in, else the start car.
+    fn fill_followed_car(&mut self, frame: &mut SimFrame) {
+        let car = match self.vehicle.as_ref() {
+            Some(key @ ObjectKey::Generated(id)) => self.vehicles.get(key).map(|v| (id, v)),
+            Some(_) => None,
+            None => self.vehicles.iter().find_map(|(key, vehicle)| match key {
+                ObjectKey::Generated(id) if id.layer == WorldLayer::Startup => Some((id, vehicle)),
+                _ => None,
+            }),
+        }
+        .map(|(id, v)| (id, v.prototype as u32));
+        if car != self.followed_car.as_ref().map(|(id, p)| (id, *p)) {
+            self.followed_car = car.map(|(id, p)| (id.clone(), p));
+            frame
+                .changes
+                .push(Change::FollowedCar(self.followed_car.clone()));
+        }
     }
     /// The renderer dropped a retired pose handle.
     pub fn release_pose(&mut self, handle: Handle) {

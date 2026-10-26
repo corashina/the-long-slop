@@ -12,7 +12,6 @@ pub use types::*;
 mod draw_distance;
 pub use draw_distance::DrawDistances;
 mod cables;
-#[cfg(target_arch = "wasm32")]
 pub use cables::aim;
 mod lamps;
 mod source_lights;
