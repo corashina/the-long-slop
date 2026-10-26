@@ -88,6 +88,17 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #mouse-driving label {display:flex;align-items:center;gap:12px;min-height:44px;}
 #mouse-driving input {flex:1;min-width:0;accent-color:#b48046;}
 #mouse-driving output {min-width:3em;}
+#steering-wheel {border:0;margin:0 0 24px;padding:0;font-size:18px;text-shadow:2px 2px 2px #000;}
+#steering-wheel legend,#steering-wheel h4 {margin:0 0 8px;font-size:inherit;}
+#steering-wheel .wheel-axis {margin-bottom:16px;}
+#steering-wheel .wheel-bind,#steering-wheel .wheel-checks,#steering-wheel .wheel-check,#steering-wheel .wheel-slider {display:flex;flex-wrap:wrap;align-items:center;gap:12px;min-height:44px;}
+#steering-wheel .wheel-bind span {min-width:6em;}
+#steering-wheel .wheel-bind output {flex:1;min-width:7em;}
+#steering-wheel button {position:static;min-height:44px;padding:0 8px;}
+#steering-wheel input[type=checkbox] {margin:0;width:20px;height:20px;accent-color:#b48046;}
+#steering-wheel input[type=range] {flex:1;min-width:0;accent-color:#b48046;}
+#steering-wheel .wheel-slider output {min-width:3em;}
+#steering-wheel .wheel-live {display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-variant-numeric:tabular-nums;}
 #driving-gear {position:absolute;left:50%;bottom:96px;margin:0;transform:translateX(-50%);font-size:18px;font-variant-numeric:tabular-nums;}
 #inventory{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:6px}
 #inventory>div{position:relative;width:58px;height:58px;border:1px solid #888;background:#0008;box-sizing:border-box}

@@ -72,6 +72,21 @@ pub struct CarryDeltas {
     pub wheel: f32,
 }
 
+/// Raw browser gamepad state: 4 pads, 8 axes and 32 button bits per pad.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GamepadFrame {
+    /// Pad `p` axis `a` is at `p * GamepadFrame::AXES + a`.
+    pub axes: [f32; 32],
+    /// Bit `b` of pad `p` is set while button `b` is pressed.
+    pub buttons: [u32; 4],
+}
+
+impl GamepadFrame {
+    pub const PADS: usize = 4;
+    pub const AXES: usize = 8;
+    pub const BUTTONS: usize = 32;
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInput {
     pub held: u32,
@@ -87,6 +102,7 @@ pub struct FrameInput {
     pub drive_mouse: [f32; 2],
     pub wheel: f32,
     pub carry: CarryDeltas,
+    pub gamepad: GamepadFrame,
 }
 
 impl FrameInput {
@@ -99,6 +115,7 @@ impl FrameInput {
         self.player_released |= frame.player_released;
         self.inventory_held = frame.inventory_held;
         self.inventory_released |= frame.inventory_released;
+        self.gamepad = frame.gamepad;
         for (pending, delta) in self
             .mouse
             .iter_mut()
@@ -146,6 +163,7 @@ impl FrameInput {
             held: step.held,
             player_held: step.player_held,
             inventory_held: step.inventory_held,
+            gamepad: step.gamepad,
             ..Self::default()
         };
         step
