@@ -441,7 +441,7 @@ mod tests {
         );
         let mut breakables = Breakables::default();
         breakables.bind(BreakKind::Item(ItemId(4)), 0, &records[0]);
-        let mut step = |b: &mut Breakables| {
+        let step = |b: &mut Breakables| {
             b.step_hits(&records, &physics, &roles, |_| Some(body), 0.02);
         };
         // 2 per step: health 7 goes to 1 after three steps and breaks at the fourth.

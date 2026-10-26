@@ -9,6 +9,7 @@ use crate::reference::{
     BreakableOwnerKind, BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId,
 };
 use crate::vehicle::PhysicsWorld;
+use rapier3d::prelude::ActiveEvents;
 
 /// The node of the breakablescript in a world prototype.
 fn world_node(record: &BreakableReference, prototype: &SourceId) -> Option<u32> {
@@ -25,11 +26,11 @@ impl WorldStream {
         &mut self,
         reference: &ReferenceManifest,
         items: &ItemStore,
-        physics: &PhysicsWorld,
+        physics: &mut PhysicsWorld,
         dt: f32,
     ) {
         self.refresh_boxes();
-        self.refresh_breakables(reference, items);
+        self.refresh_breakables(reference, items, physics);
         self.breakables.step_hits(
             &reference.breakables,
             physics,
@@ -78,7 +79,12 @@ impl WorldStream {
         Ok(())
     }
     /// Rebinds targets on a content, item or lamp revision change only.
-    fn refresh_breakables(&mut self, reference: &ReferenceManifest, items: &ItemStore) {
+    fn refresh_breakables(
+        &mut self,
+        reference: &ReferenceManifest,
+        items: &ItemStore,
+        physics: &mut PhysicsWorld,
+    ) {
         let scan = [
             self.request.session,
             self.contents.active_revision(),
@@ -111,6 +117,25 @@ impl WorldStream {
             {
                 self.breakables
                     .bind(BreakKind::Item(item), record, &records[record]);
+            }
+        }
+        // Source OnCollisionEnter runs on every contact. Item colliders without a hit sound report
+        // no contacts, so bound item colliders report them here.
+        for target in self.breakables.targets() {
+            let BreakKind::Item(item) = target.kind else {
+                continue;
+            };
+            let Some(body) = items.get(item).and_then(|s| s.body) else {
+                continue;
+            };
+            for index in 0..physics.rapier().bodies[body].colliders().len() {
+                let collider = physics.rapier().bodies[body].colliders()[index];
+                let events = physics.rapier().colliders[collider].active_events();
+                if !events.contains(ActiveEvents::COLLISION_EVENTS) {
+                    physics.edit_collider(collider, |c| {
+                        c.set_active_events(events | ActiveEvents::COLLISION_EVENTS)
+                    });
+                }
             }
         }
         // A structure lamp control: each breakablescript in its prototype that breaks its lamps.

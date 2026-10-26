@@ -2092,7 +2092,7 @@ impl GarageRuntime {
     /// Source breakablescript: contacts and hazard triggers of this step, then Break in break order.
     fn break_targets(&mut self, reference: &ReferenceManifest) {
         self.stream
-            .step_breakables(reference, &self.area.items, &self.physics, FIXED_DT);
+            .step_breakables(reference, &self.area.items, &mut self.physics, FIXED_DT);
         while let Some((kind, record)) = self.stream.take_break() {
             let item = match kind {
                 crate::damage::BreakKind::Item(item) => item,
