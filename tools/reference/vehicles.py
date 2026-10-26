@@ -161,6 +161,16 @@ def kmh_meters(source, proto, car_reader, car) -> list:
     return rows
 
 
+def selector_engines(source, proto):
+    """Each engine part that a randomTypeSelector mounts (Car06) must be a prototype node, so it has an engine record."""
+    for _,reader in proto.scripts('randomTypeSelector'):
+        for row in source.read(reader)['tipusok']:
+            for part in filter(None,(source.resolve(reader,p) for p in row.get('parts') or [])):
+                owner=part if part.type.name=='GameObject' else source.resolve(part,source.read(part)['m_GameObject'])
+                nodes=source.hierarchy(source.transform_for(owner))
+                if any(c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID'] and source.class_name(c)=='enginescript' for n in nodes for c in n['components']):
+                    proto.node(owner)
+
 def fuel_tank_slot(source, proto, car_reader, car):
     """carscript.tankslot. Its part holds the fuel tank when the root has no tankscript."""
     slot=source.resolve(car_reader,car['tankslot'])
@@ -173,6 +183,7 @@ def fuel_tank_slot(source, proto, car_reader, car):
 def part_records(source, hierarchy, asset, material_indices) -> tuple[list, list, list]:
     """Engine, radiator and gauge records of the part nodes of one prototype."""
     proto=Prototype(source,hierarchy)
+    selector_engines(source,proto)
     engines=[{'source':source_id(reader),'node':node,'oil_tank':proto.link(reader,value['T']),**engine_fields(value)}
         for node,reader in proto.scripts('enginescript') for value in (source.read(reader),)]
     radiators=[{'source':source_id(reader),'node':node,'coolant_tank':proto.link(reader,value['coolant']),

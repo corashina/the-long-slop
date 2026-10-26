@@ -1,20 +1,30 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool and the bike pool.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 PR 1 car types.
 
-| Car | Source root | Start | Engine |
+## Car types
+
+| Car type | Source root | Start field | Engine |
 | --- | --- | --- | --- |
-| Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
+| Lada 2101 (car02) | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
+| car01, car02k, car04, car05 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05` | Petrol |
+| car06 (bare and full) | Catalog item in `CAR_ITEMS` | `StartCar06` | `randomTypeSelector`: petrol or diesel, 50/50 |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
 | Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
 | Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
+
+- Each `vehicle` record has the source `carscript.carType`.
+- PR 1 types spawn only as start cars. Their pool rows (`kaszni`, `carfull`) stay off until PR 3.
 
 Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. See [Trailers](#trailers).
 
 ## Model
 
 - `car_prototypes` in `tools/reference/world.py` is the allow list. It reads the catalog at export time.
-- The list holds the Lada and each `CAR_CATEGORIES` item root with `carscript`. Other car roots stay `other_vehicle`.
+- The list holds the Lada, each `CAR_CATEGORIES` item root with `carscript`, and each `CAR_ITEMS` item root. Other car roots stay `other_vehicle`.
+- A `CAR_ITEMS` item set to `False` is start-only. Its prototype exports, but its catalog row has no prototype (`other_vehicle`). Pools do not spawn it.
+- Pool spawns of a catalog item need its `prototype`. A direct `G` link to a start-only car stops the export.
+- A `randomTypeSelector` engine part (car06) must be a node of the car prototype. Each engine part then has its engine record.
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
@@ -31,17 +41,42 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - One Rapier world holds every chassis. Every engine steps each frame. Only the seated driver's car reads keys.
 - `GarageRuntime.vehicle` is the last seated car. The camera, HUD, and recovery follow it.
 - Parts fit only slots with a matching source part type. The source rules decide cross-car fit.
-
-## Placement and save
-
-- The `world.startup` entry `StartCar02` has a prototype. The stream spawns it as a fixed placement on the `Startup` layer.
 - The world generator can place any number of copies at any pose. Each copy has its own key.
+
+## Start car
+
+- `start_placements` reads each `START_CARS` field of `TerrainGenerationSettings` (`level1` 64898). The field links the start car group.
+- The group holds one `carscript` root, a scene copy. The entry has its scene pose, the prefab of the catalog item, and `start_car` set.
+- The stream spawns only the picked start car, as a fixed placement on the `Startup` layer.
+- The start pack of a group spawns only with its start car (`StartCar01`, `StartCar02`).
+- The Game mode screen has a `#start-car` list: Random, then each manifest start placement. Browser storage keeps it (`gameMode.startCar`, -1 = Random). The menu default is Random.
+- `src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`:
+
+| Field | Chance |
+| --- | --- |
+| `StartCar01` | 100 |
+| `StartCar02` | 75 |
+| `StartCar02k`, `StartCar03` | 65 |
+| `StartCar03k`, `StartCar04` to `StartCar08c` | 55 |
+| `StartCar09`, `StartCar09P` | 30 |
+| `StartCar10`, `StartCar10k` | 55 |
+
+- The pick draws `Random.Range(0, sum)` and takes the first cumulative chance above it.
+- A field without an exported placement is skipped with its chance. PR 2 and V03 add the missing fields.
+- Car09 then takes `StartCar09` or `StartCar09S`, 50/50 (source `startscript`).
+- The pick uses a menu random from browser entropy. It does not touch the world random state.
+- The spawn context current car is source `itemdatabase.carTypeToCarID[carType]` of the picked car. The Lada gives 15.
+
+## Save
+
 - On retire, the car, engine, radiator and wheel slot states go to the world change records.
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
 - The save keeps gauge part values per key.
 - The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
-- Save schema 23. Older saves are rejected.
+- The save keeps the start car field. Load spawns its placement and ignores the menu choice. Validation checks the current car against it.
+- Save schema 25. Older saves are rejected.
+- `src/world/stream_tests/car_types.rs` drives, saves and loads each start car. It needs the export.
 
 ## Bus doors
 
@@ -82,7 +117,7 @@ Disabled colliders now have empty solver groups. CCD ignores them.
 
 ## Driving controls
 
-The driving branch uses source bindings for both cars. Gear keys act with Automatic gears disabled.
+The driving branch uses source bindings for every car. Gear keys act with Automatic gears disabled.
 
 | Action | Keys |
 | --- | --- |
@@ -95,7 +130,7 @@ The driving branch uses source bindings for both cars. Gear keys act with Automa
 Without Automatic clutch, depress the clutch past halfway before a shift.
 Automatic clutch permits manual shifts. Its RPM clutch ramp runs inside automatic shifting.
 Automatic gears requires Automatic clutch. In that mode, S requests reverse after stopping; W requests forward travel.
-Both cars use neutral and both assists at New game startup.
+Every car uses neutral and both assists at New game startup.
 At exact zero driven-wheel RPM, the endpoint-clamped port can retain neutral.
 Source CalcTorque evaluates its curve without that wrapper. Native curve extrapolation remains unmeasured.
 The serialized infinity value does not establish the public WrapMode mapping. Source boundary parity remains conditional.
@@ -136,8 +171,8 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car's catalog category to `CAR_CATEGORIES` in `tools/reference/world.py`. Its roots then export with a `vehicle` record.
-2. For a start car, add its startup placement next to `StartCar02` in `recover_world`. Check the pose against home colliders and the terrain.
+1. Add the car's catalog items to `CAR_ITEMS` in `tools/reference/world.py`. Its roots then export with a `vehicle` record. Set `True` to enable pools.
+2. For a start car, add its field and full item to `START_CARS`. Check the pose against home colliders and the terrain.
 3. Run the runtime export. The exporter stops when a source record is missing. Car `mountStuff` volumes export by themselves.
 4. Check the prototype node count against the stream limits.
 5. Run the export-based tests with the new manifest.

@@ -2411,7 +2411,12 @@ impl GarageRuntime {
         self.area
             .player
             .align_startup(startup.player_offset, &mut self.physics);
-        let packs = cigarettes::start_pack_poses(reference, startup, self.area.origin)?;
+        let packs = cigarettes::start_pack_poses(
+            reference,
+            self.stream.start_car(),
+            startup,
+            self.area.origin,
+        )?;
         for (pose, count) in packs {
             self.spawn_pack(reference, pose, count)?;
         }
