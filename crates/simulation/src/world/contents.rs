@@ -42,6 +42,7 @@ pub struct ContentCollider {
     pub node: usize,
     pub local: rapier3d::math::Pose,
 }
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedCapVisual {
     pub opening: crate::reference::OpeningId,
     pub visual: crate::reference::CapVisualReference,

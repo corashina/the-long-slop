@@ -253,7 +253,7 @@ pub fn run(
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
                 advance_physics,
-                (sync_world, fill_frame).chain(),
+                (sync_world, fill_frame, sync_instances).chain(),
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
@@ -883,8 +883,6 @@ fn sync_world(
             &mut runtime.wheels,
             &mut runtime.vehicles,
             &mut runtime.powertrain,
-            &runtime.flyers,
-            runtime.simulation_seconds,
             view,
             runtime.lighting.cycle.output().shader_time_seconds as f32,
             lod_view,
@@ -979,6 +977,23 @@ pub(crate) fn sync_imported(
     presentation::reference::sync_caps(&frame.frame, dt, &mut caps, &mut visibility);
 }
 
+/// Applies the structure views of the new frame.
+fn sync_instances(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
+    mut presentation: presentation::world::runtime::WorldPresentation,
+    requests: Res<save::SaveRequests>,
+) {
+    if requests.freezes_world() {
+        return;
+    }
+    if let Err(error) = presentation.sync_instances(&reference.0, &mut sim) {
+        game_failure(&error.to_string());
+        drive.runtime.stream.fail(error);
+        drive.runtime.clear_input();
+    }
+}
 /// Fills the frame after the simulation and world work of this Bevy frame.
 fn fill_frame(
     reference: Res<RuntimeReference>,

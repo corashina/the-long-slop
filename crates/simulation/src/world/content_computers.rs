@@ -304,7 +304,6 @@ impl WorldStream {
         }
     }
     /// displayscript.R: `on` picks the material, `map` is the computer whose output it shows.
-    #[cfg(target_arch = "wasm32")]
     pub fn display_screen(&self, parent: &GeneratedId) -> Option<(bool, Option<ItemId>)> {
         self.computers
             .displays

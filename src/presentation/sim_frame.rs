@@ -2,14 +2,14 @@
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 use simulation::boundary::{
-    Change, Feedback, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, RopeAim,
-    SimFrame, SpawnData,
+    Change, Feedback, Handle, ItemRow, MaterialRow, NodePoseRow, ParticleGroupRow, ParticleRow,
+    PoseKey, PoseRow, RopeAim, SimFrame, SpawnData,
 };
 use simulation::conditions::ConditionState;
-use simulation::reference::{ConditionId, ItemId, NodeId};
+use simulation::reference::{ConditionId, ItemId, NodeId, SourceId};
 use simulation::starting_area::spawned::SpawnedItem;
 use simulation::vehicle::VehiclePose;
-use simulation::world::GeneratedId;
+use simulation::world::{GeneratedCapVisual, GeneratedId};
 use std::collections::HashMap;
 
 /// One particle group of the frame: kind, kind ids and source.
@@ -20,6 +20,20 @@ pub(crate) struct ParticleGroupKey {
     pub b: u32,
     pub c: u32,
     pub source: u32,
+}
+
+/// The last view of one structure slot.
+#[derive(Default)]
+pub(crate) struct StructureView {
+    id: Option<GeneratedId>,
+    /// `StructureRow` flags.
+    pub flags: u32,
+    pub lamp: [f32; 4],
+    pub display_map: u32,
+    pub poses: Vec<NodePoseRow>,
+    pub hidden: Vec<u32>,
+    pub materials: Vec<MaterialRow>,
+    pub caps: Vec<GeneratedCapVisual>,
 }
 
 #[derive(Resource, Default)]
@@ -38,6 +52,15 @@ pub(crate) struct SimFrameResource {
     pub followed_car: Option<(GeneratedId, u32)>,
     /// Feedback waiting for the HUD.
     pub feedback: Option<Box<Feedback>>,
+    structure_slots: HashMap<GeneratedId, u32>,
+    /// Last view by structure slot.
+    pub structure_views: Vec<StructureView>,
+    /// Material sources by `MaterialRow::source`.
+    pub material_sources: Vec<SourceId>,
+    /// Slots whose view changed since the instances last read them.
+    pub changed_structures: Vec<u32>,
+    /// A structure took or left a slot since the instances last read them.
+    pub structures_moved: bool,
 }
 
 impl SimFrameResource {
@@ -71,9 +94,55 @@ impl SimFrameResource {
                 Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),
                 Change::FollowedCar(car) => self.followed_car.clone_from(car),
                 Change::Feedback(feedback) => self.feedback = Some(feedback.clone()),
+                Change::StructureAdd { slot, id } => {
+                    let slot = *slot as usize;
+                    if self.structure_views.len() <= slot {
+                        self.structure_views
+                            .resize_with(slot + 1, StructureView::default);
+                    }
+                    self.structure_views[slot] = StructureView {
+                        id: Some(id.clone()),
+                        ..default()
+                    };
+                    self.structure_slots.insert(id.clone(), slot as u32);
+                    self.structures_moved = true;
+                }
+                Change::StructureRemove(slot) => {
+                    let view = std::mem::take(&mut self.structure_views[*slot as usize]);
+                    if let Some(id) = view.id {
+                        self.structure_slots.remove(&id);
+                    }
+                    self.structures_moved = true;
+                }
+                Change::StructureCaps { slot, caps } => {
+                    self.structure_views[*slot as usize].caps.clone_from(caps);
+                }
+                Change::MaterialSource(source) => self.material_sources.push(source.clone()),
                 Change::Failure(_) => {}
             }
         }
+        let frame = &self.frame;
+        for row in &frame.structures {
+            let view = &mut self.structure_views[row.slot as usize];
+            let range = |r: [u32; 2]| r[0] as usize..r[1] as usize;
+            view.flags = row.flags;
+            view.lamp = row.lamp;
+            view.display_map = row.display_map;
+            view.poses.clear();
+            view.poses
+                .extend_from_slice(&frame.structure_poses[range(row.poses)]);
+            view.hidden.clear();
+            view.hidden
+                .extend_from_slice(&frame.hidden_nodes[range(row.hidden)]);
+            view.materials.clear();
+            view.materials
+                .extend_from_slice(&frame.node_materials[range(row.materials)]);
+            self.changed_structures.push(row.slot);
+        }
+    }
+    /// The structure slot of world object `id`.
+    pub fn structure_slot(&self, id: &GeneratedId) -> Option<u32> {
+        self.structure_slots.get(id).copied()
     }
     pub fn condition(&self, id: ConditionId) -> &ConditionState {
         &self.conditions[&id]

@@ -41,6 +41,8 @@ pub struct PreparedPresentation {
     screen_height: f32,
     aspect_ratio: f32,
     required_views: Option<Box<crate::world::RequiredViews>>,
+    /// Structure views of the candidate.
+    frame: super::sim_frame::SimFrameResource,
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
@@ -159,6 +161,7 @@ impl PreparedPresentation {
             conditions: None,
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
+            frame: default(),
         })
     }
     fn exchange(&mut self, world: &mut World) {
@@ -318,8 +321,6 @@ impl PreparedPresentation {
                 &mut candidate.wheels,
                 &mut candidate.vehicles,
                 &mut candidate.powertrain,
-                &candidate.flyers,
-                candidate.simulation_seconds,
                 view,
                 candidate.lighting.cycle.output().shader_time_seconds as f32,
                 lod,
@@ -331,7 +332,16 @@ impl PreparedPresentation {
                 crate::app::LOADING_BUDGET_MS,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
-        };
+        }
+        .and_then(|()| {
+            // The hidden instances take the structure views of the candidate.
+            candidate.fill_structure_frame(reference, &mut self.frame.frame);
+            self.frame.apply_changes(|_| {});
+            self.system
+                .get_mut(world)
+                .map_err(|e| crate::reference::ReferenceError(e.to_string()))?
+                .sync_instances(reference, &mut self.frame)
+        });
         self.system.apply(world);
         self.exchange(world);
         {

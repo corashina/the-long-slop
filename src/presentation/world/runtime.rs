@@ -89,6 +89,21 @@ pub struct WorldPresentation<'w, 's> {
     pub screens: ResMut<'w, crate::presentation::computer::ComputerScreens>,
 }
 impl WorldPresentation<'_, '_> {
+    /// Applies the structure views of the simulation frame to the instances.
+    pub(crate) fn sync_instances(
+        &mut self,
+        reference: &ReferenceManifest,
+        sim: &mut crate::presentation::sim_frame::SimFrameResource,
+    ) -> Result<(), ReferenceError> {
+        self.instances.sync(
+            sim,
+            reference,
+            &mut self.commands,
+            &mut self.roots,
+            &mut self.materials,
+            &self.screens,
+        )
+    }
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
@@ -101,8 +116,6 @@ impl WorldPresentation<'_, '_> {
             crate::starting_area::VehicleRuntime,
         >,
         powertrain: &mut crate::simulation::powertrain::PowertrainParts,
-        flyers: &crate::flyers::Flyers,
-        seconds: f64,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
@@ -123,8 +136,6 @@ impl WorldPresentation<'_, '_> {
                 wheels,
                 vehicles,
                 powertrain,
-                flyers,
-                seconds,
                 view,
                 time,
                 lod_view,
@@ -153,8 +164,6 @@ impl WorldPresentation<'_, '_> {
             crate::starting_area::VehicleRuntime,
         >,
         powertrain: &mut crate::simulation::powertrain::PowertrainParts,
-        flyers: &crate::flyers::Flyers,
-        seconds: f64,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
@@ -502,20 +511,6 @@ impl WorldPresentation<'_, '_> {
             &mut stream.computers,
             &mut self.images,
         );
-        self.instances.sync(
-            stream,
-            reference,
-            physics,
-            &area.items,
-            vehicles,
-            powertrain,
-            flyers,
-            seconds,
-            &mut self.commands,
-            &mut self.roots,
-            &mut self.materials,
-            &self.screens,
-        )?;
         let instance_cache_cpu = self.instances.cache_bytes();
         if self.allocation.instance_cache_cpu != instance_cache_cpu {
             let mut allocation = stream.presentation_allocation();
@@ -527,8 +522,6 @@ impl WorldPresentation<'_, '_> {
             stream.set_presentation_allocation(allocation)?;
             self.allocation.instance_cache_cpu = instance_cache_cpu;
         }
-        physics.clear_presentation_bodies();
-        stream.clear_presentation_changes();
         timer.next(crate::world::stream_profile::Stage::LampSync);
         super::lamps::sync_source_lamps(
             &stream.frame(),

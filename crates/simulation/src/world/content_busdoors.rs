@@ -709,7 +709,6 @@ impl WorldStream {
             }
         }
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn bus_doors(&self, parent: &GeneratedId) -> Option<&BusDoorBinding> {
         self.bus_door_bindings.iter().find(|b| &b.parent == parent)
     }

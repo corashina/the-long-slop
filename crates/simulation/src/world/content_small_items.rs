@@ -650,7 +650,6 @@ impl WorldStream {
         self.small_items.particles(index)
     }
     /// ginlampscript `M.SetColor("_EmissionColor")`.
-    #[cfg(target_arch = "wasm32")]
     pub fn lamp_emission(&self, parent: &GeneratedId) -> Option<[f32; 4]> {
         self.small_items
             .lamps
@@ -659,7 +658,6 @@ impl WorldStream {
             .map(|b| b.emission)
     }
     /// The spray bottle trigger node local pose.
-    #[cfg(target_arch = "wasm32")]
     pub fn spray_trigger(&self, parent: &GeneratedId) -> Option<Transform> {
         self.small_items
             .sprays

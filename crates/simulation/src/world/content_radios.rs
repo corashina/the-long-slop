@@ -386,7 +386,6 @@ impl WorldStream {
             .iter()
             .map(|b| (b.item, &b.script, &b.state, b.output, &b.parent))
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn radio(&self, parent: &GeneratedId) -> Option<&RadioBinding> {
         self.radio_bindings.iter().find(|b| &b.parent == parent)
     }
