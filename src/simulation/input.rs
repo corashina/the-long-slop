@@ -1,4 +1,5 @@
 use crate::simulation::{FIXED_DT, keys};
+use rapier3d::prelude::RigidBodyHandle;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DrivingControls {
@@ -13,7 +14,8 @@ pub struct KeyboardDriving {
     controls: DrivingControls,
     steering_increment: f32,
     pedal_increment: f32,
-    driving: bool,
+    /// The body of the seat that takes the input: the car chassis or the item body.
+    seat: Option<RigidBodyHandle>,
 }
 
 impl KeyboardDriving {
@@ -22,22 +24,21 @@ impl KeyboardDriving {
             controls: DrivingControls::default(),
             steering_increment: steering_rate * FIXED_DT,
             pedal_increment: pedal_rate * FIXED_DT,
-            driving: false,
+            seat: None,
         }
     }
 
     pub fn clear(&mut self) {
         self.controls = DrivingControls::default();
-        self.driving = false;
+        self.seat = None;
     }
 
-    /// The caller clears the controls on a seat change.
-    pub fn step(&mut self, driving: bool, held: u32) -> DrivingControls {
-        if self.driving != driving {
+    pub fn step(&mut self, seat: Option<RigidBodyHandle>, held: u32) -> DrivingControls {
+        if self.seat != seat {
             self.clear();
-            self.driving = driving;
+            self.seat = seat;
         }
-        if !driving {
+        if seat.is_none() {
             return self.controls;
         }
         let steer =

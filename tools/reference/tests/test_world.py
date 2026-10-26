@@ -39,6 +39,14 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(vehicle_exclusion(bus, {'utanfutoscript'}), 'other_vehicle')
         self.assertEqual(vehicle_exclusion(bus, {'partscript'}), '')
 
+    def test_sled_values_stop_on_a_missing_value(self):
+        from tools.reference.sled import VALUES, LINKS, sled_values
+        data = {**{field: 1. for field in VALUES}, **{field: None for field in LINKS}}
+        self.assertEqual(sled_values(data)['slide_above_mass'], 1.)
+        for field in ('soundMaxPitch', 'cols'):
+            with self.assertRaises(ValueError): sled_values({k: v for k, v in data.items() if k != field})
+        with self.assertRaises(ValueError): sled_values({**data, 'maxSpeed': None})
+
 
 class LightCookieTests(unittest.TestCase):
     def test_world_light_cookie_binds_to_lighting_spot_cookie(self):

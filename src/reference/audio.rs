@@ -837,6 +837,17 @@ impl AudioReference {
                 }),
             "audio collision gains",
         )?;
+        require(
+            game.vehicles.iter().all(|v| {
+                v.wheel_effects.iter().all(|w| {
+                    [w.ground_voice, w.spring_voice, w.slide_voice]
+                        .iter()
+                        .all(|id| voices.contains(id))
+                })
+            }) && clips.contains(&game.skid.road_clip)
+                && clips.contains(&game.skid.dirt_clip),
+            "audio wheel effects",
+        )?;
         for a in &self.ambience {
             require(
                 game.world
@@ -874,6 +885,13 @@ impl AudioReference {
             )?;
         }
         validate_zones(&self.ambience_zones, &self.survival)?;
+        // Sleds play through the one looped survival row of kind 20.
+        let sled = self.survival.iter().find(|b| b.kind == 20);
+        require(
+            game.world.prototypes.iter().all(|p| p.sled.is_none())
+                || sled.is_some_and(|b| b.role == "sled" && !b.one_shot && !b.clips.is_empty()),
+            "sled playback",
+        )?;
         let f = &self.footsteps;
         require(
             f.surfaces
@@ -1011,14 +1029,16 @@ impl AudioGameplayReference {
                 "required audio clips and pitch",
             )?;
         }
-        // The ambience zone row exists only when the world has zones.
-        let zones = r
-            .bindings
-            .iter()
-            .filter(|b| b.kind == 19 && b.role == "ambience_zone" && !b.clips.is_empty())
-            .count();
+        // The ambience zone and sled rows exist only when the world has zones or sleds.
+        let optional = |kind: u32, role: &str| {
+            r.bindings
+                .iter()
+                .filter(|b| b.kind == kind && b.role == role && !b.clips.is_empty())
+                .count()
+        };
+        let (zones, sleds) = (optional(19, "ambience_zone"), optional(20, "sled"));
         require(
-            zones <= 1 && r.bindings.len() == 18 + zones,
+            zones <= 1 && sleds <= 1 && r.bindings.len() == 18 + zones + sleds,
             "required audio roles",
         )?;
         Ok(r)

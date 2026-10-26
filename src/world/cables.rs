@@ -656,6 +656,7 @@ mod tests {
             vehicle: None,
             engines: Vec::new(),
             radiators: Vec::new(),
+            sled: None,
         };
         let pole = RoadPole {
             node: 1,

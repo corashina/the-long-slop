@@ -54,6 +54,8 @@ pub mod small_items;
 pub use small_items::*;
 pub mod melee;
 pub use melee::*;
+pub mod wheel_effects;
+pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -938,6 +940,8 @@ pub struct VehicleReference {
     pub collision_gain: f32,
     /// Source `carscript.psSmoke` systems, posed relative to `root`.
     pub exhaust: Vec<ParticleReference>,
+    pub wheel_effects: [WheelEffectsReference; 4],
+    pub effect_gains: EffectGains,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -998,6 +1002,7 @@ pub struct ReferenceManifest {
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
     pub melee: MeleeReference,
+    pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
     pub source_hashes: Vec<SourceHash>,
@@ -2252,6 +2257,7 @@ impl ReferenceManifest {
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
         self.melee.validate(self)?;
+        wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())
     }

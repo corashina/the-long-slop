@@ -674,6 +674,8 @@ pub struct VehicleRuntime {
     pub starter_delay_seconds: f32,
     /// Car electronics allow ignition.
     pub electronics_enabled: bool,
+    /// V03 bridge: wheel effects of old garage cars only. Task 9a adds world car records.
+    pub wheel_effects: Option<crate::wheel_effects::WheelEffects>,
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
@@ -708,6 +710,7 @@ impl VehicleRuntime {
             // The world record has no electronics output yet. Task 9 reads it from the
             // `carscript.electronics` part.
             electronics_enabled: true,
+            wheel_effects: None,
             recovery_bounds,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
@@ -769,6 +772,11 @@ impl VehicleRuntime {
             fuel_tank: Some(vehicle.engine.fuel_tank),
             starter_delay_seconds: vehicle.engine.starter_delay_seconds,
             electronics_enabled: vehicle.engine.electronics_enabled,
+            wheel_effects: Some(crate::wheel_effects::WheelEffects::new(
+                &vehicle.wheel_effects,
+                &reference.skid,
+                vehicle.source.path_id as u64,
+            )),
             recovery_bounds,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
@@ -1477,7 +1485,15 @@ impl GarageRuntime {
             input
         };
         let driving = self.area.player.driving();
-        let controls = self.driving_input.step(driving, vehicle_input.held);
+        // The car driver seat and item seats take the driving input. Only sleds read it on item seats.
+        let controls = self.driving_input.step(
+            if driving {
+                self.area.player.seat_body()
+            } else {
+                self.area.player.item_seat_body()
+            },
+            vehicle_input.held,
+        );
         let selected = self.vehicle.as_ref().and_then(garage_vehicle_index);
         if (driving || self.area.player.driving2())
             && input.pressed & keys::LIGHTS != 0
@@ -1512,9 +1528,19 @@ impl GarageRuntime {
             let driven = driving && self.vehicle.as_ref() == Some(key);
             self.step_vehicle(reference, key, vehicle, vehicle_input, driven, controls);
             self.advance_exhaust(reference, key, vehicle);
+            self.advance_wheel_effects(reference, key, vehicle);
         }
         self.vehicles = vehicles;
         self.step_loose_engines(reference);
+        let sled_seat = match (
+            self.area.player.seat_owner(),
+            self.area.player.item_seat_source(),
+        ) {
+            (Some(crate::player::SeatOwner::Item(owner)), Some(source)) => Some((owner, source)),
+            _ => None,
+        };
+        self.stream
+            .step_sleds(&mut self.physics, sled_seat, controls);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
@@ -1586,6 +1612,19 @@ impl GarageRuntime {
                     } => audio.cap(id, previous, current, tune),
                 }
             }
+            // szankoScript.Update sets the slide volume and pitch of each sled in use.
+            audio.stop_survival_loops(crate::audio::AudioKind::Sled);
+            let origin = self.stream.origin;
+            self.stream
+                .sled_sounds(&self.physics, |item, volume, pitch, position| {
+                    audio.pitched_loop(
+                        crate::audio::AudioKind::Sled,
+                        item.0,
+                        volume,
+                        pitch,
+                        origin.absolute(position),
+                    )
+                });
             let index = audio.vehicle_index;
             let key = garage_vehicle_key(index);
             let vehicle = &self.vehicles[&key];
@@ -1614,6 +1653,14 @@ impl GarageRuntime {
                 FIXED_DT,
                 audio.game_seconds,
             );
+            if let Some(effects) = &vehicle.wheel_effects {
+                audio.wheels(
+                    effects,
+                    &reference.vehicles[index].wheel_effects,
+                    &reference.skid,
+                    active,
+                );
+            }
         }
         for (key, vehicle) in &mut self.vehicles {
             let current = self.persistent_world.absolute_vehicle_position(
@@ -1791,6 +1838,59 @@ impl GarageRuntime {
                 origin: self.stream.origin.offset,
             },
             &reference.fluid_rules.burn_colors,
+            &self.physics,
+        );
+    }
+
+    /// Advances wheel effects every step, so old particles age out on a sleeping car.
+    fn advance_wheel_effects(
+        &self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        vehicle: &mut VehicleRuntime,
+    ) {
+        let (Some(effects), VehicleRecord::Garage(index)) =
+            (vehicle.wheel_effects.as_mut(), vehicle.record)
+        else {
+            return;
+        };
+        let record = &reference.vehicles[index];
+        let chassis = self.physics.chassis_handle(key);
+        let body = &self.physics.rapier().bodies[chassis];
+        // The chassis body frame is the car root node: reference validation requires it.
+        let root = body.position();
+        let forward = root.rotation * -rapier3d::math::Vector::Z;
+        let linear_velocity = body.linvel();
+        let physics = &self.physics;
+        let wheels = std::array::from_fn(|w| {
+            let (rpm, radius, grounded) = physics.wheel_motion(key, w);
+            crate::wheel_effects::WheelInput {
+                rpm,
+                radius,
+                forward,
+                grounded,
+            }
+        });
+        // Footsteps own the source sand layer list. Without audio, every hit is road.
+        let sand_layers = self
+            .audio
+            .as_ref()
+            .map_or(&[][..], |a| &a.reference.footsteps.sand_layers);
+        effects.advance(
+            FIXED_DT,
+            &crate::wheel_effects::WheelEffectsInput {
+                root_absolute: self.stream.origin.absolute(root.translation.to_array()),
+                rotation: root.rotation,
+                origin: self.stream.origin.offset,
+                chassis,
+                linear_velocity,
+                car_kmh: linear_velocity.dot(forward).abs() * 3.6,
+                wheels,
+            },
+            &record.wheel_effects,
+            &record.effect_gains,
+            &reference.skid,
+            sand_layers,
             &self.physics,
         );
     }

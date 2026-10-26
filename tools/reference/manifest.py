@@ -12,6 +12,7 @@ from .driving import recover_driving
 from .wheels import wheel_collider_record
 from .lighting import rgba
 from .particles import recover_exhaust
+from .wheel_effects import recover_wheel_effects, effect_gains
 from .player_movement import recover_player_movement, recover_seat_view
 from .vehicles import component_mass, engine_fields, radiator_fields, seat_fields
 
@@ -192,7 +193,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
                 if not value['m_Enabled'] and key(reader) not in retained_colliders:continue
                 material=source.resolve(reader,value['m_Material']);friction,restitution=0.6,0.
                 if material:
-                    properties=source.read(material);friction=properties['m_DynamicFriction'];restitution=properties['m_Bounciness']
+                    properties=source.read(material);friction=properties['dynamicFriction'];restitution=properties['bounciness']
                 body_id=body_for(node);owner=bodies[body_id-1]
                 colliders.append({'id':len(colliders)+1,'source':source_id(reader),'node':node,'body':body_id,
                     'sensor':value['m_IsTrigger'],'enabled':bool(value['m_Enabled']) and (nodes[node-1]['active'] or food_geometry),'membership':1<<layer,'filter':matrix[layer],
@@ -324,6 +325,8 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         return engine_record
     engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]
     exhaust_records=[recover_exhaust(source,reader,data,node_readers[root],index,output) for index,(root,reader,data) in enumerate(zip(car_roots,car_readers,car_data))]
+    wheel_effect_records=[recover_wheel_effects(source,reader,data,node_readers[root],[wheel_readers[i] for i in slots],index,output)
+        for index,(root,reader,data,slots) in enumerate(zip(car_roots,car_readers,car_data,car_wheel_slots))]
     capsule=source.get('level1',58456);camera=source.get('level1',40241)
     player_record={'source':source_id(player_reader),'capsule_source':source_id(capsule),'camera_source':source_id(camera),'walk_speed':player['FdefMaxSpeed'],'run_multiplier':player['FrunM'],'jump_force':player['FjumpForce'],'mass_kg':source.read(source.get('level1',50702))['m_Mass'],'duck_multiplier':player['FduckM'],'aim_reach':player['FrayRange']}
     player_record.update(recover_player_movement(source))
@@ -413,8 +416,9 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             'min_tube_vertical_height':main['minTubeVerticalHeight'],'max_tube_vertical_height':main['maxTubeVerticalHeight'],'words':default_words(source)},'player':player_record,'seats':seats,
         'vehicles':[{'spawn_car_id':{1:1,2:15}[car['carType']],'driving':drive['driving'],'engine':engine,'source':source_id(car_reader),'handbrake':bool(car['BhandBrake']),'body':car_body,'root':car_root,'mass_kg':bodies[car_body-1]['mass_kg'],'serialized_mass_kg':source.read(source.resolve(car_reader,car['RB']))['m_Mass'],'wheel_slots':slots,'colliders':[c['id'] for c in colliders if c['body']==car_body and c['enabled']],'gear_ratios':[g['ratio'] for g in car['gears']],'final_drive_ratio':car['differentialRatio'],'max_steer_degrees':car['steerAngle'],'keyboard_steering_rate':driving['keyboard_steering_rate'],'brake_torque_nm':car['brakePower'],'handbrake_torque_nm':car['maxHandBrake'],'wheel_slip':[main[k] for k in ('WheelSlip1Min','WheelSlip1Max','WheelSlip2Min','WheelSlip2Max')],'rim_slip':[main['WheelSlip1'],main['WheelSlip2']],
             'auto_shift_stop_speed':car['autoShiftStopSpeed'],'auto_shift_min_rpm':car['autoShiftMinRpm'],'auto_shift_max_rpm':car['autoShiftMaxRpm'],
-            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM'],'exhaust':exhaust}
-            for engine,exhaust,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,exhaust_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
+            'gear_free_run':[bool(gear['freeRun']) for gear in car['gears']],'dont_ignite_with_throttle_in_automatic':bool(car['dontIgniteWithThorttleInAutomatic']),'auto_move_min':0.3,'collision_gain':car['collisionSoundM'],'exhaust':exhaust,
+            'wheel_effects':wheel_effects,'effect_gains':effect_gains(car)}
+            for engine,exhaust,wheel_effects,car_reader,car,car_body,car_root,slots,drive in zip(engine_records,exhaust_records,wheel_effect_records,car_readers,car_data,car_bodies,car_roots,car_wheel_slots,driving['vehicles'])],
         'area':{'source':source_id(source.get('level1',64896)),'home_root':home_root,'home_pose':home_pose,'home_bounds':bounds,'player_spawn':spawn,'car_pose':car_pose,'driveway_bounds':driveway_bounds,'driveway_height':driveway_height}}
     result['rendering'] = {'materials': [dict(record, asset=asset_id)
         for asset_id, name in enumerate(roots, 1) for record in reports[name]['materials']]}

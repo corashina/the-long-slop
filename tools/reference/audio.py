@@ -451,7 +451,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     item_clips+=world_clips
     # The runtime finds the hit sound of a generated item by its pickupable source.
     manifest['world']['pickup_hits']=[{'source':s,'collision_clip':clip(c),'collision_gain':g} for (s,_,g),c in zip(hits,world_clips)]
-    audio['ambience']=[];rocks=[];audio['ambience_zones']=[];zones=[]
+    audio['ambience']=[];rocks=[];audio['ambience_zones']=[];zones=[];sleds=[]
     for prototype in manifest['world']['prototypes']:
         interiors=[];root=source.get(prototype['source']['file'],prototype['source']['path_id'])
         for node in source.hierarchy(root,activate_root=True):
@@ -464,6 +464,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
                 audio['ambience'].append(ambience_record(prototype['source'],source.read(c),
                     lambda pointers,c=c:[clip(r) for r in readers(c,pointers)],method('soundplayscript','PlaySound')))
         prototype['interiors']=world_interiors(source,prototype,interiors,manifest['world']['mechanisms'],method('interiorscript','GetValue'))
+        if prototype['sled']:
+            sled=prototype['sled'];sleds.append(sled)
+            sled['clip']=clip(source.get(sled['clip']['file'],sled['clip']['path_id']))
     if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
     if car_route is None:raise ValueError('Car hit audio needs the car route')
     rock=audio['ambience'][0]
@@ -506,6 +509,14 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         first=source.read(zone_sources[0])
         survival_groups.append(('ambience_zone',19,zones[0][3],unique(source.resolve(r,source.read(r)['m_audioClip']) for r in zone_sources),
             zone_sources[0],[first['m_Volume']]*2,[first['m_Pitch']]*2))
+    if sleds:
+        # szankoScript.Update sets the volume and pitch of its own source each frame. One row serves every sled.
+        sled_sources=[source.get(v['audio_source']['file'],v['audio_source']['path_id']) for v in sleds]
+        shared=lambda r:{k:v for k,v in source.read(r).items() if k!='m_GameObject'}
+        if any(shared(r)!=shared(sled_sources[0]) for r in sled_sources):raise ValueError('Sled sources differ')
+        first=source.read(sled_sources[0]);owner=source.get(sleds[0]['source']['file'],sleds[0]['source']['path_id'])
+        survival_groups.append(('sled',20,owner,[source.resolve(sled_sources[0],first['m_audioClip'])],sled_sources[0],
+            [0.,sleds[0]['sound_max_volume']],[sleds[0]['sound_min_pitch'],sleds[0]['sound_max_pitch']]))
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'rock_heat':default_route,'footstep':default_route,
@@ -516,7 +527,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         d=source.read(reader);one_shot=role in ONE_SHOT
         route=routes[role] if role in routes else source.resolve(reader,d['OutputAudioMixerGroup'])
         transform=source.transform_for(source.resolve(reader,d['m_GameObject']))
-        if any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
+        # The sled source moves with its Rigidbody. The runtime passes its position each frame.
+        if role!='sled' and any(c.type.name=='Rigidbody' for c in source.components(transform)[1]):raise ValueError('Selected audio velocity needs a Rigidbody route')
         pose=world_pose(source,transform)
         player_pose=world_pose(source,source.transform_for(source.resolve(player,pd['m_GameObject'])))
         offset=[pose['translation'][i]-player_pose['translation'][i] for i in range(3)] if role in ('burp','fart','shit','death','sleep') else [0.,0.,0.]
@@ -527,7 +539,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd'),'sled':('szankoScript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -661,6 +673,13 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
+    # talajnezo loops 3 sources per wheel. The slide voice switches between the mainscript skid clips.
+    for vehicle in manifest['vehicles']:
+        for wheel in vehicle['wheel_effects']:
+            for field in ('ground_voice','spring_voice','slide_voice'):
+                wheel[field]=voice(source.get(wheel[field]['file'],wheel[field]['path_id']),[method('talajnezo','FixedUpdate')])
+    skid=manifest['skid']
+    for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
     for field in ['engine','horn','radio','portable_radio']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:

@@ -66,10 +66,10 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
                 if owner is None:raise ValueError(f'Prototype collider lacks body: {key(c)}')
                 body=bodies[owner-1];layer=source.read(record['game_object'])['m_Layer']
                 material=source.resolve(c,d['m_Material'])
-                properties=source.read(material) if material else {'m_DynamicFriction':.6,'m_Bounciness':0.}
+                properties=source.read(material) if material else {'dynamicFriction':.6,'bounciness':0.}
                 colliders.append({'id':len(colliders)+1,'source':source_id(c),'node':node,'body':owner,
                     'sensor':bool(d['m_IsTrigger']),'enabled':bool(d['m_Enabled']), 'membership':1<<layer,'filter':matrix[layer],
-                    'friction':properties['m_DynamicFriction'],'restitution':properties['m_Bounciness'],
+                    'friction':properties['dynamicFriction'],'restitution':properties['bounciness'],
                     'geometry':geometry(source,exporter,c,record['reader'],poses[body['node']],body['dynamic']),
                     'step_surface':step_surface(source,record['game_object']),'tag':collider_tag(source,record['game_object'])})
             if 'pickupable' in group:

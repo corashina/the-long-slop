@@ -34,3 +34,13 @@ test('hit_priority_loses_voices',()=>{
  b.event(raw.bindings[1],1,0,0,0,1,1);
  assert.deepEqual(b.effects.map(s=>s.priority).sort(),[100,55].sort(),'a living sound takes a hit voice');
 });
+
+test('voice_update_switches_clip',async()=>{
+ const voice={...settings,id:5,emitter:1,clip:1,loop:true,mixer:1};
+ const b=new VoiceBank(new Context(),{...raw,voices:[voice]},{effect:async id=>({duration:.5,id})},new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});
+ b.begin();b.emitter(1,[0,0,0],[0,0,0,1],true);
+ const s=b.voices.get(5);
+ b.update(5,true,1,1,true,0);await tick();assert.equal(s.buffer.id,1,'0 keeps the record clip');
+ b.update(5,true,1,1,true,2);await tick();assert.equal(s.buffer.id,2);assert.ok(s.source.started);
+ b.update(5,true,1,1,true,2);assert.equal(s.buffer.id,2,'the same clip keeps playing');
+});

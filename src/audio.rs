@@ -77,6 +77,8 @@ pub struct AudioSignal {
     pub gain: f32,
     pub pitch: f32,
     pub looping: bool,
+    /// Clip id that the voice plays. 0 has no clip.
+    pub clip: u32,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VehicleAudioInput {
@@ -242,6 +244,7 @@ impl AudioState {
                     gain: v.gain,
                     pitch: v.pitch,
                     looping: v.r#loop,
+                    clip: v.clip.unwrap_or(0),
                 })
                 .collect(),
             voice_indices: reference
@@ -886,6 +889,44 @@ impl AudioState {
                 );
         self.voice(h.voice, self.horn_gain > 0., self.horn_gain, pitch);
     }
+    /// Source talajnezo GroundSource, SpringSource and SlideSource of the four wheels.
+    /// A sleeping chassis is quiet.
+    pub fn wheels(
+        &mut self,
+        effects: &crate::wheel_effects::WheelEffects,
+        wheels: &[crate::reference::WheelEffectsReference; 4],
+        skid: &crate::reference::SkidReference,
+        active: bool,
+    ) {
+        for (w, r) in wheels.iter().enumerate() {
+            let s = effects.sound(w);
+            // talajnezo does not set the GroundSource pitch.
+            let pitch = self.reference.voices[self.voice_indices[&r.ground_voice]].pitch;
+            self.voice(
+                r.ground_voice,
+                active && s.ground_playing,
+                s.ground_gain,
+                pitch,
+            );
+            self.voice(
+                r.spring_voice,
+                active && s.spring_playing,
+                s.spring_gain,
+                s.spring_pitch,
+            );
+            self.voice(
+                r.slide_voice,
+                active && s.slide_playing,
+                s.slide_gain,
+                s.slide_pitch,
+            );
+            self.signals[self.voice_indices[&r.slide_voice]].clip = if s.slide_road {
+                skid.road_clip
+            } else {
+                skid.dirt_clip
+            };
+        }
+    }
     pub(crate) fn restore_engine(&mut self, running: bool) {
         self.last_running = running;
         self.starter_enabled = false;
@@ -956,6 +997,7 @@ impl AudioState {
             signal.gain = voice.gain;
             signal.pitch = voice.pitch;
             signal.looping = voice.r#loop;
+            signal.clip = voice.clip.unwrap_or(0);
         }
         for a in &self.reference.mechanisms {
             if let Some(id) = a.movement_voice {
@@ -1475,6 +1517,7 @@ pub enum AudioKind {
     MeleeHit = 17,
     MetalDetector = 18,
     AmbienceZone = 19,
+    Sled = 20,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]

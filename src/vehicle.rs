@@ -421,6 +421,12 @@ impl PhysicsWorld {
         (wheel.angle, wheel.rpm(), wheel.previous_angle)
     }
 
+    /// Source WheelCollider rpm, radius and isGrounded of one wheel slot.
+    pub fn wheel_motion(&self, vehicle: &ObjectKey, wheel: usize) -> (f32, f32, bool) {
+        let w = &self.vehicle(vehicle).wheels.wheels()[wheel];
+        (w.rpm(), w.profile.radius, w.contact.is_some())
+    }
+
     /// Source carscript avgRpm: all driven slots over the driven rim count.
     pub fn driven_wheel_rpm(&self, key: &ObjectKey) -> f32 {
         let vehicle = self.vehicle(key);

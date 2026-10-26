@@ -1,6 +1,6 @@
 //! Validate runtime manifests with the same contract as the game.
-use the_long_slop::reference::{AudioReference, MAX_MANIFEST_BYTES, ReferenceManifest};
 use std::io::{self, Read};
+use the_long_slop::reference::{AudioReference, MAX_MANIFEST_BYTES, ReferenceManifest};
 
 fn validate() -> Result<(), Box<dyn std::error::Error>> {
     let mut content = Vec::new();

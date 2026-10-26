@@ -1268,6 +1268,7 @@ mod world_sync_tests {
             vehicle: None,
             engines: Vec::new(),
             radiators: Vec::new(),
+            sled: None,
         }
     }
     fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {
