@@ -69,8 +69,8 @@ def fake_particle(source, system, role, rate, output, owner=None):
 def manifest(source):
     nodes = [{'id': i + 1, 'source': {'file': ASSETS, 'path_id': pid}, 'asset': 1 if pid < 38000 else 2,
         'parent': None if pid in (6484, 38331) else 1 if pid < 38000 else 4} for i, pid in enumerate([6484, 6487, 6490, 38331, 38351])]
-    return {'nodes': nodes, 'assets': [{'id': 1, 'usage': 'sky', 'root': {'file': ASSETS, 'path_id': 6484}},
-        {'id': 2, 'usage': 'sky', 'root': {'file': ASSETS, 'path_id': 38331}}],
+    return {'nodes': nodes, 'assets': [{'id': 1, 'usage': 'sky_traffic', 'root': {'file': ASSETS, 'path_id': 6484}},
+        {'id': 2, 'usage': 'sky_traffic', 'root': {'file': ASSETS, 'path_id': 38331}}],
         'lighting': {'textures': []}, 'audio': {'voices': [{'id': 1, 'emitter': 1}, {'id': 2, 'emitter': 2}],
         'emitters': [{'id': 1, 'node': 3}, {'id': 2, 'node': 4}]}}
 

@@ -30,7 +30,9 @@ def prefabs(source,reader):
     return [source.transform_for(game_object(source,r)) for r in links]
 
 def prepare_sky(source, roots):
-    for (name,_),root in zip(PREFABS,prefabs(source,spawner(source))):roots[name]=[root]
+    # Instantiate(prefab, position, Quaternion.identity, parent) replaces the root pose. The glTF root keeps only its scale.
+    source.sky_roots=set()
+    for (name,_),root in zip(PREFABS,prefabs(source,spawner(source))):roots[name]=[root];source.sky_roots.add(key(root))
 
 def spin(source,records,nodes):
     found=[c for n in records for c in n['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='fedoscript']
@@ -79,7 +81,7 @@ def validate_sky(sky, manifest):
             or not 0<=sky['max_angle']<=180):raise ValueError('Invalid sky spawner')
     for p in sky['prefabs']:
         asset=assets.get(p['asset'],{});root=nodes.get(p['root'],{})
-        if asset.get('usage')!='sky' or asset.get('root')!=p['source'] or root.get('source')!=p['source'] or root.get('parent') is not None:
+        if asset.get('usage')!='sky_traffic' or asset.get('root')!=p['source'] or root.get('source')!=p['source'] or root.get('parent') is not None:
             raise ValueError('Invalid sky prefab root')
         if any(v not in voices or nodes.get(emitters[voices[v]['emitter']]['node'],{}).get('asset')!=p['asset'] for v in p['voices']):
             raise ValueError('Invalid sky voice')
