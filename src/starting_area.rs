@@ -672,6 +672,7 @@ pub struct GarageRuntime {
     ambient: crate::audio::AmbientState,
     pub weather: crate::weather::WeatherState,
     weather_bindings: weather::WeatherBindings,
+    sky: crate::sky_traffic::SkyTraffic,
     pub urine: crate::interaction::fluid_contact::FluidContact,
     urine_reference: crate::reference::FluidParticleReference,
     urine_emission: [f32; 2],
@@ -820,6 +821,7 @@ impl GarageRuntime {
             ambient: crate::audio::AmbientState::new(&reference.ambient),
             weather: crate::weather::WeatherState::new(&reference.weather, seed as u64),
             weather_bindings,
+            sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
@@ -1391,6 +1393,7 @@ impl GarageRuntime {
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
+        self.advance_sky(reference, FIXED_DT);
         self.area
             .interaction
             .mechanisms
@@ -1626,6 +1629,26 @@ impl GarageRuntime {
             &reference.lighting.cycle,
             (output.phase == crate::sleep::SleepPhase::Sleeping).then_some(output.progress),
         );
+    }
+
+    /// Planes run in every state, also while the player sits in a car.
+    fn advance_sky(&mut self, reference: &ReferenceManifest, dt: f32) {
+        self.sky
+            .advance(&reference.sky, self.simulation_seconds, dt);
+    }
+
+    pub fn sky(&self) -> &crate::sky_traffic::SkyTraffic {
+        &self.sky
+    }
+
+    /// Absolute anchor of the plane offsets: player body + up * height.
+    pub fn sky_anchor(&self, reference: &ReferenceManifest) -> [f64; 3] {
+        let mut anchor = self
+            .stream
+            .origin
+            .absolute(self.area.player.body_pose(&self.physics).position);
+        anchor[1] += reference.sky.height as f64;
+        anchor
     }
 
     /// Gauge inputs of car `key`.
