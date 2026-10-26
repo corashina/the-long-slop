@@ -517,6 +517,12 @@ impl GarageRuntime {
             &mut self.area.interaction.cleaning,
             &mut self.area.items,
         );
+        self.stream.advance_cobwebs(
+            frame,
+            reference,
+            &mut self.area.interaction.cleaning,
+            &mut self.physics,
+        );
         self.play_small_item_sounds();
         self.area.interaction.cleaning.finish_frame(
             frame,

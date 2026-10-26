@@ -262,6 +262,8 @@ enum Owner {
     Ember(crate::reference::ItemId),
     /// Player mouth smoke (`fpscontroller.smokeParticle`).
     Exhale,
+    /// A washtriggerscript `particleOnDestroy`; the wash effect.
+    Cobweb(usize),
 }
 /// The `Group::source` meaning of a car system.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -652,6 +654,17 @@ fn sync_particles(
             &mut commands,
             &mut materials,
         );
+        for (effect, e) in reference.0.small_items.wash_effects.iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::Cobweb(effect),
+                0,
+                &e.particle,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
     }
     // A cigarette ember with live particles holds a group. Free groups serve the next ember.
     let cigarettes = &drive.runtime.area.cigarettes;
@@ -779,6 +792,7 @@ fn sync_particles(
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
             Owner::Ember(_) => ember.expect("ember group has its record"),
             Owner::Exhale => &reference.0.small_items.exhale.particle,
+            Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
         };
         let fluid = match g.owner {
             Owner::Urine => Some(&drive.runtime.urine),
@@ -797,7 +811,8 @@ fn sync_particles(
             | Owner::Storm(_)
             | Owner::Melee
             | Owner::Ember(_)
-            | Owner::Exhale => None,
+            | Owner::Exhale
+            | Owner::Cobweb(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -854,6 +869,8 @@ fn sync_particles(
             Some(cigarettes.ember_particles(id))
         } else if let Owner::Exhale = g.owner {
             Some(cigarettes.exhale_particles())
+        } else if let Owner::Cobweb(effect) = g.owner {
+            Some(drive.runtime.stream.cobweb_particles(effect))
         } else if splash {
             fluid.map(|f| f.splash())
         } else {

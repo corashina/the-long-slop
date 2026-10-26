@@ -1251,6 +1251,14 @@ impl SourceInstances {
                 }
             }
         }
+        // Cobweb changes are rare: a cleaned or start-disabled trigger.
+        for id in stream.cobweb_changes() {
+            for (index, instance) in self.instances.iter().enumerate() {
+                if &instance.placement.id == id {
+                    self.selection.push(index);
+                }
+            }
+        }
         // World car gauges and lamps change on a still car too. Sync a car copy only when
         // its presented state changed. The sync records the signature once bindings are ready.
         for (key, vehicle) in vehicles {
@@ -1446,6 +1454,7 @@ impl SourceInstances {
                     instance.write_local(transforms, node, local_pose(b.pose), frame.origin)?;
                 }
             }
+            let cobwebs = stream.cobweb_hidden(&instance.placement.id);
             for (i, node) in prototype.nodes.iter().enumerate() {
                 if let Some((_, pose_value)) = instance
                     .lamp_buttons
@@ -1461,6 +1470,7 @@ impl SourceInstances {
                     )?;
                 }
                 let enabled = active_food(prototype, i, appearance, reference, food)
+                    && !cobwebs.contains(&i)
                     && car
                         .and_then(|(record, v)| v.node_visible(record, i as u32))
                         .unwrap_or(true);

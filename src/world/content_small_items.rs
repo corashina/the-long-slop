@@ -3,7 +3,9 @@ use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::conditions::ConditionStore;
 use crate::interaction::InteractionState;
-use crate::interaction::cleaning::{CleaningTools, Target, ToolFrame, ToolOwner, ToolWorld};
+use crate::interaction::cleaning::{
+    CleaningTools, Target, ToolFrame, ToolOwner, ToolWorld, WashOwner,
+};
 use crate::interaction::genie_lamp::GenieLamp;
 use crate::interaction::items::ItemStore;
 use crate::interaction::spray::{Ammo, SprayTrigger};
@@ -81,7 +83,7 @@ pub(crate) struct RefillInput {
     pub reload_held: bool,
     pub reload_released: bool,
 }
-fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
+pub(super) fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
     reference.audio["clips"].as_array()?.iter().find_map(|c| {
         (c["source"]["file"].as_str() == Some(source.file.as_str())
             && c["source"]["path_id"].as_i64() == Some(source.path_id))
@@ -183,7 +185,9 @@ impl WorldStream {
                 self.small_items.lamps[i].slot = slot;
                 i += 1;
             } else {
-                interaction.cleaning.remove_generated_wash(b.item);
+                interaction
+                    .cleaning
+                    .remove_generated_wash(WashOwner::Item(b.item));
                 self.small_items.lamps.swap_remove(i);
             }
         }
@@ -337,7 +341,7 @@ impl WorldStream {
             colliders.push((id, *handle));
         }
         interaction.cleaning.register_generated_wash(
-            item,
+            WashOwner::Item(item),
             permission as u8,
             flag(wash, "neverRepair")?,
             colliders,

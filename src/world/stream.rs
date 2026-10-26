@@ -142,6 +142,7 @@ pub struct WorldStream {
     lamp_bindings: Vec<content_lamps::LampBinding>,
     dial_bindings: Vec<content_dials::DialBinding>,
     pub(crate) small_items: content_small_items::SmallItems,
+    cobwebs: content_cobwebs::Cobwebs,
     /// Session and active revision whose dial items are all bound.
     dial_scan: Option<(u64, u64)>,
     level_bindings: Vec<content_levels::LevelBinding>,
@@ -763,6 +764,7 @@ impl WorldStream {
             lamp_bindings: Vec::new(),
             dial_bindings: Vec::new(),
             small_items: content_small_items::SmallItems::new(reference),
+            cobwebs: content_cobwebs::Cobwebs::new(reference),
             dial_scan: None,
             level_bindings: Vec::new(),
             level_scan: None,
@@ -4346,6 +4348,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_cobwebs(reference, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         if let Err(error) = self.sync_level_bindings(&reference.small_items.spirit_level, items) {
             self.binding_reserved = 0;
             return Err(error);
@@ -5033,6 +5039,7 @@ impl WorldStream {
                     .map(content_dials::DialBinding::heap_bytes)
                     .sum::<usize>()
                 + self.small_items.heap_bytes()
+                + self.cobwebs.heap_bytes()
                 + self.level_bindings.capacity()
                     * std::mem::size_of::<content_levels::LevelBinding>()
                 + self
@@ -5403,6 +5410,9 @@ pub(crate) mod content_small_items;
 
 #[path = "content_lamps.rs"]
 mod content_lamps;
+
+#[path = "content_cobwebs.rs"]
+mod content_cobwebs;
 
 #[path = "content_levels.rs"]
 mod content_levels;
