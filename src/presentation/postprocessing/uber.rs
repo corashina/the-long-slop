@@ -202,6 +202,10 @@ impl UberPass {
         self.sequence = DitherSequence::default();
         self.pending = None;
     }
+    /// Grading post exposure in EV. `encode` writes it.
+    pub fn set_post_exposure(&mut self, post_exposure: f32) {
+        self.uniform.get_mut().grading.z = post_exposure.exp2();
+    }
     pub fn noise_index(&self) -> u32 {
         self.sequence.noise_index()
     }

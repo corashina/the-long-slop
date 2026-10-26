@@ -170,6 +170,8 @@ pub struct SourceMaterials {
     pub handles: HashMap<(source::AssetId, u32, bool, u32), Handle<SourceMaterial>>,
     pub(crate) shaders: [Handle<Shader>; 3],
     pub(crate) fixed_admitted: bool,
+    /// Ragdoll asset. Its `player_model` materials have no camera distance clip.
+    ragdoll: source::AssetId,
     pub state: RenderingState,
     pub bound: bool,
     pub texture_bytes: usize,
@@ -452,24 +454,29 @@ pub fn load_materials(
                     | AssetUsage::FoodPrototype
                     | AssetUsage::ItemPrototype
                     | AssetUsage::PlayerPrototype
+                    | AssetUsage::RagdollPrototype
                     | AssetUsage::SkyTraffic
             )
         })
         .map(|asset| asset.id)
         .collect();
-    // The player asset draws only character 0. Other player materials stay unloaded.
-    let body = &reference.clothing.characters[0];
+    // The player and ragdoll assets draw only character 0. Their other materials stay unloaded.
+    let characters = [
+        &reference.clothing.characters[0],
+        &reference.clothing.ragdoll.characters[0],
+    ];
     let records: Vec<_> = reference
         .rendering
         .materials
         .iter()
         .filter(|record| {
             fixed_assets.contains(&record.asset)
-                && (record.asset != body.asset
-                    || body
-                        .renderers
-                        .iter()
-                        .any(|renderer| renderer.materials.contains(&record.source)))
+                && characters.iter().all(|c| {
+                    record.asset != c.asset
+                        || c.renderers
+                            .iter()
+                            .any(|renderer| renderer.materials.contains(&record.source))
+                })
         })
         .map(|record| Arc::new(record.clone()))
         .collect();
@@ -541,6 +548,7 @@ pub fn load_materials(
         handles: HashMap::new(),
         shaders: default(),
         fixed_admitted: false,
+        ragdoll: reference.clothing.ragdoll.asset,
         state: RenderingState::Loading,
         bound: false,
         texture_bytes: 0,
@@ -790,6 +798,10 @@ fn make_material(
     // Source player_model has no keywords. It always clips alpha, also in the caster.
     if player {
         flags |= 1 << 9;
+    }
+    // The ragdoll draws with `_Dist` 0 in every view: no head clip.
+    if player && record.asset == source.ragdoll {
+        flags |= 1 << 12;
     }
     let mut data = SourceUniform {
         color: Vec4::from_array(
