@@ -258,6 +258,12 @@ enum Owner {
     Storm(crate::weather::StormId),
     /// `mainscript` melee hit systems; `Group::source` is the system.
     Melee,
+    /// The `emberScript` particle of one cigarette.
+    Ember(crate::reference::ItemId),
+    /// Player mouth smoke (`fpscontroller.smokeParticle`).
+    Exhale,
+    /// A washtriggerscript `particleOnDestroy`; the wash effect.
+    Cobweb(usize),
 }
 /// The `Group::source` meaning of a car system.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -639,6 +645,60 @@ fn sync_particles(
                 &mut materials,
             );
         }
+        add_group(
+            &mut state,
+            Owner::Exhale,
+            0,
+            &reference.0.small_items.exhale.particle,
+            &lighting,
+            &mut commands,
+            &mut materials,
+        );
+        for (effect, e) in reference.0.small_items.wash_effects.iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::Cobweb(effect),
+                0,
+                &e.particle,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
+    }
+    // A cigarette ember with live particles holds a group. Free groups serve the next ember.
+    let cigarettes = &drive.runtime.area.cigarettes;
+    let ember = crate::presentation::lighting::ember_particle(&reference.0);
+    for g in &mut state.groups {
+        if let Owner::Ember(id) = g.owner {
+            g.active = !cigarettes.ember_particles(id).is_empty();
+        }
+    }
+    if let Some(ember) = ember {
+        for (id, particles) in cigarettes.embers() {
+            let owner = Owner::Ember(id);
+            if particles.is_empty() || state.groups.iter().any(|g| g.active && g.owner == owner) {
+                continue;
+            }
+            if let Some(g) = state
+                .groups
+                .iter_mut()
+                .find(|g| !g.active && matches!(g.owner, Owner::Ember(_)))
+            {
+                g.owner = owner;
+                g.active = true;
+                continue;
+            }
+            add_group(
+                &mut state,
+                owner,
+                0,
+                ember,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
     }
     // Car copies come and go. A retired car frees its groups for the next copy of its prototype.
     let physics = &drive.runtime.physics;
@@ -730,6 +790,9 @@ fn sync_particles(
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
+            Owner::Ember(_) => ember.expect("ember group has its record"),
+            Owner::Exhale => &reference.0.small_items.exhale.particle,
+            Owner::Cobweb(effect) => &reference.0.small_items.wash_effects[effect].particle,
         };
         let fluid = match g.owner {
             Owner::Urine => Some(&drive.runtime.urine),
@@ -746,7 +809,10 @@ fn sync_particles(
             | Owner::SprayBottle(_)
             | Owner::Car { .. }
             | Owner::Storm(_)
-            | Owner::Melee => None,
+            | Owner::Melee
+            | Owner::Ember(_)
+            | Owner::Exhale
+            | Owner::Cobweb(_) => None,
         };
         let splash = p.role.starts_with("splash") || p.role == "urine_splash";
         let particles = if let Owner::SprayBottle(index) = g.owner {
@@ -799,6 +865,12 @@ fn sync_particles(
             )
         } else if let Owner::Melee = g.owner {
             Some(drive.runtime.area.interaction.melee.particles(g.source))
+        } else if let Owner::Ember(id) = g.owner {
+            Some(cigarettes.ember_particles(id))
+        } else if let Owner::Exhale = g.owner {
+            Some(cigarettes.exhale_particles())
+        } else if let Owner::Cobweb(effect) = g.owner {
+            Some(drive.runtime.stream.cobweb_particles(effect))
         } else if splash {
             fluid.map(|f| f.splash())
         } else {

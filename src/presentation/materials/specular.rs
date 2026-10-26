@@ -49,6 +49,13 @@ impl SpecularMaterial {
         self.base.base_color = color;
         self.uniform.color = linear;
     }
+    /// Linear `_EmissionColor`.
+    pub fn emission(&self) -> Vec4 {
+        self.uniform.emission
+    }
+    pub fn set_emission(&mut self, linear: Vec4) {
+        self.uniform.emission = linear;
+    }
     pub fn from_source(
         record: &WorldSourceMaterial,
         textures: &WorldTextures,

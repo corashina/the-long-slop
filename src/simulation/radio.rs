@@ -155,14 +155,17 @@ impl Station {
         }
     }
 }
-fn holiday(value: u8, [month, day]: [u8; 2], ranges: &[[u8; 4]; 2]) -> bool {
-    let date = u16::from(month) * 100 + u16::from(day);
+fn holiday(value: u8, calendar: [u8; 2], ranges: &[[u8; 4]; 2]) -> bool {
     if value == 0 {
         return true;
     }
-    let Some(&[sm, sd, em, ed]) = ranges.get(usize::from(value - 1)) else {
-        return false;
-    };
+    ranges
+        .get(usize::from(value - 1))
+        .is_some_and(|&range| in_holiday(calendar, range))
+}
+/// Source `mainscript.CheckHoliday` for one start and end date, both inclusive.
+pub(crate) fn in_holiday([month, day]: [u8; 2], [sm, sd, em, ed]: [u8; 4]) -> bool {
+    let date = u16::from(month) * 100 + u16::from(day);
     let start = u16::from(sm) * 100 + u16::from(sd);
     let end = u16::from(em) * 100 + u16::from(ed);
     if start <= end {

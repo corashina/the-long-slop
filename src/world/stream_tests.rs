@@ -364,7 +364,7 @@ fn prepare_step_for_views(
         )
         .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
-    run.align_startup(reference).unwrap();
+    run.align_startup(reference, [1, 1]).unwrap();
 }
 
 pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
