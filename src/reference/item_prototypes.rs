@@ -213,19 +213,45 @@ pub struct PrototypeBehavior {
     pub ammo: Option<SourceId>,
     pub cigarette_prefab: Option<SourceId>,
     pub spawn: Option<SourceId>,
+    /// Box breakablescript. Its record is in `breakables`.
     pub breakable: Option<SourceId>,
     pub mount: Option<SourceId>,
-    pub debris: Option<PrototypeId>,
-    pub reduced_debris: Option<PrototypeId>,
     pub melee: Option<SourceId>,
     pub attack_target: Option<SourceId>,
     pub attack_trigger: Option<SourceId>,
-    pub gib: Option<SourceId>,
-    pub gib_children: Vec<NodeId>,
+    /// gibscript of a gib root. Gibs only.
+    pub gib: Option<GibReference>,
+    /// Gib nodes with scaleDestroyScript. Gibs only.
+    pub scale_destroy: Vec<NodeId>,
     pub clips: Vec<SourceId>,
     pub contact_sound_source: Option<SourceId>,
     pub contact_clips: Vec<Vec<SourceId>>,
 }
+
+/// gibscript on a gib root.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GibReference {
+    pub source: SourceId,
+    pub gib_main: bool,
+    /// gibMainDontRot.
+    pub dont_rot: bool,
+    /// gibMainAddSmallPos.
+    pub add_small_pos: bool,
+    /// True: `life` is a distance from the player in metres. False: seconds.
+    pub distance: bool,
+    pub life: f32,
+    pub children: Vec<NodeId>,
+}
+
+/// Item prototypes before the gibs, in export order.
+const SELECTED: [i64; 11] = [
+    75443, 51722, 61587, 70812, 53838, 53837, 63605, 63259, 54495, 83430, 51557,
+];
+/// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs.
+const GIB_COUNT: usize = 8;
+/// Box gib and reduced gib roots.
+pub(super) const BOX_GIBS: [i64; 2] = [81642, 81645];
 
 fn checked(source: &SourceId, path: i64) -> bool {
     source.file == "sharedassets1.assets" && source.path_id == path
@@ -289,12 +315,29 @@ impl PickupReference {
 }
 
 pub fn validate_prototypes(m: &ReferenceManifest) -> Result<(), ReferenceError> {
+    let (items, gibs) = m
+        .item_prototypes
+        .split_at_checked(SELECTED.len())
+        .ok_or_else(|| ReferenceError("selected item prototypes".into()))?;
     require(
-        m.item_prototypes.iter().map(|p| p.id.0.path_id).eq([
-            75443, 51722, 61587, 81642, 81645, 70812, 53838, 53837, 63605, 63259, 54495, 83430,
-            51557,
-        ]),
+        items.iter().map(|p| p.id.0.path_id).eq(SELECTED)
+            && items.iter().all(|p| p.item_id.is_some())
+            && gibs.len() == GIB_COUNT
+            && gibs.iter().all(|p| p.item_id.is_none())
+            && [&gibs[1], &gibs[5]]
+                .iter()
+                .map(|p| p.id.0.path_id)
+                .eq(BOX_GIBS),
         "selected item prototypes",
+    )?;
+    // Each gib prototype is the Gib or reducedGib of a breakable.
+    require(
+        gibs.iter().all(|p| {
+            m.breakables
+                .iter()
+                .any(|b| [&b.gib, &b.reduced_gib].contains(&&Some(p.id.clone())))
+        }),
+        "gib prototype without breakable",
     )?;
     ids(
         m.item_prototypes.iter().map(|p| &p.id),
@@ -343,24 +386,76 @@ impl ItemPrototype {
         }
         None
     }
-    pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
-        let (item_id, count, icon, inventory, hand, pickup_source) = match self.id.0.path_id {
-            75443 => (Some(74), 1, Some(4624), true, false, Some(149224)),
-            51722 => (Some(62), 1, None, false, false, Some(154651)),
-            61587 => (Some(216), 1, Some(4553), true, true, Some(144067)),
-            81642 => (None, 56, Some(4623), true, false, None),
-            81645 => (None, 14, Some(4623), true, false, None),
-            70812 => (Some(217), 1, Some(4557), true, false, Some(157660)),
-            53838 => (Some(218), 1, Some(4527), true, false, Some(147660)),
-            53837 => (Some(221), 1, Some(4529), true, false, Some(147659)),
-            63605 => (Some(245), 1, None, false, false, Some(147259)),
-            63259 => (Some(92), 1, Some(4590), true, false, Some(149587)),
-            54495 => (Some(230), 1, None, false, false, Some(134670)),
-            // Hose segment inventory flags and icons are not checked against the source build.
-            83430 => (Some(61), 6, None, false, false, None),
-            51557 => (Some(312), 1, Some(4569), false, false, Some(146482)),
-            _ => return Err(ReferenceError("unknown item prototype".into())),
+    fn validate_gib(&self, m: &ReferenceManifest, generic: bool) -> Result<(), ReferenceError> {
+        let b = &self.behavior;
+        ids(
+            b.scale_destroy.iter().copied(),
+            "duplicate scaleDestroyScript node",
+        )?;
+        require(
+            b.scale_destroy.iter().all(|n| self.within(m, *n)),
+            "gib scaleDestroyScript owner",
+        )?;
+        let Some(gib) = &b.gib else {
+            return require(generic, "box gib without gibscript");
         };
+        ids(gib.children.iter().copied(), "duplicate gib child")?;
+        // gibscript.Start adds torque or force to child Rigidbodies.
+        let pushed = gib.gib_main && (!gib.dont_rot || gib.add_small_pos);
+        require(
+            checked(&gib.source, gib.source.path_id)
+                && gib.life.is_finite()
+                && gib.life >= 0.
+                && !(gib.gib_main && gib.add_small_pos && gib.children.is_empty())
+                && gib.children.iter().all(|n| {
+                    *n != self.root
+                        && self.within(m, *n)
+                        && (!pushed || self.bodies.iter().any(|b| b.node == *n))
+                }),
+            "gib children",
+        )?;
+        if generic {
+            return Ok(());
+        }
+        require(
+            checked(
+                &gib.source,
+                if self.id.0.path_id == BOX_GIBS[0] {
+                    153704
+                } else {
+                    153707
+                },
+            ) && gib
+                .children
+                .iter()
+                .copied()
+                .eq(self.pickups.iter().map(|p| p.node)),
+            "debris child owners",
+        )
+    }
+    pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        let spec = match self.id.0.path_id {
+            75443 => Some((Some(74), 1, Some(4624), true, false, Some(149224))),
+            51722 => Some((Some(62), 1, None, false, false, Some(154651))),
+            61587 => Some((Some(216), 1, Some(4553), true, true, Some(144067))),
+            81642 => Some((None, 56, Some(4623), true, false, None)),
+            81645 => Some((None, 14, Some(4623), true, false, None)),
+            70812 => Some((Some(217), 1, Some(4557), true, false, Some(157660))),
+            53838 => Some((Some(218), 1, Some(4527), true, false, Some(147660))),
+            53837 => Some((Some(221), 1, Some(4529), true, false, Some(147659))),
+            63605 => Some((Some(245), 1, None, false, false, Some(147259))),
+            63259 => Some((Some(92), 1, Some(4590), true, false, Some(149587))),
+            54495 => Some((Some(230), 1, None, false, false, Some(134670))),
+            // Hose segment inventory flags and icons are not checked against the source build.
+            83430 => Some((Some(61), 6, None, false, false, None)),
+            51557 => Some((Some(312), 1, Some(4569), false, false, Some(146482))),
+            _ => None,
+        };
+        // Gibs other than the box gibs have no checked counts, icons or pickup flags.
+        let generic = spec.is_none();
+        require(!generic || self.item_id.is_none(), "unknown item prototype")?;
+        let (item_id, count, icon, inventory, hand, pickup_source) =
+            spec.unwrap_or((None, 0, None, false, false, None));
         let hose = item_id == Some(61);
         require(
             checked(&self.id.0, self.id.0.path_id)
@@ -377,24 +472,24 @@ impl ItemPrototype {
                 && self.within(m, self.root),
             "prototype identity",
         )?;
-        let (collider_count, renderer_count) = match self.id.0.path_id {
-            75443 => (1, 3),
-            51722 => (2, 3),
-            61587 => (2, 3),
-            81642 => (58, 56),
-            81645 => (15, 14),
-            70812 => (3, 25),
-            53838 => (2, 4),
-            53837 => (1, 2),
-            63605 => (12, 2),
-            63259 => (3, 2),
-            54495 => (1, 7),
-            83430 => (6, 0),
-            51557 => (1, 1),
-            _ => unreachable!(),
+        let geometry = match self.id.0.path_id {
+            75443 => Some((1, 3)),
+            51722 => Some((2, 3)),
+            61587 => Some((2, 3)),
+            81642 => Some((58, 56)),
+            81645 => Some((15, 14)),
+            70812 => Some((3, 25)),
+            53838 => Some((2, 4)),
+            53837 => Some((1, 2)),
+            63605 => Some((12, 2)),
+            63259 => Some((3, 2)),
+            54495 => Some((1, 7)),
+            83430 => Some((6, 0)),
+            51557 => Some((1, 1)),
+            _ => None,
         };
         require(
-            self.colliders.len() == collider_count && self.renderers.len() == renderer_count,
+            geometry.is_none_or(|g| g == (self.colliders.len(), self.renderers.len())),
             "complete selected geometry",
         )?;
         let bodies = ids(self.bodies.iter().map(|b| b.id), "duplicate local body")?;
@@ -412,7 +507,9 @@ impl ItemPrototype {
             "duplicate collider source",
         )?;
         require(
-            self.bodies.len() == count && self.pickups.len() == count && !self.colliders.is_empty(),
+            (generic || self.bodies.len() == count && self.pickups.len() == count)
+                && !self.bodies.is_empty()
+                && !self.colliders.is_empty(),
             "complete prototype physics",
         )?;
         for b in &self.bodies {
@@ -481,15 +578,16 @@ impl ItemPrototype {
                     && self.body_for(m, Some(p.node)) == Some(p.body)
                     && bodies.contains(&p.body)
                     && (hose
+                        || generic
                         || (p.pickup.can_inventory == expected_inventory
                             && p.pickup.inventory_icon.as_ref().map(|s| s.path_id)
                                 == expected_icon))
-                    && p.pickup.can_hold_right_hand == hand
+                    && (generic || p.pickup.can_hold_right_hand == hand)
                     && pickup_source
                         .is_none_or(|s| checked(&p.pickup.source, s) && p.node == self.root)
                     && p.collision_gain.is_finite()
                     && p.collision_gain >= 0.
-                    && if hose {
+                    && if hose || generic {
                         p.collision_clip.as_ref().is_none_or(|s| clip_exists(m, s))
                     } else {
                         p.collision_clip.as_ref().is_some_and(|s| {
@@ -576,7 +674,6 @@ impl ItemPrototype {
         }
         let b = &self.behavior;
         let expected_clips: &[i64] = match item_id {
-            Some(62) => &[4223, 4140],
             Some(216) => &[4241, 4452, 4144, 4208],
             _ => &[],
         };
@@ -625,12 +722,10 @@ impl ItemPrototype {
                 && b.spawn.is_some() == (item_id == Some(62))
                 && b.breakable.is_some() == (item_id == Some(62))
                 && b.mount.is_some() == (item_id == Some(62))
-                && b.debris.is_some() == (item_id == Some(62))
-                && b.reduced_debris.is_some() == (item_id == Some(62))
                 && b.melee.is_some() == (item_id == Some(216))
                 && b.attack_target.is_some() == (item_id == Some(216))
                 && b.attack_trigger.is_some() == (item_id == Some(216))
-                && b.gib.is_some() == item_id.is_none(),
+                && (item_id.is_none() || b.gib.is_none() && b.scale_destroy.is_empty()),
             "prototype behavior kinds",
         )?;
         match item_id {
@@ -648,13 +743,7 @@ impl ItemPrototype {
             Some(62) => require(
                 optional_checked(&b.spawn, 158204)
                     && optional_checked(&b.breakable, 135113)
-                    && optional_checked(&b.mount, 146589)
-                    && b.debris.as_ref().is_some_and(|id| {
-                        checked(&id.0, 81642) && m.item_prototypes.iter().any(|p| &p.id == id)
-                    })
-                    && b.reduced_debris.as_ref().is_some_and(|id| {
-                        checked(&id.0, 81645) && m.item_prototypes.iter().any(|p| &p.id == id)
-                    }),
+                    && optional_checked(&b.mount, 146589),
                 "Box source links",
             )?,
             Some(216) => require(
@@ -668,22 +757,7 @@ impl ItemPrototype {
                     }),
                 "shovel source links",
             )?,
-            None => require(
-                optional_checked(
-                    &b.gib,
-                    if self.id.0.path_id == 81642 {
-                        153704
-                    } else {
-                        153707
-                    },
-                ) && b
-                    .gib_children
-                    .iter()
-                    .copied()
-                    .eq(self.pickups.iter().map(|p| p.node))
-                    && self.pickups.iter().all(|p| p.node != self.root),
-                "debris child owners",
-            )?,
+            None => self.validate_gib(m, generic)?,
             _ => {}
         }
         require(self.hose.is_some() == hose, "hose owner")?;
@@ -697,10 +771,6 @@ impl ItemPrototype {
         if let Some(c) = &self.consumable {
             c.validate(self, m)?;
         }
-        require(
-            item_id.is_none() || b.gib_children.is_empty(),
-            "unexpected gib children",
-        )?;
         require(
             m.bodies.iter().all(|b| !self.within(m, b.node))
                 && m.items.iter().all(|i| !self.within(m, i.node))

@@ -192,30 +192,34 @@ fn structure_refresh_accumulates_both_foci_and_forced_refreshes() {
 fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
     let mut reference = reference();
     // Retain a checked source identity but remove collision from this ordering check.
-    let prototype = std::sync::Arc::get_mut(&mut reference.world)
+    let (source, scale) = std::sync::Arc::get_mut(&mut reference.world)
         .unwrap()
         .prototypes
-        .iter_mut()
-        .find(|p| p.role == crate::reference::WorldPrototypeRole::Structure)
-        .unwrap();
-    prototype.nodes.clear();
-    prototype.bodies.clear();
-    prototype.colliders.clear();
-    let source = prototype.source.clone();
-    let scale = prototype.prefab_pose.scale;
+        .edit(|prototypes| {
+            let prototype = prototypes
+                .iter_mut()
+                .find(|p| p.role == crate::reference::WorldPrototypeRole::Structure)
+                .unwrap();
+            prototype.nodes.clear();
+            prototype.bodies.clear();
+            prototype.colliders.clear();
+            (prototype.source.clone(), prototype.prefab_pose.scale)
+        });
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let stream = &mut run.stream;
     stream.request.player = [0.; 3];
     stream.request.vehicle = [100., 0., 0.];
-    stream.wanted_structures = [50., 101., -1.]
-        .into_iter()
-        .enumerate()
-        .map(|(index, x)| {
-            let mut p = replay_placement(&source, index as u32, [x, 0., 0.]);
-            p.scale = scale;
-            p
-        })
-        .collect();
+    stream.wanted_structures.edit(|list| {
+        *list = [50., 101., -1.]
+            .into_iter()
+            .enumerate()
+            .map(|(index, x)| {
+                let mut p = replay_placement(&source, index as u32, [x, 0., 0.]);
+                p.scale = scale;
+                p
+            })
+            .collect()
+    });
     stream.reserve_prototype(source.clone(), 0, 0).unwrap();
     stream.bind_prototype(&source).unwrap();
     stream.bind_structure_recipe(&source).unwrap();
@@ -1614,10 +1618,10 @@ fn replay_predicates_match_old_keys_for_instances_owners_and_removals() {
     );
     let history = stream.contents.state.capture_history();
     stream.prepare_contents();
-    assert_eq!(stream.wanted_structures, expected);
+    assert_eq!(*stream.wanted_structures, expected);
     // Existing unbound distant placements exercise the earlier retention predicate too.
     stream.prepare_contents();
-    assert_eq!(stream.wanted_structures, expected);
+    assert_eq!(*stream.wanted_structures, expected);
     assert_eq!(stream.contents.state.capture_history(), history);
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
 }
@@ -1962,7 +1966,7 @@ fn fixed_decorations_preserve_collision_without_item_bindings() {
     std::sync::Arc::get_mut(&mut reference.world)
         .unwrap()
         .prototypes
-        .push(wrong_file);
+        .edit(|prototypes| prototypes.push(wrong_file));
     let mut run = GarageRuntime::new_default(&reference).unwrap();
     let sources = [84448, 69558, 66737, 79572].map(decoration_source);
     for (ordinal, source) in sources.iter().enumerate() {

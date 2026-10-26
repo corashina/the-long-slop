@@ -353,6 +353,8 @@ impl PlayerState {
             recoil_velocity: self.recoil_velocity.to_array(),
             running: self.running,
             carry,
+            // GarageRuntime owns sleep and sets this field.
+            since_wake: 0.,
         })
     }
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.

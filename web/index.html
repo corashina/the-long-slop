@@ -26,11 +26,14 @@
 </dl></section>
 <section><h3>Driving</h3>
 <fieldset id="driving-assists"><legend>Driving assists</legend><label><input id="automatic-clutch" type="checkbox">Automatic clutch</label><label><input id="automatic-gears" type="checkbox">Automatic gears</label></fieldset>
+<fieldset id="mouse-driving"><legend>Mouse driving</legend><label for="mouse-drive-x">Mouse driving X <input id="mouse-drive-x" type="range"><output id="mouse-drive-x-value" for="mouse-drive-x"></output></label><label for="mouse-drive-y">Mouse driving Y <input id="mouse-drive-y" type="range"><output id="mouse-drive-y-value" for="mouse-drive-y"></output></label></fieldset>
+<fieldset id="steering-wheel"></fieldset>
 <dl><div><dt>Accelerate / brake</dt><dd>W / S</dd></div><div><dt>Steer</dt><dd>A / D</dd></div><div><dt>Headlights: off / low / high</dt><dd>L</dd></div>
 <div><dt>Ignition / starter</dt><dd>I / Hold I</dd></div><div><dt>Handbrake</dt><dd>Space</dd></div><div><dt>Clutch</dt><dd data-driving-binding="clutch"></dd></div>
 <div><dt>Shift up</dt><dd data-driving-binding="shift_up"></dd></div><div><dt>Shift down</dt><dd data-driving-binding="shift_down"></dd></div>
 <div><dt>Reverse</dt><dd data-driving-binding="reverse"></dd></div><div><dt>Neutral</dt><dd data-driving-binding="neutral"></dd></div>
 <div><dt>Gear 1</dt><dd data-driving-binding="gear1"></dd></div><div><dt>Gear 2</dt><dd data-driving-binding="gear2"></dd></div><div><dt>Gear 3</dt><dd data-driving-binding="gear3"></dd></div><div><dt>Gear 4</dt><dd data-driving-binding="gear4"></dd></div><div><dt>Gear 5</dt><dd data-driving-binding="gear5"></dd></div><div><dt>Gear 6</dt><dd data-driving-binding="gear6"></dd></div>
+<div><dt>Mouse driving</dt><dd data-driving-binding="mouse_drive"></dd></div>
 <div><dt>Camera</dt><dd>C</dd></div><div><dt>Get out</dt><dd>E</dd></div><div><dt>Menu</dt><dd>Esc</dd></div></dl></section>
 </div><div class="display-controls"><button id="back" type="button">Back</button><button id="fullscreen" type="button">Fullscreen</button><label for="scene-resolution">Scene resolution <select id="scene-resolution"><option value="1" selected>100%</option><option value="0.75">75%</option></select></label><label for="draw-distance">Draw distance <input id="draw-distance" type="range"><output id="draw-distance-value" for="draw-distance"></output></label></div></section>
 <section id="game-mode-screen" aria-labelledby="game-mode-title" hidden>

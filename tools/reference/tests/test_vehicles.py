@@ -86,7 +86,7 @@ def car_fixture():
     # Only the right hand has a drive frame, as a node under the root.
     hand = node(root)
     data[car.path_id].update(LHDrivePos=ptr(None), RHDrivePos=ptr(hand['reader']), LLDrivePos=ptr(None), RLDrivePos=ptr(None),
-        speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
+        speedBasedKeyboardSens=0, keySteerSensMultiplier=0, Transmission=ptr(None), RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
         WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), carType=1, startingTime=1.,
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
@@ -132,6 +132,9 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(vehicle['mass_kg'], 800.)
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
+        # A car without carscript.Transmission has no lever.
+        self.assertIsNone(vehicle['lever'])
+        self.assertEqual(vehicle['key_steer_multiplier'], 0)
         self.assertIsNone(vehicle['instruments'])
         self.assertEqual(vehicle['kmh_meters'], [])
         self.assertEqual(vehicle['gauge_limits']['electronics_output'], 1.)

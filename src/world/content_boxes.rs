@@ -4,7 +4,7 @@ use super::WorldStream;
 use crate::interaction::items::{ItemLocation, ItemStore};
 use crate::interaction::storage::StorageLocks;
 use crate::reference::{
-    BoxBreakRules, ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole,
+    BreakableReference, ItemId, ReferenceError, ReferenceManifest, SourceId, TriggerRole,
 };
 use crate::vehicle::PhysicsWorld;
 use crate::world::{AbsolutePose, GeneratedId, ObjectKey, Placement};
@@ -125,7 +125,7 @@ pub(crate) fn relocate(placement: &mut Placement, origin: &AbsolutePose, pose: &
 }
 
 /// Source breakablescript.OnCollisionEnter: the force passed to TryBreak.
-pub(crate) fn collision_force(rules: &BoxBreakRules, relative_speed: f32) -> Option<f32> {
+pub(crate) fn collision_force(rules: &BreakableReference, relative_speed: f32) -> Option<f32> {
     if rules.no_collider
         || rules.only_decrease_above && relative_speed < rules.decrease_above_health
     {
@@ -134,7 +134,7 @@ pub(crate) fn collision_force(rules: &BoxBreakRules, relative_speed: f32) -> Opt
     Some(relative_speed)
 }
 /// Source breakablescript.TryBreak(float). True breaks the box.
-pub(crate) fn try_break(rules: &BoxBreakRules, health: &mut f32, force: f32) -> bool {
+pub(crate) fn try_break(rules: &BreakableReference, health: &mut f32, force: f32) -> bool {
     if force >= *health {
         return true;
     }
@@ -158,8 +158,10 @@ pub(crate) struct BoxRuntime {
 }
 
 impl WorldStream {
-    fn box_rules<'a>(&self, reference: &'a ReferenceManifest) -> &'a BoxBreakRules {
-        &reference.acquisition.r#box.break_rules
+    fn box_rules<'a>(&self, reference: &'a ReferenceManifest) -> &'a BreakableReference {
+        reference
+            .breakable(&reference.acquisition.r#box.breakable)
+            .expect("validated box breakable")
     }
     /// Box content that waits for its box to break.
     pub(super) fn box_content_withheld(&self, id: &GeneratedId) -> bool {
@@ -343,20 +345,32 @@ mod tests {
     use crate::world::spawn_selection::{box_count, pick_weighted};
     use crate::world::{UnityRandom, WorldBounds};
 
-    /// acquisition.box.break_rules of item 62 (box01).
-    fn rules() -> BoxBreakRules {
-        BoxBreakRules {
+    /// breakables record of item 62 (box01).
+    fn rules() -> BreakableReference {
+        BreakableReference {
+            source: source(135113),
+            owners: Vec::new(),
             health: 7.,
+            shoot_health: 0.,
+            shoot_different: false,
+            explosion_health: 0.,
+            explosion_different: false,
+            no_shoot: false,
             decrease_after_attack: false,
             only_decrease_above: false,
             decrease_above_health: 0.,
-            mass_modifier: 0.,
             only_velocity: false,
+            mass_modifier: 1.,
+            child_modifier: 0.,
+            children: Vec::new(),
             no_trigger: true,
             no_collider: false,
-            no_destroy: false,
             no_gib: false,
-            destroyed: false,
+            no_destroy: false,
+            gib: None,
+            reduced_gib: None,
+            clips: Vec::new(),
+            lamp: None,
         }
     }
     fn source(path_id: i64) -> SourceId {
@@ -397,7 +411,7 @@ mod tests {
         // A hazard with damageBreakable d breaks the box when d * dt reaches health.
         assert!(!try_break(&rules, &mut health, 349. * 0.02));
         assert!(try_break(&rules, &mut health, 350. * 0.02));
-        let mut decreasing = BoxBreakRules {
+        let mut decreasing = BreakableReference {
             decrease_after_attack: true,
             ..rules.clone()
         };

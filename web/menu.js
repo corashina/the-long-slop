@@ -58,7 +58,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,slider,
  }
  clutch.addEventListener('change',requestDriving);gears.addEventListener('change',requestDriving);
  {
-  const names={ControlLeft:'Left Ctrl',ControlRight:'Right Ctrl',Numpad0:'Numpad 0',ArrowUp:'Up arrow',ArrowDown:'Down arrow',KeyR:'R',KeyN:'N',NumpadAdd:'Numpad +',NumpadSubtract:'Numpad -'};
+  const names={ControlLeft:'Left Ctrl',ControlRight:'Right Ctrl',Numpad0:'Numpad 0',ArrowUp:'Up arrow',ArrowDown:'Down arrow',KeyR:'R',KeyN:'N',KeyU:'U',NumpadAdd:'Numpad +',NumpadSubtract:'Numpad -'};
   for(const {action,codes} of drivingBindings){const node=document.querySelector('[data-driving-binding="'+action+'"]');node.textContent=codes.map(code=>names[code]??code.replace('Digit','').replace('Numpad','Numpad ')).join(' / ');}
  }
  const columnWrapper=document.querySelector('.control-columns'),columns=columnWrapper.querySelectorAll(':scope > section');

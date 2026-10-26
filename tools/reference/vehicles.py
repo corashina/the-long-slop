@@ -5,7 +5,7 @@ Ids are local to one world prototype: node, body and collider indices.
 import math
 from .source import key, source_id
 from .wheels import wheel_collider_record
-from .driving import car_driving, road_wheels, hub_record, wheel_graphics
+from .driving import car_driving, road_wheels, hub_record, wheel_graphics, recover_lever
 from .instruments import instrument_record, gauge_limits, Meters
 from .lighting import vehicle_light_links, vehicle_states
 from .particles import recover_exhaust
@@ -226,7 +226,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
     cars=[c for i,c in proto.scripts('carscript') if i==0]
     if not cars:return None
     car_reader=cars[0];car=source.read(car_reader)
-    if car['speedBasedKeyboardSens'] or car['keySteerSensMultiplier']!=0:
+    if car['speedBasedKeyboardSens']:
         raise ValueError(f'Car requires unsupported speed-based keyboard steering: {key(car_reader)}')
     rigidbody=source.resolve(car_reader,car['RB'])
     body=next((i for i,b in enumerate(bodies) if b['source']==source_id(rigidbody)),None) if rigidbody else None
@@ -275,6 +275,9 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'exhaust':recover_exhaust(source,car_reader,car,hierarchy[0]['reader'],car_reader.path_id,output),
         'wheel_effects':recover_wheel_effects(source,car_reader,car,hierarchy[0]['reader'],[source.get(*identity) for identity in sorted(road)],car_reader.path_id,output),
         'effect_gains':effect_gains(car),
+        'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
+        # inputscript.DriveStuff uses the multiplier only when it is not zero.
+        'key_steer_multiplier':car['keySteerSensMultiplier'],
         'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),

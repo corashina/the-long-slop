@@ -364,6 +364,9 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &mut candidate.physics,
         )?;
+        candidate
+            .sleep
+            .restore(saved.player.since_wake, candidate.simulation_seconds);
         candidate.survival.restore_save(&saved.needs);
         if let Some(carry) = saved
             .player
@@ -578,6 +581,7 @@ impl GarageRuntime {
                 snapshot.bodies.retain(|b| !matches!(&b.identity, BodyIdentity::Assembly { root } if root == &saved.instance));
             }
         }
+        snapshot.player.since_wake = self.sleep.since_wake(self.simulation_seconds);
         snapshot.validate(reference, source)?;
         Ok(snapshot)
     }
