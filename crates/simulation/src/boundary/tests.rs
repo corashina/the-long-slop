@@ -17,9 +17,21 @@ fn frame_round_trips() {
             flags: StateBlock::STARTED | StateBlock::SEATED,
             fov_degrees: 60.,
             stored_items: [0, 8, 0, 3],
+            body_pose: row(7.),
+            body_root: row(8.),
+            joint_scale: 0.01,
+            pad: 0,
         },
         previous: vec![row(1.), row(4.)],
         current: vec![row(2.), row(5.)],
+        items: vec![
+            ItemRow::default(),
+            ItemRow {
+                scale: 0.5,
+                bite: 2,
+            },
+        ],
+        joints: vec![row(9.)],
         valves: vec![ValveRow {
             opening: 4,
             valve: 0.5,
@@ -28,7 +40,14 @@ fn frame_round_trips() {
             Change::Spawn {
                 handle: Handle(1),
                 key: PoseKey::Item(ItemId(7)),
+                data: SpawnData::Spawned(crate::starting_area::spawned::SpawnedItem {
+                    id: ItemId(7),
+                    serial: 2,
+                    prototype: 3,
+                    pickup: 1,
+                }),
             },
+            Change::PlayerRig(vec![crate::reference::NodeId(5)]),
             Change::Retire(Handle(0)),
             Change::Failure("stream".into()),
         ],

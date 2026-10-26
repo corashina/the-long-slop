@@ -1,6 +1,6 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
-use crate::boundary::{Handle, SimFrame, StateBlock, ValveRow};
+use crate::boundary::{Handle, PoseRow, SimFrame, StateBlock, ValveRow};
 use crate::interaction::items::ItemLocation;
 use crate::reference::ReferenceManifest;
 
@@ -37,6 +37,10 @@ impl GarageRuntime {
             flags,
             fov_degrees: area.player.view(&self.physics).fov_degrees,
             stored_items,
+            body_pose: PoseRow::new(area.player.body_pose(&self.physics), 0),
+            body_root: PoseRow::new(area.body.root_local(), 0),
+            joint_scale: area.body.joint_scale(),
+            pad: 0,
         };
         frame.valves.clear();
         frame.valves.extend(
@@ -47,7 +51,8 @@ impl GarageRuntime {
                     valve,
                 }),
         );
-        self.frame_poses.fill(&self.area, &self.physics, frame);
+        self.frame_poses
+            .fill(reference, &self.area, &self.physics, frame);
     }
     /// The renderer dropped a retired pose handle.
     pub fn release_pose(&mut self, handle: Handle) {
@@ -80,7 +85,7 @@ mod tests {
             run.step(&reference, FrameInput::default());
             run.fill_frame(&reference, 0.5, &mut frame);
             for change in &frame.changes {
-                if let Change::Spawn { handle, key } = change {
+                if let Change::Spawn { handle, key, .. } = change {
                     keys.push((*handle, *key));
                 }
             }

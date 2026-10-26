@@ -1,12 +1,14 @@
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
-use crate::app::{Drive, RuntimeReference};
+use super::sim_frame::SimFrameResource;
+use crate::app::RuntimeReference;
 use crate::reference::{AssetUsage, ItemId, NodeId, SourceId};
 use crate::vehicle::{from_rapier, to_rapier};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use simulation::boundary::{PoseKey, SpawnData};
 use std::collections::HashMap;
 
 #[derive(Component)]
@@ -45,7 +47,7 @@ struct Identity {
 pub(crate) fn sync(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut food: ResMut<ConsumableVisuals>,
@@ -61,44 +63,51 @@ pub(crate) fn sync(
     }
     let manifest = &reference.0;
     let starter = manifest.survival.starter_food;
-    if let Some(item) = drive.runtime.area.items.get(starter) {
-        let prototype = &manifest.survival.foods[item.food.unwrap().prototype_index];
-        if let Some(&root) = visuals.nodes.get(
-            &manifest
-                .items
-                .iter()
-                .find(|record| record.id == starter)
-                .unwrap()
-                .node,
-        ) {
-            set_visibility(&mut visibility, root, !item.removed);
-        }
-        for (index, group) in manifest.survival.starter_parts.iter().enumerate() {
-            for node in group {
-                if let Some(&entity) = visuals.nodes.get(node) {
-                    set_visibility(
-                        &mut visibility,
-                        entity,
-                        !item.removed
-                            && index == item.food.unwrap().bite as usize
-                            && index < prototype.bites as usize,
-                    );
-                }
+    // An eaten starter food leaves the frame.
+    let starter_food = frame.food(starter);
+    if let Some(&root) = visuals.nodes.get(
+        &manifest
+            .items
+            .iter()
+            .find(|record| record.id == starter)
+            .unwrap()
+            .node,
+    ) {
+        set_visibility(&mut visibility, root, starter_food.is_some());
+    }
+    for (index, group) in manifest.survival.starter_parts.iter().enumerate() {
+        for node in group {
+            if let Some(&entity) = visuals.nodes.get(node) {
+                set_visibility(
+                    &mut visibility,
+                    entity,
+                    starter_food.is_some_and(|(prototype, bite)| {
+                        index == bite as usize
+                            && index < manifest.survival.foods[prototype].bites as usize
+                    }),
+                );
             }
         }
     }
-    for item in drive.runtime.area.items.iter().filter(|item| {
-        item.food.is_some() && item.id != starter && !drive.runtime.area.items.is_generated(item.id)
-    }) {
-        if item.removed {
-            if let Some(instance) = food.instances.remove(&item.id) {
-                commands.entity(instance.root).despawn();
-            }
+    food.instances.retain(|id, instance| {
+        let keep = frame.food(*id).is_some();
+        if !keep {
+            commands.entity(instance.root).despawn();
+        }
+        keep
+    });
+    for (id, data) in frame.items() {
+        if id == starter || !matches!(data, SpawnData::Food { .. }) {
             continue;
         }
-        let state = item.food.unwrap();
-        let prototype = &manifest.survival.foods[state.prototype_index];
-        if !food.instances.contains_key(&item.id) {
+        let Some((prototype_index, bite)) = frame.food(id) else {
+            continue;
+        };
+        let Some(pose) = frame.interpolated(PoseKey::Item(id)) else {
+            continue;
+        };
+        let prototype = &manifest.survival.foods[prototype_index];
+        if !food.instances.contains_key(&id) {
             let asset = manifest
                 .assets
                 .iter()
@@ -115,7 +124,6 @@ pub(crate) fn sync(
             let Some(gltf) = gltfs.get(handle) else {
                 continue;
             };
-            let id = item.id;
             let generation = food.generation;
             let root = commands
                 .spawn((
@@ -138,7 +146,7 @@ pub(crate) fn sync(
                 )
                 .id();
             food.instances.insert(
-                item.id,
+                id,
                 FoodInstance {
                     root,
                     ready: false,
@@ -153,7 +161,7 @@ pub(crate) fn sync(
             );
             continue;
         }
-        let instance = food.instances.get_mut(&item.id).unwrap();
+        let instance = food.instances.get_mut(&id).unwrap();
         if !instance.ready {
             continue;
         }
@@ -221,21 +229,6 @@ pub(crate) fn sync(
             }
             instance.source_materials_bound = true;
         }
-        let pose = drive
-            .runtime
-            .area
-            .item_render_poses
-            .iter()
-            .find(|(id, _, _)| *id == item.id)
-            .map_or(item.pose, |(_, previous, current)| {
-                super::interpolate(
-                    *previous,
-                    *current,
-                    drive
-                        .clock
-                        .alpha(drive.runtime.clock_factors(manifest).time_scale),
-                )
-            });
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
             transform.set_if_neq(super::transform(from_rapier(
                 &(to_rapier(pose) * instance.source_root.inverse()),
@@ -251,7 +244,7 @@ pub(crate) fn sync(
         for (index, group) in prototype.parts.iter().enumerate() {
             for node in group {
                 if let Some(&(_, entity)) = instance.nodes.iter().find(|(id, _)| id == node) {
-                    set_visibility(&mut visibility, entity, index == state.bite as usize);
+                    set_visibility(&mut visibility, entity, index == bite as usize);
                 }
             }
         }

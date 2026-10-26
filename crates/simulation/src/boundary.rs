@@ -1,9 +1,11 @@
 //! The data that crosses between the simulation and the renderer.
 //! `SimFrame` goes out once per tick. `SimCommand` comes in once per rendered frame.
 //! Poses and state are Pod rows; rare changes are postcard encoded.
-use crate::reference::{BodyId, ItemId, OpeningId};
+use crate::interaction::items::ItemLocation;
+use crate::reference::{BodyId, ItemId, NodeId, OpeningId, ReferenceManifest};
 use crate::simulation::FrameInput;
 use crate::starting_area::StartingArea;
+use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
@@ -92,7 +94,7 @@ impl PoseRow {
             rotation: self.rotation,
         }
     }
-    fn new(pose: VehiclePose, flags: u32) -> Self {
+    pub fn new(pose: VehiclePose, flags: u32) -> Self {
         Self {
             position: pose.position,
             flags,
@@ -114,6 +116,14 @@ pub struct StateBlock {
     pub fov_degrees: f32,
     /// Items stored in the inventory slots, as `ItemId + 1`. 0 is an empty slot.
     pub stored_items: [u32; 4],
+    /// Player body at the current pose; the renderer moves it with the camera interpolation.
+    pub body_pose: PoseRow,
+    /// `CharacterRoot` relative to the Player.
+    pub body_root: PoseRow,
+    /// Uniform scale of every joint relative to `CharacterRoot`.
+    pub joint_scale: f32,
+    /// Keeps the block free of implicit padding.
+    pub pad: u32,
 }
 
 impl StateBlock {
@@ -133,6 +143,27 @@ pub struct ValveRow {
     pub valve: f32,
 }
 
+/// Per-handle item state. Body rows stay zero.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ItemRow {
+    /// Gib shrink scale; 1 for other items.
+    pub scale: f32,
+    /// Food bite index.
+    pub bite: u32,
+}
+
+/// What the renderer needs to build a new handle's visual.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SpawnData {
+    /// The visual already exists in the reference scene.
+    Bound,
+    /// A spawned item prototype body.
+    Spawned(SpawnedItem),
+    /// A food item that is not world content.
+    Food { prototype: u32 },
+}
+
 /// What a pose handle stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PoseKey {
@@ -147,7 +178,10 @@ pub enum Change {
     Spawn {
         handle: Handle,
         key: PoseKey,
+        data: SpawnData,
     },
+    /// Skin joint nodes of the player body, in `SimFrame::joints` order.
+    PlayerRig(Vec<NodeId>),
     /// The renderer drops the handle, then releases it.
     Retire(Handle),
     Failure(String),
@@ -162,7 +196,10 @@ pub struct SimFrame {
     /// Poses at the step before `current`, indexed by handle.
     pub previous: Vec<PoseRow>,
     pub current: Vec<PoseRow>,
+    pub items: Vec<ItemRow>,
     pub valves: Vec<ValveRow>,
+    /// Player body joints relative to `CharacterRoot`.
+    pub joints: Vec<PoseRow>,
     pub changes: Vec<Change>,
 }
 
@@ -194,48 +231,51 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     out.clear();
     out.extend_from_slice(&frame.seq_consumed.to_le_bytes());
     out.extend_from_slice(bytemuck::bytes_of(&frame.state));
-    out.extend_from_slice(&(frame.current.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytemuck::cast_slice(&frame.previous));
-    out.extend_from_slice(bytemuck::cast_slice(&frame.current));
-    out.extend_from_slice(&(frame.valves.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytemuck::cast_slice(&frame.valves));
+    put_rows(out, &frame.previous);
+    put_rows(out, &frame.current);
+    put_rows(out, &frame.items);
+    put_rows(out, &frame.valves);
+    put_rows(out, &frame.joints);
     *out = postcard::to_extend(&frame.changes, std::mem::take(out)).expect("frame changes encode");
 }
 
 /// Reads `bytes` into `frame`, reusing its arrays.
 pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     let mut rest = bytes;
-    let mut take = |n: usize| {
-        if rest.len() < n {
-            return Err(DecodeError("short frame".into()));
-        }
-        let (head, tail) = rest.split_at(n);
-        rest = tail;
-        Ok(head)
-    };
-    frame.seq_consumed = u64::from_le_bytes(take(8)?.try_into().expect("8 bytes"));
-    frame.state = bytemuck::pod_read_unaligned(take(size_of::<StateBlock>())?);
-    let rows = u32::from_le_bytes(take(4)?.try_into().expect("4 bytes")) as usize;
-    for poses in [&mut frame.previous, &mut frame.current] {
-        poses.clear();
-        poses.extend(
-            take(rows * size_of::<PoseRow>())?
-                .as_chunks::<{ size_of::<PoseRow>() }>()
-                .0
-                .iter()
-                .map(|row| bytemuck::cast::<_, PoseRow>(*row)),
-        );
-    }
-    let valves = u32::from_le_bytes(take(4)?.try_into().expect("4 bytes")) as usize;
-    frame.valves.clear();
-    frame.valves.extend(
-        take(valves * size_of::<ValveRow>())?
-            .as_chunks::<{ size_of::<ValveRow>() }>()
-            .0
-            .iter()
-            .map(|row| bytemuck::cast::<_, ValveRow>(*row)),
-    );
+    frame.seq_consumed = u64::from_le_bytes(take(&mut rest, 8)?.try_into().expect("8 bytes"));
+    frame.state = bytemuck::pod_read_unaligned(take(&mut rest, size_of::<StateBlock>())?);
+    take_rows(&mut rest, &mut frame.previous)?;
+    take_rows(&mut rest, &mut frame.current)?;
+    take_rows(&mut rest, &mut frame.items)?;
+    take_rows(&mut rest, &mut frame.valves)?;
+    take_rows(&mut rest, &mut frame.joints)?;
     frame.changes = postcard::from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
+    Ok(())
+}
+
+fn put_rows<T: Pod>(out: &mut Vec<u8>, rows: &[T]) {
+    out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytemuck::cast_slice(rows));
+}
+
+fn take<'a>(rest: &mut &'a [u8], n: usize) -> Result<&'a [u8], DecodeError> {
+    if rest.len() < n {
+        return Err(DecodeError("short frame".into()));
+    }
+    let (head, tail) = rest.split_at(n);
+    *rest = tail;
+    Ok(head)
+}
+
+fn take_rows<T: Pod>(rest: &mut &[u8], rows: &mut Vec<T>) -> Result<(), DecodeError> {
+    let n = u32::from_le_bytes(take(rest, 4)?.try_into().expect("4 bytes")) as usize;
+    let bytes = take(rest, n * size_of::<T>())?;
+    rows.clear();
+    rows.extend(
+        bytes
+            .chunks_exact(size_of::<T>())
+            .map(bytemuck::pod_read_unaligned::<T>),
+    );
     Ok(())
 }
 
@@ -255,22 +295,27 @@ pub struct FramePoses {
     /// Tick stamp per handle. A live handle without the current stamp left the area.
     seen: Vec<u32>,
     stamp: u32,
+    /// Joint count of the last `PlayerRig` change.
+    rig_joints: Option<usize>,
 }
 
 impl FramePoses {
     /// Writes the area poses into `frame` and adds `Spawn` and `Retire` changes.
-    pub fn fill(&mut self, area: &StartingArea, physics: &PhysicsWorld, frame: &mut SimFrame) {
+    pub fn fill(
+        &mut self,
+        reference: &ReferenceManifest,
+        area: &StartingArea,
+        physics: &PhysicsWorld,
+        frame: &mut SimFrame,
+    ) {
         self.stamp = self.stamp.wrapping_add(1);
-        frame.previous.resize(self.seen.len(), PoseRow::default());
-        frame.current.resize(self.seen.len(), PoseRow::default());
+        let rows = self.seen.len();
+        frame.previous.resize(rows, PoseRow::default());
+        frame.current.resize(rows, PoseRow::default());
+        frame.items.resize(rows, ItemRow::default());
         let stored = area.inventory.slots.map(|id| {
             id.and_then(|id| area.items.get(id))
-                .filter(|i| {
-                    matches!(
-                        i.location,
-                        crate::interaction::items::ItemLocation::Stored(_)
-                    )
-                })
+                .filter(|i| matches!(i.location, ItemLocation::Stored(_)))
                 .and_then(|i| i.body)
         });
         for (id, previous, current) in &area.render_poses {
@@ -281,15 +326,40 @@ impl FramePoses {
             } else {
                 0
             } | if stored { PoseRow::STORED } else { 0 };
-            self.write(PoseKey::Body(*id), *previous, *current, flags, frame);
+            let slot = self.write(PoseKey::Body(*id), || SpawnData::Bound, frame);
+            frame.previous[slot] = PoseRow::new(*previous, flags);
+            frame.current[slot] = PoseRow::new(*current, flags);
         }
+        let starter = reference.survival.starter_food;
         for (id, previous, current) in &area.item_render_poses {
-            let visible = area
-                .items
-                .get(*id)
-                .is_some_and(|item| item.inactive_pose.is_none());
-            let flags = if visible { PoseRow::VISIBLE } else { 0 };
-            self.write(PoseKey::Item(*id), *previous, *current, flags, frame);
+            let item = area.items.get(*id);
+            let mut flags = 0;
+            if item.is_some_and(|item| item.inactive_pose.is_none()) {
+                flags |= PoseRow::VISIBLE;
+            }
+            if item.is_some_and(|item| matches!(item.location, ItemLocation::Stored(_))) {
+                flags |= PoseRow::STORED;
+            }
+            let data = || {
+                if let Some(spawned) = area.spawned.get(*id) {
+                    SpawnData::Spawned(*spawned)
+                } else if let Some(food) = item.and_then(|i| i.food)
+                    && (*id == starter || !area.items.is_generated(*id))
+                {
+                    SpawnData::Food {
+                        prototype: food.prototype_index as u32,
+                    }
+                } else {
+                    SpawnData::Bound
+                }
+            };
+            let slot = self.write(PoseKey::Item(*id), data, frame);
+            frame.previous[slot] = PoseRow::new(*previous, flags);
+            frame.current[slot] = PoseRow::new(*current, flags);
+            frame.items[slot] = ItemRow {
+                scale: area.gibs.scale(*id).unwrap_or(1.),
+                bite: item.and_then(|i| i.food).map_or(0, |f| u32::from(f.bite)),
+            };
         }
         for (slot, seen) in self.seen.iter().enumerate() {
             let handle = Handle(slot as u32);
@@ -297,37 +367,52 @@ impl FramePoses {
                 self.handles.retire(handle);
                 frame.previous[slot] = PoseRow::default();
                 frame.current[slot] = PoseRow::default();
+                frame.items[slot] = ItemRow::default();
                 frame.changes.push(Change::Retire(handle));
             }
         }
+        let body = &area.body;
+        if self.rig_joints != Some(body.joint_count()) {
+            self.rig_joints = Some(body.joint_count());
+            frame.changes.push(Change::PlayerRig(
+                (0..body.joint_count())
+                    .map(|i| body.joint_node(i))
+                    .collect(),
+            ));
+        }
+        frame.joints.clear();
+        frame
+            .joints
+            .extend((0..body.joint_count()).map(|i| PoseRow::new(body.joint_local(i), 0)));
     }
     /// The renderer dropped `handle`.
     pub fn release(&mut self, handle: Handle) {
         self.handles.release(handle);
     }
+    /// The row of `key`, with a `Spawn` change when the key is new.
     fn write(
         &mut self,
         key: PoseKey,
-        previous: VehiclePose,
-        current: VehiclePose,
-        flags: u32,
+        data: impl FnOnce() -> SpawnData,
         frame: &mut SimFrame,
-    ) {
+    ) -> usize {
         let (handle, new) = self.handles.assign(key);
         let slot = handle.0 as usize;
         if slot >= self.seen.len() {
             self.seen.resize(slot + 1, 0);
-        }
-        if slot >= frame.current.len() {
             frame.previous.resize(slot + 1, PoseRow::default());
             frame.current.resize(slot + 1, PoseRow::default());
+            frame.items.resize(slot + 1, ItemRow::default());
         }
         if new {
-            frame.changes.push(Change::Spawn { handle, key });
+            frame.changes.push(Change::Spawn {
+                handle,
+                key,
+                data: data(),
+            });
         }
         self.seen[slot] = self.stamp;
-        frame.previous[slot] = PoseRow::new(previous, flags);
-        frame.current[slot] = PoseRow::new(current, flags);
+        slot
     }
 }
 

@@ -3,6 +3,7 @@
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use super::renderers::AuthoredRenderer;
+use super::sim_frame::SimFrameResource;
 use crate::app::{Drive, RuntimeReference};
 use crate::reference::{NodeId, SourceId};
 use bevy::ecs as bevy_ecs;
@@ -47,7 +48,7 @@ fn bind(
     event: On<WorldInstanceReady>,
     mut commands: Commands,
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     mut body: ResMut<PlayerBody>,
     children: Query<&Children>,
     extras: Query<&GltfExtras>,
@@ -114,10 +115,7 @@ fn bind(
         return;
     };
     // BodyState poses every joint relative to CharacterRoot, so each joint is its direct child.
-    let state = &drive.runtime.area.body;
-    let posed: Vec<Entity> = (0..state.joint_count())
-        .map(|i| body.joints[&state.joint_node(i)])
-        .collect();
+    let posed: Vec<Entity> = frame.rig().iter().map(|node| body.joints[node]).collect();
     for joint in &posed {
         commands.entity(*joint).insert(ChildOf(root));
     }
@@ -128,6 +126,7 @@ pub(crate) fn sync(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut body: ResMut<PlayerBody>,
@@ -180,19 +179,20 @@ pub(crate) fn sync(
     }
     if let Ok((mut transform, _, _)) = nodes.get_mut(player) {
         let scale = transform.scale;
-        transform.set_if_neq(super::transform(drive.rendered_body_pose()).with_scale(scale));
+        let pose = drive.rendered_body_pose(frame.frame.state.body_pose.pose());
+        transform.set_if_neq(super::transform(pose).with_scale(scale));
     }
-    let state = &drive.runtime.area.body;
+    let state = &frame.frame.state;
     if let Some(root) = body.character_root
         && let Ok((mut transform, _, _)) = nodes.get_mut(root)
     {
         let scale = transform.scale;
-        transform.set_if_neq(super::transform(state.root_local()).with_scale(scale));
+        transform.set_if_neq(super::transform(state.body_root.pose()).with_scale(scale));
     }
-    let scale = Vec3::splat(state.joint_scale());
-    for (i, joint) in body.posed.iter().enumerate() {
+    let scale = Vec3::splat(state.joint_scale);
+    for (joint, row) in body.posed.iter().zip(&frame.frame.joints) {
         if let Ok((mut transform, _, _)) = nodes.get_mut(*joint) {
-            transform.set_if_neq(super::transform(state.joint_local(i)).with_scale(scale));
+            transform.set_if_neq(super::transform(row.pose()).with_scale(scale));
         }
     }
 }

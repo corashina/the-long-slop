@@ -1,10 +1,10 @@
 //! Scene instances of spawned item prototype bodies.
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
-use crate::app::{Drive, RuntimeReference};
-use crate::interaction::items::ItemLocation;
+use super::sim_frame::SimFrameResource;
+use crate::app::RuntimeReference;
 use crate::reference::{AssetUsage, ItemId, ItemPrototype, NodeId, ReferenceManifest, SourceId};
-use crate::starting_area::spawned::{SpawnedItem, SpawnedItems};
+use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
 use bevy::ecs as bevy_ecs;
 use bevy::ecs::system::SystemParam;
@@ -12,6 +12,7 @@ use bevy::gltf::GltfExtras;
 use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use simulation::boundary::{PoseKey, PoseRow};
 use std::collections::HashMap;
 
 #[derive(Component)]
@@ -153,7 +154,7 @@ fn skin_body(manifest: &ReferenceManifest, prototype: &ItemPrototype) -> Option<
 /// Bound scene node of the sibling item (same spawn serial) that owns `body`.
 fn sibling_node(
     spawned: &SpawnedVisuals,
-    items: &SpawnedItems,
+    items: &[SpawnedItem],
     prototype: &ItemPrototype,
     item: &SpawnedItem,
     body: &crate::reference::BodyRecord,
@@ -171,7 +172,7 @@ fn sibling_node(
 fn bind_skin(
     commands: &mut Commands,
     spawned: &SpawnedVisuals,
-    items: &SpawnedItems,
+    items: &[SpawnedItem],
     prototype: &ItemPrototype,
     item: &SpawnedItem,
     primitives: &Query<(Entity, &ChildOf), With<Mesh3d>>,
@@ -231,7 +232,7 @@ pub(crate) struct SceneQueries<'w, 's> {
 pub(crate) fn sync(
     mut commands: Commands,
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     mut spawned: ResMut<SpawnedVisuals>,
@@ -250,19 +251,19 @@ pub(crate) fn sync(
         return;
     }
     let manifest = &reference.0;
-    let area = &drive.runtime.area;
+    let items = frame.spawned();
     let stale: Vec<ItemId> = spawned
         .instances
         .keys()
         .copied()
-        .filter(|id| !area.spawned.contains(*id))
+        .filter(|id| !items.iter().any(|item| item.id == *id))
         .collect();
     for id in stale {
         let instance = spawned.instances.remove(&id).unwrap();
         commands.entity(instance.root).despawn();
     }
-    for item in area.spawned.iter() {
-        let Some(state) = area.items.get(item.id) else {
+    for item in items {
+        let Some((_, current)) = frame.pose(PoseKey::Item(item.id)) else {
             continue;
         };
         let prototype = &manifest.item_prototypes[item.prototype];
@@ -418,22 +419,12 @@ pub(crate) fn sync(
             }
             instance.source_materials_bound = true;
         }
-        let pose = area
-            .item_render_poses
-            .iter()
-            .find(|(id, _, _)| *id == item.id)
-            .map_or(state.pose, |(_, previous, current)| {
-                super::interpolate(
-                    *previous,
-                    *current,
-                    drive
-                        .clock
-                        .alpha(drive.runtime.clock_factors(manifest).time_scale),
-                )
-            });
+        let pose = frame
+            .interpolated(PoseKey::Item(item.id))
+            .expect("indexed spawned item");
         if let Ok(mut transform) = transforms.get_mut(instance.root) {
             // scaleDestroyScript scales the gib about its body node.
-            let scale = area.gibs.scale(item.id).unwrap_or(1.);
+            let scale = frame.item(item.id).map_or(1., |row| row.scale);
             let mut body_to_scene = instance.body_to_scene;
             body_to_scene.translation *= scale;
             transform.set_if_neq(
@@ -441,7 +432,7 @@ pub(crate) fn sync(
                     .with_scale(Vec3::splat(scale)),
             );
         }
-        let shown = !matches!(state.location, ItemLocation::Stored(_));
+        let shown = current.flags & PoseRow::STORED == 0;
         if let Ok(mut v) = visibility.get_mut(instance.root) {
             v.set_if_neq(if shown {
                 Visibility::Inherited
@@ -453,7 +444,7 @@ pub(crate) fn sync(
             && bind_skin(
                 &mut commands,
                 &spawned,
-                &area.spawned,
+                items,
                 prototype,
                 item,
                 &primitives,

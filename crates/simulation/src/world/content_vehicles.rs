@@ -199,7 +199,9 @@ pub(super) fn bind(
             continue;
         };
         let oil_tank = record.oil_tank.and_then(node_item);
-        register_engine(item, record, prototype, oil_tank, items, powertrain, changes)?;
+        register_engine(
+            item, record, prototype, oil_tank, items, powertrain, changes,
+        )?;
     }
     for record in &prototype.radiators {
         let Some(item) = node_item(record.node) else {
