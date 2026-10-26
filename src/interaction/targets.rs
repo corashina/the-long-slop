@@ -378,7 +378,8 @@ impl InteractionState {
             match action {
                 QueryAction::Use => binding
                     .and_then(|binding| binding.use_owner)
-                    .filter(|id| self.supports_use(*id)),
+                    .filter(|id| self.supports_use(*id))
+                    .or_else(|| self.item_seats.get(&handle).map(|seat| seat.item)),
                 QueryAction::Fill => binding.and_then(|binding| binding.use_owner).filter(|id| {
                     self.filling_items.contains(id)
                         && self.held().is_some()

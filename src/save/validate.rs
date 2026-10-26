@@ -535,43 +535,51 @@ impl SaveSnapshot {
         )?;
         if let Some(seat) = &p.seat {
             local(&seat.local_pose)?;
-            let vehicle_index = ids
-                .vehicles
-                .iter()
-                .position(|id| id == &seat.vehicle)
-                .ok_or_else(|| invalid("Seat vehicle"))?;
-            let vehicle = self
-                .vehicles
-                .iter()
-                .find(|v| v.instance == seat.vehicle)
-                .ok_or_else(|| invalid("Seat vehicle"))?;
-            links(
-                seat.vehicle == self.progress.selected_vehicle,
-                "Selected seat vehicle",
-            )?;
-            data(
-                p.pose
-                    .position
-                    .iter()
-                    .zip(vehicle.body.pose.position)
-                    .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
-                "Seat relative position",
-            )?;
-            let seat_id = ids
-                .seats
-                .get(&seat.source)
-                .ok_or_else(|| invalid("Unknown seat"))?;
-            let source = reference.seats.iter().find(|s| s.id == *seat_id).unwrap();
-            let mut root = source.item;
-            while let Some(parent) = parents.get(&root) {
-                root = *parent;
+            match &seat.owner {
+                SeatOwnerSnapshot::Vehicle { vehicle } => {
+                    let vehicle_index = ids
+                        .vehicles
+                        .iter()
+                        .position(|id| id == vehicle)
+                        .ok_or_else(|| invalid("Seat vehicle"))?;
+                    let record = self
+                        .vehicles
+                        .iter()
+                        .find(|v| v.instance == *vehicle)
+                        .ok_or_else(|| invalid("Seat vehicle"))?;
+                    links(
+                        *vehicle == self.progress.selected_vehicle,
+                        "Selected seat vehicle",
+                    )?;
+                    data(
+                        p.pose
+                            .position
+                            .iter()
+                            .zip(record.body.pose.position)
+                            .all(|(a, b)| (*a - b).abs() <= f64::from(crate::world::REBASE_LIMIT)),
+                        "Seat relative position",
+                    )?;
+                    let seat_id = ids
+                        .seats
+                        .get(&seat.source)
+                        .ok_or_else(|| invalid("Unknown seat"))?;
+                    let source = reference.seats.iter().find(|s| s.id == *seat_id).unwrap();
+                    let mut root = source.item;
+                    while let Some(parent) = parents.get(&root) {
+                        root = *parent;
+                    }
+                    links(
+                        reference.items.iter().any(|item| {
+                            item.id == root && item.node == reference.vehicles[vehicle_index].root
+                        }),
+                        "Seat is detached from vehicle",
+                    )?;
+                }
+                // validate_world checks the item key. The seat binding checks the source at restore.
+                SeatOwnerSnapshot::Item { .. } => {
+                    seat.source.source_id()?;
+                }
             }
-            links(
-                reference.items.iter().any(|item| {
-                    item.id == root && item.node == reference.vehicles[vehicle_index].root
-                }),
-                "Seat is detached from vehicle",
-            )?;
         }
         let held: Vec<_> = items
             .values()

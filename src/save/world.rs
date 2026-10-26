@@ -465,10 +465,7 @@ impl PersistentWorld {
                     .is_some_and(|h| physics.body_active(*h))
             } else {
                 Some(handle) == held
-                    || area
-                        .player
-                        .seat_vehicle()
-                        .is_some_and(|vehicle| handle == physics.chassis_handle(vehicle))
+                    || area.player.seat_body() == Some(handle)
                     || (bounded
                         && stream.supports(crate::world::WorldBounds {
                             min: absolute.map(|v| v - extent - 2.),

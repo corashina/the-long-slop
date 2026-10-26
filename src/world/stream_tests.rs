@@ -5,6 +5,8 @@ mod cargo;
 mod drive_out;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
+#[path = "stream_tests/item_seats.rs"]
+mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
 
@@ -4691,12 +4693,7 @@ fn g08_frame_clutch_binding_collision() {
             inventory_held: 4,
             ..Default::default()
         };
-        assert_eq!(
-            run.area
-                .inventory_context(&run.physics, input)
-                .seated_clutch,
-            collision
-        );
+        assert_eq!(run.area.inventory_context(input).seated_clutch, collision);
         g08_frame(&mut run, &reference, input, 0.1);
         assert_eq!(run.area.inventory.selected, if collision { 0 } else { 1 });
         assert_eq!(

@@ -110,6 +110,7 @@ impl ViewState {
         context: PlayerStepContext,
         posture: f32,
         seated: bool,
+        look_mode: bool,
         head_rotation: Rotation,
         dt: f32,
     ) -> Option<f32> {
@@ -145,9 +146,21 @@ impl ViewState {
         } else {
             0.
         };
-        self.seated_lean = seated && held;
-        self.looking = !seated && (held || self.standing_lean);
-        if seated {
+        // Source lookInsteadOfLean: a seated lean turns the camera, and release lerps it back.
+        let look_mode = seated && look_mode;
+        self.seated_lean = seated && held && !look_mode;
+        self.looking = (!seated || look_mode) && (held || self.standing_lean);
+        if look_mode {
+            if held {
+                self.turn_independent(mouse, context.mouse_consumed);
+            } else {
+                let amount = (dt * self.reference.return_rate).min(1.);
+                for angle in &mut self.independent {
+                    *angle -= *angle * amount;
+                }
+                self.set_camera_rotation();
+            }
+        } else if seated {
             self.independent = [0.; 2];
             self.camera_rotation = Rotation::IDENTITY;
             self.height = 0.;
@@ -159,18 +172,7 @@ impl ViewState {
                 );
             }
             if held {
-                for (angle, delta) in self.independent.iter_mut().zip(if context.mouse_consumed {
-                    [0.; 2]
-                } else {
-                    mouse
-                }) {
-                    *angle = (*angle + delta).clamp(
-                        -self.reference.free_look_limit_degrees,
-                        self.reference.free_look_limit_degrees,
-                    );
-                }
-                self.camera_rotation = Rotation::from_rotation_y(-self.independent[0].to_radians())
-                    * Rotation::from_rotation_x(-self.independent[1].to_radians());
+                self.turn_independent(mouse, context.mouse_consumed);
                 self.return_remaining = self.reference.return_window_seconds;
             } else {
                 self.independent = [0.; 2];
@@ -229,6 +231,21 @@ impl ViewState {
                 1.
             },
         )
+    }
+    fn turn_independent(&mut self, mouse: [f32; 2], consumed: bool) {
+        let limit = self.reference.free_look_limit_degrees;
+        for (angle, delta) in
+            self.independent
+                .iter_mut()
+                .zip(if consumed { [0.; 2] } else { mouse })
+        {
+            *angle = (*angle + delta).clamp(-limit, limit);
+        }
+        self.set_camera_rotation();
+    }
+    fn set_camera_rotation(&mut self) {
+        self.camera_rotation = Rotation::from_rotation_y(-self.independent[0].to_radians())
+            * Rotation::from_rotation_x(-self.independent[1].to_radians());
     }
     pub(super) fn enter(&mut self, head_in_seat: Pose) {
         self.cancel(1.);

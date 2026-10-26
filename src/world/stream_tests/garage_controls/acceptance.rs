@@ -77,7 +77,7 @@ impl Play {
                 return true;
             }
             // Seat yaw stops short of 180 degrees, so turn the other way round.
-            if self.run.area.player.seat().is_some() {
+            if self.run.area.player.seated() {
                 let current = self.run.area.player.yaw_degrees();
                 if current + yaw > 178. {
                     yaw -= 360.;

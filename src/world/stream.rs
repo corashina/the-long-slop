@@ -155,6 +155,11 @@ pub struct WorldStream {
     music_box_bindings: Vec<content_musicboxes::MusicBoxBinding>,
     /// Session and active revision whose music box items are all bound.
     music_box_scan: Option<(u64, u64)>,
+    seat_bindings: Vec<content_seats::SeatBinding>,
+    /// Session and active revision whose seat items are all bound.
+    seat_scan: Option<(u64, u64)>,
+    /// Seats of world prototypes, read and checked on world load.
+    seat_prototypes: Vec<content_seats::PrototypeSeats>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
@@ -709,6 +714,7 @@ impl WorldStream {
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
+        let seat_prototypes = content_seats::world_seats(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
         let cables = super::cables::CableRecipes::new(world, seed)?;
         let biome_materials =
@@ -755,6 +761,9 @@ impl WorldStream {
             radio_scripts: Vec::new(),
             music_box_bindings: Vec::new(),
             music_box_scan: None,
+            seat_bindings: Vec::new(),
+            seat_scan: None,
+            seat_prototypes,
             detector_bindings: Vec::new(),
             detector_scan: None,
             lamp_binding_revision: 0,
@@ -4161,6 +4170,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_seat_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -4838,6 +4851,15 @@ impl WorldStream {
                     .iter()
                     .map(content_musicboxes::MusicBoxBinding::heap_bytes)
                     .sum::<usize>()
+                + self.seat_bindings.capacity() * std::mem::size_of::<content_seats::SeatBinding>()
+                + self
+                    .seat_bindings
+                    .iter()
+                    .map(content_seats::SeatBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.seat_prototypes.capacity()
+                    * std::mem::size_of::<content_seats::PrototypeSeats>()
+                + content_seats::prototype_seats_heap(&self.seat_prototypes)
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5148,6 +5170,8 @@ mod content_dials;
 mod content_musicboxes;
 #[path = "content_radios.rs"]
 mod content_radios;
+#[path = "content_seats.rs"]
+pub(crate) mod content_seats;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;

@@ -82,7 +82,7 @@ impl AudioState {
         biome: impl FnOnce([f64; 3]) -> u8,
     ) {
         let player = &area.player;
-        let seated = player.seat().is_some();
+        let seated = player.seated();
         if !self
             .footsteps
             .step(seated, player.grounded(), player.footstep_beat())
