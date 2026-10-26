@@ -6,7 +6,7 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 | --- | --- | --- | --- |
 | Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
-| car01, car02k, car04, car05, car06 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05`, `StartCar06` (not spawned yet) | Petrol; car06 random petrol or diesel |
+| car01, car02k, car04, car05, car06 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05`, `StartCar06` | Petrol; car06 random petrol or diesel |
 
 The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` until the trailer PR.
 
@@ -37,15 +37,24 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 
 - `start_placements` reads each `START_CARS` field of `TerrainGenerationSettings` (`level1` 64898). The field links the start car group.
 - The group holds one `carscript` root, a scene copy. The entry has its scene pose, the prefab of the catalog item, and `start_car` set.
-- Start car entries are exclusive. The stream spawns only `START_CAR_FIELD` (`StartCar02`) as a fixed placement on the `Startup` layer.
-- The start pack of a group spawns only with `START_CAR_FIELD`.
+- Start car entries are exclusive. The stream spawns only the picked start car as a fixed placement on the `Startup` layer.
+- The start pack of a group spawns only with its start car (`StartCar01`, `StartCar02`).
+
+## Start car
+
+- The Game mode screen has a `#start-car` list: Random, then each manifest start placement. Browser storage keeps it (`gameMode.startCar`, -1 = Random).
+- `src/world/start_car.rs` picks the start car. Random follows `mainmenuscript.RandomStartCar`: the chances are constants there.
+- A start car field without an exported placement is skipped with its chance. Car09 then takes `StartCar09` or `StartCar09S`, 50/50.
+- The pick uses a menu random from browser entropy. It does not touch the world random state.
+- The spawn context current car is the source car type of the picked car.
 - The world generator can place any number of copies at any pose. Each copy has its own key.
 - On retire, the car, engine, radiator and wheel slot states go to the world change records.
 - On return, the copy respawns and takes its states back. A moved car returns at its last pose.
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
 - The save keeps gauge part values per key.
 - The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
-- Save schema 22. Older saves are rejected.
+- The save keeps the start car field. Load spawns its placement. The spawn context keeps the current car.
+- Save schema 23. Older saves are rejected.
 
 ## Bus doors
 

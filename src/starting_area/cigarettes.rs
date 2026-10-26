@@ -394,6 +394,7 @@ impl GarageRuntime {
 /// as physics-space root poses and counts.
 pub(super) fn start_pack_poses(
     reference: &ReferenceManifest,
+    start_car: crate::world::StartCar,
     startup: &crate::world::StartupTerrain,
     origin: [f64; 3],
 ) -> Result<Vec<(VehiclePose, u32)>, ReferenceError> {
@@ -406,12 +407,12 @@ pub(super) fn start_pack_poses(
         let pose = crate::world::source_world_pose(&reference.world, startup, &v.transform, &[])?;
         packs.push((local(pose), v.ammo.count));
     }
-    // The export keeps the packs of the start car groups. Only the spawned start car keeps its pack.
+    // The export keeps the packs of the start car groups. Only the picked start car keeps its pack.
     for v in reference
         .acquisition
         .startup_packs
         .iter()
-        .filter(|v| v.start_car() == crate::world::START_CAR_FIELD)
+        .filter(|v| v.start_car() == start_car.field())
     {
         let parent = v
             .group_pose

@@ -3,9 +3,6 @@ use super::{TerrainContext, TerrainEvaluator, TerrainFoundation, TerrainRoadPoin
 use crate::reference::{BodyId, ReferenceError, ReferenceManifest, WorldReference, WorldValue};
 use rapier3d::math::Vector;
 
-/// The start car field whose placement and pack spawn: the Lada.
-pub const START_CAR_FIELD: &str = "StartCar02";
-
 /// Startup offsets retain imported ownership; callers apply them before collider insertion.
 #[derive(Default)]
 pub struct StartupTerrain {

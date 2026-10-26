@@ -1643,6 +1643,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
             placements: candidate.placements.capture_index(),
         },
         seed: 42,
+        start_car: candidate.start_car(),
         changes: ChangeRecords::default(),
         spawn: candidate.contents.state.capture_history(),
         boxes: Vec::new(),

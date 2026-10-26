@@ -177,9 +177,6 @@ pub(crate) struct SourceContents {
     /// Broken boxes whose content may publish.
     pub boxes: super::stream::content_boxes::BoxReleases,
 }
-/// Source `carTypeToCarID` of the start Lada (carType 1). The context keeps it.
-pub(crate) const START_CAR: i32 = 1;
-
 impl SourceContents {
     pub fn discard_replay_siblings(&mut self, wanted: &[Placement]) {
         let previous = self.active.len();
@@ -238,13 +235,14 @@ impl SourceContents {
             })
     }
 
-    pub fn new(reference: &WorldReference) -> Self {
+    /// `current_car` is the source car type of the start car.
+    pub fn new(reference: &WorldReference, current_car: i32) -> Self {
         Self {
             rules: SourceRules::new(reference),
             state: SourceSpawnState::supplied_controlled_startup(
                 &reference.spawn_context,
                 SpawnContext {
-                    current_car: START_CAR,
+                    current_car,
                     peaceful_enemies: 0,
                     date: reference.spawn_context.date,
                     chance_bits: None,
@@ -1418,7 +1416,7 @@ mod tests {
     }
 
     fn cursors(reference: &WorldReference) -> SourceContents {
-        let mut contents = SourceContents::new(reference);
+        let mut contents = SourceContents::new(reference, 1);
         let prototype = reference.buildings.types[0].prototype.clone();
         let building = contents
             .rules

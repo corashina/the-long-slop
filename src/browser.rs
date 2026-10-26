@@ -303,6 +303,8 @@ extern "C" {
     pub fn game_driving_assists() -> u32;
     #[wasm_bindgen(js_namespace = window, js_name = gameBiome)]
     pub fn game_biome() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameStartCar)]
+    pub fn game_start_car() -> i32;
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
     pub fn game_driving_state(gear: i32, assists: u32, seated: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameUpdate)]
