@@ -55,7 +55,7 @@ pub use small_items::*;
 pub mod melee;
 pub use melee::*;
 pub mod wheel_effects;
-pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference};
+pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
 pub use plates::*;
 pub mod clothing;

@@ -30,7 +30,7 @@ class FakeSource:
             script = self.add(base + 9, 'MonoBehaviour', 'talajnezo')
             self.data[script.path_id] = {'m_Enabled': 1, 'm_GameObject': pointer(go), 'W': pointer(self.wheels[wheel]),
                 'Car': pointer(self.car), 'ps': pointer(dust), 'grasstrail': pointer(None), 'grasss': [pointer(grass)],
-                'rateM': 2. + i, 'LM': {'m_Bits': 5},
+                'rateM': 2. + i, 'LM': {'m_Bits': 5}, 'groundSoundM': .1 * i, 'springSoundM': 3., 'springPitchM': 4.,
                 **{name: pointer(a) for name, a in zip(('GroundSource', 'SpringSource', 'SlideSource'), audio)}}
             scripts.append(script)
         self.scripts = scripts
@@ -66,6 +66,19 @@ class WheelEffectsTests(unittest.TestCase):
         self.assertEqual([records[0][f] for f in ('ground_voice', 'spring_voice', 'slide_voice')],
             [{'file': 'level1', 'path_id': 134 + k} for k in range(3)])
         self.assertEqual(records[0]['ray_mask'], 5)
+        self.assertIsNone(records[0]['own_gains'])
+
+    def test_null_car_uses_own_gains(self):
+        source = FakeSource([0, 1, 2, 3])
+        other = source.add(3, 'MonoBehaviour', 'carscript')
+        # Script 2 links wheel 2.
+        source.data[source.scripts[2].path_id]['Car'] = pointer(None)
+        records = wheel_effects.recover_wheel_effects(source, source.car, {}, source.root, source.wheels, 0, None)
+        self.assertEqual(records[2]['own_gains'], {'ground': .2, 'spring': 3., 'spring_pitch': 4.})
+        self.assertIsNone(records[1]['own_gains'])
+        source.data[source.scripts[2].path_id]['Car'] = pointer(other)
+        with self.assertRaisesRegex(ValueError, 'Car link differs'):
+            wheel_effects.recover_wheel_effects(source, source.car, {}, source.root, source.wheels, 0, None)
 
     def test_missing_talajnezo_raises(self):
         source = FakeSource([0, 1, 2])

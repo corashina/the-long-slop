@@ -33,13 +33,15 @@ def recover_wheel_effects(source, car_reader, car, root, wheels, index, output):
     for w,wheel in enumerate(wheels):
         if key(wheel) not in scripts:raise ValueError(f'Wheel needs talajnezo: {key(wheel)}')
         script,d=scripts[key(wheel)]
+        # A null Car is legal: the wheel uses its own gains and has no slide sound.
         linked=source.resolve(script,d['Car'])
-        if linked is None or key(linked)!=key(car_reader):raise ValueError(f'talajnezo Car link differs: {source_id(script)}')
+        if linked is not None and key(linked)!=key(car_reader):raise ValueError(f'talajnezo Car link differs: {source_id(script)}')
         node=source.transform_for(source.resolve(script,d['m_GameObject']))
         dust=source.resolve(script,d['ps'])
         grass=[source.resolve(script,p) for p in ([d['grasstrail']] if d['grasstrail']['m_PathID'] else [])+list(d['grasss'])]
         if any(g is None for g in grass):raise ValueError(f'talajnezo grass link is null: {source_id(script)}')
         record={'source':source_id(script),'pose':relative_pose(source,node,root),'rate':d['rateM'],'ray_mask':d['LM']['m_Bits'],
+            'own_gains':None if linked is not None else {'ground':d['groundSoundM'],'spring':d['springSoundM'],'spring_pitch':d['springPitchM']},
             # The runtime sets the dust rate from speed.
             'dust':particle(source,dust,f'wheel_{index}_{w}_dust',1.,output,root) if dust else None,
             'grass':[particle(source,g,f'wheel_{index}_{w}_grass_{i}',source.read(g)['EmissionModule']['rateOverTime']['scalar'],output,root)

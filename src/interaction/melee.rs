@@ -450,7 +450,7 @@ impl MeleeState {
 
 /// Pose of a prototype node in its root frame, and the node local scale.
 /// Source `Quaternion.LookRotation(dir, up)` in converted space: source +Z is -Z.
-fn look_rotation(direction: Vector) -> Rotation {
+pub(crate) fn look_rotation(direction: Vector) -> Rotation {
     let back = -direction.normalize();
     let right = Vector::Y.cross(back).try_normalize().unwrap_or(Vector::X);
     let up = back.cross(right);

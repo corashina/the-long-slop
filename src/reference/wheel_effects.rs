@@ -12,6 +12,8 @@ pub struct WheelEffectsReference {
     pub rate: f32,
     /// LM: layers that the ground ray hits.
     pub ray_mask: u32,
+    /// The talajnezo gains when its Car link is null. Such a wheel has no slide sound.
+    pub own_gains: Option<WheelGains>,
     /// ps. The runtime sets the rate.
     pub dust: Option<ParticleReference>,
     /// grasstrail first if present, then grasss.
@@ -20,6 +22,15 @@ pub struct WheelEffectsReference {
     pub ground_voice: u32,
     pub spring_voice: u32,
     pub slide_voice: u32,
+}
+
+/// talajnezo groundSoundM, springSoundM and springPitchM.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WheelGains {
+    pub ground: f32,
+    pub spring: f32,
+    pub spring_pitch: f32,
 }
 
 /// carscript groundSoundM, springSoundM, springPitchM, slideAngle and maxSlideVolumeSpeed.
@@ -68,7 +79,11 @@ pub(super) fn validate(m: &ReferenceManifest) -> Result<(), ReferenceError> {
         )?;
         for w in &vehicle.wheel_effects {
             require(
-                w.rate.is_finite() && w.rate >= 0. && transform(&w.pose),
+                w.rate.is_finite()
+                    && w.rate >= 0.
+                    && transform(&w.pose)
+                    && w.own_gains
+                        .is_none_or(|g| finite(&[g.ground, g.spring, g.spring_pitch])),
                 "wheel effects",
             )?;
             for p in w.dust.iter().chain(&w.grass) {

@@ -100,6 +100,12 @@ impl ParticleState {
         self.reference.rate_over_time = over_time;
         self.reference.rate_over_distance = over_distance;
     }
+    /// Source `ShapeModule.rotation`: Euler angles in source degrees.
+    pub(crate) fn set_shape_rotation(&mut self, degrees: [f32; 3]) {
+        if let Some(rotation) = self.reference.vectors.get_mut("ShapeModule.m_Rotation") {
+            *rotation = degrees;
+        }
+    }
     /// Source trigger module with the Kill inside action: removes particles that touch an
     /// interior collider. `interior` selects those colliders. Call after `advance`.
     pub fn remove_inside(
