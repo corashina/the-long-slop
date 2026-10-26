@@ -16,6 +16,8 @@ pub enum WorldLayer {
     DesertBuilding,
     Lamp,
     Nested,
+    /// Fixed world prototype placements of the source startup list, such as the start car.
+    Startup,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

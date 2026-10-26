@@ -251,6 +251,8 @@ pub struct WorldStream {
     wanted_structures: Vec<Placement>,
     ready_structures: Vec<super::GeneratedId>,
     startup: Option<StartupTerrain>,
+    /// Fixed prototype placements of the startup list, set with `startup`.
+    startup_placements: Vec<Placement>,
     startup_candidates: Vec<u32>,
     startup_next: usize,
     startup_points: Vec<TerrainRoadPoint>,
@@ -874,6 +876,7 @@ impl WorldStream {
             wanted_structures: Vec::new(),
             ready_structures: Vec::with_capacity(32),
             startup: None,
+            startup_placements: Vec::new(),
             startup_candidates: Vec::new(),
             startup_next: 0,
             startup_points: Vec::new(),
@@ -1666,6 +1669,10 @@ impl WorldStream {
                 }
                 self.color_foundations = Vec::with_capacity(count);
                 self.color_helpers = Vec::with_capacity(helpers);
+                match self.startup_placements(&startup) {
+                    Ok(placements) => self.startup_placements = placements,
+                    Err(error) => self.failure = Some(error.0),
+                }
                 self.startup = Some(startup);
             }
             Err(error) => self.failure = Some(error.0),
@@ -1674,6 +1681,73 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
+    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
+    fn startup_placements(
+        &self,
+        startup: &StartupTerrain,
+    ) -> Result<Vec<Placement>, ReferenceError> {
+        let mut placements = Vec::new();
+        for (ordinal, entry) in self.reference.startup.iter().enumerate() {
+            let Some(prototype) = &entry.prototype else {
+                continue;
+            };
+            let offset = startup.chain_offset(&self.reference, &entry.source)?;
+            let mut position = entry.pose.translation.map(f64::from);
+            position[1] += f64::from(offset);
+            let radius = self.contents.rules.radius(prototype).unwrap_or(0.);
+            placements.push(Placement {
+                id: super::GeneratedId {
+                    layer: WorldLayer::Startup,
+                    generator: entry.source.clone(),
+                    unit: [0, 0],
+                    ordinal: ordinal as u32,
+                    children: Vec::new(),
+                },
+                prototype: prototype.clone(),
+                pose: super::AbsolutePose {
+                    position,
+                    rotation: entry.pose.rotation,
+                },
+                scale: entry.pose.scale,
+                bounds: WorldBounds {
+                    min: position.map(|v| v - radius),
+                    max: position.map(|v| v + radius),
+                },
+                object_seed: 0,
+            });
+        }
+        Ok(placements)
+    }
+    /// Fixed startup placements request their contents within the item spawn distance.
+    /// A changed placement returns through the changed destination replay instead.
+    fn refresh_startup_placements(&mut self) {
+        let radius = self.distances.item_spawn_dist;
+        let points = [self.request.player, self.request.vehicle];
+        let near = |p: &Placement| {
+            points
+                .into_iter()
+                .any(|f| source_distance_squared(f, p.pose.position) < radius * radius)
+        };
+        let changes = &self.changes;
+        let wanted = |p: &Placement| {
+            near(p)
+                && changes
+                    .get(super::ObjectKey::Generated(p.id.clone()))
+                    .is_none()
+        };
+        let active = &self.contents.active;
+        self.wanted_structures.retain(|p| {
+            p.id.layer != WorldLayer::Startup
+                || wanted(p)
+                || active.iter().any(|c| c.content.placement.id == p.id)
+        });
+        for placement in &self.startup_placements {
+            if wanted(placement) && !self.wanted_structures.iter().any(|p| p.id == placement.id) {
+                self.wanted_structures.push(placement.clone());
+            }
+        }
+    }
     fn refresh_structures(&mut self) -> bool {
         let radius = self.distances.building_gen_dist;
         let points = [self.request.player, self.request.vehicle];
@@ -1718,6 +1792,7 @@ impl WorldStream {
         }
         self.append_ramps();
         self.refresh_poles();
+        self.refresh_startup_placements();
         self.ready_structures
             .retain(|id| self.wanted_structures.iter().any(|p| &p.id == id));
         removed || count != self.wanted_structures.iter().filter(|p| numeric(p)).count()

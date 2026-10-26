@@ -471,7 +471,11 @@ impl SourceContents {
             let staging = self.admit_queues(limit, 1, staging)?;
             let cursor = &self.cursors[index];
             let parent = &cursor.parent;
+            // A fixed startup placement evaluates from a copy of the startup random. It never
+            // advances the live random, so it needs no boundary and replays the same contents.
+            let startup = parent.id.layer == super::WorldLayer::Startup;
             if cursor.replay_only
+                && !startup
                 && !self.state.has_boundary(
                     &parent.id,
                     cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
@@ -483,43 +487,66 @@ impl SourceContents {
                     "Changed object has no retained root initialization boundary".into(),
                 ));
             }
-            let (mut output, deferred, inputs) = self.state.invoke(
-                &parent.id,
-                cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
-                0,
-                SpawnPhase::ComponentStart,
-                staging,
-                &cursor.inputs,
-                |random, context, pools, initialization, staging| {
-                    let mut e =
-                        SpawnEvaluation::new(reference, &self.rules, random, context, pools, limit);
-                    e.staging = staging;
-                    e.admit_initialization(parent)?;
-                    e.initialization = initialization.clone();
-                    e.output.push(SpawnedContent {
-                        inputs: super::spawn_state::SpawnInitialization::default(),
-                        placement: parent.clone(),
-                        appearance: Vec::new(),
-                        cable: cables
-                            .iter()
-                            .find(|(id, _)| id == &parent.id)
-                            .map(|(_, c)| c.clone())
-                            .unwrap_or_default(),
-                        lights: Vec::new(),
-                        fluid: None,
-                        tanks: Vec::new(),
-                        condition: 1.,
-                        buried: false,
-                        distance_offset: [0.; 3],
-                        ammo: None,
-                    });
-                    e.queue_start(parent.clone(), None);
-                    e.finish_starts()?;
-                    e.check_staging(staging)?;
-                    Ok((e.output, e.deferred, e.initialization))
-                },
-            )?;
-            self.cursors[index].root = Some(output.remove(0));
+            let evaluate = |random: &mut super::UnityRandom,
+                            context: super::SpawnContext,
+                            pools: &mut Vec<super::spawn_state::PaintingPool>,
+                            initialization: &super::spawn_state::SpawnInitialization,
+                            staging: usize| {
+                let mut e =
+                    SpawnEvaluation::new(reference, &self.rules, random, context, pools, limit);
+                e.staging = staging;
+                e.admit_initialization(parent)?;
+                e.initialization = initialization.clone();
+                e.output.push(SpawnedContent {
+                    inputs: super::spawn_state::SpawnInitialization::default(),
+                    placement: parent.clone(),
+                    appearance: Vec::new(),
+                    cable: cables
+                        .iter()
+                        .find(|(id, _)| id == &parent.id)
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_default(),
+                    lights: Vec::new(),
+                    fluid: None,
+                    tanks: Vec::new(),
+                    condition: 1.,
+                    buried: false,
+                    distance_offset: [0.; 3],
+                    ammo: None,
+                });
+                e.queue_start(parent.clone(), None);
+                e.finish_starts()?;
+                e.check_staging(staging)?;
+                Ok((e.output, e.deferred, e.initialization))
+            };
+            let (mut output, deferred, inputs) = if startup {
+                let mut random = super::UnityRandom::restore(super::UnityRandomState {
+                    words: reference.spawn_context.startup_state,
+                });
+                evaluate(
+                    &mut random,
+                    self.state.context,
+                    &mut Vec::new(),
+                    &cursor.inputs,
+                    staging,
+                )?
+            } else {
+                self.state.invoke(
+                    &parent.id,
+                    cursor.building.as_ref().unwrap_or(&cursor.parent.prototype),
+                    0,
+                    SpawnPhase::ComponentStart,
+                    staging,
+                    &cursor.inputs,
+                    evaluate,
+                )?
+            };
+            let root = output.remove(0);
+            // The startup root is itself a world object.
+            if startup {
+                output.insert(0, root.clone());
+            }
+            self.cursors[index].root = Some(root);
             self.cursors[index].initial_eligible = Some(
                 self.cursors[index].replay_only
                     || (self.cursors[index].building.is_some()
