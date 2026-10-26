@@ -66,7 +66,7 @@ fn request(run: &mut GarageRuntime) {
 }
 
 /// Top of fixed collision below a local point.
-fn ground(run: &GarageRuntime, local: [f32; 3]) -> Option<f32> {
+pub(super) fn ground(run: &GarageRuntime, local: [f32; 3]) -> Option<f32> {
     let ray = Ray::new(Vector::new(local[0], local[1] + 3., local[2]), -Vector::Y);
     run.physics
         .queries(QueryFilter::only_fixed().exclude_sensors())
