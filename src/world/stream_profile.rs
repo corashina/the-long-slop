@@ -76,6 +76,9 @@ struct Measurement {
     total_ms: f64,
     max_ms: f64,
     over_2_ms: u64,
+    // Work items, such as LOD groups evaluated.
+    items: u64,
+    max_items: u64,
 }
 static ENABLED: AtomicBool = AtomicBool::new(false);
 const SAMPLE_CAPACITY: usize = 4096;
@@ -86,6 +89,8 @@ static VALUES: Mutex<[Measurement; 30]> = Mutex::new(
         total_ms: 0.,
         max_ms: 0.,
         over_2_ms: 0,
+        items: 0,
+        max_items: 0,
     }; 30],
 );
 
@@ -125,6 +130,17 @@ impl Timer {
         value.over_2_ms += u64::from(ms > 2.);
     }
 }
+/// Adds work items of one stage call.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn count(stage: Stage, items: usize) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut values = VALUES.lock().unwrap();
+    let value = &mut values[stage as usize];
+    value.items += items as u64;
+    value.max_items = value.max_items.max(items as u64);
+}
 impl Drop for Timer {
     fn drop(&mut self) {
         self.record();
@@ -160,7 +176,7 @@ pub fn streaming_profile_audit() -> String {
         sorted.sort_by(f64::total_cmp);
         let percentile = |p: f64| sorted.get((count as f64 * p).ceil() as usize - usize::from(count > 0)).copied();
         serde_json::json!({"calls": row.calls, "total_ms": row.total_ms, "max_ms": row.max_ms,
-            "over_2_ms": row.over_2_ms, "mean_ms": (row.calls > 0).then(|| row.total_ms / row.calls as f64),
+            "over_2_ms": row.over_2_ms, "items": row.items, "max_items": row.max_items, "mean_ms": (row.calls > 0).then(|| row.total_ms / row.calls as f64),
             "p95_ms": percentile(0.95), "p99_ms": percentile(0.99), "sample_count": count,
             "dropped": row.calls.saturating_sub(SAMPLE_CAPACITY as u64)})
     }).collect();
