@@ -180,7 +180,11 @@ fn terrain_source_fingerprints() {
 fn game_mode_forces_terrain_color() {
     use crate::world::{GameMode, forced_color};
     let raw = [0.7, 0.2, 0.1, 0.4];
-    let winter = GameMode { biome: 2 }.biome_override();
+    let winter = GameMode {
+        biome: 2,
+        ..GameMode::default()
+    }
+    .biome_override();
     assert_eq!(winter, Some(1));
     assert_eq!(forced_color(raw, winter), [0., 0., 1., 0.4]);
     assert_eq!(forced_color(raw, GameMode::default().biome_override()), raw);

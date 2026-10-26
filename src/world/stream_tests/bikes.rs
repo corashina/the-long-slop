@@ -101,7 +101,7 @@ fn bike01_kick_starts_and_rides_upright() {
     );
     run.physics.reset_preserving_wheels(&key, pose);
     run.physics.refresh_queries();
-    let (body, seat, seat_item, seat_pose) = run
+    let seat = run
         .physics
         .rapier()
         .colliders
@@ -111,17 +111,9 @@ fn bike01_kick_starts_and_rides_upright() {
                 .interaction
                 .item_seat(handle)
                 .filter(|s| s.owner == SeatOwner::Vehicle(key.clone()) && s.seat.driver)
-                .map(|s| (s.body, s.seat.clone(), s.seat_item, s.pose))
         })
         .expect("Bike01 driver seat");
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Vehicle(key.clone()),
-        body,
-        &seat,
-        seat_item,
-        seat_pose,
-        &mut run.physics,
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
     settle(&mut run, &reference, 2.);
     assert!(run.physics.wheel_contacts(&key).all(|c| c), "wheels down");
     assert!(!running(&run, &key));

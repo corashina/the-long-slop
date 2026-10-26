@@ -159,7 +159,8 @@ Keep the shared cache: native records depend on its bound `records/manifest.json
 
 The home link comes from `homesickscript.FirstHome`.
 The Lada is the world prototype `sharedassets1.assets` 82556. The startup entry `StartCar02` places it at the scene Lada spot.
-The plate font and material, the reflection probe, the radio settings and the car hit route come from this prototype.
+Each `START_CARS` field of `TerrainGenerationSettings` gives one startup entry with `start_car` set. Only `StartCar02` spawns.
+The plate font and material and the reflection probe come from the Lada. The radio settings come from the car radios; they must be equal.
 
 `Source` caches resolved object IDs and generated type trees.
 It repairs the MonoBehaviour header and generated array container types.

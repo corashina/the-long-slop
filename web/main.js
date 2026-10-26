@@ -1,6 +1,6 @@
 import {installSceneResolution} from './scene-resolution.js';
 installSceneResolution(window,document.querySelector('#scene-resolution'));
-import {installGameMode} from './game-mode.js';
+import {installGameMode,installStartCar} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
@@ -198,6 +198,7 @@ async function load(){
  // Rust copies only the shell fields, so JS does not parse the world records.
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
+ installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});

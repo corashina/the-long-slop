@@ -185,6 +185,8 @@ pub struct WorldStream {
     lamp_binding_revision: u64,
     seed: i32,
     mode: super::GameMode,
+    /// The picked start car. Only its start placement spawns.
+    start_car: super::StartCar,
     package_id: String,
     generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
@@ -409,6 +411,7 @@ impl WorldStream {
                 placements: self.placements.capture_index(),
             },
             seed: self.seed,
+            start_car: self.start_car,
             changes,
             spawn: self.contents.state.capture_history(),
         }
@@ -456,6 +459,7 @@ impl WorldStream {
         saved: &crate::save::WorldSnapshot,
     ) -> Result<(), ReferenceError> {
         if self.seed != saved.seed
+            || self.start_car != saved.start_car
             || self.initial_generation_ready
             || !self.structures.is_empty()
             || self.roads.coverage() != 0
@@ -660,6 +664,9 @@ impl WorldStream {
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
+    pub fn start_car(&self) -> super::StartCar {
+        self.start_car
+    }
 
     /// Test stream in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -732,7 +739,9 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let mut contents = super::contents::SourceContents::new(world);
+        let start_car = mode.start_car.pick(world, &mut super::menu_random());
+        let mut contents =
+            super::contents::SourceContents::new(world, start_car.current_car(reference)?);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
@@ -815,6 +824,7 @@ impl WorldStream {
             lamp_binding_revision: 0,
             seed,
             mode,
+            start_car,
             biome_materials,
             structure_helpers,
             building_components: Default::default(),
@@ -1721,7 +1731,8 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
-    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// The startup entries with a prototype become fixed placements. Of the start cars, only
+    /// the picked one spawns. The exported pose is the raw
     /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
     fn startup_placements(
         &self,
@@ -1732,6 +1743,9 @@ impl WorldStream {
             let Some(prototype) = &entry.prototype else {
                 continue;
             };
+            if entry.start_car && entry.group != self.start_car.field() {
+                continue;
+            }
             let offset = startup.chain_offset(&self.reference, &entry.source)?;
             let mut position = entry.pose.translation.map(f64::from);
             position[1] += f64::from(offset);
