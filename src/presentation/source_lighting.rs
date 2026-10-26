@@ -283,6 +283,7 @@ impl Plugin for SourceLightingPlugin {
             .add_systems(Update, super::lighting_assets::lighting_asset_readiness);
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             super::surface_graph::install(render_app);
+            super::depth_resolve::install(render_app);
             render_app
                 .init_resource::<SourceViewCamera>()
                 .add_systems(
@@ -293,7 +294,6 @@ impl Plugin for SourceLightingPlugin {
                 )
                 .init_resource::<super::surface_pass::SurfacePasses>()
                 .init_resource::<super::caster::CasterPasses>()
-                .add_systems(bevy::render::RenderStartup, super::camera_depth::install)
                 .init_resource::<super::transparent::SourceSortIndex>()
                 .add_systems(
                     bevy::render::ExtractSchedule,

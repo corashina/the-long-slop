@@ -1,4 +1,4 @@
-//! Depth and shadow draws share the surface alpha data, without surface lighting textures.
+//! Shadow draws share the surface alpha data, without surface lighting textures.
 use super::{
     gpu_prepare::GpuPreparation,
     materials::{SourceMaterial, SourceUniform, specular::SpecularMaterial},

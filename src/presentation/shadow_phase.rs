@@ -145,7 +145,7 @@ impl RenderCommand<SourceShadow> for SelectCaster {
         if item.key.split_mask & (1 << cascade) == 0 {
             return RenderCommandResult::Skip;
         }
-        pass.set_bind_group(1, views.binding(cascade + 1), &[]);
+        pass.set_bind_group(1, views.binding(cascade), &[]);
         RenderCommandResult::Success
     }
 }

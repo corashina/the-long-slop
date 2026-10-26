@@ -268,7 +268,7 @@ pub(crate) fn prepare_views(
                 &resources.probes[index].capture_sample_view
             }
         });
-        // Only MSAA views keep camera depth free of the transparent attachment.
+        // Only MSAA views keep the resolved camera depth free of the transparent attachment.
         let camera_depth = target
             .multisample_depth
             .is_some()
@@ -298,5 +298,9 @@ pub(crate) fn prepare_views(
             ),
             SourceTransparentPasses::new(capacity),
         ));
+        if let Some(resolve) = super::depth_resolve::DepthResolveView::new(&device, &cache, target)
+        {
+            commands.entity(entity).insert(resolve);
+        }
     }
 }

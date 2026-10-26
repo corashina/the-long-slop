@@ -311,7 +311,7 @@ pub fn queue(world: &mut World) {
                                 }
                             };
                             let casters = world.resource::<CasterPasses>();
-                            let Some(pipeline) = casters.pipeline(base.0, true) else {
+                            let Some(pipeline) = casters.pipeline(base.0) else {
                                 ready = false;
                                 continue;
                             };
@@ -508,7 +508,7 @@ pub fn write_cascades(
                 * cascade.texel_size[0].max(cascade.texel_size[1]);
             let world_from_view = cascade_world_from_view(cascade, basis);
             slots.write(
-                index + 1,
+                index,
                 CasterUniform {
                     clip_from_world: projection,
                     world_from_view,
@@ -563,6 +563,7 @@ pub(crate) fn graph_ready(
     cache: Res<PipelineCache>,
     surface: Res<super::surface_pass::SurfacePasses>,
     caster: Res<CasterPasses>,
+    resolve: Res<super::depth_resolve::DepthResolve>,
     owners: Res<super::pipeline_ownership::PipelineOwners>,
     loading: Res<super::materials::MaterialLoading>,
     status: Res<RendererStateHandle>,
@@ -575,6 +576,7 @@ pub(crate) fn graph_ready(
         && loading.is_ready()
         && surface.ready(&cache, &owners)
         && caster.ready(&cache, &owners)
+        && resolve.ready(&cache)
         && collector.is_some_and(|c| c.prepared_frame == frame.frame)
         && !status.failure().is_some()
 }

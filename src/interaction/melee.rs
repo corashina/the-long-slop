@@ -123,17 +123,12 @@ impl MeleeState {
             *slot = parameter(name)?;
         }
         let hit_trigger = parameter("Hit")?;
-        let asset = r
-            .item_prototypes
-            .iter()
-            .find(|p| p.id == shovel.prototype)
-            .ok_or_else(|| ReferenceError("Missing shovel prototype".into()))?
-            .asset;
+        // The item glTF and the world glTF are separate assets of one prefab source.
         let prototype = r
             .world
             .prototypes
             .iter()
-            .find(|p| p.asset == asset)
+            .find(|p| p.source == shovel.prototype.0)
             .ok_or_else(|| ReferenceError("Missing shovel world prototype".into()))?;
         let node = |source: &SourceId| {
             prototype
