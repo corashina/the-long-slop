@@ -378,7 +378,7 @@ fn update_rows(
                     lod_index_mask: 0,
                     active_lod: 0,
                 },
-                material_has_caster: materials.source_caster(material.typed())?,
+                material_has_caster: materials.row_caster(material)?,
             },
         );
     }

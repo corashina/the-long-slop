@@ -10,6 +10,11 @@ struct PropRow {
     extents: vec3<f32>,
     // Batch above 8 flag bits.
     key: u32,
+    // Linear surface color: the condition color, else the material color.
+    color: vec4<f32>,
+    // Frozen source position for procedural inputs.
+    source_position: vec3<f32>,
+    unused: u32,
 }
 @group(2) @binding(50) var<storage> prop_rows: array<PropRow>;
 @group(2) @binding(51) var<storage> prop_visible: array<u32>;
@@ -21,6 +26,30 @@ fn prop_row(instance_index: u32) -> PropRow {
 }
 fn prop_world_from_local(row: PropRow) -> mat4x4<f32> {
     return transpose(mat4x4<f32>(row.world_x, row.world_y, row.world_z, vec4<f32>(0.0, 0.0, 0.0, 1.0)));
+}
+// Same result as Bevy's `get_local_from_world`: the glam inverse of the 3x3, then the translation.
+fn prop_local_from_world(world_from_local: mat4x4<f32>) -> mat4x4<f32> {
+    let x = world_from_local[0].xyz;
+    let y = world_from_local[1].xyz;
+    let z = world_from_local[2].xyz;
+    let c0 = cross(y, z);
+    let c1 = cross(z, x);
+    let c2 = cross(x, y);
+    let inverse_det = 1.0 / dot(z, c2);
+    let inverse = transpose(mat3x3<f32>(c0 * inverse_det, c1 * inverse_det, c2 * inverse_det));
+    let rotation_scale = mat4x4<f32>(
+        vec4<f32>(inverse[0], 0.0),
+        vec4<f32>(inverse[1], 0.0),
+        vec4<f32>(inverse[2], 0.0),
+        vec4<f32>(0.0, 0.0, 0.0, 1.0),
+    );
+    let translation = mat4x4<f32>(
+        vec4<f32>(1.0, 0.0, 0.0, 0.0),
+        vec4<f32>(0.0, 1.0, 0.0, 0.0),
+        vec4<f32>(0.0, 0.0, 1.0, 0.0),
+        vec4<f32>(-world_from_local[3].xyz, 1.0),
+    );
+    return rotation_scale * translation;
 }
 fn prop_determinant_sign(world_from_local: mat4x4<f32>) -> f32 {
     let det = dot(world_from_local[0].xyz, cross(world_from_local[1].xyz, world_from_local[2].xyz));

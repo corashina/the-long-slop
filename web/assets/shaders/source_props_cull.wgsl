@@ -9,6 +9,11 @@ struct PropRow {
     extents: vec3<f32>,
     // Batch above 8 flag bits.
     key: u32,
+    // Linear surface color: the condition color, else the material color.
+    color: vec4<f32>,
+    // Frozen source position for procedural inputs.
+    source_position: vec3<f32>,
+    unused: u32,
 }
 struct PropBatch {
     first: u32,

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub(crate) enum MaterialIdentity {
     Primary(AssetId, u32),
     Specular(SourceId),
+    /// Only GPU prop rows share impostors. Rows hold the fade and the source position.
+    Impostor(SourceId),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SharedMaterialKey {
@@ -20,7 +22,9 @@ pub(crate) struct SharedMaterialKey {
 impl SharedMaterialKey {
     fn heap_bytes(&self) -> usize {
         match &self.material {
-            MaterialIdentity::Specular(source) => source.file.capacity(),
+            MaterialIdentity::Specular(source) | MaterialIdentity::Impostor(source) => {
+                source.file.capacity()
+            }
             MaterialIdentity::Primary(..) => 0,
         }
     }

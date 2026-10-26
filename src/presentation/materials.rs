@@ -114,8 +114,12 @@ pub struct SourceSurface {
     state: SurfaceKey,
 }
 impl SourceSurface {
-    pub fn set_color(&mut self, color: Color) {
-        self.data.color = Vec4::from_array(color.to_linear().to_f32_array());
+    /// Linear color.
+    pub fn color(&self) -> Vec4 {
+        self.data.color
+    }
+    pub fn set_color(&mut self, linear: Vec4) {
+        self.data.color = linear;
     }
 }
 fn blend_factor(value: u8) -> BlendFactor {

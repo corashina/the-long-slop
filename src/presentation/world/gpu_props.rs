@@ -2,8 +2,9 @@
 //! The main world owns the rows. The render world uploads the dirty ranges.
 use crate::reference::shadow_candidates::Bounds;
 use bevy::asset::{AssetId, UntypedAssetId};
+use bevy::color::{Color, ColorToComponents};
 use bevy::ecs as bevy_ecs;
-use bevy::math::{Affine3A, DMat4, Mat4};
+use bevy::math::{Affine3A, DMat4, Mat4, Vec3, Vec4};
 use bevy::mesh::Mesh;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::Resource;
@@ -11,7 +12,9 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Words of one row in the GPU row buffer. Same layout as `PropRow` in source_props.wgsl.
-pub const ROW_WORDS: usize = 20;
+pub const ROW_WORDS: usize = 28;
+/// Row word with the batch and the flags.
+pub const KEY_WORD: usize = 19;
 /// The row slot is free.
 pub const NO_BATCH: u32 = u32::MAX;
 /// The last row word holds the batch above 8 flag bits.
@@ -42,6 +45,10 @@ pub struct PropRow {
     pub hidden: bool,
     /// Signed LOD crossfade, as the entity material `lod_fade`. 1 is no fade.
     pub fade: f32,
+    /// Linear surface color: the condition color, else the material color.
+    pub color: Vec4,
+    /// Frozen source position for procedural inputs, as the entity impostor uniform.
+    pub source_position: Vec3,
     pub batch: u32,
 }
 impl PropRow {
@@ -78,12 +85,32 @@ impl PropRow {
             f(e[1]),
             f(e[2]),
             self.batch << FLAG_BITS | flags,
+            f(self.color.x),
+            f(self.color.y),
+            f(self.color.z),
+            f(self.color.w),
+            f(self.source_position.x),
+            f(self.source_position.y),
+            f(self.source_position.z),
+            0,
         ]
     }
 }
 /// World matrix of a static root renderer. Entities used the root pose times the baked matrix.
 pub fn row_world(root: DMat4, chain: Mat4) -> Mat4 {
     (root * chain.as_dmat4()).as_mat4()
+}
+/// Linear color of a source sRGBA condition color. Entity materials and rows use this one formula.
+pub fn linear_color(srgba: [f32; 4]) -> Vec4 {
+    Vec4::from_array(
+        Color::srgba(srgba[0], srgba[1], srgba[2], srgba[3])
+            .to_linear()
+            .to_f32_array(),
+    )
+}
+/// Source position of a renderer node. Entity impostors and rows use this one formula.
+pub fn source_position(source_world: Mat4) -> Vec3 {
+    source_world.w_axis.truncate() * Vec3::new(1., 1., -1.)
 }
 /// World AABB in the source frame. Entity and row casters use this one formula.
 pub fn world_bounds(world: Affine3A, center: [f32; 3], half_extents: [f32; 3]) -> Bounds {
@@ -353,7 +380,6 @@ impl GpuProps {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::math::Vec3;
 
     fn key(mesh: u128) -> BatchKey {
         BatchKey {
@@ -377,6 +403,8 @@ mod tests {
             cast_shadows: 1,
             hidden,
             fade: 1.0,
+            color: Vec4::ONE,
+            source_position: Vec3::ZERO,
             batch: 0,
         }
     }
@@ -429,13 +457,10 @@ mod tests {
         props.set_fade(c, 0.25);
         assert_eq!(dirty(&mut props), [2..3]);
         assert_eq!(props.revision(), revision);
-        assert_eq!(
-            word_batch(props.rows()[c as usize].words()[ROW_WORDS - 1]),
-            1
-        );
+        assert_eq!(word_batch(props.rows()[c as usize].words()[KEY_WORD]), 1);
         props.free(c);
         assert_eq!(
-            word_batch(props.rows()[c as usize].words()[ROW_WORDS - 1]),
+            word_batch(props.rows()[c as usize].words()[KEY_WORD]),
             NO_BATCH
         );
     }
@@ -566,16 +591,54 @@ mod tests {
             for owner in &owners {
                 for (node, &(slot, _)) in owner.rows.iter().enumerate() {
                     let words = props.rows()[slot as usize].words();
-                    let row = (
-                        words[ROW_WORDS - 1] & ROW_HIDDEN == 0,
-                        f32::from_bits(words[15]),
-                    );
+                    let row = (words[KEY_WORD] & ROW_HIDDEN == 0, f32::from_bits(words[15]));
                     assert_eq!(Some(row), owner.entities[node], "frame {frame} node {node}");
                     fading += usize::from(row.0 && row.1 != 1.0);
                 }
             }
         }
         assert!(fading > 10_000, "fixture has {fading} fading rows");
+    }
+
+    /// Rows carry the color and the source position that the entity path wrote into private materials.
+    #[test]
+    fn rows_take_the_entity_color_and_source_position() {
+        use bevy::math::Quat;
+        let colors = [
+            [1.0, 1.0, 1.0, 1.0],
+            [0.5, 0.25, 0.75, 1.0],
+            [0.0, 0.02, 0.04, 0.5],
+            [0.9, 0.6, 0.1, 0.3],
+        ];
+        let worlds = [
+            Mat4::IDENTITY,
+            Mat4::from_scale_rotation_translation(
+                Vec3::new(1.5, 0.5, 2.0),
+                Quat::from_rotation_y(0.7),
+                Vec3::new(1250.25, -3.5, 812.75),
+            ),
+        ];
+        let mut props = GpuProps::default();
+        for color in colors {
+            for source_world in worlds {
+                // Entity path: `SourceSurface::set_color` and the impostor uniform `source_position`.
+                let entity_color = Color::srgba(color[0], color[1], color[2], color[3])
+                    .to_linear()
+                    .to_f32_array();
+                let entity_position = source_world.w_axis.truncate() * Vec3::new(1., 1., -1.);
+                let slot = props.alloc(
+                    key(1),
+                    PropRow {
+                        color: linear_color(color),
+                        source_position: source_position(source_world),
+                        ..row(false)
+                    },
+                );
+                let words = props.rows()[slot as usize].words().map(f32::from_bits);
+                assert_eq!(words[20..24], entity_color);
+                assert_eq!(words[24..27], entity_position.to_array());
+            }
+        }
     }
 
     #[test]

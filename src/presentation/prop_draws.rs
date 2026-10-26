@@ -9,8 +9,9 @@ use super::{
     surface_pass::SurfacePasses,
     surface_views::{SourceSurfaceView, VIEW_COUNT},
     view_frame::SourceViewFrame,
-    world::gpu_props::{NO_BATCH, PropBatch, ROW_WORDS, word_batch},
+    world::gpu_props::{KEY_WORD, NO_BATCH, PropBatch, ROW_WORDS, word_batch},
 };
+use crate::presentation::materials::{SourceMaterial, impostor::ImpostorMaterial};
 use crate::presentation::shadow_scene::CasterKey;
 use bevy::material::{
     MaterialProperties,
@@ -33,6 +34,7 @@ use bevy::render::{
 };
 use bevy::shader::ShaderCacheError;
 use bevy::{ecs as bevy_ecs, prelude::*};
+use std::any::TypeId;
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::{
@@ -74,15 +76,19 @@ fn compiled(cache: &PipelineCache, id: CachedRenderPipelineId) -> Result<bool, S
     }
 }
 /// A row pipeline is ready with its additive and caster companions.
+/// A world shader, such as the impostor, has no additive companion.
 fn pipeline_state(
     id: CachedRenderPipelineId,
+    world_shader: bool,
     cache: &PipelineCache,
     surface: &SurfacePasses,
     caster: &CasterPasses,
 ) -> Result<bool, String> {
     let mut ready = compiled(cache, id)?;
     // The companion passes inspect a pipeline after its publication.
-    ready &= surface.companion_state(id, cache).unwrap_or(Ok(false))?;
+    if !world_shader {
+        ready &= surface.companion_state(id, cache).unwrap_or(Ok(false))?;
+    }
     ready &= caster.classified(id) && caster.companion_state(id, cache).unwrap_or(Ok(true))?;
     Ok(ready)
 }
@@ -619,7 +625,8 @@ impl PropDraws {
             let cache = world.resource::<PipelineCache>();
             let surface = world.resource::<SurfacePasses>();
             let casters = world.resource::<CasterPasses>();
-            ready &= pipeline_state(base, cache, surface, casters)?;
+            let world_shader = key.material.type_id() == TypeId::of::<ImpostorMaterial>();
+            ready &= pipeline_state(base, world_shader, cache, surface, casters)?;
             view.pipelines[batch] = BatchPipelines {
                 base: Some(base),
                 partner: surface.partner(base),
@@ -648,7 +655,7 @@ impl PropDraws {
                 };
                 let mask = scene.masks[index].get(item).copied().unwrap_or(0);
                 self.mask_bytes[slot as usize] = mask;
-                let batch = word_batch(self.words[slot as usize * ROW_WORDS + ROW_WORDS - 1]);
+                let batch = word_batch(self.words[slot as usize * ROW_WORDS + KEY_WORD]);
                 if batch == NO_BATCH {
                     continue;
                 }
@@ -987,7 +994,12 @@ pub(crate) fn draw_cascade<'w>(
             .caster
             .and_then(|id| cache.get_render_pipeline(id));
         let template = draws.templates.get(batch).copied().flatten();
-        let material = materials.group(entry.key.material.typed());
+        // The primary caster has its own material group. Other casters read the surface group.
+        let material = if entry.key.material.type_id() == TypeId::of::<SourceMaterial>() {
+            materials.group(entry.key.material.typed())
+        } else {
+            material_group(world, entry.key.material)
+        };
         let (
             Some(pipeline),
             Some(camera),

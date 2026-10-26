@@ -1,6 +1,6 @@
 //! Generated scenes are prepared offscreen before their collision recipes publish.
 use super::{
-    gpu_props::{BatchKey, GpuProps, PropRow, world_bounds},
+    gpu_props::{BatchKey, GpuProps, PropRow, source_position, world_bounds},
     grass_jobs::GrassJobs,
     instance_materials::{InstanceMaterial, InstanceMaterials, RendererMaterial, ready},
     lod::{LodInstance, LodOwner, LodSchedule, LodTable},
@@ -619,8 +619,7 @@ impl SourceInstances {
                                     let mesh = asset.meshes[index].clone();
                                     let world = worlds[node.index as usize].as_mat4();
                                     let source_position =
-                                        source_worlds[node.index as usize].w_axis.truncate()
-                                            * Vec3::new(1., 1., -1.);
+                                        source_position(source_worlds[node.index as usize]);
                                     let appearance =
                                         stream.appearance(&placement.id).iter().rev().find(|a| {
                                             a.node == source_node.source
@@ -671,13 +670,13 @@ impl SourceInstances {
                                         );
                                     variant_ids.retain(|id| Some(id) != selected);
                                     // A static root renderer with one shared material can be a GPU prop row.
-                                    // A row takes its LOD state from the row data, so its material stays shared.
+                                    // A row takes its LOD state, color and source position from the row data,
+                                    // so its material stays shared.
                                     let local = meshes
                                         .get(&mesh)
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
                                         .and_then(bevy::camera::primitives::MeshAabb::compute_aabb);
-                                    let row = color.is_none()
-                                        && variant_ids.is_empty()
+                                    let row = variant_ids.is_empty()
                                         && node.skin.is_none()
                                         && flat.on_root(node.index as usize)
                                         && local.is_some()
@@ -705,18 +704,17 @@ impl SourceInstances {
                                     else {
                                         continue;
                                     };
-                                    if let Some(color) = color {
-                                        materials.color(&mut binding, color)?;
-                                    }
-                                    if has_lod && !binding.gpu_props() {
-                                        materials.make_private(&mut binding);
-                                    }
                                     let material_source = selected.cloned();
                                     if binding.gpu_props() {
-                                        let InstanceMaterial::Primary(handle) = &binding.visible
-                                        else {
-                                            unreachable!("GPU prop rows use primary materials");
+                                        let material = match &binding.visible {
+                                            InstanceMaterial::Primary(h) => h.id().untyped(),
+                                            InstanceMaterial::Specular(h) => h.id().untyped(),
+                                            InstanceMaterial::Impostor(h) => h.id().untyped(),
+                                            InstanceMaterial::Grass(_) => {
+                                                unreachable!("Grass renderers are entities")
+                                            }
                                         };
+                                        let color = materials.row_color(&binding, color)?;
                                         let aabb = local.unwrap();
                                         let world = worlds[node.index as usize].as_mat4();
                                         let (center, half_extents) =
@@ -724,7 +722,7 @@ impl SourceInstances {
                                         let slot = props.alloc(
                                             BatchKey {
                                                 mesh: mesh.id(),
-                                                material: handle.id().untyped(),
+                                                material,
                                             },
                                             PropRow {
                                                 world,
@@ -737,6 +735,8 @@ impl SourceInstances {
                                                 cast_shadows: record.cast_shadows,
                                                 hidden: true,
                                                 fade: 1.0,
+                                                color,
+                                                source_position,
                                                 batch: 0,
                                             },
                                         );
@@ -761,6 +761,12 @@ impl SourceInstances {
                                             settings: None,
                                         });
                                         continue;
+                                    }
+                                    if let Some(color) = color {
+                                        materials.color(&mut binding, color)?;
+                                    }
+                                    if has_lod {
+                                        materials.make_private(&mut binding);
                                     }
                                     let is_grass =
                                         matches!(binding.visible, InstanceMaterial::Grass(_));
@@ -1460,11 +1466,12 @@ impl SourceInstances {
                 }
             }
             for renderer in &instance.renderers {
+                // A row impostor shares its material. Its row holds the source position.
+                if renderer.entity().is_none() {
+                    continue;
+                }
                 let node = &prototype.nodes[renderer.node];
-                let position = instance.source_worlds[node.gltf_node as usize]
-                    .w_axis
-                    .truncate()
-                    * Vec3::new(1., 1., -1.);
+                let position = source_position(instance.source_worlds[node.gltf_node as usize]);
                 if let InstanceMaterial::Impostor(handle) = &renderer.binding.visible {
                     if let Some(mut material) = materials.impostors.get_mut(handle) {
                         if material.uniform.source_position.truncate() != position {
@@ -1514,11 +1521,9 @@ impl SourceInstances {
                         }
                     };
                     renderer.show(root, commands, props);
-                    let source_position = instance.source_worlds
-                        [prototype.nodes[renderer.node].gltf_node as usize]
-                        .w_axis
-                        .truncate()
-                        * Vec3::new(1., 1., -1.);
+                    let source_position = source_position(
+                        instance.source_worlds[prototype.nodes[renderer.node].gltf_node as usize],
+                    );
                     materials.fade(&renderer.binding, fade, source_position);
                     grass.set_fade(entity, fade, &mut materials.grass);
                 }

@@ -4,6 +4,9 @@
 #import "shaders/source_lod.wgsl"::source_lod_keep
 // Checked Octahedron and ColoredBarrels programs. Source atlas rows retain authored mip order.
 #import bevy_pbr::{mesh_functions, mesh_view_bindings::view}
+#ifdef SOURCE_GPU_PROPS
+#import source_props::{prop_row, prop_world_from_local, prop_local_from_world}
+#endif
 struct ImpostorUniform {
     lod: vec4<f32>,
     shape: vec4<f32>, // frames, size, parallax, depth size
@@ -69,8 +72,13 @@ fn atlas_frame(frame:vec2<f32>, camera:vec3<f32>, ray:vec3<f32>)->vec4<f32> {
 }
 @vertex
 fn vertex(input:ImpostorVertex)->ImpostorOutput {
+#ifdef SOURCE_GPU_PROPS
+    let model=prop_world_from_local(prop_row(input.instance));
+    let inverse=prop_local_from_world(model);
+#else
     let model=mesh_functions::get_world_from_local(input.instance);
     let inverse=mesh_functions::get_local_from_world(input.instance);
+#endif
     var camera=view.world_position;
     if view.clip_from_view[3].w==1. {camera=model[3].xyz+view.world_from_view[2].xyz*5000.;}
 #ifdef SOURCE_CASTER
@@ -159,7 +167,18 @@ fn source_brdf(diffuse: vec3<f32>, specular: vec3<f32>, smoothness: f32, normal:
 #endif
 @fragment
 fn fragment(in:ImpostorOutput)->ImpostorFragment {
-    if !source_lod_keep(in.position.xy,impostor.lod.x) {discard;}
+#ifdef SOURCE_GPU_PROPS
+    // The row holds the fade and the source position of the shared material.
+    let prop=prop_row(in.instance);
+    let lod_fade=prop.fade;
+    let source_position=prop.source_position;
+    let model=prop_world_from_local(prop);
+#else
+    let lod_fade=impostor.lod.x;
+    let source_position=impostor.source_position.xyz;
+    let model=mesh_functions::get_world_from_local(in.instance);
+#endif
+    if !source_lod_keep(in.position.xy,lod_fade) {discard;}
     let fraction=fract(in.frames);
     let weights=vec3(min(1.-fraction.x,1.-fraction.y),abs(fraction.x-fraction.y),min(fraction.x,fraction.y));
     let depths=vec3(atlas_sample(0u,in.frame0.zw,-1.).a,atlas_sample(0u,in.frame1.zw,-1.).a,atlas_sample(0u,in.frame2.zw,-1.).a);
@@ -168,7 +187,6 @@ fn fragment(in:ImpostorOutput)->ImpostorFragment {
     let uv2=in.frame2.zw+(.5-depths.z)*in.frame2.xy;
     let albedo_sample=atlas_blend(1u,uv0,uv1,uv2,weights);
     if albedo_sample.a<impostor.surface.y {discard;}
-    let model=mesh_functions::get_world_from_local(in.instance);
     // Source reads the Z row, not the length of the third column.
     let z_scale=length(vec3(model[0].z,model[1].z,model[2].z));
     let displacement=(dot(depths,weights)-.5)*impostor.shape.w*z_scale;
@@ -197,7 +215,7 @@ fn fragment(in:ImpostorOutput)->ImpostorFragment {
     let properties=atlas_blend(2u,uv0,uv1,uv2,weights);
     if impostor.renderer.y!=0u {
         specular=vec3(properties.r);smoothness=properties.g;occlusion=properties.b;
-        let seed=abs(sin(impostor.source_position.x+impostor.source_position.z));
+        let seed=abs(sin(source_position.x+source_position.z));
         let hue=clamp(abs(fract(seed+vec3(1.,.666666687,.333333343))*6.-3.)-1.,vec3(0.),vec3(1.));
         albedo=albedo*(1.-properties.a)+hue*properties.a*properties.a;
     } else {

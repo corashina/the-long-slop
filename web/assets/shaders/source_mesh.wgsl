@@ -30,6 +30,8 @@ struct SourceVertexOutput {
 #ifdef SOURCE_GPU_PROPS
     // The row LOD fade replaces the material `lod_fade`.
     @location(13) @interpolate(flat) source_fade: f32,
+    // The row color replaces the material color.
+    @location(14) @interpolate(flat) source_color: vec4<f32>,
 #endif
 #ifdef VERTEX_UVS_A
     @location(2) uv: vec2<f32>,
@@ -94,6 +96,7 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
     let prop = prop_row(vertex_no_morph.instance_index);
     let mesh_world_from_local = prop_world_from_local(prop);
     out.source_fade = prop.fade;
+    out.source_color = prop.color;
 #else
     let mesh_world_from_local = mesh_functions::get_world_from_local(vertex_no_morph.instance_index);
 #endif
