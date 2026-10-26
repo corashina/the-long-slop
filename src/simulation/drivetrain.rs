@@ -171,10 +171,9 @@ impl DrivetrainState {
                 depression = 0.;
             }
         }
-        // DriveStuff suppresses manual edges when automatic gears are selected.
+        // `edges` come from `DrivingInput`, which clears them for automatic gears.
         // ControlStuff applies direct keys in source order, then up, then down.
         if controlled
-            && !assists.automatic_gears
             && (depression > 0.
                 || assists.automatic_clutch
                 || (vehicle.driving.force_automatic && !driving.force_manual))

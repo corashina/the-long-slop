@@ -14,6 +14,7 @@ from . import world_probe
 from . import draw_distance
 from .sled import centers_of_mass, recover_sled
 from .actions import recover_world_pushes
+from .towing import recover_hitches, recover_trailer
 
 PAYLOAD_SHA256 = '243f2862c6fa3d38b4c7d8df56332a2016c09d412b11030564f7f21665ad8ad9'
 WORLD_DATABASE_ID = 66024
@@ -34,14 +35,16 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Digging and detection (W06): metal detector.
     'metalDetectorScript',
     # Power cables (W04): rope segments and their pole targets.
-    'ropeScript'}
+    'ropeScript',
+    # Towing (V05): the trailer grip spawns at Start.
+    'attachgripscript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
 
-VEHICLE_CLASSES = {'carscript','utanfutoscript'}
+VEHICLE_CLASSES = {'carscript'}
 # The start car prefab. car_prototypes adds the bus pool.
 LADA = ('sharedassets1.assets',82556)
 CAR_CATEGORIES = ('bus', 'bike')
@@ -64,7 +67,7 @@ def category_items(catalog, name):
 
 def car_prototypes(source, catalog):
     """The car roots that export as world prototypes: the Lada and the CAR_CATEGORIES pools.
-    A root with utanfutoscript (a trailer) stays other_vehicle."""
+    A trailer root (utanfutoscript) has no carscript and exports as a world prototype too."""
     cars={LADA}
     for name in CAR_CATEGORIES:
         for index in category_items(catalog,name):
@@ -72,7 +75,7 @@ def car_prototypes(source, catalog):
             root=_source_root(source,source.get(item['source']['file'],item['source']['path_id']))
             classes={source.class_name(c) for n in source.hierarchy(root) for c in n['components']
                 if c.type.name=='MonoBehaviour' and source.read(c)['m_Script']['m_PathID']}
-            if 'carscript' in classes and 'utanfutoscript' not in classes:cars.add(key(root))
+            if 'carscript' in classes:cars.add(key(root))
     return cars
 
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
@@ -390,6 +393,10 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
                 if component.type.name in ('MeshRenderer','SkinnedMeshRenderer','MeshFilter','LODGroup','Light'):selected.record(component)
                 if component.type.name!='MonoBehaviour':continue
                 cname=source.class_name(component)
+                if cname=='attachgripscript':
+                    # attachgripscript.Start instantiates GripPrefab: the grip is its own prototype.
+                    prefab=source.resolve(component,source.read(component)['GripPrefab'])
+                    if prefab:add(prefab,'nested')
                 if cname in RULE_CLASSES or key(component) in EDIBLE_COMPONENTS:
                     rule=selected.record(component)
                     selected.record(node['reader'])
@@ -763,14 +770,18 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         sled=recover_sled(source,hierarchy,mapping,bodies,colliders)
         pushes=recover_world_pushes(local,hierarchy,mapping,bodies,colliders)
+        from .vehicles import Prototype, light_records
+        trailer=recover_trailer(source,hierarchy,mapping,bodies,lambda transform:world_pose(local,transform)['translation'],
+            lambda:light_records(source,Prototype(source,hierarchy),None,None,index,report['material_indices'])[0])
         for node in hierarchy:
             for component in node['components']:
-                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass'):selected.record(component)
+                if component.type.name=='MonoBehaviour' and source.class_name(component) in ('szankoScript','setcenterofmass','utanfutoscript','attachTargetscript','attachablescript'):selected.record(component)
                 selected.component_record(component)
         prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,'pushes':pushes}
+            'materials':[dict(material,asset=index) for material in report['materials']],'sled':sled,'pushes':pushes,
+            'trailer':trailer,'hitches':recover_hitches(source,hierarchy,mapping,colliders)}
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle

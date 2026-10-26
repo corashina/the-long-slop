@@ -49,7 +49,12 @@ pub struct WorldVehicleReference {
     /// One `talajnezo` per wheel, in `wheels` order. Poses are relative to the prototype root.
     pub wheel_effects: Vec<WheelEffectsReference>,
     pub effect_gains: EffectGains,
+    /// Source `carscript.Transmission`. None: the car has no gear lever.
+    pub lever: Option<LeverReference>,
+    /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
+    pub key_steer_multiplier: f32,
     pub seats: Vec<WorldSeatReference>,
+    pub drive_frames: DriveFrames,
     pub lights: Vec<WorldLightReference>,
     pub light_switch: Option<WorldLightSwitchReference>,
     /// Node ids are prototype node indices.
@@ -229,6 +234,17 @@ pub struct WorldSeatReference {
     pub source: SourceId,
     pub driver: bool,
     pub driving2: bool,
+}
+
+/// Source `carscript` player body frames while driving: `LHDrivePos`, `RHDrivePos`,
+/// `LLDrivePos`, `RLDrivePos`. `None` for a null link.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriveFrames {
+    pub left_hand: Option<u32>,
+    pub right_hand: Option<u32>,
+    pub left_leg: Option<u32>,
+    pub right_leg: Option<u32>,
 }
 
 /// A `headlightscript` (headlight or cabin) or `rearlights` controller.
@@ -569,6 +585,23 @@ impl WorldVehicleReference {
         )?;
         check(
             s,
+            "vehicle key steer multiplier",
+            self.key_steer_multiplier.is_finite() && self.key_steer_multiplier >= 0.,
+        )?;
+        if let Some(lever) = &self.lever {
+            check(
+                s,
+                "vehicle lever",
+                b.node(lever.node)
+                    && lever.gears.len() == self.gear_ratios.len()
+                    && lever
+                        .gears
+                        .iter()
+                        .all(|gear| transform(&gear.path) && transform(&gear.pos)),
+            )?;
+        }
+        check(
+            s,
             "vehicle plates",
             self.plates.iter().all(|p| {
                 b.node(p.node)
@@ -582,6 +615,15 @@ impl WorldVehicleReference {
                 .iter()
                 .enumerate()
                 .all(|(i, p)| self.plates[..i].iter().all(|o| o.node != p.node)),
+        )?;
+        let d = &self.drive_frames;
+        check(
+            s,
+            "vehicle drive frames",
+            [d.left_hand, d.right_hand, d.left_leg, d.right_leg]
+                .iter()
+                .flatten()
+                .all(|n| b.node(*n)),
         )?;
         check(
             s,

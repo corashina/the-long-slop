@@ -61,8 +61,7 @@ impl SceneLighting {
         shadow_fade: Vec4,
         shadow_fade_center: Vec4,
         clip_from_world: Mat4,
-        near: f32,
-        far: f32,
+        near_far: Vec4,
         sun_shadow: super::shadow_collector::SunShadowUniform,
     ) -> LightingUniform {
         LightingUniform {
@@ -77,7 +76,7 @@ impl SceneLighting {
             probe_extents: self.probe_extents,
             source_time: self.source_time,
             clip_from_world,
-            near_far: Vec4::new(near, far, 0., 0.),
+            near_far,
             sun_shadow,
         }
     }

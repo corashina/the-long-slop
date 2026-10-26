@@ -8,10 +8,9 @@ mod lod;
 mod memory;
 use super::{
     AssetId, AssetRecord, AssetUsage, ColliderGeometry, EngineGlobals, EnginePartReference,
-    GaugePartReference,
-    LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference, ReferenceError,
-    ReferenceManifest, SourceHash, SourceId, Transform, WorldVehicleReference, finite, hash,
-    require, transform,
+    GaugePartReference, LibraryProvenance, NodeId, PrototypeBounds, RadiatorPartReference,
+    ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform, WorldHitchReference,
+    WorldTrailerReference, WorldVehicleReference, finite, hash, require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -70,8 +69,7 @@ pub struct WorldReference {
     /// Source `materialpairscript` sets that marked prototype nodes use.
     #[serde(deserialize_with = "compact_vec")]
     pub biome_material_sets: Vec<WorldBiomeMaterialSet>,
-    #[serde(deserialize_with = "compact_vec")]
-    pub prototypes: Vec<WorldPrototypeReference>,
+    pub prototypes: WorldPrototypes,
     #[serde(deserialize_with = "compact_vec")]
     pub records: Vec<WorldSourceRecord>,
     #[serde(deserialize_with = "compact_vec")]
@@ -167,6 +165,10 @@ pub struct WorldPrototypeReference {
     #[serde(default)]
     pub gauges: Vec<GaugePartReference>,
     pub sled: Option<SledReference>,
+    pub trailer: Option<WorldTrailerReference>,
+    /// Trailer hitch targets on this prototype.
+    #[serde(default, deserialize_with = "compact_vec")]
+    pub hitches: Vec<WorldHitchReference>,
     /// Source `pushablescript` components with a Rigidbody on their node.
     #[serde(default)]
     pub pushes: Vec<WorldPushReference>,
@@ -1836,6 +1838,12 @@ impl WorldReference {
             p.pushes.iter().all(|push| push.valid(p)),
             &field(&p.source, "prototype push"),
         )?;
+        require(
+            p.trailer.as_ref().is_none_or(|t| {
+                t.valid(p) && self.prototypes.iter().any(|g| g.source == t.grip.prototype)
+            }) && p.hitches.iter().all(|h| h.valid(p)),
+            &field(&p.source, "prototype trailer/hitches"),
+        )?;
         let doors: Vec<_> = self
             .mechanisms
             .iter()
@@ -2040,6 +2048,60 @@ pub struct WorldRenderTarget {
 }
 
 /// Source inputs are immutable after decoding; retain no deserializer growth slack.
+/// World prototypes with a source lookup built at load.
+#[derive(Clone, Debug, Default)]
+pub struct WorldPrototypes {
+    list: Vec<WorldPrototypeReference>,
+    /// Prototype indices sorted by source; the first of equal sources leads.
+    order: Vec<u32>,
+}
+impl WorldPrototypes {
+    pub fn new(list: Vec<WorldPrototypeReference>) -> Self {
+        let mut order = (0..list.len() as u32).collect::<Vec<_>>();
+        order.sort_by(|&a, &b| list[a as usize].source.cmp(&list[b as usize].source));
+        Self { list, order }
+    }
+    /// Index of the first prototype of `source`.
+    pub fn index(&self, source: &SourceId) -> Option<usize> {
+        let at = self
+            .order
+            .partition_point(|&i| self.list[i as usize].source < *source);
+        let index = *self.order.get(at)? as usize;
+        (self.list[index].source == *source).then_some(index)
+    }
+    pub fn get(&self, source: &SourceId) -> Option<&WorldPrototypeReference> {
+        self.index(source).map(|index| &self.list[index])
+    }
+    /// Edits the list and rebuilds the source lookup.
+    pub fn edit<R>(&mut self, edit: impl FnOnce(&mut Vec<WorldPrototypeReference>) -> R) -> R {
+        let result = edit(&mut self.list);
+        *self = Self::new(std::mem::take(&mut self.list));
+        result
+    }
+}
+impl std::ops::Deref for WorldPrototypes {
+    type Target = [WorldPrototypeReference];
+    fn deref(&self) -> &Self::Target {
+        &self.list
+    }
+}
+impl<'a> IntoIterator for &'a WorldPrototypes {
+    type Item = &'a WorldPrototypeReference;
+    type IntoIter = std::slice::Iter<'a, WorldPrototypeReference>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.list.iter()
+    }
+}
+impl Serialize for WorldPrototypes {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.list.serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for WorldPrototypes {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        compact_vec(deserializer).map(Self::new)
+    }
+}
 fn compact_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2239,7 +2301,9 @@ mod tests {
                 "auto_move_min": 0.3, "collision_gain": 1.0, "exhaust": [],
                 "wheel_effects": [{"source": src(16), "pose": pose, "rate": 1.0, "ray_mask": 1, "own_gains": null, "dust": null, "grass": []}],
                 "effect_gains": {"ground": 1.0, "spring": 1.0, "spring_pitch": 1.0, "slide_angle": 20.0, "max_slide_volume_speed": 10.0},
+                "lever": null, "key_steer_multiplier": 0.0,
                 "seats": [{"source": src(13), "driver": true, "driving2": true}],
+                "drive_frames": {"left_hand": 2, "right_hand": null, "left_leg": null, "right_leg": null},
                 "lights": [], "light_switch": null, "instruments": null, "high_beams": [], "plates": [],
                 "gauge_limits": crate::reference::gauge_limits_fixture(), "kmh_meters": []
             },

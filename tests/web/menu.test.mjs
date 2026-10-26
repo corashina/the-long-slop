@@ -5,7 +5,7 @@ import {createInput} from '../../web/input.js';
 
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function event(type,properties={}){return Object.assign(new Event(type,{cancelable:true}),properties);}
-function setup(t){
+function setup(t,session={}){
  const originals=new Map(['window','document','innerWidth','innerHeight'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
  const window=new EventTarget(),document=new EventTarget(),nodes=new Map(),actions=[];
  class Element extends EventTarget {
@@ -24,7 +24,7 @@ function setup(t){
  const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],layoutUrls:{},pairUrls:[{background:'background',frame:'frame'}]};
  let menu,locked=null,newGame=async()=>{};
  const input=createInput(canvas,()=>menu.model.state==='playing'&&document.pointerLockElement===canvas,[]);
- menu=createMenu({canvas,ui,drivingBindings:[],clearInput:input.clear,queueAction:action=>actions.push(action),slider:{lock(value){locked=value;}},saveSession:{newGame:()=>newGame(),cancel:()=>false}});
+ menu=createMenu({canvas,ui,drivingBindings:[],clearInput:input.clear,queueAction:action=>actions.push(action),slider:{lock(value){locked=value;}},saveSession:{newGame:()=>newGame(),cancel:()=>false,list:async()=>({saves:[],autosave:null,last:null}),...session},buildId:'b',thumbnail:()=>'thumb'});
  const key=(code,repeat=false)=>window.dispatchEvent(event('keydown',{code,repeat}));
  const start=async()=>{menu.ready();document.querySelector('#new-game').dispatchEvent(event('click'));await settle();assert.equal(menu.model.state,'pause-menu');actions.length=0;};
  t.after(()=>{input.dispose();menu.dispose();for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
@@ -104,4 +104,24 @@ test('draw_distance_unlocks_only_before_start_and_shows_refusal',async t=>{
  app.newGame=async()=>{};click('#new-game');await settle();
  assert.equal(app.menu.model.state,'pause-menu');assert.equal(app.locked,true);
  click('#controls');assert.equal(app.menu.model.state,'controls');assert.equal(app.locked,true);
+});
+
+test('save_screen_opens_from_both_menus_and_escape_clears_selection_then_returns',async t=>{
+ const calls=[],entry={name:'one',date:'d',seed:7,drivenKm:12.4,version:'b',thumbnail:null};
+ const app=setup(t,{list:async()=>({saves:[entry],autosave:null,last:'one'}),save:async(...args)=>{calls.push(['save',...args]);},remove:async name=>{calls.push(['remove',name]);}});
+ const click=id=>app.document.querySelector(id).dispatchEvent(event('click'));
+ await app.menu.ready();await settle();
+ assert.equal(app.document.querySelector('#start-load-last').hidden,false);
+ click('#start-load');await settle();
+ assert.equal(app.menu.model.state,'saves');assert.equal(app.document.querySelector('#save-name-row').hidden,true);
+ click('#save-back');assert.equal(app.menu.model.state,'start-menu');
+ await app.start();
+ click('#save');await settle();
+ assert.equal(app.menu.model.state,'saves');assert.equal(app.menu.model.origin,'pause-menu');
+ click('#save-tile-0');assert.equal(app.document.querySelector('#save-info-driven').textContent,'0012 km');
+ click('#save-save');assert.equal(app.document.querySelector('#save-save-confirm').hidden,false);
+ click('#save-save-yes');await settle();await settle();
+ assert.deepEqual(calls,[['save','one','thumb']]);assert.equal(app.menu.model.status,'Save complete.');
+ app.key('Escape');await settle();assert.equal(app.menu.model.state,'saves');assert.equal(app.menu.model.status,'Save complete.');
+ app.key('Escape');await settle();assert.equal(app.menu.model.state,'pause-menu');
 });

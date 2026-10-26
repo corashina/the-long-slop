@@ -308,13 +308,16 @@ impl InteractionState {
                     {
                         a.actions.0 |= ActionMask::DISMOUNT;
                     }
+                    // A hitched grip body sleeps; picking it up detaches it first.
                     ItemLocation::World
                         if t.slot.is_none()
-                            && item.body.is_some_and(|body| {
-                                self.carry
-                                    .can_acquire(t.item, t.point, player, body, physics)
-                                    .is_ok()
-                            }) =>
+                            && ((self.hitch.is_hitched(t.item)
+                                && self.carry.allows_pickup(t.item, player.seated(), false))
+                                || item.body.is_some_and(|body| {
+                                    self.carry
+                                        .can_acquire(t.item, t.point, player, body, physics)
+                                        .is_ok()
+                                })) =>
                     {
                         a.actions.0 |= ActionMask::PICKUP;
                     }
@@ -333,6 +336,7 @@ impl InteractionState {
             {
                 let fits = match slot {
                     SlotTarget::Part(slot) => self.parts.can_install(held, slot, items).is_ok(),
+                    SlotTarget::Hitch(target) => self.hitch.can_attach(held, target, items).is_ok(),
                     SlotTarget::Wheel(_) | SlotTarget::Tire(_) => {
                         self.wheel_installation_block(aim, items).is_none()
                     }

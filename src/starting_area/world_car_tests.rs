@@ -108,7 +108,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
             };
             vehicle
                 .lights
-                .advance(record, input, |_| true, |_| 0., FIXED_DT);
+                .advance(&record.lights, input, |_| true, |_| 0., FIXED_DT);
         }
     };
     step_lights(vehicle, 0.5);
@@ -118,7 +118,12 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     assert_eq!((lit(vehicle, 2), lit(vehicle, 3)), (2., 0.));
     let renderer = vehicle.lights.materials()[0];
     assert_eq!(
-        renderer.choice.unwrap().link(record).unwrap().gltf_material,
+        renderer
+            .choice
+            .unwrap()
+            .link(&record.lights)
+            .unwrap()
+            .gltf_material,
         1
     );
     vehicle.requested_headlights = 2;
@@ -235,7 +240,7 @@ fn light_switch_click_toggles_world_car_headlights() {
         };
         vehicle
             .lights
-            .advance(record, input, |_| true, |_| 0., FIXED_DT);
+            .advance(&record.lights, input, |_| true, |_| 0., FIXED_DT);
     }
     let low = vehicle
         .lights

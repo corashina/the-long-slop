@@ -9,7 +9,7 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 | Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
 | Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
-The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` until the trailer PR.
+Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. See [Trailers](#trailers).
 
 ## Model
 
@@ -41,7 +41,7 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - The save keeps these records per key: pose, gear, ignition, handbrake, trip, headlights, engine state and fuel.
 - The save keeps gauge part values per key.
 - The save keeps bus door state (`Bopened`, `Bsigned`) per bus.
-- Save schema 22. Older saves are rejected.
+- Save schema 23. Older saves are rejected.
 
 ## Bus doors
 
@@ -54,8 +54,25 @@ The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` un
 - Leaves lerp their euler angles to `opened` or `closed`. The speed is drawn in `Start` order from `minspeed`..`maxspeed`.
 - A leaf plays a random sound when `minTime` passed since its last use. Colliders below a leaf turn with it.
 - `dinamiccolliderforbus`: each box length follows the `t1`-`t2` distance when a leaf moves.
-- `detachIfOpen` waits for the V05 hitch. Opening only clears the link.
+- `detachIfOpen` is not ported yet. Opening only clears the link.
 - A usable that also slides (world mechanism) slides and works as a door button.
+
+## Trailers
+
+`src/interaction/hitch.rs` and `src/world/content_trailers.rs` port `utanfutoscript`, `attachgripscript`, `attachablescript` (onlyToPoint) and `attachTargetscript`.
+
+- A prototype root with `utanfutoscript` exports a `trailer` record: body, wheels, both centers of mass, brake force, brake switch, grip and rear lamps.
+- `attachTargetscript` entries with type `utanfuto` export as `hitches`: the target node and the one collider on the script node.
+- `attachgripscript.Start` spawns the grip prefab at `VgripPos` as a child content. A loose spherical joint holds it to the trailer.
+- Attach: the player puts the held grip on a hitch collider. One spherical joint links the car body and the trailer at the grip point.
+- A hitched grip stays a world item. Its body is disabled. Its shapes ride on the car without contacts or mass.
+- Picking up a hitched grip detaches it. The grip keeps the car speed at the hitch.
+- The trailer uses `CenterOfMassAttached` while hitched, else `CenterOfMass`.
+- Brakes: each wheel gets `brakeForce` while the `brake` flashlightscript is on. Only the bus trailer has one.
+- Lamps: `rearlights` follow the towing car: headlights, ignition and brake. With no car, the lamps are off.
+- Save: the grip attachment holds the car key and the target source. No schema change. Load waits for the target and the trailer.
+- The trailer, its grip and the towing car load and unload as one group.
+- Not ported: rope towing (B16 is not in the original), `PlusWheelToKeepAwake`, trailer wheel mesh spin, bus door `detachIfOpen`.
 
 ## Physics fix
 
@@ -129,6 +146,5 @@ Expected work for other cars:
 
 - Car03: the engine needs two-stroke mixed fuel. It has no radiator and no oil tank.
 - Car06P: diesel works through its engine `fuel_consumption`. Add its category.
-- Buses: the trailer comes in a later PR.
 - Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.

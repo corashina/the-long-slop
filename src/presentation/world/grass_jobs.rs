@@ -9,6 +9,7 @@ use crate::{
     reference::ReferenceError,
     world::WorldStream,
 };
+use bevy::platform::collections::HashMap;
 use bevy::{
     asset::RenderAssetUsages,
     ecs as bevy_ecs,
@@ -55,7 +56,6 @@ struct Instance {
     material: Handle<GrassMaterial>,
     shadows: bool,
     bounds: bevy::camera::primitives::Aabb,
-    latest: GrassView,
     accepted_view: Option<GrassView>,
     accepted: Option<Geometry>,
     pending: Option<Pending>,
@@ -69,6 +69,12 @@ struct Instance {
 #[derive(Resource, Default)]
 pub struct GrassJobs {
     instances: Vec<Instance>,
+    /// Instance index by entity.
+    index: HashMap<Entity, usize>,
+    /// Camera view of this frame. Every instance expands for it.
+    view: GrassView,
+    /// Per parent: a job is pending, and the stale instance that may start next.
+    groups: HashMap<Entity, (bool, Option<(u64, usize)>)>,
     worker: GrassWorker,
     actor_cpu: usize,
     revision: u64,
@@ -122,6 +128,7 @@ impl GrassJobs {
     ) {
         self.worker.dispose();
         self.actor_cpu = 0;
+        self.index.clear();
         for instance in self.instances.drain(..) {
             if let Some(accepted) = instance.accepted {
                 meshes.remove(accepted.mesh.id());
@@ -174,28 +181,21 @@ impl GrassJobs {
         Ok(())
     }
 
+    fn get(&self, entity: Entity) -> Option<&Instance> {
+        self.index.get(&entity).map(|&index| &self.instances[index])
+    }
     /// Source patch identities for the admitted canonical triangle expansion.
     pub fn patch_ids(&self, entity: Entity) -> Option<&[u32]> {
-        self.instances
-            .iter()
-            .find(|i| i.entity == entity)
+        self.get(entity)
             .and_then(|i| i.accepted.as_ref())
             .map(|g| g.patches.as_slice())
     }
-
-    pub fn request_view(
-        &mut self,
-        _stream: &mut WorldStream,
-        entity: Entity,
-        view: GrassView,
-    ) -> Result<(), ReferenceError> {
-        if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
-            instance.latest = view;
-        }
-        Ok(())
+    /// Sets the camera view of this frame for all instances.
+    pub fn set_view(&mut self, view: GrassView) {
+        self.view = view;
     }
     pub fn set_fade(&self, entity: Entity, fade: f32, materials: &mut Assets<GrassMaterial>) {
-        if let Some(instance) = self.instances.iter().find(|i| i.entity == entity) {
+        if let Some(instance) = self.get(entity) {
             if let Some(accepted) = &instance.accepted {
                 if let Some(mut material) = materials.get_mut(&accepted.material) {
                     if material.uniform.lod.x != fade {
@@ -213,7 +213,7 @@ impl GrassJobs {
         }
     }
     pub fn ready(&self, entity: Entity) -> bool {
-        self.instances.iter().any(|i| i.entity == entity && i.ready)
+        self.get(entity).is_some_and(|i| i.ready)
     }
     pub fn request(
         &mut self,
@@ -223,7 +223,6 @@ impl GrassJobs {
         patches: Arc<[GrassPatch]>,
         settings: GrassSettings,
         material: Handle<GrassMaterial>,
-        view: GrassView,
         shadows: bool,
         bounds: bevy::camera::primitives::Aabb,
     ) -> Result<(), ReferenceError> {
@@ -231,16 +230,16 @@ impl GrassJobs {
             .instances
             .iter()
             .any(|i| i.parent == parent && i.pending.is_some());
-        if let Some(instance) = self.instances.iter_mut().find(|i| i.entity == entity) {
+        if let Some(&index) = self.index.get(&entity) {
+            let instance = &mut self.instances[index];
             if !Arc::ptr_eq(&instance.patches, &patches) || instance.settings != settings {
                 return Err(ReferenceError(
                     "Grass entity source changed before retirement".into(),
                 ));
             }
-            instance.latest = view;
             if group_idle
                 && instance.pending.is_none()
-                && instance.accepted_view != Some(view)
+                && instance.accepted_view != Some(self.view)
                 && stream.can_request_independent(1)
             {
                 instance.continuation = Some(stream.reserve_grass_renderer(entity.to_bits(), 0)?);
@@ -251,7 +250,11 @@ impl GrassJobs {
         if self.instances.len() >= 8192 {
             return Err(ReferenceError("Grass instance count cap".into()));
         }
-        let metadata = std::mem::size_of::<Instance>();
+        // The index and group maps hold at most one entry per instance at half load.
+        let metadata = std::mem::size_of::<Instance>()
+            + 2 * (std::mem::size_of::<(Entity, usize)>()
+                + std::mem::size_of::<(Entity, (bool, Option<(u64, usize)>))>()
+                + 2);
         let continuation = if group_idle && stream.can_request_independent(1) {
             Some(stream.reserve_grass_renderer(entity.to_bits(), metadata)?)
         } else {
@@ -259,6 +262,7 @@ impl GrassJobs {
             None
         };
         let queued = continuation.is_some();
+        self.index.insert(entity, self.instances.len());
         self.instances.push(Instance {
             continuation,
             upload: None,
@@ -272,7 +276,6 @@ impl GrassJobs {
             material,
             shadows,
             bounds,
-            latest: view,
             accepted_view: None,
             accepted: None,
             pending: queued.then_some(Pending::Queued),
@@ -417,25 +420,31 @@ impl GrassJobs {
                     }
             })
             .sum();
+        // One stale instance per parent starts a job, the least recently started first,
+        // and only while no job of that parent is pending.
+        let view = self.view;
+        self.groups.clear();
+        for (index, i) in self.instances.iter().enumerate() {
+            let group = self.groups.entry(i.parent).or_default();
+            group.0 |= i.pending.is_some();
+            if i.accepted_view != Some(view) {
+                let key = (i.last_started, index);
+                group.1 = Some(group.1.map_or(key, |first| first.min(key)));
+            }
+        }
         for index in 0..self.instances.len() {
             let needs_child = self.instances[index].pending.is_none()
-                && self.instances[index].accepted_view != Some(self.instances[index].latest);
-            let parent = self.instances[index].parent;
+                && self.instances[index].accepted_view != Some(view);
             let group_idle = needs_child
-                && !self.instances.iter().enumerate().any(|(other, i)| {
-                    i.parent == parent
-                        && (i.pending.is_some()
-                            || (i.accepted_view != Some(i.latest)
-                                && (i.last_started, other)
-                                    < (self.instances[index].last_started, index)))
-                });
+                && self.groups[&self.instances[index].parent]
+                    == (false, Some((self.instances[index].last_started, index)));
             let instance = &mut self.instances[index];
             if instance.retirement.started() || instance.session != stream.frame().request.session {
                 continue;
             }
             if group_idle
                 && instance.pending.is_none()
-                && instance.accepted_view != Some(instance.latest)
+                && instance.accepted_view != Some(view)
                 && stream.can_request_independent(1)
             {
                 instance.continuation =
@@ -532,12 +541,12 @@ impl GrassJobs {
                     };
                     instance.pending = Some(Pending::Worker {
                         id,
-                        view: instance.latest,
+                        view,
                         approved: false,
                         canceled: false,
                         scratch,
                     });
-                    self.worker.submit(id, instance.latest)?;
+                    self.worker.submit(id, view)?;
                 }
             }
             if let Some(Pending::Worker {
@@ -742,7 +751,7 @@ impl GrassJobs {
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<GrassMaterial>,
     ) -> Result<bool, ReferenceError> {
-        let Some(index) = self.instances.iter().position(|i| i.entity == entity) else {
+        let Some(&index) = self.index.get(&entity) else {
             return Ok(true);
         };
         self.instances[index].retirement.keep(false);
@@ -774,6 +783,10 @@ impl GrassJobs {
             return Ok(false);
         }
         let mut instance = self.instances.swap_remove(index);
+        self.index.remove(&instance.entity);
+        if let Some(moved) = self.instances.get(index) {
+            self.index.insert(moved.entity, index);
+        }
         self.worker
             .publication_ended(instance.entity.to_bits(), false);
         let mut cpu =

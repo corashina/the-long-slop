@@ -11,7 +11,7 @@ ANCHOR_FIELDS = dict(CharacterRoot=29438,CharacterStandPos=36982,CharacterDuckPo
     defdefLLPos=37888,defdefRLPos=25884,RH=23118,TpickedUpParent=39812,
     TpickedUpParent2=23837,TpickedUpPos=39814,usingHand=32168,pointAt=35402,
     CamParent=22249,THeadDir=37709,ghostHead=28987,TStandHeadPos=39823,
-    TDuckHeadPos=39849,TProneHeadPos=23339,THeadBob=39808,THeadLean=39829)
+    TDuckHeadPos=39849,TProneHeadPos=23339,THeadBob=39808,THeadLean=39829,Th=39811)
 TARGET_FIELDS = dict(HHTarget=25362,LHTarget=32234,RHTarget=32762,LLTarget=36286,RLTarget=26378,Pelvis=29799)
 WALK_FIELDS = ('LeftLegWalkWayPoints','RightLegWalkWayPoints')
 WALK_IDS = ([22742,32651,34295,22427,37543,24385],[28142,26891,36507,36405,33777,27003])
