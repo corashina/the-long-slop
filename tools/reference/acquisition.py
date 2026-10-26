@@ -699,6 +699,9 @@ CONTENT_COUNTS = [{'prototype': {'file': 'sharedassets1.assets', 'path_id': 7544
   'maximum': 0},
  {'prototype': {'file': 'sharedassets1.assets', 'path_id': 54495},
   'source': {'file': 'sharedassets1.assets', 'path_id': 134663},
+  'maximum': 0},
+ {'prototype': {'file': 'sharedassets1.assets', 'path_id': 51557},
+  'source': {'file': 'sharedassets1.assets', 'path_id': 137709},
   'maximum': 0}]
 
 STARTUP_PACKS = [{'source': 14079, 'save': 72692, 'body': 50432, 'pickup': 75069, 'group': 298, 'vehicle': 69517, 'pack': 70704, 'ammo': 70998},
