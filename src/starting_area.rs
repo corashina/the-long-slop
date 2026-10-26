@@ -610,8 +610,58 @@ pub fn initial_vehicle_poses(
         .collect()
 }
 
+/// The car record that a car copy reads each step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VehicleRecord {
+    /// V03 bridge: old garage car index in `reference.vehicles`. Task 9 removes it.
+    Garage(usize),
+    /// Index of the car prototype in `reference.world.prototypes`.
+    World(usize),
+}
+
+impl VehicleRecord {
+    pub fn gearbox(
+        self,
+        reference: &ReferenceManifest,
+    ) -> crate::simulation::drivetrain::Gearbox<'_> {
+        match self {
+            Self::Garage(index) => (&reference.vehicles[index]).into(),
+            Self::World(index) => self::world_vehicle(reference, index).into(),
+        }
+    }
+    /// Source `carscript.psSmoke` systems of the record.
+    pub fn exhaust(self, reference: &ReferenceManifest) -> &[crate::reference::ParticleReference] {
+        match self {
+            Self::Garage(index) => &reference.vehicles[index].exhaust,
+            Self::World(index) => &self::world_vehicle(reference, index).exhaust,
+        }
+    }
+}
+
+/// The vehicle record of car prototype `index`. The binder adds runtimes only for car prototypes.
+fn world_vehicle(
+    reference: &ReferenceManifest,
+    index: usize,
+) -> &crate::reference::WorldVehicleReference {
+    reference.world.prototypes[index]
+        .vehicle
+        .as_ref()
+        .expect("car prototype")
+}
+
+/// Car-side state of a car copy. The world change records keep it while the car is retired.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VehicleState {
+    pub ignition: bool,
+    pub gear: usize,
+    pub handbrake: bool,
+    pub trip_m: f64,
+    pub requested_headlights: u8,
+}
+
 /// Source `carscript` state of one car copy. Engine state lives on the engine part.
 pub struct VehicleRuntime {
+    pub record: VehicleRecord,
     pub ignition: IgnitionState,
     pub handbrake: bool,
     /// Distance this vehicle has driven, in meters.
@@ -629,12 +679,62 @@ pub struct VehicleRuntime {
     previous: [f64; 3],
     /// Parts mounted on this car, found once at the start of each step.
     powertrain: Powertrain,
+    /// Requested headlight state of a world car. V03 bridge: old garage cars keep it in
+    /// `LightingState`. Task 9 moves every car here.
+    pub requested_headlights: u8,
 }
 
 impl VehicleRuntime {
+    /// Runtime of a car copy of world prototype `prototype`.
+    /// `recovery_bounds` hold the enabled chassis colliders in the chassis frame.
+    pub(crate) fn world(
+        prototype: usize,
+        record: &crate::reference::WorldVehicleReference,
+        fuel_tank: Option<ItemId>,
+        recovery_bounds: crate::reference::Bounds,
+    ) -> Self {
+        Self {
+            record: VehicleRecord::World(prototype),
+            handbrake: record.handbrake,
+            trip_m: 0.0,
+            ignition: IgnitionState::default(),
+            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(record.into()),
+            exhaust: crate::exhaust::ExhaustState::new(
+                &record.exhaust,
+                record.source.path_id as u64,
+            ),
+            fuel_tank,
+            starter_delay_seconds: record.starter_delay_seconds,
+            // The world record has no electronics output yet. Task 9 reads it from the
+            // `carscript.electronics` part.
+            electronics_enabled: true,
+            recovery_bounds,
+            previous: [0.0; 3],
+            powertrain: Powertrain::default(),
+            requested_headlights: 0,
+        }
+    }
+    pub fn state(&self) -> VehicleState {
+        VehicleState {
+            ignition: self.ignition.ignition,
+            gear: self.drivetrain.gear(),
+            handbrake: self.handbrake,
+            trip_m: self.trip_m,
+            requested_headlights: self.requested_headlights,
+        }
+    }
+    /// Restores a captured state. The gear must be in the record range.
+    pub fn restore(&mut self, state: &VehicleState) {
+        self.ignition.ignition = state.ignition;
+        self.drivetrain.restore_gear(state.gear);
+        self.handbrake = state.handbrake;
+        self.trip_m = state.trip_m;
+        self.requested_headlights = state.requested_headlights;
+    }
     /// V03 bridge: runtime of an old garage car. Task 9 removes it.
     fn new(
         reference: &ReferenceManifest,
+        index: usize,
         vehicle: &crate::reference::VehicleReference,
     ) -> Result<Self, ReferenceError> {
         let mut recovery_bounds = crate::reference::Bounds {
@@ -657,10 +757,11 @@ impl VehicleRuntime {
             }
         }
         Ok(Self {
+            record: VehicleRecord::Garage(index),
             handbrake: vehicle.handbrake,
             trip_m: 0.0,
             ignition: IgnitionState::default(),
-            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle),
+            drivetrain: crate::simulation::drivetrain::DrivetrainState::new(vehicle.into()),
             exhaust: crate::exhaust::ExhaustState::new(
                 &vehicle.exhaust,
                 vehicle.source.path_id as u64,
@@ -671,6 +772,7 @@ impl VehicleRuntime {
             recovery_bounds,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
+            requested_headlights: 0,
         })
     }
 }
@@ -870,7 +972,7 @@ impl GarageRuntime {
                 .map(|(index, vehicle)| {
                     Ok((
                         garage_vehicle_key(index),
-                        VehicleRuntime::new(reference, vehicle)?,
+                        VehicleRuntime::new(reference, index, vehicle)?,
                     ))
                 })
                 .collect::<Result<_, ReferenceError>>()?,
@@ -1389,6 +1491,14 @@ impl GarageRuntime {
             self.lighting
                 .cycle_headlights(&reference.lighting, selected);
         }
+        // A world car keeps its request on its runtime. Source `carscript` cycles off, low, high.
+        if (driving || self.area.player.driving2())
+            && input.pressed & keys::LIGHTS != 0
+            && selected.is_none()
+            && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
+        {
+            vehicle.requested_headlights = (vehicle.requested_headlights + 1) % 3;
+        }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
             && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
@@ -1537,11 +1647,19 @@ impl GarageRuntime {
         });
         self.stream.request_at(absolute, car);
         let (world, physics, origin) = (&self.persistent_world, &self.physics, self.stream.origin);
-        let cars = self
-            .vehicles
-            .keys()
-            .map(|key| world.absolute_vehicle_position(physics, &origin, key));
+        let cars = self.vehicles.keys().map(|key| {
+            (
+                physics.chassis_handle(key),
+                world.absolute_vehicle_position(physics, &origin, key),
+            )
+        });
         self.stream.request_cars(cars);
+        let last_car = self
+            .vehicle
+            .as_ref()
+            .map(|key| self.physics.chassis_handle(key));
+        self.stream
+            .request_kept([self.area.player.seat_body(), last_car]);
         self.persistent_world
             .sync(
                 reference,
@@ -1688,8 +1806,11 @@ impl GarageRuntime {
         driving: bool,
         controls: crate::simulation::input::DrivingControls,
     ) {
-        // V03 bridge: gears, lights and audio still read the old garage car record. Task 9 removes it.
-        let index = garage_vehicle_index(key).expect("V03 bridge: old garage car");
+        // V03 bridge: lights and audio still read the old garage car record. Task 9 removes it.
+        let garage = match vehicle.record {
+            VehicleRecord::Garage(index) => Some(index),
+            VehicleRecord::World(_) => None,
+        };
         let chassis = self.physics.chassis_handle(key);
         let chassis_active = self.physics.body_active(chassis);
         let climate = self.engine_climate(reference);
@@ -1707,7 +1828,7 @@ impl GarageRuntime {
         if !chassis_active && !engine_active {
             return;
         }
-        let source = &reference.vehicles[index];
+        let gearbox = vehicle.record.gearbox(reference);
         let snapshot = self.physics.snapshot(key);
         let speed = snapshot.speed_mps;
         let driving = driving && chassis_active;
@@ -1732,7 +1853,7 @@ impl GarageRuntime {
             vehicle.ignition.ignition,
             rolling_rpm,
             direction,
-            source,
+            gearbox,
             &reference.driving,
             driving,
         );
@@ -1818,7 +1939,7 @@ impl GarageRuntime {
         let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
         if vehicle.ignition.ignition != was_ignition
             && let Some(audio) = &mut self.audio
-            && audio.vehicle_index == index
+            && garage == Some(audio.vehicle_index)
         {
             audio.ignition_changed(&self.area);
         }
@@ -1862,32 +1983,36 @@ impl GarageRuntime {
             steer: pushed.unwrap_or(controls.steer),
             handbrake: vehicle.handbrake as u8 as f32,
         };
-        let electronics = reference
-            .lighting
-            .controllers
-            .iter()
-            .find(|c| {
-                c.kind == crate::reference::LightControllerKind::Rear && c.vehicle == Some(index)
-            })
-            .expect("validated rear lights");
-        let electronics_fine = electronics.electronics_source.is_none()
-            || electronics.electronics_output > electronics.electronics_threshold;
-        self.lighting.update_vehicle(
-            &reference.lighting,
-            index,
-            crate::lighting::VehicleLightSample {
-                local_ignition: vehicle.ignition.ignition && electronics_fine,
-                brake,
-                gear_ratio: source.gear_ratios[gear],
-                electronics_output: electronics.electronics_output,
-            },
-        );
+        // V03 bridge: only old garage cars have light controllers. Task 9 adds world car lights.
+        if let Some(index) = garage {
+            let electronics = reference
+                .lighting
+                .controllers
+                .iter()
+                .find(|c| {
+                    c.kind == crate::reference::LightControllerKind::Rear
+                        && c.vehicle == Some(index)
+                })
+                .expect("validated rear lights");
+            let electronics_fine = electronics.electronics_source.is_none()
+                || electronics.electronics_output > electronics.electronics_threshold;
+            self.lighting.update_vehicle(
+                &reference.lighting,
+                index,
+                crate::lighting::VehicleLightSample {
+                    local_ignition: vehicle.ignition.ignition && electronics_fine,
+                    brake,
+                    gear_ratio: gearbox.gear_ratios[gear],
+                    electronics_output: electronics.electronics_output,
+                },
+            );
+        }
         if chassis_active {
             self.physics.apply_vehicle_forces(
                 key,
                 drive,
                 if engine.is_some() {
-                    crate::simulation::drivetrain::transmitted_torques(output, source, gear)
+                    crate::simulation::drivetrain::transmitted_torques(output, gearbox, gear)
                 } else {
                     Default::default()
                 },

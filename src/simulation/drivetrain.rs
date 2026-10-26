@@ -4,9 +4,47 @@ use super::{
     input::DrivingControls,
     keys,
 };
-use crate::reference::{DrivingAssists, DrivingReference, EnginePartReference, VehicleReference};
+use crate::reference::{
+    DrivingAssists, DrivingReference, DrivingVehicleReference, EnginePartReference,
+    VehicleReference, WorldVehicleReference,
+};
 use crate::vehicle::DriveTorques;
 
+/// Gear values of one car record.
+#[derive(Clone, Copy, Debug)]
+pub struct Gearbox<'a> {
+    pub driving: &'a DrivingVehicleReference,
+    pub gear_ratios: &'a [f32],
+    pub gear_free_run: &'a [bool],
+    pub final_drive_ratio: f32,
+    pub auto_move_min: f32,
+    pub dont_ignite_with_throttle_in_automatic: bool,
+}
+impl<'a> From<&'a WorldVehicleReference> for Gearbox<'a> {
+    fn from(v: &'a WorldVehicleReference) -> Self {
+        Self {
+            driving: &v.driving,
+            gear_ratios: &v.gear_ratios,
+            gear_free_run: &v.gear_free_run,
+            final_drive_ratio: v.final_drive_ratio,
+            auto_move_min: v.auto_move_min,
+            dont_ignite_with_throttle_in_automatic: v.dont_ignite_with_throttle_in_automatic,
+        }
+    }
+}
+/// V03 bridge: gear values of an old garage car. Task 9 removes it.
+impl<'a> From<&'a VehicleReference> for Gearbox<'a> {
+    fn from(v: &'a VehicleReference) -> Self {
+        Self {
+            driving: &v.driving,
+            gear_ratios: &v.gear_ratios,
+            gear_free_run: &v.gear_free_run,
+            final_drive_ratio: v.final_drive_ratio,
+            auto_move_min: v.auto_move_min,
+            dont_ignite_with_throttle_in_automatic: v.dont_ignite_with_throttle_in_automatic,
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct DrivetrainState {
     gear: usize,
@@ -26,7 +64,7 @@ pub struct DrivetrainOutput {
     pub ignition_request: bool,
 }
 impl DrivetrainState {
-    pub fn new(vehicle: &VehicleReference) -> Self {
+    pub fn new(vehicle: Gearbox<'_>) -> Self {
         Self {
             gear: vehicle.driving.initial_gear,
             auto_shift_to: 1,
@@ -51,7 +89,7 @@ impl DrivetrainState {
         ignition: bool,
         wheel_rpm: f32,
         direction: f32,
-        vehicle: &VehicleReference,
+        vehicle: Gearbox<'_>,
         driving: &DrivingReference,
         controlled: bool,
     ) -> DrivetrainOutput {
@@ -210,7 +248,7 @@ impl DrivetrainState {
 /// EngineOutput already includes clutch engagement. These are axle torques in Nm.
 pub fn transmitted_torques(
     engine: EngineOutput,
-    vehicle: &VehicleReference,
+    vehicle: Gearbox<'_>,
     gear: usize,
 ) -> DriveTorques {
     let ratio = vehicle.gear_ratios[gear];

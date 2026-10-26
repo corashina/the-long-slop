@@ -195,8 +195,10 @@ pub struct WorldStream {
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
     request: WorldRequest,
-    /// Absolute positions of every car, as source important objects.
-    cars: Vec<[f64; 3]>,
+    /// Chassis and absolute position of every car, as source important objects.
+    cars: Vec<(rapier3d::prelude::RigidBodyHandle, [f64; 3])>,
+    /// Bodies whose contents never retire: the seat owner and the last seated car.
+    kept: [Option<rapier3d::prelude::RigidBodyHandle>; 2],
     recovery: Option<PendingRecovery>,
     recovery_search: Option<([f64; 3], bool)>,
     roads: RoadIndex,
@@ -809,6 +811,7 @@ impl WorldStream {
                 vehicle: [0.0; 3],
             },
             cars: Vec::new(),
+            kept: [None; 2],
             recovery: None,
             recovery_search: None,
             roads,
@@ -1320,10 +1323,17 @@ impl WorldStream {
         self.recipes.remove(source);
         Ok(())
     }
-    /// Sets every car position for item freeze and removal.
-    pub fn request_cars(&mut self, cars: impl IntoIterator<Item = [f64; 3]>) {
+    /// Sets every car chassis and position for item freeze and removal.
+    pub fn request_cars(
+        &mut self,
+        cars: impl IntoIterator<Item = (rapier3d::prelude::RigidBodyHandle, [f64; 3])>,
+    ) {
         self.cars.clear();
         self.cars.extend(cars);
+    }
+    /// Sets the seat owner body and the last seated car chassis. Their contents never retire.
+    pub fn request_kept(&mut self, kept: [Option<rapier3d::prelude::RigidBodyHandle>; 2]) {
+        self.kept = kept;
     }
     pub fn request_at(&mut self, player: [f64; 3], vehicle: [f64; 3]) {
         if self.recovery.is_some() {
@@ -4101,6 +4111,7 @@ impl WorldStream {
     }
 
     /// Call after publication and before movement or recovery. Repeated calls preserve stock and valves.
+    #[allow(clippy::too_many_arguments)]
     pub fn sync_supplies(
         &mut self,
         reference: &ReferenceManifest,
@@ -4108,6 +4119,11 @@ impl WorldStream {
         interaction: &mut crate::interaction::InteractionState,
         physics: &mut PhysicsWorld,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            super::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         let owned = items.retained_binding_bytes()
             + interaction.retained_binding_bytes()
@@ -4128,7 +4144,15 @@ impl WorldStream {
             self.binding_bytes = self.binding_owner_bytes.saturating_sub(baseline);
             return Err(error);
         }
-        if let Err(error) = self.sync_contents(reference, items, interaction, physics, wheels) {
+        if let Err(error) = self.sync_contents(
+            reference,
+            items,
+            interaction,
+            physics,
+            wheels,
+            vehicles,
+            powertrain,
+        ) {
             self.binding_reserved = 0;
             self.binding_owner_bytes = items.retained_binding_bytes()
                 + interaction.retained_binding_bytes()
@@ -4345,6 +4369,11 @@ impl WorldStream {
         items: &mut crate::interaction::items::ItemStore,
         interaction: &mut crate::interaction::InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<
+            super::ObjectKey,
+            crate::starting_area::VehicleRuntime,
+        >,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         if self.recovery.is_some()
             || self.plan_revision != self.request.revision
@@ -4353,7 +4382,7 @@ impl WorldStream {
         {
             return Ok(());
         }
-        self.retire_contents(physics, items, interaction, wheels)?;
+        self.retire_contents(physics, items, interaction, wheels, vehicles, powertrain)?;
         let mut index = 0;
         while index < self.structures.len() {
             let id = &self.structures[index].placement.id;

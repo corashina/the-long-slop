@@ -232,6 +232,7 @@ impl InstrumentVisuals {
                 choices: Vec::new(),
             })
         };
+        // V03 bridge: dashboards of old garage cars only. Task 9 binds world car instruments.
         let mut dashboards = Vec::with_capacity(reference.vehicles.len());
         for vehicle in &reference.vehicles {
             let instruments = &vehicle.instruments;

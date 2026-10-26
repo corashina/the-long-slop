@@ -129,6 +129,7 @@ mod content_containers;
 mod content_parts;
 
 mod content_slots;
+pub(crate) mod content_vehicles;
 mod content_wheels;
 
 mod content_mechanisms;

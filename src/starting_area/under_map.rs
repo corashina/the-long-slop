@@ -25,7 +25,8 @@ impl GarageRuntime {
         let player = self.area.player.body_handle();
         // A seated player follows the seat owner, which this check lifts.
         let seated = self.area.player.seated();
-        let vehicles: Vec<_> = (0..self.physics.vehicle_count())
+        // V03 bridge: only old garage cars lift with their cargo. Task 9 lifts every car.
+        let vehicles: Vec<_> = (0..reference.vehicles.len())
             .filter_map(|index| {
                 let chassis = self
                     .physics

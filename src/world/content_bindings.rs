@@ -435,6 +435,7 @@ impl WorldStream {
     pub fn world_reference(&self) -> &crate::reference::WorldReference {
         &self.reference
     }
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn sync_contents(
         &mut self,
         reference: &ReferenceManifest,
@@ -442,6 +443,8 @@ impl WorldStream {
         interaction: &mut InteractionState,
         physics: &mut PhysicsWorld,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<ObjectKey, crate::starting_area::VehicleRuntime>,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         for content in &mut self.contents.active {
             crate::world::content_mechanisms::sync(content, items, interaction, physics);
@@ -518,6 +521,11 @@ impl WorldStream {
                         .rules
                         .component(&self.reference, pickup_root, "pickupable")?
                 else {
+                    if prototype.vehicle.is_some() {
+                        return Err(ReferenceError(
+                            "Car prototype root has no pickupable".into(),
+                        ));
+                    }
                     continue;
                 };
                 (|| -> Result<(), ReferenceError> {
@@ -643,6 +651,20 @@ impl WorldStream {
                         &self.contents.rules,
                         reference,
                         interaction,
+                    )?;
+                    // The last fallible step: a failed binding leaves no car behind.
+                    // Seats bind later and find the vehicle of the chassis.
+                    crate::world::content_vehicles::bind(
+                        content,
+                        instance,
+                        prototype,
+                        &self.reference,
+                        &self.contents.rules,
+                        items,
+                        physics,
+                        vehicles,
+                        powertrain,
+                        &mut self.changes,
                     )?;
                     content.suspended_bodies.reserve(instance.bodies.len());
                     capture_baselines(content, reference, items, interaction, physics);
@@ -934,10 +956,20 @@ impl WorldStream {
             .is_none_or(|c| c.item.is_none() || c.restored)
     }
     /// Squared distance to the nearest source important object: the player and every car.
-    fn important_distance(&self, position: [f64; 3]) -> f32 {
+    /// A car does not count itself: `own` is its chassis.
+    fn important_distance(
+        &self,
+        position: [f64; 3],
+        own: Option<rapier3d::prelude::RigidBodyHandle>,
+    ) -> f32 {
         [self.request.player, self.request.vehicle]
             .into_iter()
-            .chain(self.cars.iter().copied())
+            .chain(
+                self.cars
+                    .iter()
+                    .filter(|(chassis, _)| Some(*chassis) != own)
+                    .map(|(_, p)| *p),
+            )
             .map(|p| crate::world::contents::distance(p, position))
             .fold(f32::INFINITY, f32::min)
     }
@@ -947,6 +979,8 @@ impl WorldStream {
         items: &mut ItemStore,
         interaction: &mut InteractionState,
         wheels: &mut crate::interaction::wheels::WheelAssemblies,
+        vehicles: &mut std::collections::BTreeMap<ObjectKey, crate::starting_area::VehicleRuntime>,
+        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
     ) -> Result<(), ReferenceError> {
         let remove = self.distances.item_remove_dist;
         let freeze = self.distances.item_freeze_dist;
@@ -979,7 +1013,9 @@ impl WorldStream {
             let offset =
                 crate::world::placement::rotate(pose.rotation, content.content.distance_offset);
             let position = std::array::from_fn(|i| pose.position[i] + offset[i] as f64);
-            let mut distance = self.important_distance(position);
+            let body = id.and_then(|id| items.get(id)).and_then(|s| s.body);
+            let own = body.filter(|b| physics.vehicle_of(*b).is_some());
+            let mut distance = self.important_distance(position, own);
             let local_item = |item| {
                 content.item == Some(item) || content.bindings.iter().any(|b| b.item == item)
             };
@@ -1010,10 +1046,13 @@ impl WorldStream {
                 if let Some(item) = items.get(binding.item) {
                     protected |= protected_location(item.location);
                     let position = self.origin.absolute(item.pose.position);
-                    distance = distance.min(self.important_distance(position));
+                    distance = distance.min(self.important_distance(position, own));
                 }
             }
             protected |= content.has_external_dependents(items, &interaction.parts, wheels);
+            // The seat owner and the last seated car stay.
+            // V05 hook: a trailer attached to the seated car stays too. Check its hitch here.
+            protected |= body.is_some_and(|b| self.kept.contains(&Some(b)));
             protected |= self
                 .saved_item_protection
                 .iter()
@@ -1059,6 +1098,14 @@ impl WorldStream {
                 continue;
             }
             let content = self.contents.remove_active(index);
+            crate::world::content_vehicles::retire(
+                &content,
+                items,
+                physics,
+                vehicles,
+                powertrain,
+                &mut self.changes,
+            );
             if let Some(item) = content.item {
                 interaction.storage.departed(item);
                 // Restart: items that leave with this owner may sit before `index`.

@@ -766,6 +766,7 @@ enum SwitchMotion {
 pub struct LightingState {
     pub cycle: CycleState,
     /// Per-vehicle values follow the order of the manifest vehicles.
+    /// V03 bridge: old garage cars only. Task 9 adds world car light controllers.
     requested_headlights: Vec<u8>,
     mounted: Vec<bool>,
     vehicles: Vec<VehicleLightSample>,

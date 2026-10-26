@@ -727,7 +727,8 @@ impl StartingArea {
     ) -> Result<Vec<BodySnapshot>, SaveError> {
         let mut records = Vec::new();
         let mut captured = HashSet::new();
-        for index in 0..physics.vehicle_count() {
+        // V03 bridge: old garage chassis bodies save in the vehicle list. Task 8 removes it.
+        for index in 0..reference.vehicles.len() {
             captured.insert(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(index)));
         }
         for item in self.items.iter() {

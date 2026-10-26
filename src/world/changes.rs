@@ -85,6 +85,15 @@ pub struct ChangeRecords {
     payload_bytes: usize,
     #[serde(skip)]
     region_bytes: usize,
+    /// Car-side state of retired car copies. Task 8 saves it in the object snapshot.
+    #[serde(skip)]
+    vehicles: HashMap<ObjectKey, crate::starting_area::VehicleState>,
+    /// Engine state of retired engine part items. Task 8 saves it in the object snapshot.
+    #[serde(skip)]
+    engines: HashMap<ObjectKey, crate::simulation::engine::EngineState>,
+    /// Fan state of retired radiator part items. Task 8 saves it in the object snapshot.
+    #[serde(skip)]
+    radiators: HashMap<ObjectKey, bool>,
 }
 impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
@@ -418,8 +427,51 @@ impl ChangeRecords {
             }
         }
     }
+    /// Keeps the car-side state of a retired car copy until it spawns again.
+    pub(crate) fn retire_vehicle(
+        &mut self,
+        key: ObjectKey,
+        state: crate::starting_area::VehicleState,
+    ) {
+        self.vehicles.insert(key, state);
+    }
+    pub(crate) fn take_vehicle(
+        &mut self,
+        key: &ObjectKey,
+    ) -> Option<crate::starting_area::VehicleState> {
+        self.vehicles.remove(key)
+    }
+    /// Keeps the state of a retired engine part item until it spawns again.
+    pub(crate) fn retire_engine(
+        &mut self,
+        key: ObjectKey,
+        state: crate::simulation::engine::EngineState,
+    ) {
+        self.engines.insert(key, state);
+    }
+    pub(crate) fn take_engine(
+        &mut self,
+        key: &ObjectKey,
+    ) -> Option<crate::simulation::engine::EngineState> {
+        self.engines.remove(key)
+    }
+    /// Keeps the fan state of a retired radiator part item until it spawns again.
+    pub(crate) fn retire_radiator(&mut self, key: ObjectKey, fan_on: bool) {
+        self.radiators.insert(key, fan_on);
+    }
+    pub(crate) fn take_radiator(&mut self, key: &ObjectKey) -> Option<bool> {
+        self.radiators.remove(key)
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
+            + self.vehicles.capacity()
+                * (std::mem::size_of::<(ObjectKey, crate::starting_area::VehicleState)>() + 1)
+            + self.vehicles.keys().map(key_heap).sum::<usize>()
+            + self.engines.capacity()
+                * (std::mem::size_of::<(ObjectKey, crate::simulation::engine::EngineState)>() + 1)
+            + self.engines.keys().map(key_heap).sum::<usize>()
+            + self.radiators.capacity() * (std::mem::size_of::<(ObjectKey, bool)>() + 1)
+            + self.radiators.keys().map(key_heap).sum::<usize>()
             + self.records.capacity() * std::mem::size_of::<(ObjectKey, ObjectChange)>()
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)

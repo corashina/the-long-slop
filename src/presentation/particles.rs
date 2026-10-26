@@ -247,8 +247,11 @@ enum Owner {
     Outlet(u32),
     /// Spray bottle spray (0) and splash (1).
     SprayBottle(usize),
-    /// Vehicle exhaust smoke; `Group::source` is the system.
-    Exhaust(usize),
+    /// Exhaust smoke of the car with chassis `car`; `Group::source` is the system.
+    Exhaust {
+        record: crate::starting_area::VehicleRecord,
+        car: rapier3d::prelude::RigidBodyHandle,
+    },
     /// Storm dust; `Group::source` is big (0) or small (1).
     Storm(crate::weather::StormId),
     /// `mainscript` melee hit systems; `Group::source` is the system.
@@ -584,18 +587,46 @@ fn sync_particles(
                 &mut materials,
             );
         }
-        for (vehicle, v) in reference.0.vehicles.iter().enumerate() {
-            for (system, p) in v.exhaust.iter().enumerate() {
-                add_group(
-                    &mut state,
-                    Owner::Exhaust(vehicle),
-                    system,
-                    p,
-                    &lighting,
-                    &mut commands,
-                    &mut materials,
-                );
+    }
+    // Car copies come and go. A retired car frees its groups for the next copy of its record.
+    let physics = &drive.runtime.physics;
+    for g in &mut state.groups {
+        if let Owner::Exhaust { car, .. } = g.owner {
+            g.active = physics.vehicle_of(car).is_some();
+        }
+    }
+    for (key, vehicle) in &drive.runtime.vehicles {
+        let car = physics.chassis_handle(key);
+        let owner = Owner::Exhaust {
+            record: vehicle.record,
+            car,
+        };
+        for (system, p) in vehicle.record.exhaust(&reference.0).iter().enumerate() {
+            if state
+                .groups
+                .iter()
+                .any(|g| g.active && g.owner == owner && g.source == system)
+            {
+                continue;
             }
+            if let Some(g) = state.groups.iter_mut().find(|g| {
+                !g.active
+                    && g.source == system
+                    && matches!(g.owner, Owner::Exhaust { record, .. } if record == vehicle.record)
+            }) {
+                g.owner = owner;
+                g.active = true;
+                continue;
+            }
+            add_group(
+                &mut state,
+                owner,
+                system,
+                p,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
         }
     }
     let weather = &drive.runtime.weather;
@@ -640,7 +671,7 @@ fn sync_particles(
             Owner::Wash(wash) => &reference.0.conditions.washes[wash].particles[g.source],
             Owner::SprayBottle(0) => &reference.0.small_items.spray_bottle.spray,
             Owner::SprayBottle(_) => &reference.0.small_items.spray_bottle.splash,
-            Owner::Exhaust(vehicle) => &reference.0.vehicles[vehicle].exhaust[g.source],
+            Owner::Exhaust { record, .. } => &record.exhaust(&reference.0)[g.source],
             Owner::Storm(_) => &storms[g.source],
             Owner::Melee => &reference.0.melee.particles[g.source],
             Owner::Urine | Owner::Outlet(_) => &references[g.source],
@@ -658,7 +689,7 @@ fn sync_particles(
             | Owner::Spray(_)
             | Owner::Wash(_)
             | Owner::SprayBottle(_)
-            | Owner::Exhaust(_)
+            | Owner::Exhaust { .. }
             | Owner::Storm(_)
             | Owner::Melee => None,
         };
@@ -692,12 +723,12 @@ fn sync_particles(
                     .cleaning
                     .particles(tool, g.source),
             )
-        } else if let Owner::Exhaust(vehicle) = g.owner {
-            // V03 bridge: exhaust of old garage cars. Task 7 moves it to the car binder.
+        } else if let Owner::Exhaust { car, .. } = g.owner {
             Some(
-                drive.runtime.vehicles[&crate::vehicle::garage_vehicle_key(vehicle)]
-                    .exhaust
-                    .particles(g.source),
+                physics
+                    .vehicle_of(car)
+                    .and_then(|key| drive.runtime.vehicles.get(key))
+                    .map_or(&[][..], |v| v.exhaust.particles(g.source)),
             )
         } else if let Owner::Storm(id) = g.owner {
             Some(

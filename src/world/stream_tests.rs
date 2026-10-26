@@ -345,6 +345,8 @@ fn prepare_step_for_views(
             &mut run.area.interaction,
             &mut run.physics,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
@@ -735,6 +737,8 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
             &mut run.area.interaction,
             &mut run.physics,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(run.stream.bindings_ready(&id));
@@ -885,6 +889,8 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(
@@ -980,6 +986,8 @@ fn roadside_lamp_state_survives_its_source_owner() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     for _ in 0..20 {
@@ -989,6 +997,8 @@ fn roadside_lamp_state_survives_its_source_owner() {
                 &mut run.area.items,
                 &mut run.area.interaction,
                 &mut run.wheels,
+                &mut run.vehicles,
+                &mut run.powertrain,
             )
             .unwrap();
         if !run
@@ -1679,6 +1689,8 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
             &mut run.area.interaction,
             &mut run.physics,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert_eq!(run.area.items.resolve_key(&generated), Some(item));
@@ -1911,6 +1923,8 @@ fn sync_decoration_fixture(run: &mut GarageRuntime, reference: &ReferenceManifes
             &mut run.area.interaction,
             &mut run.physics,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
 }
@@ -2243,6 +2257,8 @@ fn fixed_decoration_replay_rebases_retires_and_republishes() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(
@@ -2517,6 +2533,8 @@ fn fixed_decoration_possessions_restore_on_item_path() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(
@@ -2750,6 +2768,8 @@ fn roadside_edits_survive_retirement_and_save_reload() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
@@ -2882,6 +2902,8 @@ fn roadside_unresolved_attachment_keeps_retired_parent() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(run.area.items.resolve_key(&parent_key).is_none());
@@ -2949,6 +2971,8 @@ fn roadside_consumed_tombstone_survives_departure() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(run.area.items.resolve_key(&key).is_none());
@@ -2965,6 +2989,8 @@ fn roadside_consumed_tombstone_survives_departure() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     assert!(run.stream.changes.get(&distant_key).is_some());
@@ -2984,13 +3010,21 @@ fn parked_car_keeps_nearby_item_dynamic() {
     let far = [10000., 0., 0.];
     run.stream.request.player = far;
     run.stream.request.vehicle = far;
-    run.stream.request_cars([far, placement.pose.position]);
+    run.stream.request_cars([
+        (rapier3d::prelude::RigidBodyHandle::invalid(), far),
+        (
+            rapier3d::prelude::RigidBodyHandle::invalid(),
+            placement.pose.position,
+        ),
+    ]);
     run.stream
         .retire_contents(
             &mut run.physics,
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     let id = run
@@ -3210,6 +3244,8 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             &mut run.area.items,
             &mut run.area.interaction,
             &mut run.wheels,
+            &mut run.vehicles,
+            &mut run.powertrain,
         )
         .unwrap();
     for id in [held, stored, source_part] {
@@ -3519,6 +3555,8 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             &mut loaded.area.items,
             &mut loaded.area.interaction,
             &mut loaded.wheels,
+            &mut loaded.vehicles,
+            &mut loaded.powertrain,
         )
         .unwrap();
     assert!(loaded.area.items.resolve_key(&keys[1]).is_none());
@@ -3812,6 +3850,8 @@ fn roadside_possession_survives_owner_retirement_without_duplicate_spawn() {
             &mut reset.area.items,
             &mut reset.area.interaction,
             &mut reset.wheels,
+            &mut reset.vehicles,
+            &mut reset.powertrain,
         )
         .unwrap();
     for key in &keys {

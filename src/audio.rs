@@ -327,6 +327,7 @@ impl AudioState {
         area: &StartingArea,
         physics: &PhysicsWorld,
     ) {
+        // V03 bridge: engine audio follows the old garage car. Task 9 moves it to world cars.
         self.vehicle_index = game
             .vehicles
             .iter()
