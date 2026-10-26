@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 22;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 22;
+pub const SAVE_SCHEMA_VERSION: u32 = 23;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 23;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -410,7 +410,7 @@ mod g04_ordered_state {
 
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
-        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23] {
+        for version in [6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
                 SaveSnapshot::from_json(payload.as_bytes()),
@@ -421,9 +421,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 22 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 23 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":22}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":23}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

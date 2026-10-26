@@ -107,13 +107,20 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 
 ## 5. Later
 
+Run the X05 part 1 test pass on Tomasz's PC:
+
+1. Run `cargo test --lib two_ladas -- --ignored`.
+2. Park the Lada with the wheels turned. Save and load: the wheels stay turned.
+3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
+4. Old saves do not load (save schema 23).
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
-| X05 | Save every remaining state | XL | Grow the save with each feature: items, buildings, wear, colors. [M13] |
+| X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
