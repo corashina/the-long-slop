@@ -4691,12 +4691,7 @@ fn g08_frame_clutch_binding_collision() {
             inventory_held: 4,
             ..Default::default()
         };
-        assert_eq!(
-            run.area
-                .inventory_context(&run.physics, input)
-                .seated_clutch,
-            collision
-        );
+        assert_eq!(run.area.inventory_context(input).seated_clutch, collision);
         g08_frame(&mut run, &reference, input, 0.1);
         assert_eq!(run.area.inventory.selected, if collision { 0 } else { 1 });
         assert_eq!(

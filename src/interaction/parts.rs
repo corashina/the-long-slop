@@ -824,7 +824,7 @@ impl PartAttachments {
             || s.reference.cant_uncraft
             || p.pickup.cant_pickup
             || p.pickup.cant_pickup_while_mounted
-            || (player.seat().is_some() && p.pickup.cant_pickup_while_seated)
+            || (player.seated() && p.pickup.cant_pickup_while_seated)
             || player.seat().is_some_and(|seat| p.seats.contains(&seat))
             || items.get(item).is_none()
         {

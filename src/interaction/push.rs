@@ -69,7 +69,7 @@ impl PushState {
             return false;
         };
         if target.slot.is_some()
-            || player.seat().is_some()
+            || player.seated()
             || !target.point.iter().all(|v| v.is_finite())
             || physics
                 .rapier()
@@ -196,10 +196,7 @@ impl PushState {
             self.stop(player, physics);
             return None;
         };
-        if target.slot.is_some()
-            || player.seat().is_some()
-            || !target.point.iter().all(|v| v.is_finite())
-        {
+        if target.slot.is_some() || player.seated() || !target.point.iter().all(|v| v.is_finite()) {
             self.stop(player, physics);
             return None;
         }

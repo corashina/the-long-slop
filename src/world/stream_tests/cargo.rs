@@ -107,11 +107,7 @@ fn r05_cargo_locks_in_trunk() {
     );
 
     // Pick the can up from the trunk.
-    let seat = reference.seats.iter().find(|s| s.driver).unwrap();
-    assert!(run.area.player.try_exit(
-        &mut run.physics,
-        &crate::player::ExitReference::from_reference(&reference.player, seat)
-    ));
+    assert!(run.area.player.try_exit(&mut run.physics));
     let point = run.area.items.get(can).unwrap().pose.position;
     run.area
         .interaction

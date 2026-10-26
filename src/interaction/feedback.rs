@@ -176,7 +176,7 @@ impl InteractionState {
             .item()
             .is_some_and(|id| self.carry.can_receive_equipment(id, player, items, physics))
         {
-            a.actions.0 |= if player.seat().is_some() {
+            a.actions.0 |= if player.seated() {
                 ActionMask::RELEASE_EQUIPMENT_SEATED
             } else {
                 ActionMask::RELEASE_EQUIPMENT
@@ -231,7 +231,7 @@ impl InteractionState {
                     a.actions.0 |= ActionMask::TUNE;
                 }
             }
-            if self.seats.iter().any(|s| s.item == t.item) && player.seat().is_none() {
+            if self.seats.iter().any(|s| s.item == t.item) && !player.seated() {
                 a.actions.0 |= ActionMask::ENTER;
                 a.context = FeedbackContext::Seat;
             }
@@ -256,9 +256,7 @@ impl InteractionState {
                 && items
                     .get(rim)
                     .is_some_and(|item| item.location == ItemLocation::World)
-                && self
-                    .carry
-                    .allows_pickup(t.item, player.seat().is_some(), true)
+                && self.carry.allows_pickup(t.item, player.seated(), true)
                 && items
                     .get(rim)
                     .and_then(|item| item.body)
@@ -283,9 +281,7 @@ impl InteractionState {
                 }
                 match item.location {
                     ItemLocation::Locked { .. }
-                        if self
-                            .carry
-                            .allows_pickup(t.item, player.seat().is_some(), false)
+                        if self.carry.allows_pickup(t.item, player.seated(), false)
                             && self.storage.locked_body(t.item).is_some_and(|body| {
                                 self.carry
                                     .can_acquire(t.item, t.point, player, body, physics)
@@ -296,9 +292,7 @@ impl InteractionState {
                     }
                     ItemLocation::Attached(_)
                         if self.attachments.target(t.item).is_some()
-                            && self
-                                .carry
-                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.carry.allows_pickup(t.item, player.seated(), true)
                             && self.attachments.loose_body(t.item).is_some_and(|body| {
                                 self.carry
                                     .can_acquire(t.item, t.point, player, body, physics)
@@ -323,9 +317,7 @@ impl InteractionState {
                     }
                     ItemLocation::WheelSlot(_)
                         if self.is_wheel(t.item)
-                            && self
-                                .carry
-                                .allows_pickup(t.item, player.seat().is_some(), true)
+                            && self.carry.allows_pickup(t.item, player.seated(), true)
                             && !self.parts.covered(t.item) =>
                     {
                         a.actions.0 |= ActionMask::DISMOUNT;
@@ -427,12 +419,11 @@ impl InteractionState {
                 | ActionMask::SCROLL);
             a.context = FeedbackContext::LightSwitch;
         }
-        if player.seat().is_some()
+        if player.seated()
             && a.actions.0
                 & (ActionMask::USE | ActionMask::DOOR | ActionMask::TUNE | ActionMask::SWITCH)
                 == 0
-            && let Some(s) = self.seats.iter().find(|s| Some(s.id) == player.seat())
-            && player.can_exit(physics, &s.exit)
+            && player.can_exit(physics)
         {
             a.actions.0 |= ActionMask::EXIT;
         }

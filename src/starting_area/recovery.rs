@@ -265,7 +265,7 @@ pub fn recovery_clearance(
             })
         };
     let old_view = to_rapier(area.player.view(physics).head_pose);
-    if area.player.seat().is_some() {
+    if area.player.seated() {
         let neutral = area.player.neutral_view_at(crate::vehicle::from_rapier(
             &(delta * to_rapier(area.player.body_pose(physics))),
         ));

@@ -288,7 +288,7 @@ impl CarryState {
             && !item.removed
             && !item.pending_attachment
             && item.inactive_pose.is_none()
-            && self.allows_pickup(id, player.seat().is_some(), items.mounted(id))
+            && self.allows_pickup(id, player.seated(), items.mounted(id))
             && self
                 .rules
                 .get(&id)
@@ -315,7 +315,7 @@ impl CarryState {
         if !physics.body_active(body)
             || self.held.is_some()
             || !point.iter().all(|v| v.is_finite())
-            || !self.allows_pickup(id, player.seat().is_some(), false)
+            || !self.allows_pickup(id, player.seated(), false)
             || physics.vehicle_of(body).is_some()
             || physics
                 .rapier()

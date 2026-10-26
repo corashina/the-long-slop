@@ -648,7 +648,7 @@ fn read_input(
     if !drive.runtime.needs_output().dead
         && !drive.runtime.sleeping()
         && frame.pressed & keys::CAMERA != 0
-        && drive.runtime.area.player.seat().is_some()
+        && drive.runtime.area.player.seated()
     {
         drive.runtime.audio_motion_revision = drive.runtime.audio_motion_revision.wrapping_add(1);
         drive.camera = match drive.camera {
@@ -1019,7 +1019,7 @@ fn sync_instruments(
 fn active_camera(drive: &Drive) -> Transform {
     if let Some(camera) = drive.runtime.sleep_camera() {
         presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
-    } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seat().is_some() {
+    } else if drive.camera == CameraMode::Chase && drive.runtime.area.player.seated() {
         presentation::camera::pose(
             CameraMode::Chase,
             drive.runtime.physics.snapshot(drive.runtime.vehicle).pose,
@@ -1160,7 +1160,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         .map_or(0.0, |fluid| fluid.finite_total());
     game_update(
         snapshot.speed_mps * 3.6,
-        (drive.camera == CameraMode::Cockpit || runtime.area.player.seat().is_none()) as u32,
+        (drive.camera == CameraMode::Cockpit || !runtime.area.player.seated()) as u32,
         position[0],
         position[1],
         position[2],
@@ -1254,7 +1254,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
-            runtime.area.player.seat().is_some(),
+            runtime.area.player.seated(),
             current.handbrake,
         ],
         actions: info.actions.0
@@ -1320,7 +1320,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             current.ignition.ignition,
             current.engine_output.running,
             current.engine_output.starter,
-            runtime.area.player.seat().is_some(),
+            runtime.area.player.seated(),
             current.handbrake,
             quantities[0],
             quantities[1],

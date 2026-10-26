@@ -1169,7 +1169,7 @@ impl GarageRuntime {
         }
         self.aim = aim;
         let previous_seat = self.area.player.seat();
-        let seated = previous_seat.is_some();
+        let seated = self.area.player.seated();
         let outcome = self.area.interaction.step(
             input,
             aim,
@@ -1291,7 +1291,7 @@ impl GarageRuntime {
             && self.area.interaction.dragging_mechanism().is_none()
             && self.area.interaction.tuning_opening().is_none()
         {
-            self.notice = if self.area.player.seat().is_some() {
+            self.notice = if self.area.player.seated() {
                 "Look toward a clear exit."
             } else {
                 ""
@@ -1476,7 +1476,7 @@ impl GarageRuntime {
         }
 
         self.advance_under_map(reference);
-        let focus = if self.area.player.seat().is_some() {
+        let focus = if self.area.player.seated() {
             self.physics.snapshot(self.vehicle).pose.position
         } else {
             self.area.player.focus_position(&self.physics)
@@ -1552,9 +1552,9 @@ impl GarageRuntime {
             crate::sleep::SleepInput {
                 held: sleep_held,
                 active: !self.paused,
-                camera_allowed: self.sleep_camera_allowed || self.area.player.seat().is_none(),
+                camera_allowed: self.sleep_camera_allowed || !self.area.player.seated(),
                 dead: self.needs_output().dead,
-                show_text: crate::sleep::show_text(&reference.seats, self.area.player.seat()),
+                show_text: self.area.player.show_sleep_text(),
             },
             self.simulation_seconds,
             FIXED_DT,

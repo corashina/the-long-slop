@@ -31,7 +31,7 @@ pub use targets::{InteractionBlock, LightAim, ResolvedAim};
 pub use wheel_actions::WheelAction;
 
 use crate::fluids::{spill, transfer};
-use crate::player::{ExitReference, PlayerState};
+use crate::player::PlayerState;
 use crate::reference::{
     ActionBinding, ActionMasks, AttachmentTargetId, BodyId, ColliderGeometry, ColliderId,
     FluidParticleReference, FluidPresentation, ItemId, ItemKind, LightControlId,
@@ -222,7 +222,6 @@ struct SeatState {
     id: SeatId,
     item: ItemId,
     pose: VehiclePose,
-    exit: ExitReference,
     usable: Option<ItemId>,
 }
 
@@ -453,7 +452,6 @@ impl InteractionState {
                     position: anchor.transform.translation,
                     rotation: anchor.transform.rotation,
                 },
-                exit: ExitReference::from_reference(&reference.player, seat),
                 usable: seat_usable(reference, seat)?,
             });
         }
@@ -779,7 +777,7 @@ impl InteractionState {
                 .is_some_and(|rule| rule.can_hold_right_hand)
             && self
                 .carry
-                .allows_pickup(id, player.seat().is_some(), items.mounted(id))
+                .allows_pickup(id, player.seated(), items.mounted(id))
             && physics.body_active(item.body.unwrap())
             && physics.vehicle_of(item.body.unwrap()).is_none()
     }
@@ -808,7 +806,7 @@ impl InteractionState {
             .ok_or_else(|| ReferenceError("Item is not stored".into()))?;
         if !self
             .carry
-            .allows_pickup(item, player.seat().is_some(), items.mounted(item))
+            .allows_pickup(item, player.seated(), items.mounted(item))
         {
             return Err(ReferenceError("Cannot carry this item".into()));
         }
@@ -1429,7 +1427,10 @@ impl InteractionState {
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         // Source pickupable.CanPickup refuses IsBuried items.
-        if self.buried.is_buried(item, items, physics, self.player_body) {
+        if self
+            .buried
+            .is_buried(item, items, physics, self.player_body)
+        {
             return Err(ReferenceError("Item is buried".into()));
         }
         self.carry.pickup(item, point, player, items, physics)?;
@@ -1696,17 +1697,13 @@ impl InteractionState {
             action = light_action.map(InteractionAction::LightControl);
             if !ray_actions_blocked
                 && use_input.pressed & keys::USE != 0
-                && player.seat().is_some()
+                && player.seated()
                 && !can_use_target
             {
-                if let Some(seat) = self
-                    .seats
-                    .iter()
-                    .find(|seat| Some(seat.id) == player.seat())
-                    && player.try_exit(physics, &seat.exit)
-                {
+                let seat = player.seat();
+                if player.try_exit(physics) {
                     self.seat_action_latched = true;
-                    action = Some(InteractionAction::Seat(seat.id));
+                    action = seat.map(InteractionAction::Seat);
                 }
             } else if let Some(target) = use_target {
                 if use_input.held & keys::USE != 0
@@ -2060,10 +2057,7 @@ impl InteractionState {
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        if !self
-            .carry
-            .allows_pickup(item, player.seat().is_some(), true)
-        {
+        if !self.carry.allows_pickup(item, player.seated(), true) {
             return Err(ReferenceError("Cannot remove plate".into()));
         }
         let body = self
