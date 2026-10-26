@@ -1222,6 +1222,7 @@ mod world_sync_tests {
             vehicle: None,
             engines: Vec::new(),
             radiators: Vec::new(),
+            gauges: Vec::new(),
             sled: None,
         }
     }

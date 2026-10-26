@@ -113,6 +113,7 @@ mod tests {
             vehicle: None,
             engines: Vec::new(),
             radiators: Vec::new(),
+            gauges: Vec::new(),
             sled: None,
         };
         let marked: Vec<_> = (0..4).map(|n| under_mark(&prototype, n)).collect();

@@ -97,6 +97,9 @@ pub struct ChangeRecords {
     /// Source `coolantTankscript` fan state of radiator part objects.
     #[serde(serialize_with = "pairs")]
     radiators: BTreeMap<ObjectKey, bool>,
+    /// Source `save_meterscript` values of gauge part objects.
+    #[serde(serialize_with = "pairs")]
+    gauges: BTreeMap<ObjectKey, crate::simulation::gauges::GaugeSnapshot>,
 }
 impl PartialEq for ChangeRecords {
     fn eq(&self, other: &Self) -> bool {
@@ -105,6 +108,7 @@ impl PartialEq for ChangeRecords {
             && self.wheel_slots == other.wheel_slots
             && self.engines == other.engines
             && self.radiators == other.radiators
+            && self.gauges == other.gauges
     }
 }
 /// Writes a map with object keys as a list of pairs. JSON object keys must be strings.
@@ -133,6 +137,7 @@ impl<'de> Deserialize<'de> for ChangeRecords {
             wheel_slots: Vec<(ObjectKey, Vec<Option<ObjectKey>>)>,
             engines: Vec<(ObjectKey, crate::save::EngineSnapshot)>,
             radiators: Vec<(ObjectKey, bool)>,
+            gauges: Vec<(ObjectKey, crate::simulation::gauges::GaugeSnapshot)>,
         }
         let envelope = Envelope::deserialize(deserializer)?;
         let mut result = Self {
@@ -140,6 +145,7 @@ impl<'de> Deserialize<'de> for ChangeRecords {
             wheel_slots: unique(envelope.wheel_slots)?,
             engines: unique(envelope.engines)?,
             radiators: unique(envelope.radiators)?,
+            gauges: unique(envelope.gauges)?,
             ..Self::default()
         };
         for (key, change) in envelope.records {
@@ -162,6 +168,7 @@ impl ChangeRecords {
             wheel_slots: self.wheel_slots.clone(),
             engines: self.engines.clone(),
             radiators: self.radiators.clone(),
+            gauges: self.gauges.clone(),
             ..Self::default()
         };
         for (key, change) in self.iter() {
@@ -519,6 +526,20 @@ impl ChangeRecords {
     pub fn radiator(&self, key: &ObjectKey) -> Option<bool> {
         self.radiators.get(key).copied()
     }
+    /// Keeps the meter values of gauge part `key` until it spawns again.
+    pub(crate) fn keep_gauge(
+        &mut self,
+        key: ObjectKey,
+        state: crate::simulation::gauges::GaugeSnapshot,
+    ) {
+        self.gauges.insert(key, state);
+    }
+    pub(crate) fn take_gauge(
+        &mut self,
+        key: &ObjectKey,
+    ) -> Option<crate::simulation::gauges::GaugeSnapshot> {
+        self.gauges.remove(key)
+    }
     pub fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + object_states_bytes(&self.vehicles)
@@ -538,6 +559,12 @@ impl ChangeRecords {
                 .map(|e| e.start_draw.capacity())
                 .sum::<usize>()
             + object_states_bytes(&self.radiators)
+            + object_states_bytes(&self.gauges)
+            + self
+                .gauges
+                .values()
+                .map(|g| (g.values.capacity() + g.counters.capacity()) * std::mem::size_of::<f32>())
+                .sum::<usize>()
             + self.records.capacity() * std::mem::size_of::<(ObjectKey, ObjectChange)>()
             + self.identities.capacity().saturating_mul(2)
                 * (std::mem::size_of::<(ObjectKey, usize)>() + 1)

@@ -485,6 +485,8 @@ pub struct VehicleRuntime {
     pub(crate) handbrake_lever: Option<ItemId>,
     /// Plate label texts, in `WorldVehicleReference::plates` order.
     pub plates: Vec<String>,
+    /// `carscript.kmhmeters` slots: (row, slot) pairs.
+    pub(crate) kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
 }
 
 impl VehicleRuntime {
@@ -526,6 +528,7 @@ impl VehicleRuntime {
             light_switch: parts.light_switch,
             handbrake_lever: parts.handbrake_lever,
             plates: parts.plates,
+            kmh_slots: Vec::new(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -579,19 +582,17 @@ impl VehicleRuntime {
         if let Some((i, lamp)) = r.lamps.iter().enumerate().find(|(_, l)| l.node.0 == node) {
             return Some(pick(state.lamp_bits & (1 << i) != 0, &lamp.on, &lamp.off));
         }
-        if let Some(digit) = r.odometer.digits.iter().find(|d| d.node.0 == node) {
+        if let Some(digit) = r.digits().iter().find(|d| d.node.0 == node) {
             return Some(pick(state.digits_lit, &digit.on, &digit.off));
         }
-        std::iter::once(&r.backlight)
-            .chain(r.needles.iter().map(|n| &n.backlight))
-            .find_map(|b| match b {
-                crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
-                    if n.0 == node =>
-                {
-                    Some(pick(state.digits_lit, on, off))
-                }
-                _ => None,
-            })
+        r.all_backlights().find_map(|b| match b {
+            crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
+                if n.0 == node =>
+            {
+                Some(pick(state.digits_lit, on, off))
+            }
+            _ => None,
+        })
     }
     /// Visibility that a world car sets on node `node`: lamp Working/nWorking nodes and the
     /// light switch state nodes. None: the car does not set it.
@@ -1399,8 +1400,43 @@ impl GarageRuntime {
                 key,
             );
             let previous = vehicle.previous;
-            vehicle.trip_m +=
+            let distance_m =
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
+            vehicle.trip_m += distance_m;
+            if vehicle.kmh_slots.is_empty() {
+                continue;
+            }
+            // Source carscript.Update: the meter of the part in each kmhmeters slot.
+            let record = world_vehicle(reference, vehicle.prototype);
+            let sample = instrument_sample(
+                &self.area.items,
+                &self.physics,
+                &self.powertrain,
+                key,
+                vehicle,
+                &record.gauge_limits,
+                vehicle.requested_headlights,
+            );
+            for &(row, slot) in &vehicle.kmh_slots {
+                if let Some(item) = self.area.interaction.parts.slot_item(slot)
+                    && let Some(gauge) = self.powertrain.gauge_mut(item)
+                {
+                    gauge.state.kmh_update(
+                        &gauge.record,
+                        &record.kmh_meters[row],
+                        &record.gauge_limits,
+                        &sample,
+                        (distance_m / 1000.) as f32,
+                        FIXED_DT,
+                    );
+                }
+            }
+        }
+        for gauge in self.powertrain.gauges_mut() {
+            if gauge.state.advance(&gauge.record, FIXED_DT) {
+                self.stream
+                    .mark_presentation(&gauge.parent, &mut gauge.slot_hint);
+            }
         }
 
         self.advance_under_map();
@@ -1515,11 +1551,7 @@ impl GarageRuntime {
             &self.powertrain,
             key,
             vehicle,
-            vehicle
-                .record(reference)
-                .instruments
-                .as_ref()
-                .expect("car with gauges"),
+            &vehicle.record(reference).gauge_limits,
             vehicle.requested_headlights,
         )
     }
@@ -1542,7 +1574,8 @@ impl GarageRuntime {
         let focus = rapier3d::math::Vector::from_array(area.player.focus_position(physics));
         let seated = area.player.seat_vehicle();
         for (key, vehicle) in vehicles.iter_mut() {
-            let Some(r) = vehicle.record(reference).instruments.as_ref() else {
+            let record = vehicle.record(reference);
+            let Some(r) = record.instruments.as_ref() else {
                 continue;
             };
             let position = physics.rapier().bodies[physics.chassis_handle(key)].translation();
@@ -1558,16 +1591,16 @@ impl GarageRuntime {
                 powertrain,
                 key,
                 vehicle,
-                r,
+                &record.gauge_limits,
                 vehicle.requested_headlights,
             );
             let Some(state) = vehicle.instruments.as_mut() else {
                 continue;
             };
             if initialize {
-                state.initialize_from_sample(r, sample);
+                state.initialize_from_sample(r, &record.gauge_limits, sample);
             } else {
-                state.update(r, sample, dt);
+                state.update(r, &record.gauge_limits, sample, dt);
             }
         }
     }
@@ -2306,7 +2339,7 @@ pub(crate) fn instrument_sample(
     powertrain: &PowertrainParts,
     key: &ObjectKey,
     vehicle: &VehicleRuntime,
-    r: &crate::reference::InstrumentReference,
+    limits: &crate::reference::GaugeLimits,
     headlights: u8,
 ) -> crate::simulation::instruments::InstrumentSample {
     let amount = |id: ItemId| {
@@ -2327,7 +2360,7 @@ pub(crate) fn instrument_sample(
         rpm: engine.map_or(0., |e| e.state.output().rpm),
         headlights,
         local_ignition: vehicle.ignition.ignition
-            && r.electronics_output > r.electronics_off_threshold,
+            && limits.electronics_output > limits.electronics_off_threshold,
         distance_m: vehicle.trip_m,
     }
 }

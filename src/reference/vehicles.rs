@@ -1,4 +1,4 @@
-//! Vehicle records of car world prototypes and engine and radiator records of part nodes.
+//! Vehicle records of car world prototypes and engine, radiator and gauge records of part nodes.
 //! Every `u32` id is local to its world prototype: node, body or collider index.
 use super::render_lighting::{CaptureFace, ProbeRecord, ProbeRefresh};
 use super::*;
@@ -50,6 +50,10 @@ pub struct WorldVehicleReference {
     pub light_switch: Option<WorldLightSwitchReference>,
     /// Node ids are prototype node indices.
     pub instruments: Option<InstrumentReference>,
+    /// Lamp thresholds and electronics output of every gauge on the car.
+    pub gauge_limits: GaugeLimits,
+    /// Source `carscript.kmhmeters`: gauge part slots.
+    pub kmh_meters: Vec<KmhMeterReference>,
     /// Indices of `headlight2` lamps in `instruments.lamps`.
     pub high_beams: Vec<u32>,
     /// Source `rendszamscript` labels of the license plates.
@@ -57,6 +61,18 @@ pub struct WorldVehicleReference {
     /// The realtime reflection probe that follows this car.
     pub probe: Option<WorldProbeReference>,
     pub audio: Option<CarAudioReference>,
+}
+
+/// Source `kmhslottype`: the meter of the part in each slot reads `types`, times `modifier`.
+/// With `force`, every needle of that meter reads the speed (source behavior).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KmhMeterReference {
+    pub force: bool,
+    pub modifier: f32,
+    pub types: Vec<String>,
+    /// `partslotscript` components.
+    pub slots: Vec<SourceId>,
 }
 
 /// A realtime `ReflectionProbe` of a car prototype. The fields are those of `ProbeRecord`.
@@ -418,13 +434,12 @@ impl WorldVehicleReference {
                 .filter(move |l| l.node.0 == node)
                 .flat_map(|l| [&l.on, &l.off]);
             let digits = r
-                .odometer
-                .digits
+                .digits()
                 .iter()
                 .filter(move |d| d.node.0 == node)
                 .flat_map(|d| [&d.on, &d.off]);
-            let backlights = std::iter::once(&r.backlight)
-                .chain(r.needles.iter().map(|n| &n.backlight))
+            let backlights = r
+                .all_backlights()
                 .filter_map(move |b| match b {
                     MaterialSwitchReference::Renderer { node: n, on, off } if n.0 == node => {
                         Some([on, off])
@@ -556,6 +571,24 @@ impl WorldVehicleReference {
         if let Some(r) = &self.instruments {
             check(s, "vehicle instruments", instruments_valid(r, b))?;
         }
+        let l = &self.gauge_limits;
+        check(
+            s,
+            "vehicle gauge limits",
+            finite(&[
+                l.electronics_output,
+                l.electronics_off_threshold,
+                l.low_fuel,
+                l.low_oil,
+                l.oil_test_rpm,
+                l.battery_test_rpm,
+            ]),
+        )?;
+        check(
+            s,
+            "vehicle kmh meters",
+            self.kmh_meters.iter().all(|k| k.modifier.is_finite()),
+        )?;
         for p in &self.exhaust {
             super::particles::validate_particle(p)?;
         }
@@ -564,18 +597,11 @@ impl WorldVehicleReference {
 }
 
 fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
-    let switch = |m: &MaterialSwitchReference| match m {
-        MaterialSwitchReference::Absent => true,
-        MaterialSwitchReference::Renderer { node, on, off } => {
-            b.node(node.0) && b.material(on) && b.material(off)
-        }
-    };
     // Gauge state keeps lamp bits in one u32.
     r.lamps.len() <= 32
-        && switch(&r.backlight)
+        && r.all_backlights().all(|m| switch_valid(m, &b))
         && r.needles.iter().all(|n| {
             b.node(n.node.0)
-                && switch(&n.backlight)
                 && n.axis < 3
                 && finite(&[
                     n.min_value,
@@ -594,23 +620,59 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
                 && b.material(&l.off)
                 && finite(&[l.min_value, l.max_value])
         })
-        && r.odometer.digits.iter().all(|d| {
+        && r.digits().iter().all(|d| {
             b.node(d.node.0)
                 && d.axis < 3
                 && b.material(&d.on)
                 && b.material(&d.off)
                 && finite(&[d.initial_value, d.initial_angle])
         })
-        && finite(&[
-            r.electronics_output,
-            r.electronics_off_threshold,
-            r.low_fuel,
-            r.low_oil,
-            r.oil_test_rpm,
-            r.battery_test_rpm,
-            r.odometer.initial_value,
-            r.odometer.multiplier,
-        ])
+        && r
+            .odometer
+            .as_ref()
+            .is_none_or(|o| finite(&[o.initial_value, o.multiplier]))
+}
+
+fn switch_valid(m: &MaterialSwitchReference, b: &PrototypeBounds) -> bool {
+    match m {
+        MaterialSwitchReference::Absent => true,
+        MaterialSwitchReference::Renderer { node, on, off } => {
+            b.node(node.0) && b.material(on) && b.material(off)
+        }
+    }
+}
+
+impl GaugePartReference {
+    pub(super) fn validate(&self, b: PrototypeBounds) -> Result<(), ReferenceError> {
+        check(
+            &self.source,
+            "gauge part",
+            b.node(self.node)
+                && self.lamps.len() <= 32
+                && std::iter::once(&self.backlight)
+                    .chain(self.needles.iter().map(|n| &n.backlight))
+                    .all(|m| switch_valid(m, &b))
+                && self.needles.iter().all(|n| {
+                    b.node(n.node.0)
+                        && n.axis < 3
+                        && finite(&[n.min_value, n.max_value, n.min_angle, n.max_angle])
+                        && finite(&[n.offset, n.value_smoothing, n.signal_smoothing])
+                        && finite(&n.rest)
+                })
+                && self.lamps.iter().all(|l| {
+                    b.node(l.node.0) && b.material(&l.on) && b.material(&l.off)
+                })
+                && self.counters.iter().all(|c| {
+                    finite(&[c.initial_value, c.multiplier])
+                        && c.digits.iter().all(|d| {
+                            b.node(d.node.0)
+                                && d.axis < 3
+                                && b.material(&d.on)
+                                && b.material(&d.off)
+                        })
+                }),
+        )
+    }
 }
 
 impl EnginePartReference {
@@ -723,4 +785,11 @@ pub(crate) fn engine_part_fixture() -> serde_json::Value {
     serde_json::json!({"source": {"file": "a", "path_id": 14}, "node": 3, "oil_tank": 1, "start_chance": 0.9, "starter_rpm": 300.0, "starter_rpm_lerp": 2.0, "idle_rpm": 800.0, "max_rpm": 6000.0, "shutdown_rpm": 200.0, "max_torque_nm": 120.0, "starting_push_force": 1080.0, "consumption_modifier": 1.0, "oil_consumption_modifier": 1.0, "engine_brake_modifier": 1.0, "rpm_change_modifier": 1.0, "engine_start_time_modifier": 1.0, "heat_gain_min": 1.0, "heat_gain_max": 2.0, "heat_loss": 1.0, "initial_temperature": 20.0, "heat_loss_speed_modifier": 1.0, "optimal_temperature": [80.0, 90.0, 70.0, 100.0], "fuel_consumption": [0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "two_stroke": false,
                 "torque_curve": {"keys": [{"time": 0.0, "value": 0.5, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}, {"time": 1.0, "value": 1.0, "in_tangent": 0.0, "out_tangent": 0.0, "in_weight": 0.0, "out_weight": 0.0, "weighted_mode": 0}], "pre_wrap_mode": 2, "post_wrap_mode": 2},
                 "max_rpm_difference": 100.0, "torque_modifier": 1.0, "oil_fluid": 3, "no_overheat": false, "kickstart": false, "start_chance_interval_seconds": 1.0, "auto_shift_clutch_rpm": 1000.0, "auto_shift_clutch_rpm_range": 200.0, "smoke_rate": 5.0})
+}
+
+/// Gauge limits for native tests: low fuel 5 L, low oil 1 L, full electronics.
+#[cfg(test)]
+pub(crate) fn gauge_limits_fixture() -> serde_json::Value {
+    serde_json::json!({"electronics_output": 1.0, "electronics_off_threshold": 0.2, "low_fuel": 5.0,
+        "low_oil": 1.0, "oil_test_rpm": 500.0, "battery_test_rpm": 500.0})
 }

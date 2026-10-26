@@ -278,16 +278,6 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     prefab=source.get(*LADA)
     if source.read(source.get('level1',64896))['FirstHome']['m_PathID']!=21400:
         raise ValueError('Selected home link differs from the required home')
-    # Mirror glass uses the source material for disabled mirrors of the car prototype.
-    main = source.get('level1', 64919)
-    glass = source.resolve(main, source.read(main)['noMirrorMaterial'])
-    source.mirror_renderers = {}
-    for node in source.hierarchy(prefab, activate_root=True):
-        for reader in node['components']:
-            if reader.type.name == 'MonoBehaviour' and source.class_name(reader) == 'mirrorscript':
-                data = source.read(reader)['M']
-                if data['R']['m_PathID'] and data['C']['m_PathID']:
-                    source.mirror_renderers[key(source.resolve(reader, data['R']))] = glass
     prepare_conditions(source,[root for readers in roots.values() for root in readers])
     output.mkdir(parents=True, exist_ok=True)
     native_engine = native_engine_evidence(snapshot.root)

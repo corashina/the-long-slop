@@ -6,9 +6,9 @@ from .gltf import convert_point, convert_rotation, transform_point
 from .collision import quaternion_product
 from .managed_code import managed_code, class_code, method, require
 
-# Lada prefab mountStuff types: the trunk (3) and the hood room (4) wait for a closed part in their gate slot.
-LADA_TYPES=(0,0,3,4,5,5,5,5)
-# World prototype mountStuff: Box, Fridge, Raklap (pallet), Coffin (4). The Lada volumes come from its prefab.
+# Car mountStuff types 3 (trunk) and 4 (hood room) wait for a closed part in their one gate slot.
+GATED_TYPES=(3,4)
+# World prototype mountStuff: Box, Fridge, Raklap (pallet), Coffin (4). Car volumes come from each car prefab.
 PROTOTYPE_FILE='sharedassets1.assets'
 PROTOTYPE_VOLUMES=(146589,146111,133282,144518,150537,134531,153699)
 SETTING=2
@@ -88,12 +88,10 @@ def recover_prototype_storage(source, manifest, output):
     world=manifest['world'];prototypes=world['prototypes']
     mechanisms={(m['prototype']['file'],m['prototype']['path_id'],m['recipe']['source']['file'],m['recipe']['source']['path_id']) for m in world['mechanisms']}
     def transform(owner,pointer):return source.transform_for(source.resolve(owner,pointer))
-    from .world import LADA
-    lada=[c for node in source.hierarchy(source.get(*LADA),activate_root=True) for c in node['components']
-        if c.type.name=='MonoBehaviour' and source.class_name(c)=='mountStuff']
-    if sorted(source.read(c)['sType'] for c in lada)!=list(LADA_TYPES):raise ValueError(f'{LADA} storage volume types differ')
+    cars=[c for p in prototypes if p.get('vehicle') for node in source.hierarchy(source.get(p['source']['file'],p['source']['path_id']),activate_root=True)
+        for c in node['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='mountStuff']
     volumes=[];evidence=[]
-    for r in [*(source.get(PROTOTYPE_FILE,i) for i in PROTOTYPE_VOLUMES),*lada]:
+    for r in [*(source.get(PROTOTYPE_FILE,i) for i in PROTOTYPE_VOLUMES),*cars]:
         name=f'{r.assets_file.name}:{r.path_id}'
         if r.type.name!='MonoBehaviour' or source.class_name(r)!='mountStuff':raise ValueError(f'{name} is not mountStuff')
         f=source.read(r);node=transform(r,f['m_GameObject'])
@@ -105,7 +103,7 @@ def recover_prototype_storage(source, manifest, output):
         slots=[source.resolve(r,p) for p in f['slot'] if p['m_PathID']]
         if len(slots)!=len(f['slot']) or any(source.class_name(slot)!='partslotscript' for slot in slots):
             raise ValueError(f'{name} gate slot is not a partslotscript')
-        if f['sType'] in (3,4) and key(r) in {key(c) for c in lada} and len(slots)!=1:raise ValueError(f'{name} Lada gate slot differs')
+        if f['sType'] in GATED_TYPES and key(r) in {key(c) for c in cars} and len(slots)!=1:raise ValueError(f'{name} car gate slot differs')
         homes=containing(prototypes,source_id(node))
         # Upd needs activeInHierarchy below each prototype root. The stored root is inactive; the spawn activates it.
         # Scan reads only the collider box, so a disabled collider or inactive collider object still counts.

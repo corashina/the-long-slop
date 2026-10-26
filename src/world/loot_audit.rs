@@ -795,4 +795,50 @@ mod tests {
             failures.join("\n")
         );
     }
+
+    /// V03 bus pool: each `bus` category item exports as a car prototype with a vehicle
+    /// record. The trailer bus (`utanfutoscript`, PR 4) stays `other_vehicle`. The building
+    /// audit above then counts the buses at the source rates.
+    #[test]
+    #[ignore = "requires the installed source export"]
+    fn v03_bus_pool_exports_car_prototypes() {
+        let reference = reference();
+        let catalog = &reference.catalog;
+        let mut stack = vec![
+            catalog
+                .categories
+                .iter()
+                .find(|c| c.name == "bus")
+                .expect("bus category")
+                .index,
+        ];
+        let (mut seen, mut items) = (Vec::new(), Vec::new());
+        while let Some(index) = stack.pop() {
+            if seen.contains(&index) {
+                continue;
+            }
+            seen.push(index);
+            let row = &catalog.categories[index as usize];
+            items.extend(row.items.iter().flatten().copied());
+            stack.extend(row.categories.iter().flatten().copied());
+        }
+        assert!(!items.is_empty());
+        for index in items {
+            let item = &catalog.items[index as usize];
+            if item.name.to_lowercase().contains("utanfuto") {
+                assert_eq!(item.exclusion, "other_vehicle", "{}", item.name);
+                continue;
+            }
+            let prototype = item
+                .prototype
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no prototype: {}", item.name, item.exclusion));
+            let car = reference.prototypes.iter().find(|p| &p.source == prototype);
+            assert!(
+                car.is_some_and(|p| p.vehicle.is_some()),
+                "{} has no vehicle record",
+                item.name
+            );
+        }
+    }
 }
