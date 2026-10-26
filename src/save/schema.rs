@@ -166,6 +166,8 @@ pub struct PlayerSnapshot {
     pub recoil_velocity: [f32; 3],
     pub running: bool,
     pub carry: Option<CarrySnapshot>,
+    /// Source save_player.sleep: seconds since the last wake.
+    pub since_wake: f64,
 }
 /// Source save_player hp, food, water, shit, to* queue, and bladder fluids.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

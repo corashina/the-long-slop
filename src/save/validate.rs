@@ -331,6 +331,7 @@ impl SaveSnapshot {
                 && bounded_local(&[p.vertical_velocity]),
             "Player motion",
         )?;
+        data(p.since_wake.is_finite(), "Player sleep cooldown")?;
         if let Some(seat) = &p.seat {
             local(&seat.local_pose)?;
             match &seat.owner {
