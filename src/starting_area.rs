@@ -2041,16 +2041,20 @@ impl GarageRuntime {
                 )
                 .expect("bound storage")
                 .is_none()
-                || reference.acquisition.r#box.break_rules.no_gib
             {
                 continue;
             }
+            let record = reference
+                .breakable(&reference.acquisition.r#box.breakable)
+                .expect("validated box breakable");
             // Source Break spawns Gib at the box pose. No reduced-gibs setting exists here.
-            let debris = &reference.acquisition.r#box.debris;
+            let Some(gib) = record.gib.as_ref().filter(|_| !record.no_gib) else {
+                continue;
+            };
             let prototype = reference
                 .item_prototypes
                 .iter()
-                .position(|p| &p.id == debris)
+                .position(|p| &p.id == gib)
                 .expect("validated box debris prototype");
             spawned::spawn_prototype(
                 reference,

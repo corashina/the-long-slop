@@ -101,7 +101,29 @@ def breakable_records(source, prototypes, controls) -> list[dict]:
     return list(records.values())
 
 
+def check_gibs(records, prototypes) -> None:
+    """Each Gib and reducedGib link is a gib prototype, and each gib prototype has a link."""
+    gibs = [p['id'] for p in prototypes if p['item_id'] is None]
+    links = [r[f] for r in records for f in ('gib', 'reduced_gib') if r[f] is not None]
+    missing = [g for g in links if g not in gibs]
+    if missing:
+        raise ValueError(f'Breakable gibs are not item_prototypes.GIBS: {missing}')
+    unused = [g for g in gibs if g not in links]
+    if unused:
+        raise ValueError(f'Gib prototypes without a breakable: {unused}')
+
+
 def recover_breakables(source, manifest) -> list[dict]:
     controls = {(r['source']['file'], r['source']['path_id']) for r in manifest['world']['records']
                 if r['class_name'] == 'flashlightscript'}
-    return breakable_records(source, owners(source, manifest), controls)
+    records = breakable_records(source, owners(source, manifest), controls)
+    check_gibs(records, manifest['item_prototypes'])
+    return records
+
+
+def recover_gib_constants(source) -> dict:
+    """mainscript values that gibscript.Start reads."""
+    main = source.get('level1', 64919)
+    d = source.read(main)
+    return {'source': source_id(main), 'random_rotation': d['gibMainChildsRandomRot'],
+            'random_position': d['gibMainChildsRandomPos'], 'add_force': d['gibMainChildsAddForce']}

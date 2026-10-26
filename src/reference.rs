@@ -856,6 +856,7 @@ pub struct ReferenceManifest {
     pub small_items: SmallItemsReference,
     pub melee: MeleeReference,
     pub breakables: Vec<BreakableReference>,
+    pub gib_constants: GibConstants,
     pub skid: SkidReference,
     pub app_id: u32,
     pub build_id: u32,
@@ -1839,6 +1840,7 @@ impl ReferenceManifest {
         for breakable in &self.breakables {
             breakable.validate(self)?;
         }
+        self.gib_constants.validate()?;
         wheel_effects::validate(self)?;
         self.conditions.validate(self)?;
         Ok(())

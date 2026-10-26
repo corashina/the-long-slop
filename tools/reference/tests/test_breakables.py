@@ -67,6 +67,44 @@ class BreakableTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'AI link'):
             breakables.breakable_records(source, owners, {('a', 10)})
 
+    def test_gib_links(self):
+        gib = {'file': 'a', 'path_id': 21}
+        records = [{'gib': gib, 'reduced_gib': None}]
+        breakables.check_gibs(records, [{'id': gib, 'item_id': None}, {'id': {'file': 'a', 'path_id': 1}, 'item_id': 62}])
+        with self.assertRaisesRegex(ValueError, 'not item_prototypes.GIBS'):
+            breakables.check_gibs(records, [])
+        with self.assertRaisesRegex(ValueError, 'without a breakable'):
+            breakables.check_gibs([], [{'id': gib, 'item_id': None}])
+
+
+class GibTests(unittest.TestCase):
+    def source(self, gib):
+        source = FakeSource({11: gib, 12: {}})
+        source.classes = {11: 'gibscript', 12: 'scaleDestroyScript'}
+        r = source.readers
+        return source, r
+
+    def test_gib_root(self):
+        from tools.reference.item_prototypes import recover_gib
+        gib = {'gibMain': 1, 'gibMainDontRot': 0, 'gibMainAddSmallPos': 1, 'distance': 0, 'life': 30.,
+               'colsOff': 0, 'childs': [pointer(2), pointer(3)]}
+        source, r = self.source(gib)
+        nodes = {('a', 1): 1, ('a', 2): 2, ('a', 3): 3}
+        records = [{'reader': r[1], 'components': [r[1], r[11]]}, {'reader': r[2], 'components': [r[12]]},
+                   {'reader': r[3], 'components': [r[12]]}]
+        self.assertEqual(recover_gib(source, records, nodes), (
+            {'source': {'file': 'a', 'path_id': 11}, 'gib_main': True, 'dont_rot': False, 'add_small_pos': True,
+             'distance': False, 'life': 30., 'children': [2, 3]}, [2, 3]))
+        # A gib without gibscript keeps only its scaleDestroyScript nodes.
+        self.assertEqual(recover_gib(source, records[1:], nodes), (None, [2, 3]))
+        with self.assertRaisesRegex(ValueError, 'not the only one'):
+            recover_gib(source, [records[1], records[0]], nodes)
+        with self.assertRaisesRegex(ValueError, 'outside the gib'):
+            recover_gib(source, records, {('a', 1): 1, ('a', 2): 2})
+        gib['colsOff'] = 1
+        with self.assertRaisesRegex(ValueError, 'start state'):
+            recover_gib(source, records, nodes)
+
 
 if __name__ == '__main__':
     unittest.main()

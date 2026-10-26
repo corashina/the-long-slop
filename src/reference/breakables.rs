@@ -63,11 +63,45 @@ pub struct BreakableReference {
     pub no_collider: bool,
     pub no_gib: bool,
     pub no_destroy: bool,
-    /// Gib and reducedGib root Transforms.
-    pub gib: Option<SourceId>,
-    pub reduced_gib: Option<SourceId>,
+    /// Gib and reducedGib prototypes.
+    pub gib: Option<PrototypeId>,
+    pub reduced_gib: Option<PrototypeId>,
     pub clips: Vec<SourceId>,
     pub lamp: Option<BreakableLamp>,
+}
+
+/// mainscript values that gibscript.Start reads.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GibConstants {
+    pub source: SourceId,
+    /// gibMainChildsRandomRot, in degrees per axis.
+    pub random_rotation: f32,
+    /// gibMainChildsRandomPos, in metres.
+    pub random_position: f32,
+    /// gibMainChildsAddForce, a velocity change.
+    pub add_force: f32,
+}
+
+impl GibConstants {
+    pub fn validate(&self) -> Result<(), ReferenceError> {
+        require(
+            self.source.file == "level1"
+                && self.source.path_id == 64919
+                && finite(&[self.random_rotation, self.random_position, self.add_force])
+                && [self.random_rotation, self.random_position, self.add_force]
+                    .iter()
+                    .all(|v| *v >= 0.),
+            "gib constants",
+        )
+    }
+}
+
+impl ReferenceManifest {
+    /// The breakables record of a breakablescript.
+    pub fn breakable(&self, source: &SourceId) -> Option<&BreakableReference> {
+        self.breakables.iter().find(|b| &b.source == source)
+    }
 }
 
 impl BreakableReference {
@@ -88,6 +122,17 @@ impl BreakableReference {
                     .iter()
                     .all(|c| item_prototypes::clip_exists(m, c)),
             "breakable values",
+        )?;
+        require(
+            [&self.gib, &self.reduced_gib]
+                .into_iter()
+                .flatten()
+                .all(|id| {
+                    m.item_prototypes
+                        .iter()
+                        .any(|p| &p.id == id && p.item_id.is_none())
+                }),
+            "breakable gib prototype",
         )?;
         for owner in &self.owners {
             // Node sources of the owner prototype.
