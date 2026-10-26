@@ -24,6 +24,7 @@ use bevy::{ecs as bevy_ecs, prelude::*};
 #[derive(Resource, Default)]
 pub struct ShadowScene {
     pub frame: u32,
+    pub origin: [f64; 3],
     pub imported_capacity: usize,
     pub generated_capacity: usize,
     pub caster_data: CasterData<Entity>,
@@ -251,6 +252,7 @@ pub(super) fn prepare_scene(
         }
     }
     scene.casters_ready = true;
+    scene.origin = origin.0;
     scene.frame = frame.frame;
 }
 /// Return false when eligibility changes the ordered membership.
@@ -353,5 +355,6 @@ pub fn extract_scene(
     output.split_counts = input.split_counts;
     output.camera_visible = input.camera_visible;
     output.shadow_only = input.shadow_only;
+    output.origin = input.origin;
     output.frame = input.frame;
 }

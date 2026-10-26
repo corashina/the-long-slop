@@ -4,6 +4,7 @@ use super::{
     lighting_scene::SourceSceneLighting,
     readiness::RendererStateHandle,
     render_targets::SourceViewTargets,
+    shadow_atlas::ShadowCadence,
     shadow_phase::ShadowDrawState,
     shadow_queue::ShadowQueues,
     shadow_scene::ShadowScene,
@@ -55,6 +56,7 @@ fn prepare(
         Entity,
         &SourceSurfaceView,
         &SurfaceViewTargets,
+        &ShadowCadence,
         Option<&mut CollectorView>,
     )>,
     status: Res<RendererStateHandle>,
@@ -82,13 +84,14 @@ fn prepare(
         h(rotation * Vec3::Y),
         h(rotation * -Vec3::Z),
     ];
-    for (entity, view, targets, mut previous) in &mut views {
+    for (entity, view, targets, cadence, mut previous) in &mut views {
         let Some(snapshot) = frame.views[view.index] else {
             continue;
         };
         timing.face(view.index);
         let key = super::shadow_preparation::CollectorKey {
             view: scene.view_revision(view.index, &frame),
+            cadence: cadence.revision,
             projection: snapshot.raster_projection.to_cols_array().map(f32::to_bits),
             view_from_world: snapshot.view_from_world.to_cols_array().map(f32::to_bits),
             near_far_strength: [snapshot.near, snapshot.far, light.shadows.strength]
@@ -103,6 +106,10 @@ fn prepare(
                 continue;
             }
         }
+        let stale = previous
+            .as_deref()
+            .filter(|old| Arc::ptr_eq(&old.targets, &targets.0))
+            .map(|old| old.value);
         let mut value = SunShadowUniform {
             params: Vec4::new(
                 1. - light.shadows.strength,
@@ -116,6 +123,13 @@ fn prepare(
         if let Some(fit) = scene.fits[view.index] {
             value.params.w = 1.;
             for (index, cascade) in fit.cascades.iter().enumerate() {
+                // A stale cascade keeps the transform and sphere of its atlas tile.
+                if let Some(old) = stale.filter(|_| !cadence.render[index]) {
+                    value.world_to_shadow[index] = old.world_to_shadow[index];
+                    value.spheres[index] = old.spheres[index];
+                    value.radii_squared[index] = old.radii_squared[index];
+                    continue;
+                }
                 let clip = super::shadow_queue::cascade_projection(cascade, basis).0;
                 // Clip to this top-left atlas tile. Projection flip and world conversion
                 // are already in clip and must not be applied again.

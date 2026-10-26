@@ -446,7 +446,11 @@ pub fn write_cascades(
     frame: Res<SourceViewFrame>,
     live: Res<SourceSceneLighting>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
-    mut views: Query<(&mut SourceSurfaceView, &mut CasterViews)>,
+    mut views: Query<(
+        &mut SourceSurfaceView,
+        &mut CasterViews,
+        &super::shadow_atlas::ShadowCadence,
+    )>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
@@ -469,13 +473,14 @@ pub fn write_cascades(
         h(rotation * Vec3::Y),
         h(rotation * -Vec3::Z),
     ];
-    for (mut view, mut slots) in &mut views {
+    for (mut view, mut slots, cadence) in &mut views {
         if frame.skip_probe_preparation(view.index) {
             continue;
         }
         timing.face(view.index);
         let key = super::shadow_preparation::CascadeKey {
             view: scene.view_revision(view.index, &frame),
+            cadence: cadence.revision,
             bias: [
                 light.shadows.depth_bias.to_bits(),
                 light.shadows.normal_bias.to_bits(),
@@ -501,6 +506,10 @@ pub fn write_cascades(
         }
         slots.shadow_key = Some(key);
         for (index, cascade) in fit.cascades.iter().enumerate() {
+            // A stale slot keeps the values of its atlas tile.
+            if !cadence.render[index] {
+                continue;
+            }
             let (projection, device_e22) = cascade_projection(cascade, basis);
             // Selected D3D reversed-depth orthographic device e22 = 1/(far-near).
             let depth_bias = -light.shadows.depth_bias * device_e22;
