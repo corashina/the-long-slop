@@ -4,10 +4,12 @@ import {installGameMode} from './game-mode.js';
 installGameMode(window,document.querySelector('#biome'));
 import {createSurvival} from './survival.js';
 import {createAudio,installAudioBridge} from './audio.js';
-import {manifestStamp,createSaveStorage} from './save-storage.js';
+import {manifestStamp,createSaveStorage,AUTOSAVE} from './save-storage.js';
 import {createSaveSession} from './save-session.js';
 import {createSaveBridge} from './save-bridge.js';
 import {createThumbnail} from './thumbnail.js';
+import {createAutosave} from './autosave.js';
+import {readAutosaveToggles} from './save-screen.js';
 export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
 import {installDrivingSettings} from './driving-settings.js';
@@ -16,7 +18,17 @@ import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
 let slider,worldDrawDistance,drivingSettings,steeringWheel;
 // The slider is locked while a request is pending, so its value is the one the new world uses.
-const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state==='success'&&operation!=='save'&&operation!=='remove'){worldDrawDistance=slider.value();slider.store();}}});
+const saveSession=createSaveSession({storage:createSaveStorage(),runtime:saveRuntime,drawDistance:()=>slider.value(),onStatus:({operation,state})=>{if(state!=='success'||operation==='remove')return;autosave.reset(performance.now()/1000);if(operation!=='save'){worldDrawDistance=slider.value();slider.store();}}});
+const autosave=createAutosave(),autosaveNotice=document.querySelector('#autosave-notice');
+let toggleStorage=null;try{toggleStorage=window.localStorage;}catch{}
+// Toggles change only on the save screen, so read them when play resumes, not every frame.
+let toggles=readAutosaveToggles(toggleStorage),wasPlaying=false,autosaving=false,noticeTimer=0;
+async function runAutosave(){
+ autosaving=true;clearTimeout(noticeTimer);autosaveNotice.textContent='Autosaving...';autosaveNotice.hidden=false;
+ try{const blob=await thumbnail.capture();if(!saveSession.pending)await saveSession.save(AUTOSAVE,blob,{autosave:true});autosaveNotice.hidden=true;}
+ catch(error){autosaveNotice.textContent=error?.message??String(error);noticeTimer=setTimeout(()=>{autosaveNotice.hidden=true;},3000);}
+ finally{autosave.reset(performance.now()/1000);autosaving=false;}
+}
 import {createInput} from './input.js';
 import {createCpuProfile,observeRenderMainThread} from './cpu-profile.js';
 export const cpuProfile=createCpuProfile(()=>performance.now(),performance.timeOrigin);
@@ -131,6 +143,10 @@ window.gameUpdate = (kmh, mode, x, y, z, contacts, steps, surfaces, colliders, a
   state.fuelLiters = fuelLiters; state.paused = paused; state.started = started;
   state.autosaveSafe = autosaveSafe; state.seated = seated;
   menu?.sync(started,paused,travelM);
+  const playing=menu?.model.state==='playing';
+  if(playing&&!wasPlaying)toggles=readAutosaveToggles(toggleStorage);
+  wasPlaying=playing;
+  if(autosave.tick(now/1000,playing,autosaveSafe,seated,toggles)&&!autosaving&&!saveSession.pending)runAutosave();
   feedback?.setVisible(started&&!paused&&!dead&&!sleeping&&Boolean(mode)&&menu?.model.state==='playing');
   survival?.setVisible(started&&!paused&&!sleeping&&menu?.model.state==='playing');
 };
