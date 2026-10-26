@@ -23,12 +23,12 @@ mod props;
 pub use props::{PropCandidate, PropGenerator};
 pub mod spawn_state;
 pub mod unity_random;
-pub use placement::place_point;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
     FoundationPoint, PlacementIndex, PlacementIndexSnapshot, SupplyDefinition, SupplyFluid,
     SupplyPoint,
 };
+pub use placement::{node_frame, place_point};
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;

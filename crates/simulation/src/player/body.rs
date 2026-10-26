@@ -63,6 +63,8 @@ pub struct BodyInputs {
     pub carried: Option<CarriedItem>,
     pub in_hand: Option<InHandItem>,
     pub seat: Option<SeatFrames>,
+    /// `pointAt` and `pointingValue`.
+    pub point: Option<(VehiclePose, f32)>,
 }
 
 /// Node frames: player-local world and parent-local. Parents come before children.
@@ -179,6 +181,8 @@ enum HandFrame {
     Hand,
     Seat,
     Drive,
+    /// `Mutat` pointing.
+    Point,
     /// `usingHand`.
     Using,
     /// `movedNearestHandTransform`: the target frame, and its pose unless the frame is the world.
@@ -512,7 +516,7 @@ impl BodyState {
         (self.rig.target(node), HandFrame::Node(node))
     }
 
-    /// fpscontroller.UpdHandPos without pointing or per-item hand frames.
+    /// fpscontroller.UpdHandPos without per-item hand frames.
     fn upd_hand_pos(&mut self, input: &BodyInputs, dt: f32) {
         let def = |i: usize| {
             (
@@ -603,7 +607,19 @@ impl BodyState {
             let side = (self.reach.dist[2] >= self.reach.dist[3]) as usize;
             self.limbs[2 + side] = p;
         }
-        for (side, frame) in hands.map(|h| h.1).into_iter().enumerate() {
+        let mut frames = hands.map(|h| h.1);
+        // Mutat: the left hand with an item in the hands, else the right hand.
+        if let Some((at, value)) = input.point.filter(|p| p.1 > 0.) {
+            let side = if input.carried.is_some() || input.in_hand.is_some() {
+                0
+            } else {
+                1
+            };
+            let (p, r) = pose(&at);
+            self.limbs[side] = (self.limbs[side].0.lerp(p, value), r);
+            frames[side] = HandFrame::Point;
+        }
+        for (side, frame) in frames.into_iter().enumerate() {
             if self.last_hands[side] != Some(frame) {
                 self.hand_timers[side] = self.lock_time;
             }
@@ -752,6 +768,7 @@ mod tests {
             carried: None,
             in_hand: None,
             seat: None,
+            point: None,
         };
         for _ in 0..120 {
             body.step(&input, 1. / 60., |_| None);

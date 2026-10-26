@@ -17,6 +17,17 @@ impl GarageRuntime {
         let view = player.view(&self.physics);
         let [forward, backward] = player.walk_keys();
         let hand = reference.clothing.pose.anchors["RH"].node;
+        // Source carscript moves `LLDrivePos` and `RLDrivePos` to the pedals.
+        let pedals = player
+            .seat_vehicle()
+            .and_then(|key| self.vehicles.get(key))
+            .map(|v| {
+                let prototype = &reference.world.prototypes[v.prototype];
+                v.pedal_reach
+                    .legs
+                    .map(|n| n.map(|n| crate::world::node_frame(prototype, 0, n as usize)))
+            })
+            .unwrap_or_default();
         let carry = &area.interaction.carry;
         let double_hand = |item| carry.rule(item).is_some_and(|r| r.double_hand);
         let input = BodyInputs {
@@ -56,10 +67,12 @@ impl GarageRuntime {
                         hands: f.hands.map(frame),
                         legs: f.legs.map(frame),
                         driving_hands: f.driving_hands.map(frame),
-                        driving_legs: f.driving_legs.map(frame),
+                        driving_legs: [0, 1]
+                            .map(|i| frame(f.driving_legs[i].and(pedals[i]).or(f.driving_legs[i]))),
                         ..*f
                     }
                 }),
+            point: Some((from_rapier(&player.point().at), player.point().value)),
         };
         let rapier = self.physics.rapier();
         let mechanisms = &area.interaction.mechanisms;

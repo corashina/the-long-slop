@@ -46,6 +46,10 @@ pub struct DrivetrainOutput {
     pub throttle: f32,
     pub brake: f32,
     pub engagement: f32,
+    /// Source `clutch`: pedal depression.
+    pub clutch: f32,
+    /// Source `IsAutoShift`.
+    pub automatic: bool,
     pub wheel_rpm: f32,
     pub free_run: bool,
     pub ignition_request: bool,
@@ -225,6 +229,8 @@ impl DrivetrainState {
             throttle,
             brake,
             engagement: if ratio == 0. { 0. } else { 1. - depression },
+            clutch: depression,
+            automatic,
             wheel_rpm: self.wheel_rpm,
             free_run: vehicle.gear_free_run[self.gear],
             ignition_request,
