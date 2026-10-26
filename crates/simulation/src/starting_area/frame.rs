@@ -82,6 +82,7 @@ impl GarageRuntime {
                     light_intensity: out.light_intensity,
                 }
             }));
+        self.fill_particles(reference, frame);
         frame.planes.clear();
         frame
             .planes

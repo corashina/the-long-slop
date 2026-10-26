@@ -25,6 +25,7 @@ mod body;
 pub mod cigarettes;
 mod computers;
 mod frame;
+mod frame_particles;
 pub mod hose;
 mod reach;
 pub mod spawned;

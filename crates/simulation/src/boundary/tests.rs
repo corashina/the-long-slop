@@ -42,6 +42,23 @@ fn frame_round_trips() {
             color: [1., 0.5, 0., 1.],
             light_intensity: 2.,
         }],
+        particle_groups: vec![ParticleGroupRow {
+            kind: ParticleGroupRow::CAR,
+            a: ParticleGroupRow::CAR_WHEEL,
+            b: 2,
+            c: 9,
+            source: 17,
+            start: 0,
+            count: 1,
+            fluid: 0,
+        }],
+        particles: vec![ParticleRow {
+            position: [1., 2., 3.],
+            size: 0.5,
+            age: 1.,
+            lifetime: 2.,
+            ..Default::default()
+        }],
         planes: vec![PlaneRow {
             id: 3,
             prefab: 1,

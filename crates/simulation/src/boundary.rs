@@ -187,6 +187,82 @@ pub struct PlaneRow {
     pub heading: [f32; 4],
 }
 
+/// One live particle. Positions are relative to the stream origin (contrails: the sky anchor).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct ParticleRow {
+    pub position: [f32; 3],
+    pub size: f32,
+    pub color: [f32; 4],
+    pub rotation: f32,
+    pub age: f32,
+    pub lifetime: f32,
+    pub uv_draw: f32,
+}
+
+/// One particle system and its rows in `SimFrame::particles`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+pub struct ParticleGroupRow {
+    /// `ParticleGroupRow::URINE` and the other kinds.
+    pub kind: u32,
+    /// Kind id: tool, wash, opening, storm, plane, item, effect or car system.
+    pub a: u32,
+    /// Car prototype.
+    pub b: u32,
+    /// Car chassis body index.
+    pub c: u32,
+    /// System index inside the owner.
+    pub source: u32,
+    pub start: u32,
+    pub count: u32,
+    /// Rows come from a fluid contact: no age or sheet.
+    pub fluid: u32,
+}
+
+impl ParticleGroupRow {
+    pub const URINE: u32 = 0;
+    pub const BRUSH: u32 = 1;
+    pub const SPRAY: u32 = 2;
+    pub const WASH: u32 = 3;
+    pub const OUTLET: u32 = 4;
+    pub const SPRAY_BOTTLE: u32 = 5;
+    pub const CAR: u32 = 6;
+    pub const STORM: u32 = 7;
+    pub const MELEE: u32 = 8;
+    pub const SKY: u32 = 9;
+    pub const EMBER: u32 = 10;
+    pub const EXHALE: u32 = 11;
+    pub const COBWEB: u32 = 12;
+    /// Car systems in `a`.
+    pub const CAR_EXHAUST: u32 = 0;
+    /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).
+    pub const CAR_WHEEL: u32 = 1;
+    /// Skid bursts: `tiresmoke` (0) or `tiresand` (1).
+    pub const CAR_SKID: u32 = 2;
+}
+
+/// The `(car system, source)` pairs of every particle system of a car prototype.
+pub fn car_particle_sources(
+    reference: &ReferenceManifest,
+    prototype: usize,
+) -> impl Iterator<Item = (u32, usize)> + '_ {
+    let record = crate::starting_area::world_vehicle(reference, prototype);
+    let exhaust = (0..record.exhaust.len()).map(|i| (ParticleGroupRow::CAR_EXHAUST, i));
+    let wheels = record
+        .wheel_effects
+        .iter()
+        .enumerate()
+        .flat_map(|(wheel, w)| {
+            let dust = w.dust.iter().map(|_| 0);
+            let grass = 1..=w.grass.len();
+            dust.chain(grass)
+                .map(move |system| (ParticleGroupRow::CAR_WHEEL, wheel * 8 + system))
+        });
+    let skid = (0..2).map(|i| (ParticleGroupRow::CAR_SKID, i));
+    exhaust.chain(wheels).chain(skid)
+}
+
 /// Day cycle and lamp outputs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FrameLighting {
@@ -242,6 +318,8 @@ pub struct SimFrame {
     /// Player body joints relative to `CharacterRoot`.
     pub joints: Vec<PoseRow>,
     pub cigarettes: Vec<CigaretteRow>,
+    pub particle_groups: Vec<ParticleGroupRow>,
+    pub particles: Vec<ParticleRow>,
     pub planes: Vec<PlaneRow>,
     pub lighting: FrameLighting,
     /// Lights in `LightingRecord::lights` order.
@@ -286,6 +364,8 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.valves);
     put_rows(out, &frame.joints);
     put_rows(out, &frame.cigarettes);
+    put_rows(out, &frame.particle_groups);
+    put_rows(out, &frame.particles);
     put_rows(out, &frame.planes);
     put(out, &frame.lighting);
     put_list(out, &frame.lights);
@@ -306,6 +386,8 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.valves)?;
     take_rows(&mut rest, &mut frame.joints)?;
     take_rows(&mut rest, &mut frame.cigarettes)?;
+    take_rows(&mut rest, &mut frame.particle_groups)?;
+    take_rows(&mut rest, &mut frame.particles)?;
     take_rows(&mut rest, &mut frame.planes)?;
     frame.lighting = take_value(&mut rest)?;
     take_list(&mut rest, &mut frame.lights)?;

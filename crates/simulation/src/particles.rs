@@ -41,6 +41,11 @@ pub struct ParticleState {
     pub origin: [f64; 3],
     burst_started: bool,
 }
+impl ParticleOutput {
+    pub fn uv_draw(&self) -> f32 {
+        self.uv_draw
+    }
+}
 impl ParticleState {
     pub fn new(reference: &ParticleReference, seed: u64) -> Self {
         Self {
@@ -500,10 +505,14 @@ impl TextureSheet {
         })
     }
     pub fn frame(&self, p: &ParticleOutput) -> u32 {
-        let t = p.age / p.lifetime;
+        self.frame_at(p.age, p.lifetime, p.uv_draw)
+    }
+    /// Sheet frame of a particle with this age, lifetime and UV random draw.
+    pub fn frame_at(&self, age: f32, lifetime: f32, uv_draw: f32) -> u32 {
+        let t = age / lifetime;
         sheet_frame(
-            particle_curve(&self.frame_over_time, t, p.uv_draw),
-            particle_curve(&self.start_frame, t, p.uv_draw),
+            particle_curve(&self.frame_over_time, t, uv_draw),
+            particle_curve(&self.start_frame, t, uv_draw),
             self.cycles,
             self.tiles[0] * self.tiles[1],
         )
