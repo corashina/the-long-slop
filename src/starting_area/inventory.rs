@@ -506,6 +506,18 @@ impl GarageRuntime {
                 &mut primary_reserved,
             );
         }
+        let point = input.player_held & crate::simulation::player_keys::POINT != 0;
+        self.area.player.step_point(point, &self.physics, dt);
+        self.area.interaction.cleaning.advance_player(
+            point,
+            self.area.player.body_pose(&self.physics),
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
         self.stream.advance_sprays(
             frame,
             reference,

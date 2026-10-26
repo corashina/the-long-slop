@@ -199,7 +199,7 @@ pub(super) fn bind(
             continue;
         };
         let oil_tank = record.oil_tank.and_then(node_item);
-        register_engine(item, record, oil_tank, items, powertrain, changes)?;
+        register_engine(item, record, prototype, oil_tank, items, powertrain, changes)?;
     }
     for record in &prototype.radiators {
         let Some(item) = node_item(record.node) else {
@@ -300,12 +300,18 @@ fn wheel_slots(
 pub(crate) fn register_engine(
     item: ItemId,
     record: &EnginePartReference,
+    prototype: &WorldPrototypeReference,
     oil_tank: Option<ItemId>,
     items: &ItemStore,
     powertrain: &mut PowertrainParts,
     changes: &mut ChangeRecords,
 ) -> Result<(), ReferenceError> {
     let mut part = EnginePart::new(item, record.clone(), oil_tank);
+    if let Some(g) = &record.gear_stick {
+        part.gear_stick = [g.transmission, g.kick_ignition].map(|n| {
+            n.map(|n| super::placement::node_frame(prototype, record.node as usize, n as usize))
+        });
+    }
     if let Some(state) = changes.take_engine(&items.object_key(item)) {
         part.state
             .restore_save(&state)
@@ -880,7 +886,16 @@ mod tests {
                 .insert_generated(engine.clone(), &prototype, pose)
                 .unwrap();
             assert_eq!(items.object_key(part), engine_key);
-            register_engine(part, &engine_record, None, &items, &mut powertrain, changes).unwrap();
+            register_engine(
+                part,
+                &engine_record,
+                &prototype,
+                None,
+                &items,
+                &mut powertrain,
+                changes,
+            )
+            .unwrap();
             register_radiator(
                 part,
                 &radiator_record,

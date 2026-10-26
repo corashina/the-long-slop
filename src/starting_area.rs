@@ -25,6 +25,7 @@ mod body;
 pub mod cigarettes;
 mod computers;
 pub(crate) mod hose;
+mod reach;
 pub mod spawned;
 mod survival;
 mod weather;
@@ -506,6 +507,8 @@ pub struct VehicleRuntime {
     pub(crate) kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
     /// Source `carscript` balance state. It is not saved. Recovery resets it.
     pub balance: crate::simulation::balance::BalanceState,
+    /// Source `carscript` drive leg poses of the pedals.
+    pub pedals: crate::simulation::reach::PedalReach,
 }
 
 impl VehicleRuntime {
@@ -555,6 +558,7 @@ impl VehicleRuntime {
             plates: parts.plates,
             kmh_slots: Vec::new(),
             balance: Default::default(),
+            pedals: Default::default(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -923,6 +927,12 @@ impl GarageRuntime {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
+            // The player brush signal comes last.
+            if let Some(voice) = reference.conditions.player_brush.voice
+                && let Some(s) = self.area.interaction.cleaning.signals().last()
+            {
+                audio.voice(voice, s.playing, s.voice_gain, 1.);
+            }
         }
     }
 
@@ -1259,11 +1269,22 @@ impl GarageRuntime {
                         .find(|v| v.handbrake_lever == Some(lever))
                     {
                         vehicle.handbrake = !vehicle.handbrake;
+                        if let Some(key) = self.area.player.seat_vehicle().cloned()
+                            && self.area.player.driving()
+                            && self.vehicles[&key].handbrake_lever == Some(lever)
+                        {
+                            self.reach_seated_car(
+                                reference,
+                                &key,
+                                crate::simulation::reach::handbrake,
+                            );
+                        }
                     }
                 }
                 crate::interaction::mechanisms::ControlAction::CycleHeadlights(switch) => {
                     if let Some((key, record)) = use_light_switch(&mut self.vehicles, switch) {
                         self.car_switch_sound(reference, &key, record);
+                        self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
                     }
                 }
                 _ => {}
@@ -1354,12 +1375,17 @@ impl GarageRuntime {
             vehicle.cycle_headlights();
             let prototype = vehicle.prototype;
             self.car_switch_sound(reference, &key, prototype);
+            self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
         }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
-            && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
+            && let Some(key) = self.vehicle.clone()
+            && let Some(vehicle) = self.vehicles.get_mut(&key)
         {
             vehicle.handbrake = !vehicle.handbrake;
+            if driving {
+                self.reach_seated_car(reference, &key, crate::simulation::reach::handbrake);
+            }
         }
         self.refresh_powertrains();
         // Taking the map lets each car step borrow the runtime without allocation.
@@ -1995,6 +2021,33 @@ impl GarageRuntime {
         {
             lever.shift(&reference.driving.lever, last_gear, gear);
         }
+        let reach = &world_vehicle(reference, vehicle.prototype).reach;
+        let frames = self.car_frames(reference, key, vehicle);
+        let body = &mut self.area.body;
+        if gear != last_gear
+            && driving
+            && let Some(m) = crate::simulation::reach::shift(
+                reach,
+                frames.gear_stick(),
+                drivetrain.automatic,
+                reference.driving.lever.seconds,
+            )
+        {
+            frames.send(body, m);
+        }
+        let drive = &world_vehicle(reference, vehicle.prototype).drive_frames;
+        vehicle.pedals.step(
+            reach,
+            [drive.left_leg.is_some(), drive.right_leg.is_some()],
+            crate::simulation::reach::Pedals {
+                throttle: drivetrain.throttle,
+                brake: drivetrain.brake,
+                clutch: drivetrain.clutch,
+            },
+            driving,
+            FIXED_DT,
+            |m| frames.send(body, m),
+        );
         let throttle = drivetrain.throttle;
         let brake = drivetrain.brake;
         vehicle.brake = brake;
@@ -2020,6 +2073,25 @@ impl GarageRuntime {
                 * 4.0)
                 .round() as u8
         });
+        if car_controls {
+            crate::simulation::reach::ignition(
+                reach,
+                frames.gear_stick(),
+                crate::simulation::reach::IgnitionReach {
+                    held: ignition_held,
+                    last_held: vehicle.ignition.held(),
+                    starting: vehicle.ignition.starter,
+                    hold: vehicle.ignition.hold_seconds(),
+                    delay: vehicle.starter_delay_seconds,
+                },
+                |m| frames.send(&mut self.area.body, m),
+            );
+            if input.held & keys::HORN != 0
+                && let Some(m) = crate::simulation::reach::horn(reach)
+            {
+                frames.send(&mut self.area.body, m);
+            }
+        }
         let was_ignition = vehicle.ignition.ignition;
         vehicle.ignition.step(
             IgnitionInput {

@@ -818,6 +818,21 @@ pub(crate) fn node_pose(prototype: &WorldPrototypeReference, index: usize) -> Tr
     }
     result
 }
+/// Node `index` in the frame of node `frame` of the same prototype. Scale is dropped.
+pub(crate) fn node_frame(
+    prototype: &WorldPrototypeReference,
+    frame: usize,
+    index: usize,
+) -> crate::vehicle::VehiclePose {
+    let pose = |i| {
+        let t = node_pose(prototype, i);
+        crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+            position: t.translation,
+            rotation: t.rotation,
+        })
+    };
+    crate::vehicle::from_rapier(&(pose(frame).inverse() * pose(index)))
+}
 pub(crate) fn node_point(
     prototype: &WorldPrototypeReference,
     index: usize,

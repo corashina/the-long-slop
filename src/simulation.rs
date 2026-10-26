@@ -13,6 +13,7 @@ pub mod metal_detector;
 pub mod music_box;
 pub mod powertrain;
 pub mod radio;
+pub mod reach;
 pub mod sled;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = FIXED_DT as f64;

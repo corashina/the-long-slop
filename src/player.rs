@@ -3,6 +3,7 @@ pub mod collision;
 mod head_bob;
 mod ladder;
 pub(crate) mod normals;
+pub mod point;
 pub mod pose;
 mod posture;
 mod view;
@@ -178,6 +179,7 @@ pub struct PlayerState {
     hazard_damage: f32,
     /// Source `GetDir` `forward` and `backward`.
     walk_keys: [bool; 2],
+    point: point::PointState,
 }
 
 impl PlayerState {
@@ -293,6 +295,7 @@ impl PlayerState {
             ladder: ladder::LadderState::default(),
             hazard_damage: 0.0,
             walk_keys: [false; 2],
+            point: point::PointState::default(),
         }
     }
 
@@ -946,6 +949,50 @@ impl PlayerState {
     /// Source `currentAdd` of the last head bob step.
     pub fn walk_add(&self) -> f32 {
         self.view_state.walk_add()
+    }
+    /// Source `pointingValue` and `pointAt`.
+    pub fn point(&self) -> &point::PointState {
+        &self.point
+    }
+    /// Source `fpscontroller` pointing: the ray from the camera on `pointingLayer`.
+    pub(crate) fn step_point(&mut self, held: bool, physics: &PhysicsWorld, dt: f32) {
+        let r = &self.reference;
+        let body = to_rapier(self.body_pose(physics));
+        let camera = to_rapier(self.view(physics).camera_pose);
+        let ray = Ray::new(camera.translation, camera.rotation * -Vector::Z);
+        let mask = r.pointing_layer;
+        // Unity rays ignore colliders containing the ray origin.
+        let targets = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+            c.is_enabled()
+                && c.collision_groups().memberships.bits() & mask != 0
+                && !c.shape().contains_point(c.position(), ray.origin)
+        };
+        let hit = held
+            .then(|| {
+                physics
+                    .queries(
+                        QueryFilter::default()
+                            .exclude_sensors()
+                            .exclude_rigid_body(self.body)
+                            .predicate(&targets),
+                    )
+                    .cast_ray_and_get_normal(&ray, r.point_range, true)
+            })
+            .flatten()
+            .map(|(_, hit)| {
+                (
+                    body.inverse() * ray.point_at(hit.time_of_impact),
+                    body.rotation.inverse() * hit.normal,
+                )
+            });
+        self.point.step(
+            held,
+            body.inverse() * camera,
+            hit,
+            r.point_range,
+            r.point_range2,
+            dt,
+        );
     }
     /// Source `forward` and `backward` of the last head bob step.
     pub fn walk_keys(&self) -> [bool; 2] {
