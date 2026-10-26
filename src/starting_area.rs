@@ -2249,7 +2249,12 @@ impl GarageRuntime {
         }
         Ok(())
     }
-    pub fn align_startup(&mut self, reference: &ReferenceManifest) -> Result<bool, ReferenceError> {
+    /// `calendar` is the local month and day.
+    pub fn align_startup(
+        &mut self,
+        reference: &ReferenceManifest,
+        calendar: [u8; 2],
+    ) -> Result<bool, ReferenceError> {
         if self.startup_aligned {
             return Ok(true);
         }
@@ -2269,8 +2274,46 @@ impl GarageRuntime {
             .player
             .align_startup(startup.player_offset, &mut self.physics);
         let packs = cigarettes::start_pack_poses(reference, startup, self.area.origin)?;
+        // Source StartDateItems: the pumpkin of a new game in its holiday.
+        let h = &reference.acquisition.holiday_startup;
+        let pumpkin = if holiday_pumpkin(h.start, h.end, calendar) {
+            let parent = h
+                .pose
+                .parent
+                .as_ref()
+                .ok_or_else(|| ReferenceError("Holiday pumpkin parent".into()))?;
+            let pose = crate::world::source_world_pose(
+                &reference.world,
+                startup,
+                parent,
+                &[h.pose.transform],
+            )?;
+            let prototype = reference
+                .item_prototypes
+                .iter()
+                .position(|p| p.source == h.prototype.0)
+                .ok_or_else(|| ReferenceError("Holiday pumpkin prototype".into()))?;
+            Some((prototype, pose))
+        } else {
+            None
+        };
         for (pose, count) in packs {
             self.spawn_pack(reference, pose, count)?;
+        }
+        if let Some((prototype, pose)) = pumpkin {
+            let pose = VehiclePose {
+                position: std::array::from_fn(|i| {
+                    (pose.position[i] as f64 - self.area.origin[i]) as f32
+                }),
+                rotation: pose.rotation,
+            };
+            spawned::spawn_prototype(
+                reference,
+                &mut self.area,
+                &mut self.physics,
+                prototype,
+                pose,
+            )?;
         }
         self.physics.refresh_queries();
         self.area.items.sync_poses(&self.physics);
@@ -2278,6 +2321,26 @@ impl GarageRuntime {
         self.area.commit_poses(&self.physics, true);
         self.startup_aligned = true;
         Ok(true)
+    }
+}
+
+/// The start pumpkin spawns from `start` to `end`, both inclusive.
+fn holiday_pumpkin(start: [u32; 2], end: [u32; 2], calendar: [u8; 2]) -> bool {
+    let [sm, sd] = start.map(|v| v as u8);
+    let [em, ed] = end.map(|v| v as u8);
+    crate::simulation::radio::in_holiday(calendar, [sm, sd, em, ed])
+}
+
+#[cfg(test)]
+mod holiday_tests {
+    #[test]
+    fn pumpkin_spawns_from_15_october_to_15_november() {
+        let spawns = |month, day| super::holiday_pumpkin([10, 15], [11, 15], [month, day]);
+        assert!(!spawns(10, 14));
+        assert!(spawns(10, 15));
+        assert!(spawns(11, 15));
+        assert!(!spawns(11, 16));
+        assert!(!spawns(1, 1));
     }
 }
 

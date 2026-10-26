@@ -366,7 +366,7 @@ impl PreparedPresentation {
             }
         }
         result?;
-        candidate.align_startup(reference)?;
+        candidate.align_startup(reference, crate::browser::local_calendar())?;
         let restored = candidate.advance_saved_restore(reference)?;
         candidate.sync_world_activity(reference)?;
         let gpu_ready = self.materials.preparation.ready()?;
