@@ -127,6 +127,15 @@ struct SkyVoice {
     /// Emitter position relative to the prefab root.
     local: rapier3d::math::Vector,
 }
+/// A playing flyer squeak. It follows its bat until the clip ends.
+#[derive(Clone, Copy, Debug)]
+struct FlyerSqueak {
+    item: ItemId,
+    clip: u32,
+    gain: f32,
+    pitch: f32,
+    end: f64,
+}
 struct FluidSound {
     opening: crate::reference::OpeningId,
     index: usize,
@@ -156,7 +165,8 @@ pub struct AudioState {
     voice_indices: HashMap<u32, usize>,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
     sky_voices: Vec<SkyVoice>,
-    /// Voice instance loops of this step. A loop that is missing stops.
+    squeaks: Vec<FlyerSqueak>,
+    /// Voice instance loops and flyer squeak moves of this step. A loop that is missing stops.
     pub voice_loops: Vec<cars::CarSignal>,
     pub reference: AudioReference,
     pub session: u32,
@@ -237,7 +247,8 @@ impl AudioState {
                 .collect(),
             emitter_anchors: HashMap::new(),
             sky_voices: Vec::new(),
-            voice_loops: Vec::with_capacity(16),
+            squeaks: Vec::with_capacity(32),
+            voice_loops: Vec::with_capacity(48),
             session,
             game_seconds: 0.,
             outside_gain: outside.initial_gain,
@@ -544,6 +555,61 @@ impl AudioState {
             }
         }
     }
+    /// randomFlyer.Sound through mainscript.PlayClipAtPoint, parented to the bat.
+    /// New squeaks start. Playing squeaks move with their bat until the clip ends.
+    /// `position` gives the absolute bat position, or `None` when the bat is gone.
+    /// Runs after `sky`, which clears `voice_loops`.
+    pub fn flyers(
+        &mut self,
+        voice: u32,
+        started: &[crate::flyers::Squeak],
+        now: f64,
+        position: impl Fn(ItemId) -> Option<[f64; 3]>,
+    ) {
+        let kind = cars::CAR_KIND + voice;
+        let signal = |s: &FlyerSqueak, action, position| cars::CarSignal {
+            kind,
+            instance: s.item.0,
+            action,
+            clip: s.clip,
+            gain: s.gain,
+            pitch: s.pitch,
+            position,
+        };
+        self.squeaks.retain(|s| s.end > now);
+        for s in &self.squeaks {
+            if let Some(p) = position(s.item)
+                && self.voice_loops.len() < self.voice_loops.capacity()
+            {
+                self.voice_loops.push(signal(s, AudioAction::Update, p));
+            }
+        }
+        for q in started {
+            let Some(p) = position(q.item) else {
+                continue;
+            };
+            // The source destroys the source after the clip length.
+            let seconds = self
+                .reference
+                .clips
+                .iter()
+                .find(|c| c.id == q.clip)
+                .map_or(0., |c| c.source_duration_seconds);
+            let s = FlyerSqueak {
+                item: q.item,
+                clip: q.clip,
+                gain: q.gain,
+                pitch: q.pitch,
+                end: now + seconds,
+            };
+            if self.cars.events.len() < self.cars.events.capacity() {
+                self.cars.events.push(signal(&s, AudioAction::Start, p));
+            }
+            if self.squeaks.len() < self.squeaks.capacity() {
+                self.squeaks.push(s);
+            }
+        }
+    }
     fn sample(&mut self) -> f32 {
         xorshift(&mut self.random)
     }
@@ -823,6 +889,7 @@ impl AudioState {
         self.survival_events.clear();
         self.survival_loops.clear();
         self.voice_loops.clear();
+        self.squeaks.clear();
         self.sleep_radio_advanced = false;
         // Controls belong to the committed session (fresh or restored); playlists restart.
         self.broadcasts = crate::simulation::radio::RadioBroadcasts::new(

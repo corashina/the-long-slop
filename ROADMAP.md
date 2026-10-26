@@ -175,12 +175,15 @@ Run the X03a test pass (sky traffic) in the same run:
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
 2. See planes cross the sky at 600 m with their contrails and engine sound. The first plane comes at start, then one every 50 to 500 s, at most 3. About one in ten is a UFO: it spins and hums.
 3. Check F3 with planes in the sky. Compare with the frame rate rule.
+4. Bats (X03a): set the PC date between 15 Oct and 15 Nov, start a new game and drive to a gas station. In 65% of stations, 5 to 30 bats fly near it, flap and squeak. Pick one up: it keeps squeaking and does not fly out of the hand.
+5. Save and load near the bats (save schema 27). Old saves do not load.
+6. Check F3 next to the bats. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
-| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, UFO, EMP. [H01-H07, H09-H11, B17, F21] |
+| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |

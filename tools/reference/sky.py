@@ -1,13 +1,18 @@
 """Recover the sky traffic spawner and its prefabs from checked records."""
 import math
 from .source import source_id,key,vector
-from .survival import managed_evidence,finite_record
+from .survival import managed_evidence,finite_record,component
+from .acquisition_motion import motion_clips
 from .particles import particle,validate_particle
-from .validation import record,array,number,u32,optional,string,source as source_shape
+from .validation import record,array,number,u32,optional,string,boolean,source as source_shape
 from .weather import game_object
 from .world_biome_materials import scene_component
 
 MAIN_OBJECT=('level1',425)
+# mainscript.randomFlyerPrefab: the RandomBat GameObject, its Animator controller and its one clip.
+FLYER_PREFAB=('sharedassets1.assets',32394)
+FLYER_CONTROLLER=('sharedassets1.assets',4511)
+FLYER_CLIP=('sharedassets1.assets',3992)
 # AirPlaneSpawnScript.AirPlanePrefabs in order: asset name, sharedassets1 GameObject.
 PREFABS=(('sky_airplane',6483),('sky_ufo',38330))
 # Spawner rules that only exist in AirPlaneSpawnScript.Update code.
@@ -64,6 +69,67 @@ def recover_sky(source, manifest, output):
     source.lighting['textures']=list(source.lighting_textures.values())
     return result
 
+def recover_flyer(source, manifest):
+    """randomFlyer values and the wing clip of the RandomBat world prototype."""
+    main=source.get('level1',64919)
+    go=source.resolve(main,source.read(main)['randomFlyerPrefab'])
+    if go is None or key(go)!=FLYER_PREFAB:raise ValueError('Flyer prefab link differs')
+    root=source.transform_for(go)
+    prototype=next((p for p in manifest['world']['prototypes'] if p['source']==source_id(root)),None)
+    if prototype is None:raise ValueError('Flyer prefab is not a world prototype')
+    flyer=component(source,root,'randomFlyer');d=source.read(flyer)
+    save=source.read(component(source,root,'tosaveitemscript'))
+    animator=component(source,root,'Animator')
+    controller=source.resolve(animator,source.read(animator)['m_Controller'])
+    clips=[source.resolve(controller,p) for p in source.read(controller)['m_AnimationClips']] if controller else []
+    if controller is None or key(controller)!=FLYER_CONTROLLER or [key(c) for c in clips if c]!=[FLYER_CLIP]:
+        raise ValueError('Flyer wing clip differs')
+    nodes={(n['source']['file'],n['source']['path_id']):i for i,n in enumerate(prototype['nodes'])}
+    def bind(b,target):
+        # Tracks hold Transform values in the source parent-local space. A quaternion track has 4 values.
+        identity=(target['file'],target['path_id'])
+        if b['type_id']!=4 or b['dimension']!=(4 if b['attribute']==2 else 3) or b['is_pptr'] or b['script'] is not None or identity not in nodes:
+            raise ValueError('Unsupported flyer track binding')
+        return nodes[identity]
+    wing,=motion_clips(source,[source_id(clips[0])],animator,bind)
+    return {'source':source_id(flyer),'prefab':source_id(root),'asset':prototype['asset'],'item_id':save['id'],
+        'time_range':[d['minTime'],d['maxTime']],'range':[d['minRange'],d['maxRange']],'max_range_from_start':d['maxRangeFromStart'],
+        'speed_range':[d['minSpeed'],d['maxSpeed']],'velocity_lerp':d['velocityLerp'],'rot_lerp':d['rotLerp'],
+        'sound_time_range':[d['soundMinTime'],d['soundMaxTime']],'volume_range':[d['soundMinVolume'],d['soundMaxVolume']],
+        'pitch_range':[d['soundMinPitch'],d['soundMaxPitch']],
+        # recover_audio replaces these AudioClip identities with clip ids and sets the shared one-shot voice.
+        'clips':[source_id(source.resolve(flyer,c)) for c in d['soundClips']],'voice':None,'wing':wing}
+
+def validate_flyer(f, manifest):
+    prototype=next((p for p in manifest['world']['prototypes'] if p['source']==f['prefab']),None)
+    clips={c['id'] for c in manifest['audio']['clips']}
+    shots={v['id'] for v in manifest['audio']['car_voices'] if v['one_shot']}
+    def track(t):
+        width=4 if t.get('attribute')==2 else 3
+        record(t,{'node':u32,'attribute':u32,'path_hash':u32,'custom_type':u32,'curve_offset':u32,'storage':string,'interpolation':string,
+            'times':array(number),'values':array(array(number,width)),'in_tangents':array(array(number,width)),
+            'out_tangents':array(array(number,width)),'coefficients':array(array(array(number,3),width))})
+    def clip(w):
+        record(w,{'source':source_shape,'source_tracks':lambda r:record(r,{'bytes':u32,'file':string,'sha256':string}),'name':string,
+            'start_time':number,'stop_time':number,'sample_rate':number,'loop':boolean,'cycle_offset':number,'tracks':array(track),'events':array(lambda e:None)})
+    record(f,{'source':source_shape,'prefab':source_shape,'asset':u32,'item_id':u32,'time_range':array(number,2),'range':array(number,2),
+        'max_range_from_start':number,'speed_range':array(number,2),'velocity_lerp':number,'rot_lerp':number,'sound_time_range':array(number,2),
+        'volume_range':array(number,2),'pitch_range':array(number,2),'clips':array(u32),'voice':u32,'wing':clip})
+    finite_record(f)
+    if prototype is None or prototype['asset']!=f['asset']:raise ValueError('Invalid flyer prototype')
+    if any(not 0<=r[0]<=r[1] for r in (f['time_range'],f['range'],f['speed_range'],f['sound_time_range'],f['volume_range'],f['pitch_range'])):
+        raise ValueError('Invalid flyer range')
+    if (min(f['max_range_from_start'],f['velocity_lerp'],f['rot_lerp'])<=0 or not f['clips'] or any(c not in clips for c in f['clips'])
+            or f['voice'] not in shots):
+        raise ValueError('Invalid flyer values')
+    w=f['wing']
+    if (w['source']!={'file':FLYER_CLIP[0],'path_id':FLYER_CLIP[1]} or not w['loop'] or not w['start_time']<w['stop_time']
+            or not w['tracks'] or w['events']):raise ValueError('Invalid flyer wing clip')
+    for t in w['tracks']:
+        if (t['node']>=len(prototype['nodes']) or t['attribute'] not in (1,2,3,4) or not t['times'] or any(b<=a for a,b in zip(t['times'],t['times'][1:]))
+                or len(t['values'])!=len(t['times']) or len(t['in_tangents'])!=len(t['times']) or len(t['out_tangents'])!=len(t['times'])
+                or len(t['coefficients']) not in (0,len(t['times']))):raise ValueError('Invalid flyer wing track')
+
 def validate_sky(sky, manifest):
     textures={t['id'] for t in manifest['lighting']['textures']}
     nodes={n['id']:n for n in manifest['nodes']};assets={a['id']:a for a in manifest['assets']}
@@ -73,7 +139,7 @@ def validate_sky(sky, manifest):
             'spin':optional(lambda s:record(s,{'node':u32,'axis':array(number,3),'degrees_per_second':number}))})
     record(sky,{'source':source_shape,'chances':array(number),'max_planes':u32,'spawn_time_range':array(number,2),
         'spawn_distance':number,'height':number,'speed':number,'max_angle':number,'destroy_distance':number,'contrail_rate':number,
-        'prefabs':array(prefab,len(PREFABS)),'evidence':lambda e:record(e,{'assembly_sha256':string,'methods':array(string)})})
+        'prefabs':array(prefab,len(PREFABS)),'evidence':lambda e:record(e,{'assembly_sha256':string,'methods':array(string)}),'flyer':lambda f:None})
     finite_record(sky)
     if len(sky['chances'])!=len(sky['prefabs']) or any(c<0 for c in sky['chances']) or sum(sky['chances'])<=0:raise ValueError('Invalid sky chances')
     if sky['max_planes']<=0 or not 0<=sky['spawn_time_range'][0]<=sky['spawn_time_range'][1]:raise ValueError('Invalid sky schedule')
@@ -87,3 +153,4 @@ def validate_sky(sky, manifest):
             raise ValueError('Invalid sky voice')
         s=p['spin']
         if s and (nodes.get(s['node'],{}).get('asset')!=p['asset'] or math.hypot(*s['axis'])==0):raise ValueError('Invalid sky spin')
+    validate_flyer(sky['flyer'],manifest)
