@@ -40,6 +40,10 @@ pub struct SourcePrototypes {
     retired_sources: Vec<SourceId>,
     io: IoLedger,
     control_cpu: usize,
+    /// Inputs of the last `retire_unused` pass.
+    unused_key: Option<[u64; 6]>,
+    /// Prototype indices with an instance or a pending or published structure.
+    used: Vec<bool>,
 }
 pub struct SourcePrototypePlugin;
 impl Plugin for SourcePrototypePlugin {
@@ -260,8 +264,7 @@ impl SourcePrototypes {
         let prototype = reference
             .world
             .prototypes
-            .iter()
-            .find(|p| p.source == *source)
+            .get(source)
             .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
         let record = reference
             .assets
@@ -382,8 +385,7 @@ impl SourcePrototypes {
             reference
                 .world
                 .prototypes
-                .iter()
-                .find(|p| p.source == e.source)
+                .get(&e.source)
                 .is_some_and(|p| p.deferred_materials.iter().any(|m| m.source == *source))
         })
     }
@@ -393,18 +395,13 @@ impl SourcePrototypes {
         asset: crate::reference::AssetId,
     ) -> bool {
         self.entries.iter().filter(|e| !e.retired).any(|e| {
-            reference
-                .world
-                .prototypes
-                .iter()
-                .find(|p| p.source == e.source)
-                .is_some_and(|p| {
-                    p.asset == asset
-                        || p.nodes.iter().any(|n| {
-                            super::preflight::initial_material(reference, &n.source)
-                                .is_some_and(|m| m.0 == asset)
-                        })
-                })
+            reference.world.prototypes.get(&e.source).is_some_and(|p| {
+                p.asset == asset
+                    || p.nodes.iter().any(|n| {
+                        super::preflight::initial_material(reference, &n.source)
+                            .is_some_and(|m| m.0 == asset)
+                    })
+            })
         })
     }
     pub fn requested(&self, source: &SourceId) -> bool {
@@ -418,22 +415,52 @@ impl SourcePrototypes {
         reference: &ReferenceManifest,
         instances: &super::instances::SourceInstances,
     ) {
+        let held =
+            |e: &Entry| matches!(&e.state, State::Ready(loaded) if Arc::strong_count(loaded)>1);
+        // Request numbers identify entries. The sums change when an entry is added, removed,
+        // retired, restored, or shared with a fork.
+        let (active, shared) = self.entries.iter().fold((0u64, 0u64), |(a, s), e| {
+            (
+                a.wrapping_add(if e.retired { 0 } else { e.request }),
+                s.wrapping_add(if held(e) { e.request } else { 0 }),
+            )
+        });
+        let (session, structures, pending) = stream.structure_membership();
+        let key = [
+            session,
+            structures,
+            pending,
+            instances.revision(),
+            active,
+            shared,
+        ];
+        if self.unused_key == Some(key) {
+            return;
+        }
+        self.unused_key = Some(key);
+        let prototypes = &reference.world.prototypes;
+        self.used.clear();
+        self.used.resize(prototypes.len(), false);
+        for index in instances.prototypes() {
+            self.used[index] = true;
+        }
         let frame = stream.frame();
-        for entry in &mut self.entries {
-            if matches!(&entry.state, State::Ready(loaded) if Arc::strong_count(loaded)>1)
-                || reference.world.road.prototypes.contains(&entry.source)
-                || instances.uses_prototype(&entry.source)
-            {
-                continue;
+        for source in stream
+            .pending_structures()
+            .iter()
+            .map(|p| &p.prototype)
+            .chain(frame.structures.iter().map(|s| &s.placement.prototype))
+        {
+            if let Some(index) = prototypes.index(source) {
+                self.used[index] = true;
             }
-            if stream
-                .pending_structures()
-                .iter()
-                .any(|p| p.prototype == entry.source)
-                || frame
-                    .structures
-                    .iter()
-                    .any(|s| s.placement.prototype == entry.source)
+        }
+        for entry in &mut self.entries {
+            if held(entry)
+                || reference.world.road.prototypes.contains(&entry.source)
+                || prototypes
+                    .index(&entry.source)
+                    .is_some_and(|index| self.used[index])
             {
                 continue;
             }
@@ -470,7 +497,7 @@ impl SourcePrototypes {
             self.entries.iter().map(|e| e.source.file.capacity()).sum(),
             self.retired_sources.capacity(),
             self.retired_sources.iter().map(|s| s.file.capacity()).sum(),
-        );
+        ) + self.used.capacity();
         let mut allocation = stream.presentation_allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
@@ -535,8 +562,7 @@ impl SourcePrototypes {
                     let prototype = reference
                         .world
                         .prototypes
-                        .iter()
-                        .find(|p| p.source == entry.source)
+                        .get(&entry.source)
                         .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
                     entry.retired = true;
                     validate_plan(plan, prototype, reference)?;
@@ -654,8 +680,7 @@ impl SourcePrototypes {
             let prototype = reference
                 .world
                 .prototypes
-                .iter()
-                .find(|p| p.source == entry.source)
+                .get(&entry.source)
                 .ok_or_else(|| ReferenceError("Missing checked source prototype".into()))?;
             let record = reference
                 .assets
