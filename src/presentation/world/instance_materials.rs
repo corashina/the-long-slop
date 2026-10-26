@@ -369,7 +369,8 @@ impl InstanceMaterials<'_> {
         };
         Ok(color.map_or_else(|| material.expect("bound GPU prop material"), linear_color))
     }
-    pub fn fade(&mut self, binding: &RendererMaterial, fade: f32, source_position: Vec3) {
+    /// Entity LOD fade. `sync` keeps the impostor source position.
+    pub fn fade(&mut self, binding: &RendererMaterial, fade: f32) {
         if binding.shared.is_some() {
             assert_eq!(
                 fade, 1.,
@@ -391,7 +392,6 @@ impl InstanceMaterials<'_> {
             InstanceMaterial::Impostor(h) => {
                 if let Some(mut m) = self.impostors.get_mut(h) {
                     m.uniform.lod.x = fade;
-                    m.uniform.source_position = source_position.extend(0.);
                 }
             }
             InstanceMaterial::Grass(h) => {

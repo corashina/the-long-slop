@@ -152,6 +152,9 @@ pub struct GpuProps {
     /// Dirty slots, each once. `marked` holds their flags.
     dirty: Vec<u32>,
     marked: Vec<bool>,
+    /// Slots with changed shadow inputs, each once. Fade changes do not count.
+    shadow_dirty: Vec<u32>,
+    shadow_marked: Vec<bool>,
     batches: Vec<PropBatch>,
     free_batches: Vec<u32>,
     index: HashMap<BatchKey, u32>,
@@ -159,8 +162,6 @@ pub struct GpuProps {
     visible_len: u32,
     /// Changes when rows are added or removed.
     membership: u64,
-    /// Changes on a row change that the shadow scene reads. Fade changes do not count.
-    revision: u64,
     /// Changes on any batch table change.
     batch_revision: u64,
 }
@@ -173,12 +174,13 @@ impl Default for GpuProps {
             live: 0,
             dirty: Vec::new(),
             marked: Vec::new(),
+            shadow_dirty: Vec::new(),
+            shadow_marked: Vec::new(),
             batches: Vec::new(),
             free_batches: Vec::new(),
             index: HashMap::default(),
             visible_len: 0,
             membership: 0,
-            revision: 0,
             batch_revision: 0,
         }
     }
@@ -202,9 +204,6 @@ impl GpuProps {
     pub fn membership(&self) -> u64 {
         self.membership
     }
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
     pub fn batch_revision(&self) -> u64 {
         self.batch_revision
     }
@@ -213,6 +212,8 @@ impl GpuProps {
             + self.free.capacity() * 4
             + self.dirty.capacity() * 4
             + self.marked.capacity()
+            + self.shadow_dirty.capacity() * 4
+            + self.shadow_marked.capacity()
             + self.batches.capacity() * std::mem::size_of::<PropBatch>()
             + self.free_batches.capacity() * 4
             + self.index.capacity() * (std::mem::size_of::<(BatchKey, u32)>() + 1)
@@ -232,11 +233,27 @@ impl GpuProps {
         out.extend(current);
         self.dirty.clear();
     }
+    /// Moves the slots with changed shadow inputs to `out`. Membership changes are not in it.
+    pub fn take_shadow_dirty(&mut self, out: &mut Vec<u32>) {
+        for &slot in &self.shadow_dirty {
+            self.shadow_marked[slot as usize] = false;
+        }
+        out.append(&mut self.shadow_dirty);
+    }
     fn mark(&mut self, slot: u32) {
         let marked = &mut self.marked[slot as usize];
         if !*marked {
             *marked = true;
             self.dirty.push(slot);
+        }
+    }
+    /// The row uploads, and the shadow scene reads it again.
+    fn mark_shadow(&mut self, slot: u32) {
+        self.mark(slot);
+        let marked = &mut self.shadow_marked[slot as usize];
+        if !*marked {
+            *marked = true;
+            self.shadow_dirty.push(slot);
         }
     }
     /// Adds a row. The batch of `row` is replaced.
@@ -271,12 +288,12 @@ impl GpuProps {
         let slot = self.free.pop().unwrap_or_else(|| {
             self.rows.push(row);
             self.marked.push(false);
+            self.shadow_marked.push(false);
             self.rows.len() as u32 - 1
         });
         self.rows[slot as usize] = row;
         self.live += 1;
         self.membership += 1;
-        self.revision += 1;
         self.mark(slot);
         slot
     }
@@ -295,7 +312,6 @@ impl GpuProps {
         self.free.push(slot);
         self.live -= 1;
         self.membership += 1;
-        self.revision += 1;
         self.mark(slot);
         // Free capacity stays until it is a large part of the visible list.
         if self.visible_len > 1024 && self.visible_len > 4 * self.live {
@@ -318,8 +334,7 @@ impl GpuProps {
         if entry.shown == u32::from(!hidden) {
             self.batch_revision += 1;
         }
-        self.revision += 1;
-        self.mark(slot);
+        self.mark_shadow(slot);
     }
     /// Writes the renderer LOD state `(visible, fade)` of a row, as the entity path applies it.
     /// `shown` is the root and static node visibility.
@@ -343,8 +358,7 @@ impl GpuProps {
         }
         row.world = world;
         row.bounds = bounds;
-        self.revision += 1;
-        self.mark(slot);
+        self.mark_shadow(slot);
     }
     /// Gives each batch a power-of-two region in the visible lists.
     fn layout(&mut self) {
@@ -369,10 +383,11 @@ impl GpuProps {
         self.index.clear();
         self.dirty.clear();
         self.marked.clear();
+        self.shadow_dirty.clear();
+        self.shadow_marked.clear();
         self.live = 0;
         self.visible_len = 0;
         self.membership += 1;
-        self.revision += 1;
         self.batch_revision += 1;
     }
 }
@@ -451,12 +466,16 @@ mod tests {
         assert_eq!(dirty(&mut props), [1..3]);
         assert_eq!(props.batches()[1].shown, 0);
         assert_eq!(props.live(), 3);
+        let mut shadow = Vec::new();
+        props.take_shadow_dirty(&mut shadow);
+        assert_eq!(shadow, [2, 1]);
         // A fade change uploads the row but leaves the shadow inputs.
-        let revision = props.revision();
         props.set_fade(c, 0.25);
         props.set_fade(c, 0.25);
         assert_eq!(dirty(&mut props), [2..3]);
-        assert_eq!(props.revision(), revision);
+        shadow.clear();
+        props.take_shadow_dirty(&mut shadow);
+        assert!(shadow.is_empty());
         assert_eq!(word_batch(props.rows()[c as usize].words()[KEY_WORD]), 1);
         props.free(c);
         assert_eq!(

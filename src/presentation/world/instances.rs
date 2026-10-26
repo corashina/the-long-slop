@@ -1503,7 +1503,6 @@ impl SourceInstances {
             self.origin,
             &mut self.instances,
             |instance| {
-                let prototype = &reference.world.prototypes[instance.prototype];
                 let root = instance.visible;
                 for renderer in &mut instance.renderers {
                     let state = instance.lod.renderer(renderer.node);
@@ -1521,10 +1520,7 @@ impl SourceInstances {
                         }
                     };
                     renderer.show(root, commands, props);
-                    let source_position = source_position(
-                        instance.source_worlds[prototype.nodes[renderer.node].gltf_node as usize],
-                    );
-                    materials.fade(&renderer.binding, fade, source_position);
+                    materials.fade(&renderer.binding, fade);
                     grass.set_fade(entity, fade, &mut materials.grass);
                 }
             },

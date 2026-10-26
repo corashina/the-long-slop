@@ -43,12 +43,15 @@ pub struct ShadowScene {
     pub fits: [Option<ShadowFit>; VIEW_COUNT],
     pub candidates: [usize; VIEW_COUNT],
     pub split_counts: [[usize; 4]; VIEW_COUNT],
-    pub camera_visible: usize,
     pub shadow_only: usize,
     bounds: WorldBoundsCache<Entity>,
     index: CasterIndex<CasterKey>,
-    /// GPU prop owner with its row membership and row revision.
-    rows: Option<(u64, u64, u64)>,
+    /// GPU prop owner with its row membership.
+    rows: Option<(u64, u64)>,
+    /// Caster state of each GPU prop batch material.
+    batch_casters: Vec<bool>,
+    /// Row slots with changed shadow inputs. Retained storage.
+    row_changes: Vec<u32>,
     casters_ready: bool,
     views: [ShadowViewCache; VIEW_COUNT],
     mask_revisions: [u64; VIEW_COUNT],
@@ -96,7 +99,7 @@ pub(super) fn prepare_scene(
     master: Res<super::lighting::SourceLighting>,
     camera: Res<super::renderer_visibility::CameraVisibility>,
     meshes: Query<ShadowMesh, (With<ViewVisibility>, Without<SourceMaterialWarmup>)>,
-    instances: Res<SourceInstances>,
+    mut instances: ResMut<SourceInstances>,
 ) {
     let mut timing = super::reflection_preparation::Timer::new(
         super::reflection_preparation::Stage::Shadows,
@@ -122,13 +125,12 @@ pub(super) fn prepare_scene(
     let mut changes = updates.p0();
     let mut rebuild = changes.removed() || !changes.warmup.is_empty();
     rebuild |= scene.bounds.begin(frame.session, frame.scene, origin.0) || !was_ready;
-    let props = instances.props();
-    let rows = (props.id(), props.membership(), props.revision());
-    rebuild |= scene
-        .rows
-        .is_none_or(|(id, membership, _)| (id, membership) != (rows.0, rows.1));
-    let rows_changed = scene.rows != Some(rows);
+    let props = instances.bypass_change_detection().props_mut();
+    let rows = (props.id(), props.membership());
+    rebuild |= scene.rows != Some(rows);
     scene.rows = Some(rows);
+    props.take_shadow_dirty(&mut scene.row_changes);
+    let props = &*props;
     let fail = |message: &str| {
         status.fail(message.into());
     };
@@ -167,9 +169,7 @@ pub(super) fn prepare_scene(
                 }
             }
         }
-        if (materials.changed() || rows_changed)
-            && let Err(error) = update_rows(&mut scene, &materials, props)
-        {
+        if !rebuild && let Err(error) = update_rows(&mut scene, &materials, props, false) {
             fail(error);
             return;
         }
@@ -190,7 +190,7 @@ pub(super) fn prepare_scene(
                 return;
             }
         }
-        if let Err(error) = update_rows(scene, &materials, props) {
+        if let Err(error) = update_rows(scene, &materials, props, true) {
             fail(error);
             return;
         }
@@ -267,7 +267,6 @@ pub(super) fn prepare_scene(
     }
     drop(changes);
     let mut visibility = updates.p1();
-    scene.camera_visible = 0;
     scene.shadow_only = 0;
     for (i, key) in scene.caster_data.entities.iter().enumerate() {
         let CasterKey::Entity(entity) = key else {
@@ -276,7 +275,6 @@ pub(super) fn prepare_scene(
         let Ok(mut visible) = visibility.get_mut(*entity) else {
             continue;
         };
-        scene.camera_visible += usize::from(camera.entities.contains(entity));
         if scene
             .masks
             .iter()
@@ -353,36 +351,58 @@ fn update_caster(
     Ok(true)
 }
 /// Rows enter the caster list after the entities, in slot order.
+/// `all` reads every row. Else only changed rows, or every row when a batch material changes its caster state.
 fn update_rows(
     scene: &mut ShadowScene,
     materials: &ShadowMaterials,
     props: &GpuProps,
+    mut all: bool,
 ) -> Result<(), &'static str> {
-    for (slot, row) in props.rows().iter().enumerate() {
-        if row.batch == NO_BATCH {
-            continue;
+    if all || materials.changed() {
+        scene.batch_casters.resize(props.batches().len(), false);
+        for (batch, caster) in props.batches().iter().zip(&mut scene.batch_casters) {
+            let next = batch.rows != 0 && materials.row_caster(batch.key.material)?;
+            all |= *caster != next;
+            *caster = next;
         }
-        let material = props.batches()[row.batch as usize].key.material;
-        scene.index.update(
-            &mut scene.caster_data,
-            CasterKey::Row(slot as u32),
-            CasterInput {
-                bounds: row.bounds,
-                state: CandidateState {
-                    shadow_casting_mode: row.cast_shadows,
-                    layer: row.layer,
-                    renderer_present: true,
-                    disabled: row.hidden,
-                    force_off: false,
-                    lod_group: 0,
-                    lod_index_mask: 0,
-                    active_lod: 0,
-                },
-                material_has_caster: materials.row_caster(material)?,
-            },
-        );
     }
+    let changes = std::mem::take(&mut scene.row_changes);
+    if all {
+        for slot in 0..props.rows().len() as u32 {
+            update_row(scene, props, slot);
+        }
+    } else {
+        for &slot in &changes {
+            update_row(scene, props, slot);
+        }
+    }
+    scene.row_changes = changes;
+    scene.row_changes.clear();
     Ok(())
+}
+fn update_row(scene: &mut ShadowScene, props: &GpuProps, slot: u32) {
+    let row = &props.rows()[slot as usize];
+    if row.batch == NO_BATCH {
+        return;
+    }
+    scene.index.update(
+        &mut scene.caster_data,
+        CasterKey::Row(slot),
+        CasterInput {
+            bounds: row.bounds,
+            state: CandidateState {
+                shadow_casting_mode: row.cast_shadows,
+                layer: row.layer,
+                renderer_present: true,
+                disabled: row.hidden,
+                force_off: false,
+                lod_group: 0,
+                lod_index_mask: 0,
+                active_lod: 0,
+            },
+            material_has_caster: scene.batch_casters[row.batch as usize],
+        },
+    );
 }
 /// Copy bounded arrays into retained render-world storage. No manifest, material, or handle clones.
 pub fn extract_scene(
@@ -420,7 +440,6 @@ pub fn extract_scene(
     output.fits = input.fits;
     output.candidates = input.candidates;
     output.split_counts = input.split_counts;
-    output.camera_visible = input.camera_visible;
     output.shadow_only = input.shadow_only;
     output.origin = input.origin;
     output.frame = input.frame;
