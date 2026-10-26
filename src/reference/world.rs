@@ -372,6 +372,8 @@ pub struct WorldStartupReference {
     pub group: String,
     pub source: SourceId,
     pub pose: Transform,
+    /// Fixed placement of this world prototype at `pose`. Helper frames have none.
+    pub prototype: Option<SourceId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1327,7 +1329,12 @@ impl WorldReference {
         require(!self.startup.is_empty(), "world startup frames")?;
         for frame in &self.startup {
             require(
-                source_valid(&frame.source, &self.source_hashes) && transform(&frame.pose),
+                source_valid(&frame.source, &self.source_hashes)
+                    && transform(&frame.pose)
+                    && frame
+                        .prototype
+                        .as_ref()
+                        .is_none_or(|p| prototypes.contains(p)),
                 &field(&frame.source, "startup pose"),
             )?;
             let mut node = checked_record(&record_map, &frame.source, &["Transform"])?;

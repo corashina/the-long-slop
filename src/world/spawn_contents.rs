@@ -303,12 +303,7 @@ impl<'a> SpawnEvaluation<'a> {
                     .iter()
                     .any(|p| p.source == child.prototype)
                 {
-                    if self.output.len() >= self.limit {
-                        return Err(ReferenceError(
-                            "Source nested contents exceed object budget".into(),
-                        ));
-                    }
-                    self.output.push(SpawnedContent {
+                    self.push(SpawnedContent {
                         inputs: super::spawn_state::SpawnInitialization::default(),
                         placement: child.clone(),
                         appearance: Vec::new(),
@@ -320,7 +315,7 @@ impl<'a> SpawnEvaluation<'a> {
                         buried: flag(save.fields, "buried")?,
                         distance_offset: self.distance_offset(&child, save)?,
                         ammo,
-                    });
+                    })?;
                 }
             }
         }

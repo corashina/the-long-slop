@@ -39,6 +39,13 @@ def selected_actions(source, scripts, actions):
     return sorted({source.class_name(c) for c in scripts
         if source.class_name(c) in actions and key(c) not in EDIBLE_COMPONENTS})
 
+VEHICLE_CLASSES = {'carscript','utanfutoscript'}
+# Car roots that leave other_vehicle and export as world prototypes. V03: the Lada prefab.
+LADA = ('sharedassets1.assets',82556)
+CAR_PROTOTYPES = {LADA}
+def vehicle_exclusion(root, classes):
+    return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in CAR_PROTOTYPES else ''
+
 IDENTITY = {'translation':[0.,0.,0.], 'rotation':[0.,0.,0.,1.], 'scale':[1.,1.,1.]}
 
 
@@ -262,8 +269,12 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     for field in ('StartObjs','StartObjsFix','StartObjsDonTMoveOnLoad'):
         for pointer in settings[field]:
             root=source.resolve(settings_owner,pointer)
-            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root)})
+            startup.append({'group':field,'source':source_id(root),'pose':world_pose(source,root),'prototype':None})
             selected.transform_chain(root)
+    # Fixed Lada placement at the scene Lada spot. Startup frames ignore this group; the vehicle binder spawns it.
+    lada=source.transform_for(source.get('level1',17687))
+    selected.transform_chain(lada)
+    startup.append({'group':'StartCar02','source':source_id(lada),'pose':world_pose(source,lada),'prototype':source_id(source.get(*LADA))})
     for pid in (79970,68463,72657,77620):
         component=source.get('level1',pid)
         selected.record(component)
@@ -299,19 +310,18 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     scope_cache={}
     part_matches={}
     actors={'aiscript','newAiScript','nyulscript','vultureAI','movecreaturescript'}
-    vehicles={'carscript','utanfutoscript'}
     actions={'GunAim','GunShoot','bbgunscript','meleeweaponscript','weaponscript','weaponhandlingscript','wearable','ediblescript','survivalscript','cigiscript'}
     def scope(target):
         root=_source_root(source,target)
         if key(root) not in scope_cache:
             root_scripts=[c for c in source.components(root)[1] if c.type.name=='MonoBehaviour']
             root_classes={source.class_name(c) for c in root_scripts}
-            if root_classes & vehicles:result=('other_vehicle',[])
+            if vehicle_exclusion(root,root_classes):result=('other_vehicle',[])
             elif root_classes & actors:result=('actor_behavior',[])
             else:
                 scripts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour']
                 classes={source.class_name(c) for c in scripts}
-                result=('other_vehicle' if classes & vehicles else 'actor_behavior' if classes & actors else '',selected_actions(source,scripts,actions))
+                result=(vehicle_exclusion(root,classes) or ('actor_behavior' if classes & actors else ''),selected_actions(source,scripts,actions))
                 parts=[source.read(c) for c in root_scripts if source.class_name(c)=='partscript']
                 part_matches[key(root)],excluded_actions=part_scope(parts,part_scope_slots,result[1])
                 result=(result[0],excluded_actions)
@@ -327,7 +337,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             classes={source.class_name(c) for c in components if c.type.name=='MonoBehaviour'}
             selected.record(node)
             selected.record(game_object)
-            if classes & (vehicles | actors):
+            if classes & (VEHICLE_CLASSES | actors):
                 reason='startup_vehicle_owned_by_existing_scene' if key(game_object)==('level1',17687) else 'unsupported_startup_vehicle_or_actor'
                 excluded.append({'source':source_id(node),'field':'m_GameObject','target':selected.receipt(game_object),'reason':reason,'catalog':''})
                 return
@@ -335,8 +345,9 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
             for child in source.read(node)['m_Children']:visit(source.resolve(node,child),node,path,active)
         visit(root,None,'',True)
         return result
+    for identity in sorted(CAR_PROTOTYPES):add(source.get(*identity),'nested')
     scanned=set()
-    startup_pending=[source.get(r['source']['file'],r['source']['path_id']) for r in startup if r['source']['path_id'] not in (21819,39843)]
+    startup_pending=[source.get(r['source']['file'],r['source']['path_id']) for r in startup if r['prototype'] is None and r['source']['path_id'] not in (21819,39843)]
     while startup_pending or set(roots)-scanned:
         startup_root=bool(startup_pending)
         root=startup_pending.pop(0) if startup_root else roots[next(k for k in roots if k not in scanned)]

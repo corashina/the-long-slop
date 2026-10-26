@@ -30,6 +30,15 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(part_scope([{'maintipus': [1], 'tipus': [2]}], slots, []), (['s'], []))
         self.assertEqual(part_scope([], slots, []), ([], []))
 
+    def test_car_allow_list_keeps_lada_and_excludes_other_cars(self):
+        from tools.reference.world import vehicle_exclusion
+        lada = NS(assets_file=NS(source_container_path='sharedassets1.assets'), path_id=82556)
+        bus = NS(assets_file=NS(source_container_path='sharedassets1.assets'), path_id=1)
+        self.assertEqual(vehicle_exclusion(lada, {'carscript'}), '')
+        self.assertEqual(vehicle_exclusion(bus, {'carscript', 'partscript'}), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(bus, {'utanfutoscript'}), 'other_vehicle')
+        self.assertEqual(vehicle_exclusion(bus, {'partscript'}), '')
+
 
 class LightCookieTests(unittest.TestCase):
     def test_world_light_cookie_binds_to_lighting_spot_cookie(self):

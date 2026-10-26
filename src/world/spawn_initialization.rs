@@ -373,6 +373,14 @@ impl SpawnEvaluation<'_> {
         Ok(())
     }
     pub(super) fn push(&mut self, value: SpawnedContent) -> Result<(), ReferenceError> {
+        // V03 bridge: car prototypes spawn only with the vehicle binder (task 7).
+        if self
+            .rules
+            .component(self.reference, &value.placement.prototype, "carscript")?
+            .is_some()
+        {
+            return Ok(());
+        }
         if self.output.len() >= self.limit {
             return Err(ReferenceError(
                 "Source nested contents exceed object budget".into(),
