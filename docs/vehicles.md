@@ -1,6 +1,6 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool and the V02 PR 1 car types.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 PR 1 car types.
 
 ## Car types
 
@@ -10,6 +10,8 @@ The world loader spawns cars from car prototypes. The export allows the Lada, th
 | car01, car02k, car04, car05 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05` | Petrol |
 | car06 (bare and full) | Catalog item in `CAR_ITEMS` | `StartCar06` | `randomTypeSelector`: petrol or diesel, 50/50 |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
+| Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
+| Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
 - Each `vehicle` record has the source `carscript.carType`.
 - PR 1 types spawn only as start cars. Their pool rows (`kaszni`, `carfull`) stay off until PR 3.
@@ -27,6 +29,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
 - A car can have any wheel count. The radiator is optional.
+- The fuel tank is the root `tankscript`. Without it, the tank is the part in `carscript.tankslot` (Bike03).
 - Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
 - Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
 - A `kmhmeters` row reads its `types`, times `modifier`. With `force`, every needle of the gauge reads the speed (source behavior).
@@ -86,7 +89,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - Leaves lerp their euler angles to `opened` or `closed`. The speed is drawn in `Start` order from `minspeed`..`maxspeed`.
 - A leaf plays a random sound when `minTime` passed since its last use. Colliders below a leaf turn with it.
 - `dinamiccolliderforbus`: each box length follows the `t1`-`t2` distance when a leaf moves.
-- `detachIfOpen` is not ported yet. Opening only clears the link.
+- `detachIfOpen` is null on every bus in the source build. A set link stops the bind with an error.
 - A usable that also slides (world mechanism) slides and works as a door button.
 
 ## Trailers
@@ -100,11 +103,11 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - A hitched grip stays a world item. Its body is disabled. Its shapes ride on the car without contacts or mass.
 - Picking up a hitched grip detaches it. The grip keeps the car speed at the hitch.
 - The trailer uses `CenterOfMassAttached` while hitched, else `CenterOfMass`.
-- Brakes: each wheel gets `brakeForce` while the `brake` flashlightscript is on. Only the bus trailer has one.
+- Brakes: each wheel gets `brakeForce` while the `brake` flashlightscript is on. Only the Bus02 trailers have one (`brakeForce` 100). It is a switch on the trailer, not the car brake lamp.
 - Lamps: `rearlights` follow the towing car: headlights, ignition and brake. With no car, the lamps are off.
 - Save: the grip attachment holds the car key and the target source. No schema change. Load waits for the target and the trailer.
 - The trailer, its grip and the towing car load and unload as one group.
-- Not ported: rope towing (B16 is not in the original), `PlusWheelToKeepAwake`, trailer wheel mesh spin, bus door `detachIfOpen`.
+- Not ported: rope towing (B16 is not in the original), `PlusWheelToKeepAwake`, trailer wheel mesh spin.
 
 ## Physics fix
 

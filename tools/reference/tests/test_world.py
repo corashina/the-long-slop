@@ -149,7 +149,7 @@ class CarAllowListTests(unittest.TestCase):
             roots[name] = prefab(2000 + 10 * len(roots))
             if name != missing:
                 items.append({'index': len(items), 'name': name, 'source': source_id(roots[name])})
-        catalog = {'items': items, 'categories': [{'index': 0, 'name': 'bus', 'items': [0], 'categories': None}]}
+        catalog = {'items': items, 'categories': [{'index': 0, 'name': 'bus', 'items': [0], 'categories': None}, {'index': 1, 'name': 'bike', 'items': [], 'categories': None}]}
         settings = add('level1', 64898, 'MonoBehaviour')
         cars = {}
         for i, field in enumerate(START_CARS):

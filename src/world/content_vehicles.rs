@@ -171,7 +171,21 @@ pub(super) fn bind(
                 kmh_slots.push((row, slot.slot));
             }
         }
-        vehicles.get_mut(&key).unwrap().kmh_slots = kmh_slots;
+        let fuel_tank_slot = record
+            .fuel_tank_slot
+            .as_ref()
+            .map(|source| {
+                content
+                    .slots
+                    .iter()
+                    .find(|s| &s.source == source)
+                    .map(|s| s.slot)
+                    .ok_or_else(|| ReferenceError("Car tank slot is not bound".into()))
+            })
+            .transpose()?;
+        let vehicle = vehicles.get_mut(&key).unwrap();
+        vehicle.kmh_slots = kmh_slots;
+        vehicle.fuel_tank_slot = fuel_tank_slot;
         for ((id, source), slot) in ids.into_iter().zip(slot_sources).zip(&wheel_slots) {
             interaction.register_wheel_slot(id, owner, source, slot, wheels.rules());
         }

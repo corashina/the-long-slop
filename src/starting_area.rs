@@ -463,8 +463,13 @@ pub struct VehicleRuntime {
     pub steer: f32,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
-    /// Car root `tankscript` item.
+    /// Source `carscript.Tank`: the root tank, else the tank part in `fuel_tank_slot`.
+    /// Found once at the start of each step.
     pub fuel_tank: Option<ItemId>,
+    /// Car root `tankscript` item.
+    root_tank: Option<ItemId>,
+    /// Source `carscript.tankslot`.
+    pub(crate) fuel_tank_slot: Option<crate::reference::PartSlotId>,
     /// Source `carscript.startingTime`.
     pub starter_delay_seconds: f32,
     /// Car electronics allow ignition.
@@ -494,6 +499,8 @@ pub struct VehicleRuntime {
     pub plates: Vec<String>,
     /// `carscript.kmhmeters` slots: (row, slot) pairs.
     pub(crate) kmh_slots: Vec<(usize, crate::reference::PartSlotId)>,
+    /// Source `carscript` balance state. It is not saved. Recovery resets it.
+    pub balance: crate::simulation::balance::BalanceState,
 }
 
 impl VehicleRuntime {
@@ -516,6 +523,8 @@ impl VehicleRuntime {
             }),
             exhaust: crate::exhaust::ExhaustState::new(&record.exhaust, parts.seed),
             fuel_tank: parts.fuel_tank,
+            root_tank: parts.fuel_tank,
+            fuel_tank_slot: None,
             starter_delay_seconds: record.starter_delay_seconds,
             electronics_enabled: parts
                 .electronics
@@ -540,6 +549,7 @@ impl VehicleRuntime {
             handbrake_lever: parts.handbrake_lever,
             plates: parts.plates,
             kmh_slots: Vec::new(),
+            balance: Default::default(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -2104,6 +2114,27 @@ impl GarageRuntime {
             // Source `handbrake` axis beside the lever state.
             handbrake: (vehicle.handbrake as u8 as f32).max(controls.handbrake),
         };
+        // Source `carscript.Update` calls `Balance()` for a seated driver or an in-use push grip.
+        // A push leaves source `isteer` at 0 after `ResetInput`, so the balance steer is 0.
+        // Source `isteer` is right minus left. Port steer is left minus right.
+        if chassis_active
+            && (driving || pushed.is_some())
+            && let Some(balance) = &world_vehicle(reference, vehicle.prototype).balance
+        {
+            let steer = if driving {
+                -controls.steer.clamp(-1., 1.)
+            } else {
+                0.
+            };
+            apply_balance(
+                &mut self.physics,
+                chassis,
+                balance,
+                &mut vehicle.balance,
+                speed.abs() * 3.6,
+                steer,
+            );
+        }
         if chassis_active {
             self.physics.apply_vehicle_forces(
                 key,
@@ -2252,11 +2283,19 @@ impl GarageRuntime {
         self.mounted_engine(key)
             .map_or_else(EngineOutput::default, |e| e.state.output())
     }
-    /// Finds the parts mounted on each car. The step reads the result.
+    /// Finds the parts and the fuel tank mounted on each car. The step reads the result.
     /// Part moves have no single change hook, so this runs once per step.
     pub(crate) fn refresh_powertrains(&mut self) {
+        let items = &self.area.items;
+        let parts = &self.area.interaction.parts;
         for (key, vehicle) in &mut self.vehicles {
-            vehicle.powertrain = self.powertrain.mounted_on(&self.area.items, key);
+            vehicle.powertrain = self.powertrain.mounted_on(items, key);
+            vehicle.fuel_tank = vehicle.root_tank.or_else(|| {
+                vehicle
+                    .fuel_tank_slot
+                    .and_then(|slot| parts.slot_item(slot))
+                    .filter(|&item| items.get(item).is_some_and(|i| i.fluid.is_some()))
+            });
         }
     }
     /// Engine input without car controls: ambient temperature and clock rate.
@@ -2423,7 +2462,9 @@ fn engine_sound_input<'a>(
         start_time_modifier: part.record.engine_start_time_modifier,
         rpm: output.rpm,
         running: active && output.running,
-        starter: active && output.starter,
+        // Source `enginescript` skips the starter clip on a kick start engine.
+        starter: active && output.starter && !part.record.kickstart,
+        kick_start: active && output.kick_start,
         pose: to_rapier(item.pose),
         mixer,
     })
@@ -2483,6 +2524,32 @@ pub(crate) fn instrument_sample(
             && limits.electronics_output > limits.electronics_off_threshold,
         distance_m: vehicle.trip_m,
     }
+}
+
+/// Source `carscript.Balance()` for one fixed step: the roll torque as an angular impulse.
+/// `speed_kmh`: source `speed`. `steer`: source `isteer`, -1..1.
+fn apply_balance(
+    physics: &mut PhysicsWorld,
+    chassis: RigidBodyHandle,
+    reference: &crate::reference::BalanceReference,
+    state: &mut crate::simulation::balance::BalanceState,
+    speed_kmh: f32,
+    steer: f32,
+) {
+    let rotation = *physics.rapier().bodies[chassis].rotation();
+    let torque = crate::simulation::balance::step(
+        reference,
+        state,
+        speed_kmh,
+        steer,
+        rotation * rapier3d::math::Vector::Y,
+        rotation * -rapier3d::math::Vector::Z,
+        FIXED_DT,
+    );
+    // Source `AddRelativeTorque`: chassis-local torque.
+    physics.edit_body(chassis, |body| {
+        body.apply_torque_impulse(rotation * torque * FIXED_DT, true)
+    });
 }
 
 fn transport_body(

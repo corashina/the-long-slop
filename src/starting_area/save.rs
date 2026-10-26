@@ -220,10 +220,7 @@ impl GarageRuntime {
                 .find_item_seat(&owner, &seat.source.source_id()?)
                 .ok_or_else(|| SaveError::InvalidLinks("Seat item is not bound".into()))?;
             self.area.player.restore_item_seat(
-                owner,
-                bound.body,
-                &bound.seat,
-                bound.seat_item,
+                &bound,
                 local_pose(&seat.local_pose),
                 &mut self.physics,
             );

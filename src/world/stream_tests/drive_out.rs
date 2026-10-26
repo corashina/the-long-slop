@@ -225,19 +225,10 @@ pub(super) fn enter(run: &mut GarageRuntime, _reference: &ReferenceManifest) -> 
             .interaction
             .item_seat(handle)
             .filter(|seat| seat.owner == SeatOwner::Vehicle(key.clone()) && seat.seat.driver)
-            .map(|seat| (seat.body, seat.seat.clone(), seat.seat_item, seat.pose))
     }) else {
         return false;
     };
-    let (body, record, seat_item, pose) = seat;
-    run.area.player.enter_item_seat(
-        SeatOwner::Vehicle(key.clone()),
-        body,
-        &record,
-        seat_item,
-        pose,
-        &mut run.physics,
-    )
+    run.area.player.enter_item_seat(&seat, &mut run.physics)
 }
 
 /// Step until 75 frames simulated. Generation may block some frames.

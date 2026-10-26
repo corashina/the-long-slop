@@ -133,15 +133,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
                 .filter(|seat| seat.seat.source == first.source)
         })
         .expect("bound first sled seat");
-    let (seat_record, seat_item, pose) = (seat.seat.clone(), seat.seat_item, seat.pose);
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Item(owner.clone()),
-        body,
-        &seat_record,
-        seat_item,
-        pose,
-        &mut run.physics
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
 
     // Slide and push forward for 2 s.
     let start = run.physics.rapier().bodies[body].translation();
@@ -180,14 +172,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
     }
 
     // Sit again, save and load.
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Item(owner.clone()),
-        body,
-        &seat_record,
-        seat_item,
-        pose,
-        &mut run.physics
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
     step_sled(&mut run, &mut driving, 0);
     assert!(sled_in_use(&run));
     let stamp = roadside_stamp(&reference);

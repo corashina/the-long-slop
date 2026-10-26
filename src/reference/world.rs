@@ -169,6 +169,56 @@ pub struct WorldPrototypeReference {
     /// Trailer hitch targets on this prototype.
     #[serde(default, deserialize_with = "compact_vec")]
     pub hitches: Vec<WorldHitchReference>,
+    /// Source `pushablescript` components with a Rigidbody on their node.
+    #[serde(default)]
+    pub pushes: Vec<WorldPushReference>,
+}
+
+/// Source `pushablescript` of a world prototype. Ids are prototype node, body and collider indices.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPushReference {
+    pub source: SourceId,
+    pub node: u32,
+    pub body: u32,
+    pub modifier: f32,
+    pub only_projected: bool,
+    pub both: bool,
+    pub push_even_if_same_parent: bool,
+    /// The `pushgripable` whose `car` is on `node`. Its pose is relative to `body`.
+    pub grip: Option<super::PushGripReference<u32, u32>>,
+}
+impl WorldPushReference {
+    fn valid(&self, p: &WorldPrototypeReference) -> bool {
+        let node = |n: u32| (n as usize) < p.nodes.len();
+        // Grip colliders must be on the push body, below the push node, as the binder needs.
+        let under = |mut n: u32| loop {
+            if n == self.node {
+                break true;
+            }
+            match p.nodes.get(n as usize).and_then(|n| n.parent) {
+                Some(parent) => n = parent,
+                None => break false,
+            }
+        };
+        p.bodies
+            .get(self.body as usize)
+            .is_some_and(|b| b.node == self.node)
+            && self.modifier.is_finite()
+            && self.modifier >= 0.
+            && self.grip.as_ref().is_none_or(|g| {
+                node(g.node)
+                    && under(g.node)
+                    && g.hand_node.is_none_or(node)
+                    && transform(&g.local_pose)
+                    && !g.colliders.is_empty()
+                    && g.colliders.iter().all(|&c| {
+                        p.colliders
+                            .get(c as usize)
+                            .is_some_and(|c| c.node == g.node && c.body == Some(self.body))
+                    })
+            })
+    }
 }
 
 impl WorldPrototypeReference {
@@ -1787,6 +1837,10 @@ impl WorldReference {
             &field(&p.source, "prototype sled/center of mass"),
         )?;
         require(
+            p.pushes.iter().all(|push| push.valid(p)),
+            &field(&p.source, "prototype push"),
+        )?;
+        require(
             p.trailer.as_ref().is_none_or(|t| {
                 t.valid(p) && self.prototypes.iter().any(|g| g.source == t.grip.prototype)
             }) && p.hitches.iter().all(|h| h.valid(p)),
@@ -2237,7 +2291,7 @@ mod tests {
             "prefab_pose": pose,
             "vehicle": {
                 "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
-                "fuel_tank": 0, "electronics": null, "starter_delay_seconds": 1.0,
+                "fuel_tank": 0, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0, "balance": null,
                 "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
                 "handbrake": true, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
                 "wheels": [{"source": src(12), "node": 1, "slot": 2, "mount": 2, "steer": true, "drive": true, "brake": true, "handbrake": true, "sideways_stiffness_modifier": 1.0,
