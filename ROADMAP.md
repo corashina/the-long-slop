@@ -122,10 +122,18 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 34. Bike03: pedal with W from rest. The pedals and feet turn. Kick start the engine by pedaling; pedals stop while the engine runs. Fuel comes from its tank parts.
 35. Swap bike parts: wheels, mirrors, headlight, basket, bag, gauge, tanks. Save and load seated on each bike.
 36. Check F3 while riding each bike. Compare with the frame rate rule.
+37. Other cars (V02): re-export first: new car types, start placements, oil tolerances and car pools. Old saves do not load.
+38. Run `cargo test --lib car_types -- --ignored`.
+39. Pick each start car in the Game mode screen, then Random a few times. Each car starts, drives, saves and loads. StartCar06 diesel comes with 0.5 L diesel.
+40. Two-stroke cars (car03, car09, car10): run them on a 2.5 % oil mix, then on plain petrol. The engine weakens without oil. Check the oil lamp.
+41. Find roadside bare and full cars, also Car07 and a bare Lada, and no Car06P. Parts, fluids, rust and body variants differ between copies.
+42. Car07 shifts by itself in manual mode. Its dashboard clock shows game time, and its knob sets the time.
+43. Run `cargo test --release --lib w05_loot_matches_source_rules -- --ignored --nocapture`. The car pool totals print and no V03 car spawns.
+44. Drive past groups of roadside cars for 2 km. F3 bodies and generated objects fall back after you pass. Your start car and last car keep their area.
+45. Check F3 with several cars in view. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
 
 ## 5. Later
 
