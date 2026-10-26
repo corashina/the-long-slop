@@ -1401,6 +1401,7 @@ impl GarageRuntime {
                 &mut self.physics,
                 &self.area.interaction.parts,
                 &self.area.interaction.mechanisms,
+                self.area.player.item_seat_body(),
                 FIXED_DT,
             )
             .expect("bound storage")
@@ -1476,8 +1477,9 @@ impl GarageRuntime {
         }
 
         self.advance_under_map(reference);
-        let focus = if self.area.player.seated() {
-            self.physics.snapshot(self.vehicle).pose.position
+        // An item seat moves the player with the item body, so the player stays the focus.
+        let focus = if let Some(vehicle) = self.area.player.seat_vehicle() {
+            self.physics.snapshot(vehicle).pose.position
         } else {
             self.area.player.focus_position(&self.physics)
         };
@@ -1898,6 +1900,7 @@ impl GarageRuntime {
             &mut self.physics,
             &self.area.interaction.parts,
             &self.area.interaction.mechanisms,
+            self.area.player.item_seat_body(),
             if self.paused { 0.0 } else { dt },
         )?;
         if changed {

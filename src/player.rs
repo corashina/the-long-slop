@@ -854,6 +854,13 @@ impl PlayerState {
     pub fn seat_body(&self) -> Option<RigidBodyHandle> {
         self.occupancy.as_ref().map(|seat| seat.body)
     }
+    /// The body of the occupied item seat. Car seats return `None`.
+    pub fn item_seat_body(&self) -> Option<RigidBodyHandle> {
+        self.occupancy
+            .as_ref()
+            .filter(|seat| matches!(seat.owner, SeatOwner::Item(_)))
+            .map(|seat| seat.body)
+    }
     /// seatscript.showSleepText of the occupied seat.
     pub fn show_sleep_text(&self) -> bool {
         self.occupancy

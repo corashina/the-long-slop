@@ -172,7 +172,7 @@ impl SeatBinding {
     }
 }
 
-/// Prototype seats with shared records. A prototype without seats has an empty list.
+/// Prototype seats with shared records.
 pub(crate) type PrototypeSeats = (SourceId, Vec<Arc<WorldSeatReference>>);
 
 pub(crate) fn prototype_seats_heap(seats: &[PrototypeSeats]) -> usize {
@@ -193,34 +193,31 @@ pub(crate) fn prototype_seats_heap(seats: &[PrototypeSeats]) -> usize {
         .sum()
 }
 
+/// The seats of every world prototype that has seats. The world load stops on an unreadable seat.
+pub(crate) fn world_seats(
+    reference: &WorldReference,
+    rules: &SourceRules,
+) -> Result<Vec<PrototypeSeats>, ReferenceError> {
+    let mut seats = Vec::new();
+    for prototype in &reference.prototypes {
+        let records = prototype_seats(reference, rules, prototype)?;
+        if !records.is_empty() {
+            seats.push((
+                prototype.source.clone(),
+                records.into_iter().map(Arc::new).collect(),
+            ));
+        }
+    }
+    Ok(seats)
+}
+
 impl WorldStream {
-    /// The seats of a prototype, read once per prototype.
-    fn cached_prototype_seats(
-        &mut self,
-        prototype: &SourceId,
-    ) -> Result<&[Arc<WorldSeatReference>], ReferenceError> {
-        let index = match self
-            .seat_prototypes
+    /// The seats of a prototype. A prototype without seats has none.
+    fn seats_of(&self, prototype: &SourceId) -> &[Arc<WorldSeatReference>] {
+        self.seat_prototypes
             .iter()
-            .position(|(p, _)| p == prototype)
-        {
-            Some(index) => index,
-            None => {
-                let record = self
-                    .reference
-                    .prototypes
-                    .iter()
-                    .find(|p| &p.source == prototype)
-                    .ok_or_else(|| ReferenceError("Seat prototype missing".into()))?;
-                let seats = prototype_seats(&self.reference, &self.contents.rules, record)?
-                    .into_iter()
-                    .map(Arc::new)
-                    .collect();
-                self.seat_prototypes.push((prototype.clone(), seats));
-                self.seat_prototypes.len() - 1
-            }
-        };
-        Ok(&self.seat_prototypes[index].1)
+            .find(|(p, _)| p == prototype)
+            .map_or(&[], |(_, seats)| seats)
     }
     pub(super) fn sync_seat_bindings(
         &mut self,
@@ -260,14 +257,16 @@ impl WorldStream {
             if self.seat_bindings.iter().any(|b| b.item == item) {
                 continue;
             }
-            let prototype = content.content.placement.prototype.clone();
-            let restored = content.restored;
-            let seats = self.cached_prototype_seats(&prototype)?;
+            let seats = self.seats_of(&content.content.placement.prototype);
             if seats.is_empty() {
                 continue;
             }
-            if !restored || items.get(item).and_then(|i| i.body).is_none() {
+            if !content.restored {
                 complete = false;
+                continue;
+            }
+            // A removed item has no body and no seats to bind.
+            if items.get(item).and_then(|i| i.body).is_none() {
                 continue;
             }
             let seats = seats.to_vec();

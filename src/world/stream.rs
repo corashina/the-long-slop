@@ -158,7 +158,7 @@ pub struct WorldStream {
     seat_bindings: Vec<content_seats::SeatBinding>,
     /// Session and active revision whose seat items are all bound.
     seat_scan: Option<(u64, u64)>,
-    /// Prototype seatscript lookups.
+    /// Seats of world prototypes, read and checked on world load.
     seat_prototypes: Vec<content_seats::PrototypeSeats>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
@@ -714,6 +714,7 @@ impl WorldStream {
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
             super::structure_helpers::StructureHelpers::new(world, &contents.rules)?;
+        let seat_prototypes = content_seats::world_seats(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
         let cables = super::cables::CableRecipes::new(world, seed)?;
         let biome_materials =
@@ -762,7 +763,7 @@ impl WorldStream {
             music_box_scan: None,
             seat_bindings: Vec::new(),
             seat_scan: None,
-            seat_prototypes: Vec::new(),
+            seat_prototypes,
             detector_bindings: Vec::new(),
             detector_scan: None,
             lamp_binding_revision: 0,

@@ -64,6 +64,20 @@ fn item_seat_follows_item_body() {
     }
     let moved = (run.physics.rapier().bodies[body].translation() - start).length();
     assert!(moved > 0.01, "sled moved {moved} m");
+    let point = run.physics.rapier().bodies[body].translation().to_array();
+    assert!(
+        run.area
+            .interaction
+            .pickup_item(
+                item,
+                point,
+                &run.area.player,
+                &mut run.area.items,
+                &mut run.physics
+            )
+            .is_err(),
+        "occupied item refuses pickup"
+    );
     assert!(run.area.player.try_exit(&mut run.physics));
     assert!(!run.area.player.seated());
 }

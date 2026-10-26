@@ -561,6 +561,7 @@ impl StorageLocks {
         &self,
         item: ItemId,
         owner: ItemId,
+        occupied: Option<RigidBodyHandle>,
         items: &ItemStore,
         physics: &PhysicsWorld,
     ) -> bool {
@@ -585,6 +586,7 @@ impl StorageLocks {
             && !items.mounted(item)
             && state.body.is_some_and(|body| {
                 body != carrier
+                    && Some(body) != occupied
                     && physics.body_active(body)
                     && physics.vehicle_of(body).is_none()
                     && physics
@@ -826,6 +828,7 @@ impl StorageLocks {
         physics: &mut PhysicsWorld,
         parts: &PartAttachments,
         mechanisms: &MechanismState,
+        occupied: Option<RigidBodyHandle>,
         dt: f32,
     ) -> Result<bool, ReferenceError> {
         if !self.bound || !dt.is_finite() || dt < 0.0 {
@@ -846,16 +849,18 @@ impl StorageLocks {
                 std::mem::swap(&mut volume.previous, &mut volume.current);
             }
         }
-        let changed = self.advance(items, physics, parts, mechanisms, 0.0)?;
+        let changed = self.advance(items, physics, parts, mechanisms, occupied, 0.0)?;
         self.startup_frame += 1;
         Ok(changed)
     }
+    /// `occupied` is the body of the item seat of the player. It does not lock.
     pub fn advance(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         parts: &PartAttachments,
         mechanisms: &MechanismState,
+        occupied: Option<RigidBodyHandle>,
         dt: f32,
     ) -> Result<bool, ReferenceError> {
         if !self.bound || !dt.is_finite() || dt < 0.0 {
@@ -869,13 +874,14 @@ impl StorageLocks {
         for volume in &mut self.volumes {
             volume.gates_closed = Self::gates_closed(volume, parts, mechanisms, &self.part_usables);
         }
-        self.scan(items, physics)
+        self.scan(items, physics, occupied)
     }
     /// One `Upd` pass over every volume. Gate state is already set.
     fn scan(
         &mut self,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
+        occupied: Option<RigidBodyHandle>,
     ) -> Result<bool, ReferenceError> {
         let mut changed = false;
         for index in 0..self.volumes.len() {
@@ -901,7 +907,7 @@ impl StorageLocks {
                 for slot in 0..self.volumes[index].current.len() {
                     let item = self.volumes[index].current[slot];
                     if self.volumes[index].previous.contains(&item)
-                        && self.can_lock(item, owner, items, physics)
+                        && self.can_lock(item, owner, occupied, items, physics)
                         && self.lock(item, volume, items, physics)?
                     {
                         changed = true;
@@ -951,6 +957,7 @@ mod tests {
         items: ItemStore,
         locks: StorageLocks,
         carrier: RigidBodyHandle,
+        occupied: Option<RigidBodyHandle>,
     }
 
     fn user_data(item: ItemId, collider: u32) -> u128 {
@@ -1033,6 +1040,7 @@ mod tests {
             items,
             locks,
             carrier,
+            occupied: None,
         }
     }
     fn policy() -> StoragePolicy {
@@ -1093,13 +1101,16 @@ mod tests {
             items,
             locks,
             carrier: crate_body,
+            occupied: None,
         }
     }
     impl Rig {
         fn scan(&mut self, dt: f32) {
             self.locks.elapsed += dt;
             self.physics.refresh_queries();
-            self.locks.scan(&mut self.items, &mut self.physics).unwrap();
+            self.locks
+                .scan(&mut self.items, &mut self.physics, self.occupied)
+                .unwrap();
         }
         fn location(&self, id: ItemId) -> ItemLocation {
             self.items.get(id).unwrap().location
@@ -1125,6 +1136,24 @@ mod tests {
     fn close(a: &Pose, b: &Pose) -> bool {
         (a.translation - b.translation).length() < 1e-4
             && a.rotation.angle_between(b.rotation) < 1e-4
+    }
+
+    #[test]
+    fn occupied_item_does_not_lock() {
+        let mut rig = rig(false);
+        rig.occupied = rig.items.get(CAN).unwrap().body;
+        rig.scan(0.0);
+        rig.scan(1.5);
+        assert_eq!(rig.location(CAN), ItemLocation::World);
+        rig.occupied = None;
+        rig.scan(1.5);
+        assert_eq!(
+            rig.location(CAN),
+            ItemLocation::Locked {
+                owner: CARRIER,
+                volume: 0
+            }
+        );
     }
 
     #[test]
@@ -1515,6 +1544,7 @@ mod tests {
             items,
             locks,
             carrier,
+            occupied: None,
         };
         rig.scan(0.0);
         rig.scan(1.5);

@@ -316,6 +316,7 @@ impl CarryState {
             || self.held.is_some()
             || !point.iter().all(|v| v.is_finite())
             || !self.allows_pickup(id, player.seated(), false)
+            || player.item_seat_body() == Some(body)
             || physics.vehicle_of(body).is_some()
             || physics
                 .rapier()
