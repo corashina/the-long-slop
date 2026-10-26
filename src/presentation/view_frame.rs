@@ -280,7 +280,7 @@ pub(crate) fn snapshot(
     mut clock: ResMut<SourceViewClock>,
     mut frame: ResMut<SourceViewFrame>,
     status: Res<RendererStateHandle>,
-    scale: Res<crate::render_scale::SceneScale>,
+    scale: Res<crate::render_scale::SceneScaleSetting>,
     views: Query<(&SourceSurfaceView, &Camera, &GlobalTransform)>,
     sky_view: Query<(&Camera, &GlobalTransform), With<super::frame_graph::SourceSkyCamera>>,
 ) {
@@ -290,7 +290,7 @@ pub(crate) fn snapshot(
     );
     frame.session = drive.runtime.stream.frame().request.session;
     frame.selection_revision = drive.runtime.stream.required_content().selection_revision;
-    frame.scale = *scale;
+    frame.scale = scale.0;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
@@ -371,8 +371,8 @@ pub(crate) fn snapshot(
             session: frame.session,
             scene: frame.scene,
             native_extent: main.to_array(),
-            scene_extent: scale.extent(main.to_array()),
-            scale: *scale,
+            scene_extent: scale.0.extent(main.to_array()),
+            scale: scale.0,
         },
         selection_revision: frame.selection_revision,
         probe_mask: activation
@@ -424,7 +424,7 @@ pub(crate) fn snapshot(
         };
         let mut snapshot = camera_snapshot(extent, view, near, far, fov, mask, distance);
         if index < PROBE_START {
-            snapshot.extent = UVec2::from_array(scale.extent(extent.to_array()));
+            snapshot.extent = UVec2::from_array(scale.0.extent(extent.to_array()));
         }
         Some(snapshot)
     });
@@ -447,7 +447,7 @@ pub(crate) fn snapshot(
     *frame = SourceViewFrame {
         session: drive.runtime.stream.frame().request.session,
         selection_revision: drive.runtime.stream.required_content().selection_revision,
-        scale: *scale,
+        scale: scale.0,
         preparation_warmup: warmup,
         scene: epoch.0,
         motion_revision: drive.runtime.audio_motion_revision,

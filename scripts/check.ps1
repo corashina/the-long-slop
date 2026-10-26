@@ -45,7 +45,7 @@ try {
         $checks += " && cargo test --locked --test $Test"
         if ($Filter) { $checks += " $Filter" }
     } elseif ($Filter) {
-        $checks += " && cargo test --locked --lib $Filter"
+        $checks += " && cargo test --locked --workspace --lib $Filter"
     } elseif ($Full) {
         $checks += ' && cargo test --locked --workspace'
     }
