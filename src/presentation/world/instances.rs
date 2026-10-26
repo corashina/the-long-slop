@@ -1480,7 +1480,6 @@ impl SourceInstances {
             // Source `bikepedalscript.UpdPedals`: turned pedals and level feet holders.
             if let Some((record, vehicle)) = car
                 && let Some(r) = &record.pedals
-                && vehicle.pedal_angle != 0.
             {
                 use crate::simulation::pedals::{feet_holder_rotation, turned};
                 let angle = vehicle.pedal_angle;

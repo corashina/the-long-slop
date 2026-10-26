@@ -17,6 +17,8 @@ pub struct PedalState {
     pub debounce: f32,
     pub rpm: f32,
     pub output: f32,
+    /// Source `disabled`: engine running. Source `carscript` sets it only while driven.
+    pub disabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

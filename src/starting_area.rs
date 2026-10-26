@@ -2158,12 +2158,16 @@ impl GarageRuntime {
                 Default::default()
             };
             if let Some(pedals) = &record.pedals {
+                if driving {
+                    vehicle.pedals.disabled = output.running;
+                }
+                let disabled = vehicle.pedals.disabled;
                 torques.pedal_nm = self.step_pedals(
                     reference,
                     key,
                     vehicle,
                     pedals,
-                    output.running,
+                    disabled,
                     controls.throttle,
                 );
             }
