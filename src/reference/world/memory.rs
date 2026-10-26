@@ -125,7 +125,7 @@ impl ImmutableInputBytes for WorldFields {
     }
 }
 fields!(WorldExclusion:source,field,target,reason,catalog);
-fields!(WorldStartupReference:group,source,pose,prototype);
+fields!(WorldStartupReference:group,source,pose,prototype,start_car);
 fields!(WorldCollisionRules:source,record_sha256,layers);
 fields!(WorldStartupHole:component,filter,mesh,mesh_sha256,vertices);
 fields!(WorldNoiseReference:amplitude,frequency,lacunarity,octaves,persistence);

@@ -1683,7 +1683,8 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
-    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// The startup entries with a prototype become fixed placements. Of the start cars, only
+    /// `START_CAR_FIELD` spawns. The exported pose is the raw
     /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
     fn startup_placements(
         &self,
@@ -1694,6 +1695,9 @@ impl WorldStream {
             let Some(prototype) = &entry.prototype else {
                 continue;
             };
+            if entry.start_car && entry.group != super::START_CAR_FIELD {
+                continue;
+            }
             let offset = startup.chain_offset(&self.reference, &entry.source)?;
             let mut position = entry.pose.translation.map(f64::from);
             position[1] += f64::from(offset);

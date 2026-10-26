@@ -406,8 +406,13 @@ pub(super) fn start_pack_poses(
         let pose = crate::world::source_world_pose(&reference.world, startup, &v.transform, &[])?;
         packs.push((local(pose), v.ammo.count));
     }
-    // The export keeps only the packs of the selected start car groups.
-    for v in &reference.acquisition.startup_packs {
+    // The export keeps the packs of the start car groups. Only the spawned start car keeps its pack.
+    for v in reference
+        .acquisition
+        .startup_packs
+        .iter()
+        .filter(|v| v.start_car() == crate::world::START_CAR_FIELD)
+    {
         let parent = v
             .group_pose
             .parent
