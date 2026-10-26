@@ -178,6 +178,15 @@ Run the X02 part 1 test pass (damage and breaking) in the same run:
 4. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 5. Check F3 near a box pile and while pieces fall. Compare with the frame rate rule.
 
+Run the X02 part 2 test pass (melee weapons) in the same run:
+
+1. Re-export, then rebuild. The export prints the melee weapon list and the new acquisition hash; paste the hash into `CONTRACT_SHA256`. Old saves do not load (save schema 28).
+2. Run `cargo test --lib melee -- --ignored`. Fix the katana and crowbar prototype names in the tests if they are not found.
+3. Swing the katana, crowbar, fly swatter and leg with each attack key. Each plays its own animation and sounds and breaks a bottle.
+4. Hit a buried item with the crowbar: it does not dig. The shovel still digs.
+5. Hit a sausage with the shovel or a hurtFood weapon: it splits into pieces. Save and load: the pieces keep their bites. A dropped turd also saves and reloads now.
+6. Check the hands follow the weapon grips during attacks.
+
 Run the X03a test pass (sky traffic) in the same run:
 
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
@@ -190,7 +199,7 @@ Run the X03a test pass (sky traffic) in the same run:
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Ragdoll, wearables, sunglasses, appearance editor, female body. [D03, D05, D06, M10] |
-| X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
+| X02 | Weapons and damage | XL | Guns, ammo, explosions (with melee tank and explosive hits) (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |

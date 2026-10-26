@@ -363,6 +363,13 @@ impl GarageRuntime {
             &candidate.stream.origin,
             &saved.spawned,
         )?;
+        super::survival::restore_foods(
+            reference,
+            &mut candidate.area,
+            &mut candidate.physics,
+            &candidate.stream.origin,
+            &saved.foods,
+        )?;
         super::hose::restore(reference, &mut candidate.area, &mut candidate.physics)?;
         candidate.restore_cigarettes(&saved.cigarettes);
         candidate
@@ -548,7 +555,7 @@ impl GarageRuntime {
                     .area
                     .interaction
                     .held()
-                    .is_some_and(|id| self.area.spawned.contains(id))
+                    .is_some_and(|id| self.area.saves_in_world(id))
                 {
                     None
                 } else {
@@ -585,6 +592,7 @@ impl GarageRuntime {
                 .area
                 .spawned
                 .capture_save(reference, &self.area.items, origin),
+            foods: self.area.capture_foods(reference, origin),
             cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
             weather: self
                 .weather

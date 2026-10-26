@@ -33,6 +33,7 @@ mod survival;
 mod weather;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
+pub use survival::saved_food;
 
 pub struct StartingArea {
     pub conditions: crate::conditions::ConditionStore,
@@ -50,6 +51,8 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// Runtime food copies: turds and cut pieces.
+    pub foods: Vec<ItemId>,
     /// gibscript and scaleDestroyScript of spawned gibs.
     pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
@@ -279,6 +282,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            foods: Vec::new(),
             gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             portable_mass,
