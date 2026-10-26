@@ -1199,7 +1199,7 @@ impl GarageRuntime {
             self.notice = "";
         }
         self.aim = aim;
-        let previous_seat = self.area.player.seat();
+        let previous_seat = self.area.player.seat_body();
         let seated = self.area.player.seated();
         let outcome = self.area.interaction.step(
             input,
@@ -1359,25 +1359,23 @@ impl GarageRuntime {
             .sync_parts(&mut self.area.items, &mut self.physics)
             .expect("bound parts");
         if let Some(vehicle) = self.area.player.seat_vehicle() {
-            self.vehicle = Some(garage_vehicle_key(vehicle));
-            self.stream
-                .select_source_car(reference.vehicles[vehicle].spawn_car_id);
+            if self.vehicle.as_ref() != Some(vehicle) {
+                self.vehicle = Some(vehicle.clone());
+            }
+            // V03 bridge: old garage cars select their source car. Task 9 removes it.
+            if let Some(index) = garage_vehicle_index(vehicle) {
+                self.stream
+                    .select_source_car(reference.vehicles[index].spawn_car_id);
+            }
         }
-        let vehicle_input = if previous_seat != self.area.player.seat() {
+        let vehicle_input = if previous_seat != self.area.player.seat_body() {
             self.clear_driving_input();
             FrameInput::default()
         } else {
             input
         };
         let driving = self.area.player.driving();
-        let controls = self.driving_input.step(
-            if driving {
-                self.area.player.seat()
-            } else {
-                None
-            },
-            vehicle_input.held,
-        );
+        let controls = self.driving_input.step(driving, vehicle_input.held);
         let selected = self.vehicle.as_ref().and_then(garage_vehicle_index);
         if (driving || self.area.player.driving2())
             && input.pressed & keys::LIGHTS != 0
@@ -1491,7 +1489,7 @@ impl GarageRuntime {
                 .and_then(|item| item.body)
                 .is_some_and(|body| self.physics.body_active(body));
             let active = self.physics.body_active(self.physics.chassis_handle(&key));
-            let car_controls = self.area.player.seat_vehicle() == Some(index)
+            let car_controls = self.area.player.seat_vehicle() == Some(&key)
                 && (self.area.player.driving() || self.area.player.driving2());
             audio.vehicle(
                 crate::audio::VehicleAudioInput {
@@ -1521,7 +1519,7 @@ impl GarageRuntime {
         self.advance_under_map(reference);
         // An item seat moves the player with the item body, so the player stays the focus.
         let focus = if let Some(vehicle) = self.area.player.seat_vehicle() {
-            self.physics.snapshot(&garage_vehicle_key(vehicle)).pose.position
+            self.physics.snapshot(vehicle).pose.position
         } else {
             self.area.player.focus_position(&self.physics)
         };
@@ -1743,7 +1741,7 @@ impl GarageRuntime {
         let brake = drivetrain.brake;
         let car_controls = chassis_active
             && (driving
-                || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(index)));
+                || (self.area.player.driving2() && self.area.player.seat_vehicle() == Some(key)));
         let ignition_held =
             car_controls && (input.held & keys::IGNITION != 0 || drivetrain.ignition_request);
         let ignition_pressed = (car_controls && input.pressed & keys::IGNITION != 0)

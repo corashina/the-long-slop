@@ -7,6 +7,8 @@ mod wheel;
 mod wheel_set;
 
 use body::VehicleBody;
+#[cfg(test)]
+pub(crate) use body::tests as body_fixture;
 pub use body::{garage_vehicle_index, garage_vehicle_key};
 use presentation_bodies::{BodyPresentationState, PresentationBodies};
 use query_bounds::QueryBounds;

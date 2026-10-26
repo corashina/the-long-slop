@@ -107,7 +107,8 @@ impl GarageRuntime {
             .pose;
         let rise = ground + LIFT - pose.position[1];
         pose.position[1] += rise;
-        let seated = self.area.player.seat_vehicle() == Some(vehicle);
+        let seated =
+            self.area.player.seat_vehicle() == Some(&crate::vehicle::garage_vehicle_key(vehicle));
         let plan = RecoveryTransport {
             vehicle: pose,
             player: (!seated).then(|| self.area.player.body_pose(&self.physics)),

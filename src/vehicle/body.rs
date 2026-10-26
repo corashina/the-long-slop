@@ -344,7 +344,7 @@ fn garage_vehicle(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::simulation::{DriveInput, FIXED_DT};
     use crate::vehicle::DriveTorques;
@@ -352,7 +352,7 @@ mod tests {
     use serde_json::json;
 
     /// A 820 kg box car prototype with four wheels. The front wheels steer, the rear wheels drive.
-    fn car() -> WorldPrototypeReference {
+    pub(crate) fn car() -> WorldPrototypeReference {
         let src = |id: u32| json!({"file": "a", "path_id": id});
         let pose = |x: f32, z: f32| json!({"translation": [x, 0, z], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]});
         let node = |id: u32, x: f32, z: f32| json!({"source": src(id), "name": "n", "parent": if id == 1 { None } else { Some(0) }, "active": true, "renderer_enabled": true, "layer": 0, "transform": pose(x, z), "gltf_node": id - 1, "biome_materials": false});
@@ -385,24 +385,37 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn removing_one_vehicle_keeps_the_other_driving() {
-        let prototype = car();
+    /// Two copies of [`car`] on a ground box, at x = -5 and x = 5. Returns their keys and chassis.
+    pub(crate) fn two_cars(
+        prototype: &WorldPrototypeReference,
+    ) -> (PhysicsWorld, [ObjectKey; 2], [RigidBodyHandle; 2]) {
         let mut physics = PhysicsWorld::empty(2, 2);
         physics.insert_box([0.0, -0.5, 0.0], [500.0, 0.5, 500.0]);
         let keys = [ItemId(1), ItemId(2)].map(ObjectKey::Imported);
-        for (key, x) in keys.iter().zip([-5.0, 5.0]) {
+        let chassis = [-5.0, 5.0].map(|x| {
             // A world instance root body: zero-density colliders and authored mass.
-            let (chassis, collider) = physics.insert(
+            physics.insert(
                 RigidBodyBuilder::dynamic()
                     .translation(Vector::new(x, 0.5, 0.0))
                     .additional_mass(900.0),
                 ColliderBuilder::cuboid(0.8, 0.25, 2.0).density(0.0),
-            );
+            )
+        });
+        for (key, (body, collider)) in keys.iter().zip(chassis) {
             physics
-                .add_vehicle(key.clone(), chassis, &[collider], &prototype)
+                .add_vehicle(key.clone(), body, &[collider], prototype)
                 .unwrap();
-            assert_eq!(physics.rapier().bodies[chassis].mass(), 820.0);
+        }
+        physics.refresh_queries();
+        (physics, keys, chassis.map(|(body, _)| body))
+    }
+
+    #[test]
+    fn removing_one_vehicle_keeps_the_other_driving() {
+        let prototype = car();
+        let (mut physics, keys, chassis) = two_cars(&prototype);
+        for body in chassis {
+            assert_eq!(physics.rapier().bodies[body].mass(), 820.0);
         }
         // Mass changes keep the centre of mass override.
         let com = Vector::new(0.0, -0.1, 0.2);
@@ -423,7 +436,7 @@ mod tests {
             motor_nm: 1600.0,
             engine_brake_nm: 0.0,
         };
-        let mut drive = |physics: &mut PhysicsWorld, keys: &[ObjectKey], seconds: f32| {
+        let drive = |physics: &mut PhysicsWorld, keys: &[ObjectKey], seconds: f32| {
             for _ in 0..(seconds / FIXED_DT) as usize {
                 for key in keys {
                     physics.apply_vehicle_forces(key, throttle, torques);
