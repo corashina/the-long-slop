@@ -1,5 +1,7 @@
-//! Source controller and clip inputs for the selected shovel.
+//! Source controller and clip inputs of the melee weapons.
+//! Every controller gets structure checks. The shovel controller also keeps its checked values.
 use super::*;
+use crate::reference::acquisition::{required_field, source_is};
 macro_rules! record {
     ($name:ident {$($field:ident: $ty:ty),* $(,)?}) => {
         #[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
@@ -7,7 +9,7 @@ macro_rules! record {
         pub struct $name {$(#[serde(deserialize_with="required_field")] pub $field:$ty),*}
     };
 }
-record!(AcquisitionMotion {
+record!(MeleeMotion {
     controller:SourceId, handler:SourceId, animator:SourceId, target:NodeId, coordinate_space:String,
     clip_slots:Vec<SourceId>, parameters:Vec<MotionParameter>, default_state:u32, layer_binding:u32,
     layer_weight:f32, layer_blending_mode:u32, layer_ik_pass:bool, states:Vec<MotionState>,
@@ -50,18 +52,188 @@ record!(MotionTrack {
     node:NodeId,attribute:u32,path_hash:u32,custom_type:u32,curve_offset:u32,storage:String,interpolation:String,
     times:Vec<f32>,values:Vec<[f32;3]>,in_tangents:Vec<[f32;3]>,out_tangents:Vec<[f32;3]>,coefficients:Vec<[[f32;3];3]>
 });
-impl AcquisitionMotion {
+/// Parameter names in source order: five attack triggers, Speed, Hit.
+const PARAMETER_NAMES: [&str; 7] = [
+    "AttackLeft",
+    "AttackRight",
+    "AttackForward",
+    "AttackBack",
+    "AttackStab",
+    "Speed",
+    "Hit",
+];
+/// (attribute, custom_type): position and rotation tracks.
+const TRACK_TYPES: [(u32, u32); 2] = [(1, 0), (4, 4)];
+impl MeleeMotion {
+    pub fn is_shovel(&self) -> bool {
+        source_is(&self.controller, "sharedassets1.assets", 4515)
+    }
     pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
+        self.validate_structure(m)?;
+        if self.is_shovel() {
+            self.validate_shovel()?;
+        }
+        Ok(())
+    }
+    fn validate_structure(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
         require(
-            source_is(&self.controller, "sharedassets1.assets", 4515)
-                && source_is(&self.handler, "level1", 74298)
+            source_is(&self.handler, "level1", 74298)
                 && source_is(&self.animator, "level1", 56797)
                 && self.coordinate_space == "unity_parent_local"
                 && m.nodes
                     .iter()
                     .any(|n| n.id == self.target && source_is(&n.source, "level1", 23118)),
-            "shovel motion owners",
+            "melee motion owners",
         )?;
+        require(
+            self.parameters
+                .iter()
+                .map(|p| p.name.as_str())
+                .eq(PARAMETER_NAMES),
+            "melee parameter names",
+        )?;
+        for (i, p) in self.parameters.iter().enumerate() {
+            require(
+                self.parameters[..i].iter().all(|q| q.id != p.id),
+                "melee parameter identity",
+            )?;
+            require(
+                if p.name == "Speed" {
+                    p.kind == "float" && p.default_float.is_some() && p.default_bool.is_none()
+                } else {
+                    p.kind == "trigger" && p.default_float.is_none() && p.default_bool.is_some()
+                },
+                "melee parameter type",
+            )?;
+        }
+        let speed = self.parameters[5].id;
+        let states = self.states.len() as u32;
+        require(self.default_state < states, "melee default state")?;
+        let mut triggered = [false; 5];
+        let mut transition = |t: &MotionTransition| -> Result<(), ReferenceError> {
+            require(
+                t.destination < states
+                    && t.duration.is_finite()
+                    && t.duration >= 0.
+                    && t.offset.is_finite()
+                    && t.exit_time.is_finite()
+                    && t.interruption_source == 0
+                    && t.user_id == 0,
+                "melee transition",
+            )?;
+            for c in &t.conditions {
+                let p = self
+                    .parameters
+                    .iter()
+                    .position(|p| p.id == c.parameter && p.kind == "trigger");
+                require(
+                    c.mode == 1 && c.threshold == 0. && c.exit_time == 0. && p.is_some(),
+                    "melee transition condition",
+                )?;
+                if let Some(slot) = p.and_then(|i| triggered.get_mut(i)) {
+                    *slot = true;
+                }
+            }
+            Ok(())
+        };
+        for (i, s) in self.states.iter().enumerate() {
+            require(
+                (s.clip_slot as usize) < self.clip_slots.len()
+                    && s.path_id == s.id
+                    && (s.speed_parameter == 0 || s.speed_parameter == speed),
+                "melee state clip or speed binding",
+            )?;
+            require(
+                !s.mirror
+                    && !s.ik_on_feet
+                    && !s.clip_mirror
+                    && s.write_default_values
+                    && s.tag_id == 0
+                    && s.cycle_offset == 0.
+                    && s.cycle_offset_parameter == 0
+                    && s.time_parameter == 0
+                    && s.mirror_parameter == 0
+                    && s.clip_cycle_offset == 0.
+                    && s.speed.is_finite()
+                    && s.clip_duration.is_finite()
+                    && s.clip_duration >= 0.,
+                "melee state operation",
+            )?;
+            // Attack states call AttackStart on enter and AttackEnd on exit. The default state has no callback.
+            require(
+                s.callback.is_none() == (i as u32 == self.default_state),
+                "melee attack state callback",
+            )?;
+            for t in &s.transitions {
+                transition(t)?;
+            }
+        }
+        for t in &self.any_state_transitions {
+            transition(t)?;
+        }
+        require(
+            triggered.iter().all(|t| *t),
+            "melee attack triggers lack transitions",
+        )?;
+        require(
+            self.clips.len() == self.clip_slots.len(),
+            "melee complete clips",
+        )?;
+        for (c, slot) in self.clips.iter().zip(&self.clip_slots) {
+            require(
+                c.source == *slot
+                    && c.start_time >= 0.
+                    && c.stop_time.is_finite()
+                    && c.stop_time >= c.start_time
+                    && c.sample_rate > 0.
+                    && c.cycle_offset == 0.
+                    && c.events.is_empty()
+                    && !c.tracks.is_empty(),
+                "melee clip timing or events",
+            )?;
+            for (j, t) in c.tracks.iter().enumerate() {
+                require(
+                    c.tracks[..j].iter().all(|u| u.attribute != t.attribute)
+                        && t.node == self.target
+                        && TRACK_TYPES.contains(&(t.attribute, t.custom_type))
+                        && t.path_hash == 0,
+                    "melee track binding",
+                )?;
+                let constant = t.storage == "constant";
+                require(
+                    (constant && t.interpolation == "CONSTANT")
+                        || (t.storage == "streamed" && t.interpolation == "CUBIC"),
+                    "melee track interpolation",
+                )?;
+                require(
+                    !t.times.is_empty()
+                        && t.times.windows(2).all(|p| p[1] > p[0])
+                        && t.times
+                            .iter()
+                            .all(|v| v.is_finite() && *v >= 0. && *v <= c.stop_time + 1e-6),
+                    "melee track times",
+                )?;
+                for rows in [&t.values, &t.in_tangents, &t.out_tangents] {
+                    require(
+                        rows.len() == t.times.len() && rows.iter().flatten().all(|v| v.is_finite()),
+                        "melee track keys",
+                    )?;
+                }
+                require(
+                    t.coefficients.len() == if constant { 0 } else { t.times.len() }
+                        && t.coefficients
+                            .iter()
+                            .flatten()
+                            .flatten()
+                            .all(|v| v.is_finite()),
+                    "melee track polynomials",
+                )?;
+            }
+        }
+        Ok(())
+    }
+    /// Checked source values of the shovel controller.
+    fn validate_shovel(&self) -> Result<(), ReferenceError> {
         require(
             self.clip_slots.len() == 6
                 && self
@@ -71,21 +243,14 @@ impl AcquisitionMotion {
                     .all(|(s, id)| source_is(s, "sharedassets1.assets", id)),
             "shovel clip slots",
         )?;
-        require(self.parameters.len() == 7, "shovel parameters")?;
         for (p, (name, id, index)) in self.parameters.iter().zip(PARAMETERS) {
             require(
-                p.name == name && p.id == id && p.index == index,
+                p.name == name
+                    && p.id == id
+                    && p.index == index
+                    && p.default_float.unwrap_or(0.) == 0.
+                    && p.default_bool != Some(true),
                 "shovel parameter identity",
-            )?;
-            require(
-                if name == "Speed" {
-                    p.kind == "float" && p.default_float == Some(0.) && p.default_bool.is_none()
-                } else {
-                    p.kind == "trigger"
-                        && p.default_float.is_none()
-                        && p.default_bool == Some(false)
-                },
-                "shovel parameter type",
             )?;
         }
         require(
@@ -96,36 +261,10 @@ impl AcquisitionMotion {
                 && !self.layer_ik_pass,
             "shovel layer",
         )?;
-        let transition = |t: &MotionTransition| -> Result<(), ReferenceError> {
-            require(
-                t.destination < 6
-                    && t.duration.is_finite()
-                    && t.duration >= 0.
-                    && t.offset.is_finite()
-                    && t.exit_time.is_finite()
-                    && t.interruption_source == 0
-                    && t.user_id == 0,
-                "shovel transition",
-            )?;
-            for c in &t.conditions {
-                require(
-                    c.mode == 1
-                        && c.threshold == 0.
-                        && c.exit_time == 0.
-                        && self
-                            .parameters
-                            .iter()
-                            .any(|p| p.id == c.parameter && p.kind == "trigger"),
-                    "shovel transition condition",
-                )?;
-            }
-            Ok(())
-        };
         require(self.states.len() == 6, "shovel states")?;
         for (i, s) in self.states.iter().enumerate() {
             require(
                 s.id == STATES[i]
-                    && s.path_id == s.id
                     && s.clip_slot == [1, 0, 2, 3, 4, 5][i]
                     && s.speed == 1.
                     && s.r#loop == (i == 0)
@@ -135,22 +274,6 @@ impl AcquisitionMotion {
             require(
                 (s.name.as_str(), s.name_id, s.clip_duration) == STATE_BINDINGS[i],
                 "shovel state source fields",
-            )?;
-            require(
-                !s.name.is_empty()
-                    && !s.mirror
-                    && !s.ik_on_feet
-                    && !s.clip_mirror
-                    && s.write_default_values
-                    && s.tag_id == 0
-                    && s.cycle_offset == 0.
-                    && s.cycle_offset_parameter == 0
-                    && s.time_parameter == 0
-                    && s.mirror_parameter == 0
-                    && s.clip_cycle_offset == 0.
-                    && s.clip_duration.is_finite()
-                    && s.clip_duration >= 0.,
-                "shovel state operation",
             )?;
             require(
                 if i == 0 {
@@ -170,16 +293,6 @@ impl AcquisitionMotion {
                 s.transitions.len() == if i == 0 { 5 } else { 0 },
                 "shovel state transitions",
             )?;
-            for t in &s.transitions {
-                transition(t)?;
-            }
-        }
-        require(
-            self.any_state_transitions.len() == 7,
-            "shovel AnyState transitions",
-        )?;
-        for t in &self.any_state_transitions {
-            transition(t)?;
         }
         require(
             self.any_state_transitions == checked_any_transitions()
@@ -196,12 +309,10 @@ impl AcquisitionMotion {
                 && self.selectors[1].destinations == [30000],
             "shovel selectors",
         )?;
-        require(self.clips.len() == 6, "shovel complete clips")?;
         for (i, c) in self.clips.iter().enumerate() {
             let r = &c.source_tracks;
             require(
-                c.source == self.clip_slots[i]
-                    && !c.name.is_empty()
+                !c.name.is_empty()
                     && r.bytes == RECEIPTS[i].0
                     && r.file == RECEIPTS[i].1
                     && r.sha256 == RECEIPTS[i].2,
@@ -210,34 +321,17 @@ impl AcquisitionMotion {
             require(
                 c.sample_rate == 60.
                     && c.start_time == 0.
-                    && c.stop_time.is_finite()
-                    && c.stop_time >= 0.
-                    && c.cycle_offset == 0.
-                    && c.events.is_empty()
+                    && c.stop_time == CLIP_TIMES[i]
+                    && c.r#loop == (i == 1)
                     && c.tracks.len() == 2,
-                "shovel clip timing",
-            )?;
-            require(
-                c.stop_time == CLIP_TIMES[i] && c.r#loop == (i == 1),
                 "shovel source clip length",
             )?;
             for (j, t) in c.tracks.iter().enumerate() {
                 require(
-                    t.node == self.target
-                        && t.attribute == [1, 4][j]
-                        && t.path_hash == 0
+                    t.attribute == [1, 4][j]
                         && t.curve_offset == j as u32 * 3
-                        && t.custom_type == [0, 4][j],
+                        && (t.storage == "constant") == (i == 1),
                     "shovel track binding",
-                )?;
-                let constant = i == 1;
-                require(
-                    if constant {
-                        t.storage == "constant" && t.interpolation == "CONSTANT"
-                    } else {
-                        t.storage == "streamed" && t.interpolation == "CUBIC"
-                    },
-                    "shovel track interpolation",
                 )?;
                 require(
                     t.times.len() == [5, 1, 5, 4, 3, 3][i]
@@ -245,29 +339,6 @@ impl AcquisitionMotion {
                             == Some(&[0.16666667, 0., 0.16666667, 0.16666667, 0., 0.16666667][i])
                         && t.times.last() == Some(&c.stop_time),
                     "shovel source key extent",
-                )?;
-                require(
-                    !t.times.is_empty()
-                        && t.times.windows(2).all(|p| p[1] > p[0])
-                        && t.times
-                            .iter()
-                            .all(|v| v.is_finite() && *v >= 0. && *v <= c.stop_time + 1e-6),
-                    "shovel track times",
-                )?;
-                for rows in [&t.values, &t.in_tangents, &t.out_tangents] {
-                    require(
-                        rows.len() == t.times.len() && rows.iter().flatten().all(|v| v.is_finite()),
-                        "shovel track keys",
-                    )?;
-                }
-                require(
-                    t.coefficients.len() == if constant { 0 } else { t.times.len() }
-                        && t.coefficients
-                            .iter()
-                            .flatten()
-                            .flatten()
-                            .all(|v| v.is_finite()),
-                    "shovel track polynomials",
                 )?;
             }
         }

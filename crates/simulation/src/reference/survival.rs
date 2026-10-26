@@ -67,6 +67,8 @@ pub struct FoodReference {
     pub bites: u8,
     pub index: u8,
     pub destroy_on_end: bool,
+    /// `ediblescript.spawnIfShot`: a `hurtFood` melee hit cuts the food in two.
+    pub spawn_if_shot: bool,
     pub asset: AssetId,
     pub root: NodeId,
     pub mass_kg: f32,
