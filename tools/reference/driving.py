@@ -68,6 +68,41 @@ def checked_methods(source):
     return bodies, evidence, float(minimum[1]), text
 
 
+def car_driving(car):
+    """Per-car startup gear and transmission flags of one carscript."""
+    initial=car['gear']+1
+    if not 0<=initial<len(car['gears']):raise ValueError('Driving startup gear outside source gear list')
+    return {'initial_gear':initial,'force_automatic':bool(car['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False}
+
+
+def road_wheels(source, reader, car):
+    """WheelCollider identities that carscript drives, steers or brakes."""
+    return {key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in car[field]}
+
+
+def hub_record(hubs, car):
+    """mainscript.kerekagyProperties[carscript.kerekagyType]."""
+    index=car['kerekagyType']
+    if not 0<=index<len(hubs):raise ValueError('Driving hub selection outside source properties')
+    hub=hubs[index]
+    return {'radius_m':hub['radius'],'mass_kg':hub['mass'],'forward_stiffness':hub['slip1'],'sideways_stiffness':hub['slip2']}
+
+
+def wheel_graphics(source, nodes, road):
+    """Active wheelgraphicsscript per road wheel identity, from hierarchy records."""
+    graphics={}
+    for node in nodes:
+        if not node['active']:continue
+        for component in node['components']:
+            if component.type.name!='MonoBehaviour' or source.class_name(component)!='wheelgraphicsscript':continue
+            raw=source.read(component);wheel=source.resolve(component,raw['W'])
+            if wheel is None:raise ValueError('Unresolved driving wheel collider')
+            if key(wheel) in road:
+                if key(wheel) in graphics:raise ValueError('Duplicate driving wheel graphics owner')
+                graphics[key(wheel)]=(component,raw)
+    return graphics
+
+
 def recover_driving(source, car_readers, wheel_readers):
     """Resolve selected cars and wheel owners; fail on missing records or links."""
     bodies, methods, minimum, text = checked_methods(source)
@@ -121,23 +156,12 @@ def recover_driving(source, car_readers, wheel_readers):
     for reader in car_readers:
         if source.class_name(reader)!='carscript':raise ValueError('Driving car owner differs')
         value=source.read(reader);identity=key(reader);cars[identity]=(reader,value)
-        initial=value['gear']+1
-        if not 0<=initial<len(value['gears']):raise ValueError('Driving startup gear outside source gear list')
-        vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':{'initial_gear':initial,
-            'force_automatic':bool(value['forceAutomaticTransmission']),'play_shift_sounds_in_automatic':False}})
-        road={key(source.resolve(reader,p)) for field in ('WHDriven','WHSteer','WHBrakeOnly') for p in value[field]}
+        vehicles.append({'source':source_id(reader),'source_gear':value['gear'],'driving':car_driving(value)})
+        road=road_wheels(source,reader,value)
         if len(road)!=4 or any(k in owners for k in road):raise ValueError('Driving car must own four wheels')
         owners.update({k:identity for k in road})
         transform=source.transform_for(source.resolve(reader,value['m_GameObject']))
-        for node in source.hierarchy(transform,activate_root=True):
-            if not node['active']:continue
-            for component in node['components']:
-                if component.type.name!='MonoBehaviour' or source.class_name(component)!='wheelgraphicsscript':continue
-                raw=source.read(component);wheel=source.resolve(component,raw['W'])
-                if wheel is None:raise ValueError('Unresolved driving wheel collider')
-                if key(wheel) in road:
-                    if key(wheel) in graphics:raise ValueError('Duplicate driving wheel graphics owner')
-                    graphics[key(wheel)]=(component,raw)
+        graphics.update(wheel_graphics(source,source.hierarchy(transform,activate_root=True),road))
     if {key(r) for r in wheel_readers}!=set(owners) or len(wheel_readers)!=len(owners):
         raise ValueError('Driving wheel selection differs from car roles')
     slots=[]
@@ -147,13 +171,9 @@ def recover_driving(source, car_readers, wheel_readers):
         linked_car=source.resolve(graphic,raw['car']);slot=source.resolve(graphic,raw['slot'])
         if linked_car is None or key(linked_car)!=key(car_reader) or slot is None:
             raise ValueError('Unresolved driving wheel hub link')
-        hub_index=car['kerekagyType']
-        if not 0<=hub_index<len(hubs):raise ValueError('Driving hub selection outside source properties')
-        hub=hubs[hub_index]
         slots.append({'source':source_id(slot),'collider_source':source_id(reader),'graphics_source':source_id(graphic),
-            'vehicle_source':source_id(car_reader),'hub_source':source_id(main_reader),'hub_index':hub_index,
-            'sideways_stiffness_modifier':raw['sideStiffnessModifier'],
-            'hub':{'radius_m':hub['radius'],'mass_kg':hub['mass'],'forward_stiffness':hub['slip1'],'sideways_stiffness':hub['slip2']}})
+            'vehicle_source':source_id(car_reader),'hub_source':source_id(main_reader),'hub_index':car['kerekagyType'],
+            'sideways_stiffness_modifier':raw['sideStiffnessModifier'],'hub':hub_record(hubs,car)})
     return {'global':global_record,'vehicles':vehicles,'slots':slots,'keyboard_steering_rate':steering_rate,
         'evidence':{'assembly_sha256':ASSEMBLY_SHA256,'decompiled_sha256':DECOMPILED_SHA256,
             'methods':methods,'assist_toggles':toggles,'bindings':binding_evidence,

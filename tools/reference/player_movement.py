@@ -103,11 +103,17 @@ def recover_seat_view(source, reader):
     data = source.read(reader)
     if key(reader)[0] != 'level1' or key(reader)[1] not in SEATS:
         raise ValueError('Selected player seat differs')
+    if key(reader)[1] == 69296 and not (data['driverSeat0'] and data['driverSeat1']):
+        raise ValueError('Selected driver seat flags differ')
+    return seat_view(source, reader)
+
+
+def seat_view(source, reader):
+    """Supported seatscript view fields of any seat."""
+    data = source.read(reader)
     if (data['lookInsteadOfLean'] or data['BcantSitAngle'] or data['limitLessRot']
             or data['rotLimit'] != 179.0 or data['defYrot'] != 0.0 or data['minGetUpAnlge'] != 65.0):
         raise ValueError('Selected seat view differs')
-    if key(reader)[1] == 69296 and not (data['driverSeat0'] and data['driverSeat1']):
-        raise ValueError('Selected driver seat flags differ')
     transform = source.transform_for(source.resolve(reader, data['m_GameObject']))
     while transform:
         _, components = source.components(transform)

@@ -715,10 +715,17 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
                         'step_surface':step_surface(source,n['game_object']),'tag':collider_tag(source,n['game_object'])})
         for node in hierarchy:
             for component in node['components']:selected.component_record(component)
-        prototypes.append({'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
+        prototype={'source':source_id(root),'role':roles[identity],'asset':index,'nodes':nodes,'controls':controls,
             'deferred_materials':report['deferred_materials'],'excluded_actions':scope_cache.get(identity,('',[]))[1],'skins':skins,'bodies':bodies,'colliders':colliders,'prefab_pose':converted_transform(source.read(root)),
             'asset_record':{'id':index,'mesh_count':report['mesh_count'],'material_count':report['material_count'],'usage':'world_prototype','path':f'reference/{name}.gltf','sha256':report['sha256'],'root':source_id(root),'dependencies':report['dependencies']},
-            'materials':[dict(material,asset=index) for material in report['materials']]})
+            'materials':[dict(material,asset=index) for material in report['materials']]}
+        from .vehicles import vehicle_record, part_records
+        vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
+        if vehicle:prototype['vehicle']=vehicle
+        engines,radiators=part_records(source,hierarchy)
+        if engines:prototype['engines']=engines
+        if radiators:prototype['radiators']=radiators
+        prototypes.append(prototype)
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes
 

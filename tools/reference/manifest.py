@@ -13,6 +13,7 @@ from .wheels import wheel_collider_record
 from .lighting import rgba
 from .particles import recover_exhaust
 from .player_movement import recover_player_movement, recover_seat_view
+from .vehicles import component_mass, engine_fields, radiator_fields, seat_fields
 
 
 def fluid_entries(value: dict) -> list[dict]:
@@ -39,14 +40,6 @@ def burn_colors(main: dict) -> list[list[float]]:
     if len(colors) != 6 or not all(math.isfinite(v) for c in colors for v in c):
         raise ValueError('Invalid fluid burn colors')
     return colors
-
-
-def smoke_rate(engine: dict) -> float:
-    """Read enginescript.defSmokeRate."""
-    rate = engine['defSmokeRate']
-    if not math.isfinite(rate) or rate < 0:
-        raise ValueError('Invalid engine smoke rate')
-    return rate
 
 
 def build_manifest(source, roots, reports, hashes, library, cars, output):
@@ -87,11 +80,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     def total_mass(node):
         total=0.
         for child in descendants(node):
-            if not nodes[child-1]['active']:continue
-            mass=data(child,'massScript')
-            if mass:total+=mass['mass']
-            tank=data(child,'tankscript')
-            if tank:total+=sum(f['amount'] for f in tank['F']['fluids'])
+            if nodes[child-1]['active']:total+=component_mass(source,[r for group in components[child].values() for r in group])
         return total
     home_root=by_source[key(roots['home'][0])]
     car_roots=[by_source[key(roots[name][0])] for name in cars]
@@ -249,10 +238,8 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
             vehicle=car_of(node)
             if vehicle is None:raise ValueError(f'Seat outside selected cars: {key(reader)}')
             seats.append({'id':len(seats)+1,'source':source_id(reader),'item':item_nodes[node],'anchor':anchor(seat_node),'vehicle':vehicle,
-                'hit_nodes':seat_hits[key(reader)],'driver':bool(value['driverSeat0']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
-                'driving2':bool(value['driverSeat1']) and key(source.resolve(reader,value['Car']))==key(car_readers[vehicle]),
-                'yaw_limits_degrees':[-value['rotLimit'],value['rotLimit']],'exit_distance':player['CanGetOutDist'],
-                'min_exit_angle_degrees':value['minGetUpAnlge'],'exit_height':value['getOutHeight'],'show_sleep_text':bool(value['showSleepText']),**recover_seat_view(source,reader)})
+                'hit_nodes':seat_hits[key(reader)],'exit_distance':player['CanGetOutDist'],
+                **seat_fields(source,reader,value,car_readers[vehicle]),**recover_seat_view(source,reader)})
     wheel_slots=[];car_wheel_slots=[];wheel_readers=[]
     mount_links={}
     for group in components.values():
@@ -326,20 +313,13 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
         engine_reader=engines[0];engine=source.read(engine_reader)
         radiator_reader=radiators[0];radiator=source.read(radiator_reader)
         oil=source.resolve(engine_reader,engine['T']);coolant=source.resolve(radiator_reader,radiator['coolant']);fuel=components[car_root]['tankscript'][0]
-        engine_record={'source':source_id(engine_reader),'item':item_components[key(engine_reader)],'fuel_tank':item_components[key(fuel)],'oil_tank':item_components[key(oil)],'coolant_tank':item_components[key(coolant)]}
-        for field,unity in {'start_chance':'startChance','starter_delay_seconds':None,'starter_rpm':'starterRpm','starter_rpm_lerp':'starterRpmLerp','idle_rpm':'alapRpm','max_rpm':'maxRpm','shutdown_rpm':'shutdownRpm','max_torque_nm':'maxNm','consumption_modifier':'consumptionM','oil_consumption_modifier':'OilConsumptionModifier','engine_brake_modifier':'motorBrakeModifier','rpm_change_modifier':'rpmChangeModifier','engine_start_time_modifier':'engineStartTimeModifier','heat_gain_min':'engineHeatGainMin','heat_gain_max':'engineHeatGainMax','heat_loss':'engineHeatLoss','initial_temperature':'temp','heat_loss_speed_modifier':'engineHeatLossSpeedModifier'}.items():
-            engine_record[field]=engine[unity] if unity else car['startingTime']
+        engine_record={'source':source_id(engine_reader),'item':item_components[key(engine_reader)],'fuel_tank':item_components[key(fuel)],'oil_tank':item_components[key(oil)],'coolant_tank':item_components[key(coolant)],
+            'starter_delay_seconds':car['startingTime'],**engine_fields(engine)}
         electronics=source.resolve(car_reader,car['electronics']);electronics_data=source.read(electronics) if electronics else None
-        engine_record.update(starting_push_force=engine['maxNm']*9.,optimal_temperature=[engine[k] for k in ('minOptimalTemp1','maxOptimalTemp1','minOptimalTemp2','maxOptimalTemp2')],
-            fuel_consumption=[sum(f['amount'] for f in engine['FuelConsumption']['fluids'] if f['type']==i) for i in range(6)],two_stroke=bool(engine['twostroke']),
-            electronics_enabled=electronics is None or electronics_data['maxOutput']*(1.-min(1.,max(0.,electronics_data['jamValue']/(electronics_data['overRideMaxJamValue'] if electronics_data['overRideMaxJamValue']>0 else 0.3))))>0.2)
-        engine_record.update(max_rpm_difference=engine['maxRpmDifference'],torque_modifier=engine['modifier'],oil_fluid=engine['Oilfluid'],
-            no_overheat=bool(engine['noOverHeat']),kickstart=bool(engine['kickstart']),start_chance_interval_seconds=1.,smoke_rate=smoke_rate(engine))
-        engine_record.update(auto_shift_clutch_rpm=engine['autoShiftClutchRpm'],auto_shift_clutch_rpm_range=engine['autoShiftClutchRpmRange'])
-        curve=engine['torqueCurve'];engine_record['torque_curve']={'keys':[{'time':k['time'],'value':k['value'],'in_tangent':k['inSlope'],'out_tangent':k['outSlope'],'in_weight':k['inWeight'],'out_weight':k['outWeight'],'weighted_mode':k['weightedMode']} for k in curve['m_Curve']],'pre_wrap_mode':curve['m_PreInfinity'],'post_wrap_mode':curve['m_PostInfinity']}
+        engine_record['electronics_enabled']=electronics is None or electronics_data['maxOutput']*(1.-min(1.,max(0.,electronics_data['jamValue']/(electronics_data['overRideMaxJamValue'] if electronics_data['overRideMaxJamValue']>0 else 0.3))))>0.2
         engine_record['globals']={'source':source_id(main_reader),'fuel_consumption':main['defConsumption'],'oil_consumption':main['defOilConsumption'],'rpm_change':2000.,'car_temperature_bounds':[main['minCarTemp'],main['maxCarTemp']],'coolant_evaporate_rate':main['coolantEvaporateRate'],'temperature_difference_modifier':main['tempDifferenceModifier'],'temperature_move_modifier':main['tempChangeMoveModifier'],'max_car_velocity':main['maxCarVelocity'],'outside_temperature_modifier':main['outsideTempM']}
         engine_record['globals']['min_steam_temperature']=main['minSteamTemp']
-        engine_record['radiator']={'source':source_id(radiator_reader),'thermostat_range':[radiator['minThermostatTemp'],radiator['maxThermostatTemp']],'fan_temperature_on':radiator['fanOnTemp'],'fan_temperature_off':radiator['fanOffTemp'],'fan_on_when_engine_runs':bool(radiator['fanOnWhenEngineRuns']),'max_value':radiator['maxValue'],'max_fan_value':radiator['maxFanValue'],'max_fan_speed':radiator['maxFanSpeed'],'max_fluid_loss':radiator['maxFluidLoss'],
+        engine_record['radiator']={'source':source_id(radiator_reader),**radiator_fields(radiator),
             'fan_node':pointer_node(radiator_reader,radiator['Fan']) if radiator['Fan']['m_PathID'] else None}
         return engine_record
     engine_records=[engine_for(root,reader,data) for root,reader,data in zip(car_roots,car_readers,car_data)]

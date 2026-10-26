@@ -1,5 +1,6 @@
 import unittest
-from tools.reference.manifest import burn_colors, smoke_rate
+from tools.reference.manifest import burn_colors
+from tools.reference.vehicles import smoke_rate
 from tools.reference.particles import validate_exhaust
 
 

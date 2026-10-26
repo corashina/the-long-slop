@@ -7,8 +7,9 @@ mod initialization;
 mod lod;
 mod memory;
 use super::{
-    AssetId, AssetUsage, ColliderGeometry, LibraryProvenance, NodeId, ReferenceError,
-    ReferenceManifest, SourceHash, SourceId, Transform, finite, hash, require, transform,
+    AssetId, AssetUsage, ColliderGeometry, EnginePartReference, LibraryProvenance, NodeId,
+    RadiatorPartReference, ReferenceError, ReferenceManifest, SourceHash, SourceId, Transform,
+    WorldVehicleReference, finite, hash, require, transform,
 };
 pub use grass::*;
 pub use initial_materials::*;
@@ -151,6 +152,13 @@ pub struct WorldPrototypeReference {
     pub prefab_pose: Transform,
     #[serde(default, deserialize_with = "compact_vec")]
     pub interiors: Vec<WorldInteriorReference>,
+    /// Car prototypes only.
+    #[serde(default)]
+    pub vehicle: Option<WorldVehicleReference>,
+    #[serde(default)]
+    pub engines: Vec<EnginePartReference>,
+    #[serde(default)]
+    pub radiators: Vec<RadiatorPartReference>,
 }
 
 impl WorldPrototypeReference {

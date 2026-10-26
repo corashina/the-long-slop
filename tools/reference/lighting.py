@@ -308,6 +308,23 @@ def recover_road_lamp(source: Source, output: Path) -> dict:
         'lights':[source.lighting_light_ids[key(source.resolve(controller,source.read(controller)['LLight']))]],
         'global_enabled':bool(main['kozlampakOn']),'startup_on':bool(main['kozlampakSwitchedOn']),'electronics_threshold':.2}
 
+REAR_SIGNALS=(('H','tail'),('F','brake'),('R','reverse'))
+def vehicle_states(f, kind, state, intensity):
+    """headlightscript or rearlights states. `state` builds one state; `intensity` reads the first light."""
+    if kind=='rear':
+        return [state(signal,intensity(f.get(p+'Light',[])),f.get(p+'Light',[]),f[p+'Lamp'],f[p+'LampOn'],f[p+'LampOff'],dont_overwrite=f[p+'DontOverwrite'])
+            for p,signal in REAR_SIGNALS]
+    names=('off','low','high') if kind=='headlight' else ('off','cabin')
+    return [state(names[i],s['intensity'],[s['L'],*s['Ls']],[s['R'],*s['Rs']],s['M'],f['MOFF']) for i,s in enumerate(f['states'])]
+
+def vehicle_light_links(source, scripts, car):
+    """inputconnect cabin routes by target and the InteractSwitchLights usables of one car."""
+    routes={key(source.resolve(r,p)):r for r in scripts if source.class_name(r)=='inputconnect' for p in source.read(r)['headLightState1_If1']}
+    switches=[c for c in scripts if source.class_name(c)=='usablescript'
+        and any(call['m_Target']['m_PathID']==car.path_id and call['m_MethodName']=='InteractSwitchLights'
+            for call in source.read(c)['turnedEvent']['m_PersistentCalls']['m_Calls'])]
+    return routes,switches
+
 def recover_controllers(source: Source, roots: list, node_ids: dict, material_ids: dict) -> list[dict]:
     def node(reader):
         t=reader if reader.type.name=='Transform' else source.transform_for(reader if reader.type.name=='GameObject' else source.resolve(reader,source.read(reader)['m_GameObject']))
@@ -340,10 +357,7 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
         members=source.hierarchy(root,activate_root=True)
         scripts=[c for n in members for c in n['components'] if c.type.name=='MonoBehaviour']
         car=next(c for c in scripts if source.class_name(c)=='carscript')
-        routes={key(linked(r,p)):r for r in scripts if source.class_name(r)=='inputconnect' for p in source.read(r)['headLightState1_If1']}
-        switches=[c for c in scripts if source.class_name(c)=='usablescript'
-            and any(call['m_Target']['m_PathID']==car.path_id and call['m_MethodName']=='InteractSwitchLights'
-                for call in source.read(c)['turnedEvent']['m_PersistentCalls']['m_Calls'])]
+        routes,switches=vehicle_light_links(source,scripts,car)
         if len(switches)!=1:raise ValueError(f'{key(car)} needs one light switch')
         cars.append({'nodes':{key(n['reader']) for n in members},'car':car,'routes':routes,'switch':switches[0]})
     def car_of(reader):
@@ -378,9 +392,12 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                     parents=[source.read(linked(reader,f[field]))['m_Father'] for field in ('GButton','GButtonOff','GButtonOn')]
                     if parents[1:]!=parents[:-1]:raise ValueError(f'{key(reader)} switch button parent frame')
                     c['animated_poses'].append({'node':node(linked(reader,f['GButton'])),'states':[converted_transform(source.read(linked(reader,f['GButtonOff']))),converted_transform(source.read(linked(reader,f['GButtonOn'])))],'rule':'current_pose_lerp','speed':25.})
-            elif kind in ('headlight','cabin'):
-                for i,s in enumerate(f['states']):
-                    c['states'].append(state(reader,('off','low','high')[i] if kind=='headlight' else ('off','cabin')[i],s['intensity'],[s['L'],*s['Ls']],[s['R'],*s['Rs']],s['M'],f['MOFF']))
+            if kind in ('headlight','cabin','rear'):
+                def intensity(pointers,reader=reader):
+                    ids=lights(reader,pointers)
+                    return source.lighting_lights[ids[0]-1]['serialized_intensity'] if ids else 0.
+                c['states']=vehicle_states(f,kind,lambda *a,reader=reader,**k:state(reader,*a,**k),intensity)
+            if kind in ('headlight','cabin'):
                 if kind=='headlight':
                     car_reader=owner['car'];car_fields=source.read(car_reader)
                     c['vehicle_switch']={'source':source_id(car_reader),'nodes':nodes(car_reader,car_fields['LightSwitch']),'state_nodes':[nodes(car_reader,car_fields[k]) for k in ('LightOff','LightLow','LightHigh')]}
@@ -415,11 +432,7 @@ def recover_controllers(source: Source, roots: list, node_ids: dict, material_id
                         'door_usable_sources':door_usables,'threshold':rf['iUsableV1To1Limit'],
                         'include_children':bool(rf['includeUsablesChild1To1']),'missing_slot_is_same':bool(rf['ISlotUsableV1To1NoPartInSlotIsSame']),
                         'target':c['id']}
-            elif kind=='rear':
-                for prefix,signal in [('H','tail'),('F','brake'),('R','reverse')]:
-                    ids=lights(reader,f.get(prefix+'Light',[]));intensity=source.lighting_lights[ids[0]-1]['serialized_intensity'] if ids else 0.
-                    c['states'].append(state(reader,signal,intensity,f.get(prefix+'Light',[]),f[prefix+'Lamp'],f[prefix+'LampOn'],f[prefix+'LampOff'],dont_overwrite=f[prefix+'DontOverwrite']))
-            else:
+            elif kind=='road':
                 c['states'].append(state(reader,'road',e['maxOutput'],[f['LLight']],[],{'m_PathID':0},{'m_PathID':0}))
             controls.append(c)
     return controls

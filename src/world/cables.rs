@@ -653,6 +653,9 @@ mod tests {
                 scale: [1.; 3],
             },
             interiors: Vec::new(),
+            vehicle: None,
+            engines: Vec::new(),
+            radiators: Vec::new(),
         };
         let pole = RoadPole {
             node: 1,

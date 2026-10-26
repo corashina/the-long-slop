@@ -76,6 +76,8 @@ pub use instruments::*;
 pub use ui::*;
 pub mod lighting;
 pub use lighting::*;
+pub mod vehicles;
+pub use vehicles::*;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;

@@ -1294,6 +1294,9 @@ mod world_sync_tests {
             colliders: Vec::new(),
             prefab_pose: transform,
             interiors: Vec::new(),
+            vehicle: None,
+            engines: Vec::new(),
+            radiators: Vec::new(),
         }
     }
     fn insert(store: &mut ItemStore, ordinal: u32) -> ItemId {
