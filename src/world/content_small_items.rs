@@ -61,7 +61,7 @@ pub(crate) struct SmallItems {
     /// PlayClipAtPoint requests: clip, volume, absolute position.
     pub(crate) sounds: Vec<(u32, f32, [f64; 3])>,
 }
-fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
+pub(super) fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
     reference.audio["clips"].as_array()?.iter().find_map(|c| {
         (c["source"]["file"].as_str() == Some(source.file.as_str())
             && c["source"]["path_id"].as_i64() == Some(source.path_id))

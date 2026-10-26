@@ -365,5 +365,6 @@ extern "C" {
         control: u32,
         lmb_use: bool,
         hose: u32,
+        computer: u32,
     );
 }

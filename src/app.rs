@@ -52,6 +52,7 @@ struct FeedbackStamp {
     light_control: u32,
     lmb_use: bool,
     hose: u8,
+    computer: u8,
     item: Option<ItemId>,
     opening: Option<OpeningId>,
     carrying: bool,
@@ -1218,6 +1219,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
         hose: available.hose,
+        computer: runtime.computer_prompt(),
         item: available.item,
         opening: available.opening,
         carrying: info.carrying,
@@ -1272,6 +1274,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             stamp.light_control,
             stamp.lmb_use,
             stamp.hose.into(),
+            stamp.computer.into(),
         );
         drive.last_feedback = Some(stamp);
     }

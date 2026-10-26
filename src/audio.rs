@@ -482,6 +482,10 @@ impl AudioState {
     fn sample(&mut self) -> f32 {
         xorshift(&mut self.random)
     }
+    /// mainscript.PlayClipAtPoint randomPitch: Random.Range(0.85, 1.15).
+    pub fn random_pitch(&mut self) -> f32 {
+        0.85 + 0.3 * self.sample()
+    }
     fn emit(&mut self, id: u32, gain: f32, simulation_seconds: f64) {
         self.emit_at(id, gain, simulation_seconds, None);
     }
