@@ -10,6 +10,7 @@ pub mod audio;
 pub mod browser;
 
 pub mod conditions;
+pub mod damage;
 pub mod exhaust;
 pub mod fluids;
 pub mod flyers;

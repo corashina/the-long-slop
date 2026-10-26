@@ -37,6 +37,22 @@ test('profile_input_marks_the_fixed_step_and_clears_pending_events_on_blur',t=>{
  assert.equal(profile.snapshot().inputs[1].step,null);
 });
 
+test('F07 typing routes keys to the computer and blocks game bits',()=>{
+ const i=new InputState(bindings);i.code('KeyW',true);i.setTyping(true);
+ assert.equal(i.takeFrame().held,0,'typing releases held game keys');
+ for(const [code,key] of [['KeyH','h'],['KeyI','i'],['Enter','Enter'],['Backspace','Backspace'],['KeyA','a']])i.type(code,key,false);
+ i.type('KeyA','a',true);i.type('Space',' ',true);
+ const buffer=new Uint8Array(64),n=i.takeText(buffer);
+ assert.deepEqual([...buffer.subarray(0,n)],[104,105,13,8,97,32]);
+ const keys=i.typingKeys();
+ assert.equal(keys&(1<<12),1<<12,'I is the high C piano key');
+ assert.equal(keys&(1<<21),1<<21,'A lowers the octave');
+ assert.equal(keys&(1<<24),1<<24,'a key is held');
+ assert.equal(i.typingKeys()&(1<<21),0,'music keys are edges');
+ assert.equal(i.takeText(buffer),0);
+ i.setTyping(false);assert.equal(i.typingKeys(),0);
+});
+
 test('mouse_drive_binding_sets_the_player_bit',()=>{
  const i=new InputState([{action:'mouse_drive',codes:['KeyU']}]);
  i.code('KeyU',true);const f=i.takeFrame();assert.equal(f.held,0);assert.equal(f.playerHeld,16);assert.equal(f.playerPressed,16);

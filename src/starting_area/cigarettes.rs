@@ -4,8 +4,9 @@ use crate::interaction::cigarettes::{
     BurnRates, CigaretteState, ExhaleRates, ExhaleState, MouthSlot, PackState,
 };
 use crate::interaction::feedback::ActionMask;
-use crate::interaction::items::node_pose;
-use crate::reference::{ItemId, NodeId, ReferenceError, ReferenceManifest};
+use crate::interaction::items::{ItemLocation, node_pose};
+use crate::particles::ParticleState;
+use crate::reference::{ItemId, NodeId, ParticleReference, ReferenceError, ReferenceManifest};
 use crate::simulation::{FIXED_DT, FrameInput, keys, player_keys};
 use crate::vehicle::{VehiclePose, from_rapier, to_rapier};
 use rapier3d::math::Pose;
@@ -24,6 +25,17 @@ pub struct CigaretteRuntime {
     pub mouth_anchor: NodeId,
     /// Worn body pose in the mouth anchor frame.
     worn_offset: Pose,
+    /// Ember particles of each cigarette and the player mouth smoke.
+    embers: Vec<(ItemId, ParticleState)>,
+    exhale_particles: ParticleState,
+    exhale_node: NodeId,
+    exhale_distance_rate: f32,
+    ember_particle: ParticleReference,
+    /// Item root in the body frame.
+    root_in_body: Pose,
+    /// Ember particle part at its start and end pose, in the root frame (`UpdParts`).
+    ember_start: Pose,
+    ember_end: Pose,
     show_stats: bool,
     hold_seconds: f32,
     tab_elapsed: Option<f32>,
@@ -75,7 +87,28 @@ impl CigaretteRuntime {
             position: body.pose.translation,
             rotation: body.pose.rotation,
         });
+        let ember = &consumable.ember;
+        let part = consumable
+            .parts
+            .iter()
+            .position(|n| *n == ember.particle_node)
+            .ok_or_else(|| ReferenceError("Cigarette ember particle is no part".into()))?;
+        let in_root = |node| -> Result<Pose, ReferenceError> {
+            Ok(root.inverse() * to_rapier(node_pose(reference, node)?))
+        };
+        let exhale = &reference.small_items.exhale;
         Ok(Self {
+            embers: Vec::new(),
+            exhale_particles: ParticleState::new(
+                &exhale.particle,
+                exhale.particle.source.path_id as u64,
+            ),
+            exhale_node: exhale.node,
+            exhale_distance_rate: exhale.particle.rate_over_distance,
+            ember_particle: ember.particle.clone(),
+            root_in_body: body_local.inverse(),
+            ember_start: in_root(consumable.start[part])?,
+            ember_end: in_root(consumable.end[part])?,
             rates: BurnRates::from(consumable),
             exhale_rates: ExhaleRates::from(&reference.small_items.exhale),
             pack_prototype,
@@ -91,6 +124,18 @@ impl CigaretteRuntime {
             hold_seconds: reference.inventory.equip_hold_seconds,
             tab_elapsed: None,
         })
+    }
+    pub fn ember_particles(&self, id: ItemId) -> &[crate::particles::ParticleOutput] {
+        self.embers
+            .iter()
+            .find(|(i, _)| *i == id)
+            .map_or(&[], |(_, p)| p.particles())
+    }
+    pub fn embers(&self) -> impl Iterator<Item = (ItemId, &[crate::particles::ParticleOutput])> {
+        self.embers.iter().map(|(id, p)| (*id, p.particles()))
+    }
+    pub fn exhale_particles(&self) -> &[crate::particles::ParticleOutput] {
+        self.exhale_particles.particles()
     }
     pub fn pack(&self, id: ItemId) -> Option<&PackState> {
         self.packs.iter().find(|(i, _)| *i == id).map(|(_, p)| p)
@@ -381,11 +426,61 @@ impl GarageRuntime {
         }
     }
 
-    /// Automatic burn and ember decay of every cigarette.
+    /// Automatic burn and ember decay of every cigarette, then the ember and mouth smoke.
     pub(super) fn advance_cigarettes(&mut self) {
         let rates = self.area.cigarettes.rates;
         for (_, c) in &mut self.area.cigarettes.cigarettes {
             c.update(&rates, FIXED_DT);
+        }
+        let origin = self.stream.origin;
+        let c = &mut self.area.cigarettes;
+        let cigarettes = &c.cigarettes;
+        c.embers
+            .retain(|(id, _)| cigarettes.iter().any(|(i, _)| i == id));
+        for (id, state) in &c.cigarettes {
+            let Some(item) = self.area.items.get(*id) else {
+                continue;
+            };
+            let index = match c.embers.iter().position(|(i, _)| i == id) {
+                Some(index) => index,
+                None => {
+                    let seed = c.ember_particle.source.path_id as u64 ^ u64::from(id.0);
+                    c.embers
+                        .push((*id, ParticleState::new(&c.ember_particle, seed)));
+                    c.embers.len() - 1
+                }
+            };
+            let out = state.ember.output(&rates.ember);
+            // UpdParts: the part lerps from end to start by hp.
+            let hp = state.part_blend();
+            let part = c.ember_end.translation.lerp(c.ember_start.translation, hp);
+            let local = rapier3d::math::Vector::from_array(c.ember_particle.local_pose.translation);
+            let root = to_rapier(item.pose) * c.root_in_body;
+            let emitter = root.translation + root.rotation * (part - local);
+            let shown = !matches!(item.location, ItemLocation::Stored(_));
+            let p = &mut c.embers[index].1;
+            p.rotation = root.rotation;
+            p.set_origin(origin.offset);
+            p.set_rates(out.particle_rate, c.ember_particle.rate_over_distance);
+            p.advance(
+                FIXED_DT,
+                origin.absolute(emitter.to_array()),
+                if shown { 1. } else { 0. },
+                &self.physics,
+            );
+        }
+        // fpscontroller smokeParticle: the emission is off while `mouth_smoke` is None.
+        if let Some(pose) = self.area.pose.anchor(c.exhale_node) {
+            let p = &mut c.exhale_particles;
+            p.rotation = rapier3d::math::Rotation::from_array(pose.rotation);
+            p.set_origin(origin.offset);
+            p.set_rates(c.mouth_smoke.unwrap_or(0.), c.exhale_distance_rate);
+            p.advance(
+                FIXED_DT,
+                origin.absolute(pose.position),
+                if c.mouth_smoke.is_some() { 1. } else { 0. },
+                &self.physics,
+            );
         }
     }
 }
@@ -394,6 +489,7 @@ impl GarageRuntime {
 /// as physics-space root poses and counts.
 pub(super) fn start_pack_poses(
     reference: &ReferenceManifest,
+    start_car: crate::world::StartCar,
     startup: &crate::world::StartupTerrain,
     origin: [f64; 3],
 ) -> Result<Vec<(VehiclePose, u32)>, ReferenceError> {
@@ -406,8 +502,13 @@ pub(super) fn start_pack_poses(
         let pose = crate::world::source_world_pose(&reference.world, startup, &v.transform, &[])?;
         packs.push((local(pose), v.ammo.count));
     }
-    // The export keeps only the packs of the selected start car groups.
-    for v in &reference.acquisition.startup_packs {
+    // The export keeps the packs of the start car groups. Only the picked start car keeps its pack.
+    for v in reference
+        .acquisition
+        .startup_packs
+        .iter()
+        .filter(|v| v.start_car() == start_car.field())
+    {
         let parent = v
             .group_pose
             .parent
@@ -550,6 +651,7 @@ impl GarageRuntime {
 mod tests {
     use super::*;
     use crate::interaction::cigarettes::tests::cigarette;
+    use crate::interaction::spray::tests::particle;
     use crate::starting_area::spawned::{SpawnedItem, SpawnedItems};
 
     #[test]
@@ -581,6 +683,14 @@ mod tests {
             mouth_smoke: None,
             mouth_anchor: NodeId(0),
             worn_offset: Pose::IDENTITY,
+            embers: Vec::new(),
+            exhale_particles: ParticleState::new(&particle(), 1),
+            exhale_node: NodeId(0),
+            exhale_distance_rate: 0.,
+            ember_particle: particle(),
+            root_in_body: Pose::IDENTITY,
+            ember_start: Pose::IDENTITY,
+            ember_end: Pose::IDENTITY,
             show_stats: true,
             hold_seconds: 0.2,
             tab_elapsed: None,

@@ -162,6 +162,20 @@ record!(StartupPackReference {
     prototype: PrototypeId, group: SourceId, group_pose: AcquisitionPose, group_active: bool, vehicle: SourceId,
     pack: SourceId, cigarette_prefab: SourceId, ammo: AcquisitionAmmo
 });
+impl StartupPackReference {
+    /// The start car field of the pack group.
+    pub fn start_car(&self) -> &'static str {
+        pack_start_car(self.source.path_id)
+    }
+}
+/// Source `StartCar01` keeps pack 14079, `StartCar02` pack 14082.
+fn pack_start_car(pack: i64) -> &'static str {
+    if pack == 14079 {
+        "StartCar01"
+    } else {
+        "StartCar02"
+    }
+}
 record!(HolidayPumpkinReference {
     source: SourceId, pose: AcquisitionPose, active: bool, save: SourceId, item_id: u32, body: SourceId, pickup: SourceId,
     manual_start: bool, started: bool, loaded: bool, buried: bool, car: Option<SourceId>, fixed_in_car: u32,
@@ -635,13 +649,9 @@ impl AcquisitionReference {
                 .iter()
                 .any(|s| s.prototype.is_some() && s.group == group)
         };
-        let startup_packs = STARTUP_PACKS.iter().filter(|expected| {
-            start_car(if expected[0] == 14079 {
-                "StartCar01"
-            } else {
-                "StartCar02"
-            })
-        });
+        let startup_packs = STARTUP_PACKS
+            .iter()
+            .filter(|expected| start_car(pack_start_car(expected[0])));
         require(
             self.packs.len() == 1 && self.startup_packs.len() == startup_packs.clone().count(),
             "selected packs",

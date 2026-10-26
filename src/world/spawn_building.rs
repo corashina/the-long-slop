@@ -14,6 +14,8 @@ impl SpawnEvaluation<'_> {
         building: &SourceId,
     ) -> Result<Option<f32>, ReferenceError> {
         let f = &self.rules.get(self.reference, building)?.fields;
+        // paintingMain sits on the building root, so each building instance has a fresh pool.
+        self.painting_pools.clear();
         let low = number(f, "minRandomSpawn")?;
         let high = number(f, "maxRandomSpawn")?;
         let chance = (low != 0. || high != 0.).then(|| self.random.range(low, high));

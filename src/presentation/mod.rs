@@ -2,6 +2,8 @@ pub mod camera;
 pub mod camera_projection;
 mod candidate_upload;
 mod cap_motion;
+pub mod cigarettes;
+pub mod computer;
 pub mod conditions;
 pub mod consumables;
 pub mod fixed_assets;

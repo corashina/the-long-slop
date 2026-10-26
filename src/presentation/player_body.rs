@@ -1,5 +1,5 @@
 //! First-person player body: character 0 of the player prototype (source "Visible body" mode 2).
-//! The bones keep their authored rest pose below the Player root. The GPU skins the meshes.
+//! The skin joints are children of `CharacterRoot` and take the `BodyState` pose. The GPU skins the meshes.
 use super::materials::SourceMaterial;
 use super::reference::{ReferenceVisuals, bind_node};
 use super::renderers::AuthoredRenderer;
@@ -16,8 +16,12 @@ pub struct PlayerBody {
     scene: Option<Entity>,
     /// Source Player Transform. It follows the player pose.
     player: Option<Entity>,
+    /// Source `CharacterRoot`. It follows `BodyState::root_local`.
+    character_root: Option<Entity>,
     /// Character 0 skin joints.
     joints: HashMap<NodeId, Entity>,
+    /// Skin joint entities in `BodyState` joint order.
+    posed: Vec<Entity>,
     /// Character 0 renderer primitives.
     primitives: Vec<Entity>,
     shown: bool,
@@ -43,6 +47,7 @@ fn bind(
     event: On<WorldInstanceReady>,
     mut commands: Commands,
     reference: Res<RuntimeReference>,
+    drive: Res<Drive>,
     mut body: ResMut<PlayerBody>,
     children: Query<&Children>,
     extras: Query<&GltfExtras>,
@@ -68,6 +73,9 @@ fn bind(
         };
         if node.id == manifest.clothing.pose.root {
             body.player = Some(entity);
+        }
+        if node.id == manifest.clothing.pose.anchors["CharacterRoot"].node {
+            body.character_root = Some(entity);
         }
         if character.skins.iter().any(|s| s.joints.contains(&node.id)) {
             body.joints.insert(node.id, entity);
@@ -100,9 +108,20 @@ fn bind(
         .iter()
         .flat_map(|s| &s.joints)
         .all(|id| body.joints.contains_key(id));
-    if body.player.is_none() || !joints || body.primitives.is_empty() {
-        error!("Player body glTF lacks its root, skin joints, or renderers");
+    let complete = body.player.is_some() && joints && !body.primitives.is_empty();
+    let Some(root) = body.character_root.filter(|_| complete) else {
+        error!("Player body glTF lacks its root, CharacterRoot, skin joints, or renderers");
+        return;
+    };
+    // BodyState poses every joint relative to CharacterRoot, so each joint is its direct child.
+    let state = &drive.runtime.area.body;
+    let posed: Vec<Entity> = (0..state.joint_count())
+        .map(|i| body.joints[&state.joint_node(i)])
+        .collect();
+    for joint in &posed {
+        commands.entity(*joint).insert(ChildOf(root));
     }
+    body.posed = posed;
 }
 
 pub(crate) fn sync(
@@ -162,5 +181,18 @@ pub(crate) fn sync(
     if let Ok((mut transform, _, _)) = nodes.get_mut(player) {
         let scale = transform.scale;
         transform.set_if_neq(super::transform(drive.rendered_body_pose()).with_scale(scale));
+    }
+    let state = &drive.runtime.area.body;
+    if let Some(root) = body.character_root
+        && let Ok((mut transform, _, _)) = nodes.get_mut(root)
+    {
+        let scale = transform.scale;
+        transform.set_if_neq(super::transform(state.root_local()).with_scale(scale));
+    }
+    let scale = Vec3::splat(state.joint_scale());
+    for (i, joint) in body.posed.iter().enumerate() {
+        if let Ok((mut transform, _, _)) = nodes.get_mut(*joint) {
+            transform.set_if_neq(super::transform(state.joint_local(i)).with_scale(scale));
+        }
     }
 }

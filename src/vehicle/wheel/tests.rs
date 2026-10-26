@@ -64,6 +64,7 @@ fn lada_slot(steer: bool, drive: bool) -> Slot {
             drive,
             brake: true,
             handbrake: steer,
+            pedal: false,
             sideways_stiffness_modifier: 0.0,
             hub: WheelHubReference {
                 radius_m: 0.04,
@@ -141,6 +142,7 @@ fn drive(world: &mut PhysicsWorld, seconds: f32, input: DriveInput, motor_nm: f3
             DriveTorques {
                 motor_nm,
                 engine_brake_nm: 0.0,
+                pedal_nm: None,
             },
         );
         world.step_physics();

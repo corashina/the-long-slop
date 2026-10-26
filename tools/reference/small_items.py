@@ -12,6 +12,8 @@ GENIE_LAMP=(211,'ginlamp',152760,'ginlampscript')
 START_BOTTLES=((71175,78224),(71176,78226))
 START_PACKS=((80187,77156),(70712,70989),(70715,70994))
 START_GROUP=21481
+# World prototype CobWeb wash triggers. Inactive level1 scene copies lie on no prototype.
+COBWEBS=529
 PLAYER=80125
 SPRAY_FIELDS=('cleaningType','text','angleSpeed','triggerMaxAngle','triggerSetAngle','triggerResetAngle','invert',
     'volumeSet','volumeReset','gain','distance','washRadius')
@@ -28,7 +30,11 @@ EVIDENCE=[
     'M.SetColor("_EmissionColor", emission.Evaluate(value));',
     'smokeParticleEmission.rateOverTime = smokeCharged * maxSmokeParticleRate;',
     'smokeCharged -= Time.deltaTime * smokeParticleChargeSpeed * 2f;',
-    'smokeCharged += Time.deltaTime * smokeParticleChargeSpeed;']
+    'smokeCharged += Time.deltaTime * smokeParticleChargeSpeed;',
+    'if (repairValue > 1f && !neverRepair)',
+    'UnityEngine.Object.Instantiate(particleOnDestroy, transform.position, Quaternion.identity);',
+    'if (chanceToStartDisabled > 0f && UnityEngine.Random.Range(0f, 1f) < chanceToStartDisabled)',
+    'if (input.reload && Time.time - lastReloadTime >= ammoscript2.pourTime)']
 
 
 def animation_curve(data):
@@ -90,7 +96,11 @@ def recover_small_items(source, manifest, output) -> dict:
         system=component(source,root,'ParticleSystem')
         rate=source.read(system)['EmissionModule']['rateOverTime']['scalar']
         return particle(source,system,role,rate,output,root)
-    spray_bottle={**record,'ammo':ammo(source,link(d,'ammo','MonoBehaviour')),
+    holder=link(d,'ammo','MonoBehaviour');hd=source.read(holder)
+    # noPerShow ends ReloadFromInventory: a bottle refills only from an aimed bottle.
+    if not hd['noPerShow'] or hd['isMag'] or hd['w']['m_PathID']:
+        raise ValueError(f'{key(holder)} reload path differs')
+    spray_bottle={**record,'ammo':ammo(source,holder),'can_pour':bool(hd['canPour']),'pour_time':hd['pourTime'],
         'cleaning_type':d['cleaningType'],'text':d['text'],'angle_speed':d['angleSpeed'],
         'trigger_max_angle':d['triggerMaxAngle'],'trigger_set_angle':d['triggerSetAngle'],'trigger_reset_angle':d['triggerResetAngle'],
         'invert':bool(d['invert']),'trigger':source_id(link(d,'trigger','Transform')),'hole':source_id(link(d,'hole','Transform')),
@@ -123,6 +133,7 @@ def recover_small_items(source, manifest, output) -> dict:
         'emission':gradient(d['emission']),'startup_value':d['value']}
 
     start_packs=[start_copy(script_id,ammo_id,'cigiscript') for script_id,ammo_id in START_PACKS]
+    washes,wash_effects=recover_washes(source,manifest,output,genie_lamp['wash_trigger'])
 
     player=source.get('level1',PLAYER);pd=source.read(player)
     system=source.resolve(player,pd['smokeParticle'])
@@ -132,7 +143,49 @@ def recover_small_items(source, manifest, output) -> dict:
     if key(node) not in node_ids:raise ValueError('level1:80125 smokeParticle node is not exported')
     exhale={'controller':source_id(player),'node':node_ids[key(node)],'max_rate':pd['maxSmokeParticleRate'],
         'charge_speed':pd['smokeParticleChargeSpeed'],'particle':particle(source,system,'mouth_smoke',pd['maxSmokeParticleRate'],output,node)}
-    return {'spirit_level':spirit_level,'spray_bottle':spray_bottle,'genie_lamp':genie_lamp,'start_packs':start_packs,'exhale':exhale}
+    return {'spirit_level':spirit_level,'spray_bottle':spray_bottle,'genie_lamp':genie_lamp,'start_packs':start_packs,'exhale':exhale,
+        'washes':washes,'wash_effects':wash_effects}
+
+
+def recover_washes(source, manifest, output, lamp):
+    """washtriggerscript on world prototype nodes, except the genie lamp trigger."""
+    nodes={}
+    for p in manifest['world']['prototypes']:
+        for i,n in enumerate(p['nodes']):nodes[(n['source']['file'],n['source']['path_id'])]=(p,i)
+    washes=[];effects={}
+    for r in manifest['world']['records']:
+        if r['class_name']!='washtriggerscript' or r['source']==lamp:continue
+        reader=source.get(r['source']['file'],r['source']['path_id']);d=source.read(reader)
+        root=source.transform_for(source.resolve(reader,d['m_GameObject']))
+        if key(root) not in nodes:continue
+        p,index=nodes[key(root)]
+        def below(i):
+            while i is not None:
+                if i==index:return True
+                i=p['nodes'][i]['parent']
+            return False
+        def inside(go):
+            node=source.transform_for(source.resolve(reader,go))
+            if nodes.get(key(node),(None,))[0] is not p:raise ValueError(f'{key(reader)} object lies outside its prototype')
+            return source_id(node)
+        effect=source.resolve(reader,d['particleOnDestroy'])
+        if effect is not None and key(effect) not in effects:
+            if effect.type.name!='GameObject':raise ValueError(f'{key(reader)} particleOnDestroy is not GameObject')
+            er=source.transform_for(effect);system=component(source,er,'ParticleSystem');sd=source.read(system)
+            audio=source.read(component(source,er,'AudioSource'))
+            clip=source.resolve(effect,audio['m_audioClip'])
+            if clip is None or clip.type.name!='AudioClip' or not audio['m_PlayOnAwake'] or audio['Loop']:
+                raise ValueError(f'{key(effect)} destroy sound differs')
+            source.item_clips.add(key(clip))
+            effects[key(effect)]={'source':source_id(effect),
+                'particle':particle(source,system,'wash_destroy',sd['EmissionModule']['rateOverTime']['scalar'],output),
+                'clip':source_id(clip),'volume':audio['m_Volume']}
+        washes.append({'source':source_id(reader),'prototype':p['source'],'node':source_id(root),
+            'colliders':[c['source'] for c in p['colliders'] if below(c['node'])],
+            'permission':d['CleanProperty'],'never_repair':bool(d['neverRepair']),'destroy_on_repair':bool(d['destroyOnRepair']),
+            'objects':[inside(o) for o in d['objects']],'chance_to_start_disabled':d['chanceToStartDisabled'],
+            'particle_on_destroy':effects[key(effect)]['source'] if effect is not None else None})
+    return washes,list(effects.values())
 
 
 def _shape(value, fields):
@@ -152,7 +205,7 @@ def _curve(c):
 
 
 def validate_small_items(record, manifest) -> None:
-    _shape(record,'spirit_level spray_bottle genie_lamp start_packs exhale')
+    _shape(record,'spirit_level spray_bottle genie_lamp start_packs exhale washes wash_effects')
     clips={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
     l=record['spirit_level'];_shape(l,'item prototype source bubbles')
     if l['item']!=SPIRIT_LEVEL[0] or len(l['bubbles'])!=3:raise ValueError('Spirit level owner differs')
@@ -161,9 +214,11 @@ def validate_small_items(record, manifest) -> None:
         for f in ('bubble_curve','scale_z_curve','scale_xy_curve','move_xy_curve'):_curve(b[f])
         for f in ('lerp','min_scale_xy','max_scale_xy','min_scale_z','max_scale_z','move_xy','startup_value'):_number(b[f])
     s=record['spray_bottle']
-    _shape(s,'item prototype source ammo cleaning_type text angle_speed trigger_max_angle trigger_set_angle trigger_reset_angle invert trigger hole set_clip reset_clip set_volume reset_volume mask gain distance wash_radius wash_mask spray splash startup')
+    _shape(s,'item prototype source ammo can_pour pour_time cleaning_type text angle_speed trigger_max_angle trigger_set_angle trigger_reset_angle invert trigger hole set_clip reset_clip set_volume reset_volume mask gain distance wash_radius wash_mask spray splash startup')
     if s['item']!=SPRAY_BOTTLE[0] or not 0<s['trigger_reset_angle']<s['trigger_set_angle']<s['trigger_max_angle']:raise ValueError('Spray bottle trigger differs')
     if any((c['file'],c['path_id']) not in clips for c in (s['set_clip'],s['reset_clip'])):raise ValueError('Spray bottle clip is not exported')
+    _number(s['pour_time'])
+    if s['can_pour'] is not False or s['pour_time']<0:raise ValueError('Spray bottle pour differs')
     if len(s['startup'])!=len(START_BOTTLES) or any(c['item_id']!=SPRAY_BOTTLE[0] for c in s['startup']):raise ValueError('Start spray bottles differ')
     g=record['genie_lamp']
     _shape(g,'item prototype source light renderer material wash_trigger gain lose intensity range emission startup_value')
@@ -173,5 +228,23 @@ def validate_small_items(record, manifest) -> None:
         raise ValueError('Start cigarette packs differ')
     e=record['exhale'];_shape(e,'controller node max_rate charge_speed particle')
     if e['max_rate']<=0 or e['charge_speed']<=0:raise ValueError('Mouth smoke rates differ')
-    for p in (s['spray'],s['splash'],e['particle']):
+    _washes(record['washes'],record['wash_effects'],clips)
+    for p in (s['spray'],s['splash'],e['particle'])+tuple(f['particle'] for f in record['wash_effects']):
         if not p['materials'] or 'InitialModule.startLifetime' not in p['curves']:raise ValueError('Small item particle data missing')
+
+
+def _washes(washes, effects, clips):
+    """CobWeb triggers: CleanProperty 2, destroyOnRepair, no objects, one sphere trigger each."""
+    if len(effects)!=1:raise ValueError('Wash destroy effects differ')
+    for f in effects:
+        _shape(f,'source particle clip volume');_number(f['volume'])
+        if (f['clip']['file'],f['clip']['path_id']) not in clips or not 0<=f['volume']<=1:raise ValueError('Wash destroy sound differs')
+    sources={(f['source']['file'],f['source']['path_id']) for f in effects}
+    for w in washes:
+        _shape(w,'source prototype node colliders permission never_repair destroy_on_repair objects chance_to_start_disabled particle_on_destroy')
+        _number(w['chance_to_start_disabled'])
+        e=w['particle_on_destroy']
+        if (w['permission']!=2 or w['never_repair'] or not w['destroy_on_repair'] or w['objects'] or len(w['colliders'])!=1
+                or not 0<=w['chance_to_start_disabled']<1 or e is None or (e['file'],e['path_id']) not in sources):
+            raise ValueError('Cobweb wash trigger differs')
+    if len(washes)!=COBWEBS or len({(w['node']['file'],w['node']['path_id']) for w in washes})!=COBWEBS:raise ValueError('Cobweb wash count differs')

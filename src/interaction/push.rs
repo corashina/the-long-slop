@@ -1,13 +1,32 @@
 //! Source push force and a reusable steering grip.
 use super::AimTarget;
 use crate::player::PlayerState;
-use crate::reference::{BodyId, ItemId, PlayerReference, PushReference, ReferenceManifest};
+use crate::reference::{
+    BodyId, ColliderId, ItemId, PlayerReference, ReferenceManifest, Transform, WorldPushReference,
+};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, to_rapier};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{GenericJointBuilder, ImpulseJointHandle, JointAxesMask, RigidBodyHandle};
 use std::collections::HashMap;
 
+/// Push values of one item. `body` keys the interaction body map.
+#[derive(Clone)]
+struct Rule {
+    body: BodyId,
+    modifier: f32,
+    only_projected: bool,
+    both: bool,
+    push_even_if_same_parent: bool,
+    grip: Option<GripRule>,
+}
+#[derive(Clone)]
+struct GripRule {
+    colliders: Vec<ColliderId>,
+    /// Grip pose in the body frame.
+    local_pose: Transform,
+    in_use: bool,
+}
 struct Grip {
     owner: ItemId,
     body: RigidBodyHandle,
@@ -16,7 +35,7 @@ struct Grip {
     previous_pose: Pose,
 }
 pub struct PushState {
-    rules: HashMap<ItemId, PushReference>,
+    rules: HashMap<ItemId, Rule>,
     player: PlayerReference,
     /// Maximum steering angle per vehicle, in radians.
     grip: Option<Grip>,
@@ -29,7 +48,21 @@ impl PushState {
             rules: reference
                 .pushables
                 .iter()
-                .map(|r| (r.owner, r.clone()))
+                .map(|r| {
+                    let rule = Rule {
+                        body: r.body,
+                        modifier: r.modifier,
+                        only_projected: r.only_projected,
+                        both: r.both,
+                        push_even_if_same_parent: r.push_even_if_same_parent,
+                        grip: r.grip.as_ref().map(|g| GripRule {
+                            colliders: g.colliders.clone(),
+                            local_pose: g.local_pose,
+                            in_use: g.in_use,
+                        }),
+                    };
+                    (r.owner, rule)
+                })
                 .collect(),
             player: reference.player.clone(),
             grip: None,
@@ -37,7 +70,35 @@ impl PushState {
             steer: None,
         }
     }
-    pub fn is_grip(&self, item: ItemId, collider: crate::reference::ColliderId) -> bool {
+    /// Adds the push rule of a world copy. `grip` holds the generated ids of the grip colliders.
+    pub fn register_generated(
+        &mut self,
+        item: ItemId,
+        body: BodyId,
+        reference: &WorldPushReference,
+        grip: Vec<ColliderId>,
+    ) {
+        self.rules.insert(
+            item,
+            Rule {
+                body,
+                modifier: reference.modifier,
+                only_projected: reference.only_projected,
+                both: reference.both,
+                push_even_if_same_parent: reference.push_even_if_same_parent,
+                grip: reference.grip.as_ref().map(|g| GripRule {
+                    colliders: grip,
+                    local_pose: g.local_pose,
+                    in_use: g.in_use,
+                }),
+            },
+        );
+    }
+    /// Removes the rule of a world copy. Returns its body id.
+    pub fn remove_generated(&mut self, item: ItemId) -> Option<BodyId> {
+        self.rules.remove(&item).map(|rule| rule.body)
+    }
+    pub fn is_grip(&self, item: ItemId, collider: ColliderId) -> bool {
         self.rules
             .get(&item)
             .and_then(|rule| rule.grip.as_ref())
@@ -89,7 +150,7 @@ impl PushState {
     }
     fn grip_in_range(
         &self,
-        rule: &crate::reference::PushGripReference,
+        rule: &GripRule,
         body: RigidBodyHandle,
         player: &PlayerState,
         physics: &PhysicsWorld,

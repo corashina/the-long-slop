@@ -79,9 +79,6 @@ pub(crate) struct Door {
     leaves: std::ops::Range<usize>,
     green: Vec<SourceId>,
     red: Vec<SourceId>,
-    /// `detachIfOpen` attachable. V05 (`Hitches`) owns attachablescript detach; until then
-    /// opening only clears the link, as the source does after its Detach.
-    detach: Option<SourceId>,
 }
 impl Door {
     pub(crate) fn lamps(&self) -> DoorLamps {
@@ -124,7 +121,6 @@ impl BusDoors {
         }
         d.opened = !d.opened;
         d.signed = false;
-        d.detach = None;
         for index in d.leaves.clone() {
             let leaf = &mut self.leaves[index];
             if let Some(sound) = leaf.set(d.opened, self.time, &mut self.random) {
@@ -201,9 +197,7 @@ impl BusDoorBinding {
                 .state
                 .doors
                 .iter()
-                .map(|d| {
-                    ids(&d.green) + ids(&d.red) + d.detach.as_ref().map_or(0, |s| s.file.capacity())
-                })
+                .map(|d| ids(&d.green) + ids(&d.red))
                 .sum::<usize>()
             + self.state.leaves.capacity() * std::mem::size_of::<DoorLeaf>()
             + self.colliders.capacity() * std::mem::size_of::<LeafCollider>()
@@ -437,6 +431,10 @@ impl WorldStream {
             }
             for (door, d) in array(f, "doors")?.iter().enumerate() {
                 let d = fields(d)?;
+                // `detachIfOpen` is null on every bus in the source build.
+                if optional(d, "detachIfOpen")?.is_some() {
+                    return Err(ReferenceError("Unsupported bus door detachIfOpen".into()));
+                }
                 for (field, open) in [("Usign", false), ("Uopen", true)] {
                     for usable in array(d, field)? {
                         let node = rules.root(reference, value_link(usable)?)?;
@@ -507,7 +505,6 @@ impl WorldStream {
                     leaves: first..leaves.len(),
                     green: renderers("Rbs")?,
                     red: renderers("Rbc")?,
-                    detach: optional(d, "detachIfOpen")?.cloned(),
                 });
             }
         }
@@ -752,7 +749,6 @@ mod tests {
             leaves: i..i + 1,
             green: Vec::new(),
             red: Vec::new(),
-            detach: None,
         };
         BusDoors {
             doors: vec![door(0), door(1)],

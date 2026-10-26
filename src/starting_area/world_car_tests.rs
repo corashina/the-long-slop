@@ -152,6 +152,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
         let torque = DriveTorques {
             motor_nm: 1600.,
             engine_brake_nm: 0.,
+            pedal_nm: None,
         };
         physics.apply_vehicle_forces(&key, throttle, torque);
         physics.step_physics();
@@ -159,7 +160,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     let items = ItemStore::from_states(Vec::new());
     let r = record.instruments.as_ref().unwrap();
     let limits = &record.gauge_limits;
-    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, limits, 2);
+    let sample = instrument_sample(&items, &physics, &powertrain, &key, vehicle, record, 2);
     let speed = physics.snapshot(&key).speed_mps * 3.6;
     assert_eq!(sample.rpm, 2400.);
     assert!(speed > 3. && sample.speed_kmh == speed, "{speed}");
@@ -249,4 +250,40 @@ fn light_switch_click_toggles_world_car_headlights() {
         .find(|l| l.node == 2)
         .unwrap();
     assert!(low.enabled && low.intensity == 2.);
+}
+
+/// A narrow body on the ground with a balance record stays upright. Without it, it falls.
+#[test]
+fn balance_holds_a_narrow_body_upright() {
+    let mut r = crate::simulation::balance::tests::reference();
+    (r.p, r.d, r.max_force) = (30., 3., 2000.);
+    let roll = |balanced: bool| {
+        let mut physics = PhysicsWorld::empty(1, 2);
+        physics.insert_box([0., -0.5, 0.], [50., 0.5, 50.]);
+        let start = rapier3d::math::Rotation::from_axis_angle(
+            rapier3d::math::Vector::NEG_Z,
+            10f32.to_radians(),
+        );
+        let (body, _) = physics.insert(
+            RigidBodyBuilder::dynamic()
+                .pose(rapier3d::math::Pose::from_parts(
+                    rapier3d::math::Vector::new(0., 0.5, 0.),
+                    start,
+                ))
+                .additional_mass(100.),
+            ColliderBuilder::cuboid(0.05, 0.5, 1.).density(0.),
+        );
+        let mut state = crate::simulation::balance::BalanceState::default();
+        for _ in 0..(3. / FIXED_DT) as usize {
+            if balanced {
+                apply_balance(&mut physics, body, &r, &mut state, 0., 0.);
+            }
+            physics.step_physics();
+        }
+        let up = *physics.rapier().bodies[body].rotation() * rapier3d::math::Vector::Y;
+        up.angle_between(rapier3d::math::Vector::Y).to_degrees()
+    };
+    let (held, free) = (roll(true), roll(false));
+    assert!(held < 3., "{held}");
+    assert!(free > 30., "{free}");
 }

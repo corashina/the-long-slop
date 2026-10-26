@@ -338,7 +338,7 @@ fn process_request(
                 .and_then(serde_json::Value::as_f64)
                 .ok_or_else(|| invalid("Missing draw distance"))?
                 as f32;
-            let mode = super::game_mode();
+            let mode = super::game_mode(&reference);
             if request.kind == "PrepareNewGame"
                 && !drive.runtime.started
                 && drive.runtime.stream.mode() == mode

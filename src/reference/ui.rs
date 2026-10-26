@@ -61,6 +61,8 @@ pub struct UiElement {
 #[serde(deny_unknown_fields)]
 pub struct UiReference {
     pub hose_prompts: HosePrompts,
+    pub computer_prompts: ComputerPrompts,
+    pub ammo_prompts: AmmoPrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -77,6 +79,23 @@ pub struct HosePrompts {
     pub drain: String,
     pub coilup: String,
 }
+/// Source `ls.w` default English computer prompts.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComputerPrompts {
+    pub turnon: String,
+    pub turnoff: String,
+    pub r#use: String,
+    pub connect: String,
+    pub disconnect: String,
+}
+/// Source `ls.w` default English ammo prompts: R reloads the held item, E unloads into the aimed one.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmmoPrompts {
+    pub reload: String,
+    pub unload: String,
+}
 impl UiReference {
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
@@ -87,6 +106,17 @@ impl UiReference {
         require(
             !h.attach.is_empty() && !h.drain.is_empty() && !h.coilup.is_empty(),
             "hose prompts",
+        )?;
+        let c = &self.computer_prompts;
+        require(
+            [&c.turnon, &c.turnoff, &c.r#use, &c.connect, &c.disconnect]
+                .iter()
+                .all(|t| !t.is_empty()),
+            "computer prompts",
+        )?;
+        require(
+            !self.ammo_prompts.reload.is_empty() && !self.ammo_prompts.unload.is_empty(),
+            "ammo prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self

@@ -86,6 +86,7 @@ pub struct WorldPresentation<'w, 's> {
     pub world_poses: Query<'w, 's, &'static GlobalTransform>,
     pub saved_poses: Res<'w, crate::presentation::save::CandidateImportedPoses>,
     pub allocation: ResMut<'w, SourcePresentationAllocation>,
+    pub screens: ResMut<'w, crate::presentation::computer::ComputerScreens>,
 }
 impl WorldPresentation<'_, '_> {
     pub fn prepare(
@@ -496,6 +497,11 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
         )?;
         timer.next(crate::world::stream_profile::Stage::InstanceSync);
+        self.screens.sync(
+            &reference.computer.computer,
+            &mut stream.computers,
+            &mut self.images,
+        );
         self.instances.sync(
             stream,
             reference,
@@ -508,6 +514,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.commands,
             &mut self.roots,
             &mut self.materials,
+            &self.screens,
         )?;
         let instance_cache_cpu = self.instances.cache_bytes();
         if self.allocation.instance_cache_cpu != instance_cache_cpu {

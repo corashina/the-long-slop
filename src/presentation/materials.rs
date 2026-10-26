@@ -1198,6 +1198,98 @@ impl SourceMaterial {
         }
         data
     }
+    /// Linear `_EmissionColor`.
+    pub fn emission(&self) -> Vec4 {
+        self.extension.surface.data.emission
+    }
+    /// The bound `_EmissionMap` image.
+    pub fn emission_map(&self) -> Option<&Handle<Image>> {
+        let data = &self.extension.surface.data;
+        (data.flags.y & EMISSION_SLOT_BIT != 0)
+            .then(|| self.bank(data.banks[1][0]).as_ref())
+            .flatten()
+    }
+    pub fn set_emission(&mut self, linear: Vec4) {
+        self.extension.surface.data.emission = linear;
+    }
+    /// Source `SetTexture("_EmissionMap", map)`. Null samples the white default.
+    pub fn set_emission_map(&mut self, map: Option<Handle<Image>>) -> Result<(), String> {
+        let data = &mut self.extension.surface.data;
+        let Some(map) = map else {
+            data.flags.y &= !EMISSION_SLOT_BIT;
+            data.defaults[4] = Vec4::ONE;
+            return Ok(());
+        };
+        let bank = if data.flags.y & EMISSION_SLOT_BIT != 0 {
+            data.banks[1][0]
+        } else {
+            // Banks 4 and 5 are the normal and depth maps: their presence changes the pipeline.
+            let used = |bank: u32| {
+                (0..9).any(|slot| {
+                    data.flags.y & (1 << slot) != 0 && data.banks[slot / 4][slot % 4] == bank
+                })
+            };
+            let bank = [1, 2, 3, 6]
+                .into_iter()
+                .find(|bank| !used(*bank))
+                .ok_or("No free texture bank for _EmissionMap")?;
+            data.flags.y |= EMISSION_SLOT_BIT;
+            data.banks[1][0] = bank;
+            data.uv[4] = Vec4::new(1., 1., 0., 0.);
+            bank
+        };
+        *self.bank_mut(bank) = Some(map);
+        Ok(())
+    }
+    fn bank(&self, bank: u32) -> &Option<Handle<Image>> {
+        match bank {
+            0 => &self.base.base_color_texture,
+            1 => &self.base.emissive_texture,
+            2 => &self.base.metallic_roughness_texture,
+            3 => &self.base.occlusion_texture,
+            4 => &self.base.normal_map_texture,
+            5 => &self.base.depth_map,
+            _ => &self.extension.surface.bank6,
+        }
+    }
+    fn bank_mut(&mut self, bank: u32) -> &mut Option<Handle<Image>> {
+        match bank {
+            0 => &mut self.base.base_color_texture,
+            1 => &mut self.base.emissive_texture,
+            2 => &mut self.base.metallic_roughness_texture,
+            3 => &mut self.base.occlusion_texture,
+            4 => &mut self.base.normal_map_texture,
+            5 => &mut self.base.depth_map,
+            _ => &mut self.extension.surface.bank6,
+        }
+    }
+}
+/// `flags.y` bit of the `_EmissionMap` slot.
+const EMISSION_SLOT_BIT: u32 = 1 << 4;
+/// Source `SetColor("_EmissionColor")` and, with `map`, `SetTexture("_EmissionMap")`.
+/// `None` keeps the current map. Only a changed value touches the asset.
+pub fn write_emission(
+    assets: &mut Assets<SourceMaterial>,
+    handle: &Handle<SourceMaterial>,
+    linear: Vec4,
+    map: Option<Handle<Image>>,
+) -> Result<(), String> {
+    let Some(material) = assets.get(handle) else {
+        return Ok(());
+    };
+    if material.emission() == linear
+        && map
+            .as_ref()
+            .is_none_or(|map| material.emission_map() == Some(map))
+    {
+        return Ok(());
+    }
+    let mut material = assets.get_mut(handle).expect("checked source material");
+    material.set_emission(linear);
+    if map.is_some() {
+        material.set_emission_map(map)?;
+    }
+    Ok(())
 }
 impl AsBindGroup for SourceMaterial {
     type Data = (

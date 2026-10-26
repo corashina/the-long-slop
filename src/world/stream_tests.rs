@@ -1,4 +1,10 @@
 //! Native adapter for the same renderer receipts and publication boundary used by WASM.
+#[path = "stream_tests/bikes.rs"]
+mod bikes;
+#[path = "stream_tests/breakables.rs"]
+mod breakables;
+#[path = "stream_tests/car_types.rs"]
+mod car_types;
 #[path = "stream_tests/cargo.rs"]
 mod cargo;
 #[path = "stream_tests/drive_out.rs"]
@@ -360,7 +366,7 @@ fn prepare_step_for_views(
         )
         .unwrap();
     assert!(stream.failure.is_none(), "{:?}", stream.failure);
-    run.align_startup(reference).unwrap();
+    run.align_startup(reference, [1, 1]).unwrap();
 }
 
 pub(crate) fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
@@ -1650,6 +1656,7 @@ fn replay_restore_replaces_selection_and_saved_readiness_checks_revision() {
         },
         seed: 42,
         date: reference.world.spawn_context.date,
+        start_car: candidate.start_car(),
         changes: ChangeRecords::default(),
         spawn: candidate.contents.state.capture_history(),
         boxes: Vec::new(),

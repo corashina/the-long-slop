@@ -52,6 +52,8 @@ pub use storage::{
 };
 pub mod small_items;
 pub use small_items::*;
+pub mod computer;
+pub use computer::*;
 pub mod melee;
 pub use melee::*;
 pub mod breakables;
@@ -619,11 +621,13 @@ pub struct FluidRulesReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PushGripReference {
+/// Source `pushgripable`. World prototypes use prototype node and collider indices.
+pub struct PushGripReference<Node = NodeId, Collider = ColliderId> {
     pub source: SourceId,
-    pub node: NodeId,
-    pub hand_node: NodeId,
-    pub colliders: Vec<ColliderId>,
+    pub node: Node,
+    /// Source `HT`. A null `HT` moves the nearest hand to the grip.
+    pub hand_node: Option<Node>,
+    pub colliders: Vec<Collider>,
     pub local_pose: Transform,
     pub in_use: bool,
 }
@@ -682,6 +686,10 @@ pub struct PlayerReference {
     pub grip_force: f32,
     pub grip_speed: f32,
     pub grip_distance: f32,
+    /// Source `fpscontroller.PedalingNm`: bike pedal torque at full gas.
+    pub pedaling_nm: f32,
+    /// Source `fpscontroller.PedalingRpm`: bike pedal rpm at full gas.
+    pub pedaling_rpm: f32,
     pub carry_min_weight: f32,
     pub carry_max_weight: f32,
     pub carry_anchor_offset: [f32; 3],
@@ -860,6 +868,7 @@ pub struct ReferenceManifest {
     pub flashlights: FlashlightRecord,
     pub storage: StorageRecord,
     pub small_items: SmallItemsReference,
+    pub computer: ComputerRecord,
     pub melee: MeleeReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
@@ -1755,6 +1764,12 @@ impl ReferenceManifest {
                 && p.grip_distance > 0.0,
             "push and throw parameters",
         )?;
+        require(
+            finite(&[p.pedaling_nm, p.pedaling_rpm])
+                && p.pedaling_nm >= 0.0
+                && p.pedaling_rpm >= 0.0,
+            "pedaling parameters",
+        )?;
         let mut push_owners = HashSet::new();
         for push in &self.pushables {
             require(
@@ -1779,7 +1794,7 @@ impl ReferenceManifest {
             if let Some(grip) = &push.grip {
                 require(
                     node_ids.contains(&grip.node)
-                        && node_ids.contains(&grip.hand_node)
+                        && grip.hand_node.is_none_or(|node| node_ids.contains(&node))
                         && transform(&grip.local_pose)
                         && !grip.colliders.is_empty()
                         && grip.colliders.iter().all(|id| collider_ids.contains(id)),
@@ -1842,6 +1857,7 @@ impl ReferenceManifest {
         self.flashlights.validate(self)?;
         self.storage.validate(self)?;
         self.small_items.validate(self)?;
+        self.computer.validate(self)?;
         self.melee.validate(self)?;
         ids(self.breakables.iter().map(|b| &b.source), "breakable sources")?;
         for breakable in &self.breakables {
