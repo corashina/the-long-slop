@@ -538,7 +538,12 @@ pub fn write_cascades(
                     view_from_world: world_from_view.inverse(),
                     clip_from_view: projection * world_from_view,
                     direction_to_light: (rotation * Vec3::Z).extend(0.),
-                    bias: Vec4::new(depth_bias, 1., normal_bias, 0.),
+                    bias: Vec4::new(
+                        depth_bias,
+                        1.,
+                        normal_bias,
+                        super::surface_views::player_dist(view.index),
+                    ),
                 },
                 &device,
                 &queue,

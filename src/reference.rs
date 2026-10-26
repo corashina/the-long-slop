@@ -1066,7 +1066,7 @@ impl ReferenceManifest {
                 .filter(|a| a.usage == AssetUsage::PlayerPrototype)
                 .count()
                 == 1,
-            "exactly one inactive player asset",
+            "exactly one player asset",
         )?;
         require(
             self.library.schema_version == 1

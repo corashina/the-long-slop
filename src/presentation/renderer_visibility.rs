@@ -35,18 +35,18 @@ pub struct CameraVisibility {
     pub sort_data: EntityHashMap<SourceSortData>,
 }
 
+type CameraMesh = (
+    Option<&'static SourceRenderer>,
+    Option<&'static super::materials::SourceShadowMode>,
+    Option<&'static SourceSortData>,
+    Has<SourceMaterialWarmup>,
+);
+
 /// Keep the Mesh3d class even when empty so Bevy can remove retained phase items.
 /// Retain order and capacity. ViewVisibility and shadow masks are not changed here.
 pub fn filter_camera_visibility(
     mut views: Query<(&Camera, &mut VisibleEntities)>,
-    meshes: Query<
-        (
-            Option<&SourceRenderer>,
-            Option<&SourceSortData>,
-            Has<SourceMaterialWarmup>,
-        ),
-        With<Mesh3d>,
-    >,
+    meshes: Query<CameraMesh, With<Mesh3d>>,
     mut output: ResMut<CameraVisibility>,
 ) {
     output.entities.clear();
@@ -59,10 +59,15 @@ pub fn filter_camera_visibility(
             continue;
         }
         entities.retain(|entity| {
-            let Ok((renderer, sort, warmup)) = meshes.get(*entity) else {
+            let Ok((renderer, mode, sort, warmup)) = meshes.get(*entity) else {
                 return false;
             };
-            if !warmup && renderer.is_some_and(|renderer| renderer.0.cast_shadows == 3) {
+            // ShadowsOnly: the shadow scene draws it, the camera does not.
+            // The glTF mode arrives before the renderer record.
+            if !warmup
+                && (renderer.is_some_and(|renderer| renderer.0.cast_shadows == 3)
+                    || mode.is_some_and(|mode| mode.0 == 3))
+            {
                 return false;
             }
             output.entities.insert(*entity);

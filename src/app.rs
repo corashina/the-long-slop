@@ -45,6 +45,17 @@ pub(crate) struct Drive {
     last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
+impl Drive {
+    /// Player body pose at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self) -> VehiclePose {
+        let mut pose = self.runtime.area.player.body_pose(&self.runtime.physics);
+        for i in 0..3 {
+            pose.position[i] += self.rendered.position[i] - self.current.position[i];
+        }
+        pose
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct FeedbackStamp {
     actions: u32,
@@ -246,7 +257,11 @@ pub fn run(
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
-                presentation::spawned::sync,
+                (
+                    presentation::spawned::sync,
+                    presentation::player_body::sync,
+                )
+                    .chain(),
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
@@ -286,6 +301,7 @@ fn setup(
 ) {
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
+    commands.insert_resource(presentation::player_body::PlayerBody::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {
