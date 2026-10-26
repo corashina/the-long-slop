@@ -414,7 +414,7 @@ def recover_world(source: LibrarySource, reader: LibraryReader, output: Path, fi
     assembled=samples['assembled'][0]
     draw_settings=source.get('level0',16865)
     world={'sample_payload_sha256':PAYLOAD_SHA256,'managed_sha256':samples['managed_sha256'],'library':provenance(reader.receipt),'capture_library':capture_library,
-        'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(source_id(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
+        'spawn_context':recover_spawn_context(samples),'generation_frame':IDENTITY,'magnetic_field':magnetic_field,'electronics_cutoff':0.2,'draw_distance':draw_distance.record(selected.receipt(draw_settings),source.read(draw_settings),assembled['distances']),'source_hashes':[],
         'road':{'source':source_id(road_owner),'prototypes':road_roots,**generation_counts(road),**{k:road[k] for k in road_fields}},
         'terrain':{'source':source_id(settings_owner),'prefabs':terrain_prefabs,'materials':terrain_materials,'textures':list(terrain_source.lighting_textures.values()),'game_settings':{'source':source_id(main_owner),'homesickMode':main['GSettings']['homesickMode']},
             'tiles':[{k:settings[t][k] for k in ('tileSize','resolution','drawDistance','YCoord')} for t in ('Terrain','DistantTerrain','DistantTerrain2')],
