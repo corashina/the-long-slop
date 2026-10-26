@@ -457,8 +457,13 @@ pub struct VehicleRuntime {
     pub trip_m: f64,
     pub drivetrain: crate::simulation::drivetrain::DrivetrainState,
     pub exhaust: crate::exhaust::ExhaustState,
-    /// Car root `tankscript` item.
+    /// Source `carscript.Tank`: the root tank, else the tank part in `fuel_tank_slot`.
+    /// Found once at the start of each step.
     pub fuel_tank: Option<ItemId>,
+    /// Car root `tankscript` item.
+    root_tank: Option<ItemId>,
+    /// Source `carscript.tankslot`.
+    pub(crate) fuel_tank_slot: Option<crate::reference::PartSlotId>,
     /// Source `carscript.startingTime`.
     pub starter_delay_seconds: f32,
     /// Car electronics allow ignition.
@@ -505,6 +510,8 @@ impl VehicleRuntime {
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(record.into()),
             exhaust: crate::exhaust::ExhaustState::new(&record.exhaust, parts.seed),
             fuel_tank: parts.fuel_tank,
+            root_tank: parts.fuel_tank,
+            fuel_tank_slot: None,
             starter_delay_seconds: record.starter_delay_seconds,
             electronics_enabled: parts
                 .electronics
@@ -2148,11 +2155,19 @@ impl GarageRuntime {
         self.mounted_engine(key)
             .map_or_else(EngineOutput::default, |e| e.state.output())
     }
-    /// Finds the parts mounted on each car. The step reads the result.
+    /// Finds the parts and the fuel tank mounted on each car. The step reads the result.
     /// Part moves have no single change hook, so this runs once per step.
     pub(crate) fn refresh_powertrains(&mut self) {
+        let items = &self.area.items;
+        let parts = &self.area.interaction.parts;
         for (key, vehicle) in &mut self.vehicles {
-            vehicle.powertrain = self.powertrain.mounted_on(&self.area.items, key);
+            vehicle.powertrain = self.powertrain.mounted_on(items, key);
+            vehicle.fuel_tank = vehicle.root_tank.or_else(|| {
+                vehicle
+                    .fuel_tank_slot
+                    .and_then(|slot| parts.slot_item(slot))
+                    .filter(|&item| items.get(item).is_some_and(|i| i.fluid.is_some()))
+            });
         }
     }
     /// Engine input without car controls: ambient temperature and clock rate.

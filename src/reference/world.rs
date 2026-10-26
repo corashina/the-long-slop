@@ -2173,7 +2173,7 @@ mod tests {
             "prefab_pose": pose,
             "vehicle": {
                 "source": src(11), "body": 0, "car_type": 1, "colliders": [0], "mass_kg": 820.0, "serialized_mass_kg": 900.0,
-                "fuel_tank": 0, "electronics": null, "starter_delay_seconds": 1.0,
+                "fuel_tank": 0, "fuel_tank_slot": null, "electronics": null, "starter_delay_seconds": 1.0,
                 "driving": {"initial_gear": 1, "force_automatic": false, "play_shift_sounds_in_automatic": false},
                 "handbrake": true, "hub": {"radius_m": 0.3, "mass_kg": 10.0, "forward_stiffness": 1.0, "sideways_stiffness": 1.0},
                 "wheels": [{"source": src(12), "node": 1, "slot": 2, "mount": 2, "steer": true, "drive": true, "brake": true, "handbrake": true, "sideways_stiffness_modifier": 1.0,

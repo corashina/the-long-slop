@@ -85,7 +85,7 @@ def car_fixture():
         m_ShadowDistance=50., m_CullingMask={'m_Bits': 1}))
     data[car.path_id].update(speedBasedKeyboardSens=0, keySteerSensMultiplier=0, RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
-        WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), carType=1, startingTime=1.,
+        WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), tankslot=ptr(None), carType=1, startingTime=1.,
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
         forceAutomaticTransmission=0, BhandBrake=1, kerekagyType=0, differentialRatio=4., steerAngle=35.,
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
@@ -124,6 +124,7 @@ class VehicleRecordTests(unittest.TestCase):
         # Dry massScript mass. The runtime adds the 20 L of tank fluid.
         self.assertEqual(vehicle['mass_kg'], 800.)
         self.assertEqual(vehicle['fuel_tank'], 0)
+        self.assertIsNone(vehicle['fuel_tank_slot'])
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         self.assertIsNone(vehicle['instruments'])
         self.assertEqual(vehicle['kmh_meters'], [])

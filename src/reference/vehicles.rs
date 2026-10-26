@@ -18,6 +18,8 @@ pub struct WorldVehicleReference {
     pub serialized_mass_kg: f32,
     /// Root `tankscript` node.
     pub fuel_tank: Option<u32>,
+    /// Source `carscript.tankslot`. Its part holds the fuel tank when the root has none.
+    pub fuel_tank_slot: Option<SourceId>,
     /// `carscript.electronics` node.
     pub electronics: Option<u32>,
     /// Source `carscript.startingTime`.

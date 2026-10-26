@@ -138,6 +138,15 @@ def kmh_meters(source, proto, car_reader, car) -> list:
     return rows
 
 
+def fuel_tank_slot(source, proto, car_reader, car):
+    """carscript.tankslot. Its part holds the fuel tank when the root has no tankscript."""
+    slot=source.resolve(car_reader,car['tankslot'])
+    if slot is None:return None
+    if source.class_name(slot)!='partslotscript':raise ValueError(f'{key(car_reader)} tankslot is not a partslotscript')
+    proto.node(slot)
+    return source_id(slot)
+
+
 def part_records(source, hierarchy, asset, material_indices) -> tuple[list, list, list]:
     """Engine, radiator and gauge records of the part nodes of one prototype."""
     proto=Prototype(source,hierarchy)
@@ -257,7 +266,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'colliders':[i for i,c in enumerate(colliders) if c['body']==body and c['enabled']],
         'mass_kg':sum(dry_mass(source,n['components']) for n in hierarchy if n['active']),
         'serialized_mass_kg':source.read(rigidbody)['m_Mass'],
-        'fuel_tank':0 if tanks else None,'electronics':proto.link(car_reader,car['electronics']),
+        'fuel_tank':0 if tanks else None,'fuel_tank_slot':fuel_tank_slot(source,proto,car_reader,car),'electronics':proto.link(car_reader,car['electronics']),
         'starter_delay_seconds':car['startingTime'],'driving':car_driving(car),'handbrake':bool(car['BhandBrake']),
         'hub':hub_record(main['kerekagyProperties'],car),'wheels':wheels,
         'gear_ratios':[g['ratio'] for g in car['gears']],'gear_free_run':[bool(g['freeRun']) for g in car['gears']],

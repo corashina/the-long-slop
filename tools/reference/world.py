@@ -43,7 +43,7 @@ def selected_actions(source, scripts, actions):
 VEHICLE_CLASSES = {'carscript','utanfutoscript'}
 # The start car prefab. car_prototypes adds the bus pool.
 LADA = ('sharedassets1.assets',82556)
-CAR_CATEGORIES = ('bus',)
+CAR_CATEGORIES = ('bus', 'bike')
 def vehicle_exclusion(root, classes, cars):
     """Car roots outside `cars` stay other_vehicle."""
     return 'other_vehicle' if classes & VEHICLE_CLASSES and key(root) not in cars else ''
