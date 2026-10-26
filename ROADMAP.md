@@ -139,9 +139,18 @@ Run the X04b test pass (save slots, autosave) in the same run:
 5. Turn on "Load last save at start" and reload the page. The last save loads.
 6. Old saves do not load (save schema 24).
 
+Run the X01a test pass (player body) in the same run:
+
+1. Re-export, then rebuild (X01a added seat, drive and `Th` frames).
+2. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms (twist around the bone axis is a known risk) and hands on the wheel.
+3. Check you cannot see inside the head.
+4. Check the body shadow and the eye shadows. Check the siphon hose shadow follows the hose.
+5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
+6. Check the F3 cost of the body.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
+| X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |

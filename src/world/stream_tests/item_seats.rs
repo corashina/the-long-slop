@@ -46,15 +46,8 @@ fn item_seat_follows_item_body() {
         (seat.item, seat.body, &seat.owner),
         (item, body, &SeatOwner::Item(owner.clone()))
     );
-    let (record, pose) = (seat.seat.clone(), seat.pose);
-    assert!(run.area.player.enter_item_seat(
-        SeatOwner::Item(owner.clone()),
-        body,
-        &record,
-        seat.item,
-        pose,
-        &mut run.physics
-    ));
+    assert!(run.area.player.enter_item_seat(&seat, &mut run.physics));
+    let pose = seat.pose;
     assert_eq!(
         run.area.player.seat_owner(),
         Some(&SeatOwner::Item(owner.clone()))
