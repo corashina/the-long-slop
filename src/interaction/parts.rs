@@ -31,7 +31,6 @@ struct Part {
     shapes: Vec<Shape>,
     members: Vec<(ItemId, NodeId, f32)>,
     pickup: PickupReference,
-    seats: Vec<SeatId>,
     pose: Pose,
     mass: f32,
     assembly_dry_mass: f32,
@@ -152,7 +151,6 @@ impl PartAttachments {
                         + vector(&p.shapes)
                         + vector(&p.members)
                         + p.pickup.source.file.capacity()
-                        + vector(&p.seats)
                         + vector(&p.assembly_fluids)
                 })
                 .sum::<usize>()
@@ -239,12 +237,6 @@ impl PartAttachments {
                 slot: r.part_slots.iter().position(|s| s.part == Some(p.item)),
                 body: None,
                 shapes,
-                seats: r
-                    .seats
-                    .iter()
-                    .filter(|s| members.iter().any(|m| m.0 == s.item))
-                    .map(|s| s.id)
-                    .collect(),
                 members,
                 pickup: item
                     .pickup
@@ -416,7 +408,6 @@ impl PartAttachments {
             shapes,
             members,
             pickup,
-            seats: Vec::new(),
             pose: world_pose,
             mass: f32::NAN,
             assembly_dry_mass: mass,
@@ -825,7 +816,9 @@ impl PartAttachments {
             || p.pickup.cant_pickup
             || p.pickup.cant_pickup_while_mounted
             || (player.seated() && p.pickup.cant_pickup_while_seated)
-            || player.seat().is_some_and(|seat| p.seats.contains(&seat))
+            || player
+                .seat_item()
+                .is_some_and(|seat| p.members.iter().any(|m| m.0 == seat))
             || items.get(item).is_none()
         {
             return Err(InteractionBlock::Unavailable);

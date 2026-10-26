@@ -1846,6 +1846,7 @@ impl InteractionState {
                         seat.owner.clone(),
                         seat.body,
                         &seat.seat,
+                        seat.seat_item,
                         seat.pose,
                         physics,
                     )

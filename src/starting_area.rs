@@ -649,6 +649,23 @@ fn world_vehicle(
         .expect("car prototype")
 }
 
+/// Source electronics cutoff: `electronicsscript` output above it powers ignition.
+const ELECTRONICS_CUTOFF: f32 = 0.2;
+
+/// Per-copy inputs of a world car runtime.
+pub(crate) struct WorldCarParts {
+    /// Stable seed of the copy, from its object key.
+    pub seed: u64,
+    /// Car root `tankscript` item.
+    pub fuel_tank: Option<ItemId>,
+    /// Enabled solid chassis colliders in the chassis frame.
+    pub recovery_bounds: crate::reference::Bounds,
+    /// Other bodies of the car instance.
+    pub bodies: Vec<RigidBodyHandle>,
+    /// `carscript.electronics` output. None: the car has no electronics.
+    pub electronics: Option<f32>,
+}
+
 /// Car-side state of a car copy. The world change records keep it while the car is retired
 /// and in the save.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -679,6 +696,8 @@ pub struct VehicleRuntime {
     /// V03 bridge: wheel effects of old garage cars only. Task 9a adds world car records.
     pub wheel_effects: Option<crate::wheel_effects::WheelEffects>,
     recovery_bounds: crate::reference::Bounds,
+    /// Bodies of the car hierarchy other than the chassis. Recovery moves them with it.
+    bodies: Vec<RigidBodyHandle>,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
     /// Parts mounted on this car, found once at the start of each step.
@@ -690,12 +709,10 @@ pub struct VehicleRuntime {
 
 impl VehicleRuntime {
     /// Runtime of a car copy of world prototype `prototype`.
-    /// `recovery_bounds` hold the enabled chassis colliders in the chassis frame.
     pub(crate) fn world(
         prototype: usize,
         record: &crate::reference::WorldVehicleReference,
-        fuel_tank: Option<ItemId>,
-        recovery_bounds: crate::reference::Bounds,
+        parts: WorldCarParts,
     ) -> Self {
         Self {
             record: VehicleRecord::World(prototype),
@@ -703,17 +720,15 @@ impl VehicleRuntime {
             trip_m: 0.0,
             ignition: IgnitionState::default(),
             drivetrain: crate::simulation::drivetrain::DrivetrainState::new(record.into()),
-            exhaust: crate::exhaust::ExhaustState::new(
-                &record.exhaust,
-                record.source.path_id as u64,
-            ),
-            fuel_tank,
+            exhaust: crate::exhaust::ExhaustState::new(&record.exhaust, parts.seed),
+            fuel_tank: parts.fuel_tank,
             starter_delay_seconds: record.starter_delay_seconds,
-            // The world record has no electronics output yet. Task 9 reads it from the
-            // `carscript.electronics` part.
-            electronics_enabled: true,
+            electronics_enabled: parts
+                .electronics
+                .is_none_or(|output| output > ELECTRONICS_CUTOFF),
             wheel_effects: None,
-            recovery_bounds,
+            recovery_bounds: parts.recovery_bounds,
+            bodies: parts.bodies,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
             requested_headlights: 0,
@@ -741,6 +756,7 @@ impl VehicleRuntime {
         reference: &ReferenceManifest,
         index: usize,
         vehicle: &crate::reference::VehicleReference,
+        bodies: Vec<RigidBodyHandle>,
     ) -> Result<Self, ReferenceError> {
         let mut recovery_bounds = crate::reference::Bounds {
             min: [f32::MAX; 3],
@@ -780,6 +796,7 @@ impl VehicleRuntime {
                 vehicle.source.path_id as u64,
             )),
             recovery_bounds,
+            bodies,
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
             requested_headlights: 0,
@@ -946,6 +963,26 @@ impl GarageRuntime {
             urine_splash,
             0x70697373,
         );
+        let vehicles = reference
+                .vehicles
+                .iter()
+                .enumerate()
+                .map(|(index, vehicle)| {
+                    let bodies = area
+                        .bodies
+                        .iter()
+                        .filter(|(id, _)| body_vehicle(reference, **id) == Some(index))
+                        .map(|(_, handle)| *handle)
+                        .filter(|handle| {
+                            *handle != physics.chassis_handle(&garage_vehicle_key(index))
+                        })
+                        .collect();
+                    Ok((
+                        garage_vehicle_key(index),
+                        VehicleRuntime::new(reference, index, vehicle, bodies)?,
+                    ))
+                })
+                .collect::<Result<_, ReferenceError>>()?;
         let mut run = Self {
             driving_assists: reference.driving.default_assists,
             urine,
@@ -975,17 +1012,7 @@ impl GarageRuntime {
             startup_aligned: false,
             lighting,
             distances,
-            vehicles: reference
-                .vehicles
-                .iter()
-                .enumerate()
-                .map(|(index, vehicle)| {
-                    Ok((
-                        garage_vehicle_key(index),
-                        VehicleRuntime::new(reference, index, vehicle)?,
-                    ))
-                })
-                .collect::<Result<_, ReferenceError>>()?,
+            vehicles,
             powertrain: PowertrainParts::from_garage(reference),
             // V03 bridge: the old garage car starts selected. Task 9 removes it.
             vehicle: Some(garage_vehicle_key(0)),
@@ -1675,7 +1702,7 @@ impl GarageRuntime {
                 ((current[0] - previous[0]).powi(2) + (current[2] - previous[2]).powi(2)).sqrt();
         }
 
-        self.advance_under_map(reference);
+        self.advance_under_map();
         // An item seat moves the player with the item body, so the player stays the focus.
         let focus = if let Some(vehicle) = self.area.player.seat_vehicle() {
             self.physics.snapshot(vehicle).pose.position

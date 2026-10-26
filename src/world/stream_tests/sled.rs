@@ -122,11 +122,12 @@ fn sled_slides_steers_and_keeps_its_seat() {
                 .filter(|seat| seat.seat.source == first.source)
         })
         .expect("bound first sled seat");
-    let (seat_record, pose) = (seat.seat.clone(), seat.pose);
+    let (seat_record, seat_item, pose) = (seat.seat.clone(), seat.seat_item, seat.pose);
     assert!(run.area.player.enter_item_seat(
         SeatOwner::Item(owner.clone()),
         body,
         &seat_record,
+        seat_item,
         pose,
         &mut run.physics
     ));
@@ -172,6 +173,7 @@ fn sled_slides_steers_and_keeps_its_seat() {
         SeatOwner::Item(owner.clone()),
         body,
         &seat_record,
+        seat_item,
         pose,
         &mut run.physics
     ));

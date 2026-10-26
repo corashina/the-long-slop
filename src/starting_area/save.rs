@@ -213,6 +213,7 @@ impl GarageRuntime {
                 owner,
                 bound.body,
                 &bound.seat,
+                bound.seat_item,
                 local_pose(&seat.local_pose),
                 &mut self.physics,
             );

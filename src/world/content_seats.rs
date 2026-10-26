@@ -155,6 +155,8 @@ fn main_seat(
 /// One seat of a spawned world item. A car copy owns its seats as a vehicle.
 pub(crate) struct ItemSeat {
     pub item: ItemId,
+    /// The nearest item that holds the main seatscript node: a seat part or the item itself.
+    pub seat_item: ItemId,
     pub owner: SeatOwner,
     pub body: RigidBodyHandle,
     /// sitPos relative to the item body.
@@ -395,8 +397,25 @@ impl WorldStream {
                 prototype,
                 seat.hit_nodes[0] as usize,
             ));
+            let content = &self.contents.active[slot];
+            let mut cursor = Some(seat.hit_nodes[0]);
+            let mut seat_item = item;
+            while let Some(n) = cursor {
+                if let Some(found) = crate::world::content_mechanisms::node_item(
+                    content,
+                    prototype,
+                    &self.reference,
+                    &self.contents.rules,
+                    n as usize,
+                ) {
+                    seat_item = found;
+                    break;
+                }
+                cursor = prototype.nodes[n as usize].parent;
+            }
             let target = Arc::new(ItemSeat {
                 item,
+                seat_item,
                 owner: owner.clone(),
                 body,
                 pose: from_rapier(&(body_pose.inverse() * sit)),

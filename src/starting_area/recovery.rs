@@ -12,20 +12,18 @@ pub struct RecoveryTransport {
     pub held_delta: Pose,
 }
 impl GarageRuntime {
-    pub fn collect_recovery_ownership(&mut self, reference: &ReferenceManifest, vehicle: usize) {
+    /// Bodies that move with car `vehicle`: its chassis, its other bodies and its cargo.
+    pub fn collect_recovery_ownership(&mut self, vehicle: &ObjectKey) {
         self.recovery_bodies.clear();
         self.recovery_held_bodies.clear();
-        let chassis = self
-            .physics
-            .chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle));
+        let chassis = self.physics.chassis_handle(vehicle);
         self.recovery_bodies.push(chassis);
         let inverse = self.physics.rapier().bodies[chassis].position().inverse();
         let held = self.area.interaction.held();
-        let bounds = &self.vehicles[&crate::vehicle::garage_vehicle_key(vehicle)].recovery_bounds;
-        for (&id, &handle) in &self.area.bodies {
-            if body_vehicle(reference, id) == Some(vehicle)
-                && !self.recovery_bodies.contains(&handle)
-            {
+        let car = &self.vehicles[vehicle];
+        let bounds = &car.recovery_bounds;
+        for &handle in &car.bodies {
+            if !self.recovery_bodies.contains(&handle) {
                 self.recovery_bodies.push(handle);
             }
         }
@@ -54,7 +52,11 @@ impl GarageRuntime {
             }
         }
     }
-    pub fn recovery_clearance(&self, pose: VehiclePose) -> Option<RecoveryTransport> {
+    pub fn recovery_clearance(
+        &self,
+        vehicle: &ObjectKey,
+        pose: VehiclePose,
+    ) -> Option<RecoveryTransport> {
         recovery_clearance(
             &self.area,
             &self.physics,
@@ -62,19 +64,20 @@ impl GarageRuntime {
             &self.recovery_bodies,
             &self.recovery_held_bodies,
             pose,
-            self.garage_index(),
+            vehicle,
         )
     }
-    pub fn advance_recovery(
-        &mut self,
-        reference: &ReferenceManifest,
-    ) -> Result<bool, ReferenceError> {
+    /// Moves the last seated car to the prepared recovery pose. Without a car it stops.
+    pub fn advance_recovery(&mut self) -> Result<bool, ReferenceError> {
         if !self.recovering {
             return Ok(false);
         }
-        // V03 bridge: recovery moves an old garage car. Task 9 removes it.
-        let vehicle = self.garage_index();
-        self.collect_recovery_ownership(reference, vehicle);
+        let Some(vehicle) = self.vehicle.clone() else {
+            self.recovering = false;
+            return Ok(false);
+        };
+        let vehicle = &vehicle;
+        self.collect_recovery_ownership(vehicle);
         let origin = self.stream.origin;
         let area = &self.area;
         let persistent = &self.persistent_world;
@@ -101,10 +104,13 @@ impl GarageRuntime {
             return Ok(false);
         };
         let plan = self
-            .recovery_clearance(VehiclePose {
-                position: origin.local(target.position),
-                rotation: target.rotation,
-            })
+            .recovery_clearance(
+                vehicle,
+                VehiclePose {
+                    position: origin.local(target.position),
+                    rotation: target.rotation,
+                },
+            )
             .ok_or_else(|| ReferenceError("Source recovery clearance changed".into()))?;
         let player = plan
             .player
@@ -151,21 +157,12 @@ pub(super) fn transport_prepared(
     bodies: &[RigidBodyHandle],
     held: &[RigidBodyHandle],
     plan: RecoveryTransport,
-    vehicle: usize,
+    vehicle: &ObjectKey,
 ) {
     area.interaction
         .finish_cancelled_input(&mut area.player, physics);
-    let old = *physics.rapier().bodies
-        [physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle))]
-    .position();
-    let delta = to_rapier(plan.vehicle) * old.inverse();
     area.interaction.drop_held(&mut area.items, physics);
-    physics.reset(&crate::vehicle::garage_vehicle_key(vehicle), plan.vehicle);
-    for &body in bodies {
-        if body != physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)) {
-            transport_body(physics, body, delta);
-        }
-    }
+    let delta = move_car(physics, vehicle, bodies, plan.vehicle);
     area.interaction.sync_mechanisms(physics);
     area.sync_attachments(physics, false);
     area.sync_compound(physics);
@@ -191,6 +188,24 @@ pub(super) fn transport_prepared(
     area.commit_poses(physics, true);
 }
 
+/// Moves car `vehicle` to `pose` and its other `bodies` with it. Returns the pose change.
+fn move_car(
+    physics: &mut PhysicsWorld,
+    vehicle: &ObjectKey,
+    bodies: &[RigidBodyHandle],
+    pose: VehiclePose,
+) -> Pose {
+    let chassis = physics.chassis_handle(vehicle);
+    let delta = to_rapier(pose) * physics.rapier().bodies[chassis].position().inverse();
+    physics.reset(vehicle, pose);
+    for &body in bodies {
+        if body != chassis {
+            transport_body(physics, body, delta);
+        }
+    }
+    delta
+}
+
 pub fn recovery_clearance(
     area: &StartingArea,
     physics: &PhysicsWorld,
@@ -198,15 +213,11 @@ pub fn recovery_clearance(
     bodies: &[RigidBodyHandle],
     held: &[RigidBodyHandle],
     pose: VehiclePose,
-    vehicle: usize,
+    vehicle: &ObjectKey,
 ) -> Option<RecoveryTransport> {
-    let old_car = to_rapier(persistent.recovery_body_pose(
-        physics,
-        physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)),
-        vehicle,
-    )?);
-    let dormant =
-        !physics.body_active(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)));
+    let chassis = physics.chassis_handle(vehicle);
+    let old_car = to_rapier(persistent.recovery_body_pose(physics, chassis, vehicle)?);
+    let dormant = !physics.body_active(chassis);
     let collider_pose = |handle: RigidBodyHandle, collider: &Collider| -> Option<Pose> {
         if dormant && bodies.contains(&handle) {
             Some(
@@ -339,4 +350,36 @@ pub fn recovery_clearance(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rapier3d::prelude::ColliderBuilder;
+
+    #[test]
+    fn recovery_moves_a_world_car_and_its_bodies() {
+        let prototype = crate::vehicle::car_prototype_fixture();
+        let (mut physics, keys, chassis) = crate::vehicle::body_fixture::two_cars(&prototype);
+        // A door body of the first car, one metre to its side.
+        let (door, _) = physics.insert(
+            RigidBodyBuilder::dynamic().translation(Vector::new(-4.0, 0.5, 0.0)),
+            ColliderBuilder::cuboid(0.1, 0.4, 0.5),
+        );
+        let other = *physics.rapier().bodies[chassis[1]].position();
+        let target = VehiclePose {
+            position: [20.0, 2.0, 30.0],
+            rotation: rapier3d::math::Rotation::from_rotation_y(1.0).to_array(),
+        };
+        move_car(&mut physics, &keys[0], &[chassis[0], door], target);
+        let car = physics.snapshot(&keys[0]).pose;
+        for i in 0..3 {
+            assert!((car.position[i] - target.position[i]).abs() < 1e-4, "{car:?}");
+        }
+        // The door keeps its place relative to the chassis.
+        let local = physics.rapier().bodies[chassis[0]].position().inverse()
+            * physics.rapier().bodies[door].translation();
+        assert!((local - Vector::new(1.0, 0.0, 0.0)).length() < 1e-4, "{local:?}");
+        assert_eq!(*physics.rapier().bodies[chassis[1]].position(), other);
+    }
 }

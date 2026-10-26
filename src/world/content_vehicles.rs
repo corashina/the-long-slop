@@ -10,7 +10,7 @@ use crate::starting_area::VehicleRuntime;
 use crate::vehicle::PhysicsWorld;
 use crate::world::changes::ChangeRecords;
 use crate::world::contents::ContentInstance;
-use crate::world::spawn_rules::SourceRules;
+use crate::world::spawn_rules::{SourceRules, number};
 use crate::world::{ObjectKey, StructureInstance};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::BTreeMap;
@@ -60,13 +60,27 @@ pub(super) fn bind(
             .iter()
             .position(|p| p.source == prototype.source)
             .ok_or_else(|| ReferenceError("Car prototype missing".into()))?;
+        let electronics = record
+            .electronics
+            .map(|node| electronics_output(world, rules, prototype, node))
+            .transpose()?
+            .flatten();
         spawn(
-            ObjectKey::Generated(content.content.placement.id.clone()),
-            index,
+            CarCopy {
+                key: ObjectKey::Generated(content.content.placement.id.clone()),
+                prototype: index,
+                chassis,
+                colliders: &colliders,
+                bodies: instance
+                    .bodies
+                    .iter()
+                    .copied()
+                    .filter(|body| *body != chassis)
+                    .collect(),
+                fuel_tank: record.fuel_tank.and_then(node_item),
+                electronics,
+            },
             prototype,
-            chassis,
-            &colliders,
-            record.fuel_tank.and_then(node_item),
             physics,
             vehicles,
             changes,
@@ -125,15 +139,47 @@ pub(crate) fn register_radiator(
     powertrain.register_radiator(part);
 }
 
-/// Makes `chassis` a vehicle and adds its car runtime with the retired state of `key`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn spawn(
-    key: ObjectKey,
-    index: usize,
+/// Source `electronicsscript` output of prototype node `node`: `maxOutput` less the jam share.
+/// None: the node has no electronics script.
+pub(crate) fn electronics_output(
+    world: &WorldReference,
+    rules: &SourceRules,
     prototype: &WorldPrototypeReference,
-    chassis: RigidBodyHandle,
-    colliders: &[ColliderHandle],
-    fuel_tank: Option<ItemId>,
+    node: u32,
+) -> Result<Option<f32>, ReferenceError> {
+    let node = prototype
+        .nodes
+        .get(node as usize)
+        .ok_or_else(|| ReferenceError("Car electronics node missing".into()))?;
+    let Some(record) = rules.component(world, &node.source, "electronicsscript")? else {
+        return Ok(None);
+    };
+    let f = record.fields;
+    Ok(Some(
+        number(f, "maxOutput")? * crate::world::spawn_lamps::electronics_factor(f)?,
+    ))
+}
+
+/// One car copy of a world instance, as the binder spawns it.
+pub(crate) struct CarCopy<'a> {
+    pub key: ObjectKey,
+    /// Index of the car prototype in `WorldReference::prototypes`.
+    pub prototype: usize,
+    pub chassis: RigidBodyHandle,
+    /// Live handles of the record chassis colliders.
+    pub colliders: &'a [ColliderHandle],
+    /// Other bodies of the car instance.
+    pub bodies: Vec<RigidBodyHandle>,
+    /// Car root `tankscript` item.
+    pub fuel_tank: Option<ItemId>,
+    /// `carscript.electronics` output. None: the car has no electronics.
+    pub electronics: Option<f32>,
+}
+
+/// Makes the chassis a vehicle and adds its car runtime with the retired state of its key.
+pub(crate) fn spawn(
+    copy: CarCopy,
+    prototype: &WorldPrototypeReference,
     physics: &mut PhysicsWorld,
     vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
     changes: &mut ChangeRecords,
@@ -142,12 +188,22 @@ pub(crate) fn spawn(
         .vehicle
         .as_ref()
         .ok_or_else(|| ReferenceError("Prototype has no vehicle record".into()))?;
+    let key = copy.key;
     if vehicles.contains_key(&key) {
         return Err(ReferenceError("Car runtime already exists".into()));
     }
-    physics.add_vehicle(key.clone(), chassis, colliders, prototype)?;
-    let mut runtime =
-        VehicleRuntime::world(index, record, fuel_tank, chassis_bounds(physics, colliders));
+    physics.add_vehicle(key.clone(), copy.chassis, copy.colliders, prototype)?;
+    let mut runtime = VehicleRuntime::world(
+        copy.prototype,
+        record,
+        crate::starting_area::WorldCarParts {
+            seed: key.seed(),
+            fuel_tank: copy.fuel_tank,
+            recovery_bounds: chassis_bounds(physics, copy.colliders),
+            bodies: copy.bodies,
+            electronics: copy.electronics,
+        },
+    );
     if let Some(state) = changes.take_vehicle(&key) {
         if state.gear >= record.gear_ratios.len() {
             return Err(ReferenceError("Saved car gear is out of range".into()));
@@ -281,12 +337,16 @@ mod tests {
             }],
         ));
         spawn(
-            ObjectKey::Generated(id.clone()),
-            0,
+            CarCopy {
+                key: ObjectKey::Generated(id.clone()),
+                prototype: 0,
+                chassis: body,
+                colliders: &[collider],
+                bodies: Vec::new(),
+                fuel_tank: Some(item),
+                electronics: None,
+            },
             prototype,
-            body,
-            &[collider],
-            Some(item),
             physics,
             vehicles,
             changes,

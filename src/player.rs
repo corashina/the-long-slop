@@ -18,7 +18,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
-use crate::reference::{PlayerPoseReference, PlayerReference, SeatId, SeatReference};
+use crate::reference::{ItemId, PlayerPoseReference, PlayerReference, SeatId, SeatReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
 
@@ -155,6 +155,8 @@ impl SeatValues {
 struct Occupancy {
     /// Car seat record. Item seats have none.
     id: Option<SeatId>,
+    /// The item that holds the seat. Its part cannot be taken while the player sits on it.
+    item: ItemId,
     /// Main seatscript of an item seat. Car seats have none.
     source: Option<crate::reference::SourceId>,
     owner: SeatOwner,
@@ -221,6 +223,7 @@ impl PlayerState {
                 let seat = self.seats.iter().find(|s| s.id == id).unwrap();
                 Some(Occupancy {
                     id: Some(id),
+                    item: seat.item,
                     source: None,
                     body: physics.chassis_handle(vehicle),
                     owner: SeatOwner::Vehicle(vehicle.clone()),
@@ -754,6 +757,7 @@ impl PlayerState {
         let vehicle = crate::vehicle::garage_vehicle_key(seat.vehicle);
         let occupancy = Occupancy {
             id: Some(id),
+            item: seat.item,
             source: None,
             body: physics.chassis_handle(&vehicle),
             owner: SeatOwner::Vehicle(vehicle),
@@ -769,13 +773,14 @@ impl PlayerState {
         owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        seat_item: ItemId,
         pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) -> bool {
         if self.occupancy.is_some() {
             return false;
         }
-        let occupancy = self.item_occupancy(owner, body, seat, pose);
+        let occupancy = self.item_occupancy(owner, body, seat, seat_item, pose);
         self.occupy(occupancy, physics)
     }
     /// Finish a saved item seat after the world item binds. View and posture keep their saved values.
@@ -784,10 +789,11 @@ impl PlayerState {
         owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        seat_item: ItemId,
         local_pose: VehiclePose,
         physics: &mut PhysicsWorld,
     ) {
-        let occupancy = self.item_occupancy(owner, body, seat, local_pose);
+        let occupancy = self.item_occupancy(owner, body, seat, seat_item, local_pose);
         self.pose = *physics.rapier().bodies[body].position() * occupancy.local_pose;
         self.occupancy = Some(occupancy);
         self.update_geometry(physics);
@@ -802,10 +808,12 @@ impl PlayerState {
         owner: SeatOwner,
         body: RigidBodyHandle,
         seat: &crate::world::stream::content_seats::WorldSeatReference,
+        item: ItemId,
         pose: VehiclePose,
     ) -> Occupancy {
         Occupancy {
             id: None,
+            item,
             source: Some(seat.source.clone()),
             owner,
             body,
@@ -910,6 +918,10 @@ impl PlayerState {
     }
     pub fn seated(&self) -> bool {
         self.occupancy.is_some()
+    }
+    /// The item that holds the occupied seat.
+    pub fn seat_item(&self) -> Option<ItemId> {
+        self.occupancy.as_ref().map(|seat| seat.item)
     }
     pub fn seat_owner(&self) -> Option<&SeatOwner> {
         self.occupancy.as_ref().map(|seat| &seat.owner)
@@ -1321,7 +1333,14 @@ mod vehicle_seat_tests {
             position: [-0.4, 0.3, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
         };
-        assert!(player.enter_item_seat(owner, chassis[1], &seat, sit, &mut physics));
+        assert!(player.enter_item_seat(
+            owner,
+            chassis[1],
+            &seat,
+            crate::reference::ItemId(7),
+            sit,
+            &mut physics
+        ));
         assert!(player.driving());
         assert_eq!(player.seat_vehicle(), Some(&keys[1]));
         assert_eq!(player.seat_body(), Some(chassis[1]));

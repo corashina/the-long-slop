@@ -175,15 +175,12 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         handle: RigidBodyHandle,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
     ) -> Option<VehiclePose> {
         let Some(car) = self
             .records
             .iter()
-            .find(|r| {
-                r.handle
-                    == Some(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
-            })
+            .find(|r| r.handle == Some(physics.chassis_handle(vehicle)))
             .and_then(|r| r.state)
         else {
             return Some(from_rapier(physics.rapier().bodies[handle].position()));
@@ -207,7 +204,7 @@ impl PersistentWorld {
         &self,
         physics: &PhysicsWorld,
         handle: RigidBodyHandle,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
         bounds: &crate::reference::Bounds,
     ) -> bool {
         let Some(state) = self
@@ -218,11 +215,8 @@ impl PersistentWorld {
         else {
             return false;
         };
-        let Some(car) = self.recovery_body_pose(
-            physics,
-            physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)),
-            vehicle,
-        ) else {
+        let Some(car) = self.recovery_body_pose(physics, physics.chassis_handle(vehicle), vehicle)
+        else {
             return false;
         };
         let Some(pose) = self.recovery_body_pose(physics, handle, vehicle) else {
@@ -238,11 +232,10 @@ impl PersistentWorld {
         &mut self,
         area: &mut StartingArea,
         physics: &mut PhysicsWorld,
-        vehicle: usize,
+        vehicle: &crate::world::ObjectKey,
         bodies: &[RigidBodyHandle],
     ) {
-        if physics.body_active(physics.chassis_handle(&crate::vehicle::garage_vehicle_key(vehicle)))
-        {
+        if physics.body_active(physics.chassis_handle(vehicle)) {
             return;
         }
         // Set the virtual clearance frame only after the target permit succeeds.

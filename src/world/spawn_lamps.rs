@@ -209,7 +209,7 @@ impl SpawnEvaluation<'_> {
     }
 }
 
-fn electronics_factor(f: Fields<'_>) -> Result<f32, ReferenceError> {
+pub(crate) fn electronics_factor(f: Fields<'_>) -> Result<f32, ReferenceError> {
     let maximum = number(f, "overRideMaxJamValue")?;
     let maximum = if maximum > 0. { maximum } else { 0.3 };
     Ok(((maximum - number(f, "jamValue")?) / maximum).clamp(0., 1.))

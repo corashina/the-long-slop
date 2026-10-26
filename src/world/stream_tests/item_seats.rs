@@ -51,6 +51,7 @@ fn item_seat_follows_item_body() {
         SeatOwner::Item(owner.clone()),
         body,
         &record,
+        seat.item,
         pose,
         &mut run.physics
     ));

@@ -5429,7 +5429,7 @@ fn g08_app_input_after_recovery_retains_fresh_edges() {
     for _ in 0..10 {
         prepare_ready(&mut run, &reference);
         run.sync_world_activity(&reference).unwrap();
-        if run.advance_recovery(&reference).unwrap() {
+        if run.advance_recovery().unwrap() {
             break;
         }
     }

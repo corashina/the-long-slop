@@ -893,7 +893,7 @@ fn sync_world(
             runtime
                 .sync_world_activity(&reference.0)
                 .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
-            runtime.advance_recovery(&reference.0)
+            runtime.advance_recovery()
         });
     match result {
         Ok(moved) => {
