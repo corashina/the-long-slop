@@ -44,7 +44,7 @@ use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
-use rapier3d::math::{Pose, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::{HashMap, HashSet};
 
@@ -1023,6 +1023,7 @@ impl InteractionState {
         body: RigidBodyHandle,
         reference: &crate::reference::WorldPushReference,
         colliders: &[(u32, ColliderHandle)],
+        grip_hand: Option<VehiclePose>,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         let mut grip = Vec::new();
@@ -1056,7 +1057,8 @@ impl InteractionState {
             return Err(ReferenceError("Push grip collider is not published".into()));
         }
         let id = self.insert_generated_body(body)?;
-        self.push.register_generated(item, id, reference, grip);
+        self.push
+            .register_generated(item, id, reference, grip, grip_hand);
         Ok(())
     }
 
@@ -1529,6 +1531,7 @@ impl InteractionState {
         mut input: FrameInput,
         mut aim: ResolvedAim,
         player: &mut PlayerState,
+        body: &mut crate::player::body::BodyState,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         dt: f32,
@@ -1873,12 +1876,25 @@ impl InteractionState {
                         mechanism_input.held &= !keys::PRIMARY;
                         mechanism_input.pressed &= !keys::PRIMARY;
                     }
-                    self.mechanisms.step(
-                        target.item,
-                        mechanism_input,
-                        player.view(physics).camera_pose,
-                        dt,
-                    );
+                    let camera = player.view(physics).camera_pose;
+                    // Source: a new use moves the hand. A held usable only refreshes it.
+                    if use_input.pressed & (keys::USE | keys::PRIMARY) != 0
+                        || use_input.wheel != 0.0
+                    {
+                        if let Some((reach, rule)) = self.mechanisms.using_hand(
+                            target.item,
+                            target.point,
+                            Rotation::from_array(camera.rotation),
+                            target.collider,
+                            physics,
+                        ) {
+                            body.move_using_hand(reach, rule);
+                        }
+                    } else {
+                        body.refresh_using_hand();
+                    }
+                    self.mechanisms
+                        .step(target.item, mechanism_input, camera, dt);
                     // A usable can slide and be a switch knob (bus door button): both react.
                     if !matches!(action, Some(InteractionAction::DialTune(..))) {
                         action = Some(InteractionAction::Mechanism(target.item));
@@ -1920,6 +1936,7 @@ impl InteractionState {
                     push_target,
                     &self.bodies,
                     player,
+                    body,
                     physics,
                     dt,
                 )

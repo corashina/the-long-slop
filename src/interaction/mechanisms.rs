@@ -1,10 +1,11 @@
 //! Source controls use cached transform bindings for physics and rendering.
+use crate::player::body::{HandRule, ReachFrame, ReachTarget};
 use crate::reference::*;
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use rapier3d::glamx::EulerRot;
 use rapier3d::math::{Pose, Rotation, Vector};
-use rapier3d::prelude::RigidBodyHandle;
+use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::{HashMap, HashSet};
 mod reactions;
 
@@ -178,6 +179,7 @@ impl MechanismState {
             }
             needed.extend(m.driven_nodes.iter().copied());
             needed.extend([m.drag.node, m.drag.node2]);
+            needed.extend(m.hand_target);
             if let Some(slide) = &m.slide {
                 for path in &slide.paths {
                     needed.extend(path.points.iter().map(|p| p.node));
@@ -477,6 +479,51 @@ impl MechanismState {
     pub fn turn_state(&self, item: ItemId) -> Option<u8> {
         let c = &self.controls[*self.items.get(&item)?];
         c.reference.turn.as_ref().map(|_| c.turn_state)
+    }
+    /// `fpscontroller.MovedUsingHandObj` target: the hit point with the camera rotation, held by
+    /// `handTarget`, else `TDoor`, else the hit collider.
+    pub fn using_hand(
+        &self,
+        item: ItemId,
+        point: [f32; 3],
+        camera: Rotation,
+        collider: ColliderHandle,
+        physics: &PhysicsWorld,
+    ) -> Option<(ReachTarget, HandRule)> {
+        let r = &self.controls[*self.items.get(&item)?].reference;
+        // The source flashlight call passes no usable.
+        let rule = if matches!(
+            r.turn.as_ref().map(|t| &t.action),
+            Some(TurnAction::ToggleHomeLight { .. })
+        ) {
+            HandRule::Free
+        } else {
+            HandRule::from_flags(r.right_hand, r.left_hand, r.not_nearest_hand)
+        };
+        // A slide path from `TDoor` comes first. Animated slides have no `TDoor` path.
+        let door = r
+            .slide
+            .as_ref()
+            .filter(|s| s.animation_source.is_none())
+            .and_then(|s| s.paths.first())
+            .map(|p| p.node);
+        let hit = Pose::from_parts(Vector::from_array(point), camera);
+        let (frame, parent) = match r
+            .hand_target
+            .or(door)
+            .and_then(|n| Some((n, self.frames[*self.nodes.get(&n)?].world)))
+        {
+            Some((node, world)) => (ReachFrame::Node(node), world),
+            None => match physics.rapier().colliders.get(collider)?.parent() {
+                Some(body) => (
+                    ReachFrame::Body(body),
+                    *physics.rapier().bodies[body].position(),
+                ),
+                None => (ReachFrame::World, Pose::IDENTITY),
+            },
+        };
+        let pose = from_rapier(&(parent.inverse() * hit));
+        Some((ReachTarget { frame, pose }, rule))
     }
     pub fn contains(&self, item: ItemId) -> bool {
         self.items
