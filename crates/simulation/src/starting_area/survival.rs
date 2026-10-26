@@ -521,6 +521,7 @@ impl GarageRuntime {
             self.area
                 .interaction
                 .drop_held(&mut self.area.items, &mut self.physics);
+            self.spawn_ragdoll();
             self.emit_survival_audio(crate::audio::AudioKind::Death);
         }
     }
