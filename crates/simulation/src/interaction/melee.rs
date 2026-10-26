@@ -1,6 +1,6 @@
-//! Source shovel swing: `weaponhandlingscript` (input, animator, swing sound) and
-//! `meleeweaponscript` (hit box, force, hit particles, hit sound, digging, breakable damage).
-//! Tank, explosive and food hits wait for X02 parts 2 and 4.
+//! Source melee swing: `weaponhandlingscript` (input, animator, swing sound) and
+//! `meleeweaponscript` (hand grips, hit box, force, hit particles, hit sound, digging,
+//! breakable damage). Food hits wait for X02 part 2 PR 3, tank and explosive hits for part 4.
 use super::buried::BuriedItems;
 use super::items::ItemStore;
 use crate::animation::controller::{MotionController, StateEvent};
@@ -78,23 +78,44 @@ pub struct MeleeSound {
     pub position: [f64; 3],
 }
 
-pub struct MeleeState {
-    shovel: MeleeWeaponReference,
-    motion: MeleeMotion,
-    controller: MotionController,
-    triggers: [usize; 5],
-    hit_trigger: usize,
+/// One `meleeweaponscript` record with its poses and clips.
+struct Weapon {
+    record: MeleeWeaponReference,
+    /// Index in `MeleeState::motions`.
+    motion: usize,
     /// `T` and `Trigger` in the item root frame, and the `OverlapBox` half extents.
     tip: Pose,
     trigger: Pose,
     half_extents: Vector,
     swing_clips: Vec<u32>,
+    /// `LHs` and `RHs` in the item root frame, and the start of `LeftHandPos` and
+    /// `RightHandPos`. A side without poses or grip has no grip.
+    hand_poses: [Vec<Pose>; 2],
+    grips: [Option<Pose>; 2],
+}
+
+/// One weapon controller with its parameter indices.
+struct Motion {
+    motion: MeleeMotion,
+    controller: MotionController,
+    triggers: [usize; 5],
+    hit_trigger: usize,
+}
+
+pub struct MeleeState {
+    weapons: Vec<Weapon>,
+    motions: Vec<Motion>,
+    /// The held weapon. `None` is the animator off.
+    current: Option<usize>,
+    /// `meleeweaponscript.currentAttackType`: 0 idle, 1 front, 2 left, 3 right, 4 up, 5 stab.
+    attack_type: usize,
+    /// `LeftHandPos` and `RightHandPos` of the held weapon in the item root frame.
+    grips: [Pose; 2],
     /// `mainscript.meleeHitSounds` per hit type, with clip lengths.
     hit_clips: [Vec<(u32, f32)>; 6],
     hit_volumes: [f32; 6],
     particles: [ParticleState; 5],
     random: UnityRandom,
-    active: bool,
     time: f32,
     speed: f32,
     attacking: i32,
@@ -115,74 +136,56 @@ pub struct MeleeState {
 
 impl MeleeState {
     pub fn new(r: &ReferenceManifest) -> Result<Self, ReferenceError> {
-        let shovel = r
-            .melee
-            .shovel(r)
-            .ok_or_else(|| ReferenceError("Missing melee shovel".into()))?
-            .clone();
-        let motion = r
-            .melee
-            .motion(&shovel)
-            .ok_or_else(|| ReferenceError("Missing shovel motion".into()))?
-            .clone();
-        let parameter = |name| {
-            MotionController::parameter(&motion, name)
-                .ok_or_else(|| ReferenceError(format!("Missing shovel parameter {name}")))
-        };
-        let mut triggers = [0; 5];
-        for (slot, name) in triggers.iter_mut().zip(TRIGGERS) {
-            *slot = parameter(name)?;
-        }
-        let hit_trigger = parameter("Hit")?;
-        // The item glTF and the world glTF are separate assets of one prefab source.
-        let prototype = r
-            .world
-            .prototypes
+        let melee = &r.melee;
+        let motions = melee
+            .motions
             .iter()
-            .find(|p| p.source == shovel.prototype.0)
-            .ok_or_else(|| ReferenceError("Missing shovel world prototype".into()))?;
-        let node = |source: &SourceId| {
-            prototype
-                .nodes
-                .iter()
-                .position(|n| n.source == *source)
-                .map(|i| prototype.root_relative(i))
-                .ok_or_else(|| ReferenceError("Missing shovel node".into()))
-        };
-        let (tip, _) = node(&shovel.target)?;
-        let (trigger, scale) = node(&shovel.trigger)?;
+            .map(|motion| {
+                let parameter = |name| {
+                    MotionController::parameter(motion, name)
+                        .ok_or_else(|| ReferenceError(format!("Missing melee parameter {name}")))
+                };
+                let mut triggers = [0; 5];
+                for (slot, name) in triggers.iter_mut().zip(TRIGGERS) {
+                    *slot = parameter(name)?;
+                }
+                Ok(Motion {
+                    controller: MotionController::new(motion),
+                    triggers,
+                    hit_trigger: parameter("Hit")?,
+                    motion: motion.clone(),
+                })
+            })
+            .collect::<Result<_, ReferenceError>>()?;
         let clips = clip_table(r);
         let clip = |source: &SourceId| {
             clips
                 .iter()
                 .find(|(s, _, _)| s == source)
                 .map(|(_, id, length)| (*id, *length))
-                .ok_or_else(|| ReferenceError("Missing shovel clip".into()))
+                .ok_or_else(|| ReferenceError("Missing melee clip".into()))
         };
         let mut hit_clips: [Vec<(u32, f32)>; 6] = Default::default();
-        for (group, sources) in hit_clips.iter_mut().zip(&r.melee.hit_clips) {
+        for (group, sources) in hit_clips.iter_mut().zip(&melee.hit_clips) {
             *group = sources.iter().map(clip).collect::<Result<_, _>>()?;
         }
-        let swing_clips = shovel
-            .attack_clips
+        let weapons = melee
+            .weapons
             .iter()
-            .map(|s| clip(s).map(|(id, _)| id))
+            .map(|w| weapon(r, w, &clip))
             .collect::<Result<_, _>>()?;
         Ok(Self {
-            controller: MotionController::new(&motion),
-            triggers,
-            hit_trigger,
-            tip,
-            trigger,
-            half_extents: scale.abs(),
-            swing_clips,
+            weapons,
+            motions,
+            current: None,
+            attack_type: 0,
+            grips: [Pose::IDENTITY; 2],
             hit_clips,
-            hit_volumes: r.melee.hit_volumes,
+            hit_volumes: melee.hit_volumes,
             particles: std::array::from_fn(|i| {
-                ParticleState::emit_only(&r.melee.particles[i], 0x6d65_6c65 + i as u64)
+                ParticleState::emit_only(&melee.particles[i], 0x6d65_6c65 + i as u64)
             }),
             random: UnityRandom::new(0x6d65_6c65),
-            active: false,
             time: 0.,
             speed: 1.,
             attacking: 0,
@@ -199,13 +202,23 @@ impl MeleeState {
             hit_point: Vector::ZERO,
             overlaps: Vec::with_capacity(OVERLAP_CAPACITY),
             sounds: Vec::with_capacity(4),
-            shovel,
-            motion,
         })
     }
-    /// The held item is a shovel when its pickup rule is the shovel prototype rule.
-    pub fn is_shovel(&self, pickup: &SourceId) -> bool {
-        *pickup == self.shovel.pickup
+    /// The weapon whose pickup rule is the held item's rule.
+    pub fn weapon_for(&self, pickup: &SourceId) -> Option<usize> {
+        weapon_index(self.weapons.iter().map(|w| &w.record.pickup), pickup)
+    }
+    pub fn attack_type(&self) -> usize {
+        self.attack_type
+    }
+    /// `LeftHandPos` and `RightHandPos` in the item root frame while the held weapon moves
+    /// them to its `LHs` and `RHs`.
+    pub fn grips(&self) -> [Option<Pose>; 2] {
+        let Some(w) = self.current else {
+            return [None; 2];
+        };
+        let weapon = &self.weapons[w];
+        std::array::from_fn(|side| weapon.grips[side].and(Some(self.grips[side])))
     }
     pub fn particles(&self, index: usize) -> &[crate::particles::ParticleOutput] {
         self.particles[index].particles()
@@ -221,15 +234,16 @@ impl MeleeState {
     }
     /// Animated RH pose in its parent frame, or `None` for `defRH`.
     pub fn hand(&self) -> Option<VehiclePose> {
-        self.active.then(|| self.controller.pose(&self.motion))
+        let m = &self.motions[self.weapons[self.current?].motion];
+        Some(m.controller.pose(&m.motion))
     }
-    /// One frame. `shovel` is the item in the right hand when it is a shovel.
+    /// One frame. `held` is the item in the right hand and its weapon index.
     #[allow(clippy::too_many_arguments)]
     pub fn step(
         &mut self,
         input: MeleeInput,
         dt: f32,
-        shovel: Option<ItemId>,
+        held: Option<(ItemId, usize)>,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         buried: &mut BuriedItems,
@@ -243,56 +257,68 @@ impl MeleeState {
             p.set_origin(origin);
             p.advance(dt, origin, 0., physics);
         }
-        let Some(root) = shovel.and_then(|id| {
+        let held = held.and_then(|(id, w)| {
             let item = items.get(id)?;
             let body = physics.rapier().bodies.get(item.body?)?;
-            Some(*body.position() * to_rapier(item.local_pose))
-        }) else {
-            if self.active {
-                self.leave();
-            }
+            Some((*body.position() * to_rapier(item.local_pose), w))
+        });
+        if resets(self.current, held.map(|(_, w)| w)) {
+            self.leave();
+        }
+        let Some((root, w)) = held else {
             return;
         };
-        self.active = true;
-        let melee_speed = self.shovel.speed;
-        self.controller.set_speed(self.speed);
+        if self.current.is_none() {
+            self.current = Some(w);
+            self.grips = self.weapons[w].grips.map(|g| g.unwrap_or(Pose::IDENTITY));
+        }
+        let weapon = &self.weapons[w];
+        let m = &mut self.motions[weapon.motion];
+        let melee_speed = weapon.record.speed;
+        m.controller.set_speed(self.speed);
         if input.pressed {
             self.speed = melee_speed;
-            self.controller.reset_trigger(self.hit_trigger);
-            self.controller.set_trigger(self.triggers[input.attack()]);
+            m.controller.reset_trigger(m.hit_trigger);
+            m.controller.set_trigger(m.triggers[input.attack()]);
+            self.attack_type = input.attack() + 1;
             self.started_attack = true;
         }
         if input.released {
             self.speed = melee_speed;
             self.attack_started = self.time;
         }
-        if self.attacking_now
-            && !self.swing_sounded
-            && self.time - self.attack_started > SWING_SOUND_DELAY / melee_speed
-            && !self.swing_clips.is_empty()
-        {
-            self.swing_sounded = true;
-            let index = self.random.range_int(0, self.swing_clips.len() as i32) as usize;
-            self.sounds.push(MeleeSound {
-                clip: self.swing_clips[index],
-                gain: self.shovel.attack_volume,
-                position: absolute(origin, root.translation),
-            });
+        if self.attacking_now {
+            if !self.swing_sounded
+                && self.time - self.attack_started > SWING_SOUND_DELAY / melee_speed
+                && !weapon.swing_clips.is_empty()
+            {
+                self.swing_sounded = true;
+                let index = self.random.range_int(0, weapon.swing_clips.len() as i32) as usize;
+                self.sounds.push(MeleeSound {
+                    clip: weapon.swing_clips[index],
+                    gain: weapon.record.attack_volume,
+                    position: absolute(origin, root.translation),
+                });
+            }
+        } else if !self.started_attack {
+            self.attack_type = 0;
+        }
+        // meleeweaponscript.Update: the grips move to the pose of the attack type.
+        for (side, poses) in weapon.hand_poses.iter().enumerate() {
+            if let Some(target) = poses.get(self.attack_type) {
+                let grip = &mut self.grips[side];
+                grip.translation = grip
+                    .translation
+                    .lerp(target.translation, (dt * 16.).min(1.));
+                grip.rotation = grip.rotation.lerp(target.rotation, (dt * 8.).min(1.));
+            }
         }
         self.attacking_now = self.attacking > 0 && self.speed > 0.;
-        let tip = (root * self.tip).translation;
+        let tip = (root * weapon.tip).translation;
         if self.attacking_now {
+            let trigger = root * weapon.trigger;
             self.hit(
-                tip,
-                root * self.trigger,
-                dt,
-                items,
-                physics,
-                buried,
-                breakables,
-                records,
-                player,
-                origin,
+                w, tip, trigger, dt, items, physics, buried, breakables, records, player, origin,
             );
         } else {
             self.sounded = false;
@@ -324,36 +350,41 @@ impl MeleeState {
             &mut self.swing_sounded,
             &mut self.started_attack,
         );
+        let m = &mut self.motions[self.weapons[w].motion];
         // animationEventScript: OnStateEnter is AttackStart, OnStateExit is AttackEnd.
-        self.controller
-            .advance(&self.motion, dt, |event| match event {
-                StateEvent::Enter(_) => {
-                    *attacking += 1;
-                    if held {
-                        *speed = 0.;
-                    }
-                    *swing_sounded = false;
+        m.controller.advance(&m.motion, dt, |event| match event {
+            StateEvent::Enter(_) => {
+                *attacking += 1;
+                if held {
+                    *speed = 0.;
                 }
-                StateEvent::Exit(_) => {
-                    *attacking -= 1;
-                    *started_attack = false;
-                }
-            });
+                *swing_sounded = false;
+            }
+            StateEvent::Exit(_) => {
+                *attacking -= 1;
+                *started_attack = false;
+            }
+        });
     }
-    /// The shovel left the hand: the animator is off and RH returns to `defRH`.
+    /// The weapon left the hand or changed: the animator is off and RH returns to `defRH`.
     fn leave(&mut self) {
-        self.active = false;
+        let Some(w) = self.current.take() else {
+            return;
+        };
+        let m = &mut self.motions[self.weapons[w].motion];
+        m.controller.reset(&m.motion);
+        self.attack_type = 0;
         self.speed = 1.;
         self.swing_sounded = false;
         self.attacking_now = false;
         self.started_attack = false;
         self.attacking = 0;
         self.last_tip = None;
-        self.controller.reset(&self.motion);
     }
     #[allow(clippy::too_many_arguments)]
     fn hit(
         &mut self,
+        weapon: usize,
         tip: Vector,
         trigger: Pose,
         dt: f32,
@@ -365,7 +396,8 @@ impl MeleeState {
         player: Option<RigidBodyHandle>,
         origin: [f64; 3],
     ) {
-        let mask = self.shovel.contact_mask;
+        let record = &self.weapons[weapon].record;
+        let mask = record.contact_mask;
         let mut filter = QueryFilter::default();
         if let Some(player) = player {
             filter = filter.exclude_rigid_body(player);
@@ -376,7 +408,7 @@ impl MeleeState {
         };
         filter.predicate = Some(&predicate);
         self.overlaps.clear();
-        let shape = Cuboid::new(self.half_extents);
+        let shape = Cuboid::new(self.weapons[weapon].half_extents);
         self.overlaps.extend(
             physics
                 .queries(filter)
@@ -385,8 +417,8 @@ impl MeleeState {
                 .take(OVERLAP_CAPACITY),
         );
         let delta = tip - self.last_tip.unwrap_or(tip);
-        let force = (delta.normalize_or_zero() * self.shovel.contact.force + delta) * 0.5 * dt;
-        let contact = &self.shovel.contact;
+        let force = (delta.normalize_or_zero() * record.contact.force + delta) * 0.5 * dt;
+        let (contact, shovel_speed) = (&record.contact, record.shovel_speed);
         for i in 0..self.overlaps.len() {
             let rapier = physics.rapier();
             let collider = &rapier.colliders[self.overlaps[i]];
@@ -444,10 +476,10 @@ impl MeleeState {
                 );
             }
             if let Some(id) = item
-                && self.shovel.shovel_speed != 0.
+                && shovel_speed != 0.
                 && (items.get(id).is_some_and(|i| i.buried) || buried.recently_unburied(id))
             {
-                buried.lift(id, dt, self.shovel.shovel_speed, items, physics, player);
+                buried.lift(id, dt, shovel_speed, items, physics, player);
             } else if let Some(target) = breakables.target_of(physics, self.overlaps[i]) {
                 breakables.try_break_melee(records, target, contact.damage, dt);
             }
@@ -459,7 +491,91 @@ impl MeleeState {
     }
 }
 
-/// Pose of a prototype node in its root frame, and the node local scale.
+/// Poses, half extents and clips of one weapon record.
+fn weapon(
+    r: &ReferenceManifest,
+    record: &MeleeWeaponReference,
+    clip: &impl Fn(&SourceId) -> Result<(u32, f32), ReferenceError>,
+) -> Result<Weapon, ReferenceError> {
+    let motion = r
+        .melee
+        .motions
+        .iter()
+        .position(|m| m.controller == record.controller)
+        .ok_or_else(|| ReferenceError("Missing melee motion".into()))?;
+    // The item glTF and the world glTF are separate assets of one prefab source.
+    let prototype = r
+        .world
+        .prototypes
+        .iter()
+        .find(|p| p.source == record.prototype.0)
+        .ok_or_else(|| ReferenceError("Missing melee world prototype".into()))?;
+    let node = |source: &SourceId| {
+        prototype
+            .nodes
+            .iter()
+            .position(|n| n.source == *source)
+            .map(|i| prototype.root_relative(i))
+            .ok_or_else(|| ReferenceError("Missing melee node".into()))
+    };
+    let (tip, _) = node(&record.target)?;
+    let (trigger, scale) = node(&record.trigger)?;
+    let swing_clips = record
+        .attack_clips
+        .iter()
+        .map(|s| clip(s).map(|(id, _)| id))
+        .collect::<Result<_, _>>()?;
+    let poses = |sources: &[SourceId]| {
+        sources
+            .iter()
+            .map(|s| node(s).map(|(pose, _)| pose))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let hand_poses = [
+        poses(&record.left_hand_poses)?,
+        poses(&record.right_hand_poses)?,
+    ];
+    // A weapon without an item pickup cannot be held and has no grip.
+    let pickup = r
+        .item_prototypes
+        .iter()
+        .flat_map(|p| &p.pickups)
+        .find(|p| p.pickup.source == record.pickup)
+        .map(|p| &p.pickup);
+    let grip = |side: usize, source: Option<&SourceId>| match source {
+        Some(s) if !hand_poses[side].is_empty() => node(s).map(|(pose, _)| Some(pose)),
+        _ => Ok(None),
+    };
+    let grips = [
+        grip(0, pickup.and_then(|p| p.left_hand_grip.as_ref()))?,
+        grip(1, pickup.and_then(|p| p.right_hand_grip.as_ref()))?,
+    ];
+    Ok(Weapon {
+        record: record.clone(),
+        motion,
+        tip,
+        trigger,
+        half_extents: scale.abs(),
+        swing_clips,
+        hand_poses,
+        grips,
+    })
+}
+
+/// Index of the weapon with the pickup rule `pickup`.
+fn weapon_index<'a>(
+    mut pickups: impl Iterator<Item = &'a SourceId>,
+    pickup: &SourceId,
+) -> Option<usize> {
+    pickups.position(|p| p == pickup)
+}
+
+/// The original swaps `runtimeAnimatorController` to the held weapon's controller: the
+/// animator of a weapon that leaves the hand or changes restarts.
+fn resets(current: Option<usize>, held: Option<usize>) -> bool {
+    current.is_some() && current != held
+}
+
 /// Source `Quaternion.LookRotation(dir, up)` in converted space: source +Z is -Z.
 pub fn look_rotation(direction: Vector) -> Rotation {
     let back = -direction.normalize();
@@ -507,6 +623,21 @@ mod tests {
         assert_eq!(input(true, false, false).attack(), 3);
         assert_eq!(input(true, true, false).attack(), 4);
         assert_eq!(input(true, false, true).attack(), 4);
+    }
+
+    #[test]
+    fn held_pickup_picks_the_weapon_and_a_change_resets_it() {
+        let source = |path_id| SourceId {
+            file: "level1".into(),
+            path_id,
+        };
+        let pickups = [source(1), source(2)];
+        assert_eq!(weapon_index(pickups.iter(), &source(2)), Some(1));
+        assert_eq!(weapon_index(pickups.iter(), &source(3)), None);
+        assert!(!resets(None, Some(0)));
+        assert!(!resets(Some(0), Some(0)));
+        assert!(resets(Some(0), Some(1)));
+        assert!(resets(Some(0), None));
     }
 
     #[test]
