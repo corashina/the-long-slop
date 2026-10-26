@@ -17,6 +17,10 @@ pub(crate) struct ComputerBinding {
 }
 pub(crate) struct DisplayBinding {
     parent: GeneratedId,
+    /// The active content slot.
+    slot: usize,
+    /// The screen material changed since the last presentation change.
+    dirty: bool,
     pub(crate) item: ItemId,
     /// displayscript.ON.
     pub(crate) on: bool,
@@ -34,11 +38,13 @@ impl DisplayBinding {
         self.computer = Some(computer);
         self.input = output;
         self.map = output;
+        self.dirty = true;
     }
     /// displayscript.Disconnect.
     fn disconnect(&mut self) {
         self.computer = None;
         self.map = None;
+        self.dirty = true;
     }
 }
 #[derive(Default)]
@@ -73,6 +79,14 @@ impl Computers {
     }
     pub(crate) fn computers(&self) -> &[ComputerBinding] {
         &self.computers
+    }
+    /// Every computer with its screen change since the last call. Presentation draws them.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn take_screens(&mut self, mut screen: impl FnMut(ItemId, &Computer, bool)) {
+        for b in &mut self.computers {
+            let changed = b.computer.take_changed();
+            screen(b.item, &b.computer, changed);
+        }
     }
     pub(crate) fn computer(&self, item: ItemId) -> Option<&ComputerBinding> {
         self.computers.iter().find(|b| b.item == item)
@@ -151,11 +165,11 @@ impl WorldStream {
             self.contents
                 .active
                 .iter()
-                .any(|c| &c.content.placement.id == parent && c.item == Some(item))
+                .position(|c| &c.content.placement.id == parent && c.item == Some(item))
         };
         let mut gone = Vec::new();
         self.computers.computers.retain(|b| {
-            let keep = active(&b.parent, b.item);
+            let keep = active(&b.parent, b.item).is_some();
             if !keep {
                 gone.push(b.item);
             }
@@ -173,7 +187,8 @@ impl WorldStream {
         let displays = &mut self.computers.displays;
         let mut i = 0;
         while i < displays.len() {
-            if active(&displays[i].parent, displays[i].item) {
+            if let Some(slot) = active(&displays[i].parent, displays[i].item) {
+                displays[i].slot = slot;
                 i += 1;
                 continue;
             }
@@ -216,8 +231,12 @@ impl WorldStream {
                 });
             } else {
                 let knobs = self.bind_display_switch(reference, interaction, physics, &parent)?;
+                self.presentation_changes
+                    .push(super::content_index::ContentSlot::Active(slot));
                 self.computers.displays.push(DisplayBinding {
                     parent,
+                    slot,
+                    dirty: false,
                     item,
                     on: r.display.startup_on,
                     computer: None,
@@ -275,6 +294,24 @@ impl WorldStream {
         }
         Ok(knobs)
     }
+    /// Queue a presentation change for each display whose screen material changed.
+    pub(crate) fn publish_display_changes(&mut self) {
+        for d in &mut self.computers.displays {
+            let slot = super::content_index::ContentSlot::Active(d.slot);
+            if std::mem::take(&mut d.dirty) && !self.presentation_changes.contains(&slot) {
+                self.presentation_changes.push(slot);
+            }
+        }
+    }
+    /// displayscript.R: `on` picks the material, `map` is the computer whose output it shows.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn display_screen(&self, parent: &GeneratedId) -> Option<(bool, Option<ItemId>)> {
+        self.computers
+            .displays
+            .iter()
+            .find(|d| &d.parent == parent)
+            .map(|d| (d.on, d.map))
+    }
     /// usablescript.Turn on a display switch: displayscript.Turned and the turn clip.
     /// Returns false when the knob is not a display switch.
     pub fn switch_display(
@@ -292,6 +329,7 @@ impl WorldStream {
             return false;
         };
         d.on = !d.on;
+        d.dirty = true;
         let s = &reference.computer.display.switch;
         if let (Some(clip), Some(item)) = (
             super::content_small_items::clip_id(reference, &s.clip),

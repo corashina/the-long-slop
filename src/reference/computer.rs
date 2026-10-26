@@ -71,8 +71,10 @@ pub struct DisplayReference {
     pub source: SourceId,
     /// The node of displayscript.R.
     pub screen: SourceId,
-    pub on_material: SourceId,
-    pub off_material: SourceId,
+    /// displayscript.R. It takes a private material and a runtime emission.
+    pub renderer: SourceId,
+    /// defMaterial `_EmissionColor` (source sRGB). OffMaterial has no emission.
+    pub emission: [f32; 4],
     pub startup_on: bool,
     pub switch: DisplaySwitchReference,
 }
@@ -153,7 +155,7 @@ impl ComputerRecord {
             d.item == DISPLAY_ITEM
                 && inside(p, &d.screen)
                 && inside(p, &s.node)
-                && d.on_material != d.off_material
+                && finite(&d.emission)
                 && item_prototypes::clip_exists(m, &s.clip)
                 && s.volume.is_finite()
                 && (0. ..=1.).contains(&s.volume),

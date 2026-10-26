@@ -66,6 +66,7 @@ impl GarageRuntime {
                 computers.connect(held, Some(display));
             }
         }
+        self.stream.publish_display_changes();
     }
     /// `ComputerPrompt` bits of the aimed and held computers.
     pub fn computer_prompt(&self) -> u8 {

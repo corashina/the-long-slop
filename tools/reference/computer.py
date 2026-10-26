@@ -90,8 +90,15 @@ def recover_computer(source, manifest) -> dict:
         'screen':recover_screen(source,manifest,d,link)}
     record,prototype,reader,d,node,link=owner(source,manifest,DISPLAY)
     renderer=link(d,'R','MeshRenderer');node(renderer)
-    materials=[link(d,f,'Material') for f in ('defMaterial','OffMaterial')]
-    display={**record,'screen':source_id(node(renderer)),'on_material':source_id(materials[0]),'off_material':source_id(materials[1]),
+    on,off=[link(d,f,'Material') for f in ('defMaterial','OffMaterial')]
+    # R shows defMaterial. OffMaterial is the same material without _EMISSION: off is a black emission.
+    if [key(source.resolve(renderer,m)) for m in source.read(renderer)['m_Materials']]!=[key(on)]:raise ValueError(f'{key(renderer)} does not show defMaterial')
+    od,fd=source.read(on),source.read(off)
+    keywords=[set(m.get('m_ValidKeywords',m.get('m_ShaderKeywords','').split())) for m in (od,fd)]
+    if od['m_Shader']!=fd['m_Shader'] or od['m_SavedProperties']!=fd['m_SavedProperties'] or keywords[0]-keywords[1]!={'_EMISSION'} or keywords[1]-keywords[0]:
+        raise ValueError(f'{key(off)} is not defMaterial without emission')
+    color=dict(od['m_SavedProperties']['m_Colors'])['_EmissionColor']
+    display={**record,'screen':source_id(node(renderer)),'renderer':source_id(renderer),'emission':[color[c] for c in 'rgba'],
         'startup_on':bool(d['ON']),'switch':display_switch(source,prototype,reader,node)}
     return {'computer':computer,'display':display}
 
@@ -251,9 +258,9 @@ def validate_computer(record, manifest) -> None:
     if (c['item'],c['source']['path_id'])!=COMPUTER[::2] or not (0<c['x_size']<=256 and 0<c['y_size']<=256):raise ValueError('Computer values differ')
     if not (0<=c['volume']<=1 and 0<=c['pitch_difference_chance']<=1 and c['pitch_difference']>=0):raise ValueError('Computer music values differ')
     t=record['display']
-    _shape(t,'item prototype source screen on_material off_material startup_on switch')
+    _shape(t,'item prototype source screen renderer emission startup_on switch')
     _shape(t['switch'],'source node clip volume')
-    _number(t['switch']['volume'])
-    if (t['item'],t['source']['path_id'])!=DISPLAY[::2] or t['on_material']==t['off_material']:raise ValueError('Display values differ')
+    _number(t['switch']['volume'],*t['emission'])
+    if (t['item'],t['source']['path_id'])!=DISPLAY[::2] or len(t['emission'])!=4:raise ValueError('Display values differ')
     clips={(x['source']['file'],x['source']['path_id']) for x in manifest['audio']['clips']}
     if (t['switch']['clip']['file'],t['switch']['clip']['path_id']) not in clips:raise ValueError('Display switch clip is not exported')

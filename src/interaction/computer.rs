@@ -1,4 +1,6 @@
 //! Source computerscript: a text screen, a small program store and a piano mode.
+pub mod screen;
+
 use std::collections::BTreeMap;
 
 /// Seconds between cursor blinks.

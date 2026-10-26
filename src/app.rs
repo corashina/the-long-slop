@@ -220,6 +220,7 @@ pub fn run(
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
+        .init_resource::<presentation::computer::ComputerScreens>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<crate::world::metrics::browser::MeshMeasurements>()
         .add_systems(
