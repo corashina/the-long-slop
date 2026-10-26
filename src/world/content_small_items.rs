@@ -40,6 +40,8 @@ struct LampBinding {
     light: GeneratedId,
     lamp: GenieLamp,
     initial: f32,
+    /// The last written `_EmissionColor`.
+    emission: [f32; 4],
 }
 /// One spray or splash particle system, restarted by each shot.
 struct Effect {
@@ -213,6 +215,7 @@ impl WorldStream {
             } else {
                 let binding = self.bind_lamp(reference, interaction, physics, slot, item)?;
                 self.small_items.lamps.push(binding);
+                self.presentation_changes.push(ContentSlot::Active(slot));
             }
         }
         self.small_items.scan = complete.then_some(revision);
@@ -353,6 +356,7 @@ impl WorldStream {
             light,
             lamp: GenieLamp::new(value),
             initial: r.startup_value,
+            emission: crate::interaction::genie_lamp::output(r, value).emission,
         })
     }
     /// spricniscript.Pressing for a held bottle. Returns false when the item is no bottle.
@@ -513,6 +517,13 @@ impl WorldStream {
             if b.lamp.value != before {
                 items.mark_dirty(b.item);
             }
+            if out.emission != b.emission {
+                b.emission = out.emission;
+                let slot = ContentSlot::Active(b.slot);
+                if !self.presentation_changes.contains(&slot) {
+                    self.presentation_changes.push(slot);
+                }
+            }
             let content = self
                 .contents
                 .active
@@ -633,6 +644,15 @@ impl WorldStream {
     }
     pub(crate) fn small_item_particles(&self, index: usize) -> &[crate::particles::ParticleOutput] {
         self.small_items.particles(index)
+    }
+    /// ginlampscript `M.SetColor("_EmissionColor")`.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn lamp_emission(&self, parent: &GeneratedId) -> Option<[f32; 4]> {
+        self.small_items
+            .lamps
+            .iter()
+            .find(|b| &b.parent == parent)
+            .map(|b| b.emission)
     }
     /// The spray bottle trigger node local pose.
     #[cfg(target_arch = "wasm32")]

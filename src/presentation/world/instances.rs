@@ -55,6 +55,8 @@ struct Renderer {
     // The static node chain of the renderer is active. Spawned nodes carry their own visibility.
     active: bool,
     settings: Option<GrassSettings>,
+    /// The genie lamp renderer: a private material that takes the lamp emission.
+    emissive: bool,
 }
 impl Renderer {
     fn entity(&self) -> Option<Entity> {
@@ -601,10 +603,6 @@ impl SourceInstances {
                                 );
                             }
                             let mut renderers = Vec::with_capacity(primitives);
-                            let emissive = super::instance_materials::emissive_prototype(
-                                reference,
-                                &prototype.source,
-                            );
                             for (source_index, source_node) in prototype.nodes.iter().enumerate() {
                                 if !source_node.renderer_enabled {
                                     continue;
@@ -699,6 +697,14 @@ impl SourceInstances {
                                     // A static root renderer with one shared material can be a GPU prop row.
                                     // A row takes its LOD state, color and source position from the row data,
                                     // so its material stays shared.
+                                    let record =
+                                        extras.source_renderer.as_ref().ok_or_else(|| {
+                                            ReferenceError("Missing source renderer record".into())
+                                        })?;
+                                    let emissive = super::instance_materials::emissive_renderer(
+                                        reference,
+                                        &record.source,
+                                    );
                                     let local = meshes
                                         .get(&mesh)
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
@@ -711,10 +717,6 @@ impl SourceInstances {
                                         && !reference.world.grass_displacement.writers.iter().any(
                                             |w| w.enabled && w.transform == source_node.source,
                                         );
-                                    let record =
-                                        extras.source_renderer.as_ref().ok_or_else(|| {
-                                            ReferenceError("Missing source renderer record".into())
-                                        })?;
                                     let Some(mut binding) = materials.bind(
                                         stream.frame().request.session,
                                         prototype,
@@ -787,6 +789,7 @@ impl SourceInstances {
                                             active: active_nodes[source_index],
                                             shadow: shadow != 0,
                                             settings: None,
+                                            emissive: false,
                                         });
                                         continue;
                                     }
@@ -1003,6 +1006,7 @@ impl SourceInstances {
                                         active: chain_active,
                                         shadow: shadow != 0,
                                         settings,
+                                        emissive,
                                     });
                                 }
                             }
@@ -1430,6 +1434,11 @@ impl SourceInstances {
                     local_pose(trigger),
                     frame.origin,
                 )?;
+            }
+            if let Some(color) = stream.lamp_emission(&instance.placement.id) {
+                for renderer in instance.renderers.iter_mut().filter(|r| r.emissive) {
+                    materials.emission(&mut renderer.binding, color, None)?;
+                }
             }
             if let Some(level) = stream.level(&instance.placement.id) {
                 for b in level.bubbles() {
