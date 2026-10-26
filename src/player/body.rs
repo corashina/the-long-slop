@@ -6,7 +6,22 @@ use crate::reference::{ClothingReference, NodeId, NodeRecord, ReferenceError, Re
 use crate::vehicle::VehiclePose;
 use ik::{Frame, IkChain, MAX_BONES};
 use rapier3d::math::{Rotation, Vector};
+use rapier3d::prelude::RigidBodyHandle;
 use std::collections::HashMap;
+
+/// Temporary reach API stub. PR 2 replaces it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReachFrame {
+    World,
+    Body(RigidBodyHandle),
+    Node(NodeId),
+}
+/// Temporary reach API stub. PR 2 replaces it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReachTarget {
+    pub frame: ReachFrame,
+    pub pose: VehiclePose,
+}
 
 /// Left, then right. Poses are player-local in `BodyInputs` and body-local on a bound seat.
 #[derive(Clone, Copy, Debug)]
@@ -614,6 +629,11 @@ impl BodyState {
             self.rig.set(target, p, r);
         }
     }
+
+    /// Temporary reach API stub. PR 2 replaces it.
+    pub fn move_nearest_hand(&mut self, _target: ReachTarget, _delay: Option<f32>) {}
+    /// Temporary reach API stub. PR 2 replaces it.
+    pub fn move_nearest_leg(&mut self, _target: ReachTarget, _delay: Option<f32>) {}
 
     pub fn joint_count(&self) -> usize {
         self.joints.len()
