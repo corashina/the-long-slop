@@ -1,17 +1,25 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows only the Lada for now.
+The world loader spawns cars from car prototypes. The export allows the Lada and the bus pool.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
 | Lada 2101 | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
+| Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
+
+The trailer bus (`bus02UtanfutoFull`, `utanfutoscript`) stays `other_vehicle` until the trailer PR.
 
 ## Model
 
-- `CAR_PROTOTYPES` in `tools/reference/world.py` is the allow list. Other car roots stay `other_vehicle`.
+- `car_prototypes` in `tools/reference/world.py` is the allow list. It reads the catalog at export time.
+- The list holds the Lada and each `CAR_CATEGORIES` item root with `carscript`. Other car roots stay `other_vehicle`.
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
+- A car can have any wheel count. The radiator is optional.
+- Every `meterscript` in the car prefab adds needles, lamps and a backlight. The odometer is optional.
+- Diesel is data only. Each engine part has its `fuel_consumption` mix. Fuel suitability compares the tank mix with it.
+- Pumps and cans take their fluids from the source tanks. Fluid 5 is diesel.
 - `src/world/content_vehicles.rs` binds a car copy: chassis, `VehicleRuntime`, wheel slots, engine and radiator parts.
 - `ObjectKey` keys each car copy. `GarageRuntime.vehicles`, `PhysicsWorld` and wheel slots use this key.
 - One Rapier world holds every chassis. Every engine steps each frame. Only the seated driver's car reads keys.
@@ -89,16 +97,16 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car prefab to `CAR_PROTOTYPES` in `tools/reference/world.py`. It then exports as a world prototype with a `vehicle` record.
+1. Add the car's catalog category to `CAR_CATEGORIES` in `tools/reference/world.py`. Its roots then export with a `vehicle` record.
 2. For a start car, add its startup placement next to `StartCar02` in `recover_world`. Check the pose against home colliders and the terrain.
-3. Add its `mountStuff` volumes to the prototype storage in `tools/reference/storage.py`.
-4. Run the runtime export. The exporter stops when a source record is missing.
-5. Check the prototype node count against the stream limits.
-6. Run the export-based tests with the new manifest.
+3. Run the runtime export. The exporter stops when a source record is missing. Car `mountStuff` volumes export by themselves.
+4. Check the prototype node count against the stream limits.
+5. Run the export-based tests with the new manifest.
 
 Expected work for other cars:
 
 - Car03: the engine needs two-stroke mixed fuel. It has no radiator and no oil tank.
-- Diesel cars (Car06P, buses): check the station pumps and the start fluids.
+- Car06P: diesel works through its engine `fuel_consumption`. Add its category.
+- Buses: door scripts (`busdoorscripts`) and the trailer come in later PRs.
 - Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.
