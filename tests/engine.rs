@@ -351,13 +351,8 @@ fn ignition_save_ownership_and_cancellation() {
         .unwrap()
         .ignition
         .step(held, delay, true, 0.02);
-    game.vehicles
-        .get_mut(&garage_vehicle_key(0))
-        .unwrap()
-        .engine_output
-        .starter = true;
     assert!(game.vehicles[&garage_vehicle_key(0)].ignition.starter);
-    let mechanics = game.vehicles[&garage_vehicle_key(0)].engine.capture_save();
+    let mechanics = game.garage_engine_save(0);
     let saved = game
         .capture_save(
             &reference,
@@ -381,25 +376,13 @@ fn ignition_save_ownership_and_cancellation() {
     assert!(loaded.paused);
     assert!(loaded.vehicles[&garage_vehicle_key(0)].ignition.ignition);
     assert!(!loaded.vehicles[&garage_vehicle_key(0)].ignition.starter);
-    assert!(
-        !loaded.vehicles[&garage_vehicle_key(0)]
-            .engine_output
-            .starter
-    );
-    assert_eq!(
-        loaded.vehicles[&garage_vehicle_key(0)]
-            .engine
-            .capture_save(),
-        mechanics
-    );
+    assert!(!loaded.engine_output(&garage_vehicle_key(0)).starter);
+    assert_eq!(loaded.garage_engine_save(0), mechanics);
     game.clear_input();
     assert!(game.vehicles[&garage_vehicle_key(0)].ignition.ignition);
     assert!(!game.vehicles[&garage_vehicle_key(0)].ignition.starter);
-    assert!(!game.vehicles[&garage_vehicle_key(0)].engine_output.starter);
-    assert_eq!(
-        game.vehicles[&garage_vehicle_key(0)].engine.capture_save(),
-        mechanics
-    );
+    assert!(!game.engine_output(&garage_vehicle_key(0)).starter);
+    assert_eq!(game.garage_engine_save(0), mechanics);
     let mut obsolete = json.clone();
     obsolete["vehicles"][0]["engine"]["ignition"] = true.into();
     assert!(SaveSnapshot::from_json(&serde_json::to_vec(&obsolete).unwrap()).is_err());
@@ -429,6 +412,8 @@ use the_long_slop::{
 #[derive(Clone)]
 struct EngineRig {
     engine: EngineState,
+    /// Radiator part fan state.
+    fan_on: bool,
     record: EnginePartReference,
     radiator: RadiatorPartReference,
     globals: EngineGlobals,
@@ -444,8 +429,9 @@ impl EngineRig {
         let parts = PowertrainParts::from_garage(reference);
         Self {
             engine: EngineState::new(source.initial_temperature),
-            record: parts.engine(0).record.clone(),
-            radiator: parts.radiator(0).record.clone(),
+            fan_on: false,
+            record: parts.engine(source.item).unwrap().record.clone(),
+            radiator: parts.radiator(source.coolant_tank).unwrap().record.clone(),
             globals: reference.world.vehicle_globals.clone(),
             fuel: container(source.fuel_tank),
             sump: container(source.oil_tank),
@@ -474,9 +460,20 @@ impl EngineRig {
                 radiator: Some(&self.radiator),
                 globals: &self.globals,
             },
+            Some(&mut self.fan_on),
             sample,
             dt,
         )
+    }
+    fn save(&self) -> the_long_slop::save::EngineSnapshot {
+        self.engine.capture_save(self.fan_on)
+    }
+    fn restore(
+        &mut self,
+        saved: &the_long_slop::save::EngineSnapshot,
+    ) -> Result<EngineOutput, SaveError> {
+        self.fan_on = saved.fan_on;
+        self.engine.restore_save(saved)
     }
 }
 fn installed() -> EngineInput {
@@ -493,7 +490,7 @@ fn installed() -> EngineInput {
 }
 
 fn primed(rig: &EngineRig) -> the_long_slop::save::EngineSnapshot {
-    let mut state = rig.engine.capture_save();
+    let mut state = rig.save();
     state.elapsed = 1.;
     state.last_run_time = 1.;
     state.rpm = 2000.;
@@ -518,7 +515,7 @@ fn engine_draws_and_restore() {
     rule.start_chance = 0.5;
     let source = &rule;
     let mut rig = EngineRig::new(&reference);
-    let saved = rig.engine.capture_save();
+    let saved = rig.save();
     for dt in [0., -1., f32::NAN, f32::INFINITY] {
         rig.step(
             source,
@@ -526,7 +523,7 @@ fn engine_draws_and_restore() {
             |_| panic!("no draw for invalid dt"),
             dt,
         );
-        assert_eq!(rig.engine.capture_save(), saved);
+        assert_eq!(rig.save(), saved);
     }
     assert_eq!(saved.random_start, 1.);
     assert_eq!(saved.start_draw, "0");
@@ -566,7 +563,7 @@ fn engine_draws_and_restore() {
         interval + 0.001,
     );
     assert_eq!(draw_indices, vec![0, 1]);
-    assert_eq!(rig.engine.capture_save().random_start, 0.);
+    assert_eq!(rig.save().random_start, 0.);
     rig.step(source, input, |_| panic!("no draw while running"), 0.02);
     assert!(rig.engine.running());
     rig.step(
@@ -575,14 +572,14 @@ fn engine_draws_and_restore() {
         |_| panic!("no detached starter"),
         0.21,
     );
-    let mut saved = rig.engine.capture_save();
+    let mut saved = rig.save();
     saved.random_start = 1.;
-    rig.engine.restore_save(&saved).unwrap();
+    rig.restore(&saved).unwrap();
     rig.engine.clear_input();
-    assert_eq!(rig.engine.capture_save(), saved);
+    assert_eq!(rig.save(), saved);
     let mut restored = rig.clone();
     restored.engine = EngineState::new(source.initial_temperature);
-    restored.engine.restore_save(&saved).unwrap();
+    restored.restore(&saved).unwrap();
     let mut next = None;
     let mut loaded_next = None;
     let sample = |draw| (draw as f32 + 1.) / 10.;
@@ -606,17 +603,17 @@ fn engine_draws_and_restore() {
     );
     assert_eq!(next, Some((2, 0.3)));
     assert_eq!(loaded_next, next);
-    assert_eq!(restored.engine.capture_save(), rig.engine.capture_save());
+    assert_eq!(restored.save(), rig.save());
     for counter in ["", "-1", "+1", "01", " 1", "1.0", "18446744073709551616"] {
         let mut invalid = saved.clone();
         invalid.start_draw = counter.into();
-        let before = restored.engine.capture_save();
-        assert!(restored.engine.restore_save(&invalid).is_err());
-        assert_eq!(restored.engine.capture_save(), before);
+        let before = restored.save();
+        assert!(restored.restore(&invalid).is_err());
+        assert_eq!(restored.save(), before);
     }
     let mut maximum = saved.clone();
     maximum.start_draw = u64::MAX.to_string();
-    restored.engine.restore_save(&maximum).unwrap();
+    restored.restore(&maximum).unwrap();
     restored.step(
         source,
         input,
@@ -626,7 +623,7 @@ fn engine_draws_and_restore() {
         },
         interval + 0.01,
     );
-    assert_eq!(restored.engine.capture_save().start_draw, "0");
+    assert_eq!(restored.save().start_draw, "0");
 
     let (_, stamp) = installed_source();
     let game = GarageRuntime::new(
@@ -677,20 +674,20 @@ fn engine_thresholds_and_grace() {
     let (reference, _) = installed_source();
     let source = &reference.vehicles[0].engine;
     let mut rig = EngineRig::new(&reference);
-    let mut saved = rig.engine.capture_save();
+    let mut saved = rig.save();
     saved.elapsed = 0.2;
     saved.last_run_time = 0.;
-    rig.engine.restore_save(&saved).unwrap();
+    rig.restore(&saved).unwrap();
     assert!(!rig.engine.running());
     saved.elapsed = 0.2_f32.next_down();
-    rig.engine.restore_save(&saved).unwrap();
+    rig.restore(&saved).unwrap();
     assert!(rig.engine.running());
-    let mut fresh = rig.engine.capture_save();
+    let mut fresh = rig.save();
     fresh.elapsed = 1.;
     fresh.last_run_time = -1.;
     fresh.rpm = 2000.;
     fresh.random_start = 0.;
-    rig.engine.restore_save(&fresh).unwrap();
+    rig.restore(&fresh).unwrap();
     let output = rig.step(source, installed(), |_| 0., 0.02);
     assert!(!output.running, "initial cached fuel suitability is zero");
     for (fuel, heat, expected) in [
@@ -706,7 +703,7 @@ fn engine_thresholds_and_grace() {
         state.last_run_time = -1.;
         state.fuel_suitability = fuel;
         state.heat_penalty = heat;
-        rig.engine.restore_save(&state).unwrap();
+        rig.restore(&state).unwrap();
         assert_eq!(
             rig.step(source, installed(), |_| panic!("no starter"), 0.02)
                 .running,
@@ -718,7 +715,7 @@ fn engine_thresholds_and_grace() {
         let mut rig = EngineRig::new(&reference);
         let mut state = primed(&rig);
         state.last_run_time = -1.;
-        rig.engine.restore_save(&state).unwrap();
+        rig.restore(&state).unwrap();
         let oil = rig.sump.capacity_liters * 0.3 * (1. - penalty.cbrt());
         let mut quantities = [0.; 6];
         quantities[source.oil_fluid as usize] = oil;
@@ -732,11 +729,11 @@ fn engine_thresholds_and_grace() {
         assert_eq!(output.oil_penalty < 0.99, expected);
     }
     let mut healthy = EngineRig::new(&reference);
-    healthy.engine.restore_save(&primed(&healthy)).unwrap();
+    healthy.restore(&primed(&healthy)).unwrap();
     let normal = healthy.step(source, installed(), |_| 0., 0.02);
     assert!(normal.torque_nm > 0.);
     let mut low_oil = EngineRig::new(&reference);
-    low_oil.engine.restore_save(&primed(&low_oil)).unwrap();
+    low_oil.restore(&primed(&low_oil)).unwrap();
     let mut oil = [0.; 6];
     oil[source.oil_fluid as usize] = low_oil.sump.capacity_liters * 0.03;
     low_oil.sump = natural_fluid(low_oil.sump.capacity_liters, oil);
@@ -748,7 +745,7 @@ fn engine_thresholds_and_grace() {
     let mut hot = EngineRig::new(&reference);
     let mut state = primed(&hot);
     state.temperature = source.optimal_temperature[3];
-    hot.engine.restore_save(&state).unwrap();
+    hot.restore(&state).unwrap();
     let first = hot.step(source, installed(), |_| 0., 0.02);
     assert!(first.running, "decision reads the previous heat penalty");
     assert_eq!(first.heat_penalty, 1.);
@@ -757,12 +754,12 @@ fn engine_thresholds_and_grace() {
     let mut warm = EngineRig::new(&reference);
     let mut state = primed(&warm);
     state.temperature = (source.optimal_temperature[2] + source.optimal_temperature[3]) * 0.5;
-    warm.engine.restore_save(&state).unwrap();
+    warm.restore(&state).unwrap();
     let output = warm.step(source, installed(), |_| 0., 0.02);
     assert!(output.torque_nm > 0. && output.torque_nm < normal.torque_nm);
 
     let mut fuel = EngineRig::new(&reference);
-    fuel.engine.restore_save(&primed(&fuel)).unwrap();
+    fuel.restore(&primed(&fuel)).unwrap();
     fuel.fuel = FluidContainer::new(fuel.fuel.capacity_liters, &[]);
     let first = fuel.step(source, installed(), |_| 0., 0.02);
     assert!(first.running, "decision reads previous fuel suitability");
@@ -796,7 +793,7 @@ fn engine_fluids_and_cooling() {
     rig.coolant = natural_fluid(5., [0., 0., 0., 2., 3., 0.]);
     let mut saved = primed(&rig);
     saved.temperature = 120.;
-    rig.engine.restore_save(&saved).unwrap();
+    rig.restore(&saved).unwrap();
     let mut input = installed();
     input.sleep_modifier = 2.;
     input.installed.as_mut().unwrap().ignition = false;
@@ -842,7 +839,7 @@ fn engine_fluids_and_cooling() {
     // The engine publication boundary bounds each amount by its previous amount.
     let mut overdraw = EngineRig::new(&reference);
     overdraw.fuel = natural_fluid(4., [1., 1., 1., 1., 0., 0.]);
-    overdraw.engine.restore_save(&primed(&overdraw)).unwrap();
+    overdraw.restore(&primed(&overdraw)).unwrap();
     let mut drain_rule = source.clone();
     drain_rule.globals.fuel_consumption =
         4. / (0.4 * dt * (10. * (0.2 + 0.8 * 2000. / source.max_rpm)));
@@ -865,7 +862,7 @@ fn engine_fluids_and_cooling() {
     near_empty.coolant = natural_fluid(5., [0.0000001; 6]);
     let mut state = primed(&near_empty);
     state.temperature = 120.;
-    near_empty.engine.restore_save(&state).unwrap();
+    near_empty.restore(&state).unwrap();
     let mut input = installed();
     input.sleep_modifier = 20.;
     input.installed.as_mut().unwrap().radiator_condition = Some(4);
@@ -913,7 +910,7 @@ fn engine_fluids_and_cooling() {
         let mut state = primed(&rig);
         state.temperature = temperature;
         state.fan_on = fan_on;
-        rig.engine.restore_save(&state).unwrap();
+        rig.restore(&state).unwrap();
         if empty {
             rig.coolant = FluidContainer::new(rig.coolant.capacity_liters, &[]);
         }
@@ -922,7 +919,7 @@ fn engine_fluids_and_cooling() {
         installed.radiator_condition = condition;
         installed.speed_kmh = speed;
         let output = rig.step(&cooling_rule, input, |_| 0., dt);
-        (output, rig.engine.capture_save(), rig.coolant)
+        (output, rig.save(), rig.coolant)
     };
     let radiator = &cooling_rule.radiator;
     assert_eq!(cooled(100., None, false, false, 0.).0.temperature, 100.);
@@ -1007,9 +1004,9 @@ fn engine_fluids_and_cooling() {
     assert!(forced.1.fan_on);
 
     let mut stopped = EngineRig::new(&reference);
-    let mut state = stopped.engine.capture_save();
+    let mut state = stopped.save();
     state.temperature = 120.;
-    stopped.engine.restore_save(&state).unwrap();
+    stopped.restore(&state).unwrap();
     let before = stopped.coolant.total();
     let mut stopped_input = installed();
     stopped_input.installed.as_mut().unwrap().ignition = false;
@@ -1041,10 +1038,7 @@ fn engine_fluids_and_cooling() {
         reference.world.draw_distance.default,
     )
     .unwrap();
-    game.vehicles
-        .get_mut(&garage_vehicle_key(0))
-        .unwrap()
-        .engine = rig.engine.clone();
+    game.restore_garage_engine(0, &rig.save()).unwrap();
     for (id, fluid) in [
         (source.fuel_tank, &rig.fuel),
         (source.oil_tank, &rig.sump),
@@ -1069,7 +1063,8 @@ fn engine_fluids_and_cooling() {
     )
     .unwrap();
     let mut continued = EngineRig {
-        engine: loaded.vehicles[&garage_vehicle_key(0)].engine.clone(),
+        engine: loaded.garage_engine(0).state.clone(),
+        fan_on: loaded.garage_engine_save(0).fan_on,
         record: rig.record.clone(),
         radiator: rig.radiator.clone(),
         globals: rig.globals.clone(),
@@ -1101,7 +1096,7 @@ fn engine_fluids_and_cooling() {
     for _ in 0..20 {
         rig.step(source, input, |_| 0., dt);
         continued.step(source, input, |_| 0., dt);
-        assert_eq!(rig.engine.capture_save(), continued.engine.capture_save());
+        assert_eq!(rig.save(), continued.save());
         assert_eq!(rig.fuel, continued.fuel);
         assert_eq!(rig.sump, continued.sump);
         assert_eq!(rig.coolant, continued.coolant);

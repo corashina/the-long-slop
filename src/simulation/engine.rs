@@ -152,7 +152,6 @@ pub struct EngineState {
     heat_penalty: f32,
     start_draw: u64,
     supplied_fuel: f32,
-    fan_on: bool,
     last_output: EngineOutput,
 }
 
@@ -163,7 +162,12 @@ impl EngineState {
     pub fn running(&self) -> bool {
         self.elapsed - self.last_run_time < RUN_GRACE_SECONDS
     }
-    pub fn capture_save(&self) -> crate::save::EngineSnapshot {
+    /// The last step output.
+    pub fn output(&self) -> EngineOutput {
+        self.last_output
+    }
+    /// `fan_on` is radiator part state. The caller reads it from the radiator.
+    pub fn capture_save(&self, fan_on: bool) -> crate::save::EngineSnapshot {
         crate::save::EngineSnapshot {
             rpm: self.rpm,
             temperature: self.temperature,
@@ -172,7 +176,7 @@ impl EngineState {
             last_start_chance_time: self.last_start_chance_time,
             random_start: self.random_start,
             supplied_fuel: self.supplied_fuel,
-            fan_on: self.fan_on,
+            fan_on,
             oil_penalty: self.oil_penalty,
             fuel_suitability: self.fuel_suitability,
             heat_penalty: self.heat_penalty,
@@ -188,7 +192,6 @@ impl EngineState {
         self.last_start_chance_time = saved.last_start_chance_time;
         self.random_start = saved.random_start;
         self.supplied_fuel = saved.supplied_fuel;
-        self.fan_on = saved.fan_on;
         self.oil_penalty = saved.oil_penalty;
         self.fuel_suitability = saved.fuel_suitability;
         self.heat_penalty = saved.heat_penalty;
@@ -205,17 +208,6 @@ impl EngineState {
         };
         Ok(self.last_output)
     }
-    /// No engine part is mounted: no rpm, no torque, no starter.
-    pub fn stop(&mut self) -> EngineOutput {
-        self.rpm = 0.0;
-        self.supplied_fuel = 0.0;
-        self.last_run_time = self.elapsed - RUN_GRACE_SECONDS;
-        self.last_output = EngineOutput {
-            temperature: self.temperature,
-            ..Default::default()
-        };
-        self.last_output
-    }
     pub fn new(initial_temperature: f32) -> Self {
         Self {
             rpm: 0.0,
@@ -229,16 +221,17 @@ impl EngineState {
             heat_penalty: 0.,
             start_draw: 0,
             supplied_fuel: 0.0,
-            fan_on: false,
             last_output: EngineOutput::default(),
         }
     }
 
+    /// `fan_on` is the hysteresis state of the mounted radiator part.
     pub fn step(
         &mut self,
         input: EngineInput,
         fluids: VehicleFluids<'_>,
         records: EngineRecords<'_>,
+        fan_on: Option<&mut bool>,
         mut start_sample: impl FnMut(u64) -> f32,
         dt: f32,
     ) -> EngineOutput {
@@ -424,6 +417,7 @@ impl EngineState {
         if running
             && let Some(condition) = installed.radiator_condition
             && let Some(radiator) = radiator
+            && let Some(fan_on) = fan_on
             && let Some(coolant) = coolant
         {
             let condition = usize::from(condition.min(4));
@@ -432,12 +426,12 @@ impl EngineState {
             let leak = radiator.max_fluid_loss * [0.0, 0.125, 0.25, 0.5, 1.0][condition];
             let mut speed = installed.speed_kmh;
             if self.temperature > radiator.fan_temperature_on || radiator.fan_on_when_engine_runs {
-                self.fan_on = true;
+                *fan_on = true;
                 speed = (speed + fan_value).clamp(fan_value, globals.max_car_velocity);
             } else if self.temperature < radiator.fan_temperature_off {
-                self.fan_on = false;
+                *fan_on = false;
             }
-            if self.fan_on {
+            if *fan_on {
                 fan_speed = radiator.max_fan_speed * [1.0, 0.8, 0.6, 0.4, 0.2][condition];
             }
             let thermostat = inverse_lerp(
@@ -498,12 +492,13 @@ mod tests {
         assert_eq!(source.source.path_id, 68282);
         let parts = crate::simulation::powertrain::PowertrainParts::from_garage(&reference);
         let records = EngineRecords {
-            engine: &parts.engine(0).record,
-            radiator: Some(&parts.radiator(0).record),
+            engine: &parts.engine(source.item).unwrap().record,
+            radiator: Some(&parts.radiator(source.coolant_tank).unwrap().record),
             globals: &reference.world.vehicle_globals,
         };
         let mut engine = EngineState::new(source.initial_temperature);
-        let mut state = engine.capture_save();
+        let mut fan = false;
+        let mut state = engine.capture_save(fan);
         state.elapsed = 1.;
         state.last_run_time = 1.;
         engine.restore_save(&state).unwrap();
@@ -530,6 +525,7 @@ mod tests {
                 coolant: Some(&mut coolant),
             },
             records,
+            Some(&mut fan),
             |_| panic!("no starter"),
             0.02,
         );
@@ -585,6 +581,7 @@ mod tests {
                 coolant: Some(&mut coolant),
             },
             records,
+            Some(&mut fan),
             |_| panic!("no starter"),
             0.02,
         );

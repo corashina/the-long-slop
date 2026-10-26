@@ -1687,18 +1687,22 @@ mod tests {
     }
 
     fn seed_running(run: &mut GarageRuntime) {
-        let mut saved = run.garage_car(0).engine.capture_save();
+        let mut saved = run.garage_engine_save(0);
         saved.rpm = 2000.;
         saved.elapsed = 1.;
         saved.last_run_time = 1.;
         saved.supplied_fuel = 0.4;
-        run.garage_car_mut(0).engine_output =
-            run.garage_car_mut(0).engine.restore_save(&saved).unwrap();
+        run.restore_garage_engine(0, &saved).unwrap();
     }
 
     fn publish(run: &mut GarageRuntime) {
+        run.refresh_powertrains();
+        let output = run.engine_output(&crate::vehicle::garage_vehicle_key(0));
+        publish_output(run, output);
+    }
+
+    fn publish_output(run: &mut GarageRuntime, output: crate::simulation::engine::EngineOutput) {
         run.area.items.sync_poses(&run.physics);
-        let output = run.garage_car(0).engine_output;
         let ignition = run.garage_car(0).ignition.ignition;
         let audio = run.audio.as_mut().unwrap();
         audio.fixed_step(&run.area, &run.physics, &run.stream, FIXED_DT);
@@ -1744,9 +1748,7 @@ mod tests {
     }
 
     fn advance_detached(run: &mut GarageRuntime, _reference: &ReferenceManifest) {
-        // A car with no mounted engine part stops its engine.
-        let vehicle = run.garage_car_mut(0);
-        vehicle.engine_output = vehicle.engine.stop();
+        // A car with no mounted engine part reads no engine output.
         publish(run);
     }
 
@@ -1777,7 +1779,7 @@ mod tests {
         });
         advance_detached(&mut run, &reference);
         assert!(
-            run.garage_car(0).engine_output.running,
+            run.garage_engine(0).state.output().running,
             "source run grace remains active"
         );
         assert_voices(run.audio.as_ref().unwrap(), true);
@@ -1792,12 +1794,12 @@ mod tests {
             .stop_binding
             .unwrap();
         for _ in 0..20 {
-            if !run.garage_car(0).engine_output.running {
+            if !run.garage_engine(0).state.output().running {
                 break;
             }
             advance_detached(&mut run, &reference);
         }
-        assert!(!run.garage_car(0).engine_output.running);
+        assert!(!run.garage_engine(0).state.output().running);
         let audio = run.audio.as_mut().unwrap();
         let emitter = audio
             .reference
@@ -1825,8 +1827,13 @@ mod tests {
         assert_voices(audio, false);
         advance_detached(&mut run, &reference);
         assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
-        run.garage_car_mut(0).engine_output.starter = true;
-        publish(&mut run);
+        publish_output(
+            &mut run,
+            crate::simulation::engine::EngineOutput {
+                starter: true,
+                ..Default::default()
+            },
+        );
         assert!(run.audio.as_ref().unwrap().starter_enabled);
         run.clear_input();
         assert!(
@@ -1974,7 +1981,7 @@ mod tests {
             reference.world.draw_distance.default,
         )
         .unwrap();
-        assert!(restored.garage_car(0).engine_output.running);
+        assert!(restored.garage_engine(0).state.output().running);
         assert!(restored.audio.as_ref().unwrap().last_running);
         publish(&mut restored);
         assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);

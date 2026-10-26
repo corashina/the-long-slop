@@ -35,12 +35,12 @@ fn g10_control_restore_has_no_side_effects() {
         .unwrap();
     run.lighting.cycle_headlights(&reference.lighting, 0);
     run.garage_car_mut(0).handbrake = !run.garage_car(0).handbrake;
-    let vehicle = run.garage_car_mut(0);
-    vehicle.ignition.ignition = true;
-    let mut engine = vehicle.engine.capture_save();
+    let mut engine = run.garage_engine_save(0);
     engine.rpm = 725.;
     engine.temperature = 65.;
-    vehicle.engine_output = vehicle.engine.restore_save(&engine).unwrap();
+    run.restore_garage_engine(0, &engine).unwrap();
+    let vehicle = run.garage_car_mut(0);
+    vehicle.ignition.ignition = true;
     vehicle.trip_m = 321.;
     vehicle
         .drivetrain

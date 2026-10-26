@@ -9,7 +9,7 @@ use crate::player::{PlayerState, PlayerStepContext};
 use crate::reference::{BodyId, ItemId, NodeId, ReferenceError, ReferenceManifest};
 use crate::simulation::{
     DriveInput, FIXED_DT, FrameInput,
-    engine::{EngineInput, EngineOutput, EngineRecords, EngineState, InstalledEngineInput},
+    engine::{EngineInput, EngineOutput, EngineRecords, InstalledEngineInput},
     ignition::{IgnitionInput, IgnitionState},
     keys,
     powertrain::{Powertrain, PowertrainParts},
@@ -610,11 +610,9 @@ pub fn initial_vehicle_poses(
         .collect()
 }
 
-/// Engine and control state of one vehicle.
+/// Source `carscript` state of one car copy. Engine state lives on the engine part.
 pub struct VehicleRuntime {
-    pub engine: EngineState,
     pub ignition: IgnitionState,
-    pub engine_output: EngineOutput,
     pub handbrake: bool,
     /// Distance this vehicle has driven, in meters.
     pub trip_m: f64,
@@ -629,6 +627,8 @@ pub struct VehicleRuntime {
     recovery_bounds: crate::reference::Bounds,
     /// Absolute position at the start of the current step.
     previous: [f64; 3],
+    /// Parts mounted on this car, found once at the start of each step.
+    powertrain: Powertrain,
 }
 
 impl VehicleRuntime {
@@ -657,8 +657,6 @@ impl VehicleRuntime {
             }
         }
         Ok(Self {
-            engine: EngineState::new(vehicle.engine.initial_temperature),
-            engine_output: EngineOutput::default(),
             handbrake: vehicle.handbrake,
             trip_m: 0.0,
             ignition: IgnitionState::default(),
@@ -672,6 +670,7 @@ impl VehicleRuntime {
             electronics_enabled: vehicle.engine.electronics_enabled,
             recovery_bounds,
             previous: [0.0; 3],
+            powertrain: Powertrain::default(),
         })
     }
 }
@@ -835,7 +834,7 @@ impl GarageRuntime {
             urine_splash,
             0x70697373,
         );
-        Ok(Self {
+        let mut run = Self {
             driving_assists: reference.driving.default_assists,
             urine,
             urine_reference,
@@ -912,7 +911,9 @@ impl GarageRuntime {
                     None
                 })
                 .collect(),
-        })
+        };
+        run.refresh_powertrains();
+        Ok(run)
     }
 
     fn use_light_control(
@@ -1396,6 +1397,7 @@ impl GarageRuntime {
         {
             vehicle.handbrake = !vehicle.handbrake;
         }
+        self.refresh_powertrains();
         // Taking the map lets each car step borrow the runtime without allocation.
         let mut vehicles = std::mem::take(&mut self.vehicles);
         for (key, vehicle) in &mut vehicles {
@@ -1404,6 +1406,7 @@ impl GarageRuntime {
             self.advance_exhaust(reference, key, vehicle);
         }
         self.vehicles = vehicles;
+        self.step_loose_engines(reference);
         self.advance_urine(reference, FIXED_DT);
         self.advance_ambient(reference, FIXED_DT);
         self.advance_weather(reference, FIXED_DT);
@@ -1477,12 +1480,13 @@ impl GarageRuntime {
             let index = audio.vehicle_index;
             let key = garage_vehicle_key(index);
             let vehicle = &self.vehicles[&key];
-            let output = vehicle.engine_output;
-            let engine_active = self
+            let engine = vehicle
                 .powertrain
-                .mounted_on(&self.area.items, &key)
                 .engine
-                .and_then(|engine| self.area.items.get(self.powertrain.engine(engine).item))
+                .and_then(|item| self.powertrain.engine(item));
+            let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
+            let engine_active = engine
+                .and_then(|engine| self.area.items.get(engine.item))
                 .and_then(|item| item.body)
                 .is_some_and(|body| self.physics.body_active(body));
             let active = self.physics.body_active(self.physics.chassis_handle(&key));
@@ -1618,21 +1622,12 @@ impl GarageRuntime {
         let state = &self.vehicles[&key];
         let r = &reference.vehicles[index].instruments;
         let engine = self.mounted_engine(&key);
-        let engine_present = engine.is_some();
         crate::simulation::instruments::InstrumentSample {
             speed_kmh: self.physics.snapshot(&key).speed_mps * 3.6,
             fuel_liters: state.fuel_tank.map_or(0., amount),
             oil_liters: engine.and_then(|e| e.oil_tank).map_or(0., amount),
-            temperature: if engine_present {
-                state.engine_output.temperature
-            } else {
-                0.
-            },
-            rpm: if engine_present {
-                state.engine_output.rpm
-            } else {
-                0.
-            },
+            temperature: engine.map_or(0., |e| e.state.output().temperature),
+            rpm: engine.map_or(0., |e| e.state.output().rpm),
             headlights: self.lighting.headlights(index),
             local_ignition: state.ignition.ignition
                 && r.electronics_output > r.electronics_off_threshold,
@@ -1647,8 +1642,11 @@ impl GarageRuntime {
         key: &ObjectKey,
         vehicle: &mut VehicleRuntime,
     ) {
-        let engine = self.mounted_engine(key);
-        let output = vehicle.engine_output;
+        let engine = vehicle
+            .powertrain
+            .engine
+            .and_then(|item| self.powertrain.engine(item));
+        let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
         let running = engine.is_some_and(|engine| {
             self.area
                 .items
@@ -1693,9 +1691,14 @@ impl GarageRuntime {
         let index = garage_vehicle_index(key).expect("V03 bridge: old garage car");
         let chassis = self.physics.chassis_handle(key);
         let chassis_active = self.physics.body_active(chassis);
-        let Powertrain { engine, radiator } = self.powertrain.mounted_on(&self.area.items, key);
-        let engine = engine.map(|engine| self.powertrain.engine(engine));
-        let radiator = radiator.map(|radiator| self.powertrain.radiator(radiator));
+        let climate = self.engine_climate(reference);
+        let powertrain = vehicle.powertrain;
+        let engine = powertrain
+            .engine
+            .and_then(|item| self.powertrain.engine(item));
+        let radiator = powertrain
+            .radiator
+            .and_then(|item| self.powertrain.radiator(item));
         let engine_active = engine
             .and_then(|engine| self.area.items.get(engine.item))
             .and_then(|item| item.body)
@@ -1703,7 +1706,6 @@ impl GarageRuntime {
         if !chassis_active && !engine_active {
             return;
         }
-        let sleep_modifier = self.clock_factors(reference).fluid_scale;
         let source = &reference.vehicles[index];
         let snapshot = self.physics.snapshot(key);
         let speed = snapshot.speed_mps;
@@ -1725,7 +1727,7 @@ impl GarageRuntime {
             controls,
             input.pressed,
             self.driving_assists,
-            engine.map(|engine| (vehicle.engine_output, &engine.record)),
+            engine.map(|engine| (engine.state.output(), &engine.record)),
             vehicle.ignition.ignition,
             rolling_rpm,
             direction,
@@ -1769,56 +1771,50 @@ impl GarageRuntime {
             vehicle.electronics_enabled,
             FIXED_DT,
         );
-        let was_running = vehicle.engine_output.running;
+        let was_running = engine.is_some_and(|engine| engine.state.output().running);
         let globals = &reference.world.vehicle_globals;
-        match engine {
-            Some(engine) if engine_active => {
-                let ambient = self.lighting.cycle.output().ambient_temperature;
-                let cycle = &reference.lighting.cycle;
-                vehicle.engine_output = vehicle.engine.step(
-                    EngineInput {
-                        installed: Some(InstalledEngineInput {
-                            ignition: vehicle.ignition.ignition,
-                            starter: vehicle.ignition.starter,
-                            throttle,
-                            clutch: drivetrain.engagement,
-                            wheel_rpm: drivetrain.wheel_rpm,
-                            free_run: drivetrain.free_run,
-                            speed_kmh: speed * 3.6,
-                            radiator_condition,
-                            electronics_enabled: vehicle.electronics_enabled,
-                        }),
-                        ambient_temperature: ambient,
-                        ambient_heat_modifier: globals.outside_temperature_modifier
-                            * ((ambient - cycle.temp_nights[0])
-                                / (cycle.temp_days[0] + cycle.temp_add_noons[0]
-                                    - cycle.temp_nights[0]))
-                                .clamp(0., 1.),
-                        sleep_modifier,
-                    },
-                    self.area.items.engine_fluids([
-                        vehicle.fuel_tank,
-                        engine.oil_tank,
-                        radiator.and_then(|radiator| radiator.coolant_tank),
-                    ]),
-                    EngineRecords {
-                        engine: &engine.record,
-                        radiator: radiator.map(|radiator| &radiator.record),
-                        globals,
-                    },
-                    |draw| start_sample(DEFAULT_SEED, draw),
-                    FIXED_DT,
-                );
+        if engine_active && let (Some(part), radiator) = self.powertrain.pair_mut(powertrain) {
+            let (fan_on, radiator, coolant_tank) = match radiator {
+                Some(r) => (Some(&mut r.fan_on), Some(&r.record), r.coolant_tank),
+                None => (None, None, None),
+            };
+            part.state.step(
+                EngineInput {
+                    installed: Some(InstalledEngineInput {
+                        ignition: vehicle.ignition.ignition,
+                        starter: vehicle.ignition.starter,
+                        throttle,
+                        clutch: drivetrain.engagement,
+                        wheel_rpm: drivetrain.wheel_rpm,
+                        free_run: drivetrain.free_run,
+                        speed_kmh: speed * 3.6,
+                        radiator_condition,
+                        electronics_enabled: vehicle.electronics_enabled,
+                    }),
+                    ..climate
+                },
                 self.area
                     .items
-                    .get_mut(engine.item)
-                    .expect("engine item")
-                    .temperature = Some(vehicle.engine.temperature);
-            }
-            Some(_) => {}
-            None => vehicle.engine_output = vehicle.engine.stop(),
+                    .engine_fluids([vehicle.fuel_tank, part.oil_tank, coolant_tank]),
+                EngineRecords {
+                    engine: &part.record,
+                    radiator,
+                    globals,
+                },
+                fan_on,
+                |draw| start_sample(DEFAULT_SEED, draw),
+                FIXED_DT,
+            );
+            self.area
+                .items
+                .get_mut(part.item)
+                .expect("engine item")
+                .temperature = Some(part.state.temperature);
         }
-        let output = vehicle.engine_output;
+        let engine = powertrain
+            .engine
+            .and_then(|item| self.powertrain.engine(item));
+        let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
         if vehicle.ignition.ignition != was_ignition
             && let Some(audio) = &mut self.audio
             && audio.vehicle_index == index
@@ -1974,8 +1970,9 @@ impl GarageRuntime {
         self.driving_input.clear();
         for vehicle in self.vehicles.values_mut() {
             vehicle.ignition.clear_input();
-            vehicle.engine.clear_input();
-            vehicle.engine_output.starter = false;
+        }
+        for part in self.powertrain.engines_mut() {
+            part.state.clear_input();
         }
         self.area.interaction.cancel_input();
         self.area.inventory.cancel_input();
@@ -2014,15 +2011,109 @@ impl GarageRuntime {
             Err(error) => self.stream.fail(error),
         }
     }
-    /// The engine part mounted on car `key`.
+    /// The engine part mounted on car `key` at the last step.
     pub fn mounted_engine(
         &self,
         key: &ObjectKey,
     ) -> Option<&crate::simulation::powertrain::EnginePart> {
-        self.powertrain
-            .mounted_on(&self.area.items, key)
+        self.vehicles
+            .get(key)?
+            .powertrain
             .engine
-            .map(|engine| self.powertrain.engine(engine))
+            .and_then(|item| self.powertrain.engine(item))
+    }
+    /// Output of the engine part mounted on car `key`. No engine: zero output.
+    pub fn engine_output(&self, key: &ObjectKey) -> EngineOutput {
+        self.mounted_engine(key)
+            .map_or_else(EngineOutput::default, |e| e.state.output())
+    }
+    /// Finds the parts mounted on each car. The step reads the result.
+    /// Part moves have no single change hook, so this runs once per step.
+    pub(crate) fn refresh_powertrains(&mut self) {
+        for (key, vehicle) in &mut self.vehicles {
+            vehicle.powertrain = self.powertrain.mounted_on(&self.area.items, key);
+        }
+    }
+    /// Engine input without car controls: ambient temperature and clock rate.
+    fn engine_climate(&self, reference: &ReferenceManifest) -> EngineInput {
+        let globals = &reference.world.vehicle_globals;
+        let ambient = self.lighting.cycle.output().ambient_temperature;
+        let cycle = &reference.lighting.cycle;
+        EngineInput {
+            installed: None,
+            ambient_temperature: ambient,
+            ambient_heat_modifier: globals.outside_temperature_modifier
+                * ((ambient - cycle.temp_nights[0])
+                    / (cycle.temp_days[0] + cycle.temp_add_noons[0] - cycle.temp_nights[0]))
+                    .clamp(0., 1.),
+            sleep_modifier: self.clock_factors(reference).fluid_scale,
+        }
+    }
+    /// Engines on no car step without car input while their body is active.
+    /// Temperature moves toward ambient and rpm falls, as for a removed engine.
+    fn step_loose_engines(&mut self, reference: &ReferenceManifest) {
+        let climate = self.engine_climate(reference);
+        let globals = &reference.world.vehicle_globals;
+        for part in self.powertrain.engines_mut() {
+            let on_car = self
+                .vehicles
+                .values()
+                .any(|vehicle| vehicle.powertrain.engine == Some(part.item));
+            let active = self
+                .area
+                .items
+                .get(part.item)
+                .and_then(|item| item.body)
+                .is_some_and(|body| self.physics.body_active(body));
+            if on_car || !active {
+                continue;
+            }
+            part.state.step(
+                climate,
+                self.area.items.engine_fluids([None, part.oil_tank, None]),
+                EngineRecords {
+                    engine: &part.record,
+                    radiator: None,
+                    globals,
+                },
+                None,
+                |draw| start_sample(DEFAULT_SEED, draw),
+                FIXED_DT,
+            );
+            self.area
+                .items
+                .get_mut(part.item)
+                .expect("engine item")
+                .temperature = Some(part.state.temperature);
+        }
+    }
+    /// V03 bridge: engine part of old garage car `index`, mounted or not. Task 9 removes it.
+    pub fn garage_engine(&self, index: usize) -> &crate::simulation::powertrain::EnginePart {
+        let (engine, _) = self.powertrain.garage_parts(index);
+        self.powertrain.engine(engine).expect("old garage engine")
+    }
+    /// V03 bridge: save record of the engine and radiator parts of old garage car `index`.
+    /// Task 8 saves each part on its own object.
+    pub fn garage_engine_save(&self, index: usize) -> crate::save::EngineSnapshot {
+        let (_, radiator) = self.powertrain.garage_parts(index);
+        let fan_on = self.powertrain.radiator(radiator).is_some_and(|r| r.fan_on);
+        self.garage_engine(index).state.capture_save(fan_on)
+    }
+    /// V03 bridge: restores the engine and radiator parts of old garage car `index`. Task 8 replaces it.
+    pub fn restore_garage_engine(
+        &mut self,
+        index: usize,
+        saved: &crate::save::EngineSnapshot,
+    ) -> Result<EngineOutput, crate::save::SaveError> {
+        let (engine, radiator) = self.powertrain.garage_parts(index);
+        if let Some(radiator) = self.powertrain.radiator_mut(radiator) {
+            radiator.fan_on = saved.fan_on;
+        }
+        self.powertrain
+            .engine_mut(engine)
+            .expect("old garage engine")
+            .state
+            .restore_save(saved)
     }
     /// V03 bridge: runtime of old garage car `index`. Task 9 removes it.
     #[cfg(test)]
@@ -2046,6 +2137,7 @@ impl GarageRuntime {
         driving: bool,
         controls: crate::simulation::input::DrivingControls,
     ) {
+        self.refresh_powertrains();
         let key = garage_vehicle_key(index);
         let mut vehicle = self.vehicles.remove(&key).expect("old garage car");
         self.step_vehicle(reference, &key, &mut vehicle, input, driving, controls);

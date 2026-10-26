@@ -1,40 +1,72 @@
-//! Engine and radiator parts. Each car copy reads the parts that are mounted on it.
+//! Engine and radiator parts. Part state lives on the part. Each car copy reads the parts mounted on it.
+use std::collections::BTreeMap;
+
 use crate::interaction::items::ItemStore;
 use crate::reference::{
     EnginePartReference, EngineReference, ItemId, RadiatorPartReference, ReferenceManifest,
 };
+use crate::simulation::engine::EngineState;
 use crate::vehicle::garage_vehicle_index;
 use crate::world::ObjectKey;
 
-/// An engine part item and its source `enginescript`.
+/// An engine part item and its source `enginescript` record and state.
 #[derive(Clone, Debug)]
 pub struct EnginePart {
     pub item: ItemId,
     pub record: EnginePartReference,
     /// Item of `enginescript.T`.
     pub oil_tank: Option<ItemId>,
+    /// Source `enginescript` runtime fields. They move with the part.
+    pub state: EngineState,
 }
 
-/// A radiator part item and its source `coolantTankscript`.
+impl EnginePart {
+    pub fn new(item: ItemId, record: EnginePartReference, oil_tank: Option<ItemId>) -> Self {
+        let state = EngineState::new(record.initial_temperature);
+        Self {
+            item,
+            record,
+            oil_tank,
+            state,
+        }
+    }
+}
+
+/// A radiator part item and its source `coolantTankscript` record and state.
 #[derive(Clone, Debug)]
 pub struct RadiatorPart {
     pub item: ItemId,
     pub record: RadiatorPartReference,
     pub coolant_tank: Option<ItemId>,
+    /// Source `coolantTankscript` fan hysteresis state.
+    pub fan_on: bool,
 }
 
-/// Indices of the parts mounted on one car copy. Valid until the next registry change.
+impl RadiatorPart {
+    pub fn new(item: ItemId, record: RadiatorPartReference, coolant_tank: Option<ItemId>) -> Self {
+        Self {
+            item,
+            record,
+            coolant_tank,
+            fan_on: false,
+        }
+    }
+}
+
+/// Items of the parts mounted on one car copy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Powertrain {
-    pub engine: Option<usize>,
-    pub radiator: Option<usize>,
+    pub engine: Option<ItemId>,
+    pub radiator: Option<ItemId>,
 }
 
-/// Every live engine and radiator part, in registration order.
+/// Every live engine and radiator part by item.
 #[derive(Default)]
 pub struct PowertrainParts {
-    engines: Vec<EnginePart>,
-    radiators: Vec<RadiatorPart>,
+    engines: BTreeMap<ItemId, EnginePart>,
+    radiators: BTreeMap<ItemId, RadiatorPart>,
+    /// V03 bridge: engine and radiator items of each old garage car. Task 9 removes it.
+    garage: Vec<(ItemId, ItemId)>,
 }
 
 impl PowertrainParts {
@@ -44,31 +76,26 @@ impl PowertrainParts {
         let mut parts = Self::default();
         for vehicle in &reference.vehicles {
             let e = &vehicle.engine;
-            parts.register_engine(EnginePart {
-                item: e.item,
-                record: garage_engine(e),
-                oil_tank: Some(e.oil_tank),
-            });
-            parts.register_radiator(RadiatorPart {
-                item: e.coolant_tank,
-                record: garage_radiator(e),
-                coolant_tank: Some(e.coolant_tank),
-            });
+            parts.garage.push((e.item, e.coolant_tank));
+            parts.register_engine(EnginePart::new(e.item, garage_engine(e), Some(e.oil_tank)));
+            parts.register_radiator(RadiatorPart::new(
+                e.coolant_tank,
+                garage_radiator(e),
+                Some(e.coolant_tank),
+            ));
         }
         parts
     }
     pub fn register_engine(&mut self, part: EnginePart) {
-        self.engines.retain(|p| p.item != part.item);
-        self.engines.push(part);
+        self.engines.insert(part.item, part);
     }
     pub fn register_radiator(&mut self, part: RadiatorPart) {
-        self.radiators.retain(|p| p.item != part.item);
-        self.radiators.push(part);
+        self.radiators.insert(part.item, part);
     }
-    /// Removes the engine or radiator record of a retired item.
+    /// Removes the engine or radiator of a retired item.
     pub fn remove(&mut self, item: ItemId) {
-        self.engines.retain(|p| p.item != item);
-        self.radiators.retain(|p| p.item != item);
+        self.engines.remove(&item);
+        self.radiators.remove(&item);
     }
     /// The engine and radiator mounted on car `key`: the parts whose mount chain reaches its root item.
     pub fn mounted_on(&self, items: &ItemStore, key: &ObjectKey) -> Powertrain {
@@ -79,18 +106,45 @@ impl PowertrainParts {
         let root = items.resolve_key(key);
         self.mounted(|item| root.is_some_and(|root| items.descends(item, root)))
     }
-    /// The first registered engine and radiator for which `on_car` is true.
+    /// The first engine and radiator by item for which `on_car` is true.
     fn mounted(&self, on_car: impl Fn(ItemId) -> bool) -> Powertrain {
         Powertrain {
-            engine: self.engines.iter().position(|p| on_car(p.item)),
-            radiator: self.radiators.iter().position(|p| on_car(p.item)),
+            engine: self.engines.keys().copied().find(|item| on_car(*item)),
+            radiator: self.radiators.keys().copied().find(|item| on_car(*item)),
         }
     }
-    pub fn engine(&self, index: usize) -> &EnginePart {
-        &self.engines[index]
+    pub fn engine(&self, item: ItemId) -> Option<&EnginePart> {
+        self.engines.get(&item)
     }
-    pub fn radiator(&self, index: usize) -> &RadiatorPart {
-        &self.radiators[index]
+    pub fn engine_mut(&mut self, item: ItemId) -> Option<&mut EnginePart> {
+        self.engines.get_mut(&item)
+    }
+    pub fn engines_mut(&mut self) -> impl Iterator<Item = &mut EnginePart> {
+        self.engines.values_mut()
+    }
+    pub fn radiator(&self, item: ItemId) -> Option<&RadiatorPart> {
+        self.radiators.get(&item)
+    }
+    pub fn radiator_mut(&mut self, item: ItemId) -> Option<&mut RadiatorPart> {
+        self.radiators.get_mut(&item)
+    }
+    /// V03 bridge: engine and radiator items of old garage car `index`. Task 9 removes it.
+    pub fn garage_parts(&self, index: usize) -> (ItemId, ItemId) {
+        self.garage[index]
+    }
+    /// The engine and the radiator of one car, both writable.
+    pub fn pair_mut(
+        &mut self,
+        powertrain: Powertrain,
+    ) -> (Option<&mut EnginePart>, Option<&mut RadiatorPart>) {
+        (
+            powertrain
+                .engine
+                .and_then(|item| self.engines.get_mut(&item)),
+            powertrain
+                .radiator
+                .and_then(|item| self.radiators.get_mut(&item)),
+        )
     }
 }
 
@@ -161,7 +215,7 @@ mod tests {
     use crate::interaction::items::{ItemLocation, ItemState};
     use crate::reference::{EngineGlobals, PartSlotId};
     use crate::simulation::engine::{
-        EngineInput, EngineRecords, EngineState, InstalledEngineInput,
+        EngineInput, EngineOutput, EngineRecords, InstalledEngineInput,
     };
     use crate::vehicle::VehiclePose;
     use serde_json::json;
@@ -215,11 +269,7 @@ mod tests {
         // The starter must lift the rpm past the shutdown rpm at this step length.
         record.starter_rpm = 600.;
         let mut parts = PowertrainParts::default();
-        parts.register_engine(EnginePart {
-            item: ENGINE,
-            record,
-            oil_tank: Some(OIL),
-        });
+        parts.register_engine(EnginePart::new(ENGINE, record, Some(OIL)));
         (items, parts)
     }
 
@@ -234,73 +284,101 @@ mod tests {
         .unwrap()
     }
 
-    /// Holds the starter for two seconds, then drives with half clutch. Returns the last output.
-    fn run(
+    /// One engine step on car `car`. No mounted engine: no output.
+    fn step(
         items: &mut ItemStore,
-        parts: &PowertrainParts,
+        parts: &mut PowertrainParts,
         car: usize,
-    ) -> crate::simulation::engine::EngineOutput {
+        starter: bool,
+        dt: f32,
+    ) -> EngineOutput {
         let key = ObjectKey::Imported(CARS[car]);
-        let globals = globals();
-        let mut state = EngineState::new(20.);
-        let mut output = Default::default();
-        for step in 0..200 {
-            let Some(engine) = parts
-                .mounted_on(items, &key)
-                .engine
-                .map(|i| parts.engine(i))
-            else {
-                return state.stop();
-            };
-            output = state.step(
-                EngineInput {
-                    installed: Some(InstalledEngineInput {
-                        ignition: true,
-                        starter: step < 100,
-                        throttle: 1.,
-                        clutch: 0.5,
-                        electronics_enabled: true,
-                        ..Default::default()
-                    }),
+        let Some(item) = parts.mounted_on(items, &key).engine else {
+            return EngineOutput::default();
+        };
+        let part = parts.engine_mut(item).unwrap();
+        part.state.step(
+            EngineInput {
+                installed: Some(InstalledEngineInput {
+                    ignition: true,
+                    starter,
+                    throttle: 1.,
+                    clutch: 0.5,
+                    electronics_enabled: true,
                     ..Default::default()
-                },
-                items.engine_fluids([Some(FUEL[car]), engine.oil_tank, None]),
-                EngineRecords {
-                    engine: &engine.record,
-                    radiator: None,
-                    globals: &globals,
-                },
-                |_| 0.,
-                0.02,
-            );
+                }),
+                ..Default::default()
+            },
+            items.engine_fluids([Some(FUEL[car]), part.oil_tank, None]),
+            EngineRecords {
+                engine: &part.record,
+                radiator: None,
+                globals: &globals(),
+            },
+            None,
+            |_| 0.,
+            dt,
+        )
+    }
+
+    /// Holds the starter for two seconds, then drives with half clutch. Returns the last output.
+    fn run(items: &mut ItemStore, parts: &mut PowertrainParts, car: usize) -> EngineOutput {
+        let mut output = EngineOutput::default();
+        for n in 0..200 {
+            output = step(items, parts, car, n < 100, 0.02);
         }
         output
     }
 
     #[test]
     fn engine_part_moved_to_another_car_runs_there() {
-        let (mut items, parts) = world();
+        let (mut items, mut parts) = world();
         let keys = CARS.map(ObjectKey::Imported);
         assert!(parts.mounted_on(&items, &keys[0]).engine.is_some());
         assert!(parts.mounted_on(&items, &keys[1]).engine.is_none());
-        assert!(run(&mut items, &parts, 0).running);
+        assert!(run(&mut items, &mut parts, 0).running);
 
         items.get_mut(ENGINE).unwrap().location = ItemLocation::PartSlot(SLOTS[1]);
         assert!(parts.mounted_on(&items, &keys[0]).engine.is_none());
-        assert_eq!(parts.mounted_on(&items, &keys[1]).engine, Some(0));
+        assert_eq!(parts.mounted_on(&items, &keys[1]).engine, Some(ENGINE));
         let before = items.get(FUEL[1]).unwrap().fluid.as_ref().unwrap().total();
-        let output = run(&mut items, &parts, 1);
+        let output = run(&mut items, &mut parts, 1);
         assert!(output.running && output.torque_nm > 0., "{output:?}");
         // The engine burns the fuel of the car it is mounted on.
         assert!(items.get(FUEL[1]).unwrap().fluid.as_ref().unwrap().total() < before);
     }
 
     #[test]
+    fn engine_temperature_moves_with_the_part() {
+        let (mut items, mut parts) = world();
+        let keys = CARS.map(ObjectKey::Imported);
+        run(&mut items, &mut parts, 0);
+        let temperature = parts.engine(ENGINE).unwrap().state.temperature;
+        // The part left its initial temperature on car A.
+        assert_ne!(temperature, 20.);
+
+        items.get_mut(ENGINE).unwrap().location = ItemLocation::PartSlot(SLOTS[1]);
+        // Car A has no engine state. Car B reads the moved part state.
+        assert_eq!(parts.mounted_on(&items, &keys[0]), Powertrain::default());
+        let mounted = parts.mounted_on(&items, &keys[1]).engine.unwrap();
+        assert_eq!(
+            parts.engine(mounted).unwrap().state.temperature,
+            temperature
+        );
+        let output = step(&mut items, &mut parts, 1, false, 1e-4);
+        assert!(
+            (output.temperature - temperature).abs() < 0.01,
+            "{output:?}"
+        );
+        assert_eq!(step(&mut items, &mut parts, 0, false, 0.02).temperature, 0.);
+    }
+
+    #[test]
     fn empty_engine_slot_gives_no_torque() {
-        let (mut items, parts) = world();
+        let (mut items, mut parts) = world();
         items.get_mut(ENGINE).unwrap().location = ItemLocation::World;
         for car in 0..2 {
-            let output = run(&mut items, &parts, car);
+            let output = run(&mut items, &mut parts, car);
             assert!(!output.running && !output.starter, "{output:?}");
             assert_eq!((output.rpm, output.torque_nm), (0., 0.));
         }

@@ -990,8 +990,8 @@ fn sync_instruments(
             let Some(node) = vehicle.engine.radiator.fan_node else {
                 continue;
             };
-            let speed = run.vehicles[&crate::vehicle::garage_vehicle_key(index)]
-                .engine_output
+            let speed = run
+                .engine_output(&crate::vehicle::garage_vehicle_key(index))
                 .fan_speed;
             if speed != 0.
                 && let Ok(mut transform) = transforms.get_mut(imported.nodes[&node])
@@ -1247,11 +1247,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     } else {
         ""
     };
-    let rpm = if runtime.mounted_engine(key).is_some() {
-        current.engine_output.rpm
-    } else {
-        0.
-    };
+    let engine = runtime.engine_output(key);
+    let rpm = engine.rpm;
     let stamp = FeedbackStamp {
         condition: condition.to_bits(),
         held,
@@ -1260,8 +1257,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         rpm: rpm.to_bits(),
         engine_flags: [
             current.ignition.ignition,
-            current.engine_output.running,
-            current.engine_output.starter,
+            engine.running,
+            engine.starter,
             runtime.area.player.seat().is_some(),
             current.handbrake,
         ],
@@ -1326,8 +1323,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             runtime.area.interaction.throw_active(),
             rpm,
             current.ignition.ignition,
-            current.engine_output.running,
-            current.engine_output.starter,
+            engine.running,
+            engine.starter,
             runtime.area.player.seat().is_some(),
             current.handbrake,
             quantities[0],

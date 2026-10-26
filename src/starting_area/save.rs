@@ -396,18 +396,19 @@ impl GarageRuntime {
                 .position(|id| *id == saved.progress.selected_vehicle)
                 .expect("validated selected vehicle"),
         ));
-        for (key, vehicle) in &mut candidate.vehicles {
-            let Some(index) = crate::vehicle::garage_vehicle_index(key) else {
-                continue;
-            };
+        for index in 0..reference.vehicles.len() {
             let record = saved
                 .vehicles
                 .iter()
                 .find(|v| v.instance == ids.vehicles[index])
                 .expect("validated vehicle");
+            candidate.restore_garage_engine(index, &record.engine)?;
+            let vehicle = candidate
+                .vehicles
+                .get_mut(&crate::vehicle::garage_vehicle_key(index))
+                .expect("old garage car");
             vehicle.ignition.ignition = record.ignition;
             vehicle.ignition.clear_input();
-            vehicle.engine_output = vehicle.engine.restore_save(&record.engine)?;
             vehicle.drivetrain.restore_gear(record.gear);
             vehicle.handbrake = record.handbrake;
             vehicle.trip_m = record.trip_m;
@@ -467,13 +468,15 @@ impl GarageRuntime {
             (None, None) => (),
             _ => return Err(SaveError::InvalidLinks("Radio owner".into())),
         }
+        candidate.refresh_powertrains();
+        let running = candidate.audio.as_ref().is_some_and(|audio| {
+            candidate
+                .engine_output(&crate::vehicle::garage_vehicle_key(audio.vehicle_index))
+                .running
+        });
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
-            audio.restore_engine(
-                candidate.vehicles[&crate::vehicle::garage_vehicle_key(audio.vehicle_index)]
-                    .engine_output
-                    .running,
-            );
+            audio.restore_engine(running);
             audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
         candidate.startup_aligned = true;
@@ -605,7 +608,7 @@ impl GarageRuntime {
                             },
                             origin,
                         ),
-                        engine: vehicle.engine.capture_save(),
+                        engine: self.garage_engine_save(index),
                         ignition: vehicle.ignition.ignition,
                         gear: vehicle.drivetrain.gear(),
                         handbrake: vehicle.handbrake,
