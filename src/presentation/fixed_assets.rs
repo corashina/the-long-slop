@@ -916,6 +916,7 @@ impl SourceFixedAssets {
                 ao_render: shader("shaders/source_ao_render.wgsl"),
                 ao_upsample: shader("shaders/source_ao_upsample.wgsl"),
                 ao_composite: shader("shaders/source_ao_composite.wgsl"),
+                depth_resolve: shader("shaders/source_depth_resolve.wgsl"),
             };
             self.shaders_bound = true;
         }

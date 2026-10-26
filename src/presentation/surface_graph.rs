@@ -19,7 +19,6 @@ use std::sync::Arc;
 pub struct SourceSurface;
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SourceSurfaceStage {
-    CameraDepth,
     ShadowAtlas,
     Collector,
     Opaque,
@@ -54,7 +53,6 @@ pub fn install(app: &mut SubApp) {
         .configure_sets(
             SourceSurface,
             (
-                SourceSurfaceStage::CameraDepth,
                 SourceSurfaceStage::ShadowAtlas,
                 SourceSurfaceStage::Collector,
                 SourceSurfaceStage::Opaque,
@@ -68,10 +66,6 @@ pub fn install(app: &mut SubApp) {
         .add_systems(
             SourceSurface,
             (
-                super::camera_depth::camera_depth
-                    .in_set(SourceSurfaceStage::CameraDepth)
-                    .run_if(super::frame_graph::surface_ready)
-                    .run_if(super::shadow_queue::graph_ready),
                 opaque
                     .in_set(SourceSurfaceStage::Opaque)
                     .run_if(super::frame_graph::surface_ready)

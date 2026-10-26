@@ -77,7 +77,7 @@ impl Target {
         format: TextureFormat,
         sampled: bool,
     ) -> Self {
-        // Only resolved single-sample textures support sampling and copy operations.
+        // Only single-sample textures support copy operations.
         let usage = TextureUsages::RENDER_ATTACHMENT
             | if samples == 1 {
                 TextureUsages::COPY_SRC
@@ -216,7 +216,7 @@ impl SourceViewTargets {
                 height,
                 samples,
                 DEPTH_FORMAT,
-                false,
+                true,
             )
         });
         let depth = Target::new(device, "source_depth", width, height, 1, DEPTH_FORMAT, true);

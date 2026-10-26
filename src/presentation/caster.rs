@@ -1,8 +1,5 @@
-//! Persistent source camera-depth and directional-shadow caster state.
-use super::{
-    readiness::RendererStateHandle,
-    render_targets::{DEPTH_FORMAT, SHADOW_FORMAT},
-};
+//! Persistent source directional-shadow caster state.
+use super::{readiness::RendererStateHandle, render_targets::SHADOW_FORMAT};
 use crate::reference::shadow_profile;
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
@@ -39,11 +36,11 @@ struct CasterBinding {
     uniform: UniformBuffer<CasterUniform>,
     binding: BindGroup,
 }
-/// Slot0 is camera depth. Slots1..4 are the four source cascades.
+/// Slots 0..3 are the four source cascades.
 /// Each source view owns this component; queued views never overwrite another view's state.
 #[derive(Component)]
 pub struct CasterViews {
-    slots: [CasterBinding; 5],
+    slots: [CasterBinding; 4],
     pub(crate) shadow_key: Option<super::shadow_preparation::CascadeKey>,
 }
 impl CasterViews {
@@ -121,7 +118,7 @@ impl CasterViews {
 pub struct CasterPasses {
     inspected: usize,
     classified: HashSet<CachedRenderPipelineId>,
-    variants: HashMap<CachedRenderPipelineId, [Option<CachedRenderPipelineId>; 2]>,
+    variants: HashMap<CachedRenderPipelineId, Option<CachedRenderPipelineId>>,
 }
 fn flag(defs: &[ShaderDefVal], name: &str) -> Option<bool> {
     defs.iter().find_map(|d| match d {
@@ -139,16 +136,11 @@ impl CasterPasses {
         cache: &PipelineCache,
     ) -> bool {
         crate::world::renderer_pending::pipeline_states_drained(
-            self.variants
-                .get(&base)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|id| {
-                    super::world::pipelines::physical_pipeline_state(
-                        cache.get_render_pipeline_state(*id),
-                    )
-                }),
+            self.variants.get(&base).into_iter().flatten().map(|id| {
+                super::world::pipelines::physical_pipeline_state(
+                    cache.get_render_pipeline_state(*id),
+                )
+            }),
         )
     }
     pub fn companion_state(
@@ -156,45 +148,32 @@ impl CasterPasses {
         base: CachedRenderPipelineId,
         cache: &PipelineCache,
     ) -> Option<Result<bool, String>> {
-        self.variants.get(&base).map(|ids| {
-            let mut ready = true;
-            for id in ids.iter().flatten() {
-                match cache.get_render_pipeline_state(*id) {
-                    CachedPipelineState::Ok(_) => {}
-                    CachedPipelineState::Err(
-                        ShaderCacheError::ShaderNotLoaded(_)
-                        | ShaderCacheError::ShaderImportNotYetAvailable,
-                    ) => ready = false,
-                    CachedPipelineState::Err(error) => {
-                        return Err(format!("Source caster pipeline: {error}"));
-                    }
-                    _ => ready = false,
-                }
+        self.variants.get(&base).map(|id| {
+            let Some(id) = id else {
+                return Ok(true);
+            };
+            match cache.get_render_pipeline_state(*id) {
+                CachedPipelineState::Ok(_) => Ok(true),
+                CachedPipelineState::Err(
+                    ShaderCacheError::ShaderNotLoaded(_)
+                    | ShaderCacheError::ShaderImportNotYetAvailable,
+                ) => Ok(false),
+                CachedPipelineState::Err(error) => Err(format!("Source caster pipeline: {error}")),
+                _ => Ok(false),
             }
-            Ok(ready)
         })
     }
     pub fn counts(&self) -> (usize, usize) {
         (
             self.variants.len(),
-            self.variants
-                .values()
-                .flatten()
-                .filter(|id| id.is_some())
-                .count(),
+            self.variants.values().filter(|id| id.is_some()).count(),
         )
     }
     pub fn classified(&self, base: CachedRenderPipelineId) -> bool {
         self.classified.contains(&base)
     }
-    pub fn pipeline(
-        &self,
-        base: CachedRenderPipelineId,
-        shadow: bool,
-    ) -> Option<CachedRenderPipelineId> {
-        self.variants
-            .get(&base)
-            .and_then(|p| p[usize::from(shadow)])
+    pub fn pipeline(&self, base: CachedRenderPipelineId) -> Option<CachedRenderPipelineId> {
+        self.variants.get(&base).copied().flatten()
     }
     pub fn ready(
         &self,
@@ -206,8 +185,8 @@ impl CasterPasses {
                 .variants
                 .iter()
                 .filter(|(base, _)| !owners.base_isolated(**base))
-                .flat_map(|(_, ids)| ids.iter().flatten())
-                .all(|id| cache.get_render_pipeline(*id).is_some())
+                .filter_map(|(_, id)| *id)
+                .all(|id| cache.get_render_pipeline(id).is_some())
     }
     /// Called during preparation. Descriptors are cloned only once per new source surface variant.
     pub(crate) fn prepare(
@@ -250,22 +229,9 @@ impl CasterPasses {
                 }
                 return;
             };
-            let base_id = CachedRenderPipelineId::new(index);
-            let ids = std::array::from_fn(|index| {
-                match owners.queue_companion(cache, base_id, || {
+            let id = match owners.queue_companion(cache, base_id, || {
                 let mut descriptor = base.clone();
-                let shadow = index == 1;
-                if !shadow && flag(&fragment.shader_defs, "SOURCE_TRANSPARENT") == Some(true) {
-                    return None;
-                }
-                descriptor.label = Some(
-                    if shadow {
-                        "source_shadow_caster"
-                    } else {
-                        "source_camera_depth"
-                    }
-                    .into(),
-                );
+                descriptor.label = Some("source_shadow_caster".into());
                 descriptor.layout[0] = super::source_lighting::source_camera_layout();
                 descriptor.layout[1] = caster_layout();
                 if !world_shader
@@ -298,41 +264,37 @@ impl CasterPasses {
                     descriptor.primitive.cull_mode = Some(Face::Back);
                 }
                 // RenderShadowMaps sets userBackfaceMode=false for Directional1, even inside cube capture.
-                if shadow {
-                    descriptor.primitive.front_face = if reflected {
-                        FrontFace::Ccw
-                    } else {
-                        FrontFace::Cw
-                    };
-                }
+                descriptor.primitive.front_face = if reflected {
+                    FrontFace::Ccw
+                } else {
+                    FrontFace::Cw
+                };
                 descriptor.depth_stencil = Some(DepthStencilState {
-                    format: if shadow { SHADOW_FORMAT } else { DEPTH_FORMAT },
+                    format: SHADOW_FORMAT,
                     depth_write_enabled: Some(true),
                     depth_compare: Some(CompareFunction::GreaterEqual),
                     stencil: StencilState::default(),
                     bias: DepthBiasState::default(),
                 });
-                    Some(*descriptor)
-                }) {
-                    Ok(id) => id,
-                    Err(error) => {
-                        if !owners.fail(base_id, error.0.clone()) {
-                            status.fail(error.0);
-                        }
-                        None
+                Some(*descriptor)
+            }) {
+                Ok(id) => id,
+                Err(error) => {
+                    if !owners.fail(base_id, error.0.clone()) {
+                        status.fail(error.0);
                     }
+                    None
                 }
-            });
-            self.variants
-                .insert(CachedRenderPipelineId::new(index), ids);
+            };
+            self.variants.insert(base_id, id);
         }
         for id in self
             .variants
             .iter()
             .filter(|(base, _)| !owners.base_isolated(**base))
-            .flat_map(|(_, ids)| ids.iter().flatten())
+            .filter_map(|(_, id)| *id)
         {
-            match cache.get_render_pipeline_state(*id) {
+            match cache.get_render_pipeline_state(id) {
                 CachedPipelineState::Err(
                     ShaderCacheError::ShaderNotLoaded(_)
                     | ShaderCacheError::ShaderImportNotYetAvailable,
@@ -347,23 +309,14 @@ impl CasterPasses {
     }
 }
 
-/// Prepare once per view, then update only its existing camera-depth uniform buffer.
+/// Create the caster slots once per view. Cascade writes fill them later.
 /// Shadow slots remain untouched until the source candidate set and cascade fit are ready.
 pub(crate) fn prepare_views(
     mut commands: Commands,
     frame: Res<super::view_frame::SourceViewFrame>,
     assets: Option<Res<super::lighting_assets::LightingRenderAssets>>,
-    scene: Res<super::lighting_scene::SourceSceneLighting>,
     images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
-    mut views: Query<
-        (
-            Entity,
-            &super::surface_views::SourceSurfaceView,
-            &bevy::render::view::ExtractedView,
-            Option<&mut CasterViews>,
-        ),
-        With<super::surface_views::SourceSurfaceView>,
-    >,
+    views: Query<(Entity, &super::surface_views::SourceSurfaceView), Without<CasterViews>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     cache: Res<PipelineCache>,
@@ -376,46 +329,24 @@ pub(crate) fn prepare_views(
     if status.failure().is_some() {
         return;
     }
-    let (Some(assets), Some(scene)) = (assets, scene.0) else {
+    let Some(assets) = assets else {
         return;
     };
     let Some(dither) = images.get(assets.caster_dither.id()) else {
         return;
     };
-    for (entity, source, view, existing) in &mut views {
+    for (entity, source) in &views {
         if frame.skip_probe_preparation(source.index) {
             continue;
         }
         timing.face(source.index);
-        // This is the same extracted projection used by the surface vertex path.
-        // Explicit capture matrices retain their improper handedness and bypass pose reconstruction.
-        let clip_from_world = view
-            .clip_from_world
-            .unwrap_or_else(|| view.clip_from_view * view.world_from_view.affine().inverse());
-        let uniform = CasterUniform {
-            clip_from_world,
-            view_from_world: view.world_from_view.to_matrix().inverse(),
-            world_from_view: view.world_from_view.to_matrix(),
-            clip_from_view: view.clip_from_view,
-            direction_to_light: scene.direction_to_sun,
-            // DepthPassJob337330 clears unity_LightShadowBias before camera-depth draws.
-            bias: Vec4::ZERO,
-        };
-        if let Some(mut existing) = existing {
-            existing.write(0, uniform, &device, &queue);
-        } else {
-            let mut bindings = CasterViews::new(
-                &device,
-                &queue,
-                &cache,
-                &dither.texture_view,
-                &dither.sampler,
-            );
-            bindings.write(0, uniform, &device, &queue);
-            commands
-                .entity(entity)
-                .insert((bindings, super::camera_depth::CameraDepthState::default()));
-        }
+        commands.entity(entity).insert(CasterViews::new(
+            &device,
+            &queue,
+            &cache,
+            &dither.texture_view,
+            &dither.sampler,
+        ));
     }
 }
 
