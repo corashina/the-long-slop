@@ -224,6 +224,29 @@ pub(crate) mod tests {
         let mut other = Ammo { kind: 5, ..source };
         a.reload(&mut other, 1.);
         assert_eq!(a.count, 1., "other ammo types do not reload");
+        let mut full = Ammo { count: 100., ..a };
+        assert!(!full.can_reload(&source));
+        full.reload(&mut source, 1.);
+        assert_eq!(
+            (full.count, source.count),
+            (100., 2.),
+            "a full bottle takes nothing"
+        );
+        let mut almost = Ammo {
+            count: 99.5,
+            float: true,
+            ..a
+        };
+        let mut float_source = Ammo {
+            float: true,
+            ..source
+        };
+        almost.reload(&mut float_source, 1.);
+        assert_eq!(
+            (almost.count, float_source.count),
+            (100., 1.5),
+            "the move clamps at max"
+        );
         assert!(a.with_count(0.5).is_none() && a.with_count(101.).is_none());
         assert_eq!(a.with_count(40.).unwrap().count, 40.);
     }

@@ -364,6 +364,6 @@ extern "C" {
         fluid_order: u32,
         control: u32,
         lmb_use: bool,
-        hose: u32,
+        prompts: u32,
     );
 }

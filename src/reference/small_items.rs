@@ -9,14 +9,14 @@ pub struct SmallItemsReference {
     pub genie_lamp: GenieLampReference,
     pub start_packs: Vec<SmallItemStartReference>,
     pub exhale: ExhaleReference,
-    pub washes: Vec<WashReference>,
+    pub washes: Vec<WashTriggerReference>,
     pub wash_effects: Vec<WashEffectReference>,
 }
 
 /// A washtriggerscript on a world prototype node: the building cobwebs.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WashReference {
+pub struct WashTriggerReference {
     pub source: SourceId,
     pub prototype: SourceId,
     /// The trigger node (Transform).
@@ -467,11 +467,11 @@ mod tests {
             "never_repair":false,"destroy_on_repair":true,"objects":[],
             "chance_to_start_disabled":0.3,
             "particle_on_destroy":{"file":"sharedassets1.assets","path_id":45340}}"#;
-        let parsed: WashReference = serde_json::from_str(wash).unwrap();
+        let parsed: WashTriggerReference = serde_json::from_str(wash).unwrap();
         assert!(parsed.destroy_on_repair && !parsed.never_repair);
         assert_eq!(parsed.permission, 2);
         assert_eq!(parsed.particle_on_destroy.unwrap().path_id, 45340);
         let shoot = wash.replacen("\"permission\"", "\"wash_on_shoot\":true,\"permission\"", 1);
-        assert!(serde_json::from_str::<WashReference>(&shoot).is_err());
+        assert!(serde_json::from_str::<WashTriggerReference>(&shoot).is_err());
     }
 }
