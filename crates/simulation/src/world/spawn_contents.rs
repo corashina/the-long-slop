@@ -224,7 +224,7 @@ impl<'a> SpawnEvaluation<'a> {
             }
         }
         // A catalog item without a prototype runs its start rules but does not spawn,
-        // such as a start-only car whose root is a prototype of a start placement.
+        // such as an other_vehicle car (Car06P).
         let mut spawns = true;
         let target = if let Some(target) = optional(row, "G")? {
             Some(target)

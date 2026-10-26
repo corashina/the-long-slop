@@ -216,7 +216,7 @@ pub struct WorldStream {
     wanted_lights: Vec<u32>,
     pub origin: WorldOrigin,
     request: WorldRequest,
-    /// Chassis and absolute position of every car, as source important objects.
+    /// Chassis and absolute position of the start car and the last seated car, as source important objects.
     cars: Vec<(rapier3d::prelude::RigidBodyHandle, [f64; 3])>,
     /// Bodies whose contents never retire: the seat owner and the last seated car.
     kept: [Option<rapier3d::prelude::RigidBodyHandle>; 2],
@@ -1392,7 +1392,7 @@ impl WorldStream {
         self.recipes.remove(source);
         Ok(())
     }
-    /// Sets every car chassis and position for item freeze and removal.
+    /// Sets the start car and last seated car chassis and position for item freeze and removal.
     pub fn request_cars(
         &mut self,
         cars: impl IntoIterator<Item = (rapier3d::prelude::RigidBodyHandle, [f64; 3])>,

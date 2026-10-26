@@ -1,34 +1,35 @@
 # Vehicles
 
-The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 PR 1 and PR 2 car types.
+The world loader spawns cars from car prototypes. The export allows the Lada, the bus pool, the bike pool and the V02 car types.
 
 ## Car types
 
 | Car type | Source root | Start field | Engine |
 | --- | --- | --- | --- |
-| Lada 2101 (car02) | `sharedassets1` 82556 | `StartCar02` (`level1` GO 17687) | Front, petrol |
+| Lada 2101 (car02full; bare body car02) | `sharedassets1` 82556; car02 in `CAR_ITEMS` | `StartCar02` (`level1` GO 17687) | Front, petrol |
 | car01, car02k, car04, car05 (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar01`, `StartCar02k`, `StartCar04`, `StartCar05` | Petrol |
 | car06 (bare and full) | Catalog item in `CAR_ITEMS` | `StartCar06` | `randomTypeSelector`: petrol or diesel, 50/50 |
 | car03, car03k, car10, car10k (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar03`, `StartCar03k`, `StartCar10`, `StartCar10k` | Two-stroke |
 | car08, car08c (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar08`, `StartCar08c` | Petrol |
 | car09 (bare, full, `car09fullS`) | Catalog items in `CAR_ITEMS` | `StartCar09`, `StartCar09S` (`level1` GO 12382, `Car09full_slide`) | Two-stroke |
 | car09P (bare and full) | Catalog items in `CAR_ITEMS` | `StartCar09P` | Two-stroke |
+| car07 (bare and full) | Catalog items in `CAR_ITEMS` | None (pools only) | Petrol, forced automatic |
 | Bus01, Bus02, Bus03 (bare and full) | Catalog category `bus` items with `carscript` | World spawn pools | Diesel |
 | Bike01 (bare and full) | Catalog category `bike01` items with `carscript` | World spawn pools | Motorcycle, kick start |
 | Bike03 (bare and full) | Catalog category `bike03` items with `carscript` | World spawn pools | Moped, pedals and engine |
 
 - Each `vehicle` record has the source `carscript.carType`.
-- PR 1 and PR 2 types spawn only as start cars. Their pool rows (`kaszni`, `carfull`) stay off until PR 3.
+- `CAR_ITEMS` also spawn from the pools `kaszni` (bare body) and `carfull` (full car). Car06P and Car09T are V03.
 
 Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. See [Trailers](#trailers).
 
 ## Model
 
 - `car_prototypes` in `tools/reference/world.py` is the allow list. It reads the catalog at export time.
-- The list holds the Lada, each `CAR_CATEGORIES` item root with `carscript`, and each `CAR_ITEMS` item root. Other car roots stay `other_vehicle`.
-- A `CAR_ITEMS` item set to `False` is start-only. Its prototype exports, but its catalog row has no prototype (`other_vehicle`). Pools do not spawn it.
-- Pool spawns of a catalog item need its `prototype`. A direct `G` link to a start-only car stops the export.
+- The list holds the Lada, each `CAR_CATEGORIES` item root with `carscript`, and each `CAR_ITEMS` item root. Other car roots stay `other_vehicle`. Pools do not spawn them.
 - A `randomTypeSelector` engine part (car06) must be a node of the car prototype. Each engine part then has its engine record.
+- A `randomTypeSelector` variant `tank` replaces that tank's fluids after the random fluids. The `StartCar06` diesel pick puts 0.5 L diesel in the fuel tank. Variant `Move` and `R` are not ported; no V02 car uses them.
+- Pool car copies run the loot steps: `RandomSpawned` (fluids, condition `ir1`/`ir2`), then component Starts (`randomTypeSelector`, `partconditionscript`), then deferred `partslotscript` parts. A start car skips `RandomSpawned`.
 - An allowed car root exports as a world prototype, as loot does. Its `vehicle` record holds the `carscript` data.
 - The record mass is dry `massScript` mass. Wheel parts, mounted parts and tank fluid (1 kg per liter) add at runtime.
 - Engine and radiator records are on their parts. The car uses the engine part that is mounted on it.
@@ -37,6 +38,7 @@ Trailers (`utanfutoscript`) export as world prototypes with a `trailer` record. 
 - The vehicle record has `oil_led_two_stroke` (source `carscript.ledOilTestTwoStrokeDefault`).
 - `colliderscaleapplyscript` (Car10k) is an editor bake helper. The export stops if its `run` flag is set.
 - The fuel tank is the root `tankscript`. Without it, the tank is the part in `carscript.tankslot` (Bike03).
+- A `clockscript` on an active child node (Car07 dashboard clock) binds like the item clock, on the car root item. It reads only the meter face with `tipus` "time".
 - Built-in gauges come from `carscript.meters`. Each meter adds needles, lamps and a backlight. The odometer is optional.
 - Gauge parts (Bus01) are `meterscript` on part nodes. `carscript.kmhmeters` updates the gauge in each listed slot.
 - A `kmhmeters` row reads its `types`, times `modifier`. With `force`, every needle of the gauge reads the speed (source behavior).
@@ -178,7 +180,7 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car's catalog items to `CAR_ITEMS` in `tools/reference/world.py`. Its roots then export with a `vehicle` record. Set `True` to enable pools.
+1. Add the car's catalog items to `CAR_ITEMS` in `tools/reference/world.py`. Its roots then export with a `vehicle` record and spawn from pools.
 2. For a start car, add its field and full item to `START_CARS`. Check the pose against home colliders and the terrain.
 3. Run the runtime export. The exporter stops when a source record is missing. Car `mountStuff` volumes export by themselves.
 4. Check the prototype node count against the stream limits.
@@ -189,5 +191,4 @@ Expected work for other cars:
 - Two-strokes (car03, car03k, car09, car09P, car10, car10k): the engine needs two-stroke mixed fuel. They have no oil tank.
 - Car03, car03k, car08 and car08c have no radiator.
 - Car06P: diesel works through its engine `fuel_consumption`. Add its category.
-- Car07: add the automatic gearbox modes from the source.
 - Bikes: add balance physics. The four-wheel controller does not fit.
