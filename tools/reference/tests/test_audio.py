@@ -1,41 +1,17 @@
 """Critical selected-audio contract checks."""
 import copy
-import ast
 import hashlib
-import inspect
 import json
 import tempfile
 import unittest
 import wave
 from pathlib import Path
 from types import SimpleNamespace as NS
-from unittest.mock import patch
 from tools.reference.library.reader import LibraryReader
 from tools.reference.library.types import ObjectId
 from tools.reference.source import key, source_id
 
 class SelectedAudio(unittest.TestCase):
-    def test_audio_requires_gltf_reports(self):
-        from tools.reference.audio import recover_audio
-        signature = inspect.signature(recover_audio)
-        self.assertEqual(list(signature.parameters), ['source', 'roots', 'manifest', 'library', 'output', 'reports'])
-        self.assertIs(signature.parameters['reports'].default, inspect.Parameter.empty)
-
-    def test_audio_exporter_passes_gltf_reports(self):
-        from tools.reference.audio import recover_audio
-        from tools.reference.export import _export_selected
-        tree = ast.parse(inspect.getsource(_export_selected))
-        call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name) and node.func.id == 'recover_audio')
-        reports = {'lada': {'material_indices': {'level1:21': 3}}}
-        def bind(*args, **kwargs):
-            arguments = inspect.signature(recover_audio).bind(*args, **kwargs).arguments
-            self.assertIs(arguments['reports'], reports)
-            return arguments
-        scope = dict(source=object(), roots={}, CARS={}, manifest={}, library=object(),
-                     output=Path('.'), report=reports, recover_audio=bind)
-        eval(compile(ast.Expression(call), '<audio export caller>', 'eval'), scope)
-
     def accepted_source_fixture(self, directory):
         root=Path(directory)
         library,identity,_=self.fixture(directory)
@@ -389,7 +365,7 @@ class HitAudio(unittest.TestCase):
             'ambience': [ambience_record({}, ROCK, lambda _: [5], 'm')],
             'survival': [record('eat', 0, True, [6], 70), record('burp', 1, False, [6], 128),
                 record('item_hit', 11, True, [6]), record('car_hit', 12, True, [1, 2, 3, 4]), record('rock_heat', 13, True, [5]), record('eat_crunchy', 10, True, [6], 70), record('music_box', 14, True, [6], 128),
-                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6])]}
+                record('footstep', 15, True, [6], 55), record('melee_hit', 17, True, [6]), record('radio_click', 21, True, [6], 70)]}
         validate_hit_audio(audio, set(range(1, 7)), [])
         for index, field, value in [(0, 'one_shot', False), (1, 'one_shot', True), (3, 'clips', [1, 2, 3]), (2, 'kind', 14), (7, 'settings', {'priority': 100, 'spatial_blend': 1.})]:
             changed = copy.deepcopy(audio); changed['survival'][index][field] = value

@@ -9,7 +9,6 @@ from pathlib import Path
 from .library.reader import checked
 from .library.types import ObjectId
 from .source import key, source_id
-from .radio import recover_radio_visuals
 from .wheel_effects import recover_wheel_voices
 from .particles import relative_pose
 
@@ -17,9 +16,9 @@ ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
 PRIORITIES = [10, 25, 40, 55, 70, 80, 85, 100]
 # These survival roles play once through the shared prefab.
-ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'music_box': 14, 'footstep': 15, 'melee_hit': 17}
+ONE_SHOT = {'eat': 0, 'eat_crunchy': 10, 'item_hit': 11, 'car_hit': 12, 'rock_heat': 13, 'music_box': 14, 'footstep': 15, 'melee_hit': 17, 'radio_click': 21}
 # Other one-shots use AudioPriorities[7]. The music box keeps its source priority.
-ONE_SHOT_PRIORITY = {'eat': 70, 'eat_crunchy': 70, 'footstep': PRIORITIES[3]}
+ONE_SHOT_PRIORITY = {'eat': 70, 'eat_crunchy': 70, 'footstep': PRIORITIES[3], 'radio_click': PRIORITIES[4]}
 TIER_THRESHOLDS = [0.05, 0.2, 0.5, 0.7]
 PHASES = (('morning', 'reggeledik', 'Reggel'), ('day', 'nappal', 'Nappal'),
           ('dusk', 'esteledik', 'Esteledik'), ('night', 'este', 'Este'))
@@ -312,7 +311,7 @@ def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: s
         'path': 'reference/' + name, 'usages':[usage], **metadata}
 
 
-def recover_audio(source, roots: dict, manifest: dict, library, output: Path, reports: dict) -> dict:
+def recover_audio(source, roots: dict, manifest: dict, library, output: Path) -> dict:
     receipt, method, footstep_methods = managed_evidence(library)
     audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'car_voices': [], 'mixers': [],
         'bindings': [], 'mechanisms': [], 'fluids': [], 'interiors': [], 'routes': [], 'lamps': [], 'silent_actions': ['pickup', 'detach', 'handbrake'],
@@ -428,9 +427,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         audio['bindings'].append(record); return record['id']
     car_group = None
     for c, cls, d in mono:
-        if cls == 'carscript':
-            car_group = source.resolve(c, d['groupScript'])
-        elif cls == 'usablescript':
+        if cls == 'usablescript':
             movement = None
             if d['moveSound'] and d['SSource']['m_PathID'] and d['SMove']['m_PathID']:
                 movement = voice(source.resolve(c, d['SSource']), [method(cls, 'RotMoveSound'), method(cls, 'SlideMoveSound')])
@@ -469,39 +466,23 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
                 if control is None:raise ValueError('Lamp audio lacks selected light controller')
                 audio['lamps'].append({'source':source_id(c),'control':control,'voices':lamp_voices,
                     'on_binding':on,'off_binding':off,'method':method(cls,'Refresh')})
-        elif cls == 'radioscript':
-            rvoices = [voice(source.resolve(c,d[f]),[method(cls,'Start'),method(cls,'SetRadio')]) for f in ['SS','SC','SC2']]
-            for vid in rvoices[:2]:audio['voices'][vid-1]['priority']=PRIORITIES[5]
-            def control(field):
-                if not d[field]['m_PathID']: return None
-                reader = source.resolve(c,d[field]); eid = emitter(reader)
-                node = audio['emitters'][eid-1]['node']
-                values = source.read(reader)
-                item = next(i['id'] for i in manifest['items'] if i['node'] == node)
-                return {'source':source_id(reader),'node':node,'item':item,
-                    'enabled':bool(values['m_Enabled']) and not bool(values['disable']),
-                    'tune':bool(values['tuneAble']),'turnable':bool(values['turnable'])}
-            controls = {name:control(field) for name,field in [('volume','Bvolume'),('tuning','Btune'),('band','BChangeAMFM')]}
-            electronics_reader = source.resolve(c,d['electronics'])
-            electronics = source.read(electronics_reader)
-            if electronics['jamValue'] != 0:
-                raise ValueError('Radio nonzero startup jam requires source rule')
-            audio['radio'] = {'source':source_id(c),'emitter':emitter(c),'voices':rvoices,'controls':controls,
-                'visuals':recover_radio_visuals(source,c,manifest,reports),
-                'electronics_source':source_id(electronics_reader),'electronics_output':electronics['maxOutput'],
-                'tuning_repeat_seconds':0.2,'holiday_ranges':[[10,15,11,15],[12,15,1,15]],
-                'constants':{k:d[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']},
-                'initial_on':bool(d['ON']),'initial_am':bool(d['amfm']),'initial_tuning':d['currentTeker'],'initial_volume':d['v'],
-                'fm_tolerance':main['FRTFM'],'am_tolerance':main['FRTAM'],'electronics_cutoff':0.2,
-                'time_correction_seconds':0.5,'late_seek_margin_seconds':0.1,'custom_gain':0.5,
-                'clock':{'kind':'scaled','selected':method('mainscript','RADIO'),
-                    'music_start':method('radioCH','SelectRandomMusic'),
-                    'talk_start':method('radioCH','SelectRandomTalk'),
-                    'multiplayer':method('mainscript','RADIO2')},
-                'click_binding':binding(c,'radio_power_band',[d['Cturned']],d['turnVolume'],[0.85,1.15],PRIORITIES[4],method(cls,'TurnRadio')),
-                'stations':station_records(source,main_r,main,lambda reader:clip(reader,'radio')),'methods':[method(cls,'SetRadio'),method(cls,'Update'),method('mainscript','Update'),
-                    method('radioCH','SelectRandomMusic'),method('radioCH','SelectRandomTalk'),method('radioCH','AdvanceRadio'),
-                    method('fpscontroller','Update'),method('electronicsscript','Start'),method('electronicsscript','UpdOutPut'),method('mainscript','CheckHoliday')]}
+    # radioscript settings and stations of the car prototype radio. Every world radio uses them.
+    from .world import LADA
+    car_radios=[c for node in source.hierarchy(source.get(*LADA),activate_root=True) for c in node['components']
+        if c.type.name=='MonoBehaviour' and source.class_name(c)=='radioscript']
+    if len(car_radios)!=1:raise ValueError('The car prototype requires one radio')
+    radio_data=source.read(car_radios[0])
+    audio['radio'] = {'tuning_repeat_seconds':0.2,'holiday_ranges':[[10,15,11,15],[12,15,1,15]],
+        'constants':{k:radio_data[k] for k in ['AMmin','AMmax','FMmin','FMmax','AMStep','FMStep','vSpeed','turnVolume']},
+        'fm_tolerance':main['FRTFM'],'am_tolerance':main['FRTAM'],'electronics_cutoff':0.2,
+        'time_correction_seconds':0.5,'late_seek_margin_seconds':0.1,'custom_gain':0.5,
+        'clock':{'kind':'scaled','selected':method('mainscript','RADIO'),
+            'music_start':method('radioCH','SelectRandomMusic'),
+            'talk_start':method('radioCH','SelectRandomTalk'),
+            'multiplayer':method('mainscript','RADIO2')},
+        'stations':station_records(source,main_r,main,lambda reader:clip(reader,'radio')),'methods':[method('radioscript','SetRadio'),method('radioscript','Update'),method('mainscript','Update'),
+            method('radioCH','SelectRandomMusic'),method('radioCH','SelectRandomTalk'),method('radioCH','AdvanceRadio'),
+            method('fpscontroller','Update'),method('electronicsscript','Start'),method('electronicsscript','UpdOutPut'),method('mainscript','CheckHoliday')]}
     main=source.get('level1',64919);md=source.read(main)
     player=source.get('level1',80125);pd=source.read(player)
     prefab=next(c for c in source.components(source.transform_for(source.resolve(main,md['Audio'])))[1] if c.type.name=='AudioSource')
@@ -552,6 +533,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             engine['audio']=engine_audio(source,source.get(engine['source']['file'],engine['source']['path_id']),car_sound,car_shot)
         if prototype.get('vehicle'):
             vehicle=prototype['vehicle'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
+            group=source.resolve(car,source.read(car)['groupScript'])
+            if car_group is not None and key(group)!=key(car_group):raise ValueError(f'Car hit audio routes differ: {key(car)}')
+            car_group=group
             wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
             vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
             routes=[c for node in source.hierarchy(root,activate_root=True) for c in node['components']
@@ -562,7 +546,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             sled=prototype['sled'];sleds.append(sled)
             sled['clip']=clip(source.get(sled['clip']['file'],sled['clip']['path_id']))
     if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
-    if car_group is None:raise ValueError('Car hit audio needs the car route')
+    if car_group is None:raise ValueError('Car hit audio needs a car prototype route')
     rock=audio['ambience'][0]
     survival_groups+=[('item_hit',11,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
         ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
@@ -611,9 +595,15 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         first=source.read(sled_sources[0]);owner=source.get(sleds[0]['source']['file'],sleds[0]['source']['path_id'])
         survival_groups.append(('sled',20,owner,[source.resolve(sled_sources[0],first['m_audioClip'])],sled_sources[0],
             [0.,sleds[0]['sound_max_volume']],[sleds[0]['sound_min_pitch'],sleds[0]['sound_max_pitch']]))
+    # radioscript.TurnRadio plays Cturned at the radio through mainscript.PlayClipAtPoint. One row serves every world radio.
+    radios=[source.get(r['source']['file'],r['source']['path_id']) for r in manifest['world']['records'] if r['class_name']=='radioscript']
+    clicks={(key(source.resolve(r,d['Cturned'])),d['turnVolume']) for r in radios for d in [source.read(r)]}
+    if len(clicks)!=1:raise ValueError('World radio clicks differ or are missing')
+    (click,turn_volume),=clicks
+    survival_groups.append(('radio_click',21,radios[0],[source.get(*click)],prefab,[turn_volume]*2,[0.85,1.15]))
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
-    routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'rock_heat':default_route,'footstep':default_route,
+    routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'radio_click':default_route,'rock_heat':default_route,'footstep':default_route,
         'car_hit':source.resolve(car_group,source.read(car_group)['GCarSounds'])}
 
     audio['survival']=[]
@@ -633,7 +623,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         if one_shot:
             for k in settings['spatial_blend_curve']['keys']:k['value']=1.
         cls,name={'eat':('mainscript','PlayClipAtPoint'),'eat_crunchy':('mainscript','PlayClipAtPoint'),'burp':('fpscontroller','Burp'),'fart':('fpscontroller','Fart'),'shit':('fpscontroller','Shit'),'death':('fpscontroller','Death2'),'sleep':('mainscript','Update'),
-            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd'),'sled':('szankoScript','Update')}.get(role,('napszakvaltakozas','FixedUpdate'))
+            'item_hit':('pickupable','OnCollisionEnter'),'car_hit':('carscript','OnCollisionEnter'),'rock_heat':('soundplayscript','PlaySound'),'footstep':('stepSoundScript','Step'),'storm':('sandstormscript','Update'),'melee_hit':('meleeweaponscript','Update'),'metal_detector':('metalDetectorScript','UpdSound'),'ambience_zone':('ambienceZone','Upd'),'sled':('szankoScript','Update'),'radio_click':('radioscript','TurnRadio')}.get(role,('napszakvaltakozas','FixedUpdate'))
         audio['survival'].append({'role':role,'kind':kind,'one_shot':one_shot,'source':source_id(owner),'audio_source':source_id(reader),
             'clips':[clip(r) for r in clip_readers], 'gain':gain,'pitch':pitch,'offset':offset,
             'settings':settings,'mixer':mixer(route),'doppler':d['DopplerLevel'],'pan':d['Pan2D'],'method':method(cls,name)})
@@ -717,8 +707,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
 
     # World radios (portable and car radios) share a voice template per equal setting set.
     # The browser keeps a fixed slot pool per template.
-    portable=[r['source'] for r in manifest['world']['records']
-        if r['class_name']=='radioscript' and r['source']!=audio['radio']['source']]
+    portable=[r['source'] for r in manifest['world']['records'] if r['class_name']=='radioscript']
     templates=[]
     for identity in portable:
         r=source.get(identity['file'],identity['path_id']);d=source.read(r)
@@ -768,12 +757,6 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
-    # V03 bridge: old garage cars. Task 9 removes them.
-    for vehicle in manifest['vehicles']:
-        engine=vehicle['engine'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
-        engine['audio']=engine_audio(source,source.get(engine['source']['file'],engine['source']['path_id']),car_sound,car_shot)
-        wheels=[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in vehicle.pop('wheel_voices')]
-        vehicle['audio']=car_audio(source,car,wheels,cd,car_sound,car_shot)
     skid=manifest['skid']
     for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
     for field in ['radio','portable_radios']:

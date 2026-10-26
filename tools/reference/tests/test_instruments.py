@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace as NS
 
-from tools.reference.instruments import recover_instruments, recover_material_switch
+from tools.reference.instruments import instrument_record, recover_material_switch
 
 
 def dashboard_fixture():
@@ -55,6 +55,11 @@ def dashboard_fixture():
     return source, manifest, reports, car
 
 
+def recover_instruments(source, manifest, reports, car):
+    nodes = {(n['source']['file'], n['source']['path_id']): n['id'] for n in manifest['nodes']}
+    return instrument_record(source, car, nodes, 7, reports['car']['material_indices'])
+
+
 class InstrumentTests(unittest.TestCase):
     def setUp(self):
         self.owner = object()
@@ -76,11 +81,11 @@ class InstrumentTests(unittest.TestCase):
 
     def test_dashboard_and_needle_material_links(self):
         source, manifest, reports, car = dashboard_fixture()
-        result = recover_instruments(source, manifest, reports, 'car', car)
+        result = recover_instruments(source, manifest, reports, car)
         self.assertEqual(result['backlight'], {'kind': 'absent'})
         meter = source.resolve(car, {'m_PathID': 2})
         source.read(meter)['R'] = {'m_PathID': 500}
-        result = recover_instruments(source, manifest, reports, 'car', car)
+        result = recover_instruments(source, manifest, reports, car)
         self.assertEqual(result['backlight']['node'], 502)
         self.assertEqual(result['backlight']['on']['gltf_material'], 3)
         self.assertEqual(result['backlight']['off']['gltf_material'], 4)

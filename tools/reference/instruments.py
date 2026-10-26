@@ -19,13 +19,6 @@ def recover_material_switch(source, owner, fields, node, asset, material_indices
     return {'kind': 'renderer', 'node': node(owner, pointer, True),
             'on': material(fields['OnM']), 'off': material(fields['OffM'])}
 
-def recover_instruments(source,manifest,reports,name,root):
-    nodes={(n['source']['file'],n['source']['path_id']):n['id'] for n in manifest['nodes']}
-    asset=next(a['id'] for a in manifest['assets'] if a['path']==f'reference/{name}.gltf')
-    result=instrument_record(source,root,nodes,asset,reports[name]['material_indices'])
-    if result is None:raise ValueError(f'Car needs one meter: {name}')
-    return result
-
 def instrument_record(source,root,nodes,asset,material_indices):
     """Instruments of the car below `root`. `nodes` maps Transform keys to node ids. None without a meter."""
     parts=[c for n in source.hierarchy(root) for c in n['components'] if c.type.name=='MonoBehaviour'

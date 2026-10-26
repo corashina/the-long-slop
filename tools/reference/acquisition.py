@@ -13,6 +13,11 @@ TEXT_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 CONTRACT_SHA256 = 'fc132e727084ae72fb23038691ee0a7f1451a16b7b7d8f0092f19eb6259a614d'
 
 
+def start_car(manifest, group):
+    """Source DestroyOthers keeps the pack of a start car group that has a car placement."""
+    return any(s['prototype'] is not None and s['group']==group for s in manifest['world']['startup'])
+
+
 def _block(code, start):
     opening = code.index('{', start)
     depth, end = 1, opening + 1
@@ -277,7 +282,7 @@ def recover_acquisition(source, manifest):
     terrain=source.get('level1',64898);td=source.read(terrain)
     startup_packs=[]
     for field,pack_id,car_id in [('StartCar01',14079,69517),('StartCar02',14082,77839)]:
-        if not any(car['source']=={'file':'level1','path_id':car_id} for car in manifest['vehicles']):continue
+        if not start_car(manifest,field):continue
         group=source.resolve(terrain,td[field]);go=source.get('level1',pack_id)
         s=startup(go);root=source.transform_for(go)
         cigi=component(source,root,'cigiscript')
@@ -574,8 +579,8 @@ def _validate_objects(a,manifest,prototype,table):
         if v['started'] or v['loaded'] or v['buried'] or v['car'] is not None or v['fixed_in_car']!=0:
             raise ValueError('Startup instance initialization differs')
     selected_packs=[(index,expected) for index,expected in enumerate(STARTUP_PACKS)
-        if any(car['source']=={'file':'level1','path_id':expected['vehicle']} for car in manifest['vehicles'])]
-    if len(_list(a['startup_packs']))!=len(selected_packs) or len(selected_packs)!=len(manifest['vehicles']):raise ValueError('Selected-car startup packs differ')
+        if start_car(manifest,'StartCar01' if expected['source']==14079 else 'StartCar02')]
+    if len(_list(a['startup_packs']))!=len(selected_packs):raise ValueError('Selected-car startup packs differ')
     for v,(index,expected) in zip(a['startup_packs'],selected_packs,strict=True):
         _shape(v,instance_fields+' prototype group group_pose group_active vehicle pack cigarette_prefab ammo');instance(v)
         prototype(v['prototype'],74);_pose(v['group_pose']);_boolean(v['group_active'])
@@ -584,7 +589,6 @@ def _validate_objects(a,manifest,prototype,table):
         ammo(v['ammo'],expected['ammo'])
         for f in ('source','save','body','pickup','group','vehicle','pack'):
             if v[f]!={'file':'level1','path_id':expected[f]}:raise ValueError('Selected startup source link differs')
-        if not any(car['source']==v['vehicle'] for car in manifest['vehicles']):raise ValueError('Startup group not selected')
         if v['group_active'] or not v['active'] or not v['manual_start'] or v['item_id']!=74 or v['pose']['parent']!=v['group_pose']['source'] or v['cigarette_prefab']!=pack['cigarette_prefab']:
             raise ValueError('Selected startup group rule differs')
     h=a['holiday_startup'];_shape(h,instance_fields+' prototype wearable terrain start end inclusive local_calendar new_game_only multiplayer');instance(h)

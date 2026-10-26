@@ -4,7 +4,7 @@ The startup export contains the Lada. The Skoda is excluded for now.
 
 | Car | Source root | Start | Engine |
 | --- | --- | --- | --- |
-| Lada 2101 | `level1` GO 17687, `StartCar02` | Garage spot | Front, petrol |
+| Lada 2101 | `sharedassets1.assets` 82556, `StartCar02` | Garage spot | Front, petrol |
 
 ## Selection
 
@@ -97,10 +97,11 @@ See [current verification](verification.md#driving-branch-verification-2026-10-1
 
 ## Add the next car
 
-1. Add the car to `CARS` in `tools/reference/export.py`: root GameObject, start-car name, and starter link.
-2. Check its source pose against other cars, home colliders, and the terrain.
-3. Run the runtime export. The exporter stops when a source record is missing.
-4. Run the production tests with the new manifest.
+1. Add the car prefab to `CAR_PROTOTYPES` in `tools/reference/world.py`. It then exports as a world prototype with a `vehicle` record.
+2. For a start car, add its startup placement next to `StartCar02` in `recover_world`. Check the pose against home colliders and the terrain.
+3. Add its `mountStuff` volumes to the prototype storage in `tools/reference/storage.py`.
+4. Run the runtime export. The exporter stops when a source record is missing.
+5. Run the production tests with the new manifest.
 
 Expected work for each rejected car:
 

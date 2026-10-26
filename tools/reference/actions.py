@@ -14,7 +14,7 @@ def recover_masks(player):
     return result
 
 
-def recover_bindings(source, nodes, components, item_nodes, colliders, mechanisms, openings, seats):
+def recover_bindings(source, nodes, components, item_nodes, colliders, mechanisms, openings):
     component_items = {}
     for node, group in components.items():
         for readers in group.values():
@@ -23,10 +23,6 @@ def recover_bindings(source, nodes, components, item_nodes, colliders, mechanism
                     component_items[key(reader)] = item_nodes[node]
     uses = {(r['source']['file'], r['source']['path_id']): r['item'] for r in mechanisms}
     uses.update({(r['source']['file'], r['source']['path_id']): r['cap'] for r in openings})
-    for seat in seats:
-        for node in seat['hit_nodes']:
-            for reader in components[node].get('seatscript', []):
-                uses[key(reader)] = seat['item']
     layers = {}
     # pickupable.LayerStart assigns cols[].p after layerScript.FStart.
     for node, group in components.items():
