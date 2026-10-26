@@ -45,6 +45,17 @@ pub(crate) struct Drive {
     last_inventory: Option<([u32; 4], u8, u32)>,
 }
 
+impl Drive {
+    /// Player body pose at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self) -> VehiclePose {
+        let mut pose = self.runtime.area.player.body_pose(&self.runtime.physics);
+        for i in 0..3 {
+            pose.position[i] += self.rendered.position[i] - self.current.position[i];
+        }
+        pose
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct FeedbackStamp {
     actions: u32,
@@ -101,20 +112,39 @@ struct ManifestShell<'a> {
 struct WorldShell<'a> {
     #[serde(borrow)]
     draw_distance: &'a serde_json::value::RawValue,
+    #[serde(borrow, skip_serializing)]
+    startup: Vec<StartupShell<'a>>,
+    /// Start car fields in export order. The Game mode start car list shows them.
+    #[serde(skip_deserializing)]
+    start_cars: Vec<&'a str>,
+}
+#[derive(serde::Deserialize)]
+struct StartupShell<'a> {
+    group: &'a str,
+    start_car: bool,
 }
 
 #[wasm_bindgen]
 pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
-    let shell: ManifestShell =
+    let mut shell: ManifestShell =
         serde_json::from_slice(reference_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    shell.world.start_cars = shell
+        .world
+        .startup
+        .iter()
+        .filter(|s| s.start_car)
+        .map(|s| s.group)
+        .collect();
     serde_json::to_string(&shell).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// The Game mode biome from the browser. Values above 3 read as Mixed.
-fn game_mode() -> crate::world::GameMode {
+/// The Game mode from the browser. Biome values above 3 read as Mixed.
+/// The start car is -1 (Random) or an index into the manifest start placements.
+fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
     let biome = game_biome();
     crate::world::GameMode {
         biome: if biome > 3 { 0 } else { biome as u8 },
+        start_car: crate::world::StartCarChoice::from_index(&reference.world, game_start_car()),
     }
 }
 
@@ -133,7 +163,7 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, game_mode(), draw_distance)
+    let mut runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
         &mut runtime.stream,
@@ -246,7 +276,11 @@ pub fn run(
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
-                presentation::spawned::sync,
+                (
+                    presentation::spawned::sync,
+                    presentation::player_body::sync,
+                )
+                    .chain(),
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
@@ -286,6 +320,7 @@ fn setup(
 ) {
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
+    commands.insert_resource(presentation::player_body::PlayerBody::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
     {
@@ -1138,6 +1173,8 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         fuel,
         runtime.paused,
         runtime.started,
+        runtime.autosave_safe(drive.input.held & keys::GRAB != 0),
+        runtime.area.player.seated(),
     );
     let available = runtime.area.interaction.available_actions(
         &runtime.aim,

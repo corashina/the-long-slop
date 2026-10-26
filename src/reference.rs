@@ -82,6 +82,8 @@ pub mod lighting;
 pub use lighting::*;
 pub mod vehicles;
 pub use vehicles::*;
+pub mod towing;
+pub use towing::*;
 
 pub const APP_ID: u32 = 1_017_180;
 pub const BUILD_ID: u32 = 11_140_890;
@@ -614,11 +616,13 @@ pub struct FluidRulesReference {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PushGripReference {
+/// Source `pushgripable`. World prototypes use prototype node and collider indices.
+pub struct PushGripReference<Node = NodeId, Collider = ColliderId> {
     pub source: SourceId,
-    pub node: NodeId,
-    pub hand_node: NodeId,
-    pub colliders: Vec<ColliderId>,
+    pub node: Node,
+    /// Source `HT`. A null `HT` moves the nearest hand to the grip.
+    pub hand_node: Option<Node>,
+    pub colliders: Vec<Collider>,
     pub local_pose: Transform,
     pub in_use: bool,
 }
@@ -1064,7 +1068,7 @@ impl ReferenceManifest {
                 .filter(|a| a.usage == AssetUsage::PlayerPrototype)
                 .count()
                 == 1,
-            "exactly one inactive player asset",
+            "exactly one player asset",
         )?;
         require(
             self.library.schema_version == 1
@@ -1772,7 +1776,7 @@ impl ReferenceManifest {
             if let Some(grip) = &push.grip {
                 require(
                     node_ids.contains(&grip.node)
-                        && node_ids.contains(&grip.hand_node)
+                        && grip.hand_node.is_none_or(|node| node_ids.contains(&node))
                         && transform(&grip.local_pose)
                         && !grip.colliders.is_empty()
                         && grip.colliders.iter().all(|id| collider_ids.contains(id)),

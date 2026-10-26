@@ -1,6 +1,6 @@
 # Project roadmap
 
-Updated: 2026-10-25. Goal: recreate The Long Drive for the web.
+Updated: 2026-10-26. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
 Save format authority: [save schema](src/save/schema.rs).
 
@@ -101,13 +101,25 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 13. Mouse driving (V06): U toggles it in the car. Mouse X steers, mouse up is gas, down is brake, mouse look is off.
 14. Steering wheel (V06): with a real wheel or pad, bind every axis and gear button. Check H-shifter on and off and the live values. Steer a sled with the pad.
 15. Check F3 before and after, driving on sand at speed. Compare with the frame rate rule.
+16. Towing (V05): run `cargo test --lib lada_tows -- --ignored`. Re-export first: prototypes now carry `trailer` and `hitches`.
+17. Find a small trailer and a bus trailer. Pick up the grip and put it on the Lada hitch. Drive, turn, reverse and brake.
+18. Check the trailer rear and brake lamps follow the Lada lights, ignition and brake. Check the bus trailer brake switch.
+19. Pick the grip off the hitch while the car stands and while it rolls. Save and load with the trailer on the hitch.
+20. Tow a trailer far from where it spawned and back: car, trailer and grip must not vanish or freeze apart.
+21. Check the trailer reflection probe and trailer wheel meshes. Trailer wheel meshes do not turn yet; `PlusWheelToKeepAwake` is not ported.
+22. Check F3 while towing. Compare with the frame rate rule.
+23. Buses (V03): re-export first: the bus pool, bus gauges and bus doors are new. Run `cargo test --lib v03_bus_pool -- --ignored`.
+24. Check F3 at the start and near a bus. Compare with the frame rate rule.
+25. Find Bus01, Bus02 and Bus03. Fill a bus with diesel and drive it. With petrol the engine must fail to start.
+26. Bus01: both gauge parts in their kmh slots read speed. Check the counters and the gauge lamps.
+27. Bus doors: the signal button lights green, the open button swings the leaves and lights red. Check the leaf sounds and the stretching colliders. Buttons do nothing without electronics power.
+28. Bus02 trailer: put its grip on the bus hitch. Drive and turn. Its brake switch sets brake force 100 on each wheel. Its rear lamps follow the bus lights and brake.
+29. Save and load with bus doors open and signalled and with the trailer on the bus.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | V02 | Add the other cars. | L | Skoda (with its interior muffling), Lada wagon, two-stroke cars, Car07 automatic, Car08. Roadside cars from building loot with random condition, fluids and missing parts. [B02-B04, B06, B07, L06, C07] |
-| V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
-| V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
 
 ## 5. Later
 
@@ -118,12 +130,30 @@ Run the X05 part 1 test pass on Tomasz's PC:
 3. Sleep, wake, save and load: the sleep hint stays off until the cooldown ends.
 4. Old saves do not load (save schema 23).
 
+Run the X04b test pass (save slots, autosave) in the same run:
+
+1. Run `cargo test --lib x04b -- --ignored`.
+2. Save under two names. Each tile shows a game thumbnail (WebGPU canvas copy), date, seed, km and version.
+3. Overwrite, Load and Delete ask Yes/No in game. Load last loads the newest save.
+4. Play 2 minutes on foot. The autosave tile appears. Check the F3 frame cost of the autosave frame.
+5. Turn on "Load last save at start" and reload the page. The last save loads.
+6. Old saves do not load (save schema 24).
+
+Run the X01a test pass (player body) in the same run:
+
+1. Re-export, then rebuild (X01a added seat, drive and `Th` frames).
+2. Look down standing, crouching, walking forward and back. Carry a light and a heavy (>10 kg) item. Sit in the Lada (driver and passenger), on the WC and on the sled. Check legs, arms (twist around the bone axis is a known risk) and hands on the wheel.
+3. Check you cannot see inside the head.
+4. Check the body shadow and the eye shadows. Check the siphon hose shadow follows the hose.
+5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
+6. Check the F3 cost of the body.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Body model, hand and foot IK, ragdoll, wearables, sunglasses, appearance editor. [D01-D03, D05, D06, M10] |
+| X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
 | X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, save slots, autosave, settings, rebinding, languages, help text. [M01-M12, M14, M16, I10, L05] |
+| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X07 | Other items | M | Computer and display, speed-writing device, paintings, holiday items. Cigarette ember, smoke and burn-down; spray bottle start-area copies, refill and prompt text; genie lamp glow; cleaned wash triggers turn their object off. [F07, F18, F19, F22, E05, F13, F14] |

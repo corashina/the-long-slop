@@ -165,6 +165,13 @@ pub struct WorldStream {
     sled_scan: Option<(u64, u64)>,
     /// Indices of world prototypes with a sled.
     sled_prototypes: Vec<usize>,
+    trailer_bindings: Vec<content_trailers::TrailerBinding>,
+    /// Session and active revision whose trailers and hitch targets are all bound.
+    trailer_scan: Option<(u64, u64)>,
+    /// Contents whose hitch targets are registered, with their item.
+    hitch_owners: Vec<(crate::world::GeneratedId, crate::reference::ItemId)>,
+    /// Indices of world prototypes with a trailer or hitch targets.
+    trailer_prototypes: Vec<usize>,
     detector_bindings: Vec<content_detectors::DetectorBinding>,
     /// Session and active revision whose metal detectors are all bound.
     detector_scan: Option<(u64, u64)>,
@@ -177,6 +184,8 @@ pub struct WorldStream {
     lamp_binding_revision: u64,
     seed: i32,
     mode: super::GameMode,
+    /// The picked start car. Only its start placement spawns.
+    start_car: super::StartCar,
     package_id: String,
     generation_revision: u64,
     structure_helpers: super::structure_helpers::StructureHelpers,
@@ -401,6 +410,7 @@ impl WorldStream {
                 placements: self.placements.capture_index(),
             },
             seed: self.seed,
+            start_car: self.start_car,
             changes,
             spawn: self.contents.state.capture_history(),
         }
@@ -448,6 +458,7 @@ impl WorldStream {
         saved: &crate::save::WorldSnapshot,
     ) -> Result<(), ReferenceError> {
         if self.seed != saved.seed
+            || self.start_car != saved.start_car
             || self.initial_generation_ready
             || !self.structures.is_empty()
             || self.roads.coverage() != 0
@@ -652,6 +663,9 @@ impl WorldStream {
     pub fn mode(&self) -> super::GameMode {
         self.mode
     }
+    pub fn start_car(&self) -> super::StartCar {
+        self.start_car
+    }
 
     /// Test stream in the default game mode at the export default draw distance.
     #[cfg(test)]
@@ -724,7 +738,9 @@ impl WorldStream {
             }
             road_layers[index] = prototype.nodes[collider.node as usize].layer;
         }
-        let mut contents = super::contents::SourceContents::new(world);
+        let start_car = mode.start_car.pick(world, &mut super::menu_random());
+        let mut contents =
+            super::contents::SourceContents::new(world, start_car.current_car(reference)?);
         contents.boxes =
             content_boxes::BoxReleases::new(reference.acquisition.r#box.source.clone());
         let structure_helpers =
@@ -788,6 +804,16 @@ impl WorldStream {
                 .filter(|(_, p)| p.sled.is_some())
                 .map(|(i, _)| i)
                 .collect(),
+            trailer_bindings: Vec::new(),
+            trailer_scan: None,
+            hitch_owners: Vec::new(),
+            trailer_prototypes: world
+                .prototypes
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.trailer.is_some() || !p.hitches.is_empty())
+                .map(|(i, _)| i)
+                .collect(),
             detector_bindings: Vec::new(),
             detector_scan: None,
             bus_door_bindings: Vec::new(),
@@ -796,6 +822,7 @@ impl WorldStream {
             lamp_binding_revision: 0,
             seed,
             mode,
+            start_car,
             biome_materials,
             structure_helpers,
             building_components: Default::default(),
@@ -1691,7 +1718,8 @@ impl WorldStream {
         self.startup_candidates.clear();
     }
 
-    /// The startup entries with a prototype become fixed placements. The exported pose is the raw
+    /// The startup entries with a prototype become fixed placements. Of the start cars, only
+    /// the picked one spawns. The exported pose is the raw
     /// scene pose; the startup root offsets of its Transform chain move it onto the terrain.
     fn startup_placements(
         &self,
@@ -1702,6 +1730,9 @@ impl WorldStream {
             let Some(prototype) = &entry.prototype else {
                 continue;
             };
+            if entry.start_car && entry.group != self.start_car.field() {
+                continue;
+            }
             let offset = startup.chain_offset(&self.reference, &entry.source)?;
             let mut position = entry.pose.translation.map(f64::from);
             position[1] += f64::from(offset);
@@ -4340,6 +4371,10 @@ impl WorldStream {
             self.binding_reserved = 0;
             return Err(error);
         }
+        if let Err(error) = self.sync_trailer_bindings(items, interaction, physics) {
+            self.binding_reserved = 0;
+            return Err(error);
+        }
         self.sync_moving_lamps(items);
         self.sync_generated_food(reference, items, physics);
         self.binding_bytes = (items.retained_binding_bytes()
@@ -5047,6 +5082,21 @@ impl WorldStream {
                     .map(content_sleds::SledBinding::heap_bytes)
                     .sum::<usize>()
                 + self.sled_prototypes.capacity() * std::mem::size_of::<usize>()
+                + self.trailer_bindings.capacity()
+                    * std::mem::size_of::<content_trailers::TrailerBinding>()
+                + self
+                    .trailer_bindings
+                    .iter()
+                    .map(content_trailers::TrailerBinding::heap_bytes)
+                    .sum::<usize>()
+                + self.hitch_owners.capacity()
+                    * std::mem::size_of::<(crate::world::GeneratedId, crate::reference::ItemId)>()
+                + self
+                    .hitch_owners
+                    .iter()
+                    .map(|(id, _)| crate::world::contents::identity_heap(id))
+                    .sum::<usize>()
+                + self.trailer_prototypes.capacity() * std::mem::size_of::<usize>()
                 + self.detector_bindings.capacity()
                     * std::mem::size_of::<content_detectors::DetectorBinding>()
                 + self
@@ -5374,6 +5424,8 @@ mod content_radios;
 pub(crate) mod content_seats;
 #[path = "content_sleds.rs"]
 mod content_sleds;
+#[path = "content_trailers.rs"]
+pub(crate) mod content_trailers;
 
 #[path = "content_small_items.rs"]
 mod content_small_items;

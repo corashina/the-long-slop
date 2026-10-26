@@ -23,6 +23,8 @@ struct HeldState {
     joint: ImpulseJointHandle,
     local_pose: Pose,
     gravity_scale: f32,
+    /// Source `pickedUpPoint` in the item body frame. `None` follows `TpickedUpParent`.
+    grip: Option<Pose>,
 }
 
 pub struct CarryState {
@@ -41,6 +43,22 @@ pub struct CarryState {
 pub(super) fn wheel_allowed(input: FrameInput, tuning_available: bool, looking: bool) -> bool {
     ((!tuning_available && !looking) || input.held & keys::TRANSLATE != 0)
         && input.held & keys::ROTATE == 0
+}
+
+/// Source `TpickedUpParent`: the held item frame the anchor body follows.
+fn anchor_pose(
+    reference: &PlayerReference,
+    held: &HeldState,
+    view: Pose,
+    rotation_frame: Rotation,
+) -> Pose {
+    Pose::from_parts(
+        view.translation
+            + view.rotation
+                * (Vector::from_array(reference.carry_anchor_offset) + held.offset)
+                    .clamp_length(reference.carry_min_distance, reference.carry_max_distance),
+        rotation_frame * held.rotation,
+    )
 }
 
 impl CarryState {
@@ -80,6 +98,7 @@ impl CarryState {
             joint,
             local_pose: to_rapier(crate::save::local_pose(&saved.local_grip)),
             gravity_scale,
+            grip: None,
         });
         physics.edit_body(body, |body| {
             body.enable_ccd(true);
@@ -237,6 +256,31 @@ impl CarryState {
     pub fn body(&self) -> Option<RigidBodyHandle> {
         self.held.as_ref().map(|held| held.body)
     }
+    /// Source `pickedUpPoint` follows `TpickedUpParent`, as after `Drop` or recenter.
+    pub fn grip_at_anchor(&mut self) {
+        if let Some(held) = self.held.as_mut() {
+            held.grip = None;
+        }
+    }
+    /// World `pickedUpPoint`, world `TpickedUpParent`, and the authored mass.
+    pub fn hand_frames(
+        &self,
+        player: &PlayerState,
+        physics: &PhysicsWorld,
+    ) -> Option<(Pose, Pose, f32)> {
+        let held = self.held.as_ref()?;
+        let view = to_rapier(player.view(physics).head_pose);
+        let rotation_frame = if self.rules[&held.item].no_rotation {
+            to_rapier(player.body_pose(physics)).rotation
+        } else {
+            view.rotation
+        };
+        let anchor = anchor_pose(&self.reference, held, view, rotation_frame);
+        let grab = held.grip.map_or(anchor, |grip| {
+            *physics.rapier().bodies[held.body].position() * grip
+        });
+        Some((grab, anchor, physics.authored_body_mass(held.body)))
+    }
     pub fn acquisition_held(&self) -> bool {
         self.acquisition_held
     }
@@ -356,6 +400,7 @@ impl CarryState {
         physics.edit_body(anchor, |body| body.set_position(pose, false));
         let joint = physics.insert_impulse_joint(anchor, body, FixedJointBuilder::new(), true);
         let view = to_rapier(player.view(physics).head_pose);
+        let camera = to_rapier(player.view(physics).camera_pose).rotation;
         let local_pose = to_rapier(item.local_pose);
         let item_pose = pose * local_pose;
         let rotation_frame = if self.rules[&id].no_rotation {
@@ -377,6 +422,7 @@ impl CarryState {
             joint,
             local_pose,
             gravity_scale,
+            grip: Some(pose.inverse() * Pose::from_parts(Vector::from_array(point), camera)),
         });
         item.location = ItemLocation::Held;
         self.cancel_input();
@@ -394,6 +440,7 @@ impl CarryState {
         } else {
             view.rotation
         };
+        held.grip = None;
         held.offset = if rule.use_recenter_position {
             Vector::from_array(rule.recenter_position)
         } else {
@@ -519,17 +566,8 @@ impl CarryState {
             .offset
             .clamp_length_max(self.reference.carry_offset_radius);
         let current = *physics.rapier().bodies[held.body].position();
-        let mut desired = Pose::from_parts(
-            view.translation
-                + view.rotation
-                    * (Vector::from_array(self.reference.carry_anchor_offset) + held.offset)
-                        .clamp_length(
-                            self.reference.carry_min_distance,
-                            self.reference.carry_max_distance,
-                        ),
-            rotation_frame * held.rotation,
-        );
-        desired *= held.local_pose.inverse();
+        let mut desired =
+            anchor_pose(&self.reference, held, view, rotation_frame) * held.local_pose.inverse();
         if (desired.translation - current.translation).length()
             >= self.reference.carry_drop_distance
         {

@@ -309,6 +309,8 @@ extern "C" {
     pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);
     #[wasm_bindgen(js_namespace = window, js_name = gameBiome)]
     pub fn game_biome() -> u32;
+    #[wasm_bindgen(js_namespace = window, js_name = gameStartCar)]
+    pub fn game_start_car() -> i32;
     /// `steer` to `handbrake` are the last `DrivingControls` (steer positive left).
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingState)]
     pub fn game_driving_state(
@@ -344,6 +346,8 @@ extern "C" {
         fuel: f32,
         paused: bool,
         started: bool,
+        autosave_safe: bool,
+        seated: bool,
     );
     #[wasm_bindgen(js_namespace=window,js_name=gameInventory)]
     pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);

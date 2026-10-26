@@ -20,6 +20,10 @@ impl SaveSnapshot {
         let ids = IdentityMap::new(reference)?;
         self.validate_world(reference)?;
         identity::unsigned(&self.progress.start_attempts)?;
+        data(
+            self.progress.driven_km.is_finite() && self.progress.driven_km >= 0.,
+            "Driven distance",
+        )?;
         self.validate_object_states()?;
         let mut items = HashMap::new();
         for item in &self.items {

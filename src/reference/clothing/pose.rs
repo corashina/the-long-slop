@@ -284,6 +284,7 @@ const ANCHOR_FIELDS: &[(&str, i64)] = &[
     ("TProneHeadPos", 23339),
     ("THeadBob", 39808),
     ("THeadLean", 39829),
+    ("Th", 39811),
 ];
 
 const TARGET_FIELDS: &[(&str, i64)] = &[

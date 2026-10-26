@@ -18,6 +18,16 @@ pub(super) struct PendingRestore {
     seat: Option<SeatSnapshot>,
 }
 impl GarageRuntime {
+    /// Source `mainscript.Update` autosave state, without the seat and the toggles.
+    /// `grab_held` is the pickup and push key (F) in this frame.
+    pub fn autosave_safe(&self, grab_held: bool) -> bool {
+        let area = &self.area;
+        area.player.grounded()
+            && area.interaction.held().is_none()
+            && !area.interaction.push_gripping()
+            && !self.sleeping()
+            && !grab_held
+    }
     pub fn restore_pending(&self) -> bool {
         self.pending_restore.as_ref().is_some_and(|p| !p.ready)
     }
@@ -210,10 +220,7 @@ impl GarageRuntime {
                 .find_item_seat(&owner, &seat.source.source_id()?)
                 .ok_or_else(|| SaveError::InvalidLinks("Seat item is not bound".into()))?;
             self.area.player.restore_item_seat(
-                owner,
-                bound.body,
-                &bound.seat,
-                bound.seat_item,
+                &bound,
                 local_pose(&seat.local_pose),
                 &mut self.physics,
             );
@@ -235,6 +242,11 @@ impl GarageRuntime {
     ) -> Result<Self, SaveError> {
         saved.validate(reference, expected)?;
         let ids = IdentityMap::new(reference)?;
+        // The saved start car keeps its start placement.
+        let mode = crate::world::GameMode {
+            start_car: crate::world::StartCarChoice::Field(saved.world.start_car),
+            ..mode
+        };
         let mut candidate =
             Self::new_candidate(reference, false, saved.world.seed, mode, draw_distance)?;
         candidate
@@ -414,6 +426,7 @@ impl GarageRuntime {
         candidate.vehicle = saved.progress.selected_vehicle.clone();
         candidate.driving_assists = saved.driving_assists;
         candidate.attempts = crate::save::identity::unsigned(&saved.progress.start_attempts)?;
+        candidate.driven_km = saved.progress.driven_km;
         candidate
             .lighting
             .restore_save(&reference.lighting, &ids, &saved.lighting)?;
@@ -558,6 +571,7 @@ impl GarageRuntime {
             progress: ProgressSnapshot {
                 selected_vehicle: self.vehicle.clone(),
                 start_attempts: self.attempts.to_string(),
+                driven_km: self.driven_km,
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },

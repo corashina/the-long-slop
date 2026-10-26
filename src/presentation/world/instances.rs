@@ -1288,6 +1288,17 @@ impl SourceInstances {
                 }
             }
         }
+        for (body, lights) in stream.trailers() {
+            let Some(owners) = self.bodies.get(&body) else {
+                continue;
+            };
+            let signature = lights.signature();
+            for &index in owners {
+                if self.instances[index].car_signature != signature {
+                    self.selection.push(index);
+                }
+            }
+        }
         let frame = stream.frame();
         let selected = self.selection.len();
         for selected_index in 0..selected {
@@ -1324,6 +1335,14 @@ impl SourceInstances {
             });
             if let Some((_, vehicle)) = car {
                 instance.car_signature = vehicle.presentation_signature();
+            }
+            // The lamp state of a trailer copy.
+            let trailer = prototype.trailer.as_ref().and_then(|record| {
+                let handle = published.bodies.get(record.body as usize)?;
+                Some((record, stream.trailer_lights(*handle)?))
+            });
+            if let Some((_, lights)) = trailer {
+                instance.car_signature = lights.signature();
             }
             if !instance.caps_bound {
                 for cap in content.caps() {
@@ -1494,6 +1513,14 @@ impl SourceInstances {
                 let enabled = active_food(prototype, i, appearance, reference, food)
                     && car
                         .and_then(|(record, v)| v.node_visible(record, i as u32))
+                        .or_else(|| {
+                            trailer.and_then(|(_, l)| {
+                                l.visibility()
+                                    .iter()
+                                    .find(|(n, _)| *n == i as u32)
+                                    .map(|(_, visible)| *visible)
+                            })
+                        })
                         .unwrap_or(true);
                 if enabled != instance.active_nodes[i] {
                     instance.active_nodes[i] = enabled;
@@ -1517,6 +1544,15 @@ impl SourceInstances {
                 let node = renderer.node as u32;
                 let selected = car
                     .and_then(|(record, v)| v.renderer_material(record, node))
+                    .or_else(|| {
+                        let (record, lights) = trailer?;
+                        lights
+                            .materials()
+                            .iter()
+                            .find(|m| m.node == node)
+                            .and_then(|m| m.choice)
+                            .and_then(|c| c.link(&record.lights))
+                    })
                     .or_else(|| {
                         powertrain
                             .gauges()
