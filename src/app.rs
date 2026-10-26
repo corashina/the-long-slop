@@ -246,7 +246,11 @@ pub fn run(
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
-                presentation::spawned::sync,
+                (
+                    presentation::spawned::sync,
+                    presentation::cigarettes::sync,
+                )
+                    .chain(),
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,

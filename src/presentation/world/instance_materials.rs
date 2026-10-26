@@ -395,7 +395,10 @@ impl InstanceMaterials<'_> {
         self.make_private(binding);
         match &binding.visible {
             InstanceMaterial::Primary(h) => {
-                if self.primary.get(h).is_some_and(|m| m.emission_map().is_some())
+                if self
+                    .primary
+                    .get(h)
+                    .is_some_and(|m| m.emission_map().is_some())
                     && let Some(mut m) = self.primary.get_mut(h)
                 {
                     m.set_emission_map(None).map_err(ReferenceError)?;
