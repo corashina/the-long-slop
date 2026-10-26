@@ -4,7 +4,7 @@ use crate::reference::{
 };
 use crate::simulation::{DriveInput, FIXED_DT};
 use crate::vehicle::query_bounds::QueryBounds;
-use crate::vehicle::{DriveTorques, PhysicsWorld, VehicleBody};
+use crate::vehicle::{DriveTorques, PhysicsWorld, VehicleBody, WheelMount, WheelSet};
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
 // Exported Lada values (Steam build 11140890).
@@ -102,13 +102,12 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
     let corners = [(-0.7, -1.2), (-0.7, 1.2), (0.7, 1.2), (0.7, -1.2)];
     let references: [WheelSlotReference; 4] =
         std::array::from_fn(|i| lada_slot(i == 0 || i == 3, i == 1 || i == 2));
-    let wheels = std::array::from_fn(|i| {
-        WheelState::new(
-            Vector::new(corners[i].0, 0.0, corners[i].1),
-            resolve_profile(&references[i], &SLIP, assembly),
-            0.135,
-        )
+    let mounts: [WheelMount; 4] = std::array::from_fn(|i| WheelMount {
+        connection: Vector::new(corners[i].0, 0.0, corners[i].1),
+        collider: &references[i].collider,
+        profile: resolve_profile(&references[i], &SLIP, assembly),
     });
+    let wheels = WheelSet::new(chassis, &mounts);
     world.chassis.push(chassis);
     world.vehicles.push(VehicleBody {
         chassis,
@@ -207,13 +206,13 @@ fn brake_holds_a_wheel_and_motor_overcomes_it() {
         motor_nm: 300.0,
         brake_nm: 600.0,
     };
-    solve(&mut wheel, &slot, frame, held, FIXED_DT);
+    solve(&mut wheel, &slot.collider, frame, held, FIXED_DT);
     assert_eq!(wheel.omega, 0.0);
     let spun = WheelTorques {
         motor_nm: 900.0,
         brake_nm: 600.0,
     };
-    solve(&mut wheel, &slot, frame, spun, FIXED_DT);
+    solve(&mut wheel, &slot.collider, frame, spun, FIXED_DT);
     assert!(wheel.omega > 0.0);
 }
 
@@ -224,7 +223,7 @@ fn car_settles_on_source_suspension() {
     let snapshot = world.snapshot(0);
     assert!(snapshot.wheels_contact.iter().all(|c| *c));
     assert!(snapshot.absolute_speed_kmh() < 0.5);
-    for wheel in &world.vehicles[0].wheels {
+    for wheel in world.vehicles[0].wheels.wheels() {
         assert!(
             (wheel.suspension_length - 0.135).abs() < 0.02,
             "{}",

@@ -7,7 +7,7 @@
 use rapier3d::math::Vector;
 use rapier3d::prelude::ColliderHandle;
 
-use crate::reference::{WheelFrictionCurve, WheelSlotReference};
+use crate::reference::{WheelColliderReference, WheelFrictionCurve, WheelSlotReference};
 
 /// Wheel spin sub-steps in one physics step. Keeps stiff tire response stable.
 const SPIN_SUBSTEPS: usize = 20;
@@ -38,7 +38,7 @@ impl WheelAssembly {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct WheelProfile {
+pub struct WheelProfile {
     pub radius: f32,
     pub inertia: f32,
     pub forward_stiffness: f32,
@@ -99,6 +99,16 @@ pub(super) fn resolve_profile(
     profile(radius, mass, forward, sideways)
 }
 
+/// A bare source WheelCollider: its own radius, mass and curve stiffness.
+pub fn collider_profile(collider: &WheelColliderReference) -> WheelProfile {
+    profile(
+        collider.radius,
+        collider.wheel_mass_kg,
+        collider.forward_friction.stiffness,
+        collider.sideways_friction.stiffness,
+    )
+}
+
 fn profile(radius: f32, mass: f32, forward: f32, sideways: f32) -> WheelProfile {
     WheelProfile {
         radius,
@@ -109,14 +119,14 @@ fn profile(radius: f32, mass: f32, forward: f32, sideways: f32) -> WheelProfile 
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct WheelContact {
+pub struct WheelContact {
     pub collider: ColliderHandle,
     pub point: Vector,
     pub normal: Vector,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct WheelState {
+pub struct WheelState {
     pub profile: WheelProfile,
     /// Chassis-space wheel center at full compression.
     pub connection: Vector,
@@ -131,7 +141,7 @@ pub(super) struct WheelState {
 }
 
 impl WheelState {
-    pub fn new(connection: Vector, profile: WheelProfile, rest_length: f32) -> Self {
+    pub(super) fn new(connection: Vector, profile: WheelProfile, rest_length: f32) -> Self {
         Self {
             profile,
             connection,
@@ -163,8 +173,9 @@ pub(super) struct WheelFrame {
     pub gravity: f32,
 }
 
+/// Torque on one wheel. Motor torque has a sign. Brake torque is positive.
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct WheelTorques {
+pub struct WheelTorques {
     pub motor_nm: f32,
     pub brake_nm: f32,
 }
@@ -239,7 +250,7 @@ impl WheelForce {
 /// The state must hold the new contact and suspension length.
 pub(super) fn solve(
     state: &mut WheelState,
-    slot: &WheelSlotReference,
+    collider: &WheelColliderReference,
     frame: WheelFrame,
     torques: WheelTorques,
     dt: f32,
@@ -253,7 +264,7 @@ pub(super) fn solve(
                 state,
                 torques.motor_nm,
                 0.0,
-                slot.collider.rotational_damping,
+                collider.rotational_damping,
                 brake_step,
                 h,
             );
@@ -261,11 +272,11 @@ pub(super) fn solve(
         return None;
     };
     // Source rest position is targetPosition of the travel below the connection.
-    let rest = slot.collider.suspension_distance * slot.collider.target_position;
+    let rest = collider.suspension_distance * collider.target_position;
     let compression_rate = -frame.velocity.dot(frame.up);
     let load = (frame.sprung_mass * frame.gravity
-        + slot.collider.spring * (rest - state.suspension_length)
-        + slot.collider.damper * compression_rate)
+        + collider.spring * (rest - state.suspension_length)
+        + collider.damper * compression_rate)
         .max(0.0);
     let normal = contact.normal;
     let mut forward = normal.cross(frame.axle);
@@ -277,22 +288,18 @@ pub(super) fn solve(
     let vx = frame.velocity.dot(forward);
     let vy = frame.velocity.dot(side);
     let reference_speed = vx.abs().max(MIN_SLIP_SPEED);
-    let forward_peak =
-        slot.collider.forward_friction.extremum_value * profile.forward_stiffness * load;
+    let forward_peak = collider.forward_friction.extremum_value * profile.forward_stiffness * load;
     let sideways_peak =
-        slot.collider.sideways_friction.extremum_value * profile.sideways_stiffness * load;
-    let lateral = -friction(
-        &slot.collider.sideways_friction,
-        (vy / reference_speed).atan(),
-    ) * profile.sideways_stiffness
+        collider.sideways_friction.extremum_value * profile.sideways_stiffness * load;
+    let lateral = -friction(&collider.sideways_friction, (vy / reference_speed).atan())
+        * profile.sideways_stiffness
         * load;
     let mut fx_sum = 0.0;
     let mut fy_sum = 0.0;
     for _ in 0..SPIN_SUBSTEPS {
         let u = state.omega * profile.radius;
         let slip = (u - vx) / reference_speed.max(u.abs());
-        let mut fx =
-            friction(&slot.collider.forward_friction, slip) * profile.forward_stiffness * load;
+        let mut fx = friction(&collider.forward_friction, slip) * profile.forward_stiffness * load;
         let mut fy = lateral;
         // Combined slip: keep the force pair inside the friction ellipse.
         let usage = ratio(fx, forward_peak).powi(2) + ratio(fy, sideways_peak).powi(2);
@@ -305,7 +312,7 @@ pub(super) fn solve(
             state,
             torques.motor_nm,
             fx * profile.radius,
-            slot.collider.rotational_damping,
+            collider.rotational_damping,
             brake_step,
             h,
         );

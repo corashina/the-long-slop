@@ -700,7 +700,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         AnchorId, ItemId, SourceId, WheelColliderReference, WheelFrictionCurve, WheelHubReference,
         WheelSlotId, WheelSlotReference,
     };
-    use crate::vehicle::wheel::{WheelSlip, WheelState, resolve_profile};
+    use crate::vehicle::wheel::{WheelSlip, resolve_profile};
     use crate::vehicle::{DriveTorques, VehicleBody, WheelAssembly};
     use rapier3d::control::KinematicCharacterController;
     let mut world = empty_world();
@@ -769,16 +769,16 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         mass_kg: 1.0,
         quality: 1.0,
     };
-    let wheel = WheelState::new(
-        Vector::ZERO,
-        resolve_profile(&reference, &slip, assembly),
-        0.5,
-    );
+    let mount = crate::vehicle::WheelMount {
+        connection: Vector::ZERO,
+        collider: &reference.collider,
+        profile: resolve_profile(&reference, &slip, assembly),
+    };
     world.chassis.push(chassis);
     world.vehicles.push(VehicleBody {
         chassis,
         slip,
-        wheels: [wheel; 4],
+        wheels: crate::vehicle::WheelSet::new(chassis, &[mount; 4]),
         wheel_references: std::array::from_fn(|_| reference.clone()),
         max_steer: 0.0,
         brake_torque: 0.0,
@@ -796,7 +796,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         DriveTorques::default(),
     );
     assert_ne!(world.rapier().bodies[chassis].linvel(), before);
-    assert!(world.vehicles[0].wheels[0].contact.is_some());
+    assert!(world.vehicles[0].wheels.wheels()[0].contact.is_some());
     world.step_physics();
     let point = world.rapier().bodies[chassis].translation();
     assert_eq!(ray_hit(&world, point.x, point.z), Some(chassis_collider));
@@ -806,7 +806,7 @@ fn private_controller_impulses_keep_post_step_queries_current() {
         crate::simulation::DriveInput::default(),
         DriveTorques::default(),
     );
-    assert!(world.vehicles[0].wheels[0].contact.is_some());
+    assert!(world.vehicles[0].wheels.wheels()[0].contact.is_some());
 
     let mut character_world = empty_world();
     character_world.set_gravity(Vector::ZERO);
