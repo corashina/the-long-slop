@@ -174,6 +174,9 @@ fn two_ladas_drive_save_and_load() {
         })
         .into();
     assert_ne!(saved[0].2, saved[1].2);
+    // X05: the parked start copy keeps its wheels turned. The sleep cooldown runs.
+    run.vehicles.get_mut(&a).unwrap().steer = 0.4;
+    run.sleep.restore(0.25, run.simulation_seconds);
 
     let snapshot = run
         .capture_save(
@@ -191,6 +194,8 @@ fn two_ladas_drive_save_and_load() {
             "save keeps {key:?}"
         );
     }
+    assert_eq!(snapshot.world.changes.vehicle(&a).unwrap().steer, 0.4);
+    assert!((snapshot.player.since_wake - 0.25).abs() < 1e-9);
 
     // Load into a fresh runtime with the same deck.
     let mut loaded = GarageRuntime::from_save(
@@ -231,6 +236,23 @@ fn two_ladas_drive_save_and_load() {
         assert_eq!(loaded.vehicles[key].drivetrain.gear(), *gear, "{key:?}");
         assert!((fuel(&loaded, key) - fuel_liters).abs() < 1e-4, "{key:?}");
     }
+    assert_eq!(loaded.vehicles[&a].steer, 0.4);
+    let recaptured = loaded
+        .capture_save(
+            &reference,
+            &stamp,
+            crate::save::CameraSave::FirstPerson,
+            "2026-10-26T12:00:00Z",
+        )
+        .unwrap();
+    for key in [&a, &b] {
+        assert_eq!(
+            recaptured.world.changes.vehicle(key).unwrap().steer,
+            snapshot.world.changes.vehicle(key).unwrap().steer,
+            "{key:?}"
+        );
+    }
+    assert_eq!(recaptured.player.since_wake, snapshot.player.since_wake);
 }
 
 /// The old garage Lada test on a loader copy, with its numbers.

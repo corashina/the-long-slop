@@ -199,7 +199,9 @@ fn process_request(
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
             // Assignment drops the old stream and terminates its road actor first.
+            let settings = drive.runtime.driving_input.settings;
             drive.runtime = candidate.runtime;
+            drive.runtime.driving_input.settings = settings;
             drive
                 .runtime
                 .stream

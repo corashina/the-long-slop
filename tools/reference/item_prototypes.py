@@ -7,16 +7,58 @@ from .survival import component, managed_evidence, finite_record
 
 # Checked prefab root Transforms, database numbers, pickup counts, and asset names.
 SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_shovel'),
-            (81642,None,56,'item_box_debris'),(81645,None,14,'item_box_debris_reduced'),
             (70812,217,1,'item_sunglasses'),(53838,218,1,'item_hat'),(53837,221,1,'item_cap'),
             (63605,245,1,'item_cone'),(63259,92,1,'item_pumpkin'),(54495,230,1,'item_cigarette'),
             (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'))
+# Checked Gib and reducedGib GameObjects of selected breakablescripts: beer, box, cacti, vase, wc,
+# then box, vase and wc reduced gibs. Box gib Transforms are 81642 and 81645.
+GIBS = (14653,39185,24388,39184,39189,39188,39187,39186)
+# Box gib root Transforms: pickup count, collider count, renderer count.
+BOX_GIBS = {81642:(56,58,56),81645:(14,15,14)}
+
+
+def selected(source):
+    """(root Transform, database number, asset name) of each prototype. Gibs come last."""
+    for pid, item_id, _, name in SELECTED:
+        yield source.get('sharedassets1.assets', pid), item_id, name
+    for go in GIBS:
+        yield source.transform_for(source.get('sharedassets1.assets', go)), None, f'item_gib_{go}'
+
+
+def recover_gib(source, records, node_ids) -> tuple:
+    """gibscript of the gib root (or None) and the nodes with scaleDestroyScript."""
+    gib = None; scale_destroy = []
+    for index, record in enumerate(records):
+        for c in record['components']:
+            if c.type.name != 'MonoBehaviour':
+                continue
+            name = source.class_name(c)
+            if name == 'scaleDestroyScript':
+                if node_ids[key(record['reader'])] in scale_destroy:
+                    raise ValueError(f'Duplicate scaleDestroyScript: {key(c)}')
+                scale_destroy.append(node_ids[key(record['reader'])])
+            elif name == 'gibscript':
+                if index or gib is not None:
+                    raise ValueError(f'gibscript is not the only one on the gib root: {key(c)}')
+                d = source.read(c)
+                # gibscript.Start sets startTime and life2. An authored colsOff is not audited.
+                if d['colsOff']:
+                    raise ValueError(f'gibscript start state is not audited: {key(c)}')
+                children = []
+                for pointer in d['childs']:
+                    child = source.resolve(c, pointer)
+                    if child is None or child.type.name != 'Transform' or key(child) not in node_ids:
+                        raise ValueError(f'gibscript child is outside the gib: {key(c)}')
+                    children.append(node_ids[key(child)])
+                gib = {'source': source_id(c), 'gib_main': bool(d['gibMain']), 'dont_rot': bool(d['gibMainDontRot']),
+                       'add_small_pos': bool(d['gibMainAddSmallPos']), 'distance': bool(d['distance']),
+                       'life': d['life'], 'children': children}
+    return gib, scale_destroy
 
 
 def prepare_item_prototypes(source, roots):
     source.item_geometry_nodes = set()
-    for pid, _, _, name in SELECTED:
-        root = source.get('sharedassets1.assets', pid)
+    for root, _, name in selected(source):
         roots[name] = [root]
         source.item_geometry_nodes.update(key(n['reader']) for n in source.hierarchy(root, activate_root=True))
 
@@ -24,14 +66,14 @@ def prepare_item_prototypes(source, roots):
 def recover_item_prototypes(source, manifest, output) -> list[dict]:
     managed_evidence(source, ['disableThisWhenStored = transform;',
         'spawnedGib = UnityEngine.Object.Instantiate(reducedGib, transform.position, transform.rotation);',
-        'spawnedGib = UnityEngine.Object.Instantiate(Gib, transform.position, transform.rotation);'])
+        'spawnedGib = UnityEngine.Object.Instantiate(Gib, transform.position, transform.rotation);',
+        'life2 = life * 0.95f;', 'scaleLength *= UnityEngine.Random.Range(1f - random, 1f + random);'])
     nodes = {(n['source']['file'], n['source']['path_id']):n for n in manifest['nodes']}
     matrix = source.read(next(r for r in source.objects.values() if r.type.name=='PhysicsManager'))['m_LayerCollisionMatrix']
     exporter = GltfExporter(source, None, source.library)
     source.item_clips = set()
     result = []
-    for pid, item_id, _, name in SELECTED:
-        root = source.get('sharedassets1.assets', pid)
+    for root, item_id, _ in selected(source):
         records = source.hierarchy(root, activate_root=True)
         by_node = {nodes[key(r['reader'])]['id']:r for r in records}
         root_pose = world_pose(source, root)
@@ -46,9 +88,11 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             poses[node] = pose
             local_pose = {'translation':bake_points([(0.,0.,0.)],source.chain(record['reader']),root_pose)[0],
                 'rotation':list(quaternion_product(inverse,pose['rotation'])), 'scale':[1.,1.,1.]}
-            mass = component(source,record['reader'],'massScript')
+            masses = [c for c in record['components'] if c.type.name=='MonoBehaviour' and source.class_name(c)=='massScript']
+            # Gib parts may lack massScript. They keep the Rigidbody mass.
+            if len(masses)>1 or (not masses and item_id is not None):raise ValueError(f'Prototype body requires one massScript: {key(reader)}')
             bodies.append({'id':len(bodies)+1,'source':source_id(reader),'node':node,'dynamic':not d['m_IsKinematic'],
-                'mass_kg':source.read(mass)['mass'],'linear_damping':d['m_Drag'],'angular_damping':d['m_AngularDrag'],
+                'mass_kg':source.read(masses[0])['mass'] if masses else d['m_Mass'],'linear_damping':d['m_Drag'],'angular_damping':d['m_AngularDrag'],
                 'pose':local_pose,'parent_body':None})
             body_nodes[node] = bodies[-1]['id']
         def body_for(node):
@@ -96,16 +140,13 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             if target is None or target.type.name!=kind:raise ValueError(f'Invalid prototype {field}: {key(c)}')
             return target
         behavior={'pack':None,'ammo':None,'cigarette_prefab':None,'spawn':None,'breakable':None,'mount':None,
-            'debris':None,'reduced_debris':None,'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'gib_children':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
+            'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
         if item_id==74:
             c=component(source,root,'cigiscript');behavior.update(pack=source_id(c),ammo=source_id(component(source,root,'ammoscript')),
                 cigarette_prefab=source_id(link(c,'prefab','GameObject')))
         elif item_id==62:
             c=component(source,root,'breakablescript');spawn=component(source,root,'spawnInBoxScript')
-            behavior.update(breakable=source_id(c),spawn=source_id(spawn),mount=source_id(link(spawn,'mount','MonoBehaviour')),
-                debris=source_id(source.transform_for(link(c,'Gib','GameObject'))),
-                reduced_debris=source_id(source.transform_for(link(c,'reducedGib','GameObject'))))
-            behavior['clips']=[source_id(source.resolve(c,p)) for p in source.read(c)['clips']]
+            behavior.update(breakable=source_id(c),spawn=source_id(spawn),mount=source_id(link(spawn,'mount','MonoBehaviour')))
         elif item_id==216:
             c=component(source,root,'meleeweaponscript')
             behavior.update(melee=source_id(c),attack_target=source_id(link(c,'T','Transform')),attack_trigger=source_id(link(c,'Trigger','Transform')))
@@ -115,8 +156,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             behavior['contact_clips']=[[source_id(source.resolve(main,p)) for p in group['a']] for group in source.read(main)['meleeHitSounds']]
             managed_evidence(source,['mainscript.PlayClipAtPoint(mainscript.M.meleeHitSounds[(int)hitType].a[num], V, mainscript.hitVolume[(int)hitType], mainscript.AudioPriorities[7]);'])
         elif item_id is None:
-            c=component(source,root,'gibscript')
-            behavior.update(gib=source_id(c),gib_children=[nodes[key(source.resolve(c,p))]['id'] for p in source.read(c)['childs']])
+            behavior['gib'],behavior['scale_destroy']=recover_gib(source,records,{key(r['reader']):nodes[key(r['reader'])]['id'] for r in records})
         for identity in [*behavior['clips'],*(c for group in behavior['contact_clips'] for c in group)]:
             c=source.get(identity['file'],identity['path_id'])
             if c.type.name!='AudioClip':raise ValueError('Invalid behavior clip')
@@ -144,14 +184,41 @@ def validate_pickup(pickup, manifest, asset):
         if abs(sum(v*v for v in pickup[field])-1)>0.002:raise ValueError('Invalid pickup rotation')
 
 
+def validate_gib(p, within) -> None:
+    """gibscript and scaleDestroyScript links of a gib prototype. Other prototypes have none."""
+    b=p['behavior'];gib=b['gib']
+    if p['item_id'] is not None:
+        if gib is not None or b['scale_destroy']:raise ValueError('Gib behavior outside gibs')
+        return
+    if len(set(b['scale_destroy']))!=len(b['scale_destroy']) or not all(within(n) for n in b['scale_destroy']):raise ValueError('Gib scaleDestroyScript owner')
+    if gib is None:
+        if p['id']['path_id'] in BOX_GIBS:raise ValueError('Box gib without gibscript')
+        return
+    children=gib['children'];bodies={x['node'] for x in p['bodies']}
+    if not all(within(n) and n!=p['root'] for n in children) or len(set(children))!=len(children):raise ValueError('Gib child owner')
+    if gib['life']<0 or (gib['add_small_pos'] and gib['gib_main'] and not children):raise ValueError('Gib life or children')
+    # gibscript.Start adds torque or force to child Rigidbodies.
+    if gib['gib_main'] and (not gib['dont_rot'] or gib['add_small_pos']) and not all(n in bodies for n in children):raise ValueError('Gib child bodies')
+    if p['id']['path_id'] in BOX_GIBS and children!=[x['node'] for x in p['pickups']]:raise ValueError('Missing debris child owners')
+
+
 def validate_item_prototypes(prototypes, manifest) -> None:
     finite_record(prototypes)
-    if [(p['id'],p['item_id']) for p in prototypes] != [({'file':'sharedassets1.assets','path_id':pid},item) for pid,item,_,_ in SELECTED]:raise ValueError('Selected prototype identities')
+    expected=[({'file':'sharedassets1.assets','path_id':pid},item) for pid,item,_,_ in SELECTED]
+    gibs=prototypes[len(SELECTED):]
+    if ([(p['id'],p['item_id']) for p in prototypes[:len(SELECTED)]]!=expected or len(gibs)!=len(GIBS)
+        or any(p['item_id'] is not None or p['id']['file']!='sharedassets1.assets' for p in gibs)
+        or (gibs[1]['id']['path_id'],gibs[5]['id']['path_id'])!=tuple(BOX_GIBS)):raise ValueError('Selected prototype identities')
+    counts={pid:(count,*geometry) for (pid,_,count,_),geometry in zip(SELECTED,((1,3),(2,3),(2,3),(3,25),(2,4),(1,2),(12,2),(3,2),(1,7),(6,0),(1,1)),strict=True)}
+    counts.update(BOX_GIBS)
     nodes={n['id']:n for n in manifest['nodes']};assets={a['id']:a for a in manifest['assets']}
     def unique(values):
         values=list(values)
         if len(set(values))!=len(values):raise ValueError('Duplicate prototype local identity')
-    for p,(_,_,count,_) in zip(prototypes,SELECTED,strict=True):
+    for p in prototypes:
+        # Gibs other than box gibs have no checked counts.
+        count,collider_count,renderer_count=counts.get(p['id']['path_id'],(None,None,None))
+        checked_pickups=p['item_id'] is not None or count is not None
         if p['source']!=p['id'] or nodes.get(p['root'],{}).get('source')!=p['id'] or assets.get(p['asset'],{}).get('usage')!='item_prototype':raise ValueError('Invalid prototype root')
         def within(node,root=p['root']):
             seen=set()
@@ -162,8 +229,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
                 node=nodes[node]['parent']
             return False
         if not within(p['root']) or nodes[p['root']]['parent'] is not None or assets[p['asset']]['root']!=p['source']:raise ValueError('Foreign prototype root')
-        counts={75443:(1,3),51722:(2,3),61587:(2,3),81642:(58,56),81645:(15,14),70812:(3,25),53838:(2,4),53837:(1,2),63605:(12,2),63259:(3,2),54495:(1,7),83430:(6,0),51557:(1,1)}
-        if (len(p['colliders']),len(p['renderers']))!=counts[p['id']['path_id']]:raise ValueError('Incomplete selected geometry')
+        if count is not None and (len(p['colliders']),len(p['renderers']))!=(collider_count,renderer_count):raise ValueError('Incomplete selected geometry')
         bodies={b['id']:b for b in p['bodies']}
         for records in (p['bodies'],p['colliders']):unique(r['id'] for r in records);unique((r['source']['file'],r['source']['path_id']) for r in records)
         unique(b['node'] for b in p['bodies']);unique(x['node'] for x in p['pickups']);unique((x['pickup']['source']['file'],x['pickup']['source']['path_id']) for x in p['pickups'])
@@ -178,7 +244,8 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             if not within(b['node']) or b['mass_kg']<=0 or b['parent_body']!=owner(b['node'],True):raise ValueError('Invalid local body')
         for c in p['colliders']:
             if not within(c['node']) or c['body'] not in bodies or c['body']!=owner(c['node']):raise ValueError('Wrong collider owner')
-        if len(p['pickups'])!=count or len(p['bodies'])!=count:raise ValueError('Missing selected pickup bodies')
+        if count is not None and (len(p['pickups'])!=count or len(p['bodies'])!=count):raise ValueError('Missing selected pickup bodies')
+        if not p['bodies']:raise ValueError('Prototype without bodies')
         for x in p['pickups']:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}
@@ -187,8 +254,8 @@ def validate_item_prototypes(prototypes, manifest) -> None:
             icon=pickup['inventory_icon']
             if source['file']!='sharedassets1.assets' or pickup['can_hold_right_hand']!=(p['item_id']==216):raise ValueError('Pickup source eligibility')
             # Hose segment eligibility and icons are not checked yet against build 11140890.
-            if p['item_id']!=61 and pickup['can_inventory']!=(p['item_id'] not in (62,245,230,312) and exception is None):raise ValueError('Pickup source eligibility')
-            if p['item_id']!=61 and icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
+            if checked_pickups and p['item_id']!=61 and pickup['can_inventory']!=(p['item_id'] not in (62,245,230,312) and exception is None):raise ValueError('Pickup source eligibility')
+            if checked_pickups and p['item_id']!=61 and icon!=({'file':'sharedassets1.assets','path_id':expected_icon} if expected_icon else None):raise ValueError('Pickup source icon')
             if exception is not None and nodes.get(x['node'],{}).get('source')!={'file':'sharedassets1.assets','path_id':exception}:raise ValueError('Debris eligibility owner')
             if not within(x['node']) or x['body'] not in bodies or x['body']!=owner(x['node']):raise ValueError('Wrong pickup body')
             validate_pickup(x['pickup'],manifest,p['asset'])
@@ -217,7 +284,7 @@ def validate_item_prototypes(prototypes, manifest) -> None:
                 for particle in (e['visual'],e['splash']):validate_particle(particle,{t['id'] for t in manifest['lighting']['textures']})
         if (p['consumable'] is not None)!=(p['item_id']==230):raise ValueError('Cigarette consumable owner')
         if p['consumable'] is not None:validate_cigarette(p['consumable'],p,manifest)
-        if p['item_id'] is None and p['behavior']['gib_children']!=[x['node'] for x in p['pickups']]:raise ValueError('Missing debris child owners')
+        validate_gib(p,within)
         if (any(within(b['node']) for b in manifest['bodies']) or any(within(i['node']) for i in manifest['items'])
             or any(nodes.get(c['node'],{}).get('asset')==p['asset'] for c in manifest['colliders'])):
             raise ValueError('Prototype entered active tables')

@@ -357,6 +357,8 @@ impl PlayerState {
             recoil_velocity: self.recoil_velocity.to_array(),
             running: self.running,
             carry,
+            // GarageRuntime owns sleep and sets this field.
+            since_wake: 0.,
         })
     }
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
@@ -1141,7 +1143,7 @@ mod vehicle_seat_tests {
     use super::{PlayerState, SeatOwner};
     use crate::reference::{PlayerPoseReference, PlayerReference};
     use crate::vehicle::{VehiclePose, body_fixture};
-    use crate::world::stream::content_seats::WorldSeatReference;
+    use crate::world::stream::content_seats::{WorldSeatBodyPose, WorldSeatReference};
     use serde_json::json;
 
     /// Player values that keep every exit point clear: no exit mask, no use mask.
@@ -1265,6 +1267,13 @@ mod vehicle_seat_tests {
             show_sleep_text: false,
             driver: true,
             driving2: false,
+            body_pose: WorldSeatBodyPose {
+                def_pose: 0,
+                left_hand: None,
+                right_hand: None,
+                left_leg: None,
+                right_leg: None,
+            },
         };
         let owner = SeatOwner::Vehicle(physics.vehicle_of(chassis[1]).unwrap().clone());
         let sit = VehiclePose {
