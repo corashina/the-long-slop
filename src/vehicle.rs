@@ -300,10 +300,25 @@ impl PhysicsWorld {
         } else {
             0.0
         };
+        let steering = if input.steer.is_finite() {
+            input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
+        } else {
+            0.0
+        };
+        for (rules, steer) in vehicle.rules.iter().zip(&mut vehicle.steer) {
+            *steer = if rules.steer { steering } else { 0.0 };
+        }
+        // A parked car keeps its steer. Only a steer change wakes it.
+        let steer_changed = vehicle
+            .wheels
+            .wheels()
+            .iter()
+            .zip(&vehicle.steer)
+            .any(|(wheel, steer)| wheel.steering != *steer);
         if pedal(input.throttle) > 0.0
             || brake > 0.0
             || motor_nm != 0.0
-            || input.steer != 0.0
+            || steer_changed
             || handbrake != vehicle.last_handbrake
         {
             self.query_bounds.mark_body(vehicle.chassis);
@@ -314,19 +329,9 @@ impl PhysicsWorld {
                 .mark_if_changed(vehicle.chassis, before, body);
         }
         vehicle.last_handbrake = handbrake;
-        let steering = if input.steer.is_finite() {
-            input.steer.clamp(-1.0, 1.0) * vehicle.max_steer
-        } else {
-            0.0
-        };
         // Source carscript.SetWheel: driven wheels take motor torque and engine brake.
         // Service brake and handbrake add to the wheels in their source lists.
-        for ((rules, torques), steer) in vehicle
-            .rules
-            .iter()
-            .zip(&mut vehicle.torques)
-            .zip(&mut vehicle.steer)
-        {
+        for (rules, torques) in vehicle.rules.iter().zip(&mut vehicle.torques) {
             *torques = WheelTorques::default();
             if rules.drive {
                 torques.motor_nm = motor_nm / drive_count;
@@ -338,7 +343,6 @@ impl PhysicsWorld {
             if rules.handbrake {
                 torques.brake_nm += vehicle.handbrake_torque * handbrake;
             }
-            *steer = if rules.steer { steering } else { 0.0 };
         }
         let own = vehicle.chassis;
         let chassis = &self.chassis;
