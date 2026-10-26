@@ -1,8 +1,10 @@
 use super::*;
-use crate::reference::{AnchorId, ItemId, SourceId, WheelHubReference, WheelSlotId};
+use crate::reference::{
+    AnchorId, ItemId, SourceId, WheelColliderReference, WheelHubReference, WheelSlotId,
+};
 use crate::simulation::{DriveInput, FIXED_DT};
 use crate::vehicle::query_bounds::QueryBounds;
-use crate::vehicle::{DriveTorques, PhysicsWorld, VehicleBody};
+use crate::vehicle::{DriveTorques, PhysicsWorld, VehicleBody, WheelMount, WheelSet};
 use rapier3d::prelude::{ColliderBuilder, RigidBodyBuilder};
 
 // Exported Lada values (Steam build 11140890).
@@ -32,33 +34,35 @@ fn lada_slot(steer: bool, drive: bool) -> WheelSlotReference {
         wheel: ItemId(0),
         tire: ItemId(0),
         rim: ItemId(0),
-        radius: 0.3,
-        suspension_distance: 0.3,
-        center: [0.0; 3],
-        spring: 25000.0,
-        damper: 1500.0,
-        target_position: 0.45,
+        collider: WheelColliderReference {
+            radius: 0.3,
+            suspension_distance: 0.3,
+            center: [0.0; 3],
+            spring: 25000.0,
+            damper: 1500.0,
+            target_position: 0.45,
+            forward_friction: WheelFrictionCurve {
+                extremum_slip: 0.4,
+                extremum_value: 1.0,
+                asymptote_slip: 0.8,
+                asymptote_value: 0.5,
+                stiffness: 0.985,
+            },
+            sideways_friction: WheelFrictionCurve {
+                extremum_slip: 0.2,
+                extremum_value: 1.0,
+                asymptote_slip: 0.5,
+                asymptote_value: 0.75,
+                stiffness: 0.85,
+            },
+            wheel_mass_kg: 20.0,
+            rotational_damping: 0.25,
+            force_application_distance_m: 0.0,
+        },
         steer,
         drive,
         brake: true,
         handbrake: steer,
-        forward_friction: WheelFrictionCurve {
-            extremum_slip: 0.4,
-            extremum_value: 1.0,
-            asymptote_slip: 0.8,
-            asymptote_value: 0.5,
-            stiffness: 0.985,
-        },
-        sideways_friction: WheelFrictionCurve {
-            extremum_slip: 0.2,
-            extremum_value: 1.0,
-            asymptote_slip: 0.5,
-            asymptote_value: 0.75,
-            stiffness: 0.85,
-        },
-        wheel_mass_kg: 20.0,
-        rotational_damping: 0.25,
-        force_application_distance_m: 0.0,
         sideways_stiffness_modifier: 0.0,
         hub: WheelHubReference {
             radius_m: 0.04,
@@ -98,13 +102,12 @@ fn lada(assembly: WheelAssembly) -> PhysicsWorld {
     let corners = [(-0.7, -1.2), (-0.7, 1.2), (0.7, 1.2), (0.7, -1.2)];
     let references: [WheelSlotReference; 4] =
         std::array::from_fn(|i| lada_slot(i == 0 || i == 3, i == 1 || i == 2));
-    let wheels = std::array::from_fn(|i| {
-        WheelState::new(
-            Vector::new(corners[i].0, 0.0, corners[i].1),
-            resolve_profile(&references[i], &SLIP, assembly),
-            0.135,
-        )
+    let mounts: [WheelMount; 4] = std::array::from_fn(|i| WheelMount {
+        connection: Vector::new(corners[i].0, 0.0, corners[i].1),
+        collider: &references[i].collider,
+        profile: resolve_profile(&references[i], &SLIP, assembly),
     });
+    let wheels = WheelSet::new(chassis, &mounts);
     world.chassis.push(chassis);
     world.vehicles.push(VehicleBody {
         chassis,
@@ -145,7 +148,7 @@ fn throttle() -> DriveInput {
 
 #[test]
 fn friction_curve_follows_source_points() {
-    let curve = lada_slot(false, false).forward_friction;
+    let curve = lada_slot(false, false).collider.forward_friction;
     assert_eq!(friction(&curve, 0.0), 0.0);
     assert_eq!(friction(&curve, 0.4), 1.0);
     assert_eq!(friction(&curve, -0.4), -1.0);
@@ -203,13 +206,13 @@ fn brake_holds_a_wheel_and_motor_overcomes_it() {
         motor_nm: 300.0,
         brake_nm: 600.0,
     };
-    solve(&mut wheel, &slot, frame, held, FIXED_DT);
+    solve(&mut wheel, &slot.collider, frame, held, FIXED_DT);
     assert_eq!(wheel.omega, 0.0);
     let spun = WheelTorques {
         motor_nm: 900.0,
         brake_nm: 600.0,
     };
-    solve(&mut wheel, &slot, frame, spun, FIXED_DT);
+    solve(&mut wheel, &slot.collider, frame, spun, FIXED_DT);
     assert!(wheel.omega > 0.0);
 }
 
@@ -220,7 +223,7 @@ fn car_settles_on_source_suspension() {
     let snapshot = world.snapshot(0);
     assert!(snapshot.wheels_contact.iter().all(|c| *c));
     assert!(snapshot.absolute_speed_kmh() < 0.5);
-    for wheel in &world.vehicles[0].wheels {
+    for wheel in world.vehicles[0].wheels.wheels() {
         assert!(
             (wheel.suspension_length - 0.135).abs() < 0.02,
             "{}",
