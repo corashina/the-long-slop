@@ -291,7 +291,8 @@ pub fn queue(world: &mut World) {
                         for (item, caster) in scene.caster_data.entities.iter().enumerate() {
                             let mask = scene.masks[index][item];
                             // GPU prop rows draw from their own buffers.
-                            let crate::reference::shadow_scene::CasterKey::Entity(main) = *caster
+                            let crate::presentation::shadow_scene::CasterKey::Entity(main) =
+                                *caster
                             else {
                                 continue;
                             };

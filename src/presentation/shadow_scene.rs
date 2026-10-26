@@ -19,11 +19,18 @@ use crate::reference::{
     shadow_candidates::CandidateState,
     shadow_frame::{CasterInput, ShadowViewCache},
     shadow_planes::CullPlanes,
-    shadow_scene::{CasterData, CasterIndex, CasterKey},
+    shadow_scene::{CasterData, CasterIndex},
     shadows::{ShadowFit, ShadowFitInput, source_atlas_size},
 };
 use bevy::camera::visibility::{SetViewVisibility, ViewVisibility};
 use bevy::{ecs as bevy_ecs, prelude::*};
+
+/// A caster is a renderer entity or a GPU prop row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CasterKey {
+    Entity(Entity),
+    Row(u32),
+}
 
 #[derive(Resource, Default)]
 pub struct ShadowScene {

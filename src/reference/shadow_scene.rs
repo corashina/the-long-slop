@@ -2,13 +2,6 @@
 use super::shadow_frame::{CasterInput, validate_casters};
 use std::{collections::HashMap, hash::Hash};
 
-/// A caster is a renderer entity or a GPU prop row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CasterKey {
-    Entity(bevy::ecs::entity::Entity),
-    Row(u32),
-}
-
 pub struct CasterData<K> {
     pub entities: Vec<K>,
     pub casters: Vec<CasterInput>,
@@ -106,6 +99,12 @@ mod tests {
     use super::super::shadows::ShadowFitInput;
     use super::*;
 
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    enum CasterKey {
+        Entity(u32),
+        Row(u32),
+    }
+
     #[test]
     fn row_casters_give_entity_masks() {
         let projection = [
@@ -157,11 +156,7 @@ mod tests {
         let mut index = CasterIndex::default();
         // Each input enters once as an entity and once as a row, interleaved.
         for (i, input) in inputs.iter().enumerate() {
-            index.update(
-                &mut data,
-                CasterKey::Entity(bevy::ecs::entity::Entity::from_raw_u32(i as u32 + 1).unwrap()),
-                *input,
-            );
+            index.update(&mut data, CasterKey::Entity(i as u32), *input);
             index.update(&mut data, CasterKey::Row(i as u32), *input);
         }
         data.publish().unwrap();

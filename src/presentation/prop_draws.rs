@@ -11,7 +11,7 @@ use super::{
     view_frame::SourceViewFrame,
     world::gpu_props::{NO_BATCH, PropBatch, ROW_WORDS},
 };
-use crate::reference::shadow_scene::CasterKey;
+use crate::presentation::shadow_scene::CasterKey;
 use bevy::material::{
     MaterialProperties,
     key::{ErasedMaterialPipelineKey, ErasedMeshPipelineKey},
