@@ -71,6 +71,10 @@ def dry_mass(source, components) -> float:
         if r.type.name=='MonoBehaviour' and source.class_name(r)=='massScript')
 
 
+# carscript player body frames while driving.
+DRIVE_FRAMES=(('left_hand','LHDrivePos'),('right_hand','RHDrivePos'),('left_leg','LLDrivePos'),('right_leg','RLDrivePos'))
+
+
 def seat_fields(source, reader, value, car_reader) -> dict:
     """Driver roles of a primary seat in the car of `car_reader`."""
     car=source.resolve(reader,value['Car'])
@@ -276,7 +280,7 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         'lever':recover_lever(source,car_reader,car,hierarchy[0]['reader'],proto.nodes),
         # inputscript.DriveStuff uses the multiplier only when it is not zero.
         'key_steer_multiplier':car['keySteerSensMultiplier'],
-        'seats':seats,'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        'seats':seats,'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

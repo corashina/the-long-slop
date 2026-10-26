@@ -50,6 +50,7 @@ pub struct WorldVehicleReference {
     /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
     pub key_steer_multiplier: f32,
     pub seats: Vec<WorldSeatReference>,
+    pub drive_frames: DriveFrames,
     pub lights: Vec<WorldLightReference>,
     pub light_switch: Option<WorldLightSwitchReference>,
     /// Node ids are prototype node indices.
@@ -173,6 +174,17 @@ pub struct WorldSeatReference {
     pub source: SourceId,
     pub driver: bool,
     pub driving2: bool,
+}
+
+/// Source `carscript` player body frames while driving: `LHDrivePos`, `RHDrivePos`,
+/// `LLDrivePos`, `RLDrivePos`. `None` for a null link.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DriveFrames {
+    pub left_hand: Option<u32>,
+    pub right_hand: Option<u32>,
+    pub left_leg: Option<u32>,
+    pub right_leg: Option<u32>,
 }
 
 /// A `headlightscript` (headlight or cabin) or `rearlights` controller.
@@ -543,6 +555,15 @@ impl WorldVehicleReference {
                 .iter()
                 .enumerate()
                 .all(|(i, p)| self.plates[..i].iter().all(|o| o.node != p.node)),
+        )?;
+        let d = &self.drive_frames;
+        check(
+            s,
+            "vehicle drive frames",
+            [d.left_hand, d.right_hand, d.left_leg, d.right_leg]
+                .iter()
+                .flatten()
+                .all(|n| b.node(*n)),
         )?;
         check(
             s,
