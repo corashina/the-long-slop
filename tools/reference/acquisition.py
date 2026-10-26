@@ -150,7 +150,7 @@ def recover_station_graphs(source, manifest, code):
             'flyers': {'force':bool(bd['forceRandomFlyer']), 'halloween':bool(bd['randomFlyerOnHalloween']),
                 'vertical_offset':bd['randomFlyerOffsetty'], 'vertical_scale':bd['randomFlyerVertical'],
                 'horizontal':[bd['randomFlyerHorizontalMin'],bd['randomFlyerHorizontalMax']],
-                'prefab':source_id(source.resolve(main,source.read(main)['randomFlyerPrefab'])), 'supported':False},
+                'prefab':source_id(source.resolve(main,source.read(main)['randomFlyerPrefab'])), 'supported':True},
             'to_start': [source_id(source.resolve(building, p)) for p in bd['toStart']],
             'ordinary': ordinary, 'underground': underground,
             'misc4': [s['source'] for s in ordinary if any(i['selection'].get('category_id') == 35 for i in s['entries'])]})
@@ -470,7 +470,7 @@ def _validate_acquisition(a, manifest):
         for field in ('force','halloween','supported'):_boolean(f[field])
         for field in ('vertical_offset','vertical_scale'):_number(f[field])
         _numbers(f['horizontal'],2);_source(f['prefab'])
-        if f!=STATION_FLYERS[index]:raise ValueError('Station unsupported flyer contract differs')
+        if f!=STATION_FLYERS[index]:raise ValueError('Station flyer contract differs')
         record=next(r for r in manifest['world']['records'] if r['source']==station['source'])
         owner=next(f['value'] for f in record['fields'] if f['name']=='m_GameObject')
         if s['source']!={'file':'sharedassets1.assets','path_id':STATION_PREFABS[index]} or s['root']!=0 or owner!={'kind':'link','value':s['source']}:
@@ -698,21 +698,21 @@ STATION_FLYERS = [{'force': False,
   'halloween': True,
   'horizontal': [6.0, 16.0],
   'prefab': {'file': 'sharedassets1.assets', 'path_id': 32394},
-  'supported': False,
+  'supported': True,
   'vertical_offset': 10.0,
   'vertical_scale': 5.0},
  {'force': False,
   'halloween': True,
   'horizontal': [6.0, 16.0],
   'prefab': {'file': 'sharedassets1.assets', 'path_id': 32394},
-  'supported': False,
+  'supported': True,
   'vertical_offset': 10.0,
   'vertical_scale': 5.0},
  {'force': False,
   'halloween': True,
   'horizontal': [6.0, 16.0],
   'prefab': {'file': 'sharedassets1.assets', 'path_id': 32394},
-  'supported': False,
+  'supported': True,
   'vertical_offset': 10.0,
   'vertical_scale': 5.0}]
 

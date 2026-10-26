@@ -305,7 +305,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
-    from .sky import prepare_sky, recover_sky, validate_sky
+    from .sky import prepare_sky, recover_sky, recover_flyer, validate_sky
     prepare_sky(source, roots)
     from .world import prepare_home_cable
     prepare_home_cable(source)
@@ -353,6 +353,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     manifest['weather']=weather
     validate_weather_export(weather,manifest)
     manifest['sky']=recover_sky(source,manifest,output)
+    manifest['sky']['flyer']=recover_flyer(source,manifest)
     manifest['item_prototypes'] = recover_item_prototypes(source, manifest, output)
     from .small_items import recover_small_items, validate_small_items
     manifest['small_items'] = recover_small_items(source, manifest, output)

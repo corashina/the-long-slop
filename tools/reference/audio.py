@@ -400,6 +400,9 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
     for prefab in manifest['sky']['prefabs']:
         prefab['voices'] = [voice(source.get(v['file'], v['path_id']), [method('AirPlaneSpawnScript', 'Update')]) for v in prefab['voices']]
+    # randomFlyer.Update plays a random sound clip at the bat.
+    flyer = manifest['sky']['flyer']
+    flyer['clips'] = [clip(source.get(c['file'], c['path_id'])) for c in flyer['clips']]
     audio['shared']['settings'] = source_settings(prefab_data, prefab_data['Priority'])
     audio['shared']['mixer'] = mixer(source.resolve(main_r, main['defGroup']))
     def offset(reader, owner):
