@@ -6,6 +6,7 @@ pub mod normals;
 pub mod point;
 pub mod pose;
 mod posture;
+pub mod ragdoll;
 mod view;
 use collision::PlayerSweepShape;
 use posture::{MovementSpeed, PostureState};
