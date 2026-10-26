@@ -55,9 +55,7 @@ pub use small_items::*;
 pub mod melee;
 pub use melee::*;
 pub mod wheel_effects;
-pub use wheel_effects::{
-    EffectGains, SkidReference, WheelEffectsReference, WheelGains, WheelVoices,
-};
+pub use wheel_effects::{EffectGains, SkidReference, WheelEffectsReference, WheelGains};
 pub mod plates;
 pub use plates::*;
 pub mod clothing;
@@ -627,6 +625,7 @@ pub struct EngineReference {
     pub auto_shift_clutch_rpm_range: f32,
     /// Source `enginescript.defSmokeRate`.
     pub smoke_rate: f32,
+    pub audio: Option<EngineAudioReference>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -943,8 +942,8 @@ pub struct VehicleReference {
     /// Source `carscript.psSmoke` systems, posed relative to `root`.
     pub exhaust: Vec<ParticleReference>,
     pub wheel_effects: [WheelEffectsReference; 4],
-    pub wheel_voices: [WheelVoices; 4],
     pub effect_gains: EffectGains,
+    pub audio: Option<CarAudioReference>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

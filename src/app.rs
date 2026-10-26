@@ -1469,11 +1469,25 @@ fn publish_audio(
             signal.clip,
         );
     }
-    game_audio_starter(
-        audio.reference.engine.emitter,
-        audio.starter_enabled,
-        audio.game_seconds,
-    );
+    // Car voices play through the survival path with one record per car voice template.
+    for &(instance, mixer) in &audio.cars.routes {
+        game_audio_route(crate::audio::cars::CAR_ROUTE + instance, mixer);
+    }
+    for e in audio.cars.loops.iter().chain(&audio.cars.events) {
+        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
+        game_audio_survival(
+            e.kind,
+            e.instance,
+            e.action as u32,
+            e.clip,
+            e.gain,
+            e.pitch,
+            p[0],
+            p[1],
+            p[2],
+        );
+    }
+    audio.cars.events.clear();
     while let Some(event) = audio.pop_event() {
         game_audio_event(
             event.session,

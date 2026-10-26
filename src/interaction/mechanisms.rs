@@ -786,7 +786,7 @@ impl MechanismState {
                 };
                 self.control_action = Some(match &turn.action {
                     TurnAction::ToggleHandbrake => ControlAction::ToggleHandbrake(item),
-                    TurnAction::CycleHeadlights => ControlAction::CycleHeadlights,
+                    TurnAction::CycleHeadlights => ControlAction::CycleHeadlights(item),
                     TurnAction::InteriorLight => ControlAction::InteriorLight(c.turn_state),
                     TurnAction::ToggleHomeLight { source } => {
                         ControlAction::ToggleHomeLight(source.clone())
@@ -1080,7 +1080,8 @@ pub enum ControlAction {
     Radio(crate::simulation::radio::RadioControl),
     /// The item is the lever. Its body selects the vehicle.
     ToggleHandbrake(ItemId),
-    CycleHeadlights,
+    /// The switch item of a car.
+    CycleHeadlights(ItemId),
     InteriorLight(u8),
     ToggleHomeLight(SourceId),
 }

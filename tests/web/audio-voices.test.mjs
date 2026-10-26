@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VoiceBank} from '../../web/audio/voices.js';
+import {VoiceBank,CAR_KIND,CAR_ROUTE} from '../../web/audio/voices.js';
 
 const param=()=>({value:0});
 class Node {constructor(){this.gain=param();this.pan=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ'])this[n]=param();}connect(){}disconnect(){}start(){this.started=true;}stop(t){this.stopAt=t;}}
@@ -8,7 +8,7 @@ class Context {constructor(){this.currentTime=0;}createGain(){return new Node();
 const settings={priority:100,loop:false,min_distance:1,max_distance:10,rolloff_mode:1,spatial_blend_curve:{keys:[{time:0,value:1}]}};
 const record=(kind,one_shot,priority,mixer=1)=>({kind,one_shot,settings:{...settings,priority},pan:0,doppler:0,mixer,audio_source:{file:'a',path_id:1}});
 const raw={emitters:[{id:1}],voices:[],radio:{voices:[]},portable_radio:{voices:[]},clips:[{id:1,source_duration_seconds:.5}],mixers:[{id:1,pitch:1},{id:2,pitch:1},{id:3,pitch:1}],
- engine:{starter_binding:-1,stop_binding:-1,constants:{}},shared:{mixer:1,settings,audio_manager:{real_voices:2,doppler_factor:1}},
+ car_voices:[{id:1,source:{file:'a',path_id:2},one_shot:false,clip:1,settings:{...settings,priority:80,loop:true},mixer:1,doppler:0,pan:0}],shared:{mixer:1,settings,audio_manager:{real_voices:2,doppler_factor:1}},
  bindings:[80,55].map(priority=>({id:priority,clips:[1],priority,gain:1,mixer:1,emitter:1,trigger:'test'})),
  survival:[record(1,false,55),record(11,true,100),record(12,true,100,3)]};
 function bank(){const b=new VoiceBank(new Context(),raw,{effect:async()=>({duration:.5})},new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});b.begin();b.emitter(1,[0,0,0],[0,0,0,1],true);return b;}
@@ -43,4 +43,12 @@ test('voice_update_switches_clip',async()=>{
  b.update(5,true,1,1,true,0);await tick();assert.equal(s.buffer.id,1,'0 keeps the record clip');
  b.update(5,true,1,1,true,2);await tick();assert.equal(s.buffer.id,2);assert.ok(s.source.started);
  b.update(5,true,1,1,true,2);assert.equal(s.buffer.id,2,'the same clip keeps playing');
+});
+
+test('car_voice_loops_follow_their_car_route',async()=>{
+ const b=bank();b.route(CAR_ROUTE+7,2);
+ b.survival(CAR_KIND+1,7,1,1,.5,1.2,3,0,0);b.survival(CAR_KIND+1,8,1,1,.5,1,0,0,0);await tick();
+ assert.deepEqual(b.effects.map(s=>[s.mixer,s.survivalLoop,s.pitch]),[[2,true,1.2],[1,true,1]],'each car instance keeps its own loop and route');
+ b.begin();b.survival(CAR_KIND+1,7,1,1,.5,1.2,3,0,0);b.finish();
+ assert.deepEqual(b.effects.map(s=>s.playing),[true,false],'a loop that the frame does not name stops');
 });

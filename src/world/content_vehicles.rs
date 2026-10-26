@@ -111,6 +111,10 @@ pub(super) fn bind(
                 fuel_tank: record.fuel_tank.and_then(node_item),
                 electronics,
                 lights,
+                light_switch: record
+                    .light_switch
+                    .as_ref()
+                    .and_then(|s| node_item(s.usable)),
             },
             prototype,
             skid,
@@ -209,6 +213,8 @@ pub(crate) struct CarCopy<'a> {
     pub electronics: Option<f32>,
     /// Links of each record light controller.
     pub lights: Vec<CarLightLinks>,
+    /// The item of the `carscript.InteractSwitchLights` usable.
+    pub light_switch: Option<ItemId>,
 }
 
 /// Makes the chassis a vehicle and adds its car runtime with the retired state of its key.
@@ -240,6 +246,7 @@ pub(crate) fn spawn(
             bodies: copy.bodies,
             electronics: copy.electronics,
             lights: copy.lights,
+            light_switch: copy.light_switch,
         },
     );
     if let Some(state) = changes.take_vehicle(&key) {
@@ -384,6 +391,7 @@ mod tests {
                 fuel_tank: Some(item),
                 electronics: None,
                 lights: Vec::new(),
+                light_switch: None,
             },
             prototype,
             &crate::wheel_effects::tests::skid(),

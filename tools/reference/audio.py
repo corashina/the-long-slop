@@ -10,6 +10,8 @@ from .library.reader import checked
 from .library.types import ObjectId
 from .source import key, source_id
 from .radio import recover_radio_visuals
+from .wheel_effects import recover_wheel_voices
+from .particles import relative_pose
 
 ASSEMBLY_HASH = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 NATIVE_HASH = '553c1e7560e1b42bd4638c53d0168dcd1b4b9eb5b9df324b0a44f14b3f18bc86'
@@ -211,6 +213,86 @@ def zone_record(prototype, zone, audio_source, pose, clip, evidence):
         'volume': zone['volume'], 'clip': clip, 'method': evidence}
 
 
+def source_settings(d, priority):
+    """AudioSource values that a browser voice slot reads."""
+    return {'priority':priority,'loop':bool(d['Loop']),'gain':d['m_Volume'],'pitch':d['m_Pitch'],
+        'min_distance':d['MinDistance'],'max_distance':d['MaxDistance'],'rolloff_mode':d['rolloffMode'],
+        'spatial_blend':d['panLevelCustomCurve']['m_Curve'][0]['value'],
+        'spatial_blend_curve':audio_curve(d['panLevelCustomCurve']),'rolloff_curve':audio_curve(d['rolloffCustomCurve'])}
+
+
+def audio_curve(value):
+    return {'keys': [{'time': k['time'], 'value': k['value'], 'in_tangent': k['inSlope'],
+        'out_tangent': k['outSlope'], 'in_weight': k['inWeight'], 'out_weight': k['outWeight'],
+        'weighted_mode': k['weightedMode']} for k in value['m_Curve']],
+        'pre_wrap_mode': value['m_PreInfinity'], 'post_wrap_mode': value['m_PostInfinity'],
+        'rotation_order': value['m_RotationOrder']}
+
+
+def car_voice(templates, record):
+    """Id of a car voice template in `templates`. Equal templates share one id."""
+    for t in templates:
+        if {k:v for k,v in t.items() if k!='id'}==record:return t['id']
+    templates.append({'id':len(templates)+1,**record})
+    return templates[-1]['id']
+
+
+# AudioSources that the car sound records own. Other voice lists skip them.
+CAR_SOURCES={'enginescript':('SAlap','SMotor'),'carscript':('SHornSound','SSounds'),
+    'talajnezo':('GroundSource','SpringSource','SlideSource')}
+
+
+def engine_audio(source, reader, sound, shot):
+    """enginescript sounds of one engine part, in the frame of its GameObject.
+
+    `sound(audio_source, owner, priority)` and `shot(owner_reader, clip_pointer, gain, audio_source, owner)`
+    add car voice templates.
+    """
+    d=source.read(reader);owner=source.transform_for(source.resolve(reader,d['m_GameObject']))
+    voices={}
+    for name,field in (('idle','SAlap'),('motor','SMotor')):
+        r=source.resolve(reader,d[field])
+        if r is None:raise ValueError(f'enginescript {field} is null: {source_id(reader)}')
+        voices[name]=sound(r,owner,PRIORITIES[5])
+    return {**voices,'starter':shot(reader,d['SStart'],d['SStartVolume'],None,owner),
+        'stop':shot(reader,d['SStop'],d['SStopVolume'],None,owner),
+        'idle_rpm':[d['SMinAlapRpm'],d['SMaxAlapRpm']],'motor_rpm':[d['SMinMotorRpm'],d['SMaxMotorRpm']],
+        'idle_gain':d['SMaxAlapSound'],'motor_gain':d['SMaxMotorSound'],
+        'idle_pitch':[d['minAlapPitch'],d['maxAlapPitch']],'motor_pitch':[d['minMotorPitch'],d['maxMotorPitch']]}
+
+
+def car_audio(source, car_reader, wheels, cycle, sound, shot):
+    """carscript horn and switch sounds and talajnezo wheel sounds, in the chassis (`RB`) frame.
+
+    `wheels` holds the GroundSource, SpringSource and SlideSource readers of each wheel, in wheel effect order.
+    """
+    d=source.read(car_reader)
+    body=source.resolve(car_reader,d['RB'])
+    owner=source.transform_for(source.resolve(body,source.read(body)['m_GameObject']))
+    horn=source.resolve(car_reader,d['SHornSound'])
+    switch=source.resolve(car_reader,d['SSounds'])
+    return {'horn':None if horn is None else {'sound':sound(horn,owner,None),
+            'pitch':[d['HornPitchMin'],d['HornPitchMax']],'temperature':[cycle['tempNights'][0],cycle['tempDays'][0]],
+            'attack_release_rate':10.},
+        'switch':None if switch is None else shot(car_reader,d['turnedRadioSOund'],1.,switch,owner),
+        'wheels':[{field:sound(w[field],owner,None) for field in ('ground','spring','slide')} for w in wheels],
+        'route':None}
+
+
+def car_route(source, reader, interiors, mixer):
+    """audioBasedOnInteriorsensscript of a car prototype. `interiors` are the prototype interiorscript readers."""
+    d=source.read(reader)
+    index={key(r):i for i,r in enumerate(interiors)}
+    result=[]
+    for p in d['defInterior']:
+        target=source.resolve(reader,p)
+        if target is None or key(target) not in index:raise ValueError(f'Car audio route interior outside prototype: {key(reader)}')
+        result.append(index[key(target)])
+    return {'interiors':result,'main_mixer':mixer(source.resolve(reader,d['GMain'])),
+        'outside_mixer':mixer(source.resolve(reader,d['GOutSide'])),
+        'car_mixer':mixer(source.resolve(reader,d['GCarSounds'])) if d['GCarSounds']['m_PathID'] else None}
+
+
 def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: str) -> dict:
     path, metadata = library.audio(identity)
     name = f'audio-{identity.file}-{identity.path_id}.wav'
@@ -221,7 +303,7 @@ def copy_audio(library, identity: ObjectId, clip_id: int, output: Path, usage: s
 
 def recover_audio(source, roots: dict, manifest: dict, library, output: Path, reports: dict) -> dict:
     receipt, method, footstep_methods = managed_evidence(library)
-    audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'mixers': [],
+    audio = {'schema_version': 1, 'clips': [], 'emitters': [], 'voices': [], 'car_voices': [], 'mixers': [],
         'bindings': [], 'mechanisms': [], 'fluids': [], 'interiors': [], 'routes': [], 'lamps': [], 'silent_actions': ['pickup', 'detach', 'handbrake'],
         'managed': {'file': receipt['input']['file'], 'sha256': receipt['input']['sha256'],
                     'decompiled_sha256': receipt['output']['sha256']},
@@ -276,12 +358,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
         'doppler_factor': manager_data['Doppler Factor'], 'rolloff_scale': manager_data['Rolloff Scale']}
     audio['shared']['source'] = source_id(prefab)
     prefab_data = source.read(prefab)
-    def curve(value):
-        return {'keys': [{'time': k['time'], 'value': k['value'], 'in_tangent': k['inSlope'],
-            'out_tangent': k['outSlope'], 'in_weight': k['inWeight'], 'out_weight': k['outWeight'],
-            'weighted_mode': k['weightedMode']} for k in value['m_Curve']],
-            'pre_wrap_mode': value['m_PreInfinity'], 'post_wrap_mode': value['m_PostInfinity'],
-            'rotation_order': value['m_RotationOrder']}
+    curve=audio_curve
     def voice(reader, evidence=None):
         identity = key(reader)
         if identity in voices:
@@ -304,15 +381,33 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'curves': {name: curve(d[field]) for name, field in [('rolloff', 'rolloffCustomCurve'),
                 ('spatial_blend', 'panLevelCustomCurve'), ('spread', 'spreadCustomCurve'),
                 ('reverb_mix', 'reverbZoneMixCustomCurve')]}}
+    mono = [(c, source.class_name(c), source.read(c)) for c in components if c.type.name == 'MonoBehaviour']
+    car_sources = {key(r) for c, cls, d in mono for field in CAR_SOURCES.get(cls, ())
+        if (r := source.resolve(c, d[field])) is not None}
     for c in components:
-        if c.type.name == 'AudioSource': voice(c)
-    audio['shared']['settings'] = {'priority':prefab_data['Priority'],'loop':bool(prefab_data['Loop']),
-        'gain':prefab_data['m_Volume'],'pitch':prefab_data['m_Pitch'],'min_distance':prefab_data['MinDistance'],
-        'max_distance':prefab_data['MaxDistance'],'rolloff_mode':prefab_data['rolloffMode'],
-        'spatial_blend':prefab_data['panLevelCustomCurve']['m_Curve'][0]['value'],
-        'spatial_blend_curve':curve(prefab_data['panLevelCustomCurve']),
-        'rolloff_curve':curve(prefab_data['rolloffCustomCurve'])}
+        if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
+    audio['shared']['settings'] = source_settings(prefab_data, prefab_data['Priority'])
     audio['shared']['mixer'] = mixer(source.resolve(main_r, main['defGroup']))
+    def offset(reader, owner):
+        transform = source.transform_for(source.resolve(reader, source.read(reader)['m_GameObject']))
+        return relative_pose(source, transform, owner)['translation']
+    def car_template(reader, priority, one_shot):
+        d = source.read(reader); cid = source.resolve(reader, d['m_audioClip'])
+        return car_voice(audio['car_voices'], {'source': source_id(reader), 'one_shot': one_shot,
+            'clip': clip(cid) if cid else None, 'settings': source_settings(d, d['Priority'] if priority is None else priority),
+            'mixer': mixer(source.resolve(reader, d['OutputAudioMixerGroup'])), 'doppler': d['DopplerLevel'], 'pan': d['Pan2D']})
+    def car_sound(reader, owner, priority):
+        return {'voice': car_template(reader, priority, False), 'position': offset(reader, owner)}
+    def car_shot(owner_reader, pointer, gain, reader, owner):
+        """A clip played once: on AudioSource `reader`, else through mainscript.PlayClipAtPoint at `owner`."""
+        target = source.resolve(owner_reader, pointer)
+        if target is None: return None
+        if reader is not None:
+            return {'voice': car_template(reader, None, True), 'clip': clip(target), 'gain': gain, 'position': offset(reader, owner)}
+        shared = car_voice(audio['car_voices'], {'source': audio['shared']['source'], 'one_shot': True, 'clip': None,
+            'settings': {**audio['shared']['settings'], 'priority': PRIORITIES[2]}, 'mixer': audio['shared']['mixer'],
+            'doppler': prefab_data['DopplerLevel'], 'pan': prefab_data['Pan2D']})
+        return {'voice': shared, 'clip': clip(target), 'gain': gain, 'position': [0., 0., 0.]}
     def binding(owner, trigger, pointers, gain, pitch, priority, evidence, route=None, voice_id=None):
         choices = [clip(source.resolve(owner, p)) for p in pointers if p['m_PathID']]
         if not choices: return None
@@ -320,32 +415,10 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             'emitter': emitter(owner), 'clips': choices, 'gain': gain, 'pitch_range': pitch,
             'priority': priority, 'mixer': route or audio['shared']['mixer'], 'voice': voice_id, 'method': evidence}
         audio['bindings'].append(record); return record['id']
-    mono = [(c, source.class_name(c), source.read(c)) for c in components if c.type.name == 'MonoBehaviour']
-    car_route = None
+    car_group = None
     for c, cls, d in mono:
-        if cls == 'enginescript':
-            idle = voice(source.resolve(c, d['SAlap']), [method(cls, 'Start'), method(cls, 'Update')])
-            motor = voice(source.resolve(c, d['SMotor']), [method(cls, 'Start'), method(cls, 'Update')])
-            for vid in [idle, motor]: audio['voices'][vid - 1]['priority'] = PRIORITIES[5]
-            starter = binding(c, 'starter', [d['SStart']], d['SStartVolume'], [1, 1], PRIORITIES[2], method(cls, 'Update'))
-            stop = binding(c, 'engine_stop', [d['SStop']], d['SStopVolume'], [1, 1], PRIORITIES[2], method(cls, 'Update'))
-            audio['engine'] = {'source': source_id(c), 'emitter': emitter(c), 'idle_voice': idle,
-                'motor_voice': motor, 'starter_binding': starter, 'stop_binding': stop,
-                'constants': {k: d[k] for k in ['SMinAlapRpm','SMaxAlapRpm','SMinMotorRpm','SMaxMotorRpm',
-                    'SMaxAlapSound','SMaxMotorSound','minAlapPitch','maxAlapPitch','minMotorPitch','maxMotorPitch',
-                    'maxRpm','engineStartTimeModifier','SStartVolume','SStopVolume']}, 'method': method(cls, 'Update')}
-        elif cls == 'carscript':
-            horn = voice(source.resolve(c, d['SHornSound']), [method(cls, 'Update')])
-            car_route = source.resolve(c, d['groupScript'])
-            cycle_r = source.resolve(main_r, main['napszak']); cycle = source.read(cycle_r)
-            audio['horn'] = {'source': source_id(c), 'voice': horn, 'attack_release_rate': 10,
-                'pitch_min': d['HornPitchMin'], 'pitch_max': d['HornPitchMax'],
-                'temperature_min': cycle['tempNights'][0], 'temperature_max': cycle['tempDays'][0],
-                'switches': [source_id(source.resolve(c, p)) for p in d['HornSwitch']], 'method': method(cls, 'Update')}
-            vr = source.resolve(c, d['SSounds']); vid = voice(vr)
-            for trigger, name in [('ignition','Update'), ('light_switch','InteractSwitchLights')]:
-                binding(c, trigger, [d['turnedRadioSOund']], 1, [1,1], source.read(vr)['Priority'],
-                    method(cls, name), mixer(source.resolve(vr, source.read(vr)['OutputAudioMixerGroup'])), vid)
+        if cls == 'carscript':
+            car_group = source.resolve(c, d['groupScript'])
         elif cls == 'usablescript':
             movement = None
             if d['moveSound'] and d['SSource']['m_PathID'] and d['SMove']['m_PathID']:
@@ -464,11 +537,21 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
                 audio['ambience'].append(ambience_record(prototype['source'],source.read(c),
                     lambda pointers,c=c:[clip(r) for r in readers(c,pointers)],method('soundplayscript','PlaySound')))
         prototype['interiors']=world_interiors(source,prototype,interiors,manifest['world']['mechanisms'],method('interiorscript','GetValue'))
+        for engine in prototype.get('engines',[]):
+            engine['audio']=engine_audio(source,source.get(engine['source']['file'],engine['source']['path_id']),car_sound,car_shot)
+        if prototype.get('vehicle'):
+            vehicle=prototype['vehicle'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
+            wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
+            vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
+            routes=[c for node in source.hierarchy(root,activate_root=True) for c in node['components']
+                if c.type.name=='MonoBehaviour' and source.class_name(c)=='audioBasedOnInteriorsensscript' and source.read(c)['def']['m_PathID']]
+            if len(routes)>1:raise ValueError(f'Car prototype has more than one audio route: {key(car)}')
+            if routes:vehicle['audio']['route']=car_route(source,routes[0],interiors,mixer)
         if prototype['sled']:
             sled=prototype['sled'];sleds.append(sled)
             sled['clip']=clip(source.get(sled['clip']['file'],sled['clip']['path_id']))
     if len(rocks)!=1:raise ValueError('Selected world needs one rock ambience')
-    if car_route is None:raise ValueError('Car hit audio needs the car route')
+    if car_group is None:raise ValueError('Car hit audio needs the car route')
     rock=audio['ambience'][0]
     survival_groups+=[('item_hit',11,main,unique(item_clips),prefab,[1.,1.],[1.,1.]),
         ('car_hit',12,main,unique(r for tier in tiers for r in tier),prefab,[1.,1.],list(audio['shared']['random_pitch'])),
@@ -520,7 +603,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'rock_heat':default_route,'footstep':default_route,
-        'car_hit':source.resolve(car_route,source.read(car_route)['GCarSounds'])}
+        'car_hit':source.resolve(car_group,source.read(car_group)['GCarSounds'])}
 
     audio['survival']=[]
     for role,kind,owner,clip_readers,reader,gain,pitch in survival_groups:
@@ -607,7 +690,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
             voice(source.resolve(r,d['Saudio']),[method(cls,'Update'),method(cls,'Fire')])
     for r,cls,d in mono:
         if cls!='audioBasedOnInteriorsensscript':continue
-        route_voices=[voice(source.resolve(r,p),[method(cls,'Update'),method(cls,'SetSources')]) for p in d['Sources']]
+        route_voices=[voice(v,[method(cls,'Update'),method(cls,'SetSources')]) for p in d['Sources']
+            if key(v:=source.resolve(r,p)) not in car_sources]
         default_interiors=[]
         for p in d['defInterior']:
             target=source.resolve(r,p)
@@ -673,14 +757,15 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path, re
     audio['mixer_controls']['outside'] = {'default_interior_gain': player['defInteriorM'],
         'gain_smoothing':player['interiorLerpM'], 'car_sound_multiplier':player['FCarSoundM'],
         'initial_gain':player['outsideVolume'], 'sensor':sensor(source.get('level1',80121),True), 'methods':[method('fpscontroller','SetOutSideAudio')]}
-    # talajnezo loops 3 sources per wheel. The slide voice switches between the mainscript skid clips.
+    # V03 bridge: old garage cars. Task 9 removes them.
     for vehicle in manifest['vehicles']:
-        for wheel in vehicle['wheel_voices']:
-            for field in ('ground','spring','slide'):
-                wheel[field]=voice(source.get(wheel[field]['file'],wheel[field]['path_id']),[method('talajnezo','FixedUpdate')])
+        engine=vehicle['engine'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
+        engine['audio']=engine_audio(source,source.get(engine['source']['file'],engine['source']['path_id']),car_sound,car_shot)
+        wheels=[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in vehicle.pop('wheel_voices')]
+        vehicle['audio']=car_audio(source,car,wheels,cd,car_sound,car_shot)
     skid=manifest['skid']
     for field in ('road_clip','dirt_clip'):skid[field]=clip(source.get(skid[field]['file'],skid[field]['path_id']))
-    for field in ['engine','horn','radio','portable_radio']:
+    for field in ['radio','portable_radio']:
         if field not in audio:raise ValueError(f'Missing required selected audio: {field}')
     for voice_record in audio['voices']:
         if not voice_record['methods']:raise ValueError(f"Audio voice lacks source control flow: {voice_record['source']}")
@@ -717,6 +802,11 @@ def validate_audio_export(audio: dict, output: Path, manifest: dict) -> None:
         if set(v['curves'])!={'rolloff','spatial_blend','spread','reverb_mix'}:raise ValueError('Missing voice curves')
         if not math.isfinite(v['min_distance']) or not math.isfinite(v['max_distance']) or not 0<v['min_distance']<=v['max_distance']:
             raise ValueError('Invalid audio distance')
+    for v in audio['car_voices']:
+        s=v['settings']
+        if (v['clip'] is not None and v['clip'] not in ids) or v['mixer'] not in mixers:raise ValueError('Unresolved car voice clip or mixer')
+        if not all(map(math.isfinite,(s['gain'],s['pitch'],s['min_distance'],s['max_distance']))) or not 0<s['min_distance']<=s['max_distance']:
+            raise ValueError('Invalid car voice settings')
     for b in audio['bindings']:
         if not b['clips'] or any(c not in ids for c in b['clips']):raise ValueError('Unresolved event clip')
         if b['emitter'] not in emitters or b['mixer'] not in mixers:raise ValueError('Unresolved event owner or mixer')

@@ -49,6 +49,8 @@ struct Instance {
     prototype: usize,
     structure: usize,
     sync_pending: bool,
+    /// `VehicleRuntime::presentation_signature` of the last sync of a car copy.
+    car_signature: u64,
     content: Option<ContentSlot>,
     lamp_buttons: Vec<usize>,
     food: Option<crate::reference::ItemId>,
@@ -770,6 +772,7 @@ impl SourceInstances {
                                 prototype: prototype_index,
                                 structure: usize::MAX,
                                 sync_pending: true,
+                                car_signature: 0,
                                 content: None,
                                 lamp_buttons: Vec::new(),
                                 food: None,
@@ -992,7 +995,8 @@ impl SourceInstances {
                 }
             }
         }
-        // World car gauges and lamps change on a still car too.
+        // World car gauges and lamps change on a still car too. Sync a car copy only when
+        // its presented state changed.
         for (key, vehicle) in vehicles {
             if !matches!(
                 vehicle.record,
@@ -1000,9 +1004,14 @@ impl SourceInstances {
             ) {
                 continue;
             }
-            if let Some(owners) = self.bodies.get(&physics.chassis_handle(key)) {
-                for index in owners {
-                    self.selection.push(*index);
+            let Some(owners) = self.bodies.get(&physics.chassis_handle(key)) else {
+                continue;
+            };
+            let signature = vehicle.presentation_signature();
+            for &index in owners {
+                if self.instances[index].car_signature != signature {
+                    self.instances[index].car_signature = signature;
+                    self.selection.push(index);
                 }
             }
         }

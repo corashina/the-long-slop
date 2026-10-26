@@ -10,7 +10,7 @@ import {ClipCache} from '../../web/audio/clips.js';
 import {installAudioBridge} from '../../web/audio.js';
 const manifest=JSON.parse(readFileSync(new URL('../../web/assets/reference/manifest.json',import.meta.url)));
 const raw=manifest.audio;
-const binding=raw.bindings.find(b=>b.trigger==='ignition');
+const binding=raw.bindings.find(b=>b.id===raw.radio.click_binding);
 const samples=readFileSync(new URL('../../web/assets/'+raw.clips.find(c=>c.id===binding.clips[0]).path,import.meta.url));
 const param=()=>({value:0,setValueAtTime(v){this.value=v;}});
 class Node {constructor(){this.gain=param();this.pan=param();this.frequency=param();this.Q=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ','orientationX','orientationY','orientationZ'])this[n]=param();}connect(){}disconnect(){}start(t,o=0){this.offset=o;Fake.starts.push(this);}stop(time){if(time>0)this.stopTime=time;else this.stopped=true;}}
@@ -45,8 +45,6 @@ test('restart_rejects_pending_decode',async()=>{let complete;class Slow extends 
 
 test('removed_owner_rejects_pending_decode',async()=>{let complete;class Slow extends Fake {decodeAudioData(){return new Promise(r=>{complete=r;});}}const a=setup(Slow);a.unlock();await settle();event(a);await decoding(()=>complete);a.emitter(binding.emitter,[0,0,0],[0,0,0,1],false);complete({duration:raw.clips.find(c=>c.id===binding.clips[0]).duration_seconds,numberOfChannels:1});await settle();assert.equal(Fake.starts.length,0);a.dispose();});
 
-function vehicleBank(){Fake.starts=[];const context=new Fake(),cache={effect:async id=>({duration:raw.clips.find(c=>c.id===id).duration_seconds})};return new VoiceBank(context,raw,cache,new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});}
-function vehicleFrame(bank,t=1){bank.begin();for(const id of [raw.engine.emitter,raw.voices.find(v=>v.id===raw.horn.voice).emitter])bank.emitter(id,[0,0,0],[0,0,0,1],true);for(const id of [raw.engine.idle_voice,raw.engine.motor_voice,raw.horn.voice])bank.update(id,true,.7,1,true);bank.finish();}
 
 function radioSamples(id){const clip=raw.clips.find(c=>c.id===id),bytes=readFileSync(new URL('../../web/assets/'+clip.path,import.meta.url));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);}
 function radioSetup(Context=Fake){const a=setup(Context);globalThis.fetch=async url=>{const clip=raw.clips.find(c=>manifest.content_base+c.path===url);return new Response(radioSamples(clip.id));};return a;}

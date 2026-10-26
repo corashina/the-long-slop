@@ -646,6 +646,16 @@ impl VehicleRecord {
             Self::World(index) => &self::world_vehicle(reference, index).exhaust,
         }
     }
+    /// Car sounds of the record.
+    pub fn audio(
+        self,
+        reference: &ReferenceManifest,
+    ) -> Option<&crate::reference::CarAudioReference> {
+        match self {
+            Self::Garage(index) => reference.vehicles[index].audio.as_ref(),
+            Self::World(index) => self::world_vehicle(reference, index).audio.as_ref(),
+        }
+    }
     /// Source `talajnezo` records and `carscript` effect gains of the record.
     pub fn wheel_effects(
         self,
@@ -695,6 +705,8 @@ pub(crate) struct WorldCarParts {
     pub electronics: Option<f32>,
     /// Links of each record light controller.
     pub lights: Vec<crate::simulation::car_lights::CarLightLinks>,
+    /// The item of the `carscript.InteractSwitchLights` usable.
+    pub light_switch: Option<ItemId>,
 }
 
 /// Car-side state of a car copy. The world change records keep it while the car is retired
@@ -742,6 +754,8 @@ pub struct VehicleRuntime {
     /// Requested headlight state of a world car. V03 bridge: old garage cars keep it in
     /// `LightingState`. Task 9 moves every car here.
     pub requested_headlights: u8,
+    /// The item of the `carscript.InteractSwitchLights` usable of a world car.
+    pub(crate) light_switch: Option<ItemId>,
 }
 
 impl VehicleRuntime {
@@ -783,7 +797,34 @@ impl VehicleRuntime {
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
             requested_headlights: 0,
+            light_switch: parts.light_switch,
         }
+    }
+    /// A hash of the state that the car copy presents: gauges, lamp materials and node
+    /// visibility. It changes when the presentation must sync.
+    pub fn presentation_signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        self.requested_headlights.hash(&mut h);
+        if let Some(s) = &self.instruments {
+            for a in s.needle_angles.iter().chain(&s.digit_angles) {
+                a.to_bits().hash(&mut h);
+            }
+            (s.lamp_bits, s.digits_lit).hash(&mut h);
+        }
+        if let Some(lights) = &self.lights {
+            for m in lights.materials() {
+                m.choice.map(|c| (c.light, c.state, c.on)).hash(&mut h);
+            }
+            for v in lights.visibility() {
+                v.hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+    /// Source `carscript.InteractSwitchLights`: off, low, high.
+    pub fn cycle_headlights(&mut self) {
+        self.requested_headlights = (self.requested_headlights + 1) % 3;
     }
     /// The material that renderer node `node` of a world car shows. None: the authored material.
     pub fn renderer_material<'a>(
@@ -916,6 +957,7 @@ impl VehicleRuntime {
             previous: [0.0; 3],
             powertrain: Powertrain::default(),
             requested_headlights: 0,
+            light_switch: None,
         })
     }
 }
@@ -1187,14 +1229,18 @@ impl GarageRuntime {
         self.area
             .interaction
             .completed_action(InteractionAction::LightControl(control));
-        if let Some(audio) = &mut self.audio
-            && reference.lighting.controllers.iter().any(|c| {
-                c.id == control
-                    && c.kind == crate::reference::LightControllerKind::Headlight
-                    && c.vehicle == Some(audio.vehicle_index)
-            })
+        if let Some(index) = reference
+            .lighting
+            .controllers
+            .iter()
+            .find(|c| c.id == control && c.kind == crate::reference::LightControllerKind::Headlight)
+            .and_then(|c| c.vehicle)
         {
-            audio.light_switch();
+            self.car_switch_sound(
+                reference,
+                &garage_vehicle_key(index),
+                VehicleRecord::Garage(index),
+            );
         }
         self.notice = "";
     }
@@ -1553,6 +1599,11 @@ impl GarageRuntime {
                         vehicle.handbrake = !vehicle.handbrake;
                     }
                 }
+                crate::interaction::mechanisms::ControlAction::CycleHeadlights(switch) => {
+                    if let Some((key, record)) = use_light_switch(&mut self.vehicles, switch) {
+                        self.car_switch_sound(reference, &key, record);
+                    }
+                }
                 crate::interaction::mechanisms::ControlAction::Radio(control) => {
                     if let Some(audio) = &mut self.audio {
                         audio.radio_control(control);
@@ -1642,13 +1693,15 @@ impl GarageRuntime {
         let selected = self.vehicle.as_ref().and_then(garage_vehicle_index);
         if (driving || self.area.player.driving2())
             && input.pressed & keys::LIGHTS != 0
+            && let Some(key) = self.vehicle.clone()
+            && let Some(record) = self.vehicles.get(&key).map(|v| v.record)
+        {
+            self.car_switch_sound(reference, &key, record);
+        }
+        if (driving || self.area.player.driving2())
+            && input.pressed & keys::LIGHTS != 0
             && let Some(selected) = selected
         {
-            if let Some(audio) = &mut self.audio
-                && audio.vehicle_index == selected
-            {
-                audio.light_switch();
-            }
             self.lighting
                 .cycle_headlights(&reference.lighting, selected);
         }
@@ -1658,7 +1711,7 @@ impl GarageRuntime {
             && selected.is_none()
             && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
         {
-            vehicle.requested_headlights = (vehicle.requested_headlights + 1) % 3;
+            vehicle.cycle_headlights();
         }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
@@ -1776,42 +1829,8 @@ impl GarageRuntime {
                         origin.absolute(position),
                     )
                 });
-            let index = audio.vehicle_index;
-            let key = garage_vehicle_key(index);
-            let vehicle = &self.vehicles[&key];
-            let engine = vehicle
-                .powertrain
-                .engine
-                .and_then(|item| self.powertrain.engine(item));
-            let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
-            let engine_active = engine
-                .and_then(|engine| self.area.items.get(engine.item))
-                .and_then(|item| item.body)
-                .is_some_and(|body| self.physics.body_active(body));
-            let active = self.physics.body_active(self.physics.chassis_handle(&key));
-            let car_controls = self.area.player.seat_vehicle() == Some(&key)
-                && (self.area.player.driving() || self.area.player.driving2());
-            audio.vehicle(
-                crate::audio::VehicleAudioInput {
-                    rpm: output.rpm,
-                    ignition: active && vehicle.ignition.ignition,
-                    running: engine_active && output.running,
-                    starter: engine_active && output.starter,
-                    horn: active && car_controls && input.held & keys::HORN != 0,
-                    ambient_temperature: self.lighting.cycle.output().ambient_temperature,
-                    electronics_output: audio.reference.radio.electronics_output,
-                },
-                FIXED_DT,
-                audio.game_seconds,
-            );
-            // V03 bridge: wheel voices of old garage cars only. Task 9 removes it.
-            audio.wheels(
-                &vehicle.wheel_effects,
-                &reference.vehicles[index].wheel_voices,
-                &reference.skid,
-                active,
-            );
         }
+        self.step_car_sounds(reference, input);
         for (key, vehicle) in &mut self.vehicles {
             let current = self.persistent_world.absolute_vehicle_position(
                 &self.physics,
@@ -1955,12 +1974,23 @@ impl GarageRuntime {
             physics,
             powertrain,
             lighting,
+            distances,
             ..
         } = self;
+        // Gauges beyond the draw distance are not presented. They catch up when the car returns.
+        let focus = rapier3d::math::Vector::from_array(area.player.focus_position(physics));
+        let seated = area.player.seat_vehicle();
         for (key, vehicle) in vehicles.iter_mut() {
             let Some(r) = vehicle.record.instruments(reference) else {
                 continue;
             };
+            let position = physics.rapier().bodies[physics.chassis_handle(key)].translation();
+            if !initialize
+                && seated != Some(key)
+                && (position - focus).length() > distances.draw_distance
+            {
+                continue;
+            }
             let sample = instrument_sample(
                 &area.items,
                 physics,
@@ -2010,6 +2040,95 @@ impl GarageRuntime {
             |item| mechanisms.value(item, false).unwrap_or(0.),
             FIXED_DT,
         );
+    }
+
+    /// Car and engine part sounds of every copy in range of the player.
+    fn step_car_sounds(&mut self, reference: &ReferenceManifest, input: FrameInput) {
+        let Some(audio) = &mut self.audio else {
+            return;
+        };
+        let origin = self.stream.origin.offset;
+        audio.begin_cars(origin);
+        let listener =
+            rapier3d::math::Vector::from_array(self.area.player.focus_position(&self.physics));
+        let ambient_temperature = self.lighting.cycle.output().ambient_temperature;
+        let seated = self.area.player.seat_vehicle();
+        let controls = self.area.player.driving() || self.area.player.driving2();
+        let (items, physics) = (&self.area.items, &self.physics);
+        let engine_input = |part, mixer| engine_sound_input(part, items, physics, mixer);
+        for (key, vehicle) in &self.vehicles {
+            let chassis = self.physics.chassis_handle(key);
+            let pose = *self.physics.rapier().bodies[chassis].position();
+            if !audio.car_audible((pose.translation - listener).length()) {
+                continue;
+            }
+            let mixer = match (vehicle.record, key) {
+                // V03 bridge: old garage cars use the global audio routes. Task 9 removes it.
+                (VehicleRecord::Garage(index), _) => audio.garage_car_mixer(index),
+                (VehicleRecord::World(index), ObjectKey::Generated(placement)) => {
+                    world_vehicle(reference, index)
+                        .audio
+                        .as_ref()
+                        .and_then(|a| a.route.as_ref())
+                        .map(|route| audio.world_car_mixer(route, placement))
+                }
+                _ => None,
+            };
+            if let Some(car) = vehicle.record.audio(reference) {
+                let active = self.physics.body_active(chassis);
+                audio.car_sound(
+                    key,
+                    crate::audio::cars::CarSoundInput {
+                        audio: car,
+                        pose,
+                        active,
+                        horn: active
+                            && controls
+                            && seated == Some(key)
+                            && input.held & keys::HORN != 0,
+                        ambient_temperature,
+                        wheels: &vehicle.wheel_effects,
+                        skid: &reference.skid,
+                        mixer,
+                    },
+                    FIXED_DT,
+                );
+            }
+            if let Some(input) = vehicle
+                .powertrain
+                .engine
+                .and_then(|item| self.powertrain.engine(item))
+                .and_then(|part| engine_input(part, mixer))
+            {
+                audio.engine_sound(input);
+            }
+        }
+        // Loose engine parts keep sounding while they run.
+        for part in self.powertrain.engines() {
+            if self
+                .vehicles
+                .values()
+                .any(|v| v.powertrain.engine == Some(part.item))
+            {
+                continue;
+            }
+            if let Some(input) = engine_input(part, None)
+                && audio.car_audible((input.pose.translation - listener).length())
+            {
+                audio.engine_sound(input);
+            }
+        }
+        audio.cars.end();
+    }
+
+    /// The `carscript` switch sound of car `key`: ignition and light switch.
+    fn car_switch_sound(
+        &mut self,
+        reference: &ReferenceManifest,
+        key: &ObjectKey,
+        record: VehicleRecord,
+    ) {
+        car_switch_sound(&mut self.audio, &self.physics, reference, key, record);
     }
 
     /// Advances exhaust smoke every step, so old smoke ages out when the engine stops.
@@ -2244,11 +2363,14 @@ impl GarageRuntime {
             .engine
             .and_then(|item| self.powertrain.engine(item));
         let output = engine.map_or_else(EngineOutput::default, |e| e.state.output());
-        if vehicle.ignition.ignition != was_ignition
-            && let Some(audio) = &mut self.audio
-            && garage == Some(audio.vehicle_index)
-        {
-            audio.ignition_changed(&self.area);
+        if vehicle.ignition.ignition != was_ignition {
+            car_switch_sound(
+                &mut self.audio,
+                &self.physics,
+                reference,
+                key,
+                vehicle.record,
+            );
         }
         if chassis_active
             && let Some(engine) = engine
@@ -2398,9 +2520,6 @@ impl GarageRuntime {
     }
 
     fn clear_driving_input(&mut self) {
-        if let Some(audio) = &mut self.audio {
-            audio.starter_enabled = false;
-        }
         self.driving_input.clear();
         for vehicle in self.vehicles.values_mut() {
             vehicle.ignition.clear_input();
@@ -2647,6 +2766,65 @@ impl GarageRuntime {
 }
 
 /// Gauge inputs of car `key` with gauges `r`. `headlights` is its requested headlight state.
+/// Source `carscript.InteractSwitchLights` of the world car whose switch usable is `switch`.
+/// Returns the car.
+pub(crate) fn use_light_switch(
+    vehicles: &mut BTreeMap<ObjectKey, VehicleRuntime>,
+    switch: ItemId,
+) -> Option<(ObjectKey, VehicleRecord)> {
+    let (key, vehicle) = vehicles
+        .iter_mut()
+        .find(|(_, v)| v.light_switch == Some(switch))?;
+    vehicle.cycle_headlights();
+    Some((key.clone(), vehicle.record))
+}
+
+/// Car sound inputs of engine part `part`. None: the part has no sounds or no item.
+fn engine_sound_input<'a>(
+    part: &'a crate::simulation::powertrain::EnginePart,
+    items: &crate::interaction::items::ItemStore,
+    physics: &PhysicsWorld,
+    mixer: Option<u32>,
+) -> Option<crate::audio::cars::EngineSoundInput<'a>> {
+    let audio = part.record.audio.as_ref()?;
+    let item = items.get(part.item)?;
+    let output = part.state.output();
+    // A sleeping engine body is quiet.
+    let active = item.body.is_some_and(|body| physics.body_active(body));
+    Some(crate::audio::cars::EngineSoundInput {
+        item: part.item,
+        audio,
+        max_rpm: part.record.max_rpm,
+        start_time_modifier: part.record.engine_start_time_modifier,
+        rpm: output.rpm,
+        running: active && output.running,
+        starter: active && output.starter,
+        pose: to_rapier(item.pose),
+        mixer,
+    })
+}
+
+/// The `carscript` switch sound of car `key` at its chassis: ignition and light switch.
+fn car_switch_sound(
+    audio: &mut Option<crate::audio::AudioState>,
+    physics: &PhysicsWorld,
+    reference: &ReferenceManifest,
+    key: &ObjectKey,
+    record: VehicleRecord,
+) {
+    let (Some(audio), Some(shot)) = (
+        audio.as_mut(),
+        record.audio(reference).and_then(|a| a.switch.as_ref()),
+    ) else {
+        return;
+    };
+    audio.car_shot(
+        key,
+        shot,
+        *physics.rapier().bodies[physics.chassis_handle(key)].position(),
+    );
+}
+
 pub(crate) fn instrument_sample(
     items: &crate::interaction::items::ItemStore,
     physics: &PhysicsWorld,

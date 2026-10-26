@@ -107,6 +107,11 @@ impl WorldInteriors {
         let e = self.entries.get(index.checked_sub(self.offset)?)?;
         Some(&prototypes[e.prototype].interiors[e.interior])
     }
+    /// The placement and prototype interior index of a world list index.
+    pub fn owner(&self, index: usize) -> Option<(&GeneratedId, usize)> {
+        let e = self.entries.get(index.checked_sub(self.offset)?)?;
+        Some((&e.placement, e.interior))
+    }
     pub fn parent(&self, index: usize) -> Option<usize> {
         self.entries.get(index.checked_sub(self.offset)?)?.parent
     }

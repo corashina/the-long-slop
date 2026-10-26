@@ -8,6 +8,7 @@ use rapier3d::prelude::{Ball, QueryFilter};
 use std::collections::{BTreeMap, HashMap};
 
 pub mod ambience;
+pub mod cars;
 pub mod footsteps;
 pub mod impacts;
 pub mod interiors;
@@ -80,16 +81,6 @@ pub struct AudioSignal {
     /// Clip id that the voice plays. 0 has no clip.
     pub clip: u32,
 }
-#[derive(Clone, Copy, Debug, Default)]
-pub struct VehicleAudioInput {
-    pub rpm: f32,
-    pub ignition: bool,
-    pub running: bool,
-    pub starter: bool,
-    pub horn: bool,
-    pub ambient_temperature: f32,
-    pub electronics_output: f32,
-}
 fn xorshift(state: &mut u32) -> f32 {
     *state ^= *state << 13;
     *state ^= *state >> 17;
@@ -132,8 +123,11 @@ pub struct AudioState {
     pub survival_events: Vec<SurvivalAudioEvent>,
     pub survival_loops: Vec<SurvivalAudioEvent>,
     pub sleep_radio_advanced: bool,
-    pub vehicle_index: usize,
     pub signals: Vec<AudioSignal>,
+    /// Car and engine part sounds.
+    pub cars: cars::CarSounds,
+    /// Largest car voice distance. Cars farther from the listener are quiet.
+    car_range: f32,
     crafted: HashMap<ItemId, u32>,
     lamp_controls: HashMap<crate::reference::LightControlId, (usize, bool)>,
     lamp_voices: Vec<(crate::reference::LightControlId, u32, bool)>,
@@ -144,16 +138,9 @@ pub struct AudioState {
     positions: HashMap<u32, [f32; 3]>,
     removed: std::collections::HashSet<u32>,
     random: u32,
-    pub starter_enabled: bool,
-    horn_gain: f32,
-    last_running: bool,
-    engine_position: [f32; 3],
     origin_shift: [f32; 3],
-    engine_formula: [f32; 11],
     voice_indices: HashMap<u32, usize>,
     emitter_anchors: HashMap<u32, (Option<NodeId>, rapier3d::math::Pose)>,
-    engine_item: Option<ItemId>,
-    engine_emitters: Vec<(u32, rapier3d::math::Pose)>,
     pub reference: AudioReference,
     pub session: u32,
     pub game_seconds: f64,
@@ -163,7 +150,6 @@ pub struct AudioState {
     pub route_mixers: Vec<u32>,
     /// Vehicle index of each car route, for car hit sounds.
     pub route_vehicles: Vec<Option<u32>>,
-    pub engine_constants: BTreeMap<String, f32>,
     /// The Lada radio's controls.
     pub radio: crate::simulation::radio::RadioState,
     pub broadcasts: crate::simulation::radio::RadioBroadcasts,
@@ -174,7 +160,6 @@ pub struct AudioState {
     length: usize,
     sequence: u32,
     bindings: BTreeMap<u32, usize>,
-    ignition: Option<usize>,
     colliders: HashMap<ColliderId, usize>,
     collider_nodes: HashMap<ColliderId, NodeId>,
     control_items: HashMap<crate::reference::MechanismId, ItemId>,
@@ -199,20 +184,6 @@ impl AudioState {
             outside.sensor.initial_count,
             reference.interiors.len() + 256,
         );
-        let c = &reference.engine.constants;
-        let engine_formula = [
-            c["SMinAlapRpm"],
-            c["SMaxAlapRpm"],
-            c["SMinMotorRpm"],
-            c["SMaxMotorRpm"],
-            c["SMaxAlapSound"],
-            c["SMaxMotorSound"],
-            c["minAlapPitch"],
-            c["maxAlapPitch"],
-            c["minMotorPitch"],
-            c["maxMotorPitch"],
-            c["maxRpm"],
-        ];
         Self {
             survival_events: Vec::with_capacity(512),
             survival_loops: Vec::with_capacity(64),
@@ -227,13 +198,12 @@ impl AudioState {
             positions: reference.emitters.iter().map(|e| (e.id, [0.; 3])).collect(),
             removed: std::collections::HashSet::with_capacity(reference.emitters.len()),
             random: session.wrapping_add(0x9e3779b9),
-            starter_enabled: false,
-            horn_gain: 0.,
-            last_running: false,
-            vehicle_index: 0,
-            engine_position: [0.; 3],
             origin_shift: [0.; 3],
-            engine_formula,
+            cars: cars::CarSounds::default(),
+            car_range: reference
+                .car_voices
+                .iter()
+                .fold(0., |m: f32, v| m.max(v.settings.max_distance)),
             signals: reference
                 .voices
                 .iter()
@@ -254,8 +224,6 @@ impl AudioState {
                 .map(|(i, v)| (v.id, i))
                 .collect(),
             emitter_anchors: HashMap::new(),
-            engine_item: None,
-            engine_emitters: Vec::new(),
             session,
             game_seconds: 0.,
             outside_gain: outside.initial_gain,
@@ -270,10 +238,6 @@ impl AudioState {
                 .enumerate()
                 .map(|(i, b)| (b.id, i))
                 .collect(),
-            ignition: reference
-                .bindings
-                .iter()
-                .position(|b| b.trigger == "ignition"),
             colliders: reference
                 .interiors
                 .iter()
@@ -292,7 +256,6 @@ impl AudioState {
                 .iter()
                 .find(|m| m.name == "CarSounds")
                 .map_or(0, |m| m.id),
-            engine_constants: reference.engine.constants.clone(),
             radio: crate::simulation::radio::RadioState::lada(&reference.radio),
             broadcasts: crate::simulation::radio::RadioBroadcasts::new(
                 &reference.radio,
@@ -330,34 +293,12 @@ impl AudioState {
         area: &StartingArea,
         physics: &PhysicsWorld,
     ) {
-        // V03 bridge: engine audio follows the old garage car. Task 9 moves it to world cars.
-        self.vehicle_index = game
-            .vehicles
-            .iter()
-            .position(|v| v.engine.source == self.reference.engine.source)
-            .expect("validated audio vehicle");
-        let engine_item = game.vehicles[self.vehicle_index].engine.item;
-        let engine_node = game
-            .items
-            .iter()
-            .find(|item| item.id == engine_item)
-            .unwrap()
-            .node;
-        let engine_pose =
-            to_rapier(crate::interaction::items::node_pose(game, engine_node).unwrap());
-        self.engine_item = Some(engine_item);
-        self.engine_emitters.clear();
         self.emitter_anchors.clear();
         for emitter in &self.reference.emitters {
             let world = to_rapier(
                 crate::interaction::items::node_pose(game, emitter.node)
                     .expect("validated emitter node"),
             );
-            if emitter.item == Some(engine_item) {
-                self.engine_emitters
-                    .push((emitter.id, engine_pose.inverse() * world));
-                continue;
-            }
             let mut node = Some(emitter.node);
             while let Some(id) = node {
                 if area.interaction.mechanisms.node_pose(id).is_some() {
@@ -634,17 +575,6 @@ impl AudioState {
             self.emit(id, 1., simulation_seconds);
         }
     }
-    pub fn light_switch(&mut self) {
-        if let Some(b) = self
-            .reference
-            .bindings
-            .iter()
-            .find(|b| b.trigger == "light_switch")
-            .map(|b| b.id)
-        {
-            self.emit(b, 1., self.game_seconds);
-        }
-    }
     pub fn cap(
         &mut self,
         id: crate::reference::OpeningId,
@@ -823,109 +753,6 @@ impl AudioState {
     pub fn owner_alive(&self, emitter: u32) -> bool {
         !self.removed.contains(&emitter)
     }
-    pub fn vehicle(&mut self, input: VehicleAudioInput, dt: f32, simulation_seconds: f64) {
-        let [
-            idle_min,
-            idle_max,
-            motor_min,
-            motor_max,
-            idle_gain,
-            motor_gain,
-            ip_min,
-            ip_max,
-            mp_min,
-            mp_max,
-            max_rpm,
-        ] = self.engine_formula;
-        let running = input.running;
-        self.voice(
-            self.reference.engine.idle_voice,
-            running,
-            inverse_lerp(idle_max, idle_min, input.rpm) * idle_gain,
-            ip_min
-                + (ip_max - ip_min)
-                    * (inverse_lerp(0., idle_max, input.rpm)
-                        + inverse_lerp(idle_max, idle_max * 2., input.rpm)),
-        );
-        self.voice(
-            self.reference.engine.motor_voice,
-            running,
-            inverse_lerp(motor_min, motor_max, input.rpm) * motor_gain,
-            mp_min
-                + (mp_max - mp_min)
-                    * (inverse_lerp(motor_min, max_rpm, input.rpm)
-                        + inverse_lerp(max_rpm, max_rpm * 2., input.rpm)),
-        );
-        self.starter_enabled = input.starter;
-        if self.last_running && !running {
-            if let Some(id) = self.reference.engine.stop_binding {
-                let b = self.binding(id).unwrap();
-                let event = AudioEvent {
-                    session: self.session,
-                    sequence: self.sequence.wrapping_add(1),
-                    binding: id,
-                    emitter: b.emitter,
-                    position: self.engine_position,
-                    gain: 1.,
-                    pitch: 1.,
-                    time_seconds: simulation_seconds,
-                    priority: b.priority,
-                };
-                self.sequence = event.sequence;
-                self.push_event(event);
-            }
-        }
-        self.last_running = running;
-        let h = &self.reference.horn;
-        let target = if input.horn { 1. } else { 0. };
-        let step = h.attack_release_rate * dt;
-        self.horn_gain += (target - self.horn_gain).clamp(-step, step);
-        let pitch = h.pitch_min
-            + (h.pitch_max - h.pitch_min)
-                * inverse_lerp(
-                    h.temperature_min,
-                    h.temperature_max,
-                    input.ambient_temperature,
-                );
-        self.voice(h.voice, self.horn_gain > 0., self.horn_gain, pitch);
-    }
-    /// Source talajnezo GroundSource, SpringSource and SlideSource of the four wheels.
-    /// A sleeping chassis is quiet.
-    pub fn wheels(
-        &mut self,
-        effects: &crate::wheel_effects::WheelEffects,
-        wheels: &[crate::reference::WheelVoices; 4],
-        skid: &crate::reference::SkidReference,
-        active: bool,
-    ) {
-        for (w, r) in wheels.iter().enumerate() {
-            let s = effects.sound(w);
-            // talajnezo does not set the GroundSource pitch.
-            let pitch = self.reference.voices[self.voice_indices[&r.ground]].pitch;
-            self.voice(r.ground, active && s.ground_playing, s.ground_gain, pitch);
-            self.voice(
-                r.spring,
-                active && s.spring_playing,
-                s.spring_gain,
-                s.spring_pitch,
-            );
-            self.voice(
-                r.slide,
-                active && s.slide_playing,
-                s.slide_gain,
-                s.slide_pitch,
-            );
-            self.signals[self.voice_indices[&r.slide]].clip = if s.slide_road {
-                skid.road_clip
-            } else {
-                skid.dirt_clip
-            };
-        }
-    }
-    pub(crate) fn restore_engine(&mut self, running: bool) {
-        self.last_running = running;
-        self.starter_enabled = false;
-    }
     pub fn event_count(&self) -> usize {
         self.length
     }
@@ -979,9 +806,7 @@ impl AudioState {
             f.latch = 0;
             f.gain = 0.;
         }
-        self.starter_enabled = false;
-        self.horn_gain = 0.;
-        self.last_running = false;
+        self.cars.reset();
         self.outside_gain = self.reference.mixer_controls.outside.initial_gain;
         self.sensor.sensed = false;
         self.sensor.count = 0;
@@ -1014,9 +839,6 @@ impl AudioState {
                 *p -= d;
             }
         }
-        for (p, d) in self.engine_position.iter_mut().zip(shift) {
-            *p -= d;
-        }
         for event in self.queue.iter_mut().flatten() {
             for (p, d) in event.position.iter_mut().zip(shift) {
                 *p -= d;
@@ -1028,43 +850,6 @@ impl AudioState {
     }
     pub fn binding(&self, id: u32) -> Option<&crate::reference::AudioEventBinding> {
         self.bindings.get(&id).map(|&i| &self.reference.bindings[i])
-    }
-    pub fn ignition_changed(&mut self, area: &StartingArea) {
-        let Some(index) = self.ignition else {
-            return;
-        };
-        let binding = &self.reference.bindings[index];
-        let spatial_emitter = binding
-            .voice
-            .and_then(|id| self.reference.voices.iter().find(|v| v.id == id))
-            .map_or(binding.emitter, |v| v.emitter);
-        let emitter = self
-            .reference
-            .emitters
-            .iter()
-            .find(|e| e.id == spatial_emitter)
-            .unwrap();
-        let (anchor, local) = self.emitter_anchors[&emitter.id];
-        let mut world = anchor
-            .and_then(|node| area.interaction.mechanisms.node_pose(node))
-            .map_or(local, |pose| to_rapier(pose) * local);
-        if anchor.is_none() {
-            world.translation -= rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
-        }
-        let pose = crate::vehicle::from_rapier(&world);
-        self.sequence = self.sequence.wrapping_add(1);
-        let event = AudioEvent {
-            session: self.session,
-            sequence: self.sequence,
-            binding: binding.id,
-            emitter: binding.emitter,
-            position: pose.position,
-            gain: 1.,
-            pitch: binding.pitch_range[0],
-            time_seconds: self.game_seconds,
-            priority: binding.priority,
-        };
-        self.push_event(event);
     }
     pub fn fixed_step(
         &mut self,
@@ -1090,15 +875,6 @@ impl AudioState {
                     rapier3d::math::Vector::from_array(area.origin.map(|v| v as f32));
             }
             *self.positions.get_mut(&id).unwrap() = crate::vehicle::from_rapier(&world).position;
-        }
-        if let Some(item) = self.engine_item {
-            // Item poses already use the current world origin.
-            let engine = to_rapier(area.items.get(item).expect("bound engine item").pose);
-            for &(id, local) in &self.engine_emitters {
-                *self.positions.get_mut(&id).unwrap() =
-                    crate::vehicle::from_rapier(&(engine * local)).position;
-            }
-            self.engine_position = self.positions[&self.reference.engine.emitter];
         }
         for i in 0..self.mechanism_sounds.len() {
             let item = self.mechanism_sounds[i].item;
@@ -1476,6 +1252,74 @@ impl AudioState {
         self.outside_gain +=
             (target - self.outside_gain) * (settings.gain_smoothing * dt).clamp(0., 1.);
     }
+    /// Starts the car sound step at absolute physics origin `origin`.
+    pub fn begin_cars(&mut self, origin: [f64; 3]) {
+        self.cars.begin(origin);
+    }
+    /// A car or engine part at `distance` meters from the listener can sound.
+    pub fn car_audible(&self, distance: f32) -> bool {
+        distance <= self.car_range
+    }
+    pub fn engine_sound(&mut self, input: cars::EngineSoundInput) {
+        let clips = &self.reference.clips;
+        let seconds = |id: u32| {
+            clips
+                .iter()
+                .find(|c| c.id == id)
+                .map_or(0., |c| c.source_duration_seconds as f32)
+        };
+        self.cars.engine(
+            input,
+            &self.reference.car_voices,
+            seconds,
+            self.game_seconds,
+        );
+    }
+    pub fn car_sound(
+        &mut self,
+        key: &crate::world::ObjectKey,
+        input: cars::CarSoundInput,
+        dt: f32,
+    ) {
+        self.cars.car(key, input, &self.reference.car_voices, dt);
+    }
+    pub fn car_shot(
+        &mut self,
+        key: &crate::world::ObjectKey,
+        shot: &crate::reference::CarShotReference,
+        pose: rapier3d::math::Pose,
+    ) {
+        self.cars.car_shot(key, shot, pose);
+    }
+    /// Whether a player sensor hit is an interior that `inside` accepts.
+    fn player_inside(&self, inside: impl Fn(usize) -> bool) -> bool {
+        self.sensor.sensed && self.sensor.hits.iter().flatten().any(|&i| inside(i))
+    }
+    /// V03 bridge: the route mixer of old garage car `index`. Task 9 removes it.
+    pub fn garage_car_mixer(&self, index: usize) -> Option<u32> {
+        self.route_vehicles
+            .iter()
+            .position(|v| *v == Some(index as u32))
+            .map(|route| self.route_mixers[route])
+    }
+    /// Source `audioBasedOnInteriorsensscript` of a world car: the car mixer while the player
+    /// is in one of its interiors, else the outside mixer.
+    pub fn world_car_mixer(
+        &self,
+        route: &crate::reference::CarRouteReference,
+        placement: &crate::world::GeneratedId,
+    ) -> u32 {
+        let inside = self.player_inside(|i| {
+            self.world_interiors.owner(i).is_some_and(|(p, interior)| {
+                p == placement && route.interiors.contains(&(interior as u32))
+            })
+        });
+        if inside {
+            route.car_mixer.unwrap_or(route.main_mixer)
+        } else {
+            route.outside_mixer
+        }
+    }
     pub fn mixer_outputs(&self) -> [(u32, f32); 2] {
         [
             (self.outside_mixer, source_gain_db(self.outside_gain)),
@@ -1660,9 +1504,6 @@ impl AmbientState {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::save::{CameraSave, SourceHash, SourceStamp};
-    use crate::simulation::FIXED_DT;
-    use crate::starting_area::GarageRuntime;
 
     #[test]
     fn full_queue_drops_hits_for_engine_and_living_sounds() {
@@ -1689,366 +1530,5 @@ mod tests {
         assert_eq!((length, count(100), count(80), count(55)), (64, 62, 1, 1));
         assert_eq!(queue[61].unwrap().sequence, 61, "the last hits leave");
         assert!(queue.iter().flatten().all(|e| e.sequence != 66));
-    }
-
-    fn installed_source() -> (ReferenceManifest, SourceStamp) {
-        let path = "web/assets/reference/manifest.json";
-        let bytes = std::fs::read(path).unwrap();
-        let reference = ReferenceManifest::from_runtime_json(&bytes).unwrap();
-        assert_eq!(reference.build_id, 11140890);
-        assert_eq!(reference.vehicles.len(), 1);
-        assert_eq!(reference.vehicles[0].engine.source.file, "level1");
-        assert_eq!(reference.vehicles[0].engine.source.path_id, 68282);
-        let digest = std::process::Command::new("sha256sum")
-            .arg(path)
-            .output()
-            .unwrap();
-        assert!(digest.status.success());
-        let stamp = SourceStamp {
-            app_id: reference.app_id,
-            build_id: reference.build_id,
-            manifest_sha256: String::from_utf8(digest.stdout)
-                .unwrap()
-                .split_whitespace()
-                .next()
-                .unwrap()
-                .into(),
-            source_hashes: reference
-                .source_hashes
-                .iter()
-                .map(|hash| SourceHash {
-                    file: hash.file.clone(),
-                    sha256: hash.sha256.clone(),
-                })
-                .collect(),
-        };
-        (reference, stamp)
-    }
-
-    fn seed_running(run: &mut GarageRuntime) {
-        let item = run
-            .mounted_engine(&crate::vehicle::garage_vehicle_key(0))
-            .expect("mounted garage engine")
-            .item;
-        let mut saved = run.engine_part(item).state.capture_save();
-        saved.rpm = 2000.;
-        saved.elapsed = 1.;
-        saved.last_run_time = 1.;
-        saved.supplied_fuel = 0.4;
-        run.engine_part_mut(item)
-            .state
-            .restore_save(&saved)
-            .unwrap();
-    }
-
-    fn publish(run: &mut GarageRuntime) {
-        run.refresh_powertrains();
-        let output = run.engine_output(&crate::vehicle::garage_vehicle_key(0));
-        publish_output(run, output);
-    }
-
-    fn publish_output(run: &mut GarageRuntime, output: crate::simulation::engine::EngineOutput) {
-        run.area.items.sync_poses(&run.physics);
-        let ignition = run.garage_car(0).ignition.ignition;
-        let audio = run.audio.as_mut().unwrap();
-        audio.fixed_step(&run.area, &run.physics, &run.stream, FIXED_DT);
-        audio.vehicle(
-            VehicleAudioInput {
-                rpm: output.rpm,
-                running: output.running,
-                starter: output.starter,
-                ignition,
-                ..Default::default()
-            },
-            FIXED_DT,
-            audio.game_seconds,
-        );
-    }
-
-    fn detach(
-        run: &mut GarageRuntime,
-        reference: &ReferenceManifest,
-    ) -> crate::reference::PartSlotId {
-        let item = reference.vehicles[0].engine.item;
-        let slot = reference
-            .part_slots
-            .iter()
-            .find(|slot| slot.part == Some(item))
-            .unwrap()
-            .id;
-        run.area
-            .interaction
-            .parts
-            .remove(item, &mut run.area.items, &mut run.physics)
-            .unwrap();
-        run.area.interaction.parts.detach_mechanism(
-            item,
-            &mut run.area.interaction.mechanisms,
-            &mut run.physics,
-        );
-        run.area
-            .interaction
-            .sync_parts(&mut run.area.items, &mut run.physics)
-            .unwrap();
-        slot
-    }
-
-    fn advance_detached(run: &mut GarageRuntime, _reference: &ReferenceManifest) {
-        // A car with no mounted engine part reads no engine output.
-        publish(run);
-    }
-
-    fn assert_voices(audio: &AudioState, playing: bool) {
-        for id in [
-            audio.reference.engine.idle_voice,
-            audio.reference.engine.motor_voice,
-        ] {
-            assert_eq!(audio.signals[audio.voice_indices[&id]].playing, playing);
-        }
-    }
-
-    #[test]
-    #[ignore = "requires the installed build 11140890 export"]
-    fn engine_audio_follows_detached_state() {
-        // Source enginescript.Update, 12105-12213: audio follows running, not attachment.
-        let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new_default(&reference).unwrap();
-        seed_running(&mut run);
-        publish(&mut run);
-        assert_voices(run.audio.as_ref().unwrap(), true);
-        while run.audio.as_mut().unwrap().pop_event().is_some() {}
-        let slot = detach(&mut run, &reference);
-        let item = reference.vehicles[0].engine.item;
-        let body = run.area.items.get(item).unwrap().body.unwrap();
-        run.physics.edit_body(body, |body| {
-            body.set_translation(rapier3d::math::Vector::new(13., 4., -9.), true)
-        });
-        advance_detached(&mut run, &reference);
-        assert!(
-            run.engine_part(reference.vehicles[0].engine.item)
-                .state
-                .output()
-                .running,
-            "source run grace remains active"
-        );
-        assert_voices(run.audio.as_ref().unwrap(), true);
-        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
-        assert!(!run.audio.as_ref().unwrap().starter_enabled);
-        let stop_binding_id = run
-            .audio
-            .as_ref()
-            .unwrap()
-            .reference
-            .engine
-            .stop_binding
-            .unwrap();
-        for _ in 0..20 {
-            if !run
-                .engine_part(reference.vehicles[0].engine.item)
-                .state
-                .output()
-                .running
-            {
-                break;
-            }
-            advance_detached(&mut run, &reference);
-        }
-        assert!(
-            !run.engine_part(reference.vehicles[0].engine.item)
-                .state
-                .output()
-                .running
-        );
-        let audio = run.audio.as_mut().unwrap();
-        let emitter = audio
-            .reference
-            .emitters
-            .iter()
-            .find(|e| e.id == audio.binding(stop_binding_id).unwrap().emitter)
-            .unwrap();
-        let original_engine = to_rapier(
-            crate::interaction::items::node_pose(
-                &reference,
-                reference.items.iter().find(|i| i.id == item).unwrap().node,
-            )
-            .unwrap(),
-        );
-        let local = original_engine.inverse()
-            * to_rapier(crate::interaction::items::node_pose(&reference, emitter.node).unwrap());
-        let expected_emitter_position = crate::vehicle::from_rapier(
-            &(to_rapier(run.area.items.get(item).unwrap().pose) * local),
-        )
-        .position;
-        let stop = audio.pop_event().unwrap();
-        assert_eq!(stop.binding, stop_binding_id);
-        assert_eq!(stop.position, expected_emitter_position);
-        assert!(audio.pop_event().is_none());
-        assert_voices(audio, false);
-        advance_detached(&mut run, &reference);
-        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
-        publish_output(
-            &mut run,
-            crate::simulation::engine::EngineOutput {
-                starter: true,
-                ..Default::default()
-            },
-        );
-        assert!(run.audio.as_ref().unwrap().starter_enabled);
-        run.clear_input();
-        assert!(
-            !run.audio.as_ref().unwrap().starter_enabled,
-            "cancellation clears published starter immediately"
-        );
-        publish(&mut run);
-        assert!(!run.audio.as_ref().unwrap().starter_enabled);
-        assert_eq!(run.audio.as_ref().unwrap().event_count(), 0);
-        // A chassis ignition switch still emits while its engine slot is empty.
-        run.audio.as_mut().unwrap().ignition_changed(&run.area);
-        let audio = run.audio.as_mut().unwrap();
-        let ignition = audio.reference.bindings[audio.ignition.unwrap()].id;
-        assert_eq!(audio.pop_event().unwrap().binding, ignition);
-        assert!(audio.pop_event().is_none());
-        // Restore stopped mechanics, then reattach the same engine without replaying a stop.
-        let saved = run
-            .capture_save(
-                &reference,
-                &stamp,
-                CameraSave::FirstPerson,
-                "2026-10-20T12:00:00Z",
-            )
-            .unwrap();
-        let mut restored = GarageRuntime::from_save(
-            &reference,
-            &stamp,
-            &saved,
-            crate::world::GameMode::default(),
-            reference.world.draw_distance.default,
-        )
-        .unwrap();
-        assert!(!restored.audio.as_ref().unwrap().last_running);
-        restored
-            .area
-            .interaction
-            .parts
-            .install(item, slot, &mut restored.area.items, &mut restored.physics)
-            .unwrap();
-        restored
-            .area
-            .interaction
-            .parts
-            .mount_mechanism(item, &mut restored.area.interaction.mechanisms);
-        restored
-            .area
-            .interaction
-            .sync_parts(&mut restored.area.items, &mut restored.physics)
-            .unwrap();
-        publish(&mut restored);
-        assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);
-        assert!(!restored.audio.as_ref().unwrap().starter_enabled);
-    }
-
-    #[test]
-    #[ignore = "requires the installed build 11140890 export"]
-    fn engine_emitters_follow_item_pose_and_restore() {
-        let (reference, stamp) = installed_source();
-        let mut run = GarageRuntime::new_default(&reference).unwrap();
-        seed_running(&mut run);
-        publish(&mut run);
-        detach(&mut run, &reference);
-        let item = reference.vehicles[0].engine.item;
-        let engine_node = reference.items.iter().find(|i| i.id == item).unwrap().node;
-        let original =
-            to_rapier(crate::interaction::items::node_pose(&reference, engine_node).unwrap());
-        let audio = run.audio.as_ref().unwrap();
-        let emitter_ids = [
-            audio.reference.engine.emitter,
-            audio.reference.voices[audio.voice_indices[&audio.reference.engine.idle_voice]].emitter,
-            audio.reference.voices[audio.voice_indices[&audio.reference.engine.motor_voice]]
-                .emitter,
-            audio
-                .binding(audio.reference.engine.starter_binding.unwrap())
-                .unwrap()
-                .emitter,
-            audio
-                .binding(audio.reference.engine.stop_binding.unwrap())
-                .unwrap()
-                .emitter,
-        ];
-        let locals: Vec<_> = emitter_ids
-            .iter()
-            .map(|id| {
-                let emitter = audio
-                    .reference
-                    .emitters
-                    .iter()
-                    .find(|e| e.id == *id)
-                    .unwrap();
-                original.inverse()
-                    * to_rapier(
-                        crate::interaction::items::node_pose(&reference, emitter.node).unwrap(),
-                    )
-            })
-            .collect();
-        let body = run.area.items.get(item).unwrap().body.unwrap();
-        let moved = to_rapier(crate::vehicle::VehiclePose {
-            position: [21., 8., -14.],
-            rotation: [0., 0.70710677, 0., 0.70710677],
-        });
-        run.physics
-            .edit_body(body, |body| body.set_position(moved, true));
-        publish(&mut run);
-        for (&id, local) in emitter_ids.iter().zip(&locals) {
-            let expected = crate::vehicle::from_rapier(
-                &(to_rapier(run.area.items.get(item).unwrap().pose) * local),
-            )
-            .position;
-            assert_eq!(
-                run.audio.as_ref().unwrap().positions[&id],
-                expected,
-                "emitter {id} follows engine item"
-            );
-        }
-        // Item poses already use the current origin. Do not subtract its shift twice.
-        let shift = [16., 0., -8.];
-        run.area.items.rebase(shift);
-        run.area.origin = shift.map(f64::from);
-        run.audio.as_mut().unwrap().rebase(shift);
-        let shifted = to_rapier(run.area.items.get(item).unwrap().pose);
-        run.physics
-            .edit_body(body, |body| body.set_position(shifted, true));
-        publish(&mut run);
-        for (&id, local) in emitter_ids.iter().zip(&locals) {
-            assert_eq!(
-                run.audio.as_ref().unwrap().positions[&id],
-                crate::vehicle::from_rapier(&(shifted * local)).position
-            );
-        }
-        // Restore must synchronize the prior running edge before its first audio update.
-        let saved = run
-            .capture_save(
-                &reference,
-                &stamp,
-                CameraSave::FirstPerson,
-                "2026-10-20T12:00:00Z",
-            )
-            .unwrap();
-        let mut restored = GarageRuntime::from_save(
-            &reference,
-            &stamp,
-            &saved,
-            crate::world::GameMode::default(),
-            reference.world.draw_distance.default,
-        )
-        .unwrap();
-        assert!(
-            restored
-                .engine_part(reference.vehicles[0].engine.item)
-                .state
-                .output()
-                .running
-        );
-        assert!(restored.audio.as_ref().unwrap().last_running);
-        publish(&mut restored);
-        assert_eq!(restored.audio.as_ref().unwrap().event_count(), 0);
     }
 }

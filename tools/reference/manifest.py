@@ -327,7 +327,7 @@ def build_manifest(source, roots, reports, hashes, library, cars, output):
     exhaust_records=[recover_exhaust(source,reader,data,node_readers[root],index,output) for index,(root,reader,data) in enumerate(zip(car_roots,car_readers,car_data))]
     wheel_effect_records=[recover_wheel_effects(source,reader,data,node_readers[root],[wheel_readers[i] for i in slots],index,output)
         for index,(root,reader,data,slots) in enumerate(zip(car_roots,car_readers,car_data,car_wheel_slots))]
-    # V03 bridge: global wheel voices of old garage cars. Task 9 removes them.
+    # V03 bridge: wheel AudioSources of old garage cars. recover_audio moves them into the car audio record. Task 9 removes them.
     if any(len(slots)!=4 for slots in car_wheel_slots):raise ValueError('Garage car needs 4 road wheels for wheel effects')
     wheel_voice_records=[recover_wheel_voices(source,node_readers[root],[wheel_readers[i] for i in slots]) for root,slots in zip(car_roots,car_wheel_slots)]
     capsule=source.get('level1',58456);camera=source.get('level1',40241)

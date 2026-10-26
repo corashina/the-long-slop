@@ -463,14 +463,9 @@ impl GarageRuntime {
             _ => return Err(SaveError::InvalidLinks("Radio owner".into())),
         }
         candidate.refresh_powertrains();
-        let running = candidate.audio.as_ref().is_some_and(|audio| {
-            candidate
-                .engine_output(&crate::vehicle::garage_vehicle_key(audio.vehicle_index))
-                .running
-        });
+        // Car sounds sync each engine's running edge on their first step.
         if let Some(audio) = &mut candidate.audio {
             audio.bind_game(reference, &candidate.area, &candidate.physics);
-            audio.restore_engine(running);
             audio.sync_lamps(&reference.lighting, &candidate.lighting);
         }
         candidate.startup_aligned = true;

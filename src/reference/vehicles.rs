@@ -51,6 +51,7 @@ pub struct WorldVehicleReference {
     pub instruments: Option<InstrumentReference>,
     /// Indices of `headlight2` lamps in `instruments.lamps`.
     pub high_beams: Vec<u32>,
+    pub audio: Option<CarAudioReference>,
 }
 
 /// A road WheelCollider of `carscript` and its wheel slot.
@@ -186,6 +187,94 @@ pub struct EnginePartReference {
     pub auto_shift_clutch_rpm: f32,
     pub auto_shift_clutch_rpm_range: f32,
     pub smoke_rate: f32,
+    pub audio: Option<EngineAudioReference>,
+}
+
+/// A car voice template of `AudioReference::car_voices` and its position in the owner frame.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarSoundReference {
+    pub voice: u32,
+    pub position: [f32; 3],
+}
+
+/// A clip that a one-shot car voice template plays once.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarShotReference {
+    pub voice: u32,
+    pub clip: u32,
+    pub gain: f32,
+    pub position: [f32; 3],
+}
+
+/// Source `enginescript` sounds. Positions are in the engine part frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineAudioReference {
+    /// `SAlap` loop.
+    pub idle: CarSoundReference,
+    /// `SMotor` loop.
+    pub motor: CarSoundReference,
+    /// `SStart`, repeated while the starter turns.
+    pub starter: Option<CarShotReference>,
+    /// `SStop`, when the engine stops.
+    pub stop: Option<CarShotReference>,
+    /// `SMinAlapRpm`, `SMaxAlapRpm`.
+    pub idle_rpm: [f32; 2],
+    /// `SMinMotorRpm`, `SMaxMotorRpm`.
+    pub motor_rpm: [f32; 2],
+    /// `SMaxAlapSound`.
+    pub idle_gain: f32,
+    /// `SMaxMotorSound`.
+    pub motor_gain: f32,
+    /// `minAlapPitch`, `maxAlapPitch`.
+    pub idle_pitch: [f32; 2],
+    /// `minMotorPitch`, `maxMotorPitch`.
+    pub motor_pitch: [f32; 2],
+}
+
+/// Source `carscript` and `talajnezo` sounds of a car. Positions are in the chassis frame.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarAudioReference {
+    pub horn: Option<HornReference>,
+    /// `turnedRadioSOund` on `SSounds`: ignition and light switch.
+    pub switch: Option<CarShotReference>,
+    /// One entry per wheel, in wheel effect order.
+    pub wheels: Vec<WheelSoundsReference>,
+    /// World cars only. V03 bridge: old garage cars use the global audio routes.
+    pub route: Option<CarRouteReference>,
+}
+
+/// Source `carscript.SHornSound`. Pitch follows the ambient temperature.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HornReference {
+    pub sound: CarSoundReference,
+    pub pitch: [f32; 2],
+    pub temperature: [f32; 2],
+    pub attack_release_rate: f32,
+}
+
+/// Source `talajnezo` GroundSource, SpringSource and SlideSource of one wheel.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WheelSoundsReference {
+    pub ground: CarSoundReference,
+    pub spring: CarSoundReference,
+    pub slide: CarSoundReference,
+}
+
+/// Source `audioBasedOnInteriorsensscript` of a car prototype.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarRouteReference {
+    /// Indices in the prototype `interiors`.
+    pub interiors: Vec<u32>,
+    pub main_mixer: u32,
+    pub outside_mixer: u32,
+    pub car_mixer: Option<u32>,
 }
 
 /// Source `coolantTankscript` of a part node.

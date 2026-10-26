@@ -47,6 +47,9 @@ fn prototype() -> WorldPrototypeReference {
     prototype
 }
 
+/// The item of the fixture car's light switch usable.
+const SWITCH: ItemId = ItemId(30);
+
 #[test]
 fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
     let prototype = prototype();
@@ -75,6 +78,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
                 owner: None,
                 doors: Vec::new(),
             }],
+            light_switch: Some(SWITCH),
         },
         &prototype,
         &crate::wheel_effects::tests::skid(),
@@ -167,4 +171,75 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
         crate::simulation::instruments::InstrumentSample { rpm: 0., ..sample },
     );
     assert_eq!(stalled.lamp_bits, 1, "battery lamp on below the test rpm");
+}
+
+/// Using the switch usable cycles the headlight request of its car: off, low, high, off.
+#[test]
+fn light_switch_click_toggles_world_car_headlights() {
+    let prototype = prototype();
+    let key = ObjectKey::Imported(ItemId(1));
+    let mut physics = PhysicsWorld::empty(1, 2);
+    let (body, collider) = physics.insert(
+        RigidBodyBuilder::dynamic().additional_mass(900.),
+        ColliderBuilder::cuboid(0.8, 0.25, 2.0).density(0.),
+    );
+    let mut vehicles = BTreeMap::new();
+    spawn(
+        CarCopy {
+            key: key.clone(),
+            prototype: 0,
+            chassis: body,
+            colliders: &[collider],
+            bodies: Vec::new(),
+            fuel_tank: None,
+            electronics: None,
+            lights: vec![CarLightLinks {
+                electronics: None,
+                owner: None,
+                doors: Vec::new(),
+            }],
+            light_switch: Some(SWITCH),
+        },
+        &prototype,
+        &crate::wheel_effects::tests::skid(),
+        &mut physics,
+        &mut vehicles,
+        &mut ChangeRecords::default(),
+    )
+    .unwrap();
+    assert!(
+        use_light_switch(&mut vehicles, ItemId(31)).is_none(),
+        "another usable"
+    );
+    let mut states = Vec::new();
+    for _ in 0..3 {
+        let (car, record) = use_light_switch(&mut vehicles, SWITCH).unwrap();
+        assert_eq!((car, record), (key.clone(), VehicleRecord::World(0)));
+        states.push(vehicles[&key].requested_headlights);
+    }
+    assert_eq!(states, [1, 2, 0]);
+    // The low beam lights after a switch to low.
+    use_light_switch(&mut vehicles, SWITCH);
+    let vehicle = vehicles.get_mut(&key).unwrap();
+    let record = prototype.vehicle.as_ref().unwrap();
+    for _ in 0..(0.5 / FIXED_DT) as usize {
+        let input = crate::simulation::car_lights::CarLightInput {
+            requested: vehicle.requested_headlights,
+            ..Default::default()
+        };
+        vehicle
+            .lights
+            .as_mut()
+            .unwrap()
+            .advance(record, input, |_| true, |_| 0., FIXED_DT);
+    }
+    let low = vehicle
+        .lights
+        .as_ref()
+        .unwrap()
+        .lights()
+        .iter()
+        .find(|l| l.node == 2)
+        .unwrap();
+    assert!(low.enabled && low.intensity == 2.);
 }

@@ -100,8 +100,6 @@ extern "C" {
         looping: bool,
         clip: u32,
     );
-    #[wasm_bindgen(js_namespace = window, js_name = gameAudioStarter)]
-    pub fn game_audio_starter(emitter: u32, enabled: bool, time: f64);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioEvent)]
     pub fn game_audio_event(
         session: u32,

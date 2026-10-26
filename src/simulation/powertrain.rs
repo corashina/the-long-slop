@@ -188,6 +188,7 @@ fn garage_engine(e: &EngineReference) -> EnginePartReference {
         auto_shift_clutch_rpm: e.auto_shift_clutch_rpm,
         auto_shift_clutch_rpm_range: e.auto_shift_clutch_rpm_range,
         smoke_rate: e.smoke_rate,
+        audio: e.audio.clone(),
     }
 }
 

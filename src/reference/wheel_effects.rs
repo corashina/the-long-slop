@@ -20,16 +20,6 @@ pub struct WheelEffectsReference {
     pub grass: Vec<ParticleReference>,
 }
 
-/// Audio voice ids of one talajnezo GroundSource, SpringSource and SlideSource.
-/// V03 bridge: old garage cars only. Task 9 removes it.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WheelVoices {
-    pub ground: u32,
-    pub spring: u32,
-    pub slide: u32,
-}
-
 /// talajnezo groundSoundM, springSoundM and springPitchM.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
