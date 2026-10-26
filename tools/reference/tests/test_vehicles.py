@@ -98,12 +98,19 @@ def car_fixture():
         speedBasedKeyboardSens=0, keySteerSensMultiplier=0, Transmission=ptr(None), RB=ptr(rigidbody),
         WHDriven=[ptr(w) for w in wheels[2:]], WHSteer=[ptr(w) for w in wheels[:2]], WHBrakeOnly=[],
         WHHandBrake=[ptr(w) for w in wheels[2:]], electronics=ptr(None), tankslot=ptr(None), balanced=0, carType=1, startingTime=1.,
+        bikepedal=ptr(None), noGasWhilePedaling=0,
         gear=0, gears=[dict(ratio=-3., freeRun=0), dict(ratio=0., freeRun=1), dict(ratio=3., freeRun=0)],
         forceAutomaticTransmission=0, BhandBrake=1, kerekagyType=0, differentialRatio=4., steerAngle=35.,
         brakePower=1000., maxHandBrake=2000., autoShiftStopSpeed=1., autoShiftMinRpm=1500., autoShiftMaxRpm=4000.,
         dontIgniteWithThorttleInAutomatic=0, collisionSoundM=1., psSmoke=[], groundSoundM=.5,
         springSoundM=2., springPitchM=3., slideAngle=20., maxSlideVolumeSpeed=10.,
         meters=[], kmhmeters=[], lowFuelValue=5., lowOilValue=1., ledOilTestRpm=600., ledBatteryTestRpm=800., ledOilTestTwoStrokeDefault=1)
+    # A bike pedal script: two pedals, one feet holder, rear wheel driven. The car links it only in the pedal test.
+    pedal_node = node(root); axis = node(pedal_node); crank = node(axis); foot = node(axis)
+    component(pedal_node, 'MonoBehaviour', dict(WHDriven=[ptr(wheels[3])], DrivenWheelSlots=[ptr(slot)], seat=ptr(seat),
+        pedals=[ptr(crank['reader'])], pedalsInverse=[ptr(foot['game_object'])], pedalFeetHolder=[ptr(foot['reader'])],
+        pedalAxisIndex=[0], Axis=[ptr(axis['reader'])], ratio=2., pedalingSpeedModifier=6., pedalInputDebounce=.5,
+        gas_tap=.8, playerUse=1), 'bikepedalscript')
     def transform_for(reader):
         return records[(reader.assets_file.source_container_path, data[reader.path_id]['transform']['m_PathID'])]
     source = NS(read=lambda reader: data[reader.path_id], class_name=lambda reader: reader.cls,
@@ -158,6 +165,8 @@ class VehicleRecordTests(unittest.TestCase):
         self.assertEqual(vehicle['fuel_tank'], 0)
         self.assertIsNone(vehicle['fuel_tank_slot'])
         self.assertIsNone(vehicle['balance'])
+        self.assertIsNone(vehicle['pedals'])
+        self.assertIs(vehicle['no_gas_while_pedaling'], False)
         self.assertEqual(vehicle['driving']['initial_gear'], 1)
         # A car without carscript.Transmission has no lever.
         self.assertIsNone(vehicle['lever'])
@@ -204,6 +213,34 @@ class VehicleRecordTests(unittest.TestCase):
         stick = engine['gear_stick']
         self.assertEqual(hierarchy[stick['transmission']]['parent'], hierarchy[engine['node']]['reader'])
         self.assertIsNone(stick['kick_ignition'])
+
+    def test_bike_pedals_link_wheels_slots_seat_and_nodes(self):
+        source, hierarchy, bodies, colliders = car_fixture()
+        car = next(c for c in hierarchy[0]['components'] if c.cls == 'carscript')
+        pedal_reader = next(c for n in hierarchy for c in n['components'] if c.cls == 'bikepedalscript')
+        source.read(car).update(bikepedal={'m_FileID': 0, 'm_PathID': pedal_reader.path_id}, noGasWhilePedaling=1)
+        with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+                patch('tools.reference.vehicles.recover_wheel_effects', return_value=[]):
+            vehicle = vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
+        pedals = vehicle['pedals']
+        self.assertIs(vehicle['no_gas_while_pedaling'], True)
+        pedal = source.read(pedal_reader)
+        wheel = vehicle['wheels'][pedals['driven_wheels'][0]]
+        self.assertEqual(wheel['source']['path_id'], pedal['WHDriven'][0]['m_PathID'])
+        self.assertEqual(pedals['driven_slots'], [vehicle['wheels'][3]['slot']])
+        self.assertEqual(pedals['seat'], 0)
+        node = lambda field: hierarchy[pedals[field][0]]['reader'].path_id
+        self.assertEqual(node('pedals'), pedal['pedals'][0]['m_PathID'])
+        self.assertEqual(node('axes'), pedal['Axis'][0]['m_PathID'])
+        # A GameObject link resolves to its node.
+        self.assertEqual(pedals['pedals_inverse'], pedals['feet_holders'])
+        self.assertEqual((pedals['axis_index'], pedals['ratio'], pedals['speed_modifier'], pedals['input_debounce'],
+            pedals['gas_tap'], pedals['player_use']), ([0], 2., 6., .5, .8, True))
+        pedal['seat'] = {'m_FileID': 0, 'm_PathID': 0}
+        with patch('tools.reference.vehicles.recover_exhaust', return_value=[]), \
+                patch('tools.reference.vehicles.recover_wheel_effects', return_value=[]), \
+                self.assertRaisesRegex(ValueError, 'seat'):
+            vehicle_record(source, hierarchy, bodies, colliders, 5, {}, None)
 
     def test_collider_bake_runs_only_in_the_editor(self):
         source, hierarchy, bodies, colliders = car_fixture()

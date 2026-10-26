@@ -1,42 +1,24 @@
-//! Shared driving simulation and browser application.
+//! Browser application: renderer and presentation over the simulation crate.
 #![recursion_limit = "256"]
 
-pub mod animation;
+pub use ::simulation::{
+    animation, audio, conditions, damage, exhaust, fluids, interaction, inventory, lighting,
+    particles, plates, player, reference, render_readiness, save, simulation, sleep, starting_area,
+    survival, vehicle, weather, wheel_effects, world,
+};
+
 #[cfg(target_arch = "wasm32")]
 pub mod app;
-pub mod audio;
 
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
-pub mod conditions;
-pub mod damage;
-pub mod exhaust;
-pub mod fluids;
-pub mod interaction;
-pub mod lighting;
-pub mod particles;
-pub mod plates;
-pub mod player;
-pub mod reference;
-#[cfg(any(target_arch = "wasm32", test))]
-mod render_readiness;
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(target_arch = "wasm32")]
 mod render_scale;
-pub mod save;
-pub mod simulation;
-pub mod sleep;
-pub mod starting_area;
-pub mod survival;
-pub mod vehicle;
-pub mod weather;
-pub mod wheel_effects;
-pub mod world;
 
 #[cfg(target_arch = "wasm32")]
 pub mod presentation;
 
-pub mod inventory;
 #[cfg(test)]
 #[path = "presentation/world/preflight/selected.rs"]
 #[allow(dead_code)]

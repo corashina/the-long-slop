@@ -75,7 +75,7 @@ impl Timer {
         Self {
             start: ENABLED
                 .load(Ordering::Relaxed)
-                .then(crate::browser::game_now),
+                .then(simulation::host::game_now),
             stage,
             job: if frame.preparation_warmup {
                 9
@@ -122,7 +122,7 @@ impl Timer {
 impl Drop for Timer {
     fn drop(&mut self) {
         let Some(start) = self.start else { return };
-        let elapsed = crate::browser::game_now() - start;
+        let elapsed = simulation::host::game_now() - start;
         let mut values = MEASUREMENTS.lock().unwrap();
         let value = &mut values[self.job][self.stage as usize];
         value.calls += 1;
