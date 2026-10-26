@@ -2352,7 +2352,9 @@ fn engine_sound_input<'a>(
         start_time_modifier: part.record.engine_start_time_modifier,
         rpm: output.rpm,
         running: active && output.running,
-        starter: active && output.starter,
+        // Source `enginescript` skips the starter clip on a kick start engine.
+        starter: active && output.starter && !part.record.kickstart,
+        kick_start: active && output.kick_start,
         pose: to_rapier(item.pose),
         mixer,
     })

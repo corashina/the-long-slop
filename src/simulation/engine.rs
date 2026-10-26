@@ -125,6 +125,8 @@ impl Default for EngineInput {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EngineOutput {
     pub starter: bool,
+    /// The kick start branch ran this step.
+    pub kick_start: bool,
     pub running: bool,
     pub rpm: f32,
     pub target_rpm: f32,
@@ -158,6 +160,23 @@ pub struct EngineState {
 impl EngineState {
     pub fn clear_input(&mut self) {
         self.last_output.starter = false;
+        self.last_output.kick_start = false;
+    }
+    /// Source `engineStartChanceTime * engineStartTimeModifier` draw, shared by starter and kick start.
+    fn draw_start_chance(
+        &mut self,
+        reference: &EnginePartReference,
+        running: bool,
+        start_sample: &mut impl FnMut(u64) -> f32,
+    ) {
+        if !running
+            && self.elapsed - self.last_start_chance_time
+                > reference.start_chance_interval_seconds * reference.engine_start_time_modifier
+        {
+            self.last_start_chance_time = self.elapsed;
+            self.random_start = start_sample(self.start_draw).clamp(0.0, 1.0);
+            self.start_draw = self.start_draw.wrapping_add(1);
+        }
     }
     pub fn running(&self) -> bool {
         self.elapsed - self.last_run_time < RUN_GRACE_SECONDS
@@ -313,6 +332,10 @@ impl EngineState {
         {
             clutch = 0.0;
         }
+        let start_clip = reference
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.starter.is_some());
         if installed.starter {
             if self.rpm < reference.starter_rpm {
                 self.rpm = lerp(
@@ -321,14 +344,18 @@ impl EngineState {
                     reference.starter_rpm_lerp * dt,
                 );
             }
-            if !running
-                && self.elapsed - self.last_start_chance_time
-                    > reference.start_chance_interval_seconds * reference.engine_start_time_modifier
-            {
-                self.last_start_chance_time = self.elapsed;
-                self.random_start = start_sample(self.start_draw).clamp(0.0, 1.0);
-                self.start_draw = self.start_draw.wrapping_add(1);
+            if start_clip && !reference.kickstart {
+                self.draw_start_chance(reference, running, &mut start_sample);
             }
+        }
+        // Source draws the kick start chance only when `SStart` is set.
+        let kick_start = start_clip
+            && reference.kickstart
+            && installed.wheel_rpm > reference.shutdown_rpm
+            && !running
+            && ignition;
+        if kick_start {
+            self.draw_start_chance(reference, running, &mut start_sample);
         }
         let next_rpm = lerp(target_rpm, installed.wheel_rpm, clutch);
         self.rpm += (next_rpm - self.rpm).clamp(-globals.rpm_change, globals.rpm_change)
@@ -458,6 +485,7 @@ impl EngineState {
         }
         self.last_output = EngineOutput {
             starter: installed.starter,
+            kick_start,
             running,
             rpm: self.rpm,
             target_rpm,
@@ -471,5 +499,111 @@ impl EngineState {
             fan_speed,
         };
         self.last_output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fluids::FluidEntry;
+
+    fn globals() -> EngineGlobals {
+        serde_json::from_value(serde_json::json!({
+            "source": {"file": "level1", "path_id": 64919}, "fuel_consumption": 1.0,
+            "oil_consumption": 0.0, "rpm_change": 2000.0, "car_temperature_bounds": [-50.0, 150.0],
+            "coolant_evaporate_rate": 0.0, "temperature_difference_modifier": 10.0,
+            "temperature_move_modifier": 1.0, "max_car_velocity": 100.0,
+            "outside_temperature_modifier": 0.0, "min_steam_temperature": 100.0
+        }))
+        .unwrap()
+    }
+
+    /// Steps a kick start engine for two seconds. Returns the last output, the rpm peak and the draws.
+    fn kick(
+        ignition: bool,
+        starter: bool,
+        clutch: f32,
+        wheel_rpm: f32,
+    ) -> (EngineOutput, f32, u32) {
+        let mut record: EnginePartReference =
+            serde_json::from_value(crate::reference::engine_part_fixture()).unwrap();
+        record.kickstart = true;
+        let globals = globals();
+        let mut fuel = FluidContainer::new(
+            10.,
+            &[FluidEntry {
+                fluid_type: 2,
+                amount: 5.,
+            }],
+        );
+        let mut sump = FluidContainer::new(
+            10.,
+            &[FluidEntry {
+                fluid_type: 3,
+                amount: 5.,
+            }],
+        );
+        let mut state = EngineState::new(20.);
+        let (mut output, mut peak, mut draws) = (EngineOutput::default(), 0f32, 0);
+        for _ in 0..100 {
+            output = state.step(
+                EngineInput {
+                    installed: Some(InstalledEngineInput {
+                        ignition,
+                        starter,
+                        throttle: 0.5,
+                        clutch,
+                        wheel_rpm,
+                        electronics_enabled: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                VehicleFluids {
+                    fuel: Some(&mut fuel),
+                    sump: Some(&mut sump),
+                    coolant: None,
+                },
+                EngineRecords {
+                    engine: &record,
+                    radiator: None,
+                    globals: &globals,
+                },
+                None,
+                |_| {
+                    draws += 1;
+                    0.
+                },
+                0.02,
+            );
+            peak = peak.max(output.rpm);
+        }
+        (output, peak, draws)
+    }
+
+    #[test]
+    fn kick_start_draws_the_start_chance_above_shutdown_rpm() {
+        let (output, _, draws) = kick(true, false, 1., 1500.);
+        assert!(output.running && draws == 1, "{output:?} {draws}");
+        // The kick start stops once the engine runs.
+        assert!(!output.kick_start);
+        // Below shutdown rpm or without ignition there is no kick start.
+        for (ignition, wheel_rpm) in [(true, 150.), (false, 1500.)] {
+            let (output, _, draws) = kick(ignition, false, 1., wheel_rpm);
+            assert!(
+                !output.running && !output.kick_start && draws == 0,
+                "{output:?}"
+            );
+        }
+        // Source skips the starter chance draw on a kick start engine.
+        let (output, _, draws) = kick(true, true, 0., 0.);
+        assert!(!output.running && draws == 0, "{output:?}");
+    }
+
+    #[test]
+    fn kick_start_does_not_turn_the_starter() {
+        // With the clutch open, only the starter can lift the rpm.
+        let (output, peak, _) = kick(true, false, 0., 1500.);
+        assert!(output.kick_start && peak == 0., "{output:?} {peak}");
     }
 }
