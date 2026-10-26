@@ -46,6 +46,8 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// gibscript and scaleDestroyScript of spawned gibs.
+    pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
@@ -273,6 +275,7 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
             portable_mass,
         })
@@ -283,6 +286,7 @@ impl StartingArea {
         self.player.rebase(shift);
         self.interaction.rebase(shift);
         self.items.rebase(shift);
+        self.gibs.rebase(shift);
         for (_, previous, current) in &mut self.render_poses {
             for i in 0..3 {
                 previous.position[i] -= shift[i];
@@ -1443,7 +1447,7 @@ impl GarageRuntime {
         self.step_body(reference);
         self.sync_mouth();
         self.area.items.sync_poses(&self.physics);
-        self.break_boxes(reference);
+        self.break_targets(reference);
         self.area.commit_poses(&self.physics, false);
         if let Some(audio) = &mut self.audio {
             audio.fixed_step(&self.area, &self.physics, &self.stream, FIXED_DT);
@@ -2148,54 +2152,104 @@ impl GarageRuntime {
         }
     }
 
-    /// Source breakablescript on generated boxes: contacts and hazard triggers of this step.
-    fn break_boxes(&mut self, reference: &ReferenceManifest) {
+    /// Source breakablescript: contacts and hazard triggers of this step, then Break in break order.
+    fn break_targets(&mut self, reference: &ReferenceManifest) {
         self.stream
-            .step_boxes(reference, &self.area.items, &self.physics, FIXED_DT);
-        while let Some(id) = self.stream.take_broken_box() {
+            .step_breakables(reference, &self.area.items, &mut self.physics, FIXED_DT);
+        while let Some((kind, record)) = self.stream.take_break() {
+            let item = match kind {
+                crate::damage::BreakKind::Item(item) => item,
+                // PR 3: flashlightscript.Break sets the lamps of the control broken.
+                crate::damage::BreakKind::Lamp { .. } => continue,
+            };
+            let rules = &reference.breakables[record];
             // Source Break calls pickupable.Drop2 first.
-            if self.area.interaction.held() == Some(id) {
+            if self.area.interaction.held() == Some(item) {
                 self.area
                     .interaction
                     .drop_held(&mut self.area.items, &mut self.physics);
             }
-            let Some(pose) = self.area.items.get(id).map(|s| s.pose) else {
+            let Some((pose, buried)) = self
+                .area
+                .items
+                .get(item)
+                .filter(|s| {
+                    !s.removed && s.location == crate::interaction::items::ItemLocation::World
+                })
+                .map(|s| (s.pose, s.buried))
+            else {
                 continue;
             };
-            if self
-                .stream
-                .break_box(
-                    id,
-                    &mut self.area.items,
-                    &mut self.area.interaction.storage,
+            // Source Break spawns Gib at the object pose. No reduced-gibs setting exists here.
+            if let Some(gib) = rules.gib.as_ref().filter(|_| !rules.no_gib) {
+                let prototype = reference
+                    .item_prototypes
+                    .iter()
+                    .position(|p| &p.id == gib)
+                    .expect("validated gib prototype");
+                let gibs = spawned::spawn_prototype(
+                    reference,
+                    &mut self.area,
                     &mut self.physics,
+                    prototype,
+                    pose,
                 )
-                .expect("bound storage")
-                .is_none()
-            {
-                continue;
+                .expect("validated gib prototype");
+                // A buried object makes its gib buried.
+                if buried {
+                    for gib in &gibs {
+                        crate::interaction::buried::bury(
+                            *gib,
+                            &mut self.area.items,
+                            &mut self.physics,
+                        );
+                    }
+                }
+                self.area.gibs.spawn(prototype, gibs, pose);
             }
-            let record = reference
-                .breakable(&reference.acquisition.r#box.breakable)
-                .expect("validated box breakable");
-            // Source Break spawns Gib at the box pose. No reduced-gibs setting exists here.
-            let Some(gib) = record.gib.as_ref().filter(|_| !record.no_gib) else {
-                continue;
-            };
-            let prototype = reference
-                .item_prototypes
-                .iter()
-                .position(|p| &p.id == gib)
-                .expect("validated box debris prototype");
-            spawned::spawn_prototype(
-                reference,
-                &mut self.area,
-                &mut self.physics,
-                prototype,
-                pose,
-            )
-            .expect("validated box debris prototype");
+            if let Some(clip) = self.stream.pick_break_clip(rules)
+                && let Some(audio) = &mut self.audio
+            {
+                let origin = self.area.origin;
+                audio.break_clip(
+                    clip,
+                    std::array::from_fn(|i| origin[i] + f64::from(pose.position[i])),
+                );
+            }
+            if !rules.no_destroy {
+                self.stream
+                    .remove_broken_item(
+                        reference,
+                        record,
+                        item,
+                        &mut self.area.items,
+                        &mut self.area.interaction.storage,
+                        &mut self.physics,
+                    )
+                    .expect("bound storage");
+            }
         }
+        self.step_gibs(reference);
+    }
+
+    /// Gib starts after the breaks of this step, then gib updates and removals.
+    fn step_gibs(&mut self, reference: &ReferenceManifest) {
+        let player = self.area.player.body_pose(&self.physics).position;
+        self.area.gibs.step(
+            reference,
+            self.stream.breakables.random(),
+            player,
+            &mut self.area.items,
+            &mut self.physics,
+            FIXED_DT,
+        );
+        let mut removed = std::mem::take(&mut self.area.gibs.removed);
+        for item in removed.drain(..) {
+            if self.area.spawned.contains(item) {
+                spawned::despawn(&mut self.area, &mut self.physics, item).expect("spawned gib");
+            }
+        }
+        self.area.gibs.removed = removed;
     }
 
     pub fn initialize_storage_frame(&mut self, dt: f32) -> Result<bool, ReferenceError> {

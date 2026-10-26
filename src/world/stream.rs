@@ -231,6 +231,8 @@ pub struct WorldStream {
     props: super::prop_layers::PropLayers,
     contents: super::contents::SourceContents,
     boxes: content_boxes::BoxRuntime,
+    /// Source breakablescript targets of active content.
+    pub(crate) breakables: crate::damage::Breakables,
     evaluator: TerrainEvaluator,
     biome_materials: super::biome_materials::BiomeMaterials,
     color_foundations: Vec<super::FoundationPoint>,
@@ -878,6 +880,7 @@ impl WorldStream {
             props: super::prop_layers::PropLayers::new(world, seed, &distances)?,
             contents,
             boxes: Default::default(),
+            breakables: Default::default(),
             evaluator,
             color_foundations: Vec::new(),
             color_helpers: Vec::new(),
@@ -5456,6 +5459,8 @@ pub(crate) mod content_bindings;
 
 #[path = "content_boxes.rs"]
 pub(crate) mod content_boxes;
+#[path = "content_breakables.rs"]
+mod content_breakables;
 
 #[path = "content_index.rs"]
 pub(crate) mod content_index;
