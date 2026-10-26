@@ -579,19 +579,17 @@ impl VehicleRuntime {
         if let Some((i, lamp)) = r.lamps.iter().enumerate().find(|(_, l)| l.node.0 == node) {
             return Some(pick(state.lamp_bits & (1 << i) != 0, &lamp.on, &lamp.off));
         }
-        if let Some(digit) = r.odometer.digits.iter().find(|d| d.node.0 == node) {
+        if let Some(digit) = r.digits().iter().find(|d| d.node.0 == node) {
             return Some(pick(state.digits_lit, &digit.on, &digit.off));
         }
-        std::iter::once(&r.backlight)
-            .chain(r.needles.iter().map(|n| &n.backlight))
-            .find_map(|b| match b {
-                crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
-                    if n.0 == node =>
-                {
-                    Some(pick(state.digits_lit, on, off))
-                }
-                _ => None,
-            })
+        r.all_backlights().find_map(|b| match b {
+            crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
+                if n.0 == node =>
+            {
+                Some(pick(state.digits_lit, on, off))
+            }
+            _ => None,
+        })
     }
     /// Visibility that a world car sets on node `node`: lamp Working/nWorking nodes and the
     /// light switch state nodes. None: the car does not set it.

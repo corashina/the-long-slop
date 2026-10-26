@@ -42,9 +42,9 @@ impl InstrumentState {
         let mut state = Self {
             signals: vec![0.; r.needles.len()],
             values: vec![0.; r.needles.len()],
-            digit_values: vec![0.; r.odometer.digits.len()],
+            digit_values: vec![0.; r.digits().len()],
             needle_angles: vec![0.; r.needles.len()],
-            digit_angles: vec![0.; r.odometer.digits.len()],
+            digit_angles: vec![0.; r.digits().len()],
             lamp_bits: 0,
             digits_lit: false,
             distance_km: 0.,
@@ -56,7 +56,7 @@ impl InstrumentState {
     pub fn reset(&mut self, r: &InstrumentReference) {
         self.signals.fill(0.);
         self.values.fill(0.);
-        for (i, d) in r.odometer.digits.iter().enumerate() {
+        for (i, d) in r.digits().iter().enumerate() {
             self.digit_values[i] = d.initial_value;
             self.digit_angles[i] = d.initial_angle;
         }
@@ -65,7 +65,7 @@ impl InstrumentState {
         }
         self.lamp_bits = 0;
         self.digits_lit = false;
-        self.distance_km = r.odometer.initial_value;
+        self.distance_km = r.odometer.as_ref().map_or(0., |o| o.initial_value);
     }
     pub fn initialize_from_sample(&mut self, r: &InstrumentReference, s: InstrumentSample) {
         self.reset(r);
@@ -87,6 +87,7 @@ impl InstrumentState {
         for (i, n) in r.needles.iter().enumerate() {
             let target = match n.signal.as_str() {
                 "speed" => s.speed_kmh.abs(),
+                "rpm" => s.rpm,
                 "fuel" => {
                     if s.local_ignition {
                         s.fuel_liters
@@ -136,8 +137,11 @@ impl InstrumentState {
             }
         }
         self.digits_lit = s.local_ignition && matches!(s.headlights, 1 | 2);
-        self.distance_km = r.odometer.initial_value + (s.distance_m / 1000.) as f32;
-        let o = &r.odometer;
+        self.distance_km =
+            r.odometer.as_ref().map_or(0., |o| o.initial_value) + (s.distance_m / 1000.) as f32;
+        let Some(o) = &r.odometer else {
+            return;
+        };
         let value = if o.use_multiplier {
             self.distance_km * o.multiplier
         } else {
@@ -164,4 +168,3 @@ impl InstrumentState {
         }
     }
 }
-

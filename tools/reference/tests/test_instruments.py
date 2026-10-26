@@ -82,13 +82,13 @@ class InstrumentTests(unittest.TestCase):
     def test_dashboard_and_needle_material_links(self):
         source, manifest, reports, car = dashboard_fixture()
         result = recover_instruments(source, manifest, reports, car)
-        self.assertEqual(result['backlight'], {'kind': 'absent'})
+        self.assertEqual(result['backlights'], [{'kind': 'absent'}])
         meter = source.resolve(car, {'m_PathID': 2})
         source.read(meter)['R'] = {'m_PathID': 500}
         result = recover_instruments(source, manifest, reports, car)
-        self.assertEqual(result['backlight']['node'], 502)
-        self.assertEqual(result['backlight']['on']['gltf_material'], 3)
-        self.assertEqual(result['backlight']['off']['gltf_material'], 4)
+        self.assertEqual(result['backlights'][0]['node'], 502)
+        self.assertEqual(result['backlights'][0]['on']['gltf_material'], 3)
+        self.assertEqual(result['backlights'][0]['off']['gltf_material'], 4)
         for index, needle in enumerate(result['needles']):
             self.assertEqual(needle['node'], 100 + index)
             result = needle['backlight']
@@ -98,6 +98,25 @@ class InstrumentTests(unittest.TestCase):
             for field, source, index in (('on', 21, 3), ('off', 22, 4)):
                 self.assertEqual(result[field], dict(source=dict(file='level1', path_id=source),
                                                      asset=7, gltf_material=index))
+
+    def test_gauge_part_meters_add_needles_and_backlights(self):
+        source, manifest, reports, car = dashboard_fixture()
+        components = source.hierarchy(car)[0]['components']
+        meter = source.resolve(car, {'m_PathID': 2})
+        gauge = NS(assets_file=meter.assets_file, path_id=3, type=meter.type, class_name='meterscript')
+        fields = {**source.read(meter), 'mutatok': source.read(meter)['mutatok'][:1], 'szamlapok': []}
+        records = {3: gauge}
+        read, resolve = source.read, source.resolve
+        source.read = lambda reader: fields if reader is gauge else read(reader)
+        source.resolve = lambda owner, pointer: records.get(pointer['m_PathID']) or resolve(owner, pointer)
+        source.hierarchy = lambda root: [dict(components=components + [gauge])]
+        result = recover_instruments(source, manifest, reports, car)
+        self.assertEqual(len(result['needles']), 4)
+        self.assertEqual(len(result['backlights']), 2)
+        self.assertIsNotNone(result['odometer'])
+        fields['szamlapok'] = source.read(meter)['szamlapok']
+        with self.assertRaisesRegex(ValueError, 'more than one odometer'):
+            recover_instruments(source, manifest, reports, car)
 
     def test_source_null_and_missing_material(self):
         self.fields['R'] = {'m_PathID': 0}

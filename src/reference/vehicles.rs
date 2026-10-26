@@ -418,13 +418,12 @@ impl WorldVehicleReference {
                 .filter(move |l| l.node.0 == node)
                 .flat_map(|l| [&l.on, &l.off]);
             let digits = r
-                .odometer
-                .digits
+                .digits()
                 .iter()
                 .filter(move |d| d.node.0 == node)
                 .flat_map(|d| [&d.on, &d.off]);
-            let backlights = std::iter::once(&r.backlight)
-                .chain(r.needles.iter().map(|n| &n.backlight))
+            let backlights = r
+                .all_backlights()
                 .filter_map(move |b| match b {
                     MaterialSwitchReference::Renderer { node: n, on, off } if n.0 == node => {
                         Some([on, off])
@@ -572,10 +571,9 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
     };
     // Gauge state keeps lamp bits in one u32.
     r.lamps.len() <= 32
-        && switch(&r.backlight)
+        && r.all_backlights().all(switch)
         && r.needles.iter().all(|n| {
             b.node(n.node.0)
-                && switch(&n.backlight)
                 && n.axis < 3
                 && finite(&[
                     n.min_value,
@@ -594,7 +592,7 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
                 && b.material(&l.off)
                 && finite(&[l.min_value, l.max_value])
         })
-        && r.odometer.digits.iter().all(|d| {
+        && r.digits().iter().all(|d| {
             b.node(d.node.0)
                 && d.axis < 3
                 && b.material(&d.on)
@@ -608,9 +606,10 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
             r.low_oil,
             r.oil_test_rpm,
             r.battery_test_rpm,
-            r.odometer.initial_value,
-            r.odometer.multiplier,
         ])
+        && r.odometer
+            .as_ref()
+            .is_none_or(|o| finite(&[o.initial_value, o.multiplier]))
 }
 
 impl EnginePartReference {

@@ -31,7 +31,7 @@ fn prototype() -> WorldPrototypeReference {
         "states": [state("off", 1, 0.0), state("low", 2, 2.0), state("high", 3, 3.0)]}))
     .unwrap()];
     vehicle.instruments = Some(
-        serde_json::from_value(json!({"backlight": {"kind": "absent"}, "electronics_output": 1.0,
+        serde_json::from_value(json!({"backlights": [{"kind": "absent"}], "electronics_output": 1.0,
             "electronics_off_threshold": 0.2,
             "needles": [{"source": src(50), "node": 0, "backlight": {"kind": "absent"}, "signal": "speed",
                 "min_value": 0.0, "max_value": 200.0, "min_angle": 0.0, "max_angle": 270.0, "axis": 2,
@@ -99,12 +99,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
 
     // Headlights: off, low, high. Each request fades the old state out and the new one in.
     let lit = |vehicle: &VehicleRuntime, node: u32| {
-        let light = vehicle
-            
-            .lights
-            .lights()
-            .iter()
-            .find(|l| l.node == node);
+        let light = vehicle.lights.lights().iter().find(|l| l.node == node);
         light.filter(|l| l.enabled).map_or(0., |l| l.intensity)
     };
     let step_lights = |vehicle: &mut VehicleRuntime, seconds: f32| {
@@ -114,7 +109,6 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
                 ..Default::default()
             };
             vehicle
-                
                 .lights
                 .advance(record, input, |_| true, |_| 0., FIXED_DT);
         }
@@ -240,12 +234,10 @@ fn light_switch_click_toggles_world_car_headlights() {
             ..Default::default()
         };
         vehicle
-            
             .lights
             .advance(record, input, |_| true, |_| 0., FIXED_DT);
     }
     let low = vehicle
-        
         .lights
         .lights()
         .iter()

@@ -1359,16 +1359,11 @@ impl SourceInstances {
                     e[n.axis as usize] = a;
                     (n.node, e)
                 });
-                let digits = r
-                    .odometer
-                    .digits
-                    .iter()
-                    .zip(&state.digit_angles)
-                    .map(|(d, &a)| {
-                        let mut e = [0.; 3];
-                        e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
-                        (d.node, e)
-                    });
+                let digits = r.digits().iter().zip(&state.digit_angles).map(|(d, &a)| {
+                    let mut e = [0.; 3];
+                    e[d.axis as usize] = a * if d.inv { -1. } else { 1. };
+                    (d.node, e)
+                });
                 for (node, e) in needles.chain(digits) {
                     let node = prototype.nodes[node.0 as usize].gltf_node as usize;
                     if let Ok(mut transform) = transforms.get_mut(instance.entity(node)?) {
