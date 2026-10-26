@@ -71,6 +71,9 @@ impl Computers {
                 .sum::<usize>()
             + self.sounds.capacity() * std::mem::size_of::<(u32, f32, [f64; 3])>()
     }
+    pub(crate) fn computers(&self) -> &[ComputerBinding] {
+        &self.computers
+    }
     pub(crate) fn computer(&self, item: ItemId) -> Option<&ComputerBinding> {
         self.computers.iter().find(|b| b.item == item)
     }

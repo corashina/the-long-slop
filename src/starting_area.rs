@@ -1193,6 +1193,7 @@ impl GarageRuntime {
         }
         self.computer_actions(input);
         self.play_computer_sounds();
+        self.play_computer_notes(&reference.computer.computer);
         while let Some((source, poured_liters, fractions)) =
             self.area.interaction.take_drink_contact()
         {

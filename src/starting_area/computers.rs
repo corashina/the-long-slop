@@ -1,9 +1,10 @@
 //! Computer and TV actions of the player (fpscontroller look-at and held-item code).
 use super::GarageRuntime;
+use crate::audio::AudioKind;
 use crate::interaction::AimTarget;
-use crate::interaction::computer::TypingFrame;
+use crate::interaction::computer::{TypingFrame, note_pitch};
 use crate::interaction::feedback::ComputerPrompt;
-use crate::reference::ItemId;
+use crate::reference::{ComputerReference, ItemId};
 use crate::simulation::{FIXED_DT, FrameInput, keys};
 
 impl GarageRuntime {
@@ -94,6 +95,43 @@ impl GarageRuntime {
             }
         }
         bits
+    }
+    /// Music mode notes: one loop per held note. Orphaned notes of an earlier music
+    /// command keep their sound and get no pitch change.
+    pub(super) fn play_computer_notes(&mut self, reference: &ComputerReference) {
+        let Some(audio) = &mut self.audio else {
+            return;
+        };
+        audio.stop_survival_loops(AudioKind::ComputerNote);
+        let detune = (
+            reference.pitch_difference,
+            reference.pitch_difference_chance,
+        );
+        for b in self.stream.computers.computers() {
+            let c = &b.computer;
+            let mut bits = c.notes | c.orphans;
+            if bits == 0 {
+                continue;
+            }
+            let Some(item) = self.area.items.get(b.item) else {
+                continue;
+            };
+            let position = self.stream.origin.absolute(item.pose.position);
+            while bits != 0 {
+                let semitone = bits.trailing_zeros() as u8;
+                bits &= bits - 1;
+                let held = c.notes & 1 << semitone != 0;
+                // The 24-bit loop key keeps 17 bits of the item id and 7 bits of the note.
+                let emitter = (b.item.0 << 7 | u32::from(semitone)) & 0xff_ffff;
+                audio.computer_note(
+                    emitter,
+                    reference.volume,
+                    note_pitch(semitone),
+                    if held { detune } else { (0., 0.) },
+                    position,
+                );
+            }
+        }
     }
     /// mainscript.PlayClipAtPoint with a random pitch for the display switch.
     pub(super) fn play_computer_sounds(&mut self) {

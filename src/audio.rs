@@ -1330,6 +1330,7 @@ pub enum AudioKind {
     AmbienceZone = 19,
     Sled = 20,
     RadioClick = 21,
+    ComputerNote = 22,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -1394,6 +1395,29 @@ impl AudioState {
         } else if self.survival_loops.len() < self.survival_loops.capacity() {
             self.survival_loops.push(event);
         }
+    }
+    /// computerscript.PlayNote: a looped note. Each step the pitch moves by the random
+    /// difference with probability `chance`.
+    pub fn computer_note(
+        &mut self,
+        emitter: u32,
+        gain: f32,
+        pitch: f32,
+        (detune, chance): (f32, f32),
+        position: [f64; 3],
+    ) {
+        let pitch = if self.sample() < chance {
+            pitch + (self.sample() - 0.5) * detune
+        } else {
+            pitch
+        };
+        self.pitched_loop(
+            AudioKind::ComputerNote,
+            emitter,
+            gain,
+            Some(pitch),
+            position,
+        );
     }
     /// musicboxscript.PlayNote: one note with the source random pitch difference.
     pub fn music_note(&mut self, position: [f64; 3], pitch: f32, detune: f32, chance: f32) {
