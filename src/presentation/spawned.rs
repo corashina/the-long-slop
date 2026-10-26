@@ -28,6 +28,8 @@ struct SpawnedInstance {
     skin_pending: bool,
     /// Scene root pose relative to the item body pose.
     body_to_scene: rapier3d::math::Pose,
+    /// Private materials of emissive renderer nodes.
+    emissive: Vec<(NodeId, Handle<SourceMaterial>)>,
 }
 
 #[derive(Resource, Default)]
@@ -51,6 +53,68 @@ impl SpawnedVisuals {
             .then(|| instance.nodes.iter().find(|(id, _)| *id == node))
             .flatten()
             .map(|(_, entity)| *entity)
+    }
+    /// Source `SetColor("_EmissionColor")` on the renderer of `node`, and with `map`
+    /// `SetTexture("_EmissionMap")`. The first call gives the node primitives one private
+    /// material. Only a changed value touches it. Returns false while the instance is unbound.
+    pub fn emission(
+        &mut self,
+        item: ItemId,
+        node: NodeId,
+        color: [f32; 4],
+        map: Option<Handle<Image>>,
+        assets: &mut Assets<SourceMaterial>,
+        bound: &mut Query<(&ChildOf, &mut MeshMaterial3d<SourceMaterial>)>,
+    ) -> Result<bool, String> {
+        let Some(instance) = self.instances.get_mut(&item) else {
+            return Ok(false);
+        };
+        if !instance.source_materials_bound {
+            return Ok(false);
+        }
+        if !instance.emissive.iter().any(|(id, _)| *id == node) {
+            let entity = instance
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == node)
+                .map(|(_, entity)| *entity)
+                .ok_or("Emissive node is not in its spawned scene")?;
+            let mut private: Option<Handle<SourceMaterial>> = None;
+            for &primitive in &instance.primitives {
+                let Ok((parent, mut material)) = bound.get_mut(primitive) else {
+                    continue;
+                };
+                if parent.parent() != entity {
+                    continue;
+                }
+                let handle = match &private {
+                    Some(handle) => handle.clone(),
+                    None => {
+                        let copy = assets
+                            .get(&material.0)
+                            .ok_or("Emissive node material is not loaded")?
+                            .clone();
+                        private.insert(assets.add(copy)).clone()
+                    }
+                };
+                material.0 = handle;
+            }
+            let handle = private.ok_or("Emissive node has no source material primitive")?;
+            instance.emissive.push((node, handle));
+        }
+        let handle = &instance
+            .emissive
+            .iter()
+            .find(|(id, _)| *id == node)
+            .unwrap()
+            .1;
+        super::materials::write_emission(
+            assets,
+            handle,
+            crate::presentation::world::gpu_props::linear_color(color),
+            map,
+        )?;
+        Ok(true)
     }
 }
 
@@ -262,6 +326,7 @@ pub(crate) fn sync(
                     primitives: Vec::new(),
                     skin_pending: skin_body(manifest, prototype) == Some(body.node),
                     body_to_scene: body_local.inverse() * to_rapier(root_pose).inverse(),
+                    emissive: Vec::new(),
                 },
             );
             continue;

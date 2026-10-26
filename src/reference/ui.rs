@@ -62,6 +62,7 @@ pub struct UiElement {
 pub struct UiReference {
     pub hose_prompts: HosePrompts,
     pub computer_prompts: ComputerPrompts,
+    pub ammo_prompts: AmmoPrompts,
     pub need_sliders: HashMap<String, NeedSlider>,
     pub sprites: Vec<UiSprite>,
     pub pairs: Vec<MenuPair>,
@@ -88,6 +89,13 @@ pub struct ComputerPrompts {
     pub connect: String,
     pub disconnect: String,
 }
+/// Source `ls.w` default English ammo prompts: R reloads the held item, E unloads into the aimed one.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AmmoPrompts {
+    pub reload: String,
+    pub unload: String,
+}
 impl UiReference {
     pub fn validate(&self) -> Result<(), ReferenceError> {
         require(
@@ -105,6 +113,10 @@ impl UiReference {
                 .iter()
                 .all(|t| !t.is_empty()),
             "computer prompts",
+        )?;
+        require(
+            !self.ammo_prompts.reload.is_empty() && !self.ammo_prompts.unload.is_empty(),
+            "ammo prompts",
         )?;
         for role in ["food", "water", "hp", "bladder", "bowel", "sleep"] {
             let slider = self

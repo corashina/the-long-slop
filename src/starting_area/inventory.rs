@@ -517,6 +517,12 @@ impl GarageRuntime {
             &mut self.area.interaction.cleaning,
             &mut self.area.items,
         );
+        self.stream.advance_cobwebs(
+            frame,
+            reference,
+            &mut self.area.interaction.cleaning,
+            &mut self.physics,
+        );
         self.play_small_item_sounds();
         self.area.interaction.cleaning.finish_frame(
             frame,
@@ -531,6 +537,29 @@ impl GarageRuntime {
             .cleaning
             .sync_wash_colliders(&self.area.conditions, &mut self.physics);
         self.sync_tool_audio(reference);
+        let reach = reference.player.aim_reach;
+        let aimed = [
+            self.aim.focus_target,
+            self.aim.grab_target,
+            self.aim.use_target,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|t| t.distance.is_finite() && t.distance <= reach)
+        .map(|t| t.item);
+        self.stream.refill_bottles(
+            &reference.small_items.spray_bottle,
+            crate::world::stream::content_small_items::RefillInput {
+                carried: self.area.interaction.held(),
+                hand: self.area.interaction.equipment.item(),
+                aimed,
+                use_held: input.held & keys::USE != 0,
+                use_released: input.released & keys::USE != 0,
+                reload_held: input.held & keys::RELOAD != 0,
+                reload_released: input.released & keys::RELOAD != 0,
+            },
+            &mut self.area.items,
+        );
         self.area.interaction.equipment_input.finish_frame(input);
         let available = self.area.interaction.available_actions(
             &self.aim,

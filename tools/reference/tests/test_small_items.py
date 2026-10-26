@@ -23,6 +23,23 @@ class SmallItemTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             small_items.validate_small_items({'spirit_level': {}, 'extra': {}}, {'audio': {'clips': []}})
 
+    def test_washes_need_checked_cobwebs(self):
+        clip = {'file': 'sharedassets1.assets', 'path_id': 4349}
+        effect = {'source': {'file': 'sharedassets1.assets', 'path_id': 45340}, 'particle': {}, 'clip': clip, 'volume': 1.}
+        def wash(i):
+            return {'source': {'file': 'level1', 'path_id': i}, 'prototype': {'file': 'sharedassets1.assets', 'path_id': 1},
+                    'node': {'file': 'sharedassets1.assets', 'path_id': i}, 'colliders': [{'file': 'sharedassets1.assets', 'path_id': i}],
+                    'permission': 2, 'never_repair': False, 'destroy_on_repair': True, 'objects': [],
+                    'chance_to_start_disabled': .3, 'particle_on_destroy': effect['source']}
+        washes = [wash(i) for i in range(small_items.COBWEBS)]
+        clips = {('sharedassets1.assets', 4349)}
+        small_items._washes(washes, [effect], clips)
+        for change in ({'never_repair': True}, {'destroy_on_repair': False}, {'chance_to_start_disabled': 1.}, {'colliders': []}):
+            with self.assertRaises(ValueError):
+                small_items._washes([dict(washes[0], **change)] + washes[1:], [effect], clips)
+        with self.assertRaises(ValueError):
+            small_items._washes(washes[1:], [effect], clips)
+
 
 if __name__ == '__main__':
     unittest.main()

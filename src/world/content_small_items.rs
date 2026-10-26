@@ -3,7 +3,9 @@ use super::WorldStream;
 use super::content_index::ContentSlot;
 use crate::conditions::ConditionStore;
 use crate::interaction::InteractionState;
-use crate::interaction::cleaning::{CleaningTools, Target, ToolFrame, ToolOwner, ToolWorld};
+use crate::interaction::cleaning::{
+    CleaningTools, Target, ToolFrame, ToolOwner, ToolWorld, WashOwner,
+};
 use crate::interaction::genie_lamp::GenieLamp;
 use crate::interaction::items::ItemStore;
 use crate::interaction::spray::{Ammo, SprayTrigger};
@@ -40,6 +42,8 @@ struct LampBinding {
     light: GeneratedId,
     lamp: GenieLamp,
     initial: f32,
+    /// The last written `_EmissionColor`.
+    emission: [f32; 4],
 }
 /// One spray or splash particle system, restarted by each shot.
 struct Effect {
@@ -60,6 +64,24 @@ pub(crate) struct SmallItems {
     time: f64,
     /// PlayClipAtPoint requests: clip, volume, absolute position.
     pub(crate) sounds: Vec<(u32, f32, [f64; 3])>,
+    /// fpscontroller.lastReloadTime.
+    last_reload: f64,
+    /// `ItemPrompt` bits of the bottle refill.
+    refill_prompt: u8,
+}
+/// Player input of the bottle refill (fpscontroller RayStuff).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RefillInput {
+    /// pickedUp: the carried item.
+    pub carried: Option<ItemId>,
+    /// inHandP: the right-hand item.
+    pub hand: Option<ItemId>,
+    /// The aimed item.
+    pub aimed: Option<ItemId>,
+    pub use_held: bool,
+    pub use_released: bool,
+    pub reload_held: bool,
+    pub reload_released: bool,
 }
 pub(super) fn clip_id(reference: &ReferenceManifest, source: &SourceId) -> Option<u32> {
     reference.audio["clips"].as_array()?.iter().find_map(|c| {
@@ -95,6 +117,8 @@ impl SmallItems {
             ],
             time: 0.,
             sounds: Vec::with_capacity(8),
+            last_reload: f64::NEG_INFINITY,
+            refill_prompt: 0,
         }
     }
     pub fn heap_bytes(&self) -> usize {
@@ -161,7 +185,9 @@ impl WorldStream {
                 self.small_items.lamps[i].slot = slot;
                 i += 1;
             } else {
-                interaction.cleaning.remove_generated_wash(b.item);
+                interaction
+                    .cleaning
+                    .remove_generated_wash(WashOwner::Item(b.item));
                 self.small_items.lamps.swap_remove(i);
             }
         }
@@ -193,6 +219,7 @@ impl WorldStream {
             } else {
                 let binding = self.bind_lamp(reference, interaction, physics, slot, item)?;
                 self.small_items.lamps.push(binding);
+                self.presentation_changes.push(ContentSlot::Active(slot));
             }
         }
         self.small_items.scan = complete.then_some(revision);
@@ -314,7 +341,7 @@ impl WorldStream {
             colliders.push((id, *handle));
         }
         interaction.cleaning.register_generated_wash(
-            item,
+            WashOwner::Item(item),
             permission as u8,
             flag(wash, "neverRepair")?,
             colliders,
@@ -333,6 +360,7 @@ impl WorldStream {
             light,
             lamp: GenieLamp::new(value),
             initial: r.startup_value,
+            emission: crate::interaction::genie_lamp::output(r, value).emission,
         })
     }
     /// spricniscript.Pressing for a held bottle. Returns false when the item is no bottle.
@@ -493,6 +521,13 @@ impl WorldStream {
             if b.lamp.value != before {
                 items.mark_dirty(b.item);
             }
+            if out.emission != b.emission {
+                b.emission = out.emission;
+                let slot = ContentSlot::Active(b.slot);
+                if !self.presentation_changes.contains(&slot) {
+                    self.presentation_changes.push(slot);
+                }
+            }
             let content = self
                 .contents
                 .active
@@ -511,6 +546,92 @@ impl WorldStream {
             }
         }
     }
+    /// Source ammoscript.CanReload: `to` takes from another bottle of its type.
+    fn can_refill(&self, to: ItemId, from: ItemId) -> bool {
+        let ammo = |id| {
+            self.small_items
+                .sprays
+                .iter()
+                .find(|b| b.item == id)
+                .map(|b| b.ammo)
+        };
+        to != from
+            && ammo(to)
+                .zip(ammo(from))
+                .is_some_and(|(a, b)| a.can_reload(&b))
+    }
+    /// Source ammoscript.Reload(from, 1).
+    fn refill(&mut self, to: ItemId, from: ItemId, items: &mut ItemStore) {
+        let sprays = &mut self.small_items.sprays;
+        let (Some(a), Some(b)) = (
+            sprays.iter().position(|s| s.item == to),
+            sprays.iter().position(|s| s.item == from),
+        ) else {
+            return;
+        };
+        let mut source = sprays[b].ammo;
+        sprays[a].ammo.reload(&mut source, 1.);
+        sprays[b].ammo = source;
+        items.mark_dirty(to);
+        items.mark_dirty(from);
+    }
+    /// fpscontroller RayStuff for an aimed bottle. E (useUp) moves one unit from the carried bottle
+    /// into the aimed one. R (reloadUp) moves one unit from the aimed bottle into the held one.
+    /// With canPour the move repeats every pourTime while the key is held.
+    pub(crate) fn refill_bottles(
+        &mut self,
+        r: &crate::reference::SprayBottleReference,
+        input: RefillInput,
+        items: &mut ItemStore,
+    ) {
+        use crate::interaction::feedback::ItemPrompt;
+        self.small_items.refill_prompt = 0;
+        let bottle = |id: Option<ItemId>| {
+            id.filter(|id| self.small_items.sprays.iter().any(|b| b.item == *id))
+        };
+        let (carried, hand, aimed) = (
+            bottle(input.carried),
+            bottle(input.hand),
+            bottle(input.aimed),
+        );
+        let Some(aimed) = aimed else {
+            return;
+        };
+        let time = self.small_items.time;
+        let pour = |held: bool, released: bool, last: &mut f64| {
+            if r.can_pour {
+                let due = held && time - *last >= f64::from(r.pour_time);
+                if due {
+                    *last = time;
+                }
+                due
+            } else {
+                released
+            }
+        };
+        let mut last = self.small_items.last_reload;
+        if let Some(from) = carried
+            && input.hand.is_none()
+            && self.can_refill(aimed, from)
+        {
+            self.small_items.refill_prompt |= ItemPrompt::UNLOAD;
+            if pour(input.use_held, input.use_released, &mut last) {
+                self.refill(aimed, from, items);
+            }
+        }
+        if let Some(to) = hand.or(carried)
+            && self.can_refill(to, aimed)
+        {
+            self.small_items.refill_prompt |= ItemPrompt::RELOAD;
+            if pour(input.reload_held, input.reload_released, &mut last) {
+                self.refill(to, aimed, items);
+            }
+        }
+        self.small_items.last_reload = last;
+    }
+    pub(crate) fn refill_prompt(&self) -> u8 {
+        self.small_items.refill_prompt
+    }
     /// Saved spray ammo and lamp value; None at the spawn value.
     pub(super) fn small_item_values(&self, item: ItemId) -> Option<(Option<f32>, Option<f32>)> {
         if let Some(b) = self.small_items.sprays.iter().find(|b| b.item == item) {
@@ -527,6 +648,15 @@ impl WorldStream {
     }
     pub(crate) fn small_item_particles(&self, index: usize) -> &[crate::particles::ParticleOutput] {
         self.small_items.particles(index)
+    }
+    /// ginlampscript `M.SetColor("_EmissionColor")`.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn lamp_emission(&self, parent: &GeneratedId) -> Option<[f32; 4]> {
+        self.small_items
+            .lamps
+            .iter()
+            .find(|b| &b.parent == parent)
+            .map(|b| b.emission)
     }
     /// The spray bottle trigger node local pose.
     #[cfg(target_arch = "wasm32")]

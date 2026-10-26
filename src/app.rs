@@ -51,7 +51,7 @@ struct FeedbackStamp {
     context: u32,
     light_control: u32,
     lmb_use: bool,
-    hose: u8,
+    prompts: u8,
     computer: u8,
     item: Option<ItemId>,
     opening: Option<OpeningId>,
@@ -247,7 +247,11 @@ pub fn run(
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
-                presentation::spawned::sync,
+                (
+                    presentation::spawned::sync,
+                    presentation::cigarettes::sync,
+                )
+                    .chain(),
                 sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
@@ -1228,7 +1232,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
         },
         light_control: available.light_control.map_or(0, |id| id.0),
         lmb_use: available.lmb_use,
-        hose: available.hose,
+        prompts: available.prompts | runtime.stream.refill_prompt(),
         computer: runtime.computer_prompt(),
         item: available.item,
         opening: available.opening,
@@ -1283,7 +1287,7 @@ fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
             stamp.order,
             stamp.light_control,
             stamp.lmb_use,
-            stamp.hose.into(),
+            stamp.prompts.into(),
             stamp.computer.into(),
         );
         drive.last_feedback = Some(stamp);

@@ -9,11 +9,11 @@ function setup(t){
  Object.assign(globalThis,{window:new EventTarget(),document,innerWidth:1280,innerHeight:720});
  const layout={canvas:{resolution:[1280,720],mode:0},ancestry:[],font_size:16,font:'sans-serif',color:[1,1,1,1],image_color:[1,1,1,1],sprite:null};
  const roles=['use','pickup','mount','fill','reticle','fluid','carry'];
- const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],icons:{},sprites:[],hose_prompts:{attach:'Stick in',drain:'Drain',coilup:'Coil up'},computer_prompts:{turnon:'Turn On',turnoff:'Turn Off',use:'Use',connect:'Connect',disconnect:'Disconnect'}};
+ const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],icons:{},sprites:[],hose_prompts:{attach:'Stick in',drain:'Drain',coilup:'Coil up'},ammo_prompts:{reload:'Reload',unload:'Unload'},computer_prompts:{turnon:'Turn On',turnoff:'Turn Off',use:'Use',connect:'Connect',disconnect:'Disconnect'}};
  const feedback=createFeedback(ui,'switch',{items:[]});feedback.setVisible(true);
- const record={hose:0,computer:0,actions:0,context:0,carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',quantities:[0,0,0,0,0,0],name:'',notice:'',condition:-1,throwCharge:0,throwActive:false};
+ const record={prompts:0,computer:0,actions:0,context:0,carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',quantities:[0,0,0,0,0,0],name:'',notice:'',condition:-1,throwCharge:0,throwActive:false};
  t.after(()=>{feedback.dispose();for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
- return {nodes,update(actions,carrying=false,hose=0,computer=0){feedback.update({...record,actions,carrying,hose,computer});return nodes.get('#hud').children.filter(n=>n.className==='action-row'&&!n.hidden).map(n=>n.textContent);}};
+ return {nodes,update(actions,carrying=false,prompts=0,computer=0){feedback.update({...record,actions,carrying,prompts,computer});return nodes.get('#hud').children.filter(n=>n.className==='action-row'&&!n.hidden).map(n=>n.textContent);}};
 }
 
 test('G08 HUD rows follow equipment availability and remove obsolete carry wording',t=>{
@@ -46,6 +46,7 @@ test('R03 hose prompts replace mount and add coil up and drain',t=>{
  const app=setup(t),mount=16,rotate=32768;
  assert.deepEqual(app.update(mount|rotate,true,1|2|4),['[F]: Stick in','[R]: Coil up','[LMB]: Drain']);
  assert.deepEqual(app.update(rotate,true,2),['[R]: Coil up']);
+ assert.deepEqual(app.update(rotate,true,8|16),['[R]: Reload','[E]: Unload']);
 });
 
 test('F07 computer prompts use the source texts',t=>{

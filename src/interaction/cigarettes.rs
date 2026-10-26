@@ -1,5 +1,7 @@
 //! Source `cigiscript` packs, `ediblescript` smoke burn, `emberScript`, and player `smokeCharged`.
-use crate::reference::{CigaretteConsumptionReference, ConsumptionEffect, ExhaleReference};
+use crate::reference::{
+    CigaretteConsumptionReference, ConsumptionEffect, ExhaleReference, Transform,
+};
 
 /// `emberScript` values of the checked cigarette record.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,7 +90,7 @@ pub struct EmberState {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EmberOutput {
-    /// `_EmissionColor` in linear HDR.
+    /// `_EmissionColor` as `SetColor` receives it.
     pub color: [f32; 4],
     pub light_intensity: f32,
     pub particle_rate: f32,
@@ -217,6 +219,23 @@ impl CigaretteState {
     /// `UpdParts`: part poses lerp from end to start by hp.
     pub fn part_blend(&self) -> f32 {
         self.hp
+    }
+}
+
+/// `UpdParts`: Lerp(end, start, hp) of position and scale, and Quaternion.Lerp of rotation.
+pub fn part_pose(start: &Transform, end: &Transform, hp: f32) -> Transform {
+    let lerp3 = |a: [f32; 3], b: [f32; 3]| std::array::from_fn(|i| mix(a[i], b[i], hp));
+    let (a, mut b) = (end.rotation, start.rotation);
+    // Quaternion.Lerp takes the shorter arc and normalizes.
+    if (0..4).map(|i| a[i] * b[i]).sum::<f32>() < 0. {
+        b = b.map(|v| -v);
+    }
+    let q: [f32; 4] = std::array::from_fn(|i| mix(a[i], b[i], hp));
+    let length = q.iter().map(|v| v * v).sum::<f32>().sqrt();
+    Transform {
+        translation: lerp3(end.translation, start.translation),
+        rotation: q.map(|v| v / length),
+        scale: lerp3(end.scale, start.scale),
     }
 }
 
@@ -391,6 +410,40 @@ pub(crate) mod tests {
         assert_eq!(s.output(&e).light_intensity, e.light_intensities[1]);
         s.update(&e, 1.);
         assert_eq!(s.phase, EmberPhase::Lerp);
+    }
+
+    #[test]
+    fn ember_output_and_parts_follow_burn() {
+        let r = cigarette();
+        let mut c = CigaretteState::new(&r);
+        let start = c.ember.output(&r.ember);
+        assert_eq!(start.color, r.ember.colors[0]);
+        assert_eq!(start.particle_rate, r.ember.particle_rates[0]);
+        c.eat(&r, 0.25, false);
+        let lerp = c.ember.output(&r.ember);
+        assert!((lerp.color[0] - (1. + (4. - 1.) * 0.25)).abs() < 1e-6);
+        assert!((lerp.particle_rate - 75.).abs() < 1e-4);
+        let full = Transform {
+            translation: [0., 0., -0.03],
+            rotation: [0., -0.70710677, 0.70710677, 0.],
+            scale: [0.008, 0.03, 0.008],
+        };
+        let empty = Transform {
+            translation: [0., 0., 0.03],
+            scale: [0.008, 0.0007, 0.008],
+            ..full
+        };
+        assert_eq!(part_pose(&full, &empty, 1.).translation, full.translation);
+        let half = part_pose(&full, &empty, 0.5);
+        assert!(half.translation[2].abs() < 1e-6);
+        assert!((half.scale[1] - (0.03 + 0.0007) / 2.).abs() < 1e-6);
+        assert!((half.rotation[2] - 0.70710677).abs() < 1e-5);
+        assert_eq!(part_pose(&full, &empty, 0.).scale, empty.scale);
+        c.eat(&r, 100., false);
+        assert_eq!(c.part_blend(), 0.);
+        let end = c.ember.output(&r.ember);
+        assert_eq!(end.color, r.ember.colors[3]);
+        assert_eq!(end.light_intensity, r.ember.light_intensities[3]);
     }
 
     #[test]
