@@ -76,10 +76,14 @@ impl ViewState {
     }
     pub(super) fn step_car_bob(&mut self, dt: f32, velocity: Vector, dead: bool, head: Rotation) {
         self.walk_bob.beat = false;
+        self.walk_bob.add = 0.;
         self.car_offset = self.car_bob.step(dt, velocity, dead, head);
     }
     pub(super) fn footstep_beat(&self) -> bool {
         self.walk_bob.beat
+    }
+    pub(super) fn walk_add(&self) -> f32 {
+        self.walk_bob.add
     }
     pub(super) fn source_anchor_midpoint(&self, posture: f32, seated: bool) -> Vector {
         let direction_anchor = if seated {

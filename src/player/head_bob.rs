@@ -14,6 +14,8 @@ pub(super) struct WalkBob {
     wdown: bool,
     /// True on the step a source footstep fires.
     pub(super) beat: bool,
+    /// Source `currentAdd`: the state step. 0 when the bob does not advance.
+    pub(super) add: f32,
 }
 impl WalkBob {
     pub(super) fn new(player: &PlayerReference) -> Self {
@@ -26,15 +28,18 @@ impl WalkBob {
             offset: 0.,
             wdown: false,
             beat: false,
+            add: 0.,
         }
     }
     /// `body_speed` is the body speed minus the support body speed.
     pub(super) fn step(&mut self, active: bool, body_speed: f32, dt: f32) {
         self.beat = false;
+        self.add = 0.;
         if !active {
             return;
         }
-        self.state += dt * self.speed + body_speed * self.speed_rb * dt;
+        self.add = dt * self.speed + body_speed * self.speed_rb * dt;
+        self.state += self.add;
         self.offset = self.state.sin() * self.max;
         if self.offset <= -self.threshold {
             self.beat = !self.wdown;
@@ -127,6 +132,7 @@ mod tests {
             offset: 0.,
             wdown: false,
             beat: false,
+            add: 0.,
         };
         // state = 0.01 * 10 + 3 * 2 * 0.01 = 0.16.
         bob.step(true, 3., 0.01);

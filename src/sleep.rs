@@ -137,6 +137,17 @@ impl SleepState {
         }
     }
 
+    /// Source load: sleepEndTime = Time.time - save_player.sleep. The player is awake.
+    pub fn restore(&mut self, since_wake: f64, now: f64) {
+        self.interrupt();
+        self.output.wake_time = now - since_wake;
+    }
+
+    /// Source save: save_player.sleep = Time.time - sleepEndTime.
+    pub fn since_wake(&self, now: f64) -> f64 {
+        now - self.output.wake_time
+    }
+
     pub fn output(&self) -> SleepOutput {
         self.output
     }
@@ -160,14 +171,12 @@ mod tests {
     use super::*;
     use crate::reference::{ManagedEvidence, SourceId};
 
-    #[test]
-    fn hint_shows_only_in_flagged_seat() {
-        let source = SourceId {
-            file: String::new(),
-            path_id: 0,
-        };
-        let r = SleepReference {
-            source: source.clone(),
+    fn reference() -> SleepReference {
+        SleepReference {
+            source: SourceId {
+                file: String::new(),
+                path_id: 0,
+            },
             need_modifier: 1.,
             hold_gain: 1.,
             sleep_real_seconds: 1.,
@@ -188,18 +197,37 @@ mod tests {
                 assembly_sha256: String::new(),
                 methods: Vec::new(),
             },
-        };
+        }
+    }
+
+    fn input(active: bool, show_text: bool) -> SleepInput {
+        SleepInput {
+            held: false,
+            active,
+            camera_allowed: true,
+            dead: false,
+            show_text,
+        }
+    }
+
+    #[test]
+    fn hint_shows_only_in_flagged_seat() {
+        let r = reference();
         for hint in [true, false] {
-            let input = SleepInput {
-                held: false,
-                active: true,
-                camera_allowed: true,
-                dead: false,
-                show_text: hint,
-            };
-            let output = SleepState::new(&r).step(&r, input, 10., 0.02);
+            let output = SleepState::new(&r).step(&r, input(true, hint), 10., 0.02);
             assert!(output.eligible);
             assert_eq!(output.show_hint, hint);
         }
+    }
+
+    #[test]
+    fn restore_keeps_cooldown() {
+        let r = reference();
+        let mut state = SleepState::new(&r);
+        state.restore(0.5, 100.);
+        assert_eq!(state.output().phase, SleepPhase::Idle);
+        assert!(!state.step(&r, input(true, false), 100.2, 0.02).eligible);
+        assert!(state.step(&r, input(true, false), 100.6, 0.02).eligible);
+        assert_eq!(state.output().phase, SleepPhase::Idle);
     }
 }

@@ -1,3 +1,4 @@
+pub mod body;
 pub mod collision;
 mod head_bob;
 mod ladder;
@@ -173,6 +174,8 @@ pub struct PlayerState {
     running: bool,
     ladder: ladder::LadderState,
     hazard_damage: f32,
+    /// Source `GetDir` `forward` and `backward`.
+    walk_keys: [bool; 2],
 }
 
 impl PlayerState {
@@ -287,6 +290,7 @@ impl PlayerState {
             running: false,
             ladder: ladder::LadderState::default(),
             hazard_damage: 0.0,
+            walk_keys: [false; 2],
         }
     }
 
@@ -353,6 +357,8 @@ impl PlayerState {
             recoil_velocity: self.recoil_velocity.to_array(),
             running: self.running,
             carry,
+            // GarageRuntime owns sleep and sets this field.
+            since_wake: 0.,
         })
     }
     /// Mouse deltas contain degrees. The browser applies mouse sensitivity.
@@ -906,6 +912,17 @@ impl PlayerState {
             return;
         }
         let bodies = &physics.rapier().bodies;
+        let held = |key| input.held & key != 0;
+        self.walk_keys = if self.occupancy.is_some() {
+            [false; 2]
+        } else if self.push_gripping {
+            [held(keys::FORWARD), held(keys::BACK)]
+        } else {
+            [
+                held(keys::FORWARD) || held(keys::LEFT) || held(keys::RIGHT),
+                held(keys::BACK),
+            ]
+        };
         if let Some(seat) = &self.occupancy {
             let head = to_rapier(self.view(physics).head_pose).rotation;
             let velocity = bodies[seat.body].linvel();
@@ -928,6 +945,14 @@ impl PlayerState {
     /// True on the step a source footstep fires.
     pub fn footstep_beat(&self) -> bool {
         self.view_state.footstep_beat()
+    }
+    /// Source `currentAdd` of the last head bob step.
+    pub fn walk_add(&self) -> f32 {
+        self.view_state.walk_add()
+    }
+    /// Source `forward` and `backward` of the last head bob step.
+    pub fn walk_keys(&self) -> [bool; 2] {
+        self.walk_keys
     }
     pub fn apply_recoil(&mut self, impulse: Vector) {
         self.recoil_velocity += impulse / self.reference.mass_kg;
@@ -1118,7 +1143,7 @@ mod vehicle_seat_tests {
     use super::{PlayerState, SeatOwner};
     use crate::reference::{PlayerPoseReference, PlayerReference};
     use crate::vehicle::{VehiclePose, body_fixture};
-    use crate::world::stream::content_seats::WorldSeatReference;
+    use crate::world::stream::content_seats::{WorldSeatBodyPose, WorldSeatReference};
     use serde_json::json;
 
     /// Player values that keep every exit point clear: no exit mask, no use mask.
@@ -1242,6 +1267,13 @@ mod vehicle_seat_tests {
             show_sleep_text: false,
             driver: true,
             driving2: false,
+            body_pose: WorldSeatBodyPose {
+                def_pose: 0,
+                left_hand: None,
+                right_hand: None,
+                left_leg: None,
+                right_leg: None,
+            },
         };
         let owner = SeatOwner::Vehicle(physics.vehicle_of(chassis[1]).unwrap().clone());
         let sit = VehiclePose {
