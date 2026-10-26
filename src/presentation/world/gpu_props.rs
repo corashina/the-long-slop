@@ -14,11 +14,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const ROW_WORDS: usize = 20;
 /// The row slot is free.
 pub const NO_BATCH: u32 = u32::MAX;
+/// The last row word holds the batch above 8 flag bits.
+pub const FLAG_BITS: u32 = 8;
 /// Row flag bits after the 5 layer bits.
 pub const ROW_HIDDEN: u32 = 1 << 5;
 pub const ROW_SHADOW_ONLY: u32 = 1 << 6;
-/// More dirty ranges than this merge into one range.
-const DIRTY_RANGES: usize = 64;
+/// Dirty rows closer than this many rows upload as one range.
+const DIRTY_GAP: u32 = 8;
+/// Batch of the last row word. A free slot gives `NO_BATCH`.
+pub fn word_batch(word: u32) -> u32 {
+    match word >> FLAG_BITS {
+        batch if batch == NO_BATCH >> FLAG_BITS => NO_BATCH,
+        batch => batch,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PropRow {
@@ -29,7 +38,10 @@ pub struct PropRow {
     pub layer: u8,
     /// Source shadow casting mode. 3 is shadows only.
     pub cast_shadows: u8,
+    /// Root, node and LOD visibility together, as an entity inherits them.
     pub hidden: bool,
+    /// Signed LOD crossfade, as the entity material `lod_fade`. 1 is no fade.
+    pub fade: f32,
     pub batch: u32,
 }
 impl PropRow {
@@ -61,11 +73,11 @@ impl PropRow {
             f(c[0]),
             f(c[1]),
             f(c[2]),
-            flags,
+            f(self.fade),
             f(e[0]),
             f(e[1]),
             f(e[2]),
-            self.batch,
+            self.batch << FLAG_BITS | flags,
         ]
     }
 }
@@ -95,7 +107,7 @@ pub struct PropBatch {
     pub key: BatchKey,
     /// Live rows. Zero marks a free batch slot.
     pub rows: u32,
-    /// Rows that are not hidden.
+    /// Rows that are not hidden. A change bumps the batch revision only at zero.
     pub shown: u32,
     /// First entry of the batch in each visible list.
     pub first: u32,
@@ -110,7 +122,9 @@ pub struct GpuProps {
     rows: Vec<PropRow>,
     free: Vec<u32>,
     live: u32,
-    dirty: Vec<Range<u32>>,
+    /// Dirty slots, each once. `marked` holds their flags.
+    dirty: Vec<u32>,
+    marked: Vec<bool>,
     batches: Vec<PropBatch>,
     free_batches: Vec<u32>,
     index: HashMap<BatchKey, u32>,
@@ -118,7 +132,7 @@ pub struct GpuProps {
     visible_len: u32,
     /// Changes when rows are added or removed.
     membership: u64,
-    /// Changes on any row change.
+    /// Changes on a row change that the shadow scene reads. Fade changes do not count.
     revision: u64,
     /// Changes on any batch table change.
     batch_revision: u64,
@@ -131,6 +145,7 @@ impl Default for GpuProps {
             free: Vec::new(),
             live: 0,
             dirty: Vec::new(),
+            marked: Vec::new(),
             batches: Vec::new(),
             free_batches: Vec::new(),
             index: HashMap::default(),
@@ -169,39 +184,33 @@ impl GpuProps {
     pub fn retained_bytes(&self) -> usize {
         self.rows.capacity() * std::mem::size_of::<PropRow>()
             + self.free.capacity() * 4
+            + self.dirty.capacity() * 4
+            + self.marked.capacity()
             + self.batches.capacity() * std::mem::size_of::<PropBatch>()
             + self.free_batches.capacity() * 4
             + self.index.capacity() * (std::mem::size_of::<(BatchKey, u32)>() + 1)
     }
-    /// Moves the dirty ranges to `out`. The render world uploads them.
+    /// Moves the dirty rows to `out` as sorted ranges. The render world uploads them.
+    /// Small gaps join ranges, so many scattered rows give few uploads of little extra data.
     pub fn take_dirty(&mut self, out: &mut Vec<Range<u32>>) {
-        out.append(&mut self.dirty);
+        self.dirty.sort_unstable();
+        let mut current: Option<Range<u32>> = None;
+        for &slot in &self.dirty {
+            self.marked[slot as usize] = false;
+            match &mut current {
+                Some(range) if slot <= range.end + DIRTY_GAP => range.end = slot + 1,
+                _ => out.extend(current.replace(slot..slot + 1)),
+            }
+        }
+        out.extend(current);
+        self.dirty.clear();
     }
     fn mark(&mut self, slot: u32) {
-        self.revision += 1;
-        if let Some(last) = self.dirty.last_mut() {
-            if last.contains(&slot) {
-                return;
-            }
-            if last.end == slot {
-                last.end += 1;
-                return;
-            }
+        let marked = &mut self.marked[slot as usize];
+        if !*marked {
+            *marked = true;
+            self.dirty.push(slot);
         }
-        if self.dirty.len() == DIRTY_RANGES {
-            let start = self.dirty.iter().map(|r| r.start).min().unwrap().min(slot);
-            let end = self
-                .dirty
-                .iter()
-                .map(|r| r.end)
-                .max()
-                .unwrap()
-                .max(slot + 1);
-            self.dirty.clear();
-            self.dirty.push(start..end);
-            return;
-        }
-        self.dirty.push(slot..slot + 1);
     }
     /// Adds a row. The batch of `row` is replaced.
     pub fn alloc(&mut self, key: BatchKey, mut row: PropRow) -> u32 {
@@ -223,6 +232,7 @@ impl GpuProps {
                 batch
             }
         };
+        assert!(batch < NO_BATCH >> FLAG_BITS, "GPU prop batch count");
         let entry = &mut self.batches[batch as usize];
         entry.rows += 1;
         entry.shown += u32::from(!row.hidden);
@@ -233,11 +243,13 @@ impl GpuProps {
         row.batch = batch;
         let slot = self.free.pop().unwrap_or_else(|| {
             self.rows.push(row);
+            self.marked.push(false);
             self.rows.len() as u32 - 1
         });
         self.rows[slot as usize] = row;
         self.live += 1;
         self.membership += 1;
+        self.revision += 1;
         self.mark(slot);
         slot
     }
@@ -256,6 +268,7 @@ impl GpuProps {
         self.free.push(slot);
         self.live -= 1;
         self.membership += 1;
+        self.revision += 1;
         self.mark(slot);
         // Free capacity stays until it is a large part of the visible list.
         if self.visible_len > 1024 && self.visible_len > 4 * self.live {
@@ -274,7 +287,26 @@ impl GpuProps {
         } else {
             entry.shown += 1;
         }
-        self.batch_revision += 1;
+        // The render world reads only whether a batch shows rows.
+        if entry.shown == u32::from(!hidden) {
+            self.batch_revision += 1;
+        }
+        self.revision += 1;
+        self.mark(slot);
+    }
+    /// Writes the renderer LOD state `(visible, fade)` of a row, as the entity path applies it.
+    /// `shown` is the root and static node visibility.
+    pub fn set_lod(&mut self, slot: u32, shown: bool, (visible, fade): (bool, f32)) {
+        self.set_hidden(slot, !(shown && visible));
+        self.set_fade(slot, fade);
+    }
+    /// LOD crossfade only. The shadow scene does not read it.
+    fn set_fade(&mut self, slot: u32, fade: f32) {
+        let row = &mut self.rows[slot as usize];
+        if row.fade.to_bits() == fade.to_bits() {
+            return;
+        }
+        row.fade = fade;
         self.mark(slot);
     }
     pub fn set_world(&mut self, slot: u32, world: Mat4, bounds: Bounds) {
@@ -284,6 +316,7 @@ impl GpuProps {
         }
         row.world = world;
         row.bounds = bounds;
+        self.revision += 1;
         self.mark(slot);
     }
     /// Gives each batch a power-of-two region in the visible lists.
@@ -308,6 +341,7 @@ impl GpuProps {
         self.free_batches.clear();
         self.index.clear();
         self.dirty.clear();
+        self.marked.clear();
         self.live = 0;
         self.visible_len = 0;
         self.membership += 1;
@@ -342,6 +376,7 @@ mod tests {
             layer: 3,
             cast_shadows: 1,
             hidden,
+            fade: 1.0,
             batch: 0,
         }
     }
@@ -366,7 +401,7 @@ mod tests {
 
         props.free(b);
         props.free(a);
-        assert_eq!(dirty(&mut props), [1..2, 0..1]);
+        assert_eq!(dirty(&mut props), [0..2]);
         assert_eq!(props.rows()[a as usize].batch, NO_BATCH);
         // The emptied batch slot and the last freed row slot are reused first.
         let d = props.alloc(key(3), row(false));
@@ -385,9 +420,24 @@ mod tests {
             Mat4::from_translation(Vec3::X),
             props.rows()[e as usize].bounds,
         );
-        assert_eq!(dirty(&mut props), [2..3, 1..2]);
+        assert_eq!(dirty(&mut props), [1..3]);
         assert_eq!(props.batches()[1].shown, 0);
         assert_eq!(props.live(), 3);
+        // A fade change uploads the row but leaves the shadow inputs.
+        let revision = props.revision();
+        props.set_fade(c, 0.25);
+        props.set_fade(c, 0.25);
+        assert_eq!(dirty(&mut props), [2..3]);
+        assert_eq!(props.revision(), revision);
+        assert_eq!(
+            word_batch(props.rows()[c as usize].words()[ROW_WORDS - 1]),
+            1
+        );
+        props.free(c);
+        assert_eq!(
+            word_batch(props.rows()[c as usize].words()[ROW_WORDS - 1]),
+            NO_BATCH
+        );
     }
 
     #[test]
@@ -421,14 +471,111 @@ mod tests {
             }
         }
         assert_eq!(dirty(&mut props), [0..300]);
-        for slot in (0..300).step_by(2) {
-            props.set_hidden(slot, true);
+        // Small gaps join ranges. Large gaps keep them apart.
+        for slot in (0..100).step_by(2).chain([150, 299, 158]) {
+            props.set_fade(slot, 0.5);
         }
-        let out = dirty(&mut props);
-        assert!(out.len() <= DIRTY_RANGES);
-        for slot in (0..300).step_by(2) {
-            assert!(out.iter().any(|r| r.contains(&slot)), "slot {slot}");
+        assert_eq!(dirty(&mut props), [0..99, 150..159, 299..300]);
+        assert_eq!(dirty(&mut props), []);
+    }
+
+    /// The P5 scheduler writes the entity `(visible, fade)` of each renderer into its row.
+    /// The row words carry them as the cull and surface shaders read them.
+    #[test]
+    fn rows_take_the_entity_lod_states() {
+        use crate::lod_tests::{LodInstance, LodOwner, LodSchedule, LodView, fixture::*};
+        struct Owner {
+            lod: LodInstance,
+            worlds: Vec<DMat4>,
+            // Row slot and static node visibility of each renderer node.
+            rows: Vec<(u32, bool)>,
+            // Entity path: (visible, material fade) of each renderer node.
+            entities: Vec<Option<(bool, f32)>>,
         }
+        impl LodOwner for Owner {
+            fn lod(&mut self) -> Option<(&mut LodInstance, &[DMat4])> {
+                Some((&mut self.lod, &self.worlds))
+            }
+        }
+        let mut random = Random(0x2545_f491_4f6c_dd1d);
+        let tables: Vec<_> = (0..10).map(|_| table(&mut random)).collect();
+        let mut props = GpuProps::default();
+        let mut owners = (0..40)
+            .map(|_| {
+                let mut worlds = vec![DMat4::IDENTITY; NODES];
+                place(&mut random, &mut worlds);
+                let rows = (0..NODES)
+                    .map(|_| {
+                        // Some static nodes are inactive.
+                        let active = random.next() < 0.9;
+                        (props.alloc(key(1), row(!active)), active)
+                    })
+                    .collect();
+                Owner {
+                    lod: LodInstance::new(tables[random.index(tables.len())].clone()),
+                    worlds,
+                    rows,
+                    entities: vec![None; NODES],
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut schedule = LodSchedule::default();
+        for (slot, owner) in owners.iter_mut().enumerate() {
+            schedule.spawn(&mut owner.lod, slot);
+        }
+        let mut view = LodView {
+            position: Vec3::ZERO,
+            fov_degrees: 60.0,
+            ortho_size: None,
+        };
+        let mut velocity = Vec3::ZERO;
+        let mut fading = 0;
+        for frame in 0..10_000 {
+            // Smooth paths with stops, turns, teleports, FOV changes and moving instances.
+            match random.index(200) {
+                0 => velocity = Vec3::ZERO,
+                1..=8 => {
+                    velocity = Vec3::new(random.range(-1.0, 1.0), 0.0, random.range(-1.0, 1.0))
+                        * random.range(0.0, 30.0)
+                }
+                9 => {
+                    view.position = Vec3::new(
+                        random.range(-600.0, 600.0),
+                        2.0,
+                        random.range(-600.0, 600.0),
+                    )
+                }
+                10 => view.fov_degrees = random.range(20.0, 90.0),
+                11 => {
+                    let slot = random.index(owners.len());
+                    place(&mut random, &mut owners[slot].worlds);
+                    schedule.queue(&mut owners[slot].lod, slot);
+                }
+                _ => {}
+            }
+            view.position += velocity * 0.016;
+            schedule.update(view, 1.0, 0, Some([0.0; 3]), &mut owners, |owner| {
+                for node in 0..NODES {
+                    let (visible, fade) = owner.lod.renderer(node);
+                    let (slot, active) = owner.rows[node];
+                    // The entity path: Visibility from the chain and LOD, `lod_fade` on the material.
+                    owner.entities[node] = Some((active && visible, fade));
+                    props.set_lod(slot, active, (visible, fade));
+                }
+            });
+            for owner in &owners {
+                for (node, &(slot, _)) in owner.rows.iter().enumerate() {
+                    let words = props.rows()[slot as usize].words();
+                    let row = (
+                        words[ROW_WORDS - 1] & ROW_HIDDEN == 0,
+                        f32::from_bits(words[15]),
+                    );
+                    assert_eq!(Some(row), owner.entities[node], "frame {frame} node {node}");
+                    fading += usize::from(row.0 && row.1 != 1.0);
+                }
+            }
+        }
+        assert!(fading > 10_000, "fixture has {fading} fading rows");
     }
 
     #[test]

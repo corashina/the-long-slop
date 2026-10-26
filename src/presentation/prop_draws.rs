@@ -9,7 +9,7 @@ use super::{
     surface_pass::SurfacePasses,
     surface_views::{SourceSurfaceView, VIEW_COUNT},
     view_frame::SourceViewFrame,
-    world::gpu_props::{NO_BATCH, PropBatch, ROW_WORDS},
+    world::gpu_props::{NO_BATCH, PropBatch, ROW_WORDS, word_batch},
 };
 use crate::presentation::shadow_scene::CasterKey;
 use bevy::material::{
@@ -48,6 +48,8 @@ const ARGS_BYTES: u64 = 20;
 const CULL_WORDS: usize = 32;
 /// Visible rows per pass. Eight words per view.
 const TOTAL_WORDS: usize = 8;
+/// More dirty ranges than this upload all rows. Fading rows give one range per few rows.
+const UPLOAD_RANGES: usize = 256;
 
 fn align(bytes: u64) -> u64 {
     bytes.div_ceil(ALIGN) * ALIGN
@@ -378,8 +380,9 @@ pub(crate) fn extract(mut main: ResMut<MainWorld>, mut draws: ResMut<PropDraws>)
                 *words = row.words();
             }
         }
-        // Ranges collect while the buffers wait. Many ranges become one full upload.
-        if draws.dirty.len() > 64 {
+        // Ranges collect while the buffers wait. Many ranges or rows become one full upload.
+        let covered = draws.dirty.iter().map(|r| r.len()).sum::<usize>();
+        if draws.full || draws.dirty.len() > UPLOAD_RANGES || 2 * covered > rows.len() {
             draws.dirty.clear();
             draws.full = true;
         }
@@ -645,7 +648,7 @@ impl PropDraws {
                 };
                 let mask = scene.masks[index].get(item).copied().unwrap_or(0);
                 self.mask_bytes[slot as usize] = mask;
-                let batch = self.words[slot as usize * ROW_WORDS + ROW_WORDS - 1];
+                let batch = word_batch(self.words[slot as usize * ROW_WORDS + ROW_WORDS - 1]);
                 if batch == NO_BATCH {
                     continue;
                 }

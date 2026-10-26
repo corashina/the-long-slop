@@ -13,7 +13,7 @@
 #import "shaders/source_lighting.wgsl"::object_light_mask
 #endif
 #ifdef SOURCE_GPU_PROPS
-#import source_props::{prop_world_from_local, prop_normal_local_to_world, prop_tangent_local_to_world}
+#import source_props::{prop_row, prop_world_from_local, prop_normal_local_to_world, prop_tangent_local_to_world}
 #endif
 
 struct SourceVertexOutput {
@@ -26,6 +26,10 @@ struct SourceVertexOutput {
     @location(10) source_fog: f32,
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
+#endif
+#ifdef SOURCE_GPU_PROPS
+    // The row LOD fade replaces the material `lod_fade`.
+    @location(13) @interpolate(flat) source_fade: f32,
 #endif
 #ifdef VERTEX_UVS_A
     @location(2) uv: vec2<f32>,
@@ -87,7 +91,9 @@ fn vertex(vertex_no_morph: Vertex, @location(8) bounds_center_usage: vec4<f32>, 
 
 #ifdef SOURCE_GPU_PROPS
     // A GPU prop row replaces the mesh uniform. GPU props are not skinned or morphed.
-    let mesh_world_from_local = prop_world_from_local(vertex_no_morph.instance_index);
+    let prop = prop_row(vertex_no_morph.instance_index);
+    let mesh_world_from_local = prop_world_from_local(prop);
+    out.source_fade = prop.fade;
 #else
     let mesh_world_from_local = mesh_functions::get_world_from_local(vertex_no_morph.instance_index);
 #endif

@@ -1,7 +1,7 @@
 #import bevy_pbr::{mesh_functions, mesh_bindings::mesh, forward_io::Vertex, pbr_bindings}
 #import bevy_render::maths::mat2x4_f32_to_mat3x3_unpack
 #ifdef SOURCE_GPU_PROPS
-#import source_props::{prop_world_from_local, prop_normal_local_to_world}
+#import source_props::{prop_row, prop_world_from_local, prop_normal_local_to_world}
 #endif
 #import source_caster_math::{caster_transform, caster_normal_bias, caster_clip_bias, caster_cutout_margin, caster_premultiplied_alpha, caster_dither_coordinate}
 
@@ -37,7 +37,8 @@ struct CasterOutput {
 @vertex
 fn vertex(input: Vertex) -> CasterOutput {
 #ifdef SOURCE_GPU_PROPS
-    let model = prop_world_from_local(input.instance_index);
+    // The caster ignores the LOD fade, as the entity caster does.
+    let model = prop_world_from_local(prop_row(input.instance_index));
     let position = caster_transform(model, vec4(input.position, 1.0));
     let normal = prop_normal_local_to_world(model, input.normal);
 #else

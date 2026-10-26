@@ -671,12 +671,12 @@ impl SourceInstances {
                                         );
                                     variant_ids.retain(|id| Some(id) != selected);
                                     // A static root renderer with one shared material can be a GPU prop row.
+                                    // A row takes its LOD state from the row data, so its material stays shared.
                                     let local = meshes
                                         .get(&mesh)
                                         .filter(|m| m.indices().is_some() && !m.has_morph_targets())
                                         .and_then(bevy::camera::primitives::MeshAabb::compute_aabb);
-                                    let row = !has_lod
-                                        && color.is_none()
+                                    let row = color.is_none()
                                         && variant_ids.is_empty()
                                         && node.skin.is_none()
                                         && flat.on_root(node.index as usize)
@@ -708,7 +708,7 @@ impl SourceInstances {
                                     if let Some(color) = color {
                                         materials.color(&mut binding, color)?;
                                     }
-                                    if has_lod {
+                                    if has_lod && !binding.gpu_props() {
                                         materials.make_private(&mut binding);
                                     }
                                     let material_source = selected.cloned();
@@ -736,6 +736,7 @@ impl SourceInstances {
                                                 layer: source_node.layer,
                                                 cast_shadows: record.cast_shadows,
                                                 hidden: true,
+                                                fade: 1.0,
                                                 batch: 0,
                                             },
                                         );
@@ -1504,6 +1505,14 @@ impl SourceInstances {
                     }
                     renderer.lod_state = Some(state);
                     let fade = state.1;
+                    let entity = match renderer.target {
+                        Target::Entity(entity) => entity,
+                        // The row data holds the visibility and fade.
+                        Target::Row { slot, .. } => {
+                            props.set_lod(slot, root && renderer.active, state);
+                            continue;
+                        }
+                    };
                     renderer.show(root, commands, props);
                     let source_position = instance.source_worlds
                         [prototype.nodes[renderer.node].gltf_node as usize]
@@ -1511,9 +1520,7 @@ impl SourceInstances {
                         .truncate()
                         * Vec3::new(1., 1., -1.);
                     materials.fade(&renderer.binding, fade, source_position);
-                    if let Some(entity) = renderer.entity() {
-                        grass.set_fade(entity, fade, &mut materials.grass);
-                    }
+                    grass.set_fade(entity, fade, &mut materials.grass);
                 }
             },
         );

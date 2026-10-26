@@ -5,9 +5,10 @@ struct PropRow {
     world_y: vec4<f32>,
     world_z: vec4<f32>,
     center: vec3<f32>,
-    flags: u32,
+    fade: f32,
     extents: vec3<f32>,
-    batch: u32,
+    // Batch above 8 flag bits.
+    key: u32,
 }
 struct PropBatch {
     first: u32,
@@ -35,7 +36,7 @@ struct CullView {
 @group(0) @binding(6) var<storage> masks: array<u32>;
 
 const PASSES: u32 = 5u;
-const NO_BATCH: u32 = 0xffffffffu;
+const NO_BATCH: u32 = 0xffffffu;
 const HIDDEN: u32 = 32u;
 const SHADOW_ONLY: u32 = 64u;
 
@@ -88,16 +89,18 @@ fn cull(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
     let i = id.x;
     if i < view.counts.y {
         let row = rows[i];
-        if row.batch != NO_BATCH {
-            if (row.flags & (HIDDEN | SHADOW_ONLY)) == 0u
-                && (view.counts.x & (1u << (row.flags & 31u))) != 0u
+        let batch = row.key >> 8u;
+        if batch != NO_BATCH {
+            // HIDDEN also holds the LOD selection.
+            if (row.key & (HIDDEN | SHADOW_ONLY)) == 0u
+                && (view.counts.x & (1u << (row.key & 31u))) != 0u
                 && intersects_camera(row.center, row.extents) {
-                append(0u, i, row.batch);
+                append(0u, i, batch);
             }
             let mask = masks[i / 4u] >> ((i % 4u) * 8u);
             for (var cascade = 0u; cascade < 4u; cascade++) {
                 if (mask & (1u << cascade)) != 0u {
-                    append(1u + cascade, i, row.batch);
+                    append(1u + cascade, i, batch);
                 }
             }
         }

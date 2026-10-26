@@ -114,9 +114,17 @@ fn fragment(
 #ifdef SOURCE_LAMPS
     @location(12) @interpolate(flat) source_lights: vec2<u32>,
 #endif
+#ifdef SOURCE_GPU_PROPS
+    @location(13) @interpolate(flat) source_fade: f32,
+#endif
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
-    if !source_lod_keep(in.position.xy, bitcast<f32>(receiver.y)) { discard; }
+#ifdef SOURCE_GPU_PROPS
+    let lod_fade = source_fade;
+#else
+    let lod_fade = bitcast<f32>(receiver.y);
+#endif
+    if !source_lod_keep(in.position.xy, lod_fade) { discard; }
 #ifdef SOURCE_GPU_PROPS
     // Same fields as pbr_input_from_vertex_output, without the mesh uniform flags.
     var pbr = pbr_types::pbr_input_new();
