@@ -329,6 +329,7 @@ impl BodyState {
             .chain(&targets)
             .chain(p.walk_paths.iter().flatten())
             .chain(p.sit_poses.iter().flatten())
+            .chain(clothing.ragdoll.pose.pairs.iter().map(|pair| &pair.live))
             .chain(p.ik_chains.iter().flat_map(|c| {
                 c.bones
                     .iter()
@@ -718,6 +719,11 @@ impl BodyState {
     /// `CharacterRoot` relative to the Player.
     pub fn root_local(&self) -> VehiclePose {
         vehicle_pose(&self.rig.world[self.character_root])
+    }
+    /// Rig node relative to the Player. The rig holds the skin joints and the ragdoll pose nodes.
+    pub fn node_local(&self, node: NodeId) -> Option<Frame> {
+        let i = self.rig.ids.iter().position(|id| *id == node)?;
+        Some(self.rig.world[i])
     }
 }
 
