@@ -12,6 +12,8 @@ use rapier3d::prelude::{
 struct BodyRecipe {
     builder: RigidBodyBuilder,
     pose: Pose,
+    /// Source `setcenterofmass` center in the body frame.
+    center_of_mass: Option<Vector>,
 }
 struct ColliderRecipe {
     source: SourceId,
@@ -185,6 +187,7 @@ impl StructureRecipe {
                     position: std::array::from_fn(|i| body.pose.translation[i] * scale[i]),
                     rotation: body.pose.rotation,
                 }),
+                center_of_mass: body.center_of_mass.map(Vector::from_array),
             });
         }
         let mut colliders = Vec::with_capacity(prototype.colliders.len());
@@ -305,6 +308,19 @@ impl StructureRecipe {
                 roles.0.insert(handle, role);
             }
             colliders.push((source.source.clone(), handle));
+        }
+        for (recipe, &handle) in self.bodies.iter().zip(&bodies) {
+            let Some(center) = recipe.center_of_mass else {
+                continue;
+            };
+            // PhysX keeps the inertia of the collider shapes and moves only the center of mass.
+            physics.recompute_body_mass(handle);
+            physics.edit_body(handle, |body| {
+                let mut properties = body.mass_properties().local_mprops;
+                properties.local_com = center;
+                body.set_additional_mass_properties(properties, false);
+            });
+            physics.recompute_body_mass(handle);
         }
         physics.refresh_queries();
         Ok(StructureInstance {
