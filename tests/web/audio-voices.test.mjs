@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VoiceBank,CAR_KIND,CAR_ROUTE} from '../../web/audio/voices.js';
+import {VoiceBank,CAR_KIND,CAR_ROUTE,VOICE_KIND} from '../../web/audio/voices.js';
 
 const param=()=>({value:0});
 class Node {constructor(){this.gain=param();this.pan=param();this.playbackRate=param();for(const n of ['positionX','positionY','positionZ'])this[n]=param();}connect(){}disconnect(){}start(){this.started=true;}stop(t){this.stopAt=t;}}
@@ -51,4 +51,13 @@ test('car_voice_loops_follow_their_car_route',async()=>{
  assert.deepEqual(b.effects.map(s=>[s.mixer,s.survivalLoop,s.pitch]),[[2,true,1.2],[1,true,1]],'each car instance keeps its own loop and route');
  b.begin();b.survival(CAR_KIND+1,7,1,1,.5,1.2,3,0,0);b.finish();
  assert.deepEqual(b.effects.map(s=>s.playing),[true,false],'a loop that the frame does not name stops');
+});
+
+test('voice_instances_loop_apart_from_car_routes',async()=>{
+ const voice={...settings,curves:undefined,id:5,emitter:1,clip:1,loop:true,mixer:3,min_distance:0,max_distance:1500};
+ const b=new VoiceBank(new Context(),{...raw,voices:[voice]},{effect:async()=>({duration:.5})},new Map(raw.mixers.map(m=>[m.id,new Node()])),()=>1,()=>true,error=>{throw error;});
+ b.begin();b.route(CAR_ROUTE+1,2);
+ b.survival(VOICE_KIND+5,1,1,1,.2,.75,0,0,0);b.survival(VOICE_KIND+5,2,1,1,.2,.75,3,0,0);await tick();
+ assert.deepEqual(b.effects.map(s=>[s.playing,s.mixer]),[[true,3],[true,3]],'two instances of one voice play on the voice mixer');
+ assert.ok(Number.isFinite(b.effects[0].gain.gain.value)&&Number.isFinite(b.effects[0].wet.gain.value),'linear rolloff from distance 0 is finite');
 });
