@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use simulation::boundary::{
     Change, Handle, ItemRow, ParticleGroupRow, ParticleRow, PoseKey, PoseRow, SimFrame, SpawnData,
 };
-use simulation::reference::{ItemId, NodeId};
+use simulation::conditions::ConditionState;
+use simulation::reference::{ConditionId, ItemId, NodeId};
 use simulation::starting_area::spawned::SpawnedItem;
 use simulation::vehicle::VehiclePose;
 use std::collections::HashMap;
@@ -26,11 +27,19 @@ pub(crate) struct SimFrameResource {
     rig: Vec<NodeId>,
     spawned: Vec<SpawnedItem>,
     particle_groups: HashMap<ParticleGroupKey, usize>,
+    conditions: HashMap<ConditionId, ConditionState>,
+    /// Owners whose condition changed since the visuals last read them.
+    pub changed_conditions: Vec<ConditionId>,
 }
 
 impl SimFrameResource {
     /// Applies the frame changes to the pose index. Calls `retired` for each dropped handle.
     pub fn apply_changes(&mut self, mut retired: impl FnMut(Handle)) {
+        for row in &self.frame.conditions {
+            let id = ConditionId(row.id);
+            self.conditions.insert(id, row.startup());
+            self.changed_conditions.push(id);
+        }
         for change in &self.frame.changes {
             match change {
                 Change::Spawn { handle, key, data } => {
@@ -54,6 +63,9 @@ impl SimFrameResource {
                 Change::Failure(_) => {}
             }
         }
+    }
+    pub fn condition(&self, id: ConditionId) -> &ConditionState {
+        &self.conditions[&id]
     }
     /// Indexes the particle groups of a new frame.
     pub fn index_particles(&mut self) {

@@ -3,9 +3,10 @@ use super::{
     materials::{self, SourceMaterial, SourceMaterials},
     reference::ReferenceVisuals,
     renderer_visibility::{SourceMaterialWarmup, SourceRenderer, SourceSortData},
+    sim_frame::SimFrameResource,
 };
 use crate::{
-    app::{Drive, RuntimeReference},
+    app::RuntimeReference,
     conditions::{ConditionState, ConditionStore},
     reference::{ConditionId, ConditionSurface, ReferenceManifest},
     save::SaveError,
@@ -377,26 +378,16 @@ fn prepare(
         result.sprays.push((tool.item, receivers));
     }
     result.prepared = true;
+    world
+        .resource_mut::<SimFrameResource>()
+        .changed_conditions
+        .clear();
     for owner in &result.owners {
-        let state = *world
-            .resource::<Drive>()
-            .runtime
-            .area
-            .conditions
-            .get(owner.id);
+        let state = *world.resource::<SimFrameResource>().condition(owner.id);
         apply_owner(owner, &state, result.bank, world);
     }
-    for (item, receivers) in &result.sprays {
-        let color = world
-            .resource::<Drive>()
-            .runtime
-            .area
-            .interaction
-            .cleaning
-            .get(*item)
-            .unwrap()
-            .color
-            .unwrap();
+    for (index, (_, receivers)) in result.sprays.iter().enumerate() {
+        let color = world.resource::<SimFrameResource>().frame.spray_colors[index];
         apply_spray(receivers, color, result.bank, world, true);
     }
     result.apply_visibility(world);
@@ -546,11 +537,11 @@ impl ConditionVisuals {
     }
     fn apply_visibility(&self, world: &mut World) {
         // Retained identities are hidden; source destruction never removes a binding.
-        for (id, objects) in &self.washes {
-            let state = *world.resource::<Drive>().runtime.area.conditions.wash(*id);
+        for (index, (_, objects)) in self.washes.iter().enumerate() {
+            let visible = world.resource::<SimFrameResource>().frame.washes[index] != 0;
             for &entity in objects {
                 if let Some(mut v) = world.get_mut::<Visibility>(entity) {
-                    v.set_if_neq(if state.visible() {
+                    v.set_if_neq(if visible {
                         Visibility::Inherited
                     } else {
                         Visibility::Hidden
@@ -559,14 +550,7 @@ impl ConditionVisuals {
             }
         }
         for (id, model, disabled) in &self.tools {
-            let worn = world
-                .resource::<Drive>()
-                .runtime
-                .area
-                .conditions
-                .get(*id)
-                .state
-                == 5;
+            let worn = world.resource::<SimFrameResource>().condition(*id).state == 5;
             for (entity, show) in [(model, true), (disabled, !worn)] {
                 if let Some(entity) = entity {
                     if let Some(mut v) = world.get_mut::<Visibility>(*entity) {
@@ -655,15 +639,13 @@ pub(crate) fn sync_conditions(world: &mut World) {
     world.resource_scope(|world, visuals: Mut<ConditionVisuals>| {
         loop {
             let id = world
-                .resource_mut::<Drive>()
-                .runtime
-                .area
-                .conditions
-                .take_changed();
+                .resource_mut::<SimFrameResource>()
+                .changed_conditions
+                .pop();
             let Some(id) = id else {
                 break;
             };
-            let state = *world.resource::<Drive>().runtime.area.conditions.get(id);
+            let state = *world.resource::<SimFrameResource>().condition(id);
             apply_owner(
                 &visuals.owners[visuals.indices[&id]],
                 &state,
@@ -671,17 +653,8 @@ pub(crate) fn sync_conditions(world: &mut World) {
                 world,
             );
         }
-        for (item, receivers) in &visuals.sprays {
-            let color = world
-                .resource::<Drive>()
-                .runtime
-                .area
-                .interaction
-                .cleaning
-                .get(*item)
-                .unwrap()
-                .color
-                .unwrap();
+        for (index, (_, receivers)) in visuals.sprays.iter().enumerate() {
+            let color = world.resource::<SimFrameResource>().frame.spray_colors[index];
             apply_spray(receivers, color, visuals.bank, world, false);
         }
         visuals.apply_visibility(world);
@@ -691,13 +664,7 @@ pub(crate) fn sync_conditions(world: &mut World) {
         );
         for (index, (_, model, _)) in visuals.tools.iter().enumerate() {
             let Some(model) = model else { continue };
-            let pose = world
-                .resource::<Drive>()
-                .runtime
-                .area
-                .interaction
-                .cleaning
-                .model_pose(index, &world.resource::<Drive>().runtime.area.items);
+            let pose = world.resource::<SimFrameResource>().frame.brush_poses[index].pose();
             let mut parent = world.get::<ChildOf>(*model).map(|p| p.parent());
             let mut basis = Affine3A::IDENTITY;
             while let Some(entity) = parent {

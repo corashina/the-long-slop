@@ -202,6 +202,9 @@ impl ConditionStore {
             }
         }
     }
+    pub fn iter(&self) -> impl Iterator<Item = (ConditionId, &ConditionState)> {
+        self.records.iter().map(|r| r.id).zip(&self.states)
+    }
     pub fn take_changed(&mut self) -> Option<ConditionId> {
         let id = self.dirty.pop_front()?;
         self.queued[self.indices[&id]] = false;

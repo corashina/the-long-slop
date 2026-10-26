@@ -1,6 +1,8 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
-use crate::boundary::{CigaretteRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow};
+use crate::boundary::{
+    CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock, ValveRow,
+};
 use crate::interaction::cigarettes::EmberPhase;
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ItemId, ReferenceManifest};
@@ -83,6 +85,7 @@ impl GarageRuntime {
                 }
             }));
         self.fill_particles(reference, frame);
+        self.fill_conditions(reference, frame);
         frame.planes.clear();
         frame
             .planes
@@ -111,6 +114,39 @@ impl GarageRuntime {
             .extend_from_slice(lighting.visibility_outputs());
         self.frame_poses
             .fill(reference, &self.area, &self.physics, frame);
+    }
+    fn fill_conditions(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
+        let store = &mut self.area.conditions;
+        frame.conditions.clear();
+        if self.conditions_sent {
+            while let Some(id) = store.take_changed() {
+                frame.conditions.push(ConditionRow::new(id, store.get(id)));
+            }
+        } else {
+            while store.take_changed().is_some() {}
+            frame
+                .conditions
+                .extend(store.iter().map(|(id, s)| ConditionRow::new(id, s)));
+            self.conditions_sent = true;
+        }
+        frame.washes.clear();
+        frame
+            .washes
+            .extend(store.washes.iter().map(|w| u8::from(w.visible())));
+        let cleaning = &self.area.interaction.cleaning;
+        frame.brush_poses.clear();
+        frame.brush_poses.extend(
+            (0..reference.conditions.brushes.len())
+                .map(|i| PoseRow::new(cleaning.model_pose(i, &self.area.items), 0)),
+        );
+        frame.spray_colors.clear();
+        frame.spray_colors.extend(
+            reference
+                .conditions
+                .sprays
+                .iter()
+                .map(|t| cleaning.get(t.item).unwrap().color.unwrap()),
+        );
     }
     /// The renderer dropped a retired pose handle.
     pub fn release_pose(&mut self, handle: Handle) {
