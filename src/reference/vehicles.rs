@@ -167,6 +167,7 @@ impl PedalsReference {
             self.gas_tap,
         ]) && self.ratio > 0.
             && self.input_debounce >= 0.
+            && self.driven_wheels.len() <= crate::simulation::pedals::MAX_WHEELS
             && self.driven_wheels.iter().all(|i| (*i as usize) < wheels)
             && (self.seat as usize) < seats
             && b.nodes(&self.driven_slots)

@@ -1477,6 +1477,39 @@ impl SourceInstances {
                 };
                 instance.write_local(transforms, node.gltf_node as usize, pose, frame.origin)?;
             }
+            // Source `bikepedalscript.UpdPedals`: turned pedals and level feet holders.
+            if let Some((record, vehicle)) = car
+                && let Some(r) = &record.pedals
+                && vehicle.pedal_angle != 0.
+            {
+                use crate::simulation::pedals::{feet_holder_rotation, turned};
+                let angle = vehicle.pedal_angle;
+                let rest = |n: u32| prototype.nodes[n as usize].transform.rotation;
+                let pedals = r.pedals.iter().map(|&n| (n, turned(rest(n), angle)));
+                let inverse = r
+                    .pedals_inverse
+                    .iter()
+                    .map(|&n| (n, turned(rest(n), -angle)));
+                let holders = r
+                    .feet_holders
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| (n, feet_holder_rotation(&prototype.nodes, r, angle, i)));
+                for (n, rotation) in pedals.chain(inverse).chain(holders) {
+                    let node = &prototype.nodes[n as usize];
+                    let pose = Transform {
+                        translation: Vec3::from_array(node.transform.translation),
+                        rotation: Quat::from_array(rotation.to_array()),
+                        scale: Vec3::from_array(node.transform.scale),
+                    };
+                    instance.write_local(
+                        transforms,
+                        node.gltf_node as usize,
+                        pose,
+                        frame.origin,
+                    )?;
+                }
+            }
             if let Some(trigger) = stream.spray_trigger(&instance.placement.id)
                 && let Some(n) = prototype
                     .nodes

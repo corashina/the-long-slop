@@ -140,7 +140,7 @@ impl SeatValues {
 struct Occupancy {
     /// The item that holds the seat. Its part cannot be taken while the player sits on it.
     item: ItemId,
-    /// Main seatscript of an item seat. Car seats have none.
+    /// Main seatscript of the seat.
     source: Option<crate::reference::SourceId>,
     owner: SeatOwner,
     /// Owner body, resolved on enter and restore.
@@ -857,6 +857,12 @@ impl PlayerState {
             .as_ref()
             .filter(|seat| matches!(seat.owner, SeatOwner::Item(_)))
             .map(|seat| seat.body)
+    }
+    /// The main seatscript of the occupied seat.
+    pub fn seat_source(&self) -> Option<&crate::reference::SourceId> {
+        self.occupancy
+            .as_ref()
+            .and_then(|seat| seat.source.as_ref())
     }
     /// The main seatscript of the occupied item seat. Car seats return `None`.
     pub fn item_seat_source(&self) -> Option<&crate::reference::SourceId> {

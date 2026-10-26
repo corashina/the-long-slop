@@ -77,6 +77,7 @@ fn drive(
     let torques = DriveTorques {
         motor_nm,
         engine_brake_nm: 0.,
+        pedal_nm: None,
     };
     for _ in 0..(seconds / FIXED_DT) as usize {
         for key in keys {

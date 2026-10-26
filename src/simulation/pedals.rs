@@ -1,7 +1,11 @@
 //! Source `bikepedalscript.Update()`: pedal gas, pedal rpm and wheel torque.
 
-use crate::reference::PedalsReference;
+use crate::reference::{PedalsReference, WorldPrototypeNode};
 use crate::simulation::dials::{inverse_lerp, lerp};
+use rapier3d::math::Rotation;
+
+/// Most `WHDriven` wheels. The car step keeps their rpm in a fixed buffer.
+pub const MAX_WHEELS: usize = 8;
 
 /// Source `mainscript.minWheelMotorTorque`.
 const MIN_WHEEL_MOTOR_TORQUE: f32 = 0.;
@@ -71,6 +75,52 @@ pub fn step(
         torque: (!disabled).then(|| MIN_WHEEL_MOTOR_TORQUE.max(state.output)),
         angle: state.rpm * reference.speed_modifier * dt * reference.axes.len() as f32,
     }
+}
+
+/// Local rotation of a pedal node turned `angle` degrees by Unity `Rotate(angle, 0, 0)`.
+/// Unity local +x converts to -x.
+pub fn turned(rest: [f32; 4], angle: f32) -> Rotation {
+    Rotation::from_array(rest) * Rotation::from_rotation_x(-angle.to_radians())
+}
+
+/// Root-relative rotation of `node` with pedals turned by `angle` and inverse pedals by `-angle`.
+pub fn posed_rotation(
+    nodes: &[WorldPrototypeNode],
+    reference: &PedalsReference,
+    angle: f32,
+    mut node: u32,
+) -> Rotation {
+    let mut rotation = Rotation::IDENTITY;
+    while let Some(parent) = nodes[node as usize].parent {
+        let rest = nodes[node as usize].transform.rotation;
+        let local = if reference.pedals.contains(&node) {
+            turned(rest, angle)
+        } else if reference.pedals_inverse.contains(&node) {
+            turned(rest, -angle)
+        } else {
+            Rotation::from_array(rest)
+        };
+        rotation = local * rotation;
+        node = parent;
+    }
+    rotation
+}
+
+/// Source `UpdPedals` feet holder: world rotation `LookRotation(axis.forward, axis.up)`,
+/// which is the axis rotation. Returns the local rotation under the holder parent.
+pub fn feet_holder_rotation(
+    nodes: &[WorldPrototypeNode],
+    reference: &PedalsReference,
+    angle: f32,
+    holder: usize,
+) -> Rotation {
+    let axis = reference.axes[reference.axis_index[holder] as usize];
+    let parent = nodes[reference.feet_holders[holder] as usize]
+        .parent
+        .map_or(Rotation::IDENTITY, |p| {
+            posed_rotation(nodes, reference, angle, p)
+        });
+    (parent.inverse() * posed_rotation(nodes, reference, angle, axis)).normalize()
 }
 
 #[cfg(test)]

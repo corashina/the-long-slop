@@ -152,6 +152,7 @@ fn world_car_headlights_switch_and_gauges_read_rpm_and_speed() {
         let torque = DriveTorques {
             motor_nm: 1600.,
             engine_brake_nm: 0.,
+            pedal_nm: None,
         };
         physics.apply_vehicle_forces(&key, throttle, torque);
         physics.step_physics();
