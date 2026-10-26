@@ -86,7 +86,7 @@ Run these checks in the section 3 test pass on Tomasz's PC:
 
 Run these checks in the section 4 test pass on Tomasz's PC:
 
-1. Re-export, then rebuild. Old exports and saves do not load (V04 changed wheel slots, world bodies and the save schema).
+1. Re-export, then rebuild. Old exports and saves do not load (V04 changed wheel slots, world bodies and the save schema). V06 added wheel effect, skid, lever, mouse driving and steering wheel records.
 2. Run `cargo test --lib item_seat -- --ignored` and `cargo test --lib sled -- --ignored`.
 3. Sit on the WC and on each sled seat. Stand up. Check the view limits and the prompt.
 4. Sled (V04): slide down a slope, steer, reverse, stop. Check the slide sound follows speed and stops in the air. Load the sled with items above its slide mass: it slides without a rider.
@@ -96,6 +96,11 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 8. Loader (V03 PR 1): New game. The Lada stands at its garage spot. Drive it, use lights, gauges, radio, horn, wheels off and on, cargo in the trunk. Save and load.
 9. Run `cargo test --lib two_ladas -- --ignored` and `cargo test --lib installed_lada -- --ignored`.
 10. Drive the Lada far from the garage and back: it must not vanish. Check F3 at the start and while driving.
+11. Gear lever (V06): the Lada lever moves through each gear in manual and automatic.
+12. Wheel effects (V06): dust on sand and none on asphalt, grass trails, rolling, spring and skid sounds, smoke and sand bursts while skidding.
+13. Mouse driving (V06): U toggles it in the car. Mouse X steers, mouse up is gas, down is brake, mouse look is off.
+14. Steering wheel (V06): with a real wheel or pad, bind every axis and gear button. Check H-shifter on and off and the live values. Steer a sled with the pad.
+15. Check F3 before and after, driving on sand at speed. Compare with the frame rate rule.
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
@@ -103,7 +108,6 @@ Run these checks in the section 4 test pass on Tomasz's PC:
 | V03 | Add buses. [Vehicles](docs/vehicles.md) | XL | Loader done (PR 1). Diesel rules, three buses, gauges, doors, door lamps, bus trailer. [B05, B08-B11, B19] |
 | V04 | Add bikes. | XL | Motorcycle balance and kick start, pedal bicycle. Builds on the V03 loader. [B12, B13] |
 | V05 | Add towing. | L | Trailers, hitch, trailer lights and brakes, rope towing. [B15, B16] |
-| V06 | Complete driving input and effects. | M | Gear stick animation, mouse driving, wheel and joystick axes, wheel dust and ground sounds. [B18, B20-B22] |
 
 ## 5. Later
 
