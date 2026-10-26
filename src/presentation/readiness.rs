@@ -5,7 +5,7 @@ use super::{
     surface_views::SourceSurfaceView,
     view_frame::{SourceSceneEpoch, SourceSubmissionAcks, SourceViewClock, SourceViewFrame},
 };
-use crate::{render_readiness::*, render_scale::SceneScale};
+use crate::{render_readiness::*, render_scale::SceneScaleSetting};
 use bevy::ecs::system::SystemParam;
 use bevy::render::{RenderApp, renderer::RenderQueue};
 use bevy::window::PrimaryWindow;
@@ -45,7 +45,7 @@ pub(crate) struct RendererReadinessAccess<'w, 's> {
     clock: Res<'w, SourceViewClock>,
     submissions: Res<'w, SourceSubmissionAcks>,
     activation: Res<'w, ProbeActivation>,
-    scale: Res<'w, SceneScale>,
+    scale: Res<'w, SceneScaleSetting>,
     cameras: Query<'w, 's, (&'static SourceSurfaceView, &'static Camera)>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
 }
@@ -77,8 +77,8 @@ impl RendererReadinessAccess<'_, '_> {
                 session: key.session,
                 scene: self.epoch.0,
                 native_extent: native.to_array(),
-                scene_extent: self.scale.extent(native.to_array()),
-                scale: *self.scale,
+                scene_extent: self.scale.0.extent(native.to_array()),
+                scale: self.scale.0,
             },
             selection_revision: key.selection_revision,
             probe_mask: self

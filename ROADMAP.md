@@ -2,7 +2,7 @@
 
 Updated: 2026-10-26. Goal: recreate The Long Drive for the web.
 Behavior authority: Steam build `11140890` and its decompiled code in `.cache/reference-library/decompiled/managed/Assembly-CSharp.cs`.
-Save format authority: [save schema](src/save/schema.rs).
+Save format authority: [save schema](crates/simulation/src/save/schema.rs).
 
 ## Frame rate rule
 
@@ -154,10 +154,18 @@ Run the X01a test pass (player body) in the same run:
 5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
 6. Check the F3 cost of the body.
 
+Run the X02 part 1 test pass (damage and breaking) in the same run:
+
+1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
+2. Run `cargo test --lib breakables -- --ignored`.
+3. Drop and throw beer bottles, the vase and a box. Soft drops keep them whole. Hard hits break them with pieces and a break sound. The pieces scatter and fade.
+4. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
+5. Check F3 near a box pile and while pieces fall. Compare with the frame rate rule.
+
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
-| X02 | Weapons and damage | XL | Damage model, guns, ammo, melee, explosions, hit effects, gibs, wounds, explosive fluids, lamps that break when hit. [G01-G11, E04, C06, I12] |
+| X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, flyers, airplanes, UFO, EMP. [H01-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
