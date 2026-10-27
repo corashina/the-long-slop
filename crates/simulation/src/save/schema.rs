@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 28;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 28;
+pub const SAVE_SCHEMA_VERSION: u32 = 29;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 29;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -44,7 +44,7 @@ pub struct SaveSnapshot {
     pub spawned: Vec<SpawnedItemSnapshot>,
     /// Runtime food copies.
     pub foods: Vec<FoodItemSnapshot>,
-    /// Pack counts, cigarette burn state, and the mouth slot.
+    /// Pack counts and cigarette burn state.
     pub cigarettes: CigarettesSnapshot,
     /// Source save_sandstorm and the storm spawner timer.
     pub weather: WeatherSnapshot,
@@ -77,7 +77,6 @@ pub struct StormSnapshot {
 pub struct CigarettesSnapshot {
     pub packs: Vec<PackSnapshot>,
     pub cigarettes: Vec<CigaretteSnapshot>,
-    pub mouth: Option<u32>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -227,6 +226,17 @@ pub struct InventorySnapshot {
     pub slots: [Option<InstanceId>; 4],
     pub selected: u8,
     pub equipped: Option<InstanceId>,
+    /// Worn items, indexed by `wearableType`.
+    pub worn: [Option<WornSnapshot>; 5],
+}
+/// One worn item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WornSnapshot {
+    /// A source or generated item.
+    Item { item: InstanceId },
+    /// A spawned item, named by its spawn serial.
+    Spawned { serial: u32 },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -427,7 +437,7 @@ mod g04_ordered_state {
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
-            6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29,
+            6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
@@ -439,11 +449,44 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 28 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 29 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":28}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":29}"#),
             Err(SaveError::CorruptData(_))
         ));
+    }
+
+    #[test]
+    fn worn_hat_and_cigarette_round_trip() {
+        let hat = InstanceId::Generated {
+            id: crate::world::GeneratedId {
+                layer: crate::world::WorldLayer::Building,
+                generator: crate::reference::SourceId {
+                    file: "level0".into(),
+                    path_id: i64::MIN + 1,
+                },
+                unit: [3, -4],
+                ordinal: 5,
+                children: vec![],
+            },
+        };
+        let inventory = InventorySnapshot {
+            slots: [None, None, None, None],
+            selected: 0,
+            equipped: None,
+            worn: [
+                None,
+                Some(WornSnapshot::Item { item: hat }),
+                None,
+                None,
+                Some(WornSnapshot::Spawned { serial: 3 }),
+            ],
+        };
+        let json = serde_json::to_string(&inventory).unwrap();
+        assert_eq!(
+            serde_json::from_str::<InventorySnapshot>(&json).unwrap(),
+            inventory
+        );
     }
 
     #[test]

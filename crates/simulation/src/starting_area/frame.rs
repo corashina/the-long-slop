@@ -52,9 +52,9 @@ impl GarageRuntime {
                 .is_some_and(|s| s.ember.phase != EmberPhase::Start)
         };
         // One ember light: the worn cigarette, then the held one, then any lit one.
-        let ember_light = c
-            .mouth
-            .item
+        let ember_light = area
+            .wear
+            .item(c.mouth_slot)
             .filter(lit)
             .or(area.interaction.held().filter(lit))
             .or_else(|| c.cigarettes.iter().map(|(id, _)| *id).find(lit));
