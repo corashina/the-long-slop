@@ -11,6 +11,7 @@ pub mod gpu_prepare;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod outfit;
 pub mod player_body;
 pub mod ragdoll;
 pub mod reference;
