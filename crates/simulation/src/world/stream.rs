@@ -120,12 +120,6 @@ struct RoadWork {
     completed: bool,
     canceled: bool,
 }
-#[derive(Clone, Copy)]
-struct PrototypeAllocation {
-    cpu: usize,
-    gpu: usize,
-    ready: bool,
-}
 
 /// Source world publication and session ownership.
 pub struct WorldStream {
@@ -283,7 +277,8 @@ pub struct WorldStream {
     surfaces: Vec<PublishedSurface>,
     ready: Option<PreparedSurface>,
     terrain_execution: TerrainExecution,
-    admissions: HashMap<SourceId, PrototypeAllocation>,
+    /// Prototypes the renderer holds. True when bound. Their bytes are renderer credit.
+    prototype_holds: HashMap<SourceId, bool>,
     terrain_ready: [bool; 3],
     shared_cpu_bytes: Option<usize>,
     publication_available: bool,
@@ -944,7 +939,7 @@ impl WorldStream {
             surfaces: Vec::new(),
             ready: None,
             terrain_execution: TerrainExecution::default(),
-            admissions: HashMap::new(),
+            prototype_holds: HashMap::new(),
             terrain_ready: [false; 3],
             shared_cpu_bytes: Some(shared_cpu_bytes),
             publication_available: false,
@@ -1295,29 +1290,11 @@ impl WorldStream {
         }
         std::mem::take(&mut self.publication_available)
     }
-    /// Decoded headroom excludes the table and key needed to own a new prototype.
-    #[cfg(target_arch = "wasm32")]
-    pub fn prototype_headroom(&self, source: &SourceId) -> usize {
-        let owner = if self.admissions.contains_key(source) {
-            0
-        } else {
-            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity()
-        };
-        self.available_prototype_cpu_bytes().saturating_sub(owner)
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn available_prototype_cpu_bytes(&self) -> usize {
-        PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
-    }
-    /// Reserve decoded bytes before loading an admitted prototype or terrain material.
-    pub fn reserve_prototype(
-        &mut self,
-        source: SourceId,
-        cpu: usize,
-        gpu: usize,
-    ) -> Result<(), ReferenceError> {
-        if self.admissions.contains_key(&source) {
-            return Ok(());
+    /// Holds a prototype for the renderer. True when the hold is new.
+    /// The stream charges only its own table entry and the road prototype data.
+    pub fn hold_prototype(&mut self, source: SourceId) -> Result<bool, ReferenceError> {
+        if self.prototype_holds.contains_key(&source) {
+            return Ok(false);
         }
         let road_index = self
             .reference
@@ -1335,17 +1312,13 @@ impl WorldStream {
                     .expect("validated road prototype")
             });
         let road_bytes = road_input.map_or(0, super::road::road_prototype_bytes);
-        let current = self.metrics();
         let owner_bytes =
-            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity();
-        if current
+            super::metrics::map_insert_bytes(&self.prototype_holds) + source.file.capacity();
+        if self
+            .metrics()
             .prototype_cpu_bytes
-            .checked_add(cpu.saturating_add(owner_bytes).saturating_add(road_bytes))
+            .checked_add(owner_bytes.saturating_add(road_bytes))
             .is_none_or(|v| v > PROTOTYPE_CPU)
-            || current
-                .prototype_gpu_bytes
-                .checked_add(gpu)
-                .is_none_or(|v| v > PROTOTYPE_GPU)
         {
             return Err(ReferenceError(format!(
                 "Source prototype budget {}:{}",
@@ -1359,62 +1332,21 @@ impl WorldStream {
                 .ok_or_else(|| ReferenceError("Road source revision exhausted".into()))?;
             self.road_prototypes[index] = Some(super::road::road_prototype(prototype));
         }
-        self.admissions.insert(
-            source,
-            PrototypeAllocation {
-                cpu,
-                gpu,
-                ready: false,
-            },
-        );
-        Ok(())
-    }
-    /// Replace a loader reservation with its retained allocation before binding.
-    pub fn resize_prototype(
-        &mut self,
-        source: &SourceId,
-        cpu: usize,
-        gpu: usize,
-    ) -> Result<(), ReferenceError> {
-        let old = *self
-            .admissions
-            .get(source)
-            .ok_or_else(|| ReferenceError("Missing prototype reservation".into()))?;
-        let current = self.metrics();
-        if current
-            .prototype_cpu_bytes
-            .saturating_sub(old.cpu)
-            .saturating_add(cpu)
-            > PROTOTYPE_CPU
-            || current
-                .prototype_gpu_bytes
-                .saturating_sub(old.gpu)
-                .saturating_add(gpu)
-                > PROTOTYPE_GPU
-        {
-            return Err(ReferenceError(
-                "Prototype allocation exceeds its resource budget".into(),
-            ));
-        }
-        *self.admissions.get_mut(source).unwrap() = PrototypeAllocation {
-            cpu,
-            gpu,
-            ready: old.ready,
-        };
-        Ok(())
+        self.prototype_holds.insert(source, false);
+        Ok(true)
     }
     /// Renderer credit: the renderer share of the budgets.
     pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
     }
     pub fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
-        let allocation = self.admissions.get_mut(source).ok_or_else(|| {
+        let bound = self.prototype_holds.get_mut(source).ok_or_else(|| {
             ReferenceError(format!(
-                "Unreserved source binding {}:{}",
+                "Unheld source binding {}:{}",
                 source.file, source.path_id
             ))
         })?;
-        allocation.ready = true;
+        *bound = true;
         for (tier, material) in self.reference.terrain.materials.iter().enumerate() {
             if &material.source == source {
                 self.terrain_ready[tier] = true;
@@ -1471,7 +1403,7 @@ impl WorldStream {
             }
             self.road_prototypes[index] = None;
         }
-        self.admissions.remove(source);
+        self.prototype_holds.remove(source);
         self.recipes.remove(source);
         Ok(())
     }
@@ -3102,9 +3034,9 @@ impl WorldStream {
             .segment;
         let owner = segment.biome as usize;
         if !self
-            .admissions
+            .prototype_holds
             .get(&self.reference.road.prototypes[owner])
-            .is_some_and(|a| a.ready)
+            .is_some_and(|bound| *bound)
         {
             return;
         }
@@ -3590,7 +3522,7 @@ impl WorldStream {
             return self.publish_structure(physics, required_lights);
         };
         let admitted = match &work.published.prototype {
-            Some(source) => self.admissions.get(source).is_some_and(|v| v.ready),
+            Some(source) => self.prototype_holds.get(source).is_some_and(|bound| *bound),
             None => self.terrain_ready[layer_tier(work.published.key.layer)],
         };
         if !admitted || !work.renderer_ready || !self.road_publication_valid(work) {
@@ -4086,11 +4018,7 @@ impl WorldStream {
         if self.recipes.contains_key(source) {
             return Ok(());
         }
-        if !self
-            .admissions
-            .get(source)
-            .is_some_and(|allocation| allocation.ready)
-        {
+        if !self.prototype_holds.get(source).is_some_and(|bound| *bound) {
             return Err(ReferenceError(
                 "Structure material binding is not ready".into(),
             ));
@@ -5055,10 +4983,10 @@ impl WorldStream {
                 + self.roads.retained_index_bytes()
                 + self.placements.retained_index_bytes(),
             prototype_cpu_bytes: super::metrics::map_bytes(
-                self.admissions.capacity(),
-                std::mem::size_of::<(SourceId, PrototypeAllocation)>(),
+                self.prototype_holds.capacity(),
+                std::mem::size_of::<(SourceId, bool)>(),
             ) + self
-                .admissions
+                .prototype_holds
                 .keys()
                 .map(|id| id.file.capacity())
                 .sum::<usize>()
@@ -5387,10 +5315,6 @@ impl WorldStream {
                     .iter()
                     .map(|(id, _)| id.file.capacity())
                     .sum::<usize>();
-        }
-        for allocation in self.admissions.values() {
-            metrics.prototype_cpu_bytes += allocation.cpu;
-            metrics.prototype_gpu_bytes += allocation.gpu;
         }
         metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
         metrics.road_worker_reserved_bytes += self.overlap.road_worker_reserved_bytes;

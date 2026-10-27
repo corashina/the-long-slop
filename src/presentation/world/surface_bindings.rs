@@ -162,11 +162,13 @@ impl SourceWorldVisuals {
             if self.terrain[tier].is_some() {
                 continue;
             }
-            stream.reserve_prototype(
-                record.source.clone(),
-                std::mem::size_of::<TerrainMaterial>() + 256 + 8192,
-                2048,
-            )?;
+            // The terrain material lives as long as its stream hold.
+            if stream.hold_prototype(record.source.clone())? {
+                let mut allocation = ledger.allocation();
+                allocation.prototype_cpu += std::mem::size_of::<TerrainMaterial>() + 256 + 8192;
+                allocation.prototype_gpu += 2048;
+                ledger.set_allocation(allocation)?;
+            }
             cache.admit_world_material(record, reference, ledger)?;
             if !cache.world_textures.ready(&record.source) {
                 continue;

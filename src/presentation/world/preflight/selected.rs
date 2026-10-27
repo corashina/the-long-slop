@@ -1,7 +1,7 @@
 //! Selected descriptor ownership and shared IO accounting, independent of the asset backend.
 use crate::{
     reference::{FileCatalog, ReferenceError, prototype_plan::PrototypePlan},
-    world::{PresentationAllocation, PresentationLedger, WorldMetrics},
+    world::{PresentationAllocation, PresentationLedger},
 };
 use std::sync::Arc;
 
@@ -182,9 +182,9 @@ impl Reservation {
         }
         Ok(Self { cpu, gpu, staging })
     }
+    /// True if the input fits the credit. `old_cpu` and `old_gpu` are already charged.
     pub fn fits(
         self,
-        metrics: &WorldMetrics,
         ledger: &mut PresentationLedger,
         old_cpu: usize,
         old_gpu: usize,
@@ -194,56 +194,41 @@ impl Reservation {
         let jobs = ledger.available_external_jobs() > 0;
         let pending = queued || ledger.can_request_independent(1);
         let staging = ledger.request_staging(self.staging);
-        jobs && pending
-            && staging
-            && metrics
-                .prototype_cpu_bytes
-                .saturating_sub(old_cpu)
-                .checked_add(self.cpu)
-                .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_CPU)
-            && metrics
-                .prototype_gpu_bytes
-                .saturating_sub(old_gpu)
-                .checked_add(self.gpu)
-                .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU)
-    }
-    pub fn allocation(
-        self,
-        mut allocation: PresentationAllocation,
-        queued: bool,
-    ) -> PresentationAllocation {
-        allocation.jobs += 1;
-        allocation.pending += usize::from(!queued);
-        allocation.staging_bytes += self.staging;
-        allocation.dependency_staging_bytes += self.staging;
-        allocation
+        let prototype = ledger.request_prototype(
+            self.cpu.saturating_sub(old_cpu),
+            self.gpu.saturating_sub(old_gpu),
+        );
+        jobs && pending && staging && prototype
     }
 }
 #[cfg(test)]
 mod tests {
     #[test]
-    fn queued_input_uses_current_shared_asset_limits() {
+    fn input_fits_the_renderer_credit() {
         let request = super::Reservation {
             cpu: 1024,
             gpu: 1024,
             staging: 1024,
         };
-        let mut metrics = crate::world::WorldMetrics::default();
-        metrics.prototype_cpu_bytes = 300 * 1024 * 1024;
-        metrics.prototype_gpu_bytes = 600 * 1024 * 1024;
-        // Credit for one job and its staging, but no pending claim.
+        // Credit for one job, its staging and its prototype bytes, but no pending claim.
         let mut ledger = crate::world::PresentationLedger::default();
         let mut credit = crate::world::PresentationAllocation::default();
         credit.jobs = 1;
         credit.staging_bytes = 1024;
         credit.dependency_staging_bytes = 1024;
+        credit.prototype_cpu = 1024;
+        credit.prototype_gpu = 1024;
         ledger.grant(crate::world::PresentationGrant {
             credit,
             reclaim: false,
         });
-        assert!(request.fits(&metrics, &mut ledger, 0, 0, true));
-        assert!(!request.fits(&metrics, &mut ledger, 0, 0, false));
-        metrics.prototype_gpu_bytes = 1024 * 1024 * 1024;
-        assert!(!request.fits(&metrics, &mut ledger, 0, 0, true));
+        assert!(request.fits(&mut ledger, 0, 0, true));
+        assert!(!request.fits(&mut ledger, 0, 0, false));
+        let larger = super::Reservation {
+            gpu: 2048,
+            ..request
+        };
+        assert!(!larger.fits(&mut ledger, 0, 0, true));
+        assert!(larger.fits(&mut ledger, 0, 1024, true));
     }
 }

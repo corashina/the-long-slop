@@ -35,8 +35,9 @@ pub struct SourcePrototypes {
     entries: Vec<Entry>,
     next_request: u64,
     accounted_session: u64,
-    stale_cpu: usize,
-    stale_gpu: usize,
+    /// Prototype bytes of all entries, as charged to the ledger.
+    entry_cpu: usize,
+    entry_gpu: usize,
     retired_sources: Vec<SourceId>,
     io: IoLedger,
     control_cpu: usize,
@@ -169,7 +170,7 @@ impl SourcePrototypes {
             let State::Ready(_) = &e.state else {
                 unreachable!()
             };
-            stream.reserve_prototype(e.source.clone(), e.cpu, e.gpu)?;
+            stream.hold_prototype(e.source.clone())?;
             stream.bind_prototype(&e.source)?;
             copy.entries.push(Entry {
                 source: e.source.clone(),
@@ -278,7 +279,7 @@ impl SourcePrototypes {
             .find(|a| a.id == prototype.asset)
             .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
         let reservation = entry.state.payload_reservation()?;
-        if !reservation.fits(&stream.metrics(), ledger, entry.cpu, entry.gpu, false) {
+        if !reservation.fits(ledger, entry.cpu, entry.gpu, false) {
             return Ok(false);
         }
         let settings = SourceGltfSettings {
@@ -286,12 +287,6 @@ impl SourcePrototypes {
             buffer_bytes: plan.buffer_bytes,
             mesh_bytes: plan.mesh_bytes,
         };
-        let allocation = ledger.allocation();
-        ledger.set_allocation(reservation.allocation(allocation, false))?;
-        if let Err(error) = stream.resize_prototype(source, reservation.cpu, reservation.gpu) {
-            ledger.set_allocation(allocation)?;
-            return Err(error);
-        }
         let asset = server
             .load_builder()
             .with_settings(move |target: &mut SourceGltfSettings| {
@@ -306,11 +301,7 @@ impl SourcePrototypes {
         entry.cpu = reservation.cpu;
         entry.gpu = reservation.gpu;
         entry.staging = reservation.staging;
-        self.io.add(IoLedger {
-            jobs: 1,
-            pending: 1,
-            staging: reservation.staging,
-        });
+        self.account(stream, ledger)?;
         Ok(true)
     }
     pub fn loaded(&self, session: u64, source: &SourceId) -> Option<&LoadedPrototype> {
@@ -475,22 +466,12 @@ impl SourcePrototypes {
         if self.accounted_session != session {
             self.io = IoLedger::default();
             self.control_cpu = 0;
-            self.stale_cpu = 0;
-            self.stale_gpu = 0;
+            self.entry_cpu = 0;
+            self.entry_gpu = 0;
             self.accounted_session = session;
         }
-        let stale_cpu = self
-            .entries
-            .iter()
-            .filter(|e| e.session != session)
-            .map(|e| e.cpu)
-            .sum::<usize>();
-        let stale_gpu = self
-            .entries
-            .iter()
-            .filter(|e| e.session != session)
-            .map(|e| e.gpu)
-            .sum::<usize>();
+        let entry_cpu = self.entries.iter().map(|e| e.cpu).sum::<usize>();
+        let entry_gpu = self.entries.iter().map(|e| e.gpu).sum::<usize>();
         let mut io = IoLedger::default();
         for entry in &self.entries {
             io.add(entry.state.io(entry.staging));
@@ -504,15 +485,15 @@ impl SourcePrototypes {
         let mut allocation = ledger.allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
-            .saturating_sub(self.stale_cpu + self.control_cpu)
-            + stale_cpu
+            .saturating_sub(self.entry_cpu + self.control_cpu)
+            + entry_cpu
             + control_cpu;
         allocation.prototype_gpu =
-            allocation.prototype_gpu.saturating_sub(self.stale_gpu) + stale_gpu;
+            allocation.prototype_gpu.saturating_sub(self.entry_gpu) + entry_gpu;
         allocation = io.replace(self.io, allocation);
         ledger.set_allocation(allocation)?;
-        self.stale_cpu = stale_cpu;
-        self.stale_gpu = stale_gpu;
+        self.entry_cpu = entry_cpu;
+        self.entry_gpu = entry_gpu;
         self.io = io;
         self.control_cpu = control_cpu;
         Ok(())
@@ -571,7 +552,6 @@ impl SourcePrototypes {
                     entry.retired = true;
                     validate_plan(plan, prototype, reference)?;
                     let cpu = retained_plan_bytes(plan);
-                    stream.resize_prototype(&entry.source, cpu, 0)?;
                     entry.cpu = cpu;
                     entry.gpu = 0;
                     entry.staging = 0;
@@ -629,7 +609,6 @@ impl SourcePrototypes {
                         + plan.scene_bytes
                         + loaded.meshes.len() * 4096;
                     let gpu = loaded.mesh_bytes + loaded.skin_bytes + loaded.meshes.len() * 8;
-                    stream.resize_prototype(&entry.source, cpu, gpu)?;
                     entry.cpu = cpu;
                     entry.gpu = gpu;
                     entry.state.complete_payload();
@@ -692,18 +671,10 @@ impl SourcePrototypes {
                 .find(|a| a.id == prototype.asset)
                 .ok_or_else(|| ReferenceError("Missing prototype asset".into()))?;
             let reservation = Reservation::metadata(&reference.file_catalog, &record.path)?;
-            if !reservation.fits(&stream.metrics(), ledger, entry.cpu, entry.gpu, true)
-                || reservation.cpu > stream.prototype_headroom(&entry.source)
+            // A full stream table waits like a full credit.
+            if !reservation.fits(ledger, entry.cpu, entry.gpu, true)
+                || stream.hold_prototype(entry.source.clone()).is_err()
             {
-                return Ok(());
-            }
-            let allocation = ledger.allocation();
-            ledger.set_allocation(reservation.allocation(allocation, true))?;
-            if stream
-                .reserve_prototype(entry.source.clone(), reservation.cpu, 0)
-                .is_err()
-            {
-                ledger.set_allocation(allocation)?;
                 return Ok(());
             }
             let handle = load_plan(
@@ -717,8 +688,7 @@ impl SourcePrototypes {
             entry.gpu = 0;
             entry.staging = reservation.staging;
             entry.state = State::PlanLoading(handle);
-            self.io.jobs += 1;
-            self.io.staging += reservation.staging;
+            self.account(stream, ledger)?;
         }
         Ok(())
     }
