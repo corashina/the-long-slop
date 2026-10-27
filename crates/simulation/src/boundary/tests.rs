@@ -34,7 +34,10 @@ fn frame_round_trips() {
             sleep_camera: row(9.),
             seat_car: PoseRow::default(),
             prepared_roads: 12,
-            pad: 0,
+            glasses: GlassesState::encode(Some(GlassesState {
+                profile: 3,
+                hide_flare: true,
+            })),
             look: LookBlock {
                 yaw: 30.,
                 gain: 1.,
@@ -236,6 +239,13 @@ fn frame_round_trips() {
     let mut decoded = SimFrame::default();
     decode(&bytes, &mut decoded).unwrap();
     assert_eq!(decoded, frame);
+    assert_eq!(
+        decoded.state.glasses(),
+        Some(GlassesState {
+            profile: 3,
+            hide_flare: true
+        })
+    );
     assert!(decode(&bytes[..20], &mut decoded).is_err());
 }
 

@@ -106,7 +106,7 @@ impl GarageRuntime {
                 _ => PoseRow::default(),
             },
             prepared_roads: self.stream.metrics().prepared_roads as u32,
-            pad: 0,
+            glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
             // The driver sets the look and its own counters.
             look: crate::boundary::LookBlock::default(),
             perf: self.perf_block(),
