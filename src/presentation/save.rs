@@ -43,6 +43,9 @@ pub struct PreparedPresentation {
     required_views: Option<Box<crate::world::RequiredViews>>,
     /// Structure views of the candidate.
     frame: super::sim_frame::SimFrameResource,
+    /// Renderer input of the next candidate world step.
+    world: simulation::boundary::WorldCommand,
+    world_input: crate::starting_area::WorldInput,
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
@@ -196,6 +199,8 @@ impl PreparedPresentation {
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
             frame: default(),
+            world: default(),
+            world_input: default(),
         })
     }
     fn renderer_world(&self) -> &crate::world::RendererWorld {
@@ -353,18 +358,32 @@ impl PreparedPresentation {
             self.poses.0.insert(entity, matrix);
         }
         self.exchange(world);
+        let mut command = std::mem::take(&mut self.world);
+        command.views.clear();
+        if let Some(views) = &self.required_views {
+            command.views.extend_from_slice(views.as_slice());
+        }
+        self.world_input.accept(command);
         let result = match self.system.get_mut(world) {
-            Ok(mut renderer) => renderer.step_world(
-                candidate,
-                reference,
-                self.required_views
-                    .as_deref()
-                    .map_or(&[], crate::world::RequiredViews::as_slice),
-                view,
-                lod,
-                false,
-                crate::app::LOADING_BUDGET_MS,
-            ),
+            Ok(mut renderer) => candidate
+                .step_world(
+                    reference,
+                    &mut self.world_input,
+                    simulation::driver::LOADING_BUDGET_MS,
+                )
+                .and_then(|grant| {
+                    renderer.sync_mirror(&candidate.stream);
+                    renderer.prepare_frame(
+                        reference,
+                        grant,
+                        view,
+                        candidate.lighting.cycle.output().shader_time_seconds as f32,
+                        lod,
+                        false,
+                        candidate.lighting.light_outputs(),
+                        &mut self.world,
+                    )
+                }),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         }
         .and_then(|()| {

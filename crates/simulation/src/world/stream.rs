@@ -26,7 +26,7 @@ pub const PROTOTYPE_CPU: usize = 512 * MIB;
 pub const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorldRequest {
     pub session: u64,
     pub revision: u64,
@@ -34,7 +34,7 @@ pub struct WorldRequest {
     pub vehicle: [f64; 3],
 }
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PresentationAllocation {
     pub grass_worker_wasm_bytes: usize,
     pub grass_worker_cache_bytes: usize,
@@ -79,7 +79,7 @@ impl PresentationAllocation {
 }
 
 /// The renderer use of one frame.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PresentationReport {
     pub used: PresentationAllocation,
     /// Totals the renderer wanted to reach this frame.
@@ -87,16 +87,26 @@ pub struct PresentationReport {
     /// Credit the renderer gave back. It no longer spends it.
     pub release: PresentationAllocation,
 }
+impl PresentationReport {
+    /// Adds a later report: its use and wants, and both releases.
+    pub fn merge(self, later: Self) -> Self {
+        Self {
+            used: later.used,
+            want: later.want,
+            release: self.release.zip(later.release, usize::saturating_add),
+        }
+    }
+}
 
 /// The stream answer: added credit, and whether the stream waits for room.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PresentationGrant {
     pub credit: PresentationAllocation,
     pub reclaim: bool,
     /// The stream lends its publication slot of this frame.
     pub publication: bool,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceKey {
     pub layer: WorldLayer,
     pub unit: [i64; 2],

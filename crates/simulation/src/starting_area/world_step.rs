@@ -1,11 +1,59 @@
 //! World logic of one frame step. The renderer prepares after it.
 use super::GarageRuntime;
 use crate::{
+    boundary::{LampAdmission, WorldCommand},
     reference::{ReferenceError, ReferenceManifest},
-    world::{GeneratedId, RendererFacts, RequiredView, stream_profile},
+    world::{GeneratedId, PresentationGrant, RendererFacts, RequiredView, stream_profile},
 };
 
+/// Renderer input that the next world step uses.
+#[derive(Default)]
+pub struct WorldInput {
+    /// Merged commands since the last step.
+    pending: WorldCommand,
+    views: Vec<RequiredView>,
+    lamps: Option<Vec<GeneratedId>>,
+}
+impl WorldInput {
+    pub fn accept(&mut self, mut command: WorldCommand) {
+        self.views = std::mem::take(&mut command.views);
+        match std::mem::take(&mut command.lamps) {
+            LampAdmission::Same => {}
+            LampAdmission::Pending => self.lamps = None,
+            LampAdmission::Ready(lamps) => self.lamps = Some(lamps),
+        }
+        self.pending.merge(command);
+    }
+    pub fn frozen(&self) -> bool {
+        self.pending.freeze
+    }
+    pub fn take_failure(&mut self) -> Option<String> {
+        self.pending.failure.take()
+    }
+}
+
 impl GarageRuntime {
+    /// One world step from the renderer input. The grant answers the renderer report.
+    pub fn step_world(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: &mut WorldInput,
+        budget_ms: f64,
+    ) -> Result<Option<PresentationGrant>, ReferenceError> {
+        let mut command = std::mem::take(&mut input.pending);
+        self.stream.apply_renderer_facts(&mut command.facts)?;
+        let grant = command
+            .report
+            .map(|report| self.stream.exchange_presentation(report));
+        self.advance_world(
+            reference,
+            &input.views,
+            &mut command.facts,
+            input.lamps.as_deref(),
+            budget_ms,
+        )?;
+        Ok(grant)
+    }
     /// Applies the renderer facts, publishes the renderer-ready work, then prepares the next work.
     /// `admitted_lights` are the lamps the renderer admitted in its last step.
     pub fn advance_world(

@@ -2,7 +2,7 @@
 use super::{GeneratedId, SurfaceKey, WorldRequest};
 use crate::reference::SourceId;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RendererFact {
     /// The renderer needs the prototype. The renderer checked `can_hold_prototype`.
     HoldPrototype(SourceId),
@@ -25,12 +25,16 @@ pub enum RendererFact {
 }
 
 /// Facts of one renderer step, in order.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RendererFacts(Vec<RendererFact>);
 
 impl RendererFacts {
     pub fn push(&mut self, fact: RendererFact) {
         self.0.push(fact);
+    }
+    /// Adds the facts of a later step.
+    pub fn extend(&mut self, later: Self) {
+        self.0.extend(later.0);
     }
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
