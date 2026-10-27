@@ -262,7 +262,8 @@ def validate_item_prototypes(prototypes, manifest) -> None:
         for c in p['colliders']:
             if not within(c['node']) or c['body'] not in bodies or c['body']!=owner(c['node']):raise ValueError('Wrong collider owner')
         if count is not None and (len(p['pickups'])!=count or len(p['bodies'])!=count):raise ValueError('Missing selected pickup bodies')
-        if not p['bodies']:raise ValueError('Prototype without bodies')
+        # A particle-only gib has no physics.
+        if not p['bodies'] and (p['item_id'] is not None or p['colliders'] or p['pickups']):raise ValueError('Prototype without bodies')
         for x in p['pickups']:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}

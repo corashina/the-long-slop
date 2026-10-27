@@ -536,8 +536,12 @@ impl ItemPrototype {
         )?;
         require(
             (generic || self.bodies.len() == count && self.pickups.len() == count)
-                && !self.bodies.is_empty()
-                && !self.colliders.is_empty(),
+                && (!self.bodies.is_empty() && !self.colliders.is_empty()
+                    // A particle-only gib has no physics.
+                    || self.item_id.is_none()
+                        && self.bodies.is_empty()
+                        && self.colliders.is_empty()
+                        && self.pickups.is_empty()),
             "complete prototype physics",
         )?;
         for b in &self.bodies {
