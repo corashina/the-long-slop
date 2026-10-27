@@ -46,6 +46,7 @@ pub use renderer_facts::{RendererFact, RendererFacts};
 pub mod stream;
 mod stream_limits;
 pub use stream::content_boxes::BoxRelease;
+pub use stream::content_explosives::{Explosive, TankExplosion};
 pub use stream::content_index::ContentIndex;
 pub use stream::{
     PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,

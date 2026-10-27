@@ -16,7 +16,8 @@ pub struct AmmoBinding {
 }
 
 impl WorldStream {
-    /// True when the prototype has an ammoscript of a gun ammo type that no gun owns.
+    /// True when the prototype has an ammoscript of a gun ammo type or of its explosive prop,
+    /// and no gun owns it.
     pub(super) fn ammo_prototype(
         &self,
         reference: &ReferenceManifest,
@@ -38,8 +39,17 @@ impl WorldStream {
             return Ok(false);
         };
         let kind = number(a.fields, "tipus")? as u32;
+        // The rounds of an explosive prop.
+        let explosive = self
+            .contents
+            .rules
+            .component(&self.reference, prototype, "explosivescript")?
+            .map(|e| optional(e.fields, "ammo"))
+            .transpose()?
+            .flatten();
         Ok(optional(a.fields, "w")?.is_none()
-            && reference.guns.weapons.iter().any(|w| w.ammo.r#type == kind))
+            && (explosive == Some(a.source)
+                || reference.guns.weapons.iter().any(|w| w.ammo.r#type == kind)))
     }
     /// The ammoscript of the ammo content in `slot`.
     pub(super) fn bind_ammo(

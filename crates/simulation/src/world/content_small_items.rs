@@ -59,6 +59,9 @@ pub struct SmallItems {
     pub(super) ammo: Vec<super::content_ammo::AmmoBinding>,
     /// Prototypes checked for gun ammo.
     ammo_prototypes: std::collections::HashMap<SourceId, bool>,
+    pub(super) explosives: Vec<super::content_explosives::ExplosiveBinding>,
+    /// Prototypes checked for an explosivescript.
+    pub(super) explosive_prototypes: std::collections::HashMap<SourceId, bool>,
     scan: Option<(u64, u64)>,
     effects: [Effect; 2],
     /// The bottle whose spray follows its hole.
@@ -110,6 +113,8 @@ impl SmallItems {
             lamps: Vec::new(),
             ammo: Vec::new(),
             ammo_prototypes: std::collections::HashMap::new(),
+            explosives: Vec::new(),
+            explosive_prototypes: std::collections::HashMap::new(),
             scan: None,
             effects: [
                 effect(&s.spray, s.source.path_id as u64),
@@ -130,6 +135,8 @@ impl SmallItems {
         self.sprays.capacity() * std::mem::size_of::<SprayBinding>()
             + self.lamps.capacity() * std::mem::size_of::<LampBinding>()
             + self.ammo.capacity() * std::mem::size_of::<super::content_ammo::AmmoBinding>()
+            + self.explosives.capacity()
+                * std::mem::size_of::<super::content_explosives::ExplosiveBinding>()
             + self.sounds.capacity() * std::mem::size_of::<(u32, f32, [f64; 3])>()
     }
     /// Spray (0) and splash (1) particles.
@@ -251,6 +258,7 @@ impl WorldStream {
                 self.presentation_changes.push(ContentSlot::Active(slot));
             }
         }
+        self.sync_explosives()?;
         self.small_items.scan = complete.then_some(revision);
         Ok(())
     }

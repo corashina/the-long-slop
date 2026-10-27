@@ -60,6 +60,7 @@ pub(super) fn bind(
             no_pour: flag(cap.fields, "noPour")?,
             emission_min_rate: number(cap.fields, "minRate")?,
             emission_max_rate: number(cap.fields, "maxRate")?,
+            explosion: super::TankExplosion::read(tank.fields, prototype)?,
         };
         let point = SupplyPoint::nested(
             if primary == Some(tank_source) {

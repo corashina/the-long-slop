@@ -52,6 +52,7 @@ pub struct SupplyDefinition {
     pub no_pour: bool,
     pub emission_min_rate: f32,
     pub emission_max_rate: f32,
+    pub explosion: super::TankExplosion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -953,6 +954,8 @@ fn copy_prototype(
             no_pour,
             emission_min_rate: number(&component.fields["minRate"]),
             emission_max_rate: number(&component.fields["maxRate"]),
+            explosion: super::TankExplosion::read(&tank.fields, prototype)
+                .expect("checked tankscript explosion fields"),
         });
     }
     for collider in &prototype.colliders {

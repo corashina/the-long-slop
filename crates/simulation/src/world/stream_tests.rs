@@ -9,6 +9,8 @@ mod car_types;
 mod cargo;
 #[path = "stream_tests/drive_out.rs"]
 mod drive_out;
+#[path = "stream_tests/explosions.rs"]
+mod explosions;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
 #[path = "stream_tests/guns.rs"]
@@ -818,6 +820,16 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
         no_pour: false,
         emission_min_rate: 0.,
         emission_max_rate: 0.,
+        explosion: crate::world::TankExplosion {
+            never_explode: true,
+            always_explode: false,
+            always_explode_force: 0.,
+            force_needed: 0.,
+            explosion_type: 0,
+            no_shoot_hole: false,
+            no_shoot_explode: false,
+            parent_dest: None,
+        },
     };
     let mut tank_key = instance.clone();
     tank_key.children.push((definition.tank.clone(), 0));
