@@ -252,11 +252,9 @@ pub struct WorldProbeReference {
     pub mip_extents: Vec<u32>,
 }
 impl WorldProbeReference {
-    /// The capture and influence values equal those of `shared`.
+    /// The capture values equal those of `shared`. Influence bounds are per car.
     pub fn matches(&self, shared: &ProbeRecord) -> bool {
         self.enabled == shared.enabled
-            && self.bounds_size == shared.bounds_size
-            && self.bounds_offset == shared.bounds_offset
             && self.box_projection == shared.box_projection
             && self.blend_distance == shared.blend_distance
             && self.intensity == shared.intensity

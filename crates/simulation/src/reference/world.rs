@@ -1867,7 +1867,7 @@ impl WorldReference {
             }),
             &format!("{f} plate font/material"),
         )?;
-        // The capture settings of the car probe are the shared probe record.
+        // The capture settings of the car probe are the shared probe record. Bounds are per car.
         require(
             p.vehicle
                 .iter()
