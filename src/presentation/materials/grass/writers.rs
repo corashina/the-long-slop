@@ -525,7 +525,8 @@ impl GrassWriters {
     }
     pub fn configure(
         &mut self,
-        stream: &mut crate::world::WorldStream,
+        stream: &crate::world::WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
         reference: &crate::reference::WorldReference,
     ) -> Result<(), crate::reference::ReferenceError> {
         let session = stream.frame().request.session;
@@ -533,10 +534,10 @@ impl GrassWriters {
             return Ok(());
         }
         let camera = GrassCamera::from_source(reference)?;
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.active_gpu += 256 * 256 * 8 + 128;
         allocation.active_cpu += std::mem::size_of::<Self>() + std::mem::size_of::<WriterPass>();
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         self.camera = Some(camera);
         self.session = session;
         self.admitted = true;
@@ -567,7 +568,7 @@ impl GrassWriters {
 impl GrassWriters {
     pub fn request(
         &mut self,
-        stream: &mut crate::world::WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
         entity: Entity,
         mesh: Handle<Mesh>,
         pose: Mat4,
@@ -585,7 +586,7 @@ impl GrassWriters {
             writer.pose = pose;
             return Ok(());
         }
-        if !stream.can_request_independent(1) {
+        if !ledger.can_request_independent(1) {
             self.deferred = true;
             return Ok(());
         }
@@ -614,11 +615,11 @@ impl GrassWriters {
             + std::mem::size_of::<WriterGpu>()
             + 128;
         let gpu = bytes + 64;
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.active_cpu += cpu;
         allocation.active_gpu += gpu;
         allocation.pending += 1;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         self.pending.push(WriterPreparation {
             entity,
             mesh,
@@ -635,18 +636,19 @@ impl GrassWriters {
     pub fn prepare(
         &mut self,
         stream: &mut crate::world::WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
         meshes: &Assets<Mesh>,
     ) -> Result<(), crate::reference::ReferenceError> {
         use crate::reference::ReferenceError;
         for index in 0..self.pending.len() {
             let job = &mut self.pending[index];
             if !job.running {
-                if stream.available_external_jobs() == 0 {
+                if ledger.available_external_jobs() == 0 {
                     continue;
                 }
-                let mut a = stream.presentation_allocation();
+                let mut a = ledger.allocation();
                 a.jobs += 1;
-                stream.set_presentation_allocation(a)?;
+                ledger.set_allocation(a)?;
                 job.running = true;
             }
             let mesh = meshes.get(&job.mesh).ok_or_else(|| {
@@ -691,10 +693,10 @@ impl GrassWriters {
                 continue;
             }
             let job = self.pending.remove(index);
-            let mut a = stream.presentation_allocation();
+            let mut a = ledger.allocation();
             a.jobs -= 1;
             a.pending -= 1;
-            stream.set_presentation_allocation(a)?;
+            ledger.set_allocation(a)?;
             self.writers.push(GrassWriterInput {
                 entity: job.entity,
                 vertices: job.vertices.into(),
@@ -708,14 +710,14 @@ impl GrassWriters {
     }
     pub fn retire(
         &mut self,
-        stream: &mut crate::world::WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
         entity: Entity,
     ) -> Result<(), crate::reference::ReferenceError> {
         let Some(index) = self.allocations.iter().position(|a| a.0 == entity) else {
             return Ok(());
         };
         let (_, cpu, gpu) = self.allocations.swap_remove(index);
-        let mut a = stream.presentation_allocation();
+        let mut a = ledger.allocation();
         a.active_cpu = a.active_cpu.saturating_sub(cpu);
         a.active_gpu = a.active_gpu.saturating_sub(gpu);
         if let Some(index) = self.pending.iter().position(|p| p.entity == entity) {
@@ -725,6 +727,6 @@ impl GrassWriters {
         }
         self.writers.retain(|w| w.entity != entity);
         self.invalidate();
-        stream.set_presentation_allocation(a)
+        ledger.set_allocation(a)
     }
 }

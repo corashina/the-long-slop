@@ -128,7 +128,7 @@ impl GarageRuntime {
             let stream = &self.stream;
             frame.budgets.extend(
                 stream
-                    .presentation_budgets(stream.presentation_allocation())
+                    .presentation_budgets(stream.presentation_credit())
                     .map(|b| BudgetRow {
                         used: b.used as f64,
                         limit: b.limit as f64,

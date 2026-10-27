@@ -528,16 +528,14 @@ impl WorldTextures {
         images: &mut Assets<Image>,
         batches: &mut Assets<SourceTextureBatch>,
         preparation: &crate::presentation::gpu_prepare::GpuPreparation,
-        pending_available: usize,
-        staging_available: usize,
-        cpu_available: usize,
-        releasable: bool,
+        ledger: &mut crate::world::PresentationLedger,
     ) -> Result<(), ReferenceError> {
         self.reap(server, batches)?;
         if self.cancelled {
             return Ok(());
         }
         let metadata = self.metadata_bytes();
+        let cpu_available = ledger.available_prototype_cpu_bytes() + self.bytes().0;
         let mut queue = self.uploads.lock().unwrap();
         let current = queue.ownership.slots[0].and_then(|owner| {
             queue
@@ -604,7 +602,7 @@ impl WorldTextures {
             if selected.is_empty() {
                 return Ok(());
             }
-            if selected.len() > pending_available {
+            if !ledger.can_request_independent(selected.len()) {
                 return Ok(());
             }
             let shared = if let Some((owner, _, _, _)) = &current {
@@ -639,8 +637,15 @@ impl WorldTextures {
             if let Some((_, _, _, index)) = shared {
                 selected[index].4 = 4096;
             }
-            let available = staging_available
+            let available = ledger
+                .available_staging_bytes()
                 .min(cpu_available.saturating_sub(metadata + queue.ownership.bytes()));
+            let requested = selected.iter().map(|s| s.4).sum::<usize>();
+            if requested > available {
+                // Short credit waits. The report asks the stream for the rest.
+                ledger.request_staging(requested);
+                ledger.request_prototype(requested, 0);
+            }
             let admission = if refill {
                 queue
                     .ownership
@@ -648,7 +653,7 @@ impl WorldTextures {
             } else {
                 queue
                     .ownership
-                    .admit(selected.iter().map(|s| (s.3, s.4)), available, releasable)
+                    .admit(selected.iter().map(|s| (s.3, s.4)), available, true)
             };
             match admission {
                 Ok(()) => (),

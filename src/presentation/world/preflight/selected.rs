@@ -1,7 +1,7 @@
 //! Selected descriptor ownership and shared IO accounting, independent of the asset backend.
 use crate::{
     reference::{FileCatalog, ReferenceError, prototype_plan::PrototypePlan},
-    world::{PresentationAllocation, WorldMetrics},
+    world::{PresentationAllocation, PresentationLedger, WorldMetrics},
 };
 use std::sync::Arc;
 
@@ -185,15 +185,17 @@ impl Reservation {
     pub fn fits(
         self,
         metrics: &WorldMetrics,
-        jobs: usize,
-        staging: usize,
+        ledger: &mut PresentationLedger,
         old_cpu: usize,
         old_gpu: usize,
         queued: bool,
     ) -> bool {
-        jobs > 0
-            && (queued || metrics.pending_work < 32)
-            && self.staging <= staging
+        // Every request runs, so the report asks for all missing credit at once.
+        let jobs = ledger.available_external_jobs() > 0;
+        let pending = queued || ledger.can_request_independent(1);
+        let staging = ledger.request_staging(self.staging);
+        jobs && pending
+            && staging
             && metrics
                 .prototype_cpu_bytes
                 .saturating_sub(old_cpu)
@@ -229,10 +231,19 @@ mod tests {
         let mut metrics = crate::world::WorldMetrics::default();
         metrics.prototype_cpu_bytes = 300 * 1024 * 1024;
         metrics.prototype_gpu_bytes = 600 * 1024 * 1024;
-        metrics.pending_work = 32;
-        assert!(request.fits(&metrics, 1, 1024, 0, 0, true));
-        assert!(!request.fits(&metrics, 1, 1024, 0, 0, false));
+        // Credit for one job and its staging, but no pending claim.
+        let mut ledger = crate::world::PresentationLedger::default();
+        let mut credit = crate::world::PresentationAllocation::default();
+        credit.jobs = 1;
+        credit.staging_bytes = 1024;
+        credit.dependency_staging_bytes = 1024;
+        ledger.grant(crate::world::PresentationGrant {
+            credit,
+            reclaim: false,
+        });
+        assert!(request.fits(&metrics, &mut ledger, 0, 0, true));
+        assert!(!request.fits(&metrics, &mut ledger, 0, 0, false));
         metrics.prototype_gpu_bytes = 1024 * 1024 * 1024;
-        assert!(!request.fits(&metrics, 1, 1024, 0, 0, true));
+        assert!(!request.fits(&metrics, &mut ledger, 0, 0, true));
     }
 }

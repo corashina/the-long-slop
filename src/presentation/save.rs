@@ -79,9 +79,16 @@ impl PreparedPresentation {
     ) -> Result<Self, SaveError> {
         validate_assets(reference, world)?;
         world.resource_scope(|world, mut pipelines: Mut<WorldPipelines>| {
-            pipelines.reserve_cache(&mut world.resource_mut::<crate::app::Drive>().runtime.stream)
+            pipelines
+                .reserve_cache(&mut world.resource_mut::<SourcePresentationAllocation>().ledger)
         })?;
-        super::world::preflight::configure_staging(&mut candidate.stream, &reference.file_catalog)?;
+        // The candidate renderer spends its own credit from the candidate stream.
+        let mut ledger = crate::world::PresentationLedger::default();
+        super::world::preflight::configure_staging(
+            &mut candidate.stream,
+            &mut ledger,
+            &reference.file_catalog,
+        )?;
         let mut overlap = world
             .resource::<crate::app::Drive>()
             .runtime
@@ -104,9 +111,9 @@ impl PreparedPresentation {
         let mut fixed_snapshot = crate::reference::fixed_reservation::FixedAllocation::default();
         world
             .resource::<super::fixed_assets::SourceFixedAssets>()
-            .account(&mut candidate.stream, &mut fixed_snapshot)?;
+            .account(&mut ledger, &mut fixed_snapshot)?;
         let mesh_count = world.query::<&Mesh3d>().iter(world).count();
-        let mut admitted = candidate.stream.presentation_allocation();
+        let mut admitted = ledger.allocation();
         admitted.active_cpu += world
             .resource::<super::conditions::ConditionVisuals>()
             .candidate_bytes()
@@ -117,13 +124,18 @@ impl PreparedPresentation {
             + 8192 * std::mem::size_of::<Entity>()
             + mesh_count.next_power_of_two() * 2 * (std::mem::size_of::<(Entity, Mat4)>() + 1)
             + world.resource::<lighting::SourceLighting>().clone_bytes();
-        candidate.stream.set_presentation_allocation(admitted)?;
+        ledger.set_allocation(admitted)?;
         let materials = world
             .resource::<materials::SourceMaterials>()
-            .fork(&mut candidate.stream)?;
+            .fork(&mut ledger)?;
         let prototypes = world
             .resource::<SourcePrototypes>()
-            .fork(&mut candidate.stream)?;
+            .fork(&mut candidate.stream, &mut ledger)?;
+        // The stream covers the candidate use now, so a budget failure stops the save here.
+        ledger.exchange(&mut candidate.stream);
+        if let Some(error) = candidate.stream.frame().failure {
+            return Err(crate::reference::ReferenceError(error.to_owned()).into());
+        }
         let lighting = world.resource::<lighting::SourceLighting>().prepare_copy();
         let screen_height = world
             .query::<&Window>()
@@ -153,6 +165,7 @@ impl PreparedPresentation {
                     candidate.stream.frame().request.session,
                 );
                 allocation.fixed = fixed_snapshot;
+                allocation.ledger = ledger;
                 allocation.lighting_cpu =
                     world.resource::<lighting::SourceLighting>().clone_bytes();
                 allocation

@@ -170,7 +170,7 @@ impl FixedAllocation {
 
 /// Admit shared control bytes before its allocation closure can run.
 pub fn admit_control<T>(
-    stream: &mut crate::world::WorldStream,
+    ledger: &mut crate::world::PresentationLedger,
     bytes: usize,
     allocate: impl FnOnce() -> T,
 ) -> Result<(FixedAllocation, T), ReferenceError> {
@@ -178,8 +178,8 @@ pub fn admit_control<T>(
         cpu: bytes,
         ..FixedAllocation::default()
     };
-    let next = fixed.replace(FixedAllocation::default(), stream.presentation_allocation())?;
-    stream.set_presentation_allocation(next)?;
+    let next = fixed.replace(FixedAllocation::default(), ledger.allocation())?;
+    ledger.set_allocation(next)?;
     Ok((fixed, allocate()))
 }
 
@@ -438,7 +438,7 @@ pub fn png_pixels(mips: &[super::TextureMip]) -> Result<usize, ReferenceError> {
 }
 
 pub fn fixed_room(
-    stream: &crate::world::WorldStream,
+    ledger: &mut crate::world::PresentationLedger,
     cpu: usize,
     gpu: usize,
     staging: usize,
@@ -447,19 +447,12 @@ pub fn fixed_room(
     if cpu > 256 * 1024 * 1024 || gpu > 512 * 1024 * 1024 || staging > 32 * 1024 * 1024 {
         return Err(ReferenceError("Fixed input exceeds shared limits".into()));
     }
-    Ok((staging == 0 || stream.available_external_jobs() > 0)
-        && (!pending || stream.metrics().pending_work < 32)
-        && staging <= stream.available_dependency_staging_bytes()
-        && stream
-            .metrics()
-            .prototype_cpu_bytes
-            .checked_add(cpu)
-            .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_CPU)
-        && stream
-            .metrics()
-            .prototype_gpu_bytes
-            .checked_add(gpu)
-            .is_some_and(|n| n <= crate::world::stream::PROTOTYPE_GPU))
+    // Every request runs, so the report asks for all missing credit at once.
+    let jobs = staging == 0 || ledger.available_external_jobs() > 0;
+    let pending = !pending || ledger.can_request_independent(1);
+    let staging = ledger.request_staging(staging);
+    let prototype = ledger.request_prototype(cpu, gpu);
+    Ok(jobs && pending && staging && prototype)
 }
 
 macro_rules! fixed_shaders {
