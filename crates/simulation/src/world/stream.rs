@@ -3367,16 +3367,20 @@ impl WorldStream {
         Ok(())
     }
     /// The renderer finished the prepared surface. Its work drained.
+    /// The renderer repeats the fact until its frame shows the publication, so a repeat
+    /// for work that this stream already published or rewound is dropped.
     fn accept_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
     ) -> Result<(), ReferenceError> {
-        let work = self
+        let Some(work) = self
             .ready
             .as_mut()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
-            .ok_or_else(|| ReferenceError("Stale source renderer preparation".into()))?;
+        else {
+            return Ok(());
+        };
         if !work.renderer_reserved {
             return Err(ReferenceError("Unreserved source renderer".into()));
         }
