@@ -716,6 +716,7 @@ mod save;
 pub struct GarageRuntime {
     pub driving_assists: crate::reference::DrivingAssists,
     pub survival: crate::survival::SurvivalState,
+    pub hearing: crate::hearing::HearingState,
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
     pub weather: crate::weather::WeatherState,
@@ -899,6 +900,7 @@ impl GarageRuntime {
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             flyers: crate::flyers::Flyers::new(seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
+            hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
             sleep_camera_allowed: true,

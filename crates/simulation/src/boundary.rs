@@ -350,6 +350,14 @@ pub enum AudioCall {
         revision: u32,
         seconds: f64,
     },
+    /// Mixer `PlayerEar` in dB over the game mixers, and the 2D ear ring loop outside it. A
+    /// `ring` of 0 stops the loop. `pan` is the stereo pan, -1 left to 1 right.
+    PlayerEar {
+        db: f32,
+        clip: u32,
+        ring: f32,
+        pan: f32,
+    },
     OriginShift([f32; 3]),
     /// The renderer sends its camera as the listener here.
     Listener,

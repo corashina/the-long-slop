@@ -428,6 +428,7 @@ impl GarageRuntime {
             .sleep
             .restore(saved.player.since_wake, candidate.simulation_seconds);
         candidate.survival.restore_save(&saved.needs);
+        candidate.hearing.restore_save(&saved.hearing);
         if let Some(carry) = saved
             .player
             .carry
@@ -619,6 +620,7 @@ impl GarageRuntime {
                 },
             )?,
             needs: self.survival.capture_save(),
+            hearing: self.hearing.capture_save(),
             bodies: self.area.capture_save(
                 reference,
                 &ids,

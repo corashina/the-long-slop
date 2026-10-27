@@ -72,6 +72,8 @@ extern "C" {
     pub fn game_audio_survival_emitter(kind: u32, x: f32, y: f32, z: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvivalMaster)]
     pub fn game_audio_survival_master(gain: f32, revision: u32, seconds: f64);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioPlayerEar)]
+    pub fn game_audio_player_ear(db: f32, clip: u32, ring: f32, pan: f32);
 
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioBegin)]
     pub fn game_audio_begin(session: u32, started: bool, paused: bool, time: f64);

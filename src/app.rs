@@ -1092,6 +1092,12 @@ fn publish_audio(
                 revision,
                 seconds,
             } => game_audio_survival_master(gain, revision, seconds),
+            AudioCall::PlayerEar {
+                db,
+                clip,
+                ring,
+                pan,
+            } => game_audio_player_ear(db, clip, ring, pan),
             AudioCall::OriginShift([x, y, z]) => game_audio_origin_shift(x, y, z),
             AudioCall::Listener => {
                 if let Some((_, q, p)) = camera {

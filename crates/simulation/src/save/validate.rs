@@ -320,6 +320,11 @@ impl SaveSnapshot {
             ]),
             "Pending needs",
         )?;
+        let h = &self.hearing;
+        data(
+            finite(&[h.hearing, h.ringing, h.target, h.dir]) && h.hearing <= 1.,
+            "Player hearing",
+        )?;
         let bladder: f32 = n.bladder.as_slice().iter().map(|e| e.amount).sum();
         data(
             bladder <= reference.survival.bladder_capacity_liters + 1e-4,

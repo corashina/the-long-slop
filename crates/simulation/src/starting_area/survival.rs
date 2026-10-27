@@ -575,6 +575,7 @@ impl GarageRuntime {
             return;
         }
         self.simulation_seconds += f64::from(dt);
+        self.hearing.advance(dt);
         self.survival.advance(
             &reference.survival,
             dt,
@@ -586,7 +587,7 @@ impl GarageRuntime {
             self.paused = true;
         }
     }
-    fn draw_survival(&mut self) -> f32 {
+    pub(super) fn draw_survival(&mut self) -> f32 {
         self.survival_draw = self.survival_draw.wrapping_add(1);
         super::start_sample(super::DEFAULT_SEED, self.survival_draw)
     }
@@ -658,7 +659,7 @@ impl GarageRuntime {
         let selection = self.select_survival_audio(kind);
         self.emit_selected_audio(kind, selection);
     }
-    fn announce_death(&mut self, reference: &ReferenceManifest) {
+    pub(super) fn announce_death(&mut self, reference: &ReferenceManifest) {
         if self.needs_output().dead && !self.death_announced {
             self.death_announced = true;
             self.interrupt_sleep(reference);

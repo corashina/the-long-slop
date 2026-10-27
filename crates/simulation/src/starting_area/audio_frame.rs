@@ -19,6 +19,7 @@ impl GarageRuntime {
             stream,
             physics,
             survival,
+            hearing,
             vehicles,
             started,
             paused,
@@ -44,6 +45,12 @@ impl GarageRuntime {
             gain: 10_f32.powf(level.ln()),
             revision: *audio_motion_revision,
             seconds: audio.game_seconds + f64::from(alpha) / 60.,
+        });
+        out.push(AudioCall::PlayerEar {
+            db: hearing.ear_db(),
+            clip: hearing.clip,
+            ring: hearing.ring_gain(),
+            pan: hearing.dir,
         });
         let shift = audio.take_origin_shift();
         if shift != [0.; 3] {
