@@ -23,6 +23,16 @@ pub struct FluidCollision {
     pub position: Vector,
 }
 
+/// Visual fields that the per-particle loop reads, resolved once.
+struct FluidLook {
+    start_rotation: crate::reference::ParticleCurve,
+    start_size: f32,
+    size: crate::reference::ParticleCurve,
+    gradient: crate::reference::ParticleColor,
+    radius_scale: f32,
+    energy_loss: f32,
+}
+
 pub struct FluidContact {
     collisions: Vec<FluidCollision>,
     player_hit: bool,
@@ -35,6 +45,7 @@ pub struct FluidContact {
     dampen: f32,
     response_updates_remaining: u8,
     visual: crate::reference::ParticleReference,
+    look: FluidLook,
     pub splash: crate::particles::ParticleState,
     colors: [[f32; 4]; 6],
     start_color: [f32; 4],
@@ -60,6 +71,14 @@ impl FluidContact {
             dampen: reference.dampen,
             response_updates_remaining: 0,
             visual: visual.clone(),
+            look: FluidLook {
+                start_rotation: visual.curves["InitialModule.startRotation"].clone(),
+                start_size: visual.curves["InitialModule.startSize"].scalar,
+                size: visual.curves["SizeModule.curve"].clone(),
+                gradient: visual.colors["ColorModule.gradient"].clone(),
+                radius_scale: visual.scalars["CollisionModule.radiusScale"],
+                energy_loss: visual.curves["CollisionModule.m_EnergyLossOnCollision"].scalar,
+            },
             splash: crate::particles::ParticleState::new(splash, seed as u64),
             colors: std::array::from_fn(|i| {
                 let c = visual.vectors[&format!("fluid.{i}")];
@@ -216,13 +235,10 @@ impl FluidContact {
                 let offset_radius = self.random().sqrt() * reference.cone_radius;
                 let offset_angle = self.random() * std::f32::consts::TAU;
                 let draw = self.random();
-                let rotation = crate::particles::particle_curve(
-                    &self.visual.curves["InitialModule.startRotation"],
-                    0.,
-                    draw,
-                );
+                let rotation =
+                    crate::particles::particle_curve(&self.look.start_rotation, 0., draw);
                 self.particles.push(FluidParticle {
-                    size: self.visual.curves["InitialModule.startSize"].scalar,
+                    size: self.look.start_size,
                     color: self.start_color,
                     start_color: self.start_color,
                     rotation,
@@ -241,13 +257,9 @@ impl FluidContact {
             particle.remaining -= dt;
             particle.age += dt;
             let t = (particle.age / reference.lifetime_seconds).clamp(0., 1.);
-            particle.size = self.visual.curves["InitialModule.startSize"].scalar
-                * crate::particles::particle_curve(&self.visual.curves["SizeModule.curve"], t, 0.);
-            let color = crate::particles::particle_color(
-                &self.visual.colors["ColorModule.gradient"],
-                t,
-                0.,
-            );
+            particle.size =
+                self.look.start_size * crate::particles::particle_curve(&self.look.size, t, 0.);
+            let color = crate::particles::particle_color(&self.look.gradient, t, 0.);
             particle.color = std::array::from_fn(|i| particle.start_color[i] * color[i]);
             if particle.remaining <= 0. {
                 self.particles.swap_remove(index);
@@ -257,7 +269,7 @@ impl FluidContact {
                 particle.velocity + Vector::new(0., -9.81 * reference.gravity_multiplier, 0.) * dt;
             let travel = velocity * dt;
             particle.velocity = velocity;
-            let radius = particle.size * 0.5 * self.visual.scalars["CollisionModule.radiusScale"];
+            let radius = particle.size * 0.5 * self.look.radius_scale;
             let cap_hit = if contact_radius > 0. {
                 sphere_hit(particle.position, travel, cap_center, cap_radius + radius)
             } else {
@@ -299,8 +311,7 @@ impl FluidContact {
                     self.particles.swap_remove(index);
                     continue;
                 }
-                particle.remaining -= reference.lifetime_seconds
-                    * self.visual.curves["CollisionModule.m_EnergyLossOnCollision"].scalar;
+                particle.remaining -= reference.lifetime_seconds * self.look.energy_loss;
                 particle.age = reference.lifetime_seconds - particle.remaining;
                 if particle.remaining <= 0. {
                     self.particles.swap_remove(index);
