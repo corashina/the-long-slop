@@ -228,9 +228,51 @@ fn command_round_trips() {
     command.input.typing.text[..2].copy_from_slice(b"hi");
     command.input.typing.len = 2;
     command.input.gamepad.axes[31] = 0.75;
+    command.actions = SimCommand::PAUSE;
+    command.assists = Some(crate::reference::DrivingAssists {
+        automatic_clutch: true,
+        automatic_gears: false,
+    });
     let mut bytes = Vec::new();
     encode_command(&command, &mut bytes);
     assert_eq!(decode_command(&bytes).unwrap(), command);
+}
+
+#[test]
+fn command_merge_keeps_edges_and_sums_deltas() {
+    let mut first = SimCommand {
+        seq: 1,
+        delta_seconds: 0.25,
+        actions: SimCommand::PAUSE,
+        ..Default::default()
+    };
+    first.input.held = 1;
+    first.input.pressed = 1;
+    first.input.mouse = [1., 2.];
+    let mut second = SimCommand {
+        seq: 2,
+        delta_seconds: 0.5,
+        ready: true,
+        ..Default::default()
+    };
+    second.input.held = 2;
+    second.input.released = 1;
+    second.input.mouse = [0.5, -1.];
+    first.merge(second.clone());
+    assert_eq!(
+        (first.seq, first.delta_seconds, first.ready),
+        (2, 0.75, true)
+    );
+    assert_eq!(first.actions, SimCommand::PAUSE);
+    assert_eq!(
+        (first.input.held, first.input.pressed, first.input.released),
+        (2, 1, 1)
+    );
+    assert_eq!(first.input.mouse, [1.5, 1.]);
+    second.hold = true;
+    first.merge(second);
+    assert!(first.hold);
+    assert_eq!(first.input, FrameInput::default());
 }
 
 #[test]

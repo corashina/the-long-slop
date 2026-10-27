@@ -8,6 +8,7 @@ pub mod conditions;
 #[cfg(target_arch = "wasm32")]
 pub mod cpu_profile;
 pub mod damage;
+pub mod driver;
 pub mod exhaust;
 pub mod fluids;
 pub mod flyers;

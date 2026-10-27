@@ -1,7 +1,7 @@
 use crate::reference::DrivingReference;
 use crate::simulation::{FIXED_DT, FrameInput, GamepadFrame, keys};
 use rapier3d::prelude::RigidBodyHandle;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Source `inputscript.DriveStuff` mouse axis scale.
 const MOUSE_SCALE: f32 = 0.0125;
@@ -52,14 +52,14 @@ pub struct DrivingOutput {
     pub gear_edges: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AxisBinding {
     pub pad: u8,
     pub axis: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ButtonBinding {
     pub pad: u8,
@@ -68,7 +68,7 @@ pub struct ButtonBinding {
 
 /// Source `CS*` axis, `CBenable*`, `CBinvert*`, `CF*Middle` (steer only, else 0), `CF*Dead`,
 /// `CF*Sens`, `CF*Max`.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AxisSetting {
     pub bound: Option<AxisBinding>,
@@ -159,7 +159,7 @@ fn ramp(value: &mut f32, target: f32, step: f32) {
 }
 
 /// Player driving settings from the browser (source `settingsscript.S`).
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DrivingSettings {
     /// Source `FMouseDriveSensX`, `FMouseDriveSensY`.

@@ -8,16 +8,16 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::ReferenceManifest;
-use crate::simulation::{FrameInput, StepClock, keys};
+use crate::simulation::{FrameInput, keys};
 use crate::starting_area::GarageRuntime;
-use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
-use simulation::boundary::{AudioCall, HudBlock, PoseRow, RenderInput, StateBlock};
-use simulation::host::{game_cpu_clear_input, game_now};
+use simulation::boundary::{AudioCall, HudBlock, PoseRow, RenderInput, SimCommand, StateBlock};
+use simulation::driver::SimDriver;
+use simulation::host::game_now;
 use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -29,35 +29,15 @@ pub(crate) const LOADING_BUDGET_MS: f64 = 12.;
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
-    pub runtime: GarageRuntime,
-    /// Gauge state per vehicle.
-    input: FrameInput,
-    frame_input: FrameInput,
-    pub(crate) clock: StepClock,
-    previous: VehiclePose,
-    current: VehiclePose,
-    rendered: VehiclePose,
-    camera: CameraMode,
-    frame_steps: u32,
-    physics_ms: f64,
+    pub sim: SimDriver,
+    /// Sequence of the last sent command.
+    seq: u64,
     world_ms: f64,
-    pub render_delta_seconds: f32,
     /// Camera position of the last rendered frame. The simulation assigns radio voices by it.
     pub listener: Option<[f32; 3]>,
-    skip_elapsed: bool,
     pub(crate) ready: bool,
     last_inventory: Option<([u32; 4], u8, u32)>,
     last_crosshair: Option<(u32, u32)>,
-}
-
-impl Drive {
-    /// Player body `pose` at the rendered camera. It moves with the camera interpolation.
-    pub(crate) fn rendered_body_pose(&self, mut pose: VehiclePose) -> VehiclePose {
-        for i in 0..3 {
-            pose.position[i] += self.rendered.position[i] - self.current.position[i];
-        }
-        pose
-    }
 }
 
 /// Manifest fields the browser shell reads. Copies them without parsing the world records.
@@ -170,27 +150,16 @@ pub fn run(
         fixed,
         ledger,
     );
-    let current = runtime.area.player.view(&runtime.physics).camera_pose;
     App::new()
         .insert_resource(graph)
         .insert_resource(allocation)
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
-            runtime,
-            input: FrameInput::default(),
-            frame_input: FrameInput::default(),
-            clock: StepClock::default(),
-            previous: current,
-            current,
-            rendered: current,
-            camera: CameraMode::default(),
-            frame_steps: 0,
-            physics_ms: 0.,
+            sim: SimDriver::new(runtime),
+            seq: 0,
             world_ms: 0.,
-            render_delta_seconds: 0.,
             listener: None,
-            skip_elapsed: false,
             ready: false,
             last_inventory: None,
             last_crosshair: None,
@@ -351,14 +320,15 @@ fn setup(
         &mut commands,
         &mut images,
         &reference.0,
-        presentation::transform(drive.current),
+        presentation::transform(drive.sim.rendered),
         drive
+            .sim
             .runtime
             .area
             .player
-            .view(&drive.runtime.physics)
+            .view(&drive.sim.runtime.physics)
             .fov_degrees,
-        drive.runtime.distances.cam2_far_plane,
+        drive.sim.runtime.distances.cam2_far_plane,
     );
 }
 
@@ -370,7 +340,11 @@ fn initialize_storage(
     if drive.ready || visuals.failed {
         return;
     }
-    if let Err(error) = drive.runtime.initialize_storage_frame(time.delta_secs()) {
+    if let Err(error) = drive
+        .sim
+        .runtime
+        .initialize_storage_frame(time.delta_secs())
+    {
         game_failure(&error.to_string());
         visuals.failed = true;
     }
@@ -442,6 +416,7 @@ fn check_ready(
             return false;
         }
         if !drive
+            .sim
             .runtime
             .area
             .interaction
@@ -507,8 +482,8 @@ fn check_ready(
                 if materials.state != presentation::materials::RenderingState::Ready {
                     return false;
                 }
-                if !drive.runtime.world_supported()
-                    || !drive.runtime.stream.required_ready()
+                if !drive.sim.runtime.world_supported()
+                    || !drive.sim.runtime.stream.required_ready()
                     || !lighting.road_lamps.ready()
                 {
                     return false;
@@ -527,8 +502,13 @@ fn check_ready(
         }
     })();
     let key = crate::render_readiness::ContentKey {
-        session: drive.runtime.stream.frame().request.session,
-        selection_revision: drive.runtime.stream.required_content().selection_revision,
+        session: drive.sim.runtime.stream.frame().request.session,
+        selection_revision: drive
+            .sim
+            .runtime
+            .stream
+            .required_content()
+            .selection_revision,
     };
     let preparation = if prepared {
         crate::render_readiness::ContentPreparation::Prepared(key)
@@ -537,7 +517,7 @@ fn check_ready(
     };
     match renderer.check(presentation::readiness::RendererContentCheck {
         preparation,
-        history_revision: drive.runtime.audio_motion_revision,
+        history_revision: drive.sim.runtime.audio_motion_revision,
     }) {
         crate::render_readiness::RendererStatus::Loading => {}
         crate::render_readiness::RendererStatus::Ready => {
@@ -553,51 +533,30 @@ fn check_ready(
     }
 }
 
-fn clear_input(drive: &mut Drive) {
-    if cpu_profile::enabled() {
-        game_cpu_clear_input();
-    }
-    drive.input.clear();
-    drive.frame_input.clear();
-    drive.runtime.clear_input();
-    drive.current = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .camera_pose;
-    drive.clock.reset();
-    drive.previous = drive.current;
-    drive.rendered = drive.current;
-    drive.runtime.area.begin_step();
-    drive.skip_elapsed = true;
-}
 fn read_input(
     reference: Res<RuntimeReference>,
+    time: Res<Time<Real>>,
+    sim: Res<SimFrameResource>,
     mut drive: ResMut<Drive>,
     requests: Res<save::SaveRequests>,
 ) {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
-    let runtime = &drive.runtime;
-    let assists = runtime.driving_assists;
-    let controls = runtime.driving_input.controls;
+    let hud = &sim.frame.hud;
+    let [steer, throttle, brake, clutch, handbrake] = hud.controls;
     game_driving_state(
-        runtime
-            .vehicle
-            .as_ref()
-            .map_or(0, |key| runtime.vehicles[key].drivetrain.gear() as i32 - 1),
-        assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
-        runtime.area.player.driving(),
-        controls.steer,
-        controls.throttle,
-        controls.brake,
-        controls.clutch,
-        controls.handbrake,
+        hud.gear,
+        hud.assists,
+        hud.flags & HudBlock::DRIVING != 0,
+        steer,
+        throttle,
+        brake,
+        clutch,
+        handbrake,
     );
-    let actions = game_actions();
+    let actions = game_actions() & SimCommand::ACTIONS;
     let held = game_keys();
     let player = game_player_keys();
-    let mut frame = FrameInput {
+    let mut input = FrameInput {
         held,
         player_held: player as u8,
         player_pressed: (player >> 8) as u8,
@@ -613,7 +572,7 @@ fn read_input(
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
-        typing: if drive.runtime.stream.computers.typing {
+        typing: if hud.flags & HudBlock::TYPING != 0 {
             let mut typing = crate::simulation::TypingInput {
                 keys: game_typing_keys(),
                 ..Default::default()
@@ -625,151 +584,37 @@ fn read_input(
         },
         gamepad: crate::simulation::GamepadFrame::default(),
     };
-    game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
-    if requests.pending() {
-        if cpu_profile::enabled() {
-            game_cpu_clear_input();
-        }
-        drive.frame_input.clear();
-        return;
-    }
-    if actions & 2 != 0 {
-        drive.runtime.paused = true;
-        clear_input(&mut drive);
-    }
-    if actions & 4 != 0 && drive.ready && !drive.runtime.needs_output().menu_due {
-        drive.runtime.started = true;
-        drive.runtime.paused = false;
-        clear_input(&mut drive);
-    }
-
-    if actions & 16 != 0 {
-        drive.runtime.recover(&reference.0);
-        drive.current = drive
-            .runtime
-            .area
-            .player
-            .view(&drive.runtime.physics)
-            .camera_pose;
-        clear_input(&mut drive);
-    }
-    let requested = game_driving_assists();
-    if requested & 4 != 0 && !requests.pending() {
-        let _ = drive
-            .runtime
-            .set_driving_assists(crate::reference::DrivingAssists {
+    game_gamepad(&mut input.gamepad.axes, &mut input.gamepad.buttons);
+    let hold = requests.pending();
+    // A pending save keeps the browser assists and settings for a later frame.
+    let (assists, settings) = if hold {
+        (None, None)
+    } else {
+        let requested = game_driving_assists();
+        (
+            (requested & 4 != 0).then_some(crate::reference::DrivingAssists {
                 automatic_clutch: requested & 1 != 0,
                 automatic_gears: requested & 2 != 0,
-            });
-    }
-    // The browser validates stored settings. A refused value keeps the current settings.
-    if let Some(settings) = game_driving_settings()
-        && let Ok(settings) =
-            serde_json::from_str::<crate::simulation::input::DrivingSettings>(&settings)
-        && settings.valid(&reference.0.driving)
-    {
-        drive.runtime.driving_input.settings = settings;
-    }
-    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
-        drive.input.clear();
-        if cpu_profile::enabled() {
-            game_cpu_clear_input();
-        }
-        drive.frame_input.clear();
-        drive.runtime.clear_input();
-        // The Controls screen shows the pad axes while the game is paused.
-        drive.runtime.driving_input.preview(&frame.gamepad);
-        return;
-    }
-    if actions & 22 != 0 {
-        return;
-    }
-    if !drive.runtime.needs_output().dead
-        && !drive.runtime.sleeping()
-        && frame.pressed & keys::CAMERA != 0
-        && drive.runtime.area.player.seat_vehicle().is_some()
-    {
-        drive.runtime.audio_motion_revision = drive.runtime.audio_motion_revision.wrapping_add(1);
-        drive.camera = match drive.camera {
-            CameraMode::Cockpit => CameraMode::Chase,
-            CameraMode::Chase => CameraMode::Cockpit,
-        };
-    }
-    drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
-    drive.frame_input.merge(frame);
-}
-fn advance_physics(
-    time: Res<Time<Real>>,
-    reference: Res<RuntimeReference>,
-    mut drive: ResMut<Drive>,
-) {
-    drive.physics_ms = 0.;
-    drive.frame_steps = 0;
-    drive.render_delta_seconds = 0.;
-    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
-        return;
-    }
-    let blocked = drive.skip_elapsed
-        && (drive.runtime.recovering
-            || !drive.runtime.world_supported()
-            || drive.runtime.sleeping()
-            || drive.runtime.needs_output().dead);
-    let Drive {
-        frame_input,
-        skip_elapsed,
-        ..
-    } = &mut *drive;
-    let Some(raw) = frame_input.take_frame(skip_elapsed, blocked) else {
-        if blocked {
-            drive.input.clear();
-            drive.runtime.clear_input();
-        }
-        return;
+            }),
+            game_driving_settings().and_then(|settings| serde_json::from_str(&settings).ok()),
+        )
     };
-    let started = game_now();
-    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
-    if let Some(audio) = &mut drive.runtime.audio {
-        let [month, day] = local_calendar();
-        audio.broadcasts.calendar(month, day);
-    }
-    let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.runtime.area.conditions.update(delta, true);
-    let view = drive.rendered;
-    let frame = drive
-        .runtime
-        .advance_inventory_frame(&reference.0, raw, delta, view);
-    frame.merge_fixed_input(&mut drive.input);
-    drive.clock.accept_frame(time.delta_secs_f64());
-    loop {
-        let scale = drive.runtime.clock_factors(&reference.0).time_scale;
-        if !drive.clock.take_step(scale) {
-            break;
-        }
-        drive.frame_steps += 1;
-        drive.render_delta_seconds += crate::simulation::FIXED_DT;
-        drive.previous = drive.current;
-        let old_origin = drive.runtime.stream.origin.offset;
-        let input = drive.input.take_step();
-        drive.runtime.step(&reference.0, input);
-        let new_origin = drive.runtime.stream.origin.offset;
-        for i in 0..3 {
-            drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
-        }
-        drive.current = drive
-            .runtime
-            .area
-            .player
-            .view(&drive.runtime.physics)
-            .camera_pose;
-        if drive.runtime.paused {
-            drive.clock.reset();
-            break;
-        }
-    }
-    let scale = drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.rendered =
-        presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
-    drive.physics_ms = game_now() - started;
+    drive.seq += 1;
+    let command = SimCommand {
+        seq: drive.seq,
+        delta_seconds: time.delta_secs_f64(),
+        input,
+        actions,
+        ready: drive.ready,
+        hold,
+        assists,
+        settings,
+        calendar: local_calendar(),
+    };
+    drive.sim.accept(&reference.0, command);
+}
+fn advance_physics(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
+    drive.sim.advance(&reference.0);
 }
 fn sync_world(
     reference: Res<RuntimeReference>,
@@ -790,7 +635,7 @@ fn sync_world(
         return;
     };
     // Preparation consumes one completed pose/FOV pair. Startup and load use the root camera.
-    let coherent = views.session == drive.runtime.stream.frame().request.session
+    let coherent = views.session == drive.sim.runtime.stream.frame().request.session
         && views.scene == epoch.0
         && views.views[..presentation::surface_views::WORLD_VIEWS]
             .iter()
@@ -816,7 +661,7 @@ fn sync_world(
         |view| view.fov_degrees,
     );
     let started = game_now();
-    let origin = drive.runtime.stream.origin;
+    let origin = drive.sim.runtime.stream.origin;
     let position = Vec3::from_array(
         origin
             .absolute(camera_world.w_axis.truncate().to_array())
@@ -852,7 +697,7 @@ fn sync_world(
     };
     // The loading panel covers the screen, so generation can use most of each frame.
     let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
-    let runtime = &mut drive.runtime;
+    let runtime = &mut drive.sim.runtime;
     runtime.stream.advance_generation();
     let was_aligned = runtime.startup_aligned;
     let enabled = runtime
@@ -928,20 +773,14 @@ fn sync_world(
         });
     match result {
         Ok(moved) => {
-            if moved || (!was_aligned && drive.runtime.startup_aligned) {
-                drive.current = drive
-                    .runtime
-                    .area
-                    .player
-                    .view(&drive.runtime.physics)
-                    .camera_pose;
-                clear_input(&mut drive);
+            if moved || (!was_aligned && drive.sim.runtime.startup_aligned) {
+                drive.sim.clear_input();
             }
         }
         Err(error) => {
             game_failure(&error.to_string());
-            drive.runtime.stream.fail(error);
-            drive.runtime.clear_input();
+            drive.sim.runtime.stream.fail(error);
+            drive.sim.runtime.clear_input();
         }
     }
     drive.world_ms = game_now() - started;
@@ -1007,8 +846,8 @@ fn sync_instances(
     }
     if let Err(error) = presentation.sync_instances(&reference.0, &mut sim) {
         game_failure(&error.to_string());
-        drive.runtime.stream.fail(error);
-        drive.runtime.clear_input();
+        drive.sim.runtime.stream.fail(error);
+        drive.sim.runtime.clear_input();
     }
 }
 /// Fills the frame after the simulation and world work of this Bevy frame.
@@ -1020,30 +859,27 @@ fn fill_frame(
 ) {
     let drive = &mut *drive;
     let input = RenderInput {
-        dt: drive.render_delta_seconds,
+        dt: drive.sim.render_delta_seconds,
         real_dt: time.delta_secs(),
         listener: drive.listener,
     };
-    drive.runtime.advance_render_frame(&reference.0, input);
+    drive.sim.runtime.advance_render_frame(&reference.0, input);
     fill(drive, &reference.0, &mut frame);
 }
 /// Writes the runtime state into `frame` and applies its changes.
 fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
-    let alpha = drive
-        .clock
-        .alpha(drive.runtime.clock_factors(reference).time_scale);
-    drive.runtime.fill_frame(reference, alpha, &mut frame.frame);
-    frame.apply_changes(|handle| drive.runtime.release_pose(handle));
+    drive.sim.fill(reference, &mut frame.frame);
+    frame.apply_changes(|handle| drive.sim.runtime.release_pose(handle));
     frame.index_particles();
 }
 fn active_camera(drive: &Drive, state: &StateBlock) -> Transform {
     let pose = |row: PoseRow| presentation::transform(row.pose());
     if state.sleep_camera.flags & PoseRow::ACTIVE != 0 {
         pose(state.sleep_camera)
-    } else if drive.camera == CameraMode::Chase && state.seat_car.flags & PoseRow::ACTIVE != 0 {
+    } else if state.flags & StateBlock::CHASE != 0 && state.seat_car.flags & PoseRow::ACTIVE != 0 {
         presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
     } else {
-        presentation::transform(drive.rendered)
+        presentation::transform(drive.sim.rendered)
     }
 }
 fn update_camera(
@@ -1161,12 +997,12 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
     let seated = state.flags & StateBlock::SEATED != 0;
     game_update(
         hud.speed_kmh,
-        (drive.camera == CameraMode::Cockpit || !seated) as u32,
+        (state.flags & StateBlock::CHASE == 0 || !seated) as u32,
         hud.focus[0],
         hud.focus[1],
         hud.focus[2],
         hud.contacts,
-        drive.frame_steps,
+        drive.sim.frame_steps,
         hud.surfaces,
         hud.colliders,
         hud.absolute[0],
@@ -1181,7 +1017,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         hud.fuel,
         state.flags & StateBlock::PAUSED != 0,
         state.flags & StateBlock::STARTED != 0,
-        hud.flags & HudBlock::AUTOSAVE_SAFE != 0 && drive.input.held & keys::GRAB == 0,
+        hud.flags & HudBlock::AUTOSAVE_SAFE != 0 && drive.sim.held() & keys::GRAB == 0,
         seated,
     );
     if hud.flags & HudBlock::RADIO != 0 {

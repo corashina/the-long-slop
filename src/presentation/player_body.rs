@@ -385,7 +385,9 @@ pub(crate) fn sync(
     }
     if let Ok((mut transform, _, _)) = nodes.get_mut(player) {
         let scale = transform.scale;
-        let pose = drive.rendered_body_pose(frame.frame.state.body_pose.pose());
+        let pose = drive
+            .sim
+            .rendered_body_pose(frame.frame.state.body_pose.pose());
         transform.set_if_neq(super::transform(pose).with_scale(scale));
     }
     let state = &frame.frame.state;

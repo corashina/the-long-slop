@@ -162,10 +162,10 @@ fn process_request(
                 if !drive.ready {
                     return Err(invalid("The garage is not ready"));
                 }
-                permit.commit(id, &mut drive.runtime, generation)?;
-                super::clear_input(&mut drive);
-                drive.frame_steps = 0;
-                drive.render_delta_seconds = 0.;
+                permit.commit(id, &mut drive.sim.runtime, generation)?;
+                drive.sim.clear_input();
+                drive.sim.frame_steps = 0;
+                drive.sim.render_delta_seconds = 0.;
                 requests.pending = None;
                 return Ok(String::new());
             }
@@ -206,48 +206,35 @@ fn process_request(
                     .presentation
                     .take()
                     .unwrap()
-                    .commit(&mut drive.runtime, world);
+                    .commit(&mut drive.sim.runtime, world);
             });
             let mut drive = world.resource_mut::<Drive>();
             let session = drive
+                .sim
                 .runtime
                 .audio
                 .as_ref()
                 .map_or(1, |audio| audio.session.wrapping_add(1));
             // Assignment drops the old stream and terminates its road actor first.
-            let settings = drive.runtime.driving_input.settings;
-            drive.runtime = candidate.runtime;
-            drive.runtime.driving_input.settings = settings;
+            let settings = drive.sim.runtime.driving_input.settings;
+            drive.sim.runtime = candidate.runtime;
+            drive.sim.runtime.driving_input.settings = settings;
             drive
+                .sim
                 .runtime
                 .stream
                 .set_overlap(crate::world::WorldMetrics::default())
                 .expect("retired world overlap only removes charges");
-            let runtime = &mut drive.runtime;
+            let runtime = &mut drive.sim.runtime;
             if let Some(audio) = &mut runtime.audio {
                 audio.reset(session);
                 audio.sync_lamps(&reference.lighting, &runtime.lighting);
             }
-            drive.camera = candidate.camera;
-            drive.current = drive
-                .runtime
-                .area
-                .player
-                .view(&drive.runtime.physics)
-                .camera_pose;
-            drive.previous = drive.current;
-            drive.rendered = drive.current;
-            drive.input.clear();
-            drive.frame_input.clear();
-            drive.clock = StepClock::default();
-            drive.frame_steps = 0;
-            drive.render_delta_seconds = 0.;
+            drive.sim.restart(candidate.camera);
             drive.ready = false;
-            drive.runtime.paused = true;
-            drive.skip_elapsed = true;
-            drive.runtime.advance_instruments(&reference, 0., true);
+            drive.sim.runtime.advance_instruments(&reference, 0., true);
             // The new runtime starts a new frame stream: drop the old pose index and tables.
-            drive.runtime.reset_structure_views();
+            drive.sim.runtime.reset_structure_views();
             let mut sim = SimFrameResource::default();
             super::fill(&mut drive, &reference, &mut sim);
             let state = sim.frame.state;
@@ -296,18 +283,18 @@ fn process_request(
                     .get("autosave")
                     .and_then(serde_json::Value::as_bool)
                     .ok_or_else(|| invalid("Missing autosave flag"))?;
-            if !autosave && drive.runtime.started && !drive.runtime.paused {
+            if !autosave && drive.sim.runtime.started && !drive.sim.runtime.paused {
                 return Err(invalid("Pause the game first"));
             }
             if request.kind == "Capture" {
                 let mut drive = world.resource_mut::<Drive>();
                 if !autosave {
-                    super::clear_input(&mut drive);
+                    drive.sim.clear_input();
                 }
-                let snapshot = drive.runtime.capture_save(
+                let snapshot = drive.sim.runtime.capture_save(
                     &reference,
                     &requests.source,
-                    if drive.camera == CameraMode::Chase {
+                    if drive.sim.camera == CameraMode::Chase {
                         CameraSave::Chase
                     } else {
                         CameraSave::FirstPerson
@@ -339,16 +326,17 @@ fn process_request(
                 as f32;
             let mode = super::game_mode(&reference);
             if request.kind == "PrepareNewGame"
-                && !drive.runtime.started
-                && drive.runtime.stream.mode() == mode
+                && !drive.sim.runtime.started
+                && drive.sim.runtime.stream.mode() == mode
                 && drive
+                    .sim
                     .runtime
                     .distances
                     .matches(&reference.world.draw_distance, draw_distance)
             {
                 let permit = FreshSessionPermit::prepare(
                     request.id,
-                    &drive.runtime,
+                    &drive.sim.runtime,
                     world
                         .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
                         .0,

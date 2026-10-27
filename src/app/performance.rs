@@ -3,16 +3,16 @@ use crate::browser::{game_performance_counters, game_performance_frame};
 use bevy::prelude::*;
 
 pub(super) fn publish(drive: Res<Drive>, archetypes: &bevy::ecs::archetype::Archetypes) {
-    if !game_performance_frame(drive.physics_ms, drive.world_ms) {
+    if !game_performance_frame(drive.sim.physics_ms, drive.world_ms) {
         return;
     }
-    let runtime = &drive.runtime;
+    let runtime = &drive.sim.runtime;
     let counters = runtime.stream.performance_counters();
     let contacts = runtime.vehicle.as_ref().map_or(0, |key| {
         runtime.physics.wheel_contacts(key).filter(|v| *v).count() as u32
     });
     game_performance_counters(
-        drive.frame_steps,
+        drive.sim.frame_steps,
         contacts,
         runtime.physics.rapier().bodies.len() as u32,
         runtime.physics.collider_count() as u32,

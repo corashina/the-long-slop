@@ -431,7 +431,7 @@ fn world_labels(
         status.world.retain(|root| instances.has_root(*root));
     }
     let reference = &world.resource::<RuntimeReference>().0;
-    let vehicles = &world.resource::<Drive>().runtime.vehicles;
+    let vehicles = &world.resource::<Drive>().sim.runtime.vehicles;
     let Some(material) = status.material.clone() else {
         return Ok(None);
     };

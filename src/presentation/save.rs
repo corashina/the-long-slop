@@ -59,6 +59,7 @@ impl PreparedPresentation {
             && world.resource::<GrassWriters>().ready().unwrap_or(false)
             && world
                 .resource::<crate::app::Drive>()
+                .sim
                 .runtime
                 .stream
                 .metrics()
@@ -66,6 +67,7 @@ impl PreparedPresentation {
                 == 0
             && world
                 .resource::<crate::app::Drive>()
+                .sim
                 .runtime
                 .stream
                 .metrics()
@@ -94,6 +96,7 @@ impl PreparedPresentation {
         candidate.stream.apply_renderer_facts(&mut facts)?;
         let mut overlap = world
             .resource::<crate::app::Drive>()
+            .sim
             .runtime
             .stream
             .metrics();
@@ -207,6 +210,7 @@ impl PreparedPresentation {
     fn overlap(&self, world: &World) -> crate::world::WorldMetrics {
         let mut overlap = world
             .resource::<crate::app::Drive>()
+            .sim
             .runtime
             .stream
             .metrics();
