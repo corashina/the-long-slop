@@ -17,6 +17,10 @@ enum Pending {
 pub(crate) struct Candidate {
     id: u32,
     kind: String,
+    /// The newest candidate frame and its pose index.
+    frame: SimFrameResource,
+    /// The candidate world copy until the hidden scene takes it.
+    mirror: Option<Box<crate::world::RendererWorld>>,
     pub(crate) presentation: Option<PreparedPresentation>,
     ready: bool,
     canceled: bool,
@@ -163,11 +167,11 @@ fn request_input(
                     return Err(invalid("Prepared renderer is not ready"));
                 }
                 let reference = world.resource::<RuntimeReference>().0.clone();
-                candidate
-                    .presentation
-                    .as_ref()
-                    .unwrap()
-                    .validate_commit(&reference, world)?;
+                candidate.presentation.as_ref().unwrap().validate_commit(
+                    &reference,
+                    &candidate.frame,
+                    world,
+                )?;
                 candidate.committing = true;
             }
         }
@@ -224,9 +228,24 @@ fn results(world: &mut World, requests: &mut SaveRequests) {
     if flags & StateBlock::CANDIDATE != 0
         && let Some(Pending::Waiting { id, kind }) = &requests.pending
     {
+        // The candidate copy starts empty and shares the fixed lookups.
+        let mirror = world
+            .resource::<crate::presentation::world::runtime::SourcePresentationAllocation>()
+            .world
+            .as_ref()
+            .map_or_else(
+                || {
+                    crate::world::RendererWorld::new(
+                        world.resource::<RuntimeReference>().0.world.clone(),
+                    )
+                },
+                |w| w.fork(),
+            );
         requests.pending = Some(Pending::Candidate(Box::new(Candidate {
             id: *id,
             kind: kind.clone(),
+            frame: SimFrameResource::default(),
+            mirror: Some(Box::new(mirror)),
             presentation: None,
             ready: false,
             canceled: false,
@@ -258,6 +277,13 @@ fn commit(world: &mut World, mut candidate: Candidate) {
     );
     // The prepared commands and stable bindings make this boundary infallible.
     candidate.presentation.take().unwrap().commit(world);
+    // The active renderer has the candidate copy now. The world changes of this frame follow it.
+    world.resource_scope(|world, sim: Mut<SimFrameResource>| {
+        let reference = world.resource::<RuntimeReference>().0.world.clone();
+        world
+            .resource_mut::<crate::presentation::world::runtime::SourcePresentationAllocation>()
+            .apply_world(&reference, &sim.frame.world);
+    });
     let view = {
         let mut drive = world.resource_mut::<Drive>();
         drive.ready = false;
@@ -291,6 +317,27 @@ fn commit(world: &mut World, mut candidate: Candidate) {
     crate::presentation::view_frame::restart_scene(world);
 }
 
+/// Takes the candidate frame: the pose index and the world copy follow every frame.
+fn receive(world: &mut World, candidate: &mut Candidate) {
+    world.resource_scope(|world, mut sim: Mut<SimFrameResource>| {
+        let filled = sim.frame.state.flags & StateBlock::CANDIDATE != 0;
+        let Some(frame) = sim.frame.candidate.as_mut().filter(|_| filled) else {
+            return;
+        };
+        std::mem::swap(&mut **frame, &mut candidate.frame.frame);
+        let mut drive = world.resource_mut::<Drive>();
+        candidate
+            .frame
+            .apply_changes(|handle| drive.sim.release_candidate_pose(handle));
+        let delta = &candidate.frame.frame.world;
+        match (&mut candidate.presentation, &mut candidate.mirror) {
+            (Some(presentation), _) => presentation.apply_world(delta),
+            (None, Some(mirror)) => mirror.apply(delta),
+            (None, None) => {}
+        }
+    });
+}
+
 /// Prepares the hidden scene from the candidate frame of the last step.
 fn advance(world: &mut World, requests: &mut SaveRequests) {
     let Some(candidate) = requests.candidate_mut() else {
@@ -310,6 +357,7 @@ fn advance(world: &mut World, requests: &mut SaveRequests) {
         }
         return;
     }
+    receive(world, candidate);
     if candidate.ready {
         return;
     }
@@ -318,33 +366,16 @@ fn advance(world: &mut World, requests: &mut SaveRequests) {
     let result = (|| -> Result<bool, crate::save::SaveError> {
         let Some(presentation) = &mut candidate.presentation else {
             if PreparedPresentation::can_start(world) {
-                world.resource_scope(|world, drive: Mut<Drive>| {
-                    let stream = drive.sim.candidate_stream().expect("simulation candidate");
-                    candidate.presentation =
-                        Some(PreparedPresentation::new(&reference, stream, world)?);
-                    Ok::<_, crate::save::SaveError>(())
-                })?;
+                let mirror = candidate.mirror.take().expect("candidate world copy");
+                candidate.presentation =
+                    Some(PreparedPresentation::new(&reference, mirror, world)?);
             }
             return Ok(false);
         };
         if !candidate.stepped {
             return Ok(false);
         }
-        world.resource_scope(|world, mut sim: Mut<SimFrameResource>| {
-            world.resource_scope(|world, mut drive: Mut<Drive>| {
-                // The simulation fills the candidate frame after each candidate step.
-                let stepped = sim.frame.state.flags & StateBlock::CANDIDATE != 0;
-                let Some(frame) = sim.frame.candidate.as_mut().filter(|_| stepped) else {
-                    return Ok(false);
-                };
-                std::mem::swap(&mut **frame, &mut presentation.frame.frame);
-                presentation
-                    .frame
-                    .apply_changes(|handle| drive.sim.release_candidate_pose(handle));
-                let stream = drive.sim.candidate_stream().expect("simulation candidate");
-                presentation.advance(&reference, stream, world)
-            })
-        })
+        presentation.advance(&reference, &mut candidate.frame, world)
     })();
     match result {
         Ok(true) => {

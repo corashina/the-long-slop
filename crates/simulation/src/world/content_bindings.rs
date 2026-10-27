@@ -440,7 +440,7 @@ impl WorldStream {
             row.node as usize,
         )
     }
-    pub fn world_reference(&self) -> &crate::reference::WorldReference {
+    pub fn world_reference(&self) -> &std::sync::Arc<crate::reference::WorldReference> {
         &self.reference
     }
     #[allow(clippy::too_many_arguments)]

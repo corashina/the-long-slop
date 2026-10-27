@@ -26,7 +26,7 @@ pub const PROTOTYPE_CPU: usize = 512 * MIB;
 pub const PROTOTYPE_GPU: usize = 1024 * MIB;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorldRequest {
     pub session: u64,
     pub revision: u64,

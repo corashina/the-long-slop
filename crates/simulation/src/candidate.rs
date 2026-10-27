@@ -4,7 +4,7 @@ use crate::driver::{CameraMode, LOADING_BUDGET_MS};
 use crate::reference::ReferenceManifest;
 use crate::simulation::FIXED_DT;
 use crate::starting_area::{GarageRuntime, WorldInput};
-use crate::world::{PresentationGrant, WorldMetrics};
+use crate::world::{PresentationGrant, RendererWorld, WorldMetrics};
 
 pub struct CandidateDriver {
     pub runtime: GarageRuntime,
@@ -20,11 +20,15 @@ pub struct CandidateDriver {
     /// The first failure. The candidate stops after it.
     failure: Option<String>,
     failed: bool,
+    /// The renderer world copy of the last frame.
+    pub(crate) sent: RendererWorld,
 }
 
 impl CandidateDriver {
-    pub fn new(runtime: GarageRuntime, camera: CameraMode) -> Self {
+    /// `sent` is an empty copy for the candidate world.
+    pub fn new(runtime: GarageRuntime, camera: CameraMode, sent: RendererWorld) -> Self {
         Self {
+            sent,
             runtime,
             camera,
             world: WorldInput::default(),
@@ -93,8 +97,12 @@ impl CandidateDriver {
     }
 
     /// Writes the candidate state into `frame`. The camera is the player view without interpolation.
+    /// Every frame fills it: the renderer copy and the pose index follow the candidate from its start.
     pub fn fill(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
         self.runtime.fill_frame(reference, 1., frame);
+        self.runtime
+            .stream
+            .sync_renderer(&mut self.sent, &mut frame.world);
         let player = &self.runtime.area.player;
         let mut look = player.look(&self.runtime.physics);
         look.gain = 1.;

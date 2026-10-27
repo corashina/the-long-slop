@@ -49,7 +49,7 @@ pub use stream::content_boxes::BoxRelease;
 pub use stream::content_explosives::{Explosive, TankExplosion};
 pub use stream::content_index::ContentIndex;
 pub use stream::renderer_world::{
-    RendererFrame, RendererStructure, RendererSupply, RendererSurface, RendererWorld,
+    RendererFrame, RendererStructure, RendererSupply, RendererSurface, RendererWorld, WorldDelta,
 };
 pub use stream::{
     PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,
@@ -85,7 +85,7 @@ pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;
 pub const DEFAULT_SEED: u64 = 42;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorldOrigin {
     pub offset: [f64; 3],
 }
