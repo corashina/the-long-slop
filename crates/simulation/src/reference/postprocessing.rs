@@ -754,7 +754,104 @@ const GRADING_FIELDS: [(&str, usize); 10] = [
 /// `mixer{out}Out{in}In` starts at value 10, row by output channel.
 const MIXER: [&str; 3] = ["Red", "Green", "Blue"];
 
+/// The `GradingSettings::values` index of a source field. A vector field gives its first index.
+fn grading_index(name: &str) -> Option<usize> {
+    fn channel(name: &str) -> Option<(usize, &str)> {
+        MIXER
+            .iter()
+            .enumerate()
+            .find_map(|(i, c)| name.strip_prefix(c).map(|rest| (i, rest)))
+    }
+    let mixer = || {
+        let (output, rest) = channel(name.strip_prefix("mixer")?)?;
+        let (input, rest) = channel(rest.strip_prefix("Out")?)?;
+        (rest == "In").then_some(10 + output * 3 + input)
+    };
+    GRADING_FIELDS
+        .iter()
+        .find(|(field, _)| *field == name)
+        .map(|(_, index)| *index)
+        .or_else(mixer)
+}
+
+/// `ColorGrading.tonemapper` of the HDR LUT kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tonemapper {
+    /// Source value 0: `KGenLut3D_NoTonemap`.
+    None,
+    /// Source value 1: `KGenLut3D_NeutralTonemap`. The main grading uses it.
+    Neutral,
+}
+
+impl GlassesGradingParameters {
+    /// The number parameters that `GradingSettings` holds, by source field name.
+    fn numbers(&self) -> [(&'static str, &SourceParameter<f32>); 15] {
+        [
+            ("temperature", &self.temperature),
+            ("tint", &self.tint),
+            ("hueShift", &self.hue_shift),
+            ("saturation", &self.saturation),
+            ("postExposure", &self.post_exposure),
+            ("contrast", &self.contrast),
+            ("mixerRedOutRedIn", &self.mixer_red_out_red_in),
+            ("mixerRedOutGreenIn", &self.mixer_red_out_green_in),
+            ("mixerRedOutBlueIn", &self.mixer_red_out_blue_in),
+            ("mixerGreenOutRedIn", &self.mixer_green_out_red_in),
+            ("mixerGreenOutGreenIn", &self.mixer_green_out_green_in),
+            ("mixerGreenOutBlueIn", &self.mixer_green_out_blue_in),
+            ("mixerBlueOutRedIn", &self.mixer_blue_out_red_in),
+            ("mixerBlueOutGreenIn", &self.mixer_blue_out_green_in),
+            ("mixerBlueOutBlueIn", &self.mixer_blue_out_blue_in),
+        ]
+    }
+    /// The four-value parameters that `GradingSettings` holds, by source field name.
+    fn vectors(&self) -> [(&'static str, &SourceParameter<[f32; 4]>); 4] {
+        [
+            ("colorFilter", &self.color_filter),
+            ("lift", &self.lift),
+            ("gamma", &self.gamma),
+            ("gain", &self.gain),
+        ]
+    }
+}
+
 impl GradingSettings {
+    /// Source `PPVSunGlasses` over the main grading: PPv2 volume blending at weight 1.
+    /// An overridden number takes the lens value. An overridden tonemapper switches.
+    /// `GlassesProfile::validate` allows only these overrides, the HDR grading mode and the toe values.
+    /// The toe values change only the Custom tonemapper. Thus they have no effect here.
+    pub fn with_glasses(&self, profile: &GlassesProfile) -> (Self, Tonemapper) {
+        let mut grading = *self;
+        let mut tonemapper = Tonemapper::Neutral;
+        for effect in &profile.effects {
+            let GlassesEffect::ColorGrading {
+                active: true,
+                parameters: p,
+                ..
+            } = effect
+            else {
+                continue;
+            };
+            let values = grading.values();
+            for (name, parameter) in p.numbers() {
+                if parameter.override_state {
+                    *values[grading_index(name).unwrap()] = parameter.value;
+                }
+            }
+            for (name, parameter) in p.vectors() {
+                if parameter.override_state {
+                    let index = grading_index(name).unwrap();
+                    for (i, value) in parameter.value.iter().enumerate() {
+                        *values[index + i] = *value;
+                    }
+                }
+            }
+            if p.tonemapper.override_state && p.tonemapper.value == 0 {
+                tonemapper = Tonemapper::None;
+            }
+        }
+        (grading, tonemapper)
+    }
     /// Every blended number: the six scalars, color filter, channel mixer rows and the lift, gamma and gain trackballs.
     fn values(&mut self) -> [&mut f32; 31] {
         let Self {
@@ -827,16 +924,7 @@ impl DeadGrading {
                     continue;
                 }
                 let grading = effect.kind == "color_grading";
-                let index = GRADING_FIELDS
-                    .iter()
-                    .find(|(field, _)| field == name)
-                    .map(|(_, index)| *index)
-                    .or_else(|| {
-                        (0..9).find_map(|i| {
-                            let field = format!("mixer{}Out{}In", MIXER[i / 3], MIXER[i % 3]);
-                            (field == *name).then_some(10 + i)
-                        })
-                    });
+                let index = grading_index(name);
                 match (grading, index, parameter) {
                     (true, Some(index), VolumeParameter::Number(p))
                         if index < 6 || (10..19).contains(&index) =>
@@ -921,5 +1009,115 @@ mod tests {
         dead.blend(&mut grading, 1.);
         assert_eq!(grading.saturation, -100.);
         assert_eq!(grading.temperature, 10.);
+    }
+
+    #[test]
+    fn glasses_override_the_main_grading() {
+        let n = |o: bool, v: f32| serde_json::json!({"override_state": o, "value": v});
+        let spline = serde_json::json!({"override_state": false, "value": {
+            "curve": {"keys": [], "pre_wrap_mode": 0, "post_wrap_mode": 0},
+            "cached_data": [], "loop": false, "range": 1., "zero_value": 0.5}});
+        let texture = serde_json::json!({"override_state": false, "value": null,
+            "default_state": 1, "texture": null});
+        // Shaped like `clothing.glasses_profiles`: lens overrides over default values.
+        let profile = |exposure: f32, mixer: [f32; 3], tonemapper: u32| -> GlassesProfile {
+            let mut p = serde_json::Map::new();
+            for name in [
+                "blueCurve",
+                "greenCurve",
+                "hueVsHueCurve",
+                "hueVsSatCurve",
+                "lumVsSatCurve",
+                "masterCurve",
+                "redCurve",
+                "satVsSatCurve",
+            ] {
+                p.insert(name.into(), spline.clone());
+            }
+            p.insert("externalLut".into(), texture.clone());
+            p.insert("ldrLut".into(), texture.clone());
+            for name in [
+                "brightness",
+                "contrast",
+                "hueShift",
+                "ldrLutContribution",
+                "mixerBlueOutGreenIn",
+                "mixerBlueOutRedIn",
+                "mixerGreenOutBlueIn",
+                "mixerGreenOutRedIn",
+                "mixerRedOutBlueIn",
+                "mixerRedOutGreenIn",
+                "saturation",
+                "temperature",
+                "tint",
+                "toneCurveGamma",
+                "toneCurveShoulderAngle",
+                "toneCurveShoulderLength",
+                "toneCurveShoulderStrength",
+            ] {
+                p.insert(name.into(), n(false, 7.));
+            }
+            for name in ["colorFilter", "gain", "gamma", "lift"] {
+                p.insert(
+                    name.into(),
+                    serde_json::json!({"override_state": false, "value": [7., 7., 7., 7.]}),
+                );
+            }
+            let on = |value| serde_json::json!({"override_state": true, "value": value});
+            p.insert("enabled".into(), on(serde_json::json!(true)));
+            p.insert("gradingMode".into(), on(serde_json::json!(1)));
+            p.insert("tonemapper".into(), on(serde_json::json!(tonemapper)));
+            p.insert("postExposure".into(), n(true, exposure));
+            p.insert("toneCurveToeLength".into(), n(true, 0.5));
+            p.insert("toneCurveToeStrength".into(), n(true, 0.));
+            let mixed = mixer != [100.; 3];
+            p.insert("mixerRedOutRedIn".into(), n(mixed, mixer[0]));
+            p.insert("mixerGreenOutGreenIn".into(), n(mixed, mixer[1]));
+            p.insert("mixerBlueOutBlueIn".into(), n(mixed, mixer[2]));
+            serde_json::from_value(serde_json::json!({
+                "source": {"file": "sharedassets1.assets", "path_id": 130128},
+                "effects": [{"kind": "color_grading", "active": true,
+                    "source": {"file": "sharedassets1.assets", "path_id": 130142},
+                    "parameters": p}]}))
+            .unwrap()
+        };
+        let main = GradingSettings {
+            lut_size: 33,
+            curves: GradingCurves::SourceDefault,
+            temperature: 10.,
+            tint: 2.,
+            hue_shift: 0.,
+            saturation: 20.,
+            post_exposure: 1.,
+            contrast: 10.,
+            color_filter: [1.; 4],
+            channel_mixer: [[100., 5., 0.], [0., 100., 0.], [0., 0., 100.]],
+            trackballs: [[1., 1., 1., 0.]; 3],
+        };
+        // Profile 0: the dark lens.
+        let (dark, tonemapper) = main.with_glasses(&profile(-2., [100.; 3], 0));
+        assert_eq!(tonemapper, Tonemapper::None);
+        assert_eq!(
+            dark,
+            GradingSettings {
+                post_exposure: -2.,
+                ..main
+            }
+        );
+        // Profile 1: the mixer lens.
+        let (blue, tonemapper) = main.with_glasses(&profile(0., [50., 100., 200.], 0));
+        assert_eq!(tonemapper, Tonemapper::None);
+        assert_eq!(
+            blue,
+            GradingSettings {
+                post_exposure: 0.,
+                channel_mixer: [[50., 5., 0.], [0., 100., 0.], [0., 0., 200.]],
+                ..main
+            }
+        );
+        assert_eq!(
+            main.with_glasses(&profile(0., [100.; 3], 1)).1,
+            Tonemapper::Neutral
+        );
     }
 }
