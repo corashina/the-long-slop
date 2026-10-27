@@ -236,4 +236,21 @@ mod tests {
         assert!(ledger.take_publication());
         assert!(!ledger.take_publication());
     }
+
+    #[test]
+    fn grants_that_wait_for_one_renderer_step_keep_all_credit() {
+        // Two worker frames can arrive before a renderer step takes the grant.
+        let mut first = PresentationGrant::default();
+        first.credit.jobs = 1;
+        first.publication = true;
+        let mut second = PresentationGrant::default();
+        second.credit.jobs = 1;
+        second.credit.staging_bytes = 64;
+        let mut ledger = PresentationLedger::default();
+        ledger.grant(first.merge(second));
+        assert_eq!(ledger.available_external_jobs(), 2);
+        assert_eq!(ledger.available_staging_bytes(), 64);
+        // The lend belongs to the latest stream step only.
+        assert!(!ledger.take_publication());
+    }
 }

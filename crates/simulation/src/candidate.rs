@@ -9,12 +9,12 @@ use crate::world::{PresentationGrant, RendererWorld, WorldMetrics};
 pub struct CandidateDriver {
     pub runtime: GarageRuntime,
     pub camera: CameraMode,
-    world: WorldInput,
+    pub(crate) world: WorldInput,
     /// Renderer bytes that both renderers share. See `CandidateCommand`.
     shared: [usize; 2],
     fixed: [usize; 2],
     /// Answer of the last world step to the renderer report.
-    grant: Option<PresentationGrant>,
+    pub(crate) grant: Option<PresentationGrant>,
     /// The saved links are restored.
     restored: bool,
     /// The first failure. The candidate stops after it.
