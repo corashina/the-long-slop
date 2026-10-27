@@ -1,9 +1,9 @@
 //! Source surfaces retain the same vertices and triangle ranges as collision publication.
 use super::super::materials::{SourceMaterial, SourceShadowMode, terrain::TerrainMaterial};
 use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::ownership::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
-use crate::world::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::world::{WorldRequest, WorldStream};
 use crate::{
     reference::{ReferenceError, SourceId},
@@ -186,7 +186,7 @@ impl SourceWorldVisuals {
     pub fn prepare_surface(
         &mut self,
         stream: &mut WorldStream,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         meshes: &mut Assets<Mesh>,
         pipelines: &mut WorldPipelines,
         fixed: &SourceFixedAssets,

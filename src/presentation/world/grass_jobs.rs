@@ -1,13 +1,14 @@
 //! Camera-dependent Grass work uses the world publication and allocation gates.
 use super::grass_worker::{DOMAIN_BYTES, GrassJobId, GrassPoll, GrassWorker, INITIAL_WASM_BYTES};
 use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::ownership::PresentationLedger;
 use crate::{
     presentation::materials::{
         RenderingState,
         grass::material::{BLADE_ATTRIBUTE, GrassMaterial},
     },
     reference::ReferenceError,
-    world::{PresentationAllocation, PresentationLedger, WorldStream},
+    world::{PresentationAllocation, WorldStream},
 };
 use bevy::platform::collections::HashMap;
 use bevy::{
@@ -44,9 +45,9 @@ enum Pending {
     },
 }
 struct Instance {
-    continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
+    continuation: Option<crate::ownership::renderer_pending::PipelineContinuation>,
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
-    retirement: crate::world::renderer_pending::RendererRetirement,
+    retirement: crate::ownership::renderer_pending::RendererRetirement,
     entity: Entity,
     parent: Entity,
     last_started: u64,

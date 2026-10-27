@@ -1,59 +1,11 @@
 //! Renderer budget credit. The stream ledger checks the limits. The renderer spends the
 //! credit the stream gives it and reports its use once per frame.
-use super::PresentationAllocation;
-#[cfg(any(target_arch = "wasm32", test))]
-use super::WorldRequest;
-#[cfg(any(target_arch = "wasm32", test))]
 use super::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::reference::ReferenceError;
-
-impl PresentationAllocation {
-    /// Applies `f` to each pair of fields.
-    pub fn zip(self, other: Self, f: impl Fn(usize, usize) -> usize) -> Self {
-        Self {
-            grass_worker_wasm_bytes: f(self.grass_worker_wasm_bytes, other.grass_worker_wasm_bytes),
-            grass_worker_cache_bytes: f(
-                self.grass_worker_cache_bytes,
-                other.grass_worker_cache_bytes,
-            ),
-            grass_worker_reserved_bytes: f(
-                self.grass_worker_reserved_bytes,
-                other.grass_worker_reserved_bytes,
-            ),
-            active_cpu: f(self.active_cpu, other.active_cpu),
-            active_gpu: f(self.active_gpu, other.active_gpu),
-            prototype_cpu: f(self.prototype_cpu, other.prototype_cpu),
-            prototype_gpu: f(self.prototype_gpu, other.prototype_gpu),
-            jobs: f(self.jobs, other.jobs),
-            pending: f(self.pending, other.pending),
-            staging_bytes: f(self.staging_bytes, other.staging_bytes),
-            dependency_staging_bytes: f(
-                self.dependency_staging_bytes,
-                other.dependency_staging_bytes,
-            ),
-            objects: f(self.objects, other.objects),
-        }
-    }
-}
-
-/// The renderer use of one frame.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct PresentationReport {
-    pub used: PresentationAllocation,
-    /// Totals the renderer wanted to reach this frame.
-    pub want: PresentationAllocation,
-    /// Credit the renderer gave back. It no longer spends it.
-    pub release: PresentationAllocation,
-}
-
-/// The stream answer: added credit, and whether the stream waits for room.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct PresentationGrant {
-    pub credit: PresentationAllocation,
-    pub reclaim: bool,
-    /// The stream lends its publication slot of this frame.
-    pub publication: bool,
-}
+use crate::world::{
+    GeneratedId, PresentationAllocation, PresentationGrant, PresentationReport, WorldRequest,
+    WorldStream,
+};
 
 /// Renderer side of the budget. Admission checks spend credit; charges always apply.
 #[derive(Debug, Default)]
@@ -136,7 +88,6 @@ impl PresentationLedger {
         cpu <= self.available_prototype_cpu_bytes() && gpu <= self.available_prototype_gpu_bytes()
     }
     /// Gives one pending claim and its credit to the stream ready queue.
-    #[cfg(any(target_arch = "wasm32", test))]
     fn hand_over_pending(&mut self) -> Result<(), ReferenceError> {
         if self.used.pending == 0 || self.credit.pending == 0 {
             return Err(ReferenceError("Missing instance renderer claim".into()));
@@ -146,23 +97,20 @@ impl PresentationLedger {
         Ok(())
     }
     /// Takes one pending claim for a Grass renderer.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn claim_grass(&mut self, request: WorldRequest, entity: u64) -> PipelineContinuation {
         self.used.pending += 1;
         PipelineContinuation::counted(RendererOwner::Grass(request, entity))
     }
     /// Takes one pending claim for a structure renderer.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn claim_structure(
         &mut self,
         request: WorldRequest,
-        id: super::GeneratedId,
+        id: GeneratedId,
     ) -> PipelineContinuation {
         self.used.pending += 1;
         PipelineContinuation::counted(RendererOwner::Structure(request, id))
     }
     /// Gives a drained structure claim and its credit to the stream ready queue.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn hand_over_claim(
         &mut self,
         claim: &mut PipelineContinuation,
@@ -174,7 +122,6 @@ impl PresentationLedger {
         self.hand_over_pending()
     }
     /// Gives back a drained Grass or structure claim.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn release_claim(
         &mut self,
         claim: &mut PipelineContinuation,
@@ -227,7 +174,7 @@ impl PresentationLedger {
         self.publication = grant.publication;
     }
     /// Reports and takes the answer of `stream` in one call.
-    pub fn exchange(&mut self, stream: &mut super::WorldStream) {
+    pub fn exchange(&mut self, stream: &mut WorldStream) {
         let report = self.report();
         let grant = stream.exchange_presentation(report);
         self.grant(grant);

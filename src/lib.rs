@@ -19,6 +19,8 @@ mod render_scale;
 #[cfg(target_arch = "wasm32")]
 pub mod presentation;
 
+pub mod ownership;
+
 #[cfg(test)]
 #[path = "presentation/world/preflight/selected.rs"]
 #[allow(dead_code)]

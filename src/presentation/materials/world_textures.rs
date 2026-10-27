@@ -1,11 +1,11 @@
 //! Admitted source texture arrays. Each layer retains all authored mip levels.
+use crate::ownership::texture_batch::{Admission, BatchIdentity, BatchState, reservation};
 use crate::presentation::source_images::wrap;
 use crate::presentation::texture_batches::SourceTextureBatch;
 use crate::reference::texture_batch::{
     TextureArrayKey as ArrayKey, TextureBatchReference, texture_bank_groups,
 };
 use crate::reference::{LightingTextureRecord, ReferenceError, SourceId, WorldSourceMaterial};
-use crate::world::texture_batch_ownership::{Admission, BatchIdentity, BatchState, reservation};
 use bevy::asset::AssetId;
 static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 use bevy::{
@@ -528,7 +528,7 @@ impl WorldTextures {
         images: &mut Assets<Image>,
         batches: &mut Assets<SourceTextureBatch>,
         preparation: &crate::presentation::gpu_prepare::GpuPreparation,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
     ) -> Result<(), ReferenceError> {
         self.reap(server, batches)?;
         if self.cancelled {

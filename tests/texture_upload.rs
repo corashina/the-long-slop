@@ -1,5 +1,4 @@
-#[path = "../crates/simulation/src/world/upload_receipt.rs"]
-mod upload_receipt;
+use the_long_slop::ownership::upload_receipt;
 
 #[test]
 fn texture_cpu_reservation_lasts_until_gpu_completion_across_forks() {
@@ -17,7 +16,7 @@ fn texture_cpu_reservation_lasts_until_gpu_completion_across_forks() {
     assert!(!receipt.register());
 }
 
-use the_long_slop::world::texture_batch_ownership::*;
+use the_long_slop::ownership::texture_batch::*;
 fn id(request: u64) -> BatchIdentity {
     BatchIdentity {
         session: 1,

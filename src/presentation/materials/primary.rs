@@ -1,10 +1,11 @@
 //! Dynamic primary materials share the accepted source material cache.
 use super::*;
+use crate::ownership::PresentationLedger;
 pub(super) use crate::reference::fixed_reservation::{png_chain_staging, primary_staging};
 use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::{
-        PresentationLedger, WorldStream,
+        WorldStream,
         stream::{PROTOTYPE_CPU, PROTOTYPE_GPU},
     },
 };

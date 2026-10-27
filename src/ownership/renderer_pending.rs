@@ -1,6 +1,7 @@
 //! Counted renderer owners serialize pipeline work through their existing pending claim.
-use super::{GeneratedId, SurfaceKey, WorldRequest, WorldStream, upload_receipt::UploadReceipt};
+use super::{PresentationLedger, upload_receipt::UploadReceipt};
 use crate::reference::ReferenceError;
+use crate::world::{GeneratedId, SurfaceKey, WorldRequest, WorldStream};
 
 pub enum RendererOwner {
     Surface(WorldRequest, SurfaceKey),
@@ -69,7 +70,7 @@ impl PipelineContinuation {
     pub fn start(
         &mut self,
         stream: &WorldStream,
-        ledger: &mut super::PresentationLedger,
+        ledger: &mut PresentationLedger,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<PipelineOperation>, ReferenceError> {
@@ -93,7 +94,7 @@ pub struct PipelineOperation {
 impl PipelineOperation {
     pub fn reserve_pair(
         &self,
-        ledger: &mut super::PresentationLedger,
+        ledger: &mut PresentationLedger,
         cpu: usize,
     ) -> Result<(), ReferenceError> {
         if self.physical.completed() || self.physical.stopped() {
@@ -104,14 +105,14 @@ impl PipelineOperation {
         ledger.set_allocation(allocation)
     }
     pub fn independent(
-        ledger: &mut super::PresentationLedger,
+        ledger: &mut PresentationLedger,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<Self>, ReferenceError> {
         Self::admit(ledger, true, cpu, staging)
     }
     fn admit(
-        ledger: &mut super::PresentationLedger,
+        ledger: &mut PresentationLedger,
         owns_pending: bool,
         cpu: usize,
         staging: usize,
@@ -358,7 +359,7 @@ impl PipelineAccounting {
     }
     pub fn reconcile(
         &mut self,
-        ledger: &mut super::PresentationLedger,
+        ledger: &mut PresentationLedger,
         operations: impl Iterator<Item = PipelineOperation>,
         cpu: usize,
         staging: usize,
@@ -756,7 +757,7 @@ mod batch_tests {
     }
     #[test]
     fn batch_admission_and_reconciliation_spend_credit() {
-        use crate::world::{PresentationAllocation, PresentationGrant, PresentationLedger};
+        use crate::world::{PresentationAllocation, PresentationGrant};
         let mut ledger = PresentationLedger::default();
         let staging = 64 * 1024;
         // No credit: admission waits and asks for a job, a claim and staging.

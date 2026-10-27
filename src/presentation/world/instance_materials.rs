@@ -44,7 +44,7 @@ impl InstanceMaterials<'_> {
     pub fn admit(
         &mut self,
         stream: &mut WorldStream,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
         placement: &crate::world::Placement,
@@ -103,7 +103,7 @@ impl InstanceMaterials<'_> {
     }
     fn admit_binding(
         &mut self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
         primitive: &PlanPrimitive,
@@ -518,9 +518,9 @@ impl InstanceMaterial {
     pub(crate) fn warm(
         &self,
         stream: &WorldStream,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         pipelines: &mut WorldPipelines,
-        parent: &mut crate::world::renderer_pending::PipelineContinuation,
+        parent: &mut crate::ownership::renderer_pending::PipelineContinuation,
         mesh: &Handle<Mesh>,
         shadow: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {

@@ -9,13 +9,17 @@ use super::{
         selected::{Reservation, SelectedMetadata, retained_plan_bytes},
     },
 };
+use crate::ownership::PresentationLedger;
 use crate::{
+    ownership::{
+        fixed::{FixedAllocation, FixedImageOwnership},
+        upload_receipt::UploadReceipt,
+    },
     reference::{
         AssetId, AssetUsage, ReferenceError, ReferenceManifest,
-        fixed_reservation::{FixedAllocation, FixedImageOwnership, FixedReservation},
-        prototype_plan::PrototypePlan,
+        fixed_reservation::FixedReservation, prototype_plan::PrototypePlan,
     },
-    world::{PresentationLedger, WorldStream, upload_receipt::UploadReceipt},
+    world::WorldStream,
 };
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
@@ -462,13 +466,7 @@ impl SourceFixedAssets {
                 .find(|a| a.id == self.roots[index].asset)
                 .unwrap();
             let bound = Reservation::metadata(&reference.file_catalog, &asset.path)?;
-            if !crate::reference::fixed_reservation::fixed_room(
-                ledger,
-                bound.cpu,
-                0,
-                bound.staging,
-                true,
-            )? {
+            if !crate::ownership::fixed::fixed_room(ledger, bound.cpu, 0, bound.staging, true)? {
                 break;
             }
             self.roots[index].cpu = bound.cpu;
@@ -828,7 +826,7 @@ impl SourceFixedAssets {
             let root = &self.roots[index];
             let plan = root.state.plan().unwrap();
             let bound = FixedReservation::mesh(plan, retained_plan_bytes(plan))?;
-            if !crate::reference::fixed_reservation::fixed_room(
+            if !crate::ownership::fixed::fixed_room(
                 ledger,
                 bound.cpu.saturating_sub(root.cpu),
                 bound.gpu,
@@ -866,7 +864,7 @@ impl SourceFixedAssets {
             if self.shaders[index].handle.is_none() {
                 let bound = shader_input(SHADERS[index])?;
                 let (cpu, staging) = (bound.cpu, bound.staging);
-                if crate::reference::fixed_reservation::fixed_room(ledger, cpu, 0, staging, true)? {
+                if crate::ownership::fixed::fixed_room(ledger, cpu, 0, staging, true)? {
                     self.shaders[index].cpu = cpu;
                     self.shaders[index].staging = staging;
                     let mut next = self.allocation()?;
@@ -935,7 +933,7 @@ impl SourceFixedAssets {
             }
             let old = row.ownership.bytes();
             let next = ownership.bytes();
-            if !crate::reference::fixed_reservation::fixed_room(
+            if !crate::ownership::fixed::fixed_room(
                 ledger,
                 next.0.saturating_sub(old.0),
                 next.1.saturating_sub(old.1),
@@ -977,7 +975,7 @@ impl SourceFixedAssets {
                 &reference.render_lighting.sky.cloud_mesh,
                 &reference.file_catalog,
             )?;
-            if crate::reference::fixed_reservation::fixed_room(
+            if crate::ownership::fixed::fixed_room(
                 ledger,
                 bound.cpu,
                 bound.gpu,
@@ -1005,7 +1003,7 @@ impl SourceFixedAssets {
             if reference.file_catalog.file(path)?.bytes != 256 {
                 return Err(ReferenceError("Fixed dither receipt size".into()));
             }
-            if crate::reference::fixed_reservation::fixed_room(ledger, 1536, 256, 512, true)? {
+            if crate::ownership::fixed::fixed_room(ledger, 1536, 256, 512, true)? {
                 let mut next = self.allocation()?;
                 next.cpu = checked_sum(&[next.cpu, 1536])?;
                 next.gpu = checked_sum(&[next.gpu, 256])?;
@@ -1023,7 +1021,7 @@ impl SourceFixedAssets {
             let bytes = (0..10)
                 .map(|m| 3 * (512usize >> m).pow(2) * 4)
                 .sum::<usize>();
-            if crate::reference::fixed_reservation::fixed_room(ledger, 2 * bytes, bytes, 0, true)? {
+            if crate::ownership::fixed::fixed_room(ledger, 2 * bytes, bytes, 0, true)? {
                 let mut next = self.allocation()?;
                 next.cpu = checked_sum(&[next.cpu, 2 * bytes])?;
                 next.gpu = checked_sum(&[next.gpu, bytes])?;

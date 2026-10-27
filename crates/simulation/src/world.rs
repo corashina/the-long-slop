@@ -41,23 +41,15 @@ mod instances;
 pub use instances::{StructureInstance, StructureRecipe, TriggerRoles};
 pub mod metrics;
 pub use metrics::WorldMetrics;
-#[cfg(target_arch = "wasm32")]
-pub mod pipeline_ownership;
-pub mod presentation_ledger;
-#[cfg(any(target_arch = "wasm32", test))]
-pub mod renderer_pending;
 pub mod stream;
 mod stream_limits;
-pub use stream::content_index::ContentIndex;
-pub use stream_limits::StreamLimits;
-#[cfg(any(target_arch = "wasm32", test))]
-pub mod upload_receipt;
-pub use presentation_ledger::{PresentationGrant, PresentationLedger, PresentationReport};
 pub use stream::content_boxes::BoxRelease;
+pub use stream::content_index::ContentIndex;
 pub use stream::{
-    PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
-    WorldRequest, WorldStream,
+    PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,
+    PublishedSurface, SurfaceKey, WorldFrame, WorldRequest, WorldStream,
 };
+pub use stream_limits::StreamLimits;
 mod start_car;
 pub use start_car::{StartCar, StartCarChoice, menu_random, start_fields};
 mod startup;
@@ -146,6 +138,5 @@ pub fn hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
 }
-pub mod texture_batch_ownership;
 
 pub mod stream_profile;
