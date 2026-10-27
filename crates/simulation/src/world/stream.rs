@@ -16,9 +16,6 @@ use std::{
     },
 };
 
-#[cfg(any(target_arch = "wasm32", test))]
-use super::renderer_pending::{PipelineContinuation, RendererOwner};
-
 const MIB: usize = 1024 * 1024;
 const MAX_PENDING: usize = 32;
 /// Focus movement in metres before the structure window refreshes.
@@ -3381,12 +3378,13 @@ impl WorldStream {
             })
             .map(|work| (work.request, &work.published))
     }
+    /// The renderer starts the prepared surface. It owns its claim.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn reserve_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
-    ) -> Result<PipelineContinuation, ReferenceError> {
+    ) -> Result<(), ReferenceError> {
         let work = self
             .ready
             .as_ref()
@@ -3413,18 +3411,15 @@ impl WorldStream {
             ));
         }
         self.ready.as_mut().unwrap().renderer_reserved = true;
-        Ok(PipelineContinuation::counted(RendererOwner::Surface(
-            request, key,
-        )))
+        Ok(())
     }
+    /// The renderer dropped the prepared surface after its work drained.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn discard_surface_renderer(
         &mut self,
-        claim: &mut PipelineContinuation,
+        request: WorldRequest,
+        key: SurfaceKey,
     ) -> Result<(), ReferenceError> {
-        let RendererOwner::Surface(request, key) = claim.owner else {
-            return Err(ReferenceError("Wrong surface claim".into()));
-        };
         if !self
             .ready
             .as_ref()
@@ -3432,7 +3427,6 @@ impl WorldStream {
         {
             return Err(ReferenceError("Missing draining surface claim".into()));
         }
-        claim.release()?;
         self.ready = None;
         if key.layer == WorldLayer::Road {
             self.road_worker.publication_ended(false);
@@ -3440,22 +3434,19 @@ impl WorldStream {
         self.rewind_road(key);
         Ok(())
     }
+    /// The renderer finished the prepared surface. Its work drained.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
-        claim: &PipelineContinuation,
     ) -> Result<(), ReferenceError> {
         let work = self
             .ready
             .as_mut()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
             .ok_or_else(|| ReferenceError("Stale source renderer preparation".into()))?;
-        if !work.renderer_reserved
-            || !claim.drained()
-            || !matches!(claim.owner, RendererOwner::Surface(r, owner) if same_request(r, request) && owner == key)
-        {
+        if !work.renderer_reserved {
             return Err(ReferenceError("Unreserved source renderer".into()));
         }
         work.renderer_ready = true;
@@ -4049,49 +4040,33 @@ impl WorldStream {
         Ok(())
     }
 
+    /// True while the stream still wants the structure.
     #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_instance_renderer(
-        &mut self,
-        request: WorldRequest,
-        id: &super::GeneratedId,
-    ) -> Result<PipelineContinuation, ReferenceError> {
-        if request.session != self.request.session
-            || !self.wanted_structures.iter().any(|p| p.id == *id)
-        {
-            return Err(ReferenceError("Stale instance renderer admission".into()));
-        }
-        Ok(PipelineContinuation::counted(RendererOwner::Structure(
-            request,
-            id.clone(),
-        )))
+    pub fn structure_wanted(&self, request: WorldRequest, id: &super::GeneratedId) -> bool {
+        request.session == self.request.session
+            && self.wanted_structures.iter().any(|p| p.id == *id)
     }
+    /// The renderer finished the structure. Its drained claim and credit move to the ready queue.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_structure_renderer(
         &mut self,
         request: WorldRequest,
         id: &super::GeneratedId,
-        claim: &mut PipelineContinuation,
     ) -> Result<(), ReferenceError> {
-        if request.session != self.request.session
-            || !self.wanted_structures.iter().any(|p| p.id == *id)
-            || !matches!(&claim.owner, RendererOwner::Structure(r, owner) if *owner == *id && same_request(*r, request))
+        if !self.structure_wanted(request, id)
             || self.ready_structures.contains(id)
             || self.ready_structures.len() >= 32
-            || !claim.drained()
         {
             return Err(ReferenceError(
                 "Stale or live structure renderer claim".into(),
             ));
         }
-        // The claim and its credit move to the ready queue in one step.
-        let pending = self
+        // The claim credit moves to the ready queue in one step.
+        self.presentation.pending = self
             .presentation
             .pending
             .checked_sub(1)
             .ok_or_else(|| ReferenceError("Missing instance renderer claim".into()))?;
-        // No caller can observe the ready queue without its matching claim transfer.
-        claim.release()?;
-        self.presentation.pending = pending;
         self.ready_structures.push(id.clone());
         debug_assert!(self.metrics().pending_work <= 32);
         Ok(())

@@ -136,7 +136,8 @@ impl PresentationLedger {
         cpu <= self.available_prototype_cpu_bytes() && gpu <= self.available_prototype_gpu_bytes()
     }
     /// Gives one pending claim and its credit to the stream ready queue.
-    pub fn hand_over_pending(&mut self) -> Result<(), ReferenceError> {
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn hand_over_pending(&mut self) -> Result<(), ReferenceError> {
         if self.used.pending == 0 || self.credit.pending == 0 {
             return Err(ReferenceError("Missing instance renderer claim".into()));
         }
@@ -149,6 +150,28 @@ impl PresentationLedger {
     pub fn claim_grass(&mut self, request: WorldRequest, entity: u64) -> PipelineContinuation {
         self.used.pending += 1;
         PipelineContinuation::counted(RendererOwner::Grass(request, entity))
+    }
+    /// Takes one pending claim for a structure renderer.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn claim_structure(
+        &mut self,
+        request: WorldRequest,
+        id: super::GeneratedId,
+    ) -> PipelineContinuation {
+        self.used.pending += 1;
+        PipelineContinuation::counted(RendererOwner::Structure(request, id))
+    }
+    /// Gives a drained structure claim and its credit to the stream ready queue.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn hand_over_claim(
+        &mut self,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        if !matches!(claim.owner, RendererOwner::Structure(..)) {
+            return Err(ReferenceError("Wrong structure claim".into()));
+        }
+        claim.release()?;
+        self.hand_over_pending()
     }
     /// Gives back a drained Grass or structure claim.
     #[cfg(any(target_arch = "wasm32", test))]

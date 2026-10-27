@@ -544,14 +544,17 @@ impl SourceInstances {
                         let mut gpu =
                             primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
                         let objects = count + primitives;
-                        let mut continuation = stream
-                            .reserve_instance_renderer(stream.frame().request, &placement.id)?;
+                        let request = stream.frame().request;
+                        if !stream.structure_wanted(request, &placement.id) {
+                            return Err(ReferenceError("Stale instance renderer admission".into()));
+                        }
                         let mut a = ledger.allocation();
                         a.active_cpu += cpu;
                         a.active_gpu += gpu;
                         a.objects += objects;
-                        a.pending += 1;
                         ledger.set_allocation(a)?;
+                        let mut continuation =
+                            ledger.claim_structure(request, placement.id.clone());
                         let root_pose = local_root(placement, stream.origin);
                         let root = commands
                             .spawn((
@@ -1190,8 +1193,8 @@ impl SourceInstances {
                 stream.bind_prototype(&instance.placement.prototype)?;
                 stream.bind_structure_recipe(&instance.placement.prototype)?;
                 let claim = instance.continuation.as_mut().unwrap();
-                stream.accept_structure_renderer(claim.request(), &instance.placement.id, claim)?;
-                ledger.hand_over_pending()?;
+                stream.accept_structure_renderer(claim.request(), &instance.placement.id)?;
+                ledger.hand_over_claim(claim)?;
                 instance.ready = true;
                 instance.continuation = None;
                 instance.upload = None;

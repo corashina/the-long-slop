@@ -14,7 +14,7 @@ impl RendererOwner {
         }
     }
 }
-/// This proof has no Clone implementation. Only checked stream admission constructs it.
+/// This proof has no Clone implementation. The renderer makes one per counted owner.
 pub struct PipelineContinuation {
     pub(super) owner: RendererOwner,
     held: bool,
@@ -22,7 +22,7 @@ pub struct PipelineContinuation {
     upload: Option<UploadReceipt>,
 }
 impl PipelineContinuation {
-    pub(super) fn counted(owner: RendererOwner) -> Self {
+    pub fn counted(owner: RendererOwner) -> Self {
         Self {
             owner,
             held: true,
@@ -40,7 +40,7 @@ impl PipelineContinuation {
         self.flight.as_ref().is_none_or(UploadReceipt::completed)
             && self.upload.as_ref().is_none_or(UploadReceipt::completed)
     }
-    pub(super) fn release(&mut self) -> Result<(), ReferenceError> {
+    pub fn release(&mut self) -> Result<(), ReferenceError> {
         if !self.held || !self.drained() {
             return Err(ReferenceError("Renderer claim is live or released".into()));
         }
