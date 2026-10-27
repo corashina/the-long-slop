@@ -1,8 +1,13 @@
-//! Player ragdoll: character 0 of the ragdoll prototype (`fpscontroller.prefabRagdol`).
+//! Player ragdoll: the ragdoll prototype (`fpscontroller.prefabRagdol`) with the outfit character (`CopyFrom`).
 //! It shows while the frame has ragdoll rows. Each body node takes its body pose under the prefab root.
+//! Character 1 nodes take the body pose of the character 0 joint with the same name.
 //! Nodes without a body keep their local pose under their parent. The GPU skins the meshes.
 use super::materials::SourceMaterial;
-use super::player_body::Identity;
+use super::outfit::Outfit;
+use super::player_body::{
+    BoundQuery, Identity, OutfitQuery, character_nodes, character_renderer, dress, materials_bound,
+    outfit_slot,
+};
 use super::reference::{ReferenceVisuals, bind_node};
 use super::renderers::AuthoredRenderer;
 use super::sim_frame::SimFrameResource;
@@ -20,16 +25,18 @@ pub struct RagdollBody {
     scene: Option<Entity>,
     /// Prefab root. It follows the root body.
     root: Option<Entity>,
-    /// Body node entities in `RagdollReference::bodies` order.
-    bodies: Vec<Entity>,
+    /// Body node entities of each character in `RagdollReference::bodies` order.
+    bodies: [Vec<Entity>; 2],
     /// The first body without a parent body.
     root_body: usize,
-    /// Character 0 renderer primitives.
-    primitives: Vec<Entity>,
+    /// Renderer primitives and their character.
+    primitives: Vec<(Entity, usize)>,
     ready: bool,
+    /// The outfit is applied. It applies again after each change.
+    dressed: bool,
 }
 
-/// Bind the ragdoll nodes. Remove the primitives of all renderers except character 0.
+/// Bind the ragdoll nodes. Remove the primitives of all renderers except those of the characters.
 fn bind(
     event: On<WorldInstanceReady>,
     mut commands: Commands,
@@ -41,7 +48,12 @@ fn bind(
 ) {
     let manifest = &reference.0;
     let record = &manifest.clothing.ragdoll;
-    let character = &record.characters[0];
+    let characters = &record.characters;
+    let male: Vec<NodeId> = record.bodies.iter().map(|b| b.node).collect();
+    let Some(female) = character_nodes(manifest, characters, &male) else {
+        error!("Ragdoll: character 1 lacks a joint name of a character 0 body");
+        return;
+    };
     let mut bodies = HashMap::<NodeId, Entity>::new();
     for entity in children.iter_descendants(event.entity) {
         let Ok(extra) = extras.get(entity) else {
@@ -62,25 +74,44 @@ fn bind(
         if node.id == record.root {
             ragdoll.root = Some(entity);
         }
-        if record.bodies.iter().any(|b| b.node == node.id) {
+        if male.contains(&node.id) || female.contains(&node.id) {
             bodies.insert(node.id, entity);
         }
-        let drawn = character.renderers.iter().find(|r| r.node == node.id);
+        let drawn = character_renderer(characters, node.id);
         let mut removed = false;
-        let start = ragdoll.primitives.len();
         for (primitive, parent) in &primitives {
             if parent.parent() != entity {
                 continue;
             }
-            if let Some(renderer) = drawn {
-                commands
-                    .entity(primitive)
-                    .insert(AuthoredRenderer(renderer.state.clone()));
-                ragdoll.primitives.push(primitive);
-            } else {
+            let Some((character, renderer)) = drawn else {
                 commands.entity(primitive).despawn();
                 removed = true;
+                continue;
+            };
+            commands
+                .entity(primitive)
+                .insert(AuthoredRenderer(renderer.state.clone()));
+            let slot = extras
+                .get(primitive)
+                .map_err(|e| e.to_string())
+                .and_then(|e| {
+                    outfit_slot(
+                        manifest,
+                        characters,
+                        &record.invisible_material,
+                        character,
+                        node.id,
+                        e,
+                    )
+                });
+            match slot {
+                Ok(Some(slot)) => {
+                    commands.entity(primitive).insert(slot);
+                }
+                Ok(None) => {}
+                Err(error) => error!("Ragdoll: {error}"),
             }
+            ragdoll.primitives.push((primitive, character));
         }
         if removed {
             continue;
@@ -88,30 +119,26 @@ fn bind(
         if let Err(error) = bind_node(&mut commands, node, entity, extra, &primitives) {
             error!("Ragdoll: {error}");
         }
-        // `SpawnRagdol` enables every ragdoll renderer; the outfit refresh keeps those of the selected character.
-        for primitive in &ragdoll.primitives[start..] {
-            commands.entity(*primitive).insert(Visibility::Inherited);
-        }
     }
-    let ordered: Option<Vec<Entity>> = record
-        .bodies
-        .iter()
-        .map(|b| bodies.get(&b.node).copied())
-        .collect();
+    let ordered = |nodes: &[NodeId]| -> Option<Vec<Entity>> {
+        nodes.iter().map(|n| bodies.get(n).copied()).collect()
+    };
     let root_body = record.bodies.iter().position(|b| b.parent_body.is_none());
-    let (Some(root), Some(ordered), Some(root_body)) = (ragdoll.root, ordered, root_body) else {
+    let (Some(root), Some(male), Some(female), Some(root_body)) =
+        (ragdoll.root, ordered(&male), ordered(&female), root_body)
+    else {
         error!("Ragdoll glTF lacks its root or body nodes");
         return;
     };
     if ragdoll.primitives.is_empty() {
-        error!("Ragdoll glTF lacks the character 0 renderers");
+        error!("Ragdoll glTF lacks the character renderers");
         return;
     }
     // Body poses are in prefab root space, so each body node is a direct child of the root.
-    for body in ordered.iter().filter(|b| **b != root) {
+    for body in male.iter().chain(&female).filter(|b| **b != root) {
         commands.entity(*body).insert(ChildOf(root));
     }
-    ragdoll.bodies = ordered;
+    ragdoll.bodies = [male, female];
     ragdoll.root_body = root_body;
 }
 
@@ -122,6 +149,10 @@ pub(crate) fn sync(
     frame: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
+    outfit: Res<Outfit>,
+    materials: Res<Assets<SourceMaterial>>,
+    slots: OutfitQuery,
+    bound: BoundQuery,
     mut ragdoll: ResMut<RagdollBody>,
     mut nodes: Query<(
         &mut Transform,
@@ -153,19 +184,31 @@ pub(crate) fn sync(
         ragdoll.scene = Some(scene);
         return;
     };
-    let Some(root) = ragdoll.root.filter(|_| !ragdoll.bodies.is_empty()) else {
+    let Some(root) = ragdoll.root.filter(|_| !ragdoll.bodies[0].is_empty()) else {
         return;
     };
     // Show the ragdoll only after its source materials replace the glTF materials.
     if !ragdoll.ready {
-        if !ragdoll
-            .primitives
-            .iter()
-            .all(|p| nodes.get(*p).is_ok_and(|(_, _, source)| source))
-        {
+        if !materials_bound(
+            &ragdoll.primitives,
+            |p| nodes.get(p).is_ok_and(|(_, _, source)| source),
+            &bound,
+        ) {
             return;
         }
         ragdoll.ready = true;
+    }
+    // `SpawnRagdol` enables every ragdoll renderer. `CopyFrom` keeps those of the outfit character.
+    if !ragdoll.dressed || outfit.is_changed() {
+        dress(
+            &mut commands,
+            &outfit,
+            &ragdoll.primitives,
+            false,
+            &slots,
+            &materials,
+        );
+        ragdoll.dressed = true;
     }
     let rows = &frame.frame.ragdoll;
     let active = rows.len() == record.bodies.len();
@@ -197,7 +240,11 @@ pub(crate) fn sync(
         scale,
     });
     let inverse = rotation.inverse();
-    for ((entity, row), b) in ragdoll.bodies.iter().zip(rows).zip(&record.bodies) {
+    for ((entity, row), b) in ragdoll.bodies[outfit.character]
+        .iter()
+        .zip(rows)
+        .zip(&record.bodies)
+    {
         if *entity == root || !visible(row) {
             continue;
         }
