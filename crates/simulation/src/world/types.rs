@@ -81,14 +81,51 @@ pub struct WorldBounds {
 #[serde(deny_unknown_fields)]
 pub struct WorldSurface {
     pub origin: [f64; 3],
+    #[serde(with = "pod_bytes")]
     pub vertices: Vec<[f32; 3]>,
+    #[serde(with = "pod_bytes")]
     pub normals: Vec<[f32; 3]>,
+    #[serde(with = "pod_bytes")]
     pub tangents: Vec<[f32; 4]>,
+    #[serde(with = "pod_bytes")]
     pub uv: Vec<[f32; 2]>,
     /// Each range retains one authored material slot.
     pub submeshes: Vec<std::ops::Range<usize>>,
+    #[serde(with = "pod_bytes")]
     pub colors: Vec<[f32; 4]>,
+    #[serde(with = "pod_bytes")]
     pub triangles: Vec<[u32; 3]>,
+}
+
+/// Mesh arrays as one byte string, so the frame codec copies them in one step.
+mod pod_bytes {
+    use bytemuck::Pod;
+    use serde::{Deserializer, Serializer, de};
+
+    pub fn serialize<T: Pod, S: Serializer>(rows: &[T], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(bytemuck::cast_slice(rows))
+    }
+
+    pub fn deserialize<'de, T: Pod, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<T>, D::Error> {
+        struct Rows<T>(std::marker::PhantomData<T>);
+        impl<T: Pod> de::Visitor<'_> for Rows<T> {
+            type Value = Vec<T>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("mesh array bytes")
+            }
+            fn visit_bytes<E: de::Error>(self, bytes: &[u8]) -> Result<Vec<T>, E> {
+                if bytes.len() % size_of::<T>() != 0 {
+                    return Err(E::invalid_length(bytes.len(), &self));
+                }
+                let mut rows = vec![T::zeroed(); bytes.len() / size_of::<T>()];
+                bytemuck::cast_slice_mut(&mut rows).copy_from_slice(bytes);
+                Ok(rows)
+            }
+        }
+        deserializer.deserialize_bytes(Rows(std::marker::PhantomData))
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,4 +136,30 @@ pub struct Placement {
     pub scale: [f32; 3],
     pub bounds: WorldBounds,
     pub object_seed: i32,
+}
+
+#[cfg(test)]
+mod surface_codec_tests {
+    use super::WorldSurface;
+
+    #[test]
+    fn surface_arrays_encode_as_raw_bytes() {
+        let surface = WorldSurface {
+            origin: [1., 2., 3.],
+            vertices: vec![[0.5, -1., 2.]; 100],
+            normals: vec![[0., 1., 0.]; 100],
+            triangles: vec![[0, 1, 2]; 50],
+            submeshes: vec![0..50],
+            ..Default::default()
+        };
+        let bytes = postcard::to_stdvec(&surface).unwrap();
+        // Arrays cost their raw size plus a short length prefix each.
+        assert!(bytes.len() < 100 * 12 * 2 + 50 * 12 + 64);
+        let back: WorldSurface = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(back.vertices, surface.vertices);
+        assert_eq!(back.normals, surface.normals);
+        assert_eq!(back.triangles, surface.triangles);
+        assert_eq!(back.submeshes, surface.submeshes);
+        assert!(postcard::from_bytes::<WorldSurface>(&bytes[..bytes.len() - 1]).is_err());
+    }
 }
