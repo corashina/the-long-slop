@@ -54,9 +54,17 @@ impl GarageRuntime {
         frame.changes.clear();
         self.fill_structures(reference, frame);
     }
-    /// The next frame names every structure again.
-    pub fn reset_structure_views(&mut self) {
+    /// The next frame names every pose, structure, condition, screen, plate and followed car again.
+    /// A new frame stream calls it: the old stream consumed the sent state.
+    pub fn reset_frame_outputs(&mut self) {
         self.structure_views = StructureViews::default();
+        self.frame_poses = Default::default();
+        self.conditions_sent = false;
+        self.home_cable_session = None;
+        self.screens_sent = None;
+        self.plates_sent.clear();
+        self.followed_car = None;
+        self.last_feedback = None;
     }
     /// Writes the views of changed structures. Clears the stream and body presentation queues.
     pub(super) fn fill_structures(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {

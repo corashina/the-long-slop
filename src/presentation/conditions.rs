@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     app::RuntimeReference,
-    conditions::{ConditionState, ConditionStore},
+    conditions::ConditionState,
     reference::{ConditionId, ConditionSurface, ReferenceManifest},
     save::SaveError,
 };
@@ -502,14 +502,14 @@ impl ConditionVisuals {
         }
         Ok(())
     }
-    fn visibility(&self, store: &ConditionStore) -> Vec<(Entity, Visibility)> {
+    fn visibility(&self, frame: &SimFrameResource) -> Vec<(Entity, Visibility)> {
         let mut result = Vec::with_capacity(self.visibility_count());
-        for (id, objects) in &self.washes {
-            let state = store.wash(*id);
+        for (index, (_, objects)) in self.washes.iter().enumerate() {
+            let visible = frame.frame.washes[index] != 0;
             for &entity in objects {
                 result.push((
                     entity,
-                    if state.visible() {
+                    if visible {
                         Visibility::Inherited
                     } else {
                         Visibility::Hidden
@@ -518,7 +518,7 @@ impl ConditionVisuals {
             }
         }
         for (id, model, disabled) in &self.tools {
-            let worn = store.get(*id).state == 5;
+            let worn = frame.condition(*id).state == 5;
             if let Some(model) = model {
                 result.push((*model, Visibility::Inherited));
             }
@@ -564,10 +564,10 @@ impl ConditionVisuals {
             }
         }
     }
-    pub fn prepare_candidate(
+    /// Writes the conditions of the candidate `frame` into the candidate bank.
+    pub(crate) fn prepare_candidate(
         &self,
-        store: &ConditionStore,
-        tools: &crate::interaction::cleaning::CleaningTools,
+        frame: &SimFrameResource,
         world: &mut World,
     ) -> Result<PreparedConditions, SaveError> {
         self.validate_assets(world)?;
@@ -577,7 +577,7 @@ impl ConditionVisuals {
             .iter()
             .map(|o| OwnerUpdate {
                 id: o.id,
-                state: *store.get(o.id),
+                state: *frame.condition(o.id),
             })
             .collect::<Vec<_>>();
         for update in &owners {
@@ -591,8 +591,9 @@ impl ConditionVisuals {
         let sprays = self
             .sprays
             .iter()
-            .map(|(id, receivers)| {
-                let color = tools.get(*id).unwrap().color.unwrap();
+            .enumerate()
+            .map(|(index, (id, receivers))| {
+                let color = frame.frame.spray_colors[index];
                 apply_spray(receivers, color, bank, world, false);
                 (*id, color)
             })
@@ -600,7 +601,7 @@ impl ConditionVisuals {
         Ok(PreparedConditions {
             bank,
             owners,
-            visibility: self.visibility(store),
+            visibility: self.visibility(frame),
             sprays,
         })
     }

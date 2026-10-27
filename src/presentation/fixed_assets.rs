@@ -305,12 +305,6 @@ impl SourceFixedAssets {
         let a = self.allocation().expect("admitted fixed ownership totals");
         (a.cpu, a.gpu)
     }
-    pub(crate) fn allocation_for_overlap(
-        &self,
-        metrics: &mut crate::world::WorldMetrics,
-    ) -> Result<(), ReferenceError> {
-        self.allocation()?.exclude_shared(metrics)
-    }
     fn allocation(&self) -> Result<FixedAllocation, ReferenceError> {
         let mut a = FixedAllocation {
             cpu: self.control,

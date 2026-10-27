@@ -14,6 +14,7 @@ impl GarageRuntime {
     /// Writes this tick's poses and state into `frame`. `alpha` comes from the step clock.
     pub fn fill_frame(&mut self, reference: &ReferenceManifest, alpha: f32, frame: &mut SimFrame) {
         frame.changes.clear();
+        let metrics = self.stream.metrics();
         let mut flags = 0;
         for (on, flag) in [
             (self.started, StateBlock::STARTED),
@@ -37,6 +38,10 @@ impl GarageRuntime {
             (
                 self.area.interaction.storage.initialization_ready(),
                 StateBlock::STORAGE_READY,
+            ),
+            (
+                metrics.generation_jobs == 0 && metrics.pending_work == 0,
+                StateBlock::WORLD_IDLE,
             ),
         ] {
             if on {
@@ -105,7 +110,7 @@ impl GarageRuntime {
                 }
                 _ => PoseRow::default(),
             },
-            prepared_roads: self.stream.metrics().prepared_roads as u32,
+            prepared_roads: metrics.prepared_roads as u32,
             glasses: crate::boundary::GlassesState::encode(area.wear.glasses),
             // The driver sets the look and its own counters.
             look: crate::boundary::LookBlock::default(),
