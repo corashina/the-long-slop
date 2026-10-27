@@ -239,6 +239,7 @@ pub fn run(
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
             presentation::particles::SourceParticlePlugin,
+            presentation::decals::SourceDecalPlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
             presentation::outfit_preview::OutfitPreviewPlugin,

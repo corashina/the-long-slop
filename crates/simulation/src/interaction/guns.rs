@@ -1,6 +1,6 @@
 //! Source guns: `weaponscript` (trigger, CanShoot, Shot, Csoletores break barrel, Reload, flash,
 //! recoil, trigger parts, reload hand), `ammoscript.CanReload`, `revolverScript`, `bbgunscript`,
-//! `geppityuscript`, and `mainscript` tracers, hit particles and hit clips. Decals render in PR 4.
+//! `geppityuscript`, and `mainscript` tracers, hit particles, hit clips and bullet-hole spawns.
 use super::items::ItemStore;
 use super::spray::Ammo;
 use crate::damage::Breakables;
@@ -56,15 +56,12 @@ pub struct ShotSound {
     pub position: [f64; 3],
 }
 
-/// One bullet hole: `ShootDecals[kind]` at `position`, facing `normal`, turned `roll`
-/// degrees around it, parented to `collider`.
+/// One bullet hole: `ShootDecals[kind]` at `pose` in physics space, parented to `collider`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DecalSpawn {
     pub kind: u8,
     pub collider: ColliderHandle,
-    pub position: [f64; 3],
-    pub normal: Vector,
-    pub roll: f32,
+    pub pose: Pose,
     pub scale: f32,
 }
 
@@ -548,7 +545,7 @@ impl GunState {
     pub fn take_sounds(&mut self) -> impl Iterator<Item = ShotSound> + '_ {
         self.sounds.drain(..)
     }
-    /// Bullet holes of this frame. PR 4 stores and renders them.
+    /// Bullet holes of this step. `DecalStore` keeps them.
     pub fn take_decals(&mut self) -> impl Iterator<Item = DecalSpawn> + '_ {
         self.decals.drain(..)
     }
@@ -1144,13 +1141,13 @@ impl GunState {
                 };
                 play(&mut self.random, &mut self.sounds, clips, 1., at, false);
                 let scale = 0.3 * self.random.range(0.6, 1.2);
-                let roll = self.random.range(0., 360.);
+                // LookRotation(normal), then Rotate(forward, roll, Space.World): a turn about local Z.
+                let roll = self.random.range(0., 360.).to_radians();
+                let rotation = normal_rotation * Rotation::from_rotation_z(roll);
                 self.decals.push(DecalSpawn {
                     kind,
                     collider: hit.collider,
-                    position: absolute(world.origin, point + hit.normal * 0.01),
-                    normal: hit.normal,
-                    roll,
+                    pose: Pose::from_parts(point + hit.normal * 0.01, rotation),
                     scale,
                 });
             }

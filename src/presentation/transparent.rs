@@ -161,8 +161,10 @@ pub(crate) fn prepare_pass_order(
         }
         timing.face(source.index);
         // One named grab capture precedes the first distortion particle.
-        let capacity =
-            loading.transparent_pass_capacity().unwrap_or(0) + particles.uniforms.len() + 1;
+        let capacity = loading.transparent_pass_capacity().unwrap_or(0)
+            + particles.uniforms.len()
+            + crate::reference::GUN_DECALS
+            + 1;
         if order.entries.capacity() < capacity {
             order.entries.reserve_exact(capacity);
         }
@@ -206,12 +208,14 @@ pub(crate) fn prepare_pass_order(
                 status.fail("Source transparent distance mode is invalid".into());
                 return;
             };
+            // Decals draw with the particle commands.
             let particle = materials
                 .instances
                 .get(&item.main_entity())
                 .is_some_and(|m| {
-                    m.asset_id.type_id()
-                        == std::any::TypeId::of::<super::particles::ParticleMaterial>()
+                    let id = m.asset_id.type_id();
+                    id == std::any::TypeId::of::<super::particles::ParticleMaterial>()
+                        || id == std::any::TypeId::of::<super::decals::DecalMaterial>()
                 });
             // Retain the particle adapter's bias in the current squared-distance order.
             let distance = perspective_distance(mesh_center.to_array(), camera)
