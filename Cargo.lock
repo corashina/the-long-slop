@@ -4265,6 +4265,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "simulation-worker"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "simulation",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "skrifa"
 version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

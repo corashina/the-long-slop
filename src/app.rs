@@ -132,19 +132,12 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 /// The Game mode from the browser. Biome values above 3 read as Mixed.
 /// The start car is -1 (Random) or an index into the manifest start placements.
 fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
-    let biome = game_biome();
-    crate::world::GameMode {
-        biome: if biome > 3 { 0 } else { biome as u8 },
-        start_car: crate::world::StartCarChoice::from_index(&reference.world, game_start_car()),
-    }
+    crate::world::GameMode::from_menu(&reference.world, game_biome(), game_start_car())
 }
 
 #[wasm_bindgen]
-pub fn run(
-    reference_json: &[u8],
-    manifest_sha256: String,
-    draw_distance: f32,
-) -> Result<(), JsValue> {
+/// `startup` is the encoded `SimStartup` of the simulation worker.
+pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Startup);
     console_error_panic_hook::set_once();
     let reference = Arc::new(
@@ -154,13 +147,8 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let init = simulation::boundary::SimInit {
-        mode: game_mode(&reference),
-        draw_distance,
-        manifest_sha256,
-    };
-    let (session, startup) = simulation::session::Session::new(Arc::clone(&reference), init)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let startup =
+        simulation::boundary::decode_startup(startup).map_err(|e| JsValue::from_str(&e.0))?;
     let mut ledger = crate::ownership::PresentationLedger::default();
     let (fixed, graph) = crate::ownership::fixed::admit_control(
         &mut ledger,
@@ -180,7 +168,7 @@ pub fn run(
         .init_resource::<save::SaveRequests>()
         .insert_resource(Drive {
             view: startup.view,
-            link: sim_link::SimLink::new(session),
+            link: sim_link::SimLink::default(),
             startup,
             seq: 0,
             world_ms: 0.,
@@ -612,9 +600,7 @@ fn read_input(
         candidate: requests.candidate_command(),
         listener: drive.listener,
     };
-    if let Err(error) = drive.link.send(command) {
-        game_failure(&error.0);
-    }
+    drive.link.send(command);
 }
 /// World camera of the last complete view snapshot. `None`: startup and load use the root camera.
 fn world_snapshot<'a>(

@@ -1,61 +1,51 @@
-//! The renderer end of the simulation. One command is in flight; newer commands merge into the next.
+//! The renderer end of the simulation worker. One command is in flight; newer commands merge into the next.
+use crate::browser::{game_sim_frame_length, game_sim_read, game_sim_send};
 use simulation::boundary::{DecodeError, SimCommand, SimFrame, decode, encode_command};
-use simulation::session::Session;
 
+#[derive(Default)]
 pub(crate) struct SimLink {
-    session: Session,
     /// A sent command has no frame yet.
     in_flight: bool,
     /// Commands since the last send, merged.
     pending: Option<SimCommand>,
     command: Vec<u8>,
-    /// The frame of the command in flight, when it is ready.
-    answer: Option<Vec<u8>>,
+    answer: Vec<u8>,
 }
 
 impl SimLink {
-    pub(crate) fn new(session: Session) -> Self {
-        Self {
-            session,
-            in_flight: false,
-            pending: None,
-            command: Vec::new(),
-            answer: None,
-        }
-    }
-
-    pub(crate) fn send(&mut self, command: SimCommand) -> Result<(), DecodeError> {
+    pub(crate) fn send(&mut self, command: SimCommand) {
         match &mut self.pending {
             Some(pending) => pending.merge(command),
             None => self.pending = Some(command),
         }
-        self.flush()
+        self.flush();
     }
 
     /// Reads the frame of the command in flight into `frame`. False: no new frame.
     pub(crate) fn receive(&mut self, frame: &mut SimFrame) -> Result<bool, DecodeError> {
-        let Some(answer) = self.answer.as_ref().filter(|_| self.in_flight) else {
+        if !self.in_flight {
+            return Ok(false);
+        }
+        let Ok(length) = usize::try_from(game_sim_frame_length()) else {
             return Ok(false);
         };
-        decode(answer, frame)?;
+        self.answer.resize(length, 0);
+        game_sim_read(&mut self.answer);
+        decode(&self.answer, frame)?;
         self.in_flight = false;
-        self.flush()?;
+        self.flush();
         Ok(true)
     }
 
-    fn flush(&mut self) -> Result<(), DecodeError> {
+    fn flush(&mut self) {
         if self.in_flight {
-            return Ok(());
+            return;
         }
         let Some(command) = self.pending.take() else {
-            return Ok(());
+            return;
         };
         encode_command(&command, &mut self.command);
-        let frame = self.session.tick(&self.command)?;
-        let answer = self.answer.get_or_insert_default();
-        answer.clear();
-        answer.extend_from_slice(frame);
+        game_sim_send(&self.command);
         self.in_flight = true;
-        Ok(())
     }
 }

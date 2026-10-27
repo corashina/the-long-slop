@@ -178,6 +178,15 @@ extern "C" {
         cooldown_remaining: f64,
         progress: f32,
     );
+    /// Posts one encoded command to the simulation worker.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimSend)]
+    pub fn game_sim_send(command: &[u8]);
+    /// Byte length of the received frame. -1: no frame.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimFrameLength)]
+    pub fn game_sim_frame_length() -> i32;
+    /// Copies the received frame into `out` and drops it.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimRead)]
+    pub fn game_sim_read(out: &mut [u8]);
     #[wasm_bindgen(js_namespace = window, js_name = gameCpuSubmitted)]
     pub fn game_cpu_submitted(token: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]

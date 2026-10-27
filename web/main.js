@@ -45,9 +45,9 @@ window.addEventListener('blur',startupBlurred);
 function stopStartupEnvironment(){startupVisibilityChanged();document.removeEventListener('visibilitychange',startupVisibilityChanged);window.removeEventListener('blur',startupBlurred);}
 cpuProfile.enable(startupCpuProfile);
 let rustCpuProfile,profileStep=0,startupRenderTrace=startupCpuProfile?observeRenderMainThread():null;
-window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);if(enabled){terrainClient.profileHandshake();roadClients.profileHandshake();grassClients.profileHandshake();}};
+window.gameCpuProfile=enabled=>{cpuProfile.enable(enabled);profileStep=0;rustCpuProfile?.(enabled);simulation.profile(enabled);if(enabled)grassClients.profileHandshake();};
 window.gameCpuProfileSnapshot=()=>cpuProfile.snapshot();
-window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,terrain:terrainClient.profileState(),road:roadClients.profileState(),grass:grassClients.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
+window.gameCpuInstrumentationState=()=>({browserEnabled:cpuProfile.enabled,grass:grassClients.profileState(),startupRenderTraceActive:startupRenderTrace!==null});
 window.gameCpuStartupRenderTrace=()=>{const trace=startupRenderTrace?.stop()??null;startupRenderTrace=null;return trace;};
 window.gameCpuInputConsumed=()=>input?.consume(++profileStep);
 window.gameCpuClearInput=()=>cpuProfile.clearInput();
@@ -58,17 +58,14 @@ import {createLoading} from './loading.js';
 import {createStartupTrace} from './startup-trace.js';
 import {createPerformance} from './performance.js';
 import {loadUiAssets} from './ui-layout.js';
-import {createTerrain,installTerrainBridge} from './terrain.js';
-import {installRoadBridge} from './road.js';
+import {createSimulation,installSimulationBridge} from './simulation.js';
 import {installGrassBridge} from './grass.js';
 import {configureAssetCatalog,readAsset,readPackageAsset,assetReceipt,checkImageSize,worldBootstrapMeasurements,worldInputBytes,worldInputMetadataBytes,setAssetCpuProfile} from './world-assets.js';
 setAssetCpuProfile(cpuProfile);
-// Start the terrain worker and its WASM download early.
-const terrainWorkerUrl=new URL('./terrain-worker.js',import.meta.url);
-if(startupCpuProfile)terrainWorkerUrl.searchParams.set('profileCpu','1');
-const terrainClient=createTerrain(new Worker(terrainWorkerUrl,{type:'module'}),cpuProfile);
-installTerrainBridge(window,terrainClient);
-const roadClients=installRoadBridge(window,cpuProfile);
+// Start the simulation worker and its WASM download early.
+const simulation=createSimulation(new Worker(new URL('./simulation-worker.js',import.meta.url),{type:'module'}),message=>fail(message));
+simulation.hooks({inputConsumed:()=>window.gameCpuInputConsumed(),clearInput:()=>window.gameCpuClearInput()});
+installSimulationBridge(window,simulation);
 const grassClients=installGrassBridge(window,cpuProfile);
 window.sourceReadAsset=(base,receipt)=>readAsset(base,JSON.parse(receipt));
 window.sourceInputBytes=worldInputBytes;
@@ -90,7 +87,7 @@ window.gameLoadingProgress=(roads,total,rendering,world)=>loading.progress(roads
 window.gameLoadingBudget=(name,used,limit,unit)=>loading.budget(name,used,limit,unit);
 const bootStarted=performance.now();
 let wasmMemory,renderAudit,initialReadyMs=null,peakFrameMs=0,lastFrameTime=null,measureRequested=false;
-const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength,()=>renderAudit&&JSON.parse(renderAudit()),()=>worldDrawDistance);
+const performancePanel=createPerformance(()=>wasmMemory?.buffer.byteLength,()=>renderAudit&&JSON.parse(renderAudit()),()=>worldDrawDistance,()=>simulation.stats());
 window.gamePerformanceFrame=(physicsMs,worldMs)=>performancePanel.frame(performance.now(),physicsMs,worldMs);
 window.gamePerformanceCounters=performancePanel.counters;
 const measurementWaiters=[];
@@ -209,6 +206,10 @@ async function load(){
  const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
+ // The simulation parses its own manifest copy while this thread loads the interface.
+ worldDrawDistance=slider.value();
+ const simulationStarted=simulation.start(bytes.slice(),manifestHash,worldDrawDistance,window.gameBiome(),window.gameStartCar());
+ simulationStarted.catch(()=>{});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
  startup.build({sourceBuildId:manifest.build_id,manifestSha256:manifestHash,wasm:'release'});
  configureAssetCatalog(manifest.content_base,manifest.file_catalog,fetched);worldAdmitted=true;
@@ -233,7 +234,8 @@ async function load(){
  startup.end('interface');
  if(failed)return;status.textContent='Loading the garage...';loading.stage(status.textContent);
  startup.begin('generation');startup.begin('decodeUpload');startup.begin('pipeline');
- worldDrawDistance=slider.value();run(bytes,manifestHash,worldDrawDistance);
+ const startupBytes=await simulationStarted;
+ if(failed)return;run(bytes,startupBytes);
  cpuProfile.end('startup');
 }
 load().catch(error=>fail(error?.message??String(error)));
