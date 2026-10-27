@@ -12,7 +12,8 @@ use super::{
 use crate::world::stream::content_index::InstanceSelection;
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
-    reference::{ReferenceError, ReferenceManifest},
+    presentation::renderer_visibility::CameraHidden,
+    reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
     world::{Placement, PresentationLedger, WorldStream},
 };
 use bevy::math::{Affine3A, DMat4, DVec3};
@@ -25,6 +26,26 @@ use bevy::{
 };
 use grass_mesh::{GrassPatch, GrassSettings, GrassView};
 use std::sync::Arc;
+/// The prototype node is a `wear.Renderers` node of a wearable item.
+fn worn_renderer(
+    reference: &ReferenceManifest,
+    prototype: &WorldPrototypeReference,
+    node: usize,
+) -> bool {
+    let source = &prototype.nodes[node].source;
+    reference.clothing.wearables.iter().any(|w| {
+        reference
+            .item_prototypes
+            .iter()
+            .any(|p| p.id == w.prototype && p.source == prototype.source)
+            && w.renderers.iter().any(|id| {
+                reference
+                    .nodes
+                    .iter()
+                    .any(|n| n.id == *id && n.source == *source)
+            })
+    })
+}
 struct MaterialVariant {
     source: Option<crate::reference::SourceId>,
     binding: RendererMaterial,
@@ -115,6 +136,8 @@ struct Instance {
     gpu: usize,
     objects: usize,
     visible: bool,
+    /// The player wears the item. See `StructureRow::WORN`.
+    worn: bool,
     origin: [f64; 3],
 }
 impl Instance {
@@ -777,6 +800,7 @@ impl SourceInstances {
                                                 ),
                                                 layer: source_node.layer,
                                                 cast_shadows: record.cast_shadows,
+                                                camera_hidden: false,
                                                 hidden: true,
                                                 fade: 1.0,
                                                 color,
@@ -1060,6 +1084,7 @@ impl SourceInstances {
                                 gpu,
                                 objects,
                                 visible: false,
+                                worn: false,
                                 origin: stream.origin.offset,
                             })
                         })();
@@ -1389,6 +1414,24 @@ impl SourceInstances {
                             renderer.active = enabled;
                             renderer.show(root, commands, &mut self.props);
                         }
+                    }
+                }
+            }
+            let worn = view.flags & StructureRow::WORN != 0;
+            if worn != instance.worn {
+                instance.worn = worn;
+                for renderer in &instance.renderers {
+                    if !worn_renderer(reference, prototype, renderer.node) {
+                        continue;
+                    }
+                    match renderer.target {
+                        Target::Entity(entity) if worn => {
+                            commands.entity(entity).insert(CameraHidden);
+                        }
+                        Target::Entity(entity) => {
+                            commands.entity(entity).remove::<CameraHidden>();
+                        }
+                        Target::Row { slot, .. } => self.props.set_camera_hidden(slot, worn),
                     }
                 }
             }

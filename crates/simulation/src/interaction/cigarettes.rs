@@ -260,33 +260,6 @@ impl PackState {
     }
 }
 
-/// The mouth wear slot (`wearableType` 4). It holds a cigarette only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MouthSlot<T> {
-    pub item: Option<T>,
-}
-
-impl<T> Default for MouthSlot<T> {
-    fn default() -> Self {
-        Self { item: None }
-    }
-}
-
-impl<T: Copy + PartialEq> MouthSlot<T> {
-    /// `Wear` runs only when the slot is empty.
-    pub fn wear_if_empty(&mut self, item: T) -> bool {
-        if self.item.is_some() {
-            return false;
-        }
-        self.item = Some(item);
-        true
-    }
-    /// `TakeOff`: the item goes back to the hand.
-    pub fn take_off(&mut self) -> Option<T> {
-        self.item.take()
-    }
-}
-
 /// Player `smokeCharged` and mouth smoke emission.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ExhaleState {
@@ -453,16 +426,6 @@ pub mod tests {
         assert_eq!(pack.count, 0);
         assert!(!pack.can_take() && !pack.take_one());
         assert_eq!(pack.count, 0);
-    }
-
-    #[test]
-    fn mouth_slot_wears_only_when_empty() {
-        let mut slot = MouthSlot::default();
-        assert!(slot.wear_if_empty(1));
-        assert!(!slot.wear_if_empty(2));
-        assert_eq!(slot.item, Some(1));
-        assert_eq!(slot.take_off(), Some(1));
-        assert!(slot.wear_if_empty(2));
     }
 
     fn exhale() -> ExhaleRates {

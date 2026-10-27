@@ -41,6 +41,8 @@ pub struct PropRow {
     pub layer: u8,
     /// Source shadow casting mode. 3 is shadows only.
     pub cast_shadows: u8,
+    /// Source `makeinvisible`: the camera does not draw the row. Its shadow stays.
+    pub camera_hidden: bool,
     /// Root, node and LOD visibility together, as an entity inherits them.
     pub hidden: bool,
     /// Signed LOD crossfade, as the entity material `lod_fade`. 1 is no fade.
@@ -59,7 +61,7 @@ impl PropRow {
         if self.hidden {
             flags |= ROW_HIDDEN;
         }
-        if self.cast_shadows == 3 {
+        if self.cast_shadows == 3 || self.camera_hidden {
             flags |= ROW_SHADOW_ONLY;
         }
         let f = f32::to_bits;
@@ -336,6 +338,13 @@ impl GpuProps {
         }
         self.mark_shadow(slot);
     }
+    pub fn set_camera_hidden(&mut self, slot: u32, hidden: bool) {
+        let row = &mut self.rows[slot as usize];
+        if row.camera_hidden != hidden {
+            row.camera_hidden = hidden;
+            self.mark(slot);
+        }
+    }
     /// Writes the renderer LOD state `(visible, fade)` of a row, as the entity path applies it.
     /// `shown` is the root and static node visibility.
     pub fn set_lod(&mut self, slot: u32, shown: bool, (visible, fade): (bool, f32)) {
@@ -416,6 +425,7 @@ mod tests {
             },
             layer: 3,
             cast_shadows: 1,
+            camera_hidden: false,
             hidden,
             fade: 1.0,
             color: Vec4::ONE,

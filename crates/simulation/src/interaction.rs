@@ -26,6 +26,7 @@ pub mod push;
 pub mod spray;
 pub mod storage;
 pub mod targets;
+pub mod wear;
 mod wheel_actions;
 pub mod wheels;
 use feedback::ActionMask;

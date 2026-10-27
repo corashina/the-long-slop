@@ -817,6 +817,26 @@ impl StartingArea {
                 .filter(saved_item)
                 .map(|id| ids.item_instance(id))
                 .transpose()?,
+            worn: self.capture_worn(ids)?,
         })
+    }
+    fn capture_worn(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<[Option<crate::save::WornSnapshot>; 5], crate::save::SaveError> {
+        use crate::save::WornSnapshot;
+        let mut worn = [const { None }; 5];
+        for (saved, item) in worn.iter_mut().zip(self.wear.worn.slots) {
+            let Some(item) = item else { continue };
+            *saved = Some(match self.spawned.get(item.id) {
+                Some(spawned) => WornSnapshot::Spawned {
+                    serial: spawned.serial,
+                },
+                None => WornSnapshot::Item {
+                    item: ids.item_instance(item.id)?,
+                },
+            });
+        }
+        Ok(worn)
     }
 }

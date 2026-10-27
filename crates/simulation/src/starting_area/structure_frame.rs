@@ -1,7 +1,7 @@
 //! Presentation views of the world structures. A view goes out when its state changes.
 use super::{GarageRuntime, VehicleRuntime};
 use crate::boundary::{Change, MaterialRow, NodePoseRow, SimFrame, StructureRow};
-use crate::interaction::items::{ItemState, ItemStore};
+use crate::interaction::items::{ItemLocation, ItemState, ItemStore};
 use crate::reference::{
     ItemId, ReferenceError, ReferenceManifest, SourceId, Transform, WorldPrototypeReference,
 };
@@ -19,6 +19,7 @@ struct Entry {
     prototype: usize,
     content: Option<ContentSlot>,
     lamps: Vec<usize>,
+    /// The generated item of the structure.
     food: Option<ItemId>,
     /// `VehicleRuntime::presentation_signature` or `CarLights::signature` of the last view.
     signature: u64,
@@ -354,6 +355,13 @@ impl StructureViews {
             .filter(|item| item.food.is_some());
         if let Some(item) = food {
             check_food(reference, prototype, item)?;
+        }
+        if entry
+            .food
+            .and_then(|id| items.get(id))
+            .is_some_and(|item| matches!(item.location, ItemLocation::Worn(_)))
+        {
+            row.flags |= StructureRow::WORN;
         }
         let poses = &mut frame.structure_poses;
         let start = poses.len() as u32;

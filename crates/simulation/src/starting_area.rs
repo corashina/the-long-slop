@@ -35,6 +35,7 @@ mod reach;
 pub mod spawned;
 pub mod structure_frame;
 mod survival;
+pub mod wear;
 mod weather;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
@@ -62,6 +63,7 @@ pub struct StartingArea {
     /// gibscript and scaleDestroyScript of spawned gibs.
     pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
+    pub wear: wear::WearRuntime,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
 
@@ -292,6 +294,7 @@ impl StartingArea {
             foods: Vec::new(),
             gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
+            wear: wear::WearRuntime::new(reference)?,
             portable_mass,
         })
     }
@@ -1167,6 +1170,7 @@ impl GarageRuntime {
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
+        self.step_wear(&mut input);
         self.step_cigarettes(reference, &mut input);
         for (key, vehicle) in &mut self.vehicles {
             vehicle.previous = self.persistent_world.absolute_vehicle_position(
@@ -1538,7 +1542,7 @@ impl GarageRuntime {
         self.area.sync_inventory();
         self.area.sync_equipment(reference, &mut self.physics);
         self.step_body(reference);
-        self.sync_mouth();
+        self.area.sync_worn(&mut self.physics);
         self.area.items.sync_poses(&self.physics);
         self.break_targets(reference);
         self.area.commit_poses(&self.physics, false);
