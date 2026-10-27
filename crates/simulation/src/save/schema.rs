@@ -21,6 +21,24 @@ pub struct SourceStamp {
     pub manifest_sha256: String,
     pub source_hashes: Vec<SourceHash>,
 }
+impl SourceStamp {
+    /// The save stamp of the build that `reference` comes from.
+    pub fn new(reference: &crate::reference::ReferenceManifest, manifest_sha256: String) -> Self {
+        Self {
+            app_id: reference.app_id,
+            build_id: reference.build_id,
+            manifest_sha256,
+            source_hashes: reference
+                .source_hashes
+                .iter()
+                .map(|s| SourceHash {
+                    file: s.file.clone(),
+                    sha256: s.sha256.clone(),
+                })
+                .collect(),
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveSnapshot {

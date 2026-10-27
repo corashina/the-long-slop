@@ -297,9 +297,12 @@ impl SimDriver {
     /// Writes the save results and the candidate frame into `frame`.
     pub(crate) fn fill_saves(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
         frame.changes.append(&mut self.save.results);
-        if let Some(Prepared::Candidate { driver, .. }) = &mut self.save.prepared {
-            frame.state.flags |= StateBlock::CANDIDATE;
-            driver.fill(reference, frame.candidate.get_or_insert_default());
+        match &mut self.save.prepared {
+            Some(Prepared::Candidate { driver, .. }) => {
+                frame.state.flags |= StateBlock::CANDIDATE;
+                driver.fill(reference, frame.candidate.get_or_insert_default());
+            }
+            _ => frame.candidate = None,
         }
     }
 }

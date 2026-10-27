@@ -1,6 +1,5 @@
 use super::*;
 use crate::presentation::save::PreparedPresentation;
-use crate::save::{SourceHash, SourceStamp};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use simulation::boundary::{CandidateCommand, Change, SaveCommand};
@@ -47,23 +46,6 @@ impl Request {
     fn prepared(&self) -> Option<u32> {
         let payload = self.payload.as_ref()?;
         serde_json::from_str(payload.get()).ok()
-    }
-}
-
-/// The save stamp of this build.
-pub fn source_stamp(reference: &ReferenceManifest, hash: String) -> SourceStamp {
-    SourceStamp {
-        app_id: reference.app_id,
-        build_id: reference.build_id,
-        manifest_sha256: hash,
-        source_hashes: reference
-            .source_hashes
-            .iter()
-            .map(|s| SourceHash {
-                file: s.file.clone(),
-                sha256: s.sha256.clone(),
-            })
-            .collect(),
     }
 }
 
