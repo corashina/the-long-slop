@@ -260,9 +260,9 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
     for name in ["RotationModule", "EmissionModule"] {
         check(p.module_flags.contains_key(name), name)?;
     }
-    // Checked storm systems use shape type 2. Other selected systems use type 4.
-    let shape = if p.role.starts_with("storm_") { 2. } else { 4. };
-    check(scalar("ShapeModule.type")? == shape, "ShapeModule.type")?;
+    if p.module_flags.get("ShapeModule") == Some(&true) {
+        validate_shape(p, &check, &scalar)?;
+    }
     for name in [
         "InitialModule.startSize",
         "InitialModule.startSpeed",
@@ -276,25 +276,6 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
     for name in ["InitialModule.startColor", "ColorModule.gradient"] {
         check(p.colors.contains_key(name), name)?;
     }
-    for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
-        check(p.vectors.contains_key(name), name)?;
-    }
-    check(
-        (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
-        "ShapeModule.angle",
-    )?;
-    check(
-        scalar("ShapeModule.radius.value")? >= 0.,
-        "ShapeModule.radius.value",
-    )?;
-    check(
-        (0. ..=1.).contains(&scalar("ShapeModule.radiusThickness")?),
-        "ShapeModule.radiusThickness",
-    )?;
-    check(
-        scalar("ShapeModule.randomPositionAmount")? >= 0.,
-        "ShapeModule.randomPositionAmount",
-    )?;
     let layer = scalar("gameObject.layer")?;
     check(
         (0. ..=31.).contains(&layer) && layer.fract() == 0.,
@@ -337,10 +318,9 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
         }
     }
     if p.role == "urine" || p.role.starts_with("outlet_") {
-        check(
-            p.module_flags.get("CollisionModule") == Some(&true),
-            "CollisionModule",
-        )?;
+        for module in ["CollisionModule", "ShapeModule"] {
+            check(p.module_flags.get(module) == Some(&true), module)?;
+        }
         for name in [
             "CollisionModule.m_Bounce",
             "CollisionModule.m_Dampen",
@@ -393,6 +373,35 @@ pub(super) fn validate_particle(p: &ParticleReference) -> Result<(), ReferenceEr
         }
     }
     p.validate_data(2)
+}
+/// Checks the fields of an enabled shape module.
+fn validate_shape(
+    p: &ParticleReference,
+    check: &impl Fn(bool, &str) -> Result<(), ReferenceError>,
+    scalar: &impl Fn(&str) -> Result<f32, ReferenceError>,
+) -> Result<(), ReferenceError> {
+    // Checked storm systems use shape type 2. Other selected systems use type 4.
+    let shape = if p.role.starts_with("storm_") { 2. } else { 4. };
+    check(scalar("ShapeModule.type")? == shape, "ShapeModule.type")?;
+    for name in ["ShapeModule.m_Rotation", "ShapeModule.m_Scale"] {
+        check(p.vectors.contains_key(name), name)?;
+    }
+    check(
+        (0. ..=90.).contains(&scalar("ShapeModule.angle")?),
+        "ShapeModule.angle",
+    )?;
+    check(
+        scalar("ShapeModule.radius.value")? >= 0.,
+        "ShapeModule.radius.value",
+    )?;
+    check(
+        (0. ..=1.).contains(&scalar("ShapeModule.radiusThickness")?),
+        "ShapeModule.radiusThickness",
+    )?;
+    check(
+        scalar("ShapeModule.randomPositionAmount")? >= 0.,
+        "ShapeModule.randomPositionAmount",
+    )
 }
 impl ParticleReference {
     pub fn validate_data(&self, simulation_space: u8) -> Result<(), ReferenceError> {

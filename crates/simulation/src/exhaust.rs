@@ -207,7 +207,7 @@ pub mod tests {
                 rotation: [0., 0., 0., 1.],
                 scale: [1.; 3],
             },
-            module_flags: Default::default(),
+            module_flags: [("ShapeModule".into(), true)].into(),
             curves: [
                 ("InitialModule.startSpeed", curve(5.)),
                 ("InitialModule.startLifetime", curve(lifetime)),
