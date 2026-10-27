@@ -254,7 +254,6 @@ pub fn run(
         .add_systems(
             Update,
             (
-                initialize_storage,
                 presentation::readiness::observe_main_readiness.before(check_ready),
                 check_ready,
                 read_input,
@@ -353,24 +352,6 @@ fn setup(
     );
 }
 
-fn initialize_storage(
-    time: Res<Time<Real>>,
-    mut drive: ResMut<Drive>,
-    mut visuals: ResMut<ReferenceVisuals>,
-) {
-    if drive.ready || visuals.failed {
-        return;
-    }
-    if let Err(error) = drive
-        .sim
-        .runtime
-        .initialize_storage_frame(time.delta_secs())
-    {
-        game_failure(&error.to_string());
-        visuals.failed = true;
-    }
-}
-
 fn update_scene_scale(
     mut scale: ResMut<crate::render_scale::SceneScaleSetting>,
     status: Res<presentation::readiness::RendererStateHandle>,
@@ -393,6 +374,7 @@ fn check_ready(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
     mut visuals: ResMut<ReferenceVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
@@ -409,6 +391,11 @@ fn check_ready(
 ) {
     let (lighting, fixed) = lighting;
     let (plates, particles) = plates;
+    if let Some(error) = sim.failure.take() {
+        game_failure(&error);
+        visuals.failed = true;
+    }
+    let state = sim.frame.state;
     let prepared = (|| -> bool {
         if renderer.failure().is_some() {
             return false;
@@ -436,14 +423,7 @@ fn check_ready(
         if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
             return false;
         }
-        if !drive
-            .sim
-            .runtime
-            .area
-            .interaction
-            .storage
-            .initialization_ready()
-        {
+        if state.flags & StateBlock::STORAGE_READY == 0 {
             return false;
         }
         for (path, handle) in &visuals.handles {
@@ -503,10 +483,7 @@ fn check_ready(
                 if materials.state != presentation::materials::RenderingState::Ready {
                     return false;
                 }
-                if !drive.sim.runtime.world_supported()
-                    || !drive.sim.runtime.stream.required_ready()
-                    || !lighting.road_lamps.ready()
-                {
+                if state.flags & StateBlock::WORLD_READY == 0 || !lighting.road_lamps.ready() {
                     return false;
                 }
                 if !plates.ready() || !particles.prepared() {
@@ -523,13 +500,8 @@ fn check_ready(
         }
     })();
     let key = crate::render_readiness::ContentKey {
-        session: drive.sim.runtime.stream.frame().request.session,
-        selection_revision: drive
-            .sim
-            .runtime
-            .stream
-            .required_content()
-            .selection_revision,
+        session: state.session,
+        selection_revision: state.selection_revision,
     };
     let preparation = if prepared {
         crate::render_readiness::ContentPreparation::Prepared(key)
@@ -538,7 +510,7 @@ fn check_ready(
     };
     match renderer.check(presentation::readiness::RendererContentCheck {
         preparation,
-        history_revision: drive.sim.runtime.audio_motion_revision,
+        history_revision: state.motion_revision,
     }) {
         crate::render_readiness::RendererStatus::Loading => {}
         crate::render_readiness::RendererStatus::Ready => {
@@ -633,6 +605,7 @@ fn read_input(
         assists,
         settings,
         calendar: local_calendar(),
+        measure: game_measure_requested(),
     };
     drive.sim.accept(&reference.0, command);
 }

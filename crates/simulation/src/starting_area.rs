@@ -773,6 +773,8 @@ pub struct GarageRuntime {
     screens_sent: Option<Vec<ItemId>>,
     /// The computers of this frame, reused each frame.
     screens_scratch: Vec<ItemId>,
+    /// World cars whose plate texts the renderer has.
+    plates_sent: Vec<crate::world::GeneratedId>,
     /// The followed car the renderer last received.
     followed_car: Option<(crate::world::GeneratedId, u32)>,
     structure_views: structure_frame::StructureViews,
@@ -939,6 +941,7 @@ impl GarageRuntime {
             home_cable_session: None,
             screens_sent: None,
             screens_scratch: Vec::new(),
+            plates_sent: Vec::new(),
             followed_car: None,
             structure_views: Default::default(),
             last_feedback: None,
