@@ -30,13 +30,15 @@ test('a character that is not edited resets on load',()=>{
  assert.deepEqual(outfit.characters[1],defaults.characters[1]);
 });
 
-test('the outfit is sent at start and after a change, and stored',()=>{
+test('the outfit is sent at start and after a change, and stored on save',()=>{
  const store=memory(),target={},first=installOutfit(target,store.storage,characters);
  assert.equal(target.gameOutfit(),JSON.stringify(defaults));assert.equal(target.gameOutfit(),undefined);
  first.outfit.characters[0].edited=true;first.outfit.characters[0].segments[1].enabled=true;first.outfit.model=0;
  first.changed();
  const expected=JSON.stringify(first.outfit);
  assert.equal(target.gameOutfit(),expected);
+ assert.equal(store.items.size,0);
+ first.save();
  const second={};installOutfit(second,store.storage,characters);
  assert.equal(second.gameOutfit(),expected);
 });

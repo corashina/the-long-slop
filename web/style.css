@@ -39,6 +39,20 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #fullscreen {position:relative;}
 #controls-screen #back,#game-mode-back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
 #menu:has(#save-screen:not([hidden])) h1 {visibility:hidden;}
+#appearance-screen {position:absolute;inset:0;z-index:2;}
+#menu:has(#appearance-screen:not([hidden])) :is(#menu-art,#menu-frame,h1,#status) {display:none;}
+.appearance-panel {position:absolute;left:0;top:0;bottom:0;width:min(440px,45vw);display:flex;flex-direction:column;gap:12px;padding:20px 24px;overflow:auto;background:#000c;font:18px Arial,sans-serif;}
+#appearance-title {margin:0;font-size:clamp(24px,3.2vw,48px);font-weight:400;}
+.appearance-panel label {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.appearance-panel select {min-height:44px;padding:8px 16px;background:#b4804640;border:1px solid #b48046;font:inherit;color:#fff;}
+.appearance-panel input[type=range] {width:60%;height:16px;appearance:none;border-radius:8px;}
+#appearance-parts {display:grid;grid-auto-flow:column;grid-template-columns:1fr 1fr;gap:8px 12px;}
+#appearance-parts div {display:flex;align-items:center;gap:8px;}
+#appearance-parts button,.appearance-row button {position:static;flex:1;min-height:40px;padding:4px 8px;background:#b4804640;border:1px solid #b48046;text-align:left;}
+#appearance-parts button.selected {border:2px solid #fff;}
+.appearance-row {display:flex;gap:12px;margin-top:auto;}
+#appearance-back,#appearance-reset {left:auto!important;top:auto!important;width:auto!important;height:44px!important;font-size:18px!important;}
+#appearance-view {position:absolute;left:min(440px,45vw);right:0;top:0;bottom:0;pointer-events:none;}
 #save-back {position:static;left:auto!important;top:auto!important;width:150px!important;height:44px!important;font-size:18px!important;}
 .save-body {position:absolute;inset:200px 24px 80px;display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,380px);gap:24px;overflow:auto;font:18px Arial,sans-serif;text-shadow:2px 2px 2px #000;}
 #save-screen button {position:static;}
@@ -135,3 +149,4 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 #inventory span{position:absolute;left:4px;top:1px;font-size:14px}
 #inventory img{width:100%;height:100%;object-fit:contain}
 #inventory progress{position:absolute;left:0;bottom:-9px;width:100%;height:5px;accent-color:white}
+@media (max-width:799px) {.appearance-panel {top:40%;width:100%;} #appearance-view {left:0;bottom:60%;}}

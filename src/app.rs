@@ -239,6 +239,7 @@ pub fn run(
             presentation::particles::SourceParticlePlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
+            presentation::outfit_preview::OutfitPreviewPlugin,
         ))
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
@@ -278,6 +279,7 @@ pub fn run(
                     presentation::outfit::poll,
                     presentation::player_body::sync,
                     presentation::ragdoll::sync,
+                    presentation::outfit_preview::sync,
                     presentation::sky_traffic::sync,
                 )
                     .chain(),

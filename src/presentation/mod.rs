@@ -12,6 +12,7 @@ pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
 pub mod outfit;
+pub mod outfit_preview;
 pub mod player_body;
 pub mod ragdoll;
 pub mod reference;
