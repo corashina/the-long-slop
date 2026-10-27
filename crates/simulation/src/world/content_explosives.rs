@@ -9,7 +9,7 @@ use crate::world::GeneratedId;
 use crate::world::spawn_rules::*;
 
 /// tankscript explosion fields.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TankExplosion {
     pub never_explode: bool,
     pub always_explode: bool,

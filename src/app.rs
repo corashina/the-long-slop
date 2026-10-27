@@ -705,7 +705,6 @@ fn prepare_world(
         return;
     };
     let started = game_now();
-    presentation.sync_mirror(&drive.sim.runtime.stream);
     let origin = presentation.origin().expect("synced renderer world");
     let snapshot = world_snapshot(&views, &epoch, sim.frame.state.session);
     let camera_world = snapshot.map_or_else(
@@ -843,6 +842,7 @@ fn fill_frame(
     time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
     mut frame: ResMut<SimFrameResource>,
+    mut allocation: ResMut<presentation::world::runtime::SourcePresentationAllocation>,
 ) {
     let drive = &mut *drive;
     let input = RenderInput {
@@ -852,16 +852,22 @@ fn fill_frame(
     };
     drive.sim.runtime.advance_render_frame(&reference.0, input);
     fill(drive, &reference.0, &mut frame);
+    // After a restart the world changes belong to the candidate copy. The commit applies them.
+    if !restarted(&frame.frame) {
+        allocation.apply_world(&reference.0.world, &frame.frame.world);
+    }
+}
+/// The prepared candidate replaced the runtime in this frame.
+pub(crate) fn restarted(frame: &simulation::boundary::SimFrame) -> bool {
+    frame
+        .changes
+        .iter()
+        .any(|c| matches!(c, simulation::boundary::Change::Restarted))
 }
 /// Writes the runtime state into `frame` and applies its changes.
 fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
     drive.sim.fill(reference, &mut frame.frame);
-    if frame
-        .frame
-        .changes
-        .iter()
-        .any(|c| matches!(c, simulation::boundary::Change::Restarted))
-    {
+    if restarted(&frame.frame) {
         // A new frame stream: drop the pose index and the tables of the old runtime.
         let next = std::mem::take(&mut frame.frame);
         *frame = SimFrameResource::default();

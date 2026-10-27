@@ -62,12 +62,16 @@ pub struct SimDriver {
     pub(crate) save: crate::save_requests::SaveState,
     /// Renderer input of the next candidate step.
     candidate: Option<crate::boundary::CandidateCommand>,
+    /// The renderer world copy of the last frame.
+    pub(crate) sent: crate::world::RendererWorld,
 }
 
 impl SimDriver {
     /// `source` stamps the saves of this build.
     pub fn new(runtime: GarageRuntime, source: crate::save::SourceStamp) -> Self {
+        let sent = crate::world::RendererWorld::new(runtime.stream.world_reference().clone());
         let mut driver = Self {
+            sent,
             runtime,
             input: FrameInput::default(),
             frame_input: FrameInput::default(),
@@ -334,6 +338,9 @@ impl SimDriver {
             .clock
             .alpha(self.runtime.clock_factors(reference).time_scale);
         self.runtime.fill_frame(reference, alpha, frame);
+        self.runtime
+            .stream
+            .sync_renderer(&mut self.sent, &mut frame.world);
         frame.seq_consumed = self.consumed_seq;
         frame.state.look = self.look;
         frame.state.perf.physics_ms = self.physics_ms;

@@ -40,8 +40,6 @@ pub struct PreparedPresentation {
     screen_height: f32,
     aspect_ratio: f32,
     required_views: Option<Box<crate::world::RequiredViews>>,
-    /// The candidate frame. The candidate driver fills it before each `advance`.
-    pub(crate) frame: super::sim_frame::SimFrameResource,
     /// Renderer input of the next candidate step.
     command: simulation::boundary::CandidateCommand,
 }
@@ -67,9 +65,10 @@ impl PreparedPresentation {
                 != 0
     }
     /// The first candidate command carries the renderer facts and the budget report of the copy.
+    /// `renderer_world` is the candidate world copy.
     pub fn new(
         reference: &ReferenceManifest,
-        stream: &crate::world::WorldStream,
+        renderer_world: Box<crate::world::RendererWorld>,
         world: &mut World,
     ) -> Result<Self, SaveError> {
         validate_assets(reference, world)?;
@@ -80,14 +79,6 @@ impl PreparedPresentation {
         // The candidate renderer spends its own credit from the candidate stream.
         let mut ledger = crate::ownership::PresentationLedger::default();
         let mut facts = crate::world::RendererFacts::default();
-        let mut renderer_world = Box::new(
-            world
-                .resource::<SourcePresentationAllocation>()
-                .world
-                .as_ref()
-                .map_or_else(|| crate::world::RendererWorld::new(stream), |w| w.fork()),
-        );
-        stream.sync_renderer(&mut renderer_world);
         super::world::preflight::configure_staging(
             &renderer_world,
             &mut ledger,
@@ -147,8 +138,9 @@ impl PreparedPresentation {
             materials,
             lighting,
             allocation: {
-                let mut allocation =
-                    SourcePresentationAllocation::for_session(stream.frame().request.session);
+                let mut allocation = SourcePresentationAllocation::for_session(
+                    renderer_world.frame().request.session,
+                );
                 allocation.fixed = fixed_snapshot;
                 allocation.ledger = ledger;
                 allocation.lighting_cpu =
@@ -160,7 +152,6 @@ impl PreparedPresentation {
             conditions: None,
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
-            frame: default(),
             command: simulation::boundary::CandidateCommand {
                 world: simulation::boundary::WorldCommand {
                     facts,
@@ -203,28 +194,36 @@ impl PreparedPresentation {
     pub fn take_command(&mut self) -> simulation::boundary::CandidateCommand {
         std::mem::take(&mut self.command)
     }
-    /// One renderer step on the candidate frame. `stream` is the candidate world.
-    pub fn advance(
+    /// Applies the world changes of a candidate frame to the candidate copy.
+    pub fn apply_world(&mut self, delta: &crate::world::WorldDelta) {
+        self.allocation
+            .world
+            .as_mut()
+            .expect("candidate renderer world")
+            .apply(delta);
+    }
+    /// One renderer step on the candidate `frame`.
+    pub(crate) fn advance(
         &mut self,
         reference: &ReferenceManifest,
-        stream: &crate::world::WorldStream,
+        frame: &mut super::sim_frame::SimFrameResource,
         world: &mut World,
     ) -> Result<bool, SaveError> {
         if let Some(window) = world.query::<&Window>().iter(world).next() {
             self.screen_height = window.physical_height() as f32;
             self.aspect_ratio = window.width() / window.height().max(1.);
         }
-        if let Some(failure) = self.frame.failure.take() {
+        if let Some(failure) = frame.failure.take() {
             return Err(crate::reference::ReferenceError(failure).into());
         }
         // Only the active renderer reads these candidate outputs.
-        self.frame.screens.clear();
-        self.frame.screen_set = None;
-        self.frame.feedback = None;
-        self.frame.home_cable = None;
-        self.frame.measurements = None;
-        self.frame.changed_conditions.clear();
-        let state = self.frame.frame.state;
+        frame.screens.clear();
+        frame.screen_set = None;
+        frame.feedback = None;
+        frame.home_cable = None;
+        frame.measurements = None;
+        frame.changed_conditions.clear();
+        let state = frame.frame.state;
         let camera = crate::app::frame_camera(&state, state.look.pose(1., [0.; 2]));
         let local = camera.translation;
         let position = Vec3::from_array(std::array::from_fn(|i| {
@@ -254,10 +253,10 @@ impl PreparedPresentation {
             fov_degrees: state.fov_degrees,
             ortho_size: None,
         };
-        imported_updates(&self.frame, world, &mut self.updates)?;
+        imported_updates(frame, world, &mut self.updates)?;
         candidate_required_views(
             reference,
-            &self.frame.frame,
+            &frame.frame,
             camera.to_matrix(),
             self.aspect_ratio,
             self.screen_height,
@@ -303,22 +302,19 @@ impl PreparedPresentation {
         if let Some(views) = &self.required_views {
             command.views.extend_from_slice(views.as_slice());
         }
-        let grant = self.frame.grant.take();
-        let frame = &self.frame.frame;
+        let grant = frame.grant.take();
+        let rows = &frame.frame;
         let result = match self.system.get_mut(world) {
-            Ok(mut renderer) => {
-                renderer.sync_mirror(stream);
-                renderer.prepare_frame(
-                    reference,
-                    grant,
-                    view,
-                    frame.lighting.cycle.shader_time_seconds as f32,
-                    lod,
-                    false,
-                    &frame.lights,
-                    command,
-                )
-            }
+            Ok(mut renderer) => renderer.prepare_frame(
+                reference,
+                grant,
+                view,
+                rows.lighting.cycle.shader_time_seconds as f32,
+                lod,
+                false,
+                &rows.lights,
+                command,
+            ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         }
         .and_then(|()| {
@@ -326,7 +322,7 @@ impl PreparedPresentation {
             self.system
                 .get_mut(world)
                 .map_err(|e| crate::reference::ReferenceError(e.to_string()))?
-                .sync_instances(reference, &mut self.frame)
+                .sync_instances(reference, frame)
         });
         self.system.apply(world);
         self.exchange(world);
@@ -377,7 +373,7 @@ impl PreparedPresentation {
             && self.pipelines.settled()?
             && self.lighting.road_lamps.ready();
         if ready && self.conditions.is_none() {
-            let frame = &self.frame;
+            let frame = &*frame;
             self.conditions = Some(world.resource_scope(
                 |world, visuals: Mut<super::conditions::ConditionVisuals>| {
                     visuals.prepare_candidate(frame, world)
@@ -389,9 +385,10 @@ impl PreparedPresentation {
         }
         Ok(ready)
     }
-    pub fn validate_commit(
+    pub(crate) fn validate_commit(
         &self,
         reference: &ReferenceManifest,
+        frame: &super::sim_frame::SimFrameResource,
         world: &World,
     ) -> Result<(), SaveError> {
         validate_assets(reference, world)?;
@@ -407,8 +404,8 @@ impl PreparedPresentation {
         }
         if self.conditions.is_none()
             || !self.materials.preparation.ready()?
-            || self.frame.frame.state.flags & StateBlock::RESTORED == 0
-            || self.frame.frame.state.flags & StateBlock::WORLD_READY == 0
+            || frame.frame.state.flags & StateBlock::RESTORED == 0
+            || frame.frame.state.flags & StateBlock::WORLD_READY == 0
             || !self.pipelines.settled()?
             || !self.writers.ready()?
             || !self.grass.settled()

@@ -240,6 +240,7 @@ fn frame_round_trips() {
             },
             Change::Restarted,
         ],
+        world: crate::world::WorldDelta::default(),
         candidate: Some(Box::new(SimFrame {
             seq_consumed: 2,
             changes: vec![Change::Failure("candidate".into())],
