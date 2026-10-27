@@ -1,7 +1,7 @@
-//! Cigarette packs, the mouth wear slot, and smoking. Source `fpscontroller` smoke paths.
+//! Cigarette packs and smoking. Source `fpscontroller` smoke paths.
 use super::GarageRuntime;
 use crate::interaction::cigarettes::{
-    BurnRates, CigaretteState, ExhaleRates, ExhaleState, MouthSlot, PackState,
+    BurnRates, CigaretteState, ExhaleRates, ExhaleState, PackState,
 };
 use crate::interaction::feedback::ActionMask;
 use crate::interaction::items::{ItemLocation, node_pose};
@@ -18,13 +18,11 @@ pub struct CigaretteRuntime {
     pub cigarette_prototype: usize,
     pub packs: Vec<(ItemId, PackState)>,
     pub cigarettes: Vec<(ItemId, CigaretteState)>,
-    pub mouth: MouthSlot<ItemId>,
+    /// Wear slot of the cigarette (`wearableType` mask).
+    pub mouth_slot: usize,
     pub exhale: ExhaleState,
     /// Mouth smoke emission rate. `None` disables the emitter.
     pub mouth_smoke: Option<f32>,
-    pub mouth_anchor: NodeId,
-    /// Worn body pose in the mouth anchor frame.
-    worn_offset: Pose,
     /// Ember particles of each cigarette and the player mouth smoke.
     embers: Vec<(ItemId, ParticleState)>,
     exhale_particles: ParticleState,
@@ -37,8 +35,6 @@ pub struct CigaretteRuntime {
     ember_start: Pose,
     ember_end: Pose,
     show_stats: bool,
-    hold_seconds: f32,
-    tab_elapsed: Option<f32>,
 }
 
 impl CigaretteRuntime {
@@ -63,25 +59,7 @@ impl CigaretteRuntime {
             .first()
             .ok_or_else(|| ReferenceError("Missing cigarette pack rules".into()))?
             .wearable_type;
-        let mouth_anchor = *reference
-            .clothing
-            .pose
-            .wearable_anchors
-            .get(wearable_type as usize)
-            .ok_or_else(|| ReferenceError("Missing mouth wear anchor".into()))?;
-        // Source Wear: the root, or the wearable CenterObj, takes the anchor pose.
         let root = to_rapier(node_pose(reference, record.root)?);
-        let root_in_anchor = match reference.clothing.wearables.iter().find(|w| {
-            w.prototype == record.id && w.type_index == wearable_type && w.use_center_object
-        }) {
-            Some(w) => {
-                let center = w
-                    .center
-                    .ok_or_else(|| ReferenceError("Missing wearable center".into()))?;
-                (root.inverse() * to_rapier(node_pose(reference, center)?)).inverse()
-            }
-            None => Pose::IDENTITY,
-        };
         let body = &record.bodies[0];
         let body_local = to_rapier(VehiclePose {
             position: body.pose.translation,
@@ -115,14 +93,10 @@ impl CigaretteRuntime {
             cigarette_prototype,
             packs: Vec::new(),
             cigarettes: Vec::new(),
-            mouth: MouthSlot::default(),
+            mouth_slot: wearable_type as usize,
             exhale: ExhaleState::default(),
             mouth_smoke: None,
-            mouth_anchor,
-            worn_offset: root_in_anchor * body_local,
             show_stats: !consumable.dont_show_stats,
-            hold_seconds: reference.inventory.equip_hold_seconds,
-            tab_elapsed: None,
         })
     }
     pub fn ember_particles(&self, id: ItemId) -> &[crate::particles::ParticleOutput] {
@@ -161,9 +135,6 @@ impl CigaretteRuntime {
         }
         if self.cigarette(held).is_some() {
             mask |= ActionMask::SMOKE;
-            if self.mouth.item.is_none() {
-                mask |= ActionMask::PUT_ON;
-            }
         }
         mask
     }
@@ -221,70 +192,16 @@ impl GarageRuntime {
         Ok(id)
     }
 
-    /// Source `Wear`: drop the item and attach it to the mouth anchor.
-    fn wear_cigarette(&mut self, id: ItemId) {
-        if !self.area.cigarettes.mouth.wear_if_empty(id) {
-            return;
-        }
-        if self.area.interaction.held() == Some(id) {
-            self.area
-                .interaction
-                .drop_held(&mut self.area.items, &mut self.physics);
-        }
-        if let Some(body) = self.area.items.get(id).and_then(|i| i.body) {
-            self.physics.edit_body(body, |b| b.set_enabled(false));
-        }
-        self.sync_mouth();
+    /// The cigarette in the mouth slot.
+    fn mouth_cigarette(&self) -> Option<ItemId> {
+        let c = &self.area.cigarettes;
+        self.area
+            .wear
+            .item(c.mouth_slot)
+            .filter(|id| c.cigarette(*id).is_some())
     }
 
-    /// Source `TakeOff`: the worn cigarette goes back to the hand.
-    fn take_off_cigarette(&mut self) {
-        let Some(id) = self.area.cigarettes.mouth.take_off() else {
-            return;
-        };
-        let Some(body) = self.area.items.get(id).and_then(|i| i.body) else {
-            return;
-        };
-        self.physics.edit_body(body, |b| b.set_enabled(true));
-        self.physics.refresh_queries();
-        let point = self.physics.rapier().bodies[body].translation().to_array();
-        if self
-            .area
-            .interaction
-            .pickup_item(
-                id,
-                point,
-                &self.area.player,
-                &mut self.area.items,
-                &mut self.physics,
-            )
-            .is_err()
-        {
-            self.notice = "Cannot take this item.";
-        }
-    }
-
-    /// Keep the worn cigarette on the mouth anchor. Run after the pose frames update.
-    pub(super) fn sync_mouth(&mut self) {
-        let Some(id) = self.area.cigarettes.mouth.item else {
-            return;
-        };
-        let Some(anchor) = self.area.pose.anchor(self.area.cigarettes.mouth_anchor) else {
-            return;
-        };
-        let pose = to_rapier(anchor) * self.area.cigarettes.worn_offset;
-        if let Some(body) = self.area.items.get(id).and_then(|i| i.body) {
-            self.physics.edit_body(body, |b| {
-                b.set_position(pose, false);
-                b.set_enabled(false);
-            });
-        }
-        if let Some(state) = self.area.items.get_mut(id) {
-            state.pose = from_rapier(&pose);
-        }
-    }
-
-    /// Pack, wear, and smoke input. Consumed keys leave `input`.
+    /// Pack and smoke input. Consumed keys leave `input`.
     pub(super) fn step_cigarettes(
         &mut self,
         reference: &ReferenceManifest,
@@ -293,37 +210,9 @@ impl GarageRuntime {
         let dt = FIXED_DT;
         let held = self.smoke_held();
         let mut smoking = false;
-        // Short Tab release puts a held cigarette on (source canTab / puton).
-        if input.pressed & keys::RECENTER != 0 {
-            self.area.cigarettes.tab_elapsed = Some(0.);
-        } else if let Some(t) = &mut self.area.cigarettes.tab_elapsed {
-            *t += dt;
-        }
-        if input.released & keys::RECENTER != 0 {
-            let short = self
-                .area
-                .cigarettes
-                .tab_elapsed
-                .take()
-                .is_some_and(|t| t <= self.area.cigarettes.hold_seconds);
-            if let Some(id) = self.area.interaction.held()
-                && short
-                && self.area.cigarettes.cigarette(id).is_some()
-                && self.area.cigarettes.mouth.item.is_none()
-            {
-                self.wear_cigarette(id);
-                strip(input, keys::RECENTER);
-                return;
-            }
-        }
-        if self.area.interaction.held().is_none()
-            && input.player_released & player_keys::TAKE_OFF != 0
-        {
-            self.take_off_cigarette();
-        }
         // Worn cigarette: Caps Lock.
         if input.player_held & player_keys::SMOKE != 0
-            && let Some(id) = self.area.cigarettes.mouth.item
+            && let Some(id) = self.mouth_cigarette()
         {
             let rates = self.area.cigarettes.rates;
             let exhale = self.area.cigarettes.exhale_rates;
@@ -421,7 +310,9 @@ impl GarageRuntime {
             return;
         }
         match self.spawn_cigarette(reference, from_rapier(&pickup)) {
-            Ok(id) => self.wear_cigarette(id),
+            Ok(id) => {
+                self.area.put_on(&mut self.physics, id);
+            }
             Err(_) => self.notice = "Cannot take a cigarette.",
         }
     }
@@ -555,11 +446,7 @@ impl CigaretteRuntime {
             })
             .collect();
         cigarettes.sort_by_key(|c| c.serial);
-        crate::save::CigarettesSnapshot {
-            packs,
-            cigarettes,
-            mouth: self.mouth.item.and_then(serial),
-        }
+        crate::save::CigarettesSnapshot { packs, cigarettes }
     }
 }
 
@@ -594,17 +481,11 @@ pub fn validate_save(
             return Err(crate::save::SaveError::CorruptData("Cigarette hp".into()));
         }
     }
-    if saved
-        .mouth
-        .is_some_and(|m| !saved.cigarettes.iter().any(|c| c.serial == m))
-    {
-        return Err(invalid("Mouth slot item"));
-    }
     Ok(())
 }
 
 impl GarageRuntime {
-    /// Rebuild pack, cigarette, and mouth state after the spawned items exist.
+    /// Rebuild pack and cigarette state after the spawned items exist.
     pub(super) fn restore_cigarettes(&mut self, saved: &crate::save::CigarettesSnapshot) {
         let item = |serial: u32, prototype: usize| {
             self.area
@@ -634,16 +515,9 @@ impl GarageRuntime {
                 ))
             })
             .collect();
-        let mouth = saved
-            .mouth
-            .and_then(|serial| item(serial, c.cigarette_prototype));
         let c = &mut self.area.cigarettes;
         c.packs = packs;
         c.cigarettes = cigarettes;
-        c.mouth = MouthSlot::default();
-        if let Some(id) = mouth {
-            self.wear_cigarette(id);
-        }
     }
 }
 
@@ -655,7 +529,7 @@ mod tests {
     use crate::starting_area::spawned::{SpawnedItem, SpawnedItems};
 
     #[test]
-    fn save_round_trip_keeps_hp_counts_and_mouth() {
+    fn save_round_trip_keeps_hp_and_counts() {
         let rates = cigarette();
         let mut spawned = SpawnedItems::default();
         for (id, serial, prototype) in [(5, 0, 0), (6, 1, 1), (7, 2, 1)] {
@@ -668,7 +542,7 @@ mod tests {
         }
         let mut burnt = CigaretteState::new(&rates);
         burnt.eat(&rates, 10., false);
-        let mut runtime = CigaretteRuntime {
+        let runtime = CigaretteRuntime {
             rates,
             exhale_rates: ExhaleRates {
                 max_rate: 30.,
@@ -678,11 +552,9 @@ mod tests {
             cigarette_prototype: 1,
             packs: vec![(ItemId(5), PackState { count: 18 })],
             cigarettes: vec![(ItemId(7), burnt), (ItemId(6), CigaretteState::new(&rates))],
-            mouth: MouthSlot::default(),
+            mouth_slot: 4,
             exhale: ExhaleState::default(),
             mouth_smoke: None,
-            mouth_anchor: NodeId(0),
-            worn_offset: Pose::IDENTITY,
             embers: Vec::new(),
             exhale_particles: ParticleState::new(&particle(), 1),
             exhale_node: NodeId(0),
@@ -692,13 +564,9 @@ mod tests {
             ember_start: Pose::IDENTITY,
             ember_end: Pose::IDENTITY,
             show_stats: true,
-            hold_seconds: 0.2,
-            tab_elapsed: None,
         };
-        runtime.mouth.wear_if_empty(ItemId(7));
         let saved = runtime.capture_save(&spawned);
         assert_eq!(saved.packs[0].count, 18);
-        assert_eq!(saved.mouth, Some(2));
         assert_eq!(saved.cigarettes[1].serial, 2);
         assert!(saved.cigarettes[1].ate_once);
         let json = serde_json::to_string(&saved).unwrap();

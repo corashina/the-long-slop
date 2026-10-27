@@ -11,12 +11,15 @@ use crate::vehicle::to_rapier;
 use rapier3d::math::{Pose, Vector};
 
 /// Crowbar prefab name parts.
-const CROWBAR: &[&str] = &["crowbar", "feszito"];
+pub(super) const CROWBAR: &[&str] = &["crowbar", "feszito"];
 /// Frames from one swing press to the next.
 const SWING_FRAMES: usize = 50;
 
 /// The weapon whose world prototype root name has one of `names`.
-fn weapon<'a>(reference: &'a ReferenceManifest, names: &[&str]) -> &'a MeleeWeaponReference {
+pub(super) fn weapon<'a>(
+    reference: &'a ReferenceManifest,
+    names: &[&str],
+) -> &'a MeleeWeaponReference {
     reference
         .melee
         .weapons
@@ -37,7 +40,7 @@ fn weapon<'a>(reference: &'a ReferenceManifest, names: &[&str]) -> &'a MeleeWeap
 }
 
 /// Spawns the weapon prototype at the player and returns its pickup item.
-fn spawn(
+pub(super) fn spawn(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
     w: &MeleeWeaponReference,
@@ -117,7 +120,7 @@ fn swing_frame(run: &mut GarageRuntime, reference: &ReferenceManifest, index: us
 }
 
 /// Moves a body to `at` with no velocity.
-fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
+pub(super) fn place(run: &mut GarageRuntime, item: ItemId, at: Vector) {
     let body = run.area.items.get(item).unwrap().body.unwrap();
     run.physics.edit_body(body, |b| {
         let mut pose = *b.position();

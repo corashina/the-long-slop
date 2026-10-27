@@ -6,7 +6,9 @@ use crate::world::renderer_pending::{
 };
 use crate::world::upload_receipt::UploadReceipt;
 use crate::{
-    presentation::materials::RenderingState, reference::ReferenceError, world::WorldStream,
+    presentation::materials::RenderingState,
+    reference::ReferenceError,
+    world::{PresentationLedger, WorldStream},
 };
 use bevy::render::renderer::RenderQueue;
 use bevy::{
@@ -141,11 +143,11 @@ impl WorldPipelines {
             }).collect::<Vec<_>>(),
         })
     }
-    pub fn reserve_cache(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+    pub fn reserve_cache(&mut self, ledger: &mut PresentationLedger) -> Result<(), ReferenceError> {
         if !self.cache_reserved {
-            let mut allocation = stream.presentation_allocation();
+            let mut allocation = ledger.allocation();
             allocation.prototype_cpu += super::super::pipeline_ownership::CACHE_BYTES;
-            stream.set_presentation_allocation(allocation)?;
+            ledger.set_allocation(allocation)?;
             self.cache_reserved = true;
         }
         Ok(())
@@ -175,26 +177,29 @@ impl WorldPipelines {
 
     pub fn request<M: Material>(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         mesh: &Handle<Mesh>,
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        self.request_owned(stream, None, mesh, material, shadows)
+        self.request_owned(stream, ledger, None, mesh, material, shadows)
     }
     pub(crate) fn request_continuation<M: Material>(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         parent: &mut PipelineContinuation,
         mesh: &Handle<Mesh>,
         material: &Handle<M>,
         shadows: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
-        self.request_owned(stream, Some(parent), mesh, material, shadows)
+        self.request_owned(stream, ledger, Some(parent), mesh, material, shadows)
     }
     fn request_owned<M: Material>(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         mut parent: Option<&mut PipelineContinuation>,
         mesh: &Handle<Mesh>,
         material: &Handle<M>,
@@ -258,17 +263,18 @@ impl WorldPipelines {
             };
         let operation = if let Some(index) = append {
             let operation = &guard.as_ref().unwrap().batches[index].operation;
-            operation.reserve_pair(stream, cpu)?;
+            operation.reserve_pair(ledger, cpu)?;
             operation.clone()
         } else {
             let operation = match parent.as_mut() {
                 Some(parent) => parent.start(
                     stream,
+                    ledger,
                     cpu,
                     super::super::pipeline_ownership::DESCRIPTOR_BYTES,
                 )?,
                 None => PipelineOperation::independent(
-                    stream,
+                    ledger,
                     cpu,
                     super::super::pipeline_ownership::DESCRIPTOR_BYTES,
                 )?,
@@ -323,9 +329,9 @@ impl WorldPipelines {
         self.session = stream.frame().request.session;
         self.cache_reserved = true;
         if released != 0 {
-            let mut allocation = stream.presentation_allocation();
+            let mut allocation = ledger.allocation();
             allocation.prototype_cpu -= released;
-            stream.set_presentation_allocation(allocation)?;
+            ledger.set_allocation(allocation)?;
         }
         Ok(Some(ticket))
     }
@@ -338,7 +344,11 @@ impl WorldPipelines {
                 .all(|batch| batch.operation.physical.completed())
         })
     }
-    pub fn prepare(&mut self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+    pub fn prepare(
+        &mut self,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
+    ) -> Result<(), ReferenceError> {
         self.session = stream.frame().request.session;
         let Some(bank) = &self.jobs else {
             return Ok(());
@@ -365,7 +375,7 @@ impl WorldPipelines {
         let cpu = bank.pairs.len() * ticket_bytes()
             + bank.batches.len() * UploadReceipt::allocation_bytes();
         self.accounting.reconcile(
-            stream,
+            ledger,
             bank.batches.iter().map(|batch| batch.operation.clone()),
             cpu,
             super::super::pipeline_ownership::DESCRIPTOR_BYTES,

@@ -307,8 +307,8 @@ pub(crate) fn publish(
             "textures": materials.world_textures.startup_audit(&images, &server),
             "primary": materials.primary_startup_audit(&server),
             "gpu_ledger": {
-                "prototype_gpu": runtime.stream.presentation_allocation().prototype_gpu,
-                "active_gpu": runtime.stream.presentation_allocation().active_gpu,
+                "prototype_gpu": runtime.stream.presentation_credit().prototype_gpu,
+                "active_gpu": runtime.stream.presentation_credit().active_gpu,
             },
             "jobs": runtime.stream.startup_job_audit(),
             "instances": instances.startup_audit(&grass),

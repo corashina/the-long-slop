@@ -14,7 +14,7 @@ pub struct SourceRenderer(pub RendererRecord);
 #[derive(Component)]
 pub struct SourceMaterialWarmup;
 
-/// The camera does not draw the mesh. Its shadow still draws.
+/// Source `makeinvisible`: the camera does not draw a worn item renderer. Its shadow stays.
 #[derive(Component)]
 pub struct CameraHidden;
 
