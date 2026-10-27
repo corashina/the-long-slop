@@ -12,8 +12,9 @@ use super::{
 use crate::world::stream::content_index::InstanceSelection;
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
-    reference::{ReferenceError, ReferenceManifest},
-    world::{Placement, WorldStream},
+    presentation::renderer_visibility::CameraHidden,
+    reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
+    world::{Placement, PresentationLedger, WorldStream},
 };
 use bevy::math::{Affine3A, DMat4, DVec3};
 use bevy::platform::collections::HashMap;
@@ -25,6 +26,26 @@ use bevy::{
 };
 use grass_mesh::{GrassPatch, GrassSettings, GrassView};
 use std::sync::Arc;
+/// The prototype node is a `wear.Renderers` node of a wearable item.
+fn worn_renderer(
+    reference: &ReferenceManifest,
+    prototype: &WorldPrototypeReference,
+    node: usize,
+) -> bool {
+    let source = &prototype.nodes[node].source;
+    reference.clothing.wearables.iter().any(|w| {
+        reference
+            .item_prototypes
+            .iter()
+            .any(|p| p.id == w.prototype && p.source == prototype.source)
+            && w.renderers.iter().any(|id| {
+                reference
+                    .nodes
+                    .iter()
+                    .any(|n| n.id == *id && n.source == *source)
+            })
+    })
+}
 struct MaterialVariant {
     source: Option<crate::reference::SourceId>,
     binding: RendererMaterial,
@@ -115,6 +136,8 @@ struct Instance {
     gpu: usize,
     objects: usize,
     visible: bool,
+    /// The player wears the item. See `StructureRow::WORN`.
+    worn: bool,
     origin: [f64; 3],
 }
 impl Instance {
@@ -341,7 +364,8 @@ impl SourceInstances {
 
     pub fn request_descriptors(
         &self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
     ) -> Result<(), ReferenceError> {
@@ -363,13 +387,14 @@ impl SourceInstances {
                 reference.world.prototypes.get(source).ok_or_else(|| {
                     ReferenceError("Missing generated structure prototype".into())
                 })?;
-            prototypes.request(stream, &prototype.source)?;
+            prototypes.request(stream, ledger, &prototype.source)?;
         }
         Ok(())
     }
     pub fn prepare(
         &mut self,
         stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
         server: &AssetServer,
@@ -422,7 +447,7 @@ impl SourceInstances {
                         .iter()
                         .any(|m| m.shader.name == "Stix Games/Grass")
                 });
-            stream.can_request_independent(1 + usize::from(child))
+            ledger.can_request_independent(1 + usize::from(child))
         }) {
             let prototype_index = reference
                 .world
@@ -435,6 +460,7 @@ impl SourceInstances {
                 .is_some()
                 && materials.admit(
                     stream,
+                    ledger,
                     reference,
                     prototype,
                     placement,
@@ -443,7 +469,13 @@ impl SourceInstances {
                         .unwrap(),
                 )?;
             if admitted {
-                prototypes.admit_payload(stream, reference, server, &placement.prototype)?;
+                prototypes.admit_payload(
+                    stream,
+                    ledger,
+                    reference,
+                    server,
+                    &placement.prototype,
+                )?;
                 let lods = prototypes.lods(
                     stream.frame().request.session,
                     &placement.prototype,
@@ -512,13 +544,17 @@ impl SourceInstances {
                         let mut gpu =
                             primitives * (2048 + crate::presentation::caster_material::gpu_bytes());
                         let objects = count + primitives;
-                        let mut continuation = stream.reserve_instance_renderer(
-                            stream.frame().request,
-                            &placement.id,
-                            cpu,
-                            gpu,
-                            objects,
-                        )?;
+                        let request = stream.frame().request;
+                        if !stream.structure_wanted(request, &placement.id) {
+                            return Err(ReferenceError("Stale instance renderer admission".into()));
+                        }
+                        let mut a = ledger.allocation();
+                        a.active_cpu += cpu;
+                        a.active_gpu += gpu;
+                        a.objects += objects;
+                        ledger.set_allocation(a)?;
+                        let mut continuation =
+                            ledger.claim_structure(request, placement.id.clone());
                         let root_pose = local_root(placement, stream.origin);
                         let root = commands
                             .spawn((
@@ -767,6 +803,7 @@ impl SourceInstances {
                                                 ),
                                                 layer: source_node.layer,
                                                 cast_shadows: record.cast_shadows,
+                                                camera_hidden: false,
                                                 hidden: true,
                                                 fade: 1.0,
                                                 color,
@@ -850,10 +887,10 @@ impl SourceInstances {
                                             * (2048
                                                 + crate::presentation::caster_material::gpu_bytes(
                                                 ));
-                                        let mut allocation = stream.presentation_allocation();
+                                        let mut allocation = ledger.allocation();
                                         allocation.active_cpu += extra_cpu;
                                         allocation.active_gpu += extra_gpu;
-                                        stream.set_presentation_allocation(allocation)?;
+                                        ledger.set_allocation(allocation)?;
                                         cpu += extra_cpu;
                                         gpu += extra_gpu;
                                     }
@@ -966,9 +1003,9 @@ impl SourceInstances {
                                             / 3
                                             * std::mem::size_of::<GrassPatch>()
                                             * 2;
-                                        let mut a = stream.presentation_allocation();
+                                        let mut a = ledger.allocation();
                                         a.active_cpu += patch_bytes;
-                                        stream.set_presentation_allocation(a)?;
+                                        ledger.set_allocation(a)?;
                                         cpu += patch_bytes;
                                         let source_world = source_worlds[node.index as usize];
                                         let patches = grass_patches(mesh_data, source_world)?;
@@ -985,6 +1022,7 @@ impl SourceInstances {
                                             );
                                             grass.request(
                                                 stream,
+                                                ledger,
                                                 entity,
                                                 root,
                                                 Arc::clone(&patches),
@@ -1049,6 +1087,7 @@ impl SourceInstances {
                                 gpu,
                                 objects,
                                 visible: false,
+                                worn: false,
                                 origin: stream.origin.offset,
                             })
                         })();
@@ -1075,7 +1114,7 @@ impl SourceInstances {
                                 for (entity, binding) in owned_bindings {
                                     if let Some(entity) = entity {
                                         grass.retire(
-                                            stream,
+                                            ledger,
                                             entity,
                                             meshes,
                                             &mut materials.grass,
@@ -1083,12 +1122,12 @@ impl SourceInstances {
                                     }
                                     materials.release(binding);
                                 }
-                                let mut a = stream.presentation_allocation();
+                                let mut a = ledger.allocation();
                                 a.active_cpu = a.active_cpu.saturating_sub(cpu);
                                 a.active_gpu = a.active_gpu.saturating_sub(gpu);
                                 a.objects = a.objects.saturating_sub(objects);
-                                stream.set_presentation_allocation(a)?;
-                                stream.release_renderer_pending(&mut continuation)?;
+                                ledger.set_allocation(a)?;
+                                ledger.release_claim(&mut continuation)?;
                                 return Err(error);
                             }
                         }
@@ -1127,6 +1166,7 @@ impl SourceInstances {
                 if renderer.ticket.is_none() {
                     renderer.ticket = renderer.binding.visible.warm(
                         stream,
+                        ledger,
                         pipelines,
                         instance.continuation.as_mut().unwrap(),
                         &renderer.mesh,
@@ -1139,6 +1179,7 @@ impl SourceInstances {
                     if variant.ticket.is_none() {
                         variant.ticket = variant.binding.visible.warm(
                             stream,
+                            ledger,
                             pipelines,
                             instance.continuation.as_mut().unwrap(),
                             &renderer.mesh,
@@ -1152,7 +1193,8 @@ impl SourceInstances {
                 stream.bind_prototype(&instance.placement.prototype)?;
                 stream.bind_structure_recipe(&instance.placement.prototype)?;
                 let claim = instance.continuation.as_mut().unwrap();
-                stream.accept_structure_renderer(claim.request(), &instance.placement.id, claim)?;
+                stream.accept_structure_renderer(claim.request(), &instance.placement.id)?;
+                ledger.hand_over_claim(claim)?;
                 instance.ready = true;
                 instance.continuation = None;
                 instance.upload = None;
@@ -1378,6 +1420,24 @@ impl SourceInstances {
                     }
                 }
             }
+            let worn = view.flags & StructureRow::WORN != 0;
+            if worn != instance.worn {
+                instance.worn = worn;
+                for renderer in &instance.renderers {
+                    if !worn_renderer(reference, prototype, renderer.node) {
+                        continue;
+                    }
+                    match renderer.target {
+                        Target::Entity(entity) if worn => {
+                            commands.entity(entity).insert(CameraHidden);
+                        }
+                        Target::Entity(entity) => {
+                            commands.entity(entity).remove::<CameraHidden>();
+                        }
+                        Target::Row { slot, .. } => self.props.set_camera_hidden(slot, worn),
+                    }
+                }
+            }
             for renderer in &mut instance.renderers {
                 let selected = view
                     .materials
@@ -1469,7 +1529,7 @@ impl SourceInstances {
     }
     pub fn request_writers(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         writers: &mut crate::presentation::materials::grass::writers::GrassWriters,
         meshes: &Assets<Mesh>,
@@ -1496,7 +1556,7 @@ impl SourceInstances {
                 };
                 let node = &prototype.nodes[renderer.node];
                 writers.request(
-                    stream,
+                    ledger,
                     entity,
                     renderer.mesh.clone(),
                     instance.worlds[node.gltf_node as usize].as_mat4(),
@@ -1509,6 +1569,7 @@ impl SourceInstances {
     pub fn retire(
         &mut self,
         stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut InstanceMaterials,
@@ -1552,7 +1613,7 @@ impl SourceInstances {
                 .iter()
                 .filter_map(Renderer::entity)
             {
-                grass_drained &= grass.retire(stream, entity, meshes, &mut materials.grass)?;
+                grass_drained &= grass.retire(ledger, entity, meshes, &mut materials.grass)?;
             }
             let parent_drained = self.instances[index]
                 .continuation
@@ -1584,8 +1645,8 @@ impl SourceInstances {
             for renderer in instance.renderers {
                 match renderer.target {
                     Target::Entity(entity) => {
-                        writers.retire(stream, entity)?;
-                        grass.retire(stream, entity, meshes, &mut materials.grass)?;
+                        writers.retire(ledger, entity)?;
+                        grass.retire(ledger, entity, meshes, &mut materials.grass)?;
                     }
                     Target::Row { slot, .. } => self.props.free(slot),
                 }
@@ -1594,13 +1655,13 @@ impl SourceInstances {
                     materials.release(variant.binding);
                 }
             }
-            let mut a = stream.presentation_allocation();
+            let mut a = ledger.allocation();
             a.active_cpu = a.active_cpu.saturating_sub(instance.cpu);
             a.active_gpu = a.active_gpu.saturating_sub(instance.gpu);
             a.objects = a.objects.saturating_sub(instance.objects);
-            stream.set_presentation_allocation(a)?;
+            ledger.set_allocation(a)?;
             if let Some(claim) = instance.continuation.as_mut() {
-                stream.release_renderer_pending(claim)?;
+                ledger.release_claim(claim)?;
             }
         }
         Ok(())

@@ -2483,15 +2483,15 @@ impl SourceMaterials {
     }
     pub fn fork(
         &self,
-        stream: &mut crate::world::WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
     ) -> Result<Self, source::ReferenceError> {
         let world_textures = self.world_textures.fork()?;
-        self.reserve_fork(stream)?;
+        self.reserve_fork(ledger)?;
         let mut copy = self.clone();
         copy.preparation = super::gpu_prepare::GpuPreparation::candidate();
         copy.world_textures = world_textures;
         copy.begin_world_session();
-        copy.account_fork(stream)?;
+        copy.account_fork()?;
         Ok(copy)
     }
 }

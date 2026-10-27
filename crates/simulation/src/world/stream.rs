@@ -16,9 +16,6 @@ use std::{
     },
 };
 
-#[cfg(any(target_arch = "wasm32", test))]
-use super::renderer_pending::{PipelineContinuation, RendererOwner};
-
 const MIB: usize = 1024 * 1024;
 const MAX_PENDING: usize = 32;
 /// Focus movement in metres before the structure window refreshes.
@@ -37,7 +34,7 @@ pub struct WorldRequest {
     pub vehicle: [f64; 3],
 }
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PresentationAllocation {
     pub grass_worker_wasm_bytes: usize,
     pub grass_worker_cache_bytes: usize,
@@ -120,12 +117,6 @@ struct RoadWork {
     completed: bool,
     canceled: bool,
 }
-#[derive(Clone, Copy)]
-struct PrototypeAllocation {
-    cpu: usize,
-    gpu: usize,
-    ready: bool,
-}
 
 /// Source world publication and session ownership.
 pub struct WorldStream {
@@ -201,6 +192,8 @@ pub struct WorldStream {
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
     dependency_metadata: usize,
+    /// Own work waited for room this frame: the renderer gives back unused credit.
+    reclaim: std::sync::atomic::AtomicBool,
     changes: super::ChangeRecords,
     replay_roots: Vec<Placement>,
     replay_indices: Vec<super::changes::ChangeRecordIndex>,
@@ -281,10 +274,13 @@ pub struct WorldStream {
     surfaces: Vec<PublishedSurface>,
     ready: Option<PreparedSurface>,
     terrain_execution: TerrainExecution,
-    admissions: HashMap<SourceId, PrototypeAllocation>,
+    /// Prototypes the renderer holds. True when bound. Their bytes are renderer credit.
+    prototype_holds: HashMap<SourceId, bool>,
     terrain_ready: [bool; 3],
     shared_cpu_bytes: Option<usize>,
     publication_available: bool,
+    /// The renderer holds the publication slot of this frame.
+    publication_lent: bool,
     failure: Option<String>,
     last_road_work: usize,
 }
@@ -839,6 +835,7 @@ impl WorldStream {
             overlap: WorldMetrics::default(),
             dependency_staging_reserve: 0,
             dependency_metadata: 0,
+            reclaim: std::sync::atomic::AtomicBool::new(false),
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
@@ -941,10 +938,11 @@ impl WorldStream {
             surfaces: Vec::new(),
             ready: None,
             terrain_execution: TerrainExecution::default(),
-            admissions: HashMap::new(),
+            prototype_holds: HashMap::new(),
             terrain_ready: [false; 3],
             shared_cpu_bytes: Some(shared_cpu_bytes),
             publication_available: false,
+            publication_lent: false,
             failure: None,
             last_road_work: 0,
         })
@@ -958,7 +956,7 @@ impl WorldStream {
         }
         Ok(())
     }
-    pub fn set_presentation_allocation(
+    pub(crate) fn set_presentation_allocation(
         &mut self,
         next: PresentationAllocation,
     ) -> Result<(), ReferenceError> {
@@ -974,6 +972,80 @@ impl WorldStream {
         Ok(())
     }
 
+    /// Takes the renderer report and answers with added credit.
+    /// Use above the credit must fit the limits, or the stream fails as before.
+    pub fn exchange_presentation(
+        &mut self,
+        report: super::PresentationReport,
+    ) -> super::PresentationGrant {
+        let credit = self.presentation.zip(report.release, usize::saturating_sub);
+        let covered = credit.zip(report.used, usize::max);
+        let reclaim = self
+            .reclaim
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        // With nothing ready to publish, the renderer takes this frame's publication slot.
+        self.publication_lent =
+            self.failure.is_none() && self.ready.is_none() && self.ready_structures.is_empty();
+        let publication = self.publication_lent;
+        if let Err(error) = self.set_presentation_allocation(covered) {
+            self.presentation = credit;
+            self.failure.get_or_insert(error.0);
+            return super::PresentationGrant {
+                credit: PresentationAllocation::default(),
+                reclaim,
+                publication: false,
+            };
+        }
+        let mut target = covered;
+        // Own work waits for room: it gets the given-back credit first.
+        if !reclaim {
+            let want = report.want.zip(covered, usize::saturating_sub);
+            target = covered.zip(want.zip(self.presentation_room(), usize::min), |a, b| {
+                a.saturating_add(b)
+            });
+            // Dependency staging is part of the staging credit.
+            target.dependency_staging_bytes = target
+                .dependency_staging_bytes
+                .min(target.staging_bytes)
+                .max(covered.dependency_staging_bytes);
+            if self.set_presentation_allocation(target).is_err() {
+                target = covered;
+                self.presentation = covered;
+            }
+        }
+        super::PresentationGrant {
+            credit: target.zip(credit, usize::saturating_sub),
+            reclaim,
+            publication,
+        }
+    }
+    /// Free room of each renderer field next to the current credit.
+    fn presentation_room(&self) -> PresentationAllocation {
+        let budgets = self.presentation_budgets(self.presentation);
+        let free = |i: usize| (budgets[i].limit as usize).saturating_sub(budgets[i].used as usize);
+        let pending = MAX_PENDING
+            .saturating_sub(self.pending_work() + self.overlap.pending_work)
+            .min(free(5));
+        let jobs = if self.initial_generation_ready {
+            free(9)
+        } else {
+            0
+        };
+        PresentationAllocation {
+            grass_worker_wasm_bytes: usize::MAX,
+            grass_worker_cache_bytes: usize::MAX,
+            grass_worker_reserved_bytes: usize::MAX,
+            active_cpu: free(0),
+            active_gpu: free(1),
+            prototype_cpu: free(2),
+            prototype_gpu: free(3),
+            objects: free(4),
+            pending,
+            staging_bytes: free(6).min(self.available_dependency_staging_bytes()),
+            dependency_staging_bytes: usize::MAX,
+            jobs,
+        }
+    }
     pub fn presentation_budgets(
         &self,
         next: PresentationAllocation,
@@ -1102,17 +1174,17 @@ impl WorldStream {
             ));
             return false;
         }
-        bytes <= self.available_staging_bytes()
+        self.wait_for_room(bytes <= self.available_staging_bytes())
     }
     // Retained generation may wait for resources. Keep one checked input window free.
     // Grass and synchronous published bindings drain without further resource loads.
-    pub fn available_staging_bytes(&self) -> usize {
+    pub(crate) fn available_staging_bytes(&self) -> usize {
         self.available_dependency_staging_bytes().min(
             (STAGING - self.dependency_staging_reserve)
                 .saturating_sub(self.generation_pending_bytes() - self.binding_reserved),
         )
     }
-    pub fn available_dependency_staging_bytes(&self) -> usize {
+    pub(crate) fn available_dependency_staging_bytes(&self) -> usize {
         STAGING.saturating_sub(
             self.presentation.staging_bytes
                 + self.generation_pending_bytes()
@@ -1136,9 +1208,6 @@ impl WorldStream {
             return Ok(());
         }
         self.dependency_staging_reserve = reserve;
-        let mut allocation = self.presentation;
-        allocation.prototype_cpu += metadata;
-        self.set_presentation_allocation(allocation)?;
         self.dependency_metadata = metadata;
         Ok(())
     }
@@ -1154,23 +1223,35 @@ impl WorldStream {
             + usize::from(self.road_work.is_some())
             + self.presentation.pending
     }
-    pub fn can_request_independent(&self, claims: usize) -> bool {
-        self.pending_work()
+    pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
+        let fits = self
+            .pending_work()
             .checked_add(self.overlap.pending_work)
             .and_then(|count| count.checked_add(claims))
-            .is_some_and(|count| count <= MAX_PENDING)
+            .is_some_and(|count| count <= MAX_PENDING);
+        self.wait_for_room(fits)
     }
-    pub fn available_external_jobs(&self) -> usize {
+    /// Asks the renderer for unused credit when own work does not fit.
+    fn wait_for_room(&self, fits: bool) -> bool {
+        if !fits {
+            self.reclaim
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        fits
+    }
+    pub(crate) fn available_external_jobs(&self) -> usize {
         if !self.initial_generation_ready {
             return 0;
         }
-        2usize.saturating_sub(
+        let free = 2usize.saturating_sub(
             self.presentation.jobs
                 + self.overlap.generation_jobs
                 + usize::from(self.terrain_execution.has_pending())
                 + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
-        )
+        );
+        self.wait_for_room(free > 0);
+        free
     }
     pub fn startup_job_audit(&self) -> serde_json::Value {
         serde_json::json!({
@@ -1208,40 +1289,11 @@ impl WorldStream {
             "available": self.available_external_jobs(),
         })
     }
-    /// A completed renderer job uses the same frame publication slot as collision work.
-    pub fn take_presentation_publication(&mut self) -> bool {
-        if self.failure.is_some() {
-            return false;
-        }
-        std::mem::take(&mut self.publication_available)
-    }
-    /// Decoded headroom excludes the table and key needed to own a new prototype.
-    #[cfg(target_arch = "wasm32")]
-    pub fn prototype_headroom(&self, source: &SourceId) -> usize {
-        let owner = if self.admissions.contains_key(source) {
-            0
-        } else {
-            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity()
-        };
-        self.available_prototype_cpu_bytes().saturating_sub(owner)
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub fn available_prototype_cpu_bytes(&self) -> usize {
-        PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub fn available_prototype_gpu_bytes(&self) -> usize {
-        PROTOTYPE_GPU.saturating_sub(self.metrics().prototype_gpu_bytes)
-    }
-    /// Reserve decoded bytes before loading an admitted prototype or terrain material.
-    pub fn reserve_prototype(
-        &mut self,
-        source: SourceId,
-        cpu: usize,
-        gpu: usize,
-    ) -> Result<(), ReferenceError> {
-        if self.admissions.contains_key(&source) {
-            return Ok(());
+    /// Holds a prototype for the renderer. True when the hold is new.
+    /// The stream charges only its own table entry and the road prototype data.
+    pub fn hold_prototype(&mut self, source: SourceId) -> Result<bool, ReferenceError> {
+        if self.prototype_holds.contains_key(&source) {
+            return Ok(false);
         }
         let road_index = self
             .reference
@@ -1259,17 +1311,13 @@ impl WorldStream {
                     .expect("validated road prototype")
             });
         let road_bytes = road_input.map_or(0, super::road::road_prototype_bytes);
-        let current = self.metrics();
         let owner_bytes =
-            super::metrics::map_insert_bytes(&self.admissions) + source.file.capacity();
-        if current
+            super::metrics::map_insert_bytes(&self.prototype_holds) + source.file.capacity();
+        if self
+            .metrics()
             .prototype_cpu_bytes
-            .checked_add(cpu.saturating_add(owner_bytes).saturating_add(road_bytes))
+            .checked_add(owner_bytes.saturating_add(road_bytes))
             .is_none_or(|v| v > PROTOTYPE_CPU)
-            || current
-                .prototype_gpu_bytes
-                .checked_add(gpu)
-                .is_none_or(|v| v > PROTOTYPE_GPU)
         {
             return Err(ReferenceError(format!(
                 "Source prototype budget {}:{}",
@@ -1283,61 +1331,21 @@ impl WorldStream {
                 .ok_or_else(|| ReferenceError("Road source revision exhausted".into()))?;
             self.road_prototypes[index] = Some(super::road::road_prototype(prototype));
         }
-        self.admissions.insert(
-            source,
-            PrototypeAllocation {
-                cpu,
-                gpu,
-                ready: false,
-            },
-        );
-        Ok(())
+        self.prototype_holds.insert(source, false);
+        Ok(true)
     }
-    /// Replace a loader reservation with its retained allocation before binding.
-    pub fn resize_prototype(
-        &mut self,
-        source: &SourceId,
-        cpu: usize,
-        gpu: usize,
-    ) -> Result<(), ReferenceError> {
-        let old = *self
-            .admissions
-            .get(source)
-            .ok_or_else(|| ReferenceError("Missing prototype reservation".into()))?;
-        let current = self.metrics();
-        if current
-            .prototype_cpu_bytes
-            .saturating_sub(old.cpu)
-            .saturating_add(cpu)
-            > PROTOTYPE_CPU
-            || current
-                .prototype_gpu_bytes
-                .saturating_sub(old.gpu)
-                .saturating_add(gpu)
-                > PROTOTYPE_GPU
-        {
-            return Err(ReferenceError(
-                "Prototype allocation exceeds its resource budget".into(),
-            ));
-        }
-        *self.admissions.get_mut(source).unwrap() = PrototypeAllocation {
-            cpu,
-            gpu,
-            ready: old.ready,
-        };
-        Ok(())
-    }
-    pub fn presentation_allocation(&self) -> PresentationAllocation {
+    /// Renderer credit: the renderer share of the budgets.
+    pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
     }
     pub fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
-        let allocation = self.admissions.get_mut(source).ok_or_else(|| {
+        let bound = self.prototype_holds.get_mut(source).ok_or_else(|| {
             ReferenceError(format!(
-                "Unreserved source binding {}:{}",
+                "Unheld source binding {}:{}",
                 source.file, source.path_id
             ))
         })?;
-        allocation.ready = true;
+        *bound = true;
         for (tier, material) in self.reference.terrain.materials.iter().enumerate() {
             if &material.source == source {
                 self.terrain_ready[tier] = true;
@@ -1394,7 +1402,7 @@ impl WorldStream {
             }
             self.road_prototypes[index] = None;
         }
-        self.admissions.remove(source);
+        self.prototype_holds.remove(source);
         self.recipes.remove(source);
         Ok(())
     }
@@ -1534,7 +1542,7 @@ impl WorldStream {
         let started = crate::host::game_now();
         #[cfg(not(target_arch = "wasm32"))]
         let started = std::time::Instant::now();
-        self.publication_available = true;
+        self.publication_available = !self.publication_lent;
         self.last_road_work = 0;
         // Request and source-input changes force structures. Captured item motion only
         // revises replay selection; it must not restart the one-metre baseline.
@@ -3025,9 +3033,9 @@ impl WorldStream {
             .segment;
         let owner = segment.biome as usize;
         if !self
-            .admissions
+            .prototype_holds
             .get(&self.reference.road.prototypes[owner])
-            .is_some_and(|a| a.ready)
+            .is_some_and(|bound| *bound)
         {
             return;
         }
@@ -3370,12 +3378,13 @@ impl WorldStream {
             })
             .map(|work| (work.request, &work.published))
     }
+    /// The renderer starts the prepared surface. It owns its claim.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn reserve_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
-    ) -> Result<PipelineContinuation, ReferenceError> {
+    ) -> Result<(), ReferenceError> {
         let work = self
             .ready
             .as_ref()
@@ -3402,18 +3411,15 @@ impl WorldStream {
             ));
         }
         self.ready.as_mut().unwrap().renderer_reserved = true;
-        Ok(PipelineContinuation::counted(RendererOwner::Surface(
-            request, key,
-        )))
+        Ok(())
     }
+    /// The renderer dropped the prepared surface after its work drained.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn discard_surface_renderer(
         &mut self,
-        claim: &mut PipelineContinuation,
+        request: WorldRequest,
+        key: SurfaceKey,
     ) -> Result<(), ReferenceError> {
-        let RendererOwner::Surface(request, key) = claim.owner else {
-            return Err(ReferenceError("Wrong surface claim".into()));
-        };
         if !self
             .ready
             .as_ref()
@@ -3421,7 +3427,6 @@ impl WorldStream {
         {
             return Err(ReferenceError("Missing draining surface claim".into()));
         }
-        claim.release()?;
         self.ready = None;
         if key.layer == WorldLayer::Road {
             self.road_worker.publication_ended(false);
@@ -3429,22 +3434,19 @@ impl WorldStream {
         self.rewind_road(key);
         Ok(())
     }
+    /// The renderer finished the prepared surface. Its work drained.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
-        claim: &PipelineContinuation,
     ) -> Result<(), ReferenceError> {
         let work = self
             .ready
             .as_mut()
             .filter(|work| same_request(work.request, request) && work.published.key == key)
             .ok_or_else(|| ReferenceError("Stale source renderer preparation".into()))?;
-        if !work.renderer_reserved
-            || !claim.drained()
-            || !matches!(claim.owner, RendererOwner::Surface(r, owner) if same_request(r, request) && owner == key)
-        {
+        if !work.renderer_reserved {
             return Err(ReferenceError("Unreserved source renderer".into()));
         }
         work.renderer_ready = true;
@@ -3513,7 +3515,7 @@ impl WorldStream {
             return self.publish_structure(physics, required_lights);
         };
         let admitted = match &work.published.prototype {
-            Some(source) => self.admissions.get(source).is_some_and(|v| v.ready),
+            Some(source) => self.prototype_holds.get(source).is_some_and(|bound| *bound),
             None => self.terrain_ready[layer_tier(work.published.key.layer)],
         };
         if !admitted || !work.renderer_ready || !self.road_publication_valid(work) {
@@ -4009,11 +4011,7 @@ impl WorldStream {
         if self.recipes.contains_key(source) {
             return Ok(());
         }
-        if !self
-            .admissions
-            .get(source)
-            .is_some_and(|allocation| allocation.ready)
-        {
+        if !self.prototype_holds.get(source).is_some_and(|bound| *bound) {
             return Err(ReferenceError(
                 "Structure material binding is not ready".into(),
             ));
@@ -4042,100 +4040,33 @@ impl WorldStream {
         Ok(())
     }
 
+    /// True while the stream still wants the structure.
     #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_instance_renderer(
-        &mut self,
-        request: WorldRequest,
-        id: &super::GeneratedId,
-        cpu: usize,
-        gpu: usize,
-        objects: usize,
-    ) -> Result<PipelineContinuation, ReferenceError> {
-        if request.session != self.request.session
-            || !self.wanted_structures.iter().any(|p| p.id == *id)
-        {
-            return Err(ReferenceError("Stale instance renderer admission".into()));
-        }
-        let mut next = self.presentation;
-        next.active_cpu += cpu;
-        next.active_gpu += gpu;
-        next.objects += objects;
-        next.pending += 1;
-        self.set_presentation_allocation(next)?;
-        Ok(PipelineContinuation::counted(RendererOwner::Structure(
-            request,
-            id.clone(),
-        )))
+    pub fn structure_wanted(&self, request: WorldRequest, id: &super::GeneratedId) -> bool {
+        request.session == self.request.session
+            && self.wanted_structures.iter().any(|p| p.id == *id)
     }
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_grass_renderer(
-        &mut self,
-        entity: u64,
-        cpu: usize,
-    ) -> Result<PipelineContinuation, ReferenceError> {
-        let mut next = self.presentation;
-        next.active_cpu += cpu;
-        next.pending += 1;
-        self.set_presentation_allocation(next)?;
-        Ok(PipelineContinuation::counted(RendererOwner::Grass(
-            self.request,
-            entity,
-        )))
-    }
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn release_renderer_pending(
-        &mut self,
-        claim: &mut PipelineContinuation,
-    ) -> Result<(), ReferenceError> {
-        if matches!(claim.owner, RendererOwner::Surface(..)) {
-            return Err(ReferenceError(
-                "Surface claim belongs to its ready owner".into(),
-            ));
-        }
-        if !claim.drained() {
-            return Err(ReferenceError("Renderer physical work remains live".into()));
-        }
-        let mut next = self.presentation;
-        next.pending = next
-            .pending
-            .checked_sub(1)
-            .ok_or_else(|| ReferenceError("Missing renderer pending claim".into()))?;
-        // Validate before changing the single-use proof.
-        for budget in self.presentation_budgets(next) {
-            if budget.used > budget.limit {
-                return Err(ReferenceError("Renderer release exceeds budget".into()));
-            }
-        }
-        claim.release()?;
-        self.presentation = next;
-        Ok(())
-    }
+    /// The renderer finished the structure. Its drained claim and credit move to the ready queue.
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_structure_renderer(
         &mut self,
         request: WorldRequest,
         id: &super::GeneratedId,
-        claim: &mut PipelineContinuation,
     ) -> Result<(), ReferenceError> {
-        if request.session != self.request.session
-            || !self.wanted_structures.iter().any(|p| p.id == *id)
-            || !matches!(&claim.owner, RendererOwner::Structure(r, owner) if *owner == *id && same_request(*r, request))
+        if !self.structure_wanted(request, id)
             || self.ready_structures.contains(id)
             || self.ready_structures.len() >= 32
-            || !claim.drained()
         {
             return Err(ReferenceError(
                 "Stale or live structure renderer claim".into(),
             ));
         }
-        let pending = self
+        // The claim credit moves to the ready queue in one step.
+        self.presentation.pending = self
             .presentation
             .pending
             .checked_sub(1)
             .ok_or_else(|| ReferenceError("Missing instance renderer claim".into()))?;
-        // No caller can observe the ready queue without its matching claim transfer.
-        claim.release()?;
-        self.presentation.pending = pending;
         self.ready_structures.push(id.clone());
         debug_assert!(self.metrics().pending_work <= 32);
         Ok(())
@@ -4144,17 +4075,6 @@ impl WorldStream {
         let count = self.ready_structures.len();
         self.ready_structures.retain(|entry| entry != id);
         self.ready_structures.len() != count
-    }
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn release_grass_renderer(
-        &mut self,
-        entity: u64,
-        claim: &mut PipelineContinuation,
-    ) -> Result<(), ReferenceError> {
-        if !matches!(claim.owner, RendererOwner::Grass(_, owner) if owner == entity) {
-            return Err(ReferenceError("Wrong Grass renderer claim".into()));
-        }
-        self.release_renderer_pending(claim)
     }
     fn publish_structure(
         &mut self,
@@ -5010,10 +4930,10 @@ impl WorldStream {
                 + self.roads.retained_index_bytes()
                 + self.placements.retained_index_bytes(),
             prototype_cpu_bytes: super::metrics::map_bytes(
-                self.admissions.capacity(),
-                std::mem::size_of::<(SourceId, PrototypeAllocation)>(),
+                self.prototype_holds.capacity(),
+                std::mem::size_of::<(SourceId, bool)>(),
             ) + self
-                .admissions
+                .prototype_holds
                 .keys()
                 .map(|id| id.file.capacity())
                 .sum::<usize>()
@@ -5342,10 +5262,6 @@ impl WorldStream {
                     .iter()
                     .map(|(id, _)| id.file.capacity())
                     .sum::<usize>();
-        }
-        for allocation in self.admissions.values() {
-            metrics.prototype_cpu_bytes += allocation.cpu;
-            metrics.prototype_gpu_bytes += allocation.gpu;
         }
         metrics.road_worker_wasm_bytes += self.overlap.road_worker_wasm_bytes;
         metrics.road_worker_reserved_bytes += self.overlap.road_worker_reserved_bytes;

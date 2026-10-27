@@ -155,10 +155,11 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
+    let runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut ledger = crate::world::PresentationLedger::default();
     let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
-        &mut runtime.stream,
+        &mut ledger,
         presentation::readiness::control_bytes(),
         presentation::readiness::RendererStateHandle::default,
     )
@@ -166,6 +167,7 @@ pub fn run(
     let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
         runtime.stream.frame().request.session,
         fixed,
+        ledger,
     );
     let current = runtime.area.player.view(&runtime.physics).camera_pose;
     App::new()

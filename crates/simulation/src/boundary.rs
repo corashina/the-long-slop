@@ -385,6 +385,8 @@ impl StructureRow {
     pub const DISPLAY: u32 = 1 << 2;
     /// The display is on.
     pub const DISPLAY_ON: u32 = 1 << 3;
+    /// The player wears the item. The camera does not draw its wearable renderers.
+    pub const WORN: u32 = 1 << 4;
 }
 
 /// One node write of a structure view. `node` indexes the prototype nodes,
@@ -530,6 +532,8 @@ impl ParticleGroupRow {
     pub const EMBER: u32 = 10;
     pub const EXHALE: u32 = 11;
     pub const COBWEB: u32 = 12;
+    /// `mainscript.ParticleShootStart` (0) and `ParticleShootEnd` (1).
+    pub const TRACER: u32 = 13;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).

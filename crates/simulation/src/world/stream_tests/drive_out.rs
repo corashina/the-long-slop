@@ -10,7 +10,7 @@ const OUTWARD: f64 = 400.;
 
 thread_local! {
     /// Surface renderer claim kept across frames, as the WASM presentation keeps it.
-    static CLAIM: std::cell::RefCell<Option<PipelineContinuation>> = const { std::cell::RefCell::new(None) };
+    static CLAIM: std::cell::RefCell<Option<(WorldRequest, SurfaceKey)>> = const { std::cell::RefCell::new(None) };
 }
 
 pub(super) fn frame(run: &mut GarageRuntime, reference: &ReferenceManifest) {
