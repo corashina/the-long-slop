@@ -1,8 +1,8 @@
 use super::{InstanceId, SaveError, SourceKey};
 use serde::{Deserialize, Serialize};
 
-pub const SAVE_SCHEMA_VERSION: u32 = 30;
-pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 30;
+pub const SAVE_SCHEMA_VERSION: u32 = 31;
+pub const OLDEST_SAVE_SCHEMA_VERSION: u32 = 31;
 pub fn schema_supported(version: u32) -> bool {
     (OLDEST_SAVE_SCHEMA_VERSION..=SAVE_SCHEMA_VERSION).contains(&version)
 }
@@ -31,6 +31,7 @@ pub struct SaveSnapshot {
     pub world: WorldSnapshot,
     pub player: PlayerSnapshot,
     pub needs: NeedsSnapshot,
+    pub hearing: HearingSnapshot,
     pub inventory: InventorySnapshot,
     pub bodies: Vec<BodySnapshot>,
     pub items: Vec<ItemSnapshot>,
@@ -191,6 +192,15 @@ pub struct NeedsSnapshot {
     pub needs: crate::reference::NeedValues,
     pub pending: crate::reference::ConsumptionEffect,
     pub bladder: crate::fluids::FluidSnapshot,
+}
+/// Source save_player hearing, earRinging, earRingingTarget and earRingDir.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HearingSnapshot {
+    pub hearing: f32,
+    pub ringing: f32,
+    pub target: f32,
+    pub dir: f32,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -439,7 +449,8 @@ mod g04_ordered_state {
     #[test]
     fn older_schemas_are_rejected_before_payload_reconstruction() {
         for version in [
-            6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 31,
+            6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+            32,
         ] {
             let payload = format!(r#"{{"schema_version":{version}}}"#);
             assert!(matches!(
@@ -451,9 +462,9 @@ mod g04_ordered_state {
 
     #[test]
     fn current_schema_passes_the_version_gate() {
-        // Schema 30 reaches payload parsing; the empty payload then fails as corrupt data.
+        // Schema 31 reaches payload parsing; the empty payload then fails as corrupt data.
         assert!(matches!(
-            SaveSnapshot::from_json(br#"{"schema_version":30}"#),
+            SaveSnapshot::from_json(br#"{"schema_version":31}"#),
             Err(SaveError::CorruptData(_))
         ));
     }

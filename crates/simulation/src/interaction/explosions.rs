@@ -111,8 +111,6 @@ pub struct ExplosionState {
     exploded: Vec<ItemId>,
     hits: Vec<(ColliderHandle, f32)>,
     bodies: Vec<RigidBodyHandle>,
-    /// The strongest blast power at the player this step. Hearing and death read it.
-    pub player: Option<f32>,
 }
 
 impl ExplosionState {
@@ -152,7 +150,6 @@ impl ExplosionState {
             exploded: Vec::with_capacity(16),
             hits: Vec::with_capacity(256),
             bodies: Vec::with_capacity(64),
-            player: None,
         })
     }
     pub fn explosive_fluids(&self) -> &[u8] {
@@ -346,7 +343,6 @@ mod tests {
             exploded: Vec::new(),
             hits: Vec::new(),
             bodies: Vec::new(),
-            player: None,
         };
         let blast = |force| Blast {
             kind: 0,

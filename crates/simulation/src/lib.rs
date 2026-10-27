@@ -13,6 +13,7 @@ pub mod driver;
 pub mod exhaust;
 pub mod fluids;
 pub mod flyers;
+pub mod hearing;
 #[cfg(target_arch = "wasm32")]
 pub mod host;
 pub mod interaction;

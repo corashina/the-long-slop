@@ -626,7 +626,7 @@ fn absolute(origin: [f64; 3], local: Vector) -> [f64; 3] {
 }
 
 /// Exported audio clips: source, id and source length.
-pub(super) fn clip_table(r: &ReferenceManifest) -> Vec<(SourceId, u32, f32)> {
+pub(crate) fn clip_table(r: &ReferenceManifest) -> Vec<(SourceId, u32, f32)> {
     r.audio["clips"]
         .as_array()
         .into_iter()

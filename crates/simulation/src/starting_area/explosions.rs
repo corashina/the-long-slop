@@ -15,12 +15,12 @@ impl GarageRuntime {
     pub(crate) fn run_explosions(&mut self, reference: &ReferenceManifest, dt: f32) {
         let origin = self.area.origin;
         let explosions = &mut self.area.interaction.explosions;
-        explosions.player = None;
         explosions.advance(dt, origin, &self.physics);
         while let Some(blast) = self.area.interaction.explosions.next() {
             self.explode(reference, &blast);
         }
         self.area.interaction.explosions.finish();
+        self.announce_death(reference);
     }
     /// `weaponscript.Shot` on a tank and an explosive prop.
     pub(crate) fn shot_explosive(&mut self, s: Strike) {
@@ -143,6 +143,7 @@ impl GarageRuntime {
             });
         }
         let player = self.area.interaction.player_body();
+        let mut heard: Option<f32> = None;
         self.area.interaction.explosions.query(&self.physics, blast);
         for i in 0..self.area.interaction.explosions.hits().len() {
             let (collider, power) = self.area.interaction.explosions.hits()[i];
@@ -152,9 +153,8 @@ impl GarageRuntime {
             }
             let parent = self.physics.rapier().colliders[collider].parent();
             if parent.is_some() && parent == player {
-                // fpscontrollerholder: hearing and death read the power.
-                let e = &mut self.area.interaction.explosions;
-                e.player = Some(e.player.map_or(power, |p| p.max(power)));
+                // fpscontrollerholder is on one collider: the strongest player collider counts.
+                heard = Some(heard.map_or(power, |p| p.max(power)));
                 continue;
             }
             if let Some(item) = self.collider_item(collider) {
@@ -162,8 +162,26 @@ impl GarageRuntime {
                 self.try_explode_prop(item, power);
             }
         }
+        if let Some(power) = heard {
+            self.hear_blast(reference, power, blast.position);
+        }
         let explosions = &self.area.interaction.explosions;
         explosions.push(&mut self.physics, blast, player);
+    }
+    /// The `fpscontrollerholder` branch: hearing loss, ear ringing and `Death`.
+    fn hear_blast(&mut self, reference: &ReferenceManifest, power: f32, at: Vector) {
+        let camera = to_rapier(self.area.player.view(&self.physics).camera_pose);
+        let to = at - camera.translation;
+        let forward = camera.rotation * -Vector::Z;
+        // `Vector3.SignedAngle(forward, to, up)`: positive to the right.
+        let right = camera.rotation * Vector::X;
+        let angle = forward.angle_between(to).to_degrees();
+        let angle = if to.dot(right) < 0. { -angle } else { angle };
+        let draw = self.draw_survival();
+        if self.hearing.blast(power, angle, draw) {
+            self.survival
+                .damage_instant(&reference.survival, reference.survival.maximum.hp);
+        }
     }
     /// The item of a collider: its user data, else its body.
     fn collider_item(&self, collider: ColliderHandle) -> Option<ItemId> {
