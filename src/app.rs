@@ -171,10 +171,10 @@ pub fn run(
         .insert_resource(graph)
         .insert_resource(allocation)
         .insert_resource(RuntimeReference(reference.clone()))
-        .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
+        .init_resource::<save::SaveRequests>()
         .insert_resource(Drive {
             view: SimDriver::new_view(&runtime),
-            sim: SimDriver::new(runtime),
+            sim: SimDriver::new(runtime, save::source_stamp(&reference, manifest_sha256)),
             seq: 0,
             world_ms: 0.,
             listener: None,
@@ -258,11 +258,11 @@ pub fn run(
                 check_ready,
                 select_world_views,
                 read_input,
-                save::dispatch,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
                 advance_physics,
                 (fill_frame, prepare_world, sync_instances).chain(),
+                save::dispatch,
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
@@ -532,7 +532,7 @@ fn read_input(
     time: Res<Time<Real>>,
     sim: Res<SimFrameResource>,
     mut drive: ResMut<Drive>,
-    requests: Res<save::SaveRequests>,
+    mut requests: ResMut<save::SaveRequests>,
 ) {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
     let hud = &sim.frame.hud;
@@ -608,6 +608,8 @@ fn read_input(
         calendar: local_calendar(),
         measure: game_measure_requested(),
         world: std::mem::take(&mut drive.world),
+        save: requests.take_commands(),
+        candidate: requests.candidate_command(),
     };
     drive.sim.accept(&reference.0, command);
 }
@@ -854,6 +856,17 @@ fn fill_frame(
 /// Writes the runtime state into `frame` and applies its changes.
 fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
     drive.sim.fill(reference, &mut frame.frame);
+    if frame
+        .frame
+        .changes
+        .iter()
+        .any(|c| matches!(c, simulation::boundary::Change::Restarted))
+    {
+        // A new frame stream: drop the pose index and the tables of the old runtime.
+        let next = std::mem::take(&mut frame.frame);
+        *frame = SimFrameResource::default();
+        frame.frame = next;
+    }
     drive.view = drive.look.camera(&frame.frame);
     let current = frame.frame.state.look.position[1];
     drive.view_offset = std::array::from_fn(|i| drive.view.position[i] - current[i]);

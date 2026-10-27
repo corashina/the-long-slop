@@ -51,18 +51,22 @@ pub struct SimDriver {
     grant: Option<crate::world::PresentationGrant>,
     skip_elapsed: bool,
     /// The renderer shows the garage.
-    ready: bool,
+    pub(crate) ready: bool,
     delta_seconds: f64,
-    calendar: [u8; 2],
+    pub(crate) calendar: [u8; 2],
     /// The browser asked for a world measurement.
     measure: bool,
     /// A failure that the next frame reports. The driver stops the storage startup after it.
     failure: Option<String>,
     failed: bool,
+    pub(crate) save: crate::save_requests::SaveState,
+    /// Renderer input of the next candidate step.
+    candidate: Option<crate::boundary::CandidateCommand>,
 }
 
 impl SimDriver {
-    pub fn new(runtime: GarageRuntime) -> Self {
+    /// `source` stamps the saves of this build.
+    pub fn new(runtime: GarageRuntime, source: crate::save::SourceStamp) -> Self {
         let mut driver = Self {
             runtime,
             input: FrameInput::default(),
@@ -95,6 +99,8 @@ impl SimDriver {
             measure: false,
             failure: None,
             failed: false,
+            save: crate::save_requests::SaveState::new(source),
+            candidate: None,
         };
         driver.reset_look();
         driver
@@ -106,7 +112,20 @@ impl SimDriver {
     }
 
     /// Applies the menu actions and settings of `command` and queues its input.
-    pub fn accept(&mut self, reference: &ReferenceManifest, command: SimCommand) {
+    /// Save requests run after the input, so a pause in the same command counts.
+    pub fn accept(&mut self, reference: &ReferenceManifest, mut command: SimCommand) {
+        let saves = std::mem::take(&mut command.save);
+        if let Some(candidate) = command.candidate.take() {
+            match &mut self.candidate {
+                Some(pending) => pending.merge(candidate),
+                None => self.candidate = Some(candidate),
+            }
+        }
+        self.accept_input(reference, command);
+        self.accept_saves(reference, saves);
+    }
+
+    fn accept_input(&mut self, reference: &ReferenceManifest, command: SimCommand) {
         self.delta_seconds = command.delta_seconds;
         self.calendar = command.calendar;
         self.ready = command.ready;
@@ -264,6 +283,8 @@ impl SimDriver {
 
     /// Runs the world step of the accepted renderer input, after the fixed steps.
     pub fn advance_world(&mut self, reference: &ReferenceManifest) {
+        let candidate = self.candidate.take();
+        self.advance_candidate(reference, candidate);
         self.world_ms = 0.;
         if let Some(failure) = self.world.take_failure() {
             self.runtime.stream.fail(ReferenceError(failure));
@@ -332,6 +353,7 @@ impl SimDriver {
         if self.camera == CameraMode::Chase {
             frame.state.flags |= StateBlock::CHASE;
         }
+        self.fill_saves(reference, frame);
     }
 
     /// Drops queued input and restarts the step clock at the player view.
