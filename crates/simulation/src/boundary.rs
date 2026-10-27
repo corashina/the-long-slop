@@ -1243,6 +1243,14 @@ pub fn encode_command(command: &SimCommand, out: &mut Vec<u8>) {
     *out = postcard::to_extend(command, std::mem::take(out)).expect("command encode");
 }
 
+pub fn encode_startup(startup: &SimStartup) -> Vec<u8> {
+    postcard::to_stdvec(startup).expect("startup encode")
+}
+
+pub fn decode_startup(bytes: &[u8]) -> Result<SimStartup, DecodeError> {
+    postcard::from_bytes(bytes).map_err(|e| DecodeError(e.to_string()))
+}
+
 pub fn decode_command(bytes: &[u8]) -> Result<SimCommand, DecodeError> {
     postcard::from_bytes(bytes).map_err(|e| DecodeError(e.to_string()))
 }

@@ -75,6 +75,13 @@ pub struct GameMode {
 }
 
 impl GameMode {
+    /// The mode of the browser menu values. -1 or an unknown car is Random.
+    pub fn from_menu(world: &crate::reference::WorldReference, biome: u32, start_car: i32) -> Self {
+        Self {
+            biome: if biome > 3 { 0 } else { biome as u8 },
+            start_car: StartCarChoice::from_index(world, start_car),
+        }
+    }
     /// Biome index for `biome`: 0 desert, 1 winter, 2 grass. Mixed uses the terrain color.
     pub fn biome_override(self) -> Option<u8> {
         self.biome.checked_sub(1)

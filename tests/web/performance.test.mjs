@@ -23,11 +23,12 @@ test('the single panel updates at 4 Hz, toggles with F3, and discards hidden-tab
  globalThis.document={hidden:false,querySelector:()=>root,addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:()=>{}};
  globalThis.window={addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:()=>{}};
  t.after(()=>{delete globalThis.document;delete globalThis.window;});
- const panel=createPerformance(()=>64*1048576,()=>null,()=>2500);
+ const panel=createPerformance(()=>64*1048576,()=>null,()=>2500,()=>({tickMs:3.5,wasmBytes:32*1048576}));
  assert.equal(panel.frame(0,1,2),true);
  panel.counters(1,3,10,20,30,40,50,2,4,8*1048576,16*1048576,2,0.5,300,1234);
  assert.match(root.textContent,/ECS entities: 1234/);
- assert.match(root.textContent,/WASM: 64\.0 MiB/);
+ assert.match(root.textContent,/WASM main \/ worker: 64\.0 MiB \/ 32\.0 MiB/);
+ assert.match(root.textContent,/Worker tick avg: 3\.5 ms/);
  assert.match(root.textContent,/Storms \/ strongest influence \/ particles: 2 \/ 0\.50 \/ 300/);
  assert.match(root.textContent,/JS heap: unavailable/);
  assert.match(root.textContent,/Wheel contacts: 3/);
