@@ -76,6 +76,10 @@ impl GarageRuntime {
             let particles = interaction.melee.particles(source);
             out.owner(ParticleGroupRow::MELEE, 0, source, particles);
         }
+        for source in 0..2 {
+            let particles = interaction.guns.tracers(source);
+            out.owner(ParticleGroupRow::TRACER, 0, source, particles);
+        }
         let cigarettes = &area.cigarettes;
         out.owner(
             ParticleGroupRow::EXHALE,

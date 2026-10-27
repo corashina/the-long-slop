@@ -442,6 +442,7 @@ impl GarageRuntime {
                 .expect("checked inventory bindings");
         }
         self.advance_melee(reference, input, dt);
+        let gun_held = self.advance_guns(reference, input, dt, view);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -461,10 +462,12 @@ impl GarageRuntime {
             view,
             origin: self.stream.origin.offset,
         };
-        let mut primary_reserved = self.area.interaction.cleaning.reserves_lmb(
-            self.area.interaction.equipment.item(),
-            self.area.interaction.held(),
-        );
+        // fpscontroller: a gun in the hand sets noLMBUse.
+        let mut primary_reserved = gun_held
+            || self.area.interaction.cleaning.reserves_lmb(
+                self.area.interaction.equipment.item(),
+                self.area.interaction.held(),
+            );
         self.area
             .interaction
             .cleaning
@@ -700,10 +703,76 @@ impl GarageRuntime {
             }
         }
         while let Some(item) = self.area.interaction.melee.take_cut() {
-            if self.cut_food(reference, item).is_err() {
+            if self.cut_food(reference, item, true).is_err() {
                 self.notice = "Cannot cut food.";
             }
         }
+    }
+    /// `fpscontroller.PullTrigger` and `weaponscript.Update` for a gun in the right hand.
+    /// True while a gun is in the hand.
+    fn advance_guns(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: FrameInput,
+        dt: f32,
+        view: VehiclePose,
+    ) -> bool {
+        use crate::interaction::guns::{HeldGun, ShotWorld};
+        let interaction = &mut self.area.interaction;
+        let held = interaction.equipment.item().and_then(|item| {
+            let rule = interaction.carry.rule(item)?;
+            let gun = interaction.guns.weapon_for(&rule.source)?;
+            let condition = self
+                .area
+                .conditions
+                .item_state(item)
+                .map(f32::from)
+                .or_else(|| {
+                    let quality = self.area.items.get(item)?.generated_condition?;
+                    Some((1. - quality) * 4.)
+                });
+            Some(HeldGun {
+                item,
+                gun,
+                view: to_rapier(view),
+                condition,
+            })
+        });
+        let player = interaction.player_body();
+        let mut world = ShotWorld {
+            items: &self.area.items,
+            physics: &mut self.physics,
+            breakables: &mut self.stream.breakables,
+            records: &reference.breakables,
+            hit_particles: interaction.melee.particles_mut(),
+            player,
+            origin: self.area.origin,
+        };
+        interaction
+            .guns
+            .step(dt, input.held & keys::PRIMARY != 0, held, &mut world);
+        // PR 4 stores and renders the bullet holes.
+        interaction.guns.take_decals().for_each(drop);
+        for sound in interaction.guns.take_sounds() {
+            if let Some(audio) = &mut self.audio {
+                audio.survival_event(crate::audio::SurvivalAudioEvent {
+                    session: audio.session,
+                    emitter: 0,
+                    kind: crate::audio::AudioKind::ItemHit,
+                    action: crate::audio::AudioAction::Start,
+                    clip: sound.clip,
+                    gain: sound.gain,
+                    pitch: sound.pitch,
+                    position: sound.position,
+                });
+            }
+        }
+        while let Some(item) = self.area.interaction.guns.take_food() {
+            if self.cut_food(reference, item, false).is_err() {
+                self.notice = "Cannot shoot food.";
+            }
+        }
+        held.is_some()
     }
     /// mainscript.PlayClipAtPoint for spray bottle clips.
     fn play_small_item_sounds(&mut self) {

@@ -99,6 +99,10 @@ impl ConditionStore {
     pub fn quality(&self, id: ConditionId) -> f32 {
         1. - f32::from(self.get(id).state.min(4)) / 4.
     }
+    /// `partconditionscript.state` of an item.
+    pub fn item_state(&self, item: ItemId) -> Option<u8> {
+        self.items.get(&item).map(|id| self.get(*id).state)
+    }
     pub fn item_quality(&self, item: ItemId) -> Option<f32> {
         self.items.get(&item).map(|id| self.quality(*id))
     }
