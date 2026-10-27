@@ -173,6 +173,8 @@ pub struct StateBlock {
 pub struct PerfBlock {
     /// Milliseconds of the fixed steps.
     pub physics_ms: f64,
+    /// Milliseconds of the world step.
+    pub world_ms: f64,
     pub render_cpu_bytes: f64,
     pub render_gpu_bytes: f64,
     pub frame_steps: u32,
@@ -805,6 +807,8 @@ pub enum Change {
     /// The simulation part of a world measurement, as JSON.
     Measurements(String),
     Failure(String),
+    /// Renderer credit of the world step for the renderer report of the command.
+    Grant(crate::world::PresentationGrant),
 }
 
 /// Local rotation and z scale of one home cable rope.
@@ -895,6 +899,51 @@ pub struct SimCommand {
     pub calendar: [u8; 2],
     /// The browser asks for a world measurement.
     pub measure: bool,
+    pub world: WorldCommand,
+}
+
+/// Renderer input of the world step.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorldCommand {
+    /// Facts of the renderer steps since the last command, in order.
+    pub facts: crate::world::RendererFacts,
+    /// Renderer budget use. `None`: no renderer step since the last command.
+    pub report: Option<crate::world::PresentationReport>,
+    /// Camera views that select required content. Empty: no complete camera view.
+    pub views: Vec<crate::world::RequiredView>,
+    pub lamps: LampAdmission,
+    /// A save request hides the world. The world step waits.
+    pub freeze: bool,
+    /// A renderer failure. The world stops.
+    pub failure: Option<String>,
+}
+
+/// Lamps the renderer admitted in its last step.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum LampAdmission {
+    /// No change since the last command.
+    #[default]
+    Same,
+    /// The renderer did not finish lamp preparation.
+    Pending,
+    Ready(Vec<GeneratedId>),
+}
+
+impl WorldCommand {
+    /// Adds a later command.
+    pub fn merge(&mut self, next: Self) {
+        self.facts.extend(next.facts);
+        self.report = match (self.report.take(), next.report) {
+            (Some(report), Some(next)) => Some(report.merge(next)),
+            (report, next) => next.or(report),
+        };
+        self.views = next.views;
+        if next.lamps != LampAdmission::Same {
+            self.lamps = next.lamps;
+        }
+        self.freeze = next.freeze;
+        self.failure = self.failure.take().or(next.failure);
+    }
 }
 
 impl SimCommand {
@@ -919,6 +968,7 @@ impl SimCommand {
         self.settings = next.settings.or(self.settings);
         self.calendar = next.calendar;
         self.measure |= next.measure;
+        self.world.merge(next.world);
     }
 }
 

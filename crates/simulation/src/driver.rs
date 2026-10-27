@@ -1,10 +1,13 @@
 //! Runs the simulation from renderer commands. It owns the runtime, the input queue and the step clock.
 use crate::boundary::{Change, LookBlock, SimCommand, SimFrame, StateBlock};
-use crate::reference::ReferenceManifest;
+use crate::reference::{ReferenceError, ReferenceManifest};
 use crate::simulation::{FIXED_DT, FrameInput, StepClock, keys};
-use crate::starting_area::GarageRuntime;
+use crate::starting_area::{GarageRuntime, WorldInput};
 use crate::vehicle::VehiclePose;
 use glam::{Quat, Vec3};
+
+/// World step milliseconds of a loading frame. The loading panel covers the screen.
+pub const LOADING_BUDGET_MS: f64 = 12.;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CameraMode {
@@ -41,6 +44,11 @@ pub struct SimDriver {
     pub render_delta_seconds: f32,
     /// Milliseconds of the last frame steps.
     pub physics_ms: f64,
+    /// Milliseconds of the last world step.
+    world_ms: f64,
+    world: WorldInput,
+    /// Answer of the last world step to the renderer report.
+    grant: Option<crate::world::PresentationGrant>,
     skip_elapsed: bool,
     /// The renderer shows the garage.
     ready: bool,
@@ -77,6 +85,9 @@ impl SimDriver {
             frame_steps: 0,
             render_delta_seconds: 0.,
             physics_ms: 0.,
+            world_ms: 0.,
+            world: WorldInput::default(),
+            grant: None,
             skip_elapsed: false,
             ready: false,
             delta_seconds: 0.,
@@ -101,6 +112,7 @@ impl SimDriver {
         self.ready = command.ready;
         self.accepted_seq = command.seq;
         self.measure |= command.measure;
+        self.world.accept(command.world);
         if command.hold {
             clear_profile_input();
             self.drop_frame_input();
@@ -250,6 +262,51 @@ impl SimDriver {
         self.physics_ms = now() - started;
     }
 
+    /// Runs the world step of the accepted renderer input, after the fixed steps.
+    pub fn advance_world(&mut self, reference: &ReferenceManifest) {
+        self.world_ms = 0.;
+        if let Some(failure) = self.world.take_failure() {
+            self.runtime.stream.fail(ReferenceError(failure));
+            self.runtime.clear_input();
+        }
+        if self.world.frozen() {
+            return;
+        }
+        let started = now();
+        let budget_ms = if self.ready { 0. } else { LOADING_BUDGET_MS };
+        let runtime = &mut self.runtime;
+        runtime.stream.advance_generation();
+        let was_aligned = runtime.startup_aligned;
+        let result = runtime
+            .step_world(reference, &mut self.world, budget_ms)
+            .and_then(|grant| {
+                self.grant = grant;
+                runtime.align_startup(reference, self.calendar)?;
+                if runtime.has_deferred_save_links() {
+                    runtime
+                        .advance_saved_restore(reference)
+                        .map_err(|e| ReferenceError(e.to_string()))?;
+                }
+                runtime
+                    .sync_world_activity(reference)
+                    .map_err(|e| ReferenceError(e.to_string()))?;
+                runtime.advance_recovery()
+            });
+        match result {
+            Ok(moved) => {
+                if moved || (!was_aligned && self.runtime.startup_aligned) {
+                    self.clear_input();
+                }
+            }
+            Err(error) => {
+                self.failure = Some(error.to_string());
+                self.runtime.stream.fail(error);
+                self.runtime.clear_input();
+            }
+        }
+        self.world_ms = now() - started;
+    }
+
     /// Writes the runtime state into `frame`.
     pub fn fill(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
         let alpha = self
@@ -260,6 +317,10 @@ impl SimDriver {
         frame.state.look = self.look;
         frame.state.perf.physics_ms = self.physics_ms;
         frame.state.perf.frame_steps = self.frame_steps;
+        frame.state.perf.world_ms = self.world_ms;
+        if let Some(grant) = self.grant.take() {
+            frame.changes.push(Change::Grant(grant));
+        }
         if std::mem::take(&mut self.measure) {
             frame.changes.push(Change::Measurements(
                 self.runtime.measurements(reference).to_string(),

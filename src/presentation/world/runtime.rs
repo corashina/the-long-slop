@@ -17,6 +17,7 @@ use bevy::{
     prelude::*,
 };
 use grass_mesh::GrassView;
+use simulation::boundary::{LampAdmission, WorldCommand};
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,
@@ -36,6 +37,8 @@ pub struct SourcePresentationAllocation {
     facts: crate::world::RendererFacts,
     /// Renderer view of the stream. The world step updates it.
     pub(crate) world: Option<Box<RendererWorld>>,
+    /// Admitted lamps of the last report to the world step.
+    sent_lamps: Option<Vec<crate::world::GeneratedId>>,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
@@ -112,62 +115,63 @@ impl WorldPresentation<'_, '_> {
             &self.screens,
         )
     }
-    /// Gives the renderer use to the stream and takes its grant. Once per frame.
-    fn exchange_credit(&mut self, stream: &mut WorldStream) {
-        self.allocation.ledger.exchange(stream);
+    /// Updates the renderer copy of `stream`.
+    pub fn sync_mirror(&mut self, stream: &WorldStream) {
+        let world = self
+            .allocation
+            .world
+            .get_or_insert_with(|| Box::new(RendererWorld::new(stream)));
+        stream.sync_renderer(world);
     }
-    /// Alternates world steps and renderer steps until `budget_ms` ends or nothing moves.
-    /// A budget of 0 runs one pair.
-    pub fn step_world(
+    /// The stream origin of the renderer copy.
+    pub fn origin(&self) -> Option<crate::world::WorldOrigin> {
+        self.allocation.world.as_ref().map(|world| world.origin)
+    }
+    /// One renderer step on the copy after `sync_mirror`.
+    /// Adds the facts, the budget report and the admitted lamps of the step to `out`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_frame(
         &mut self,
-        runtime: &mut crate::starting_area::GarageRuntime,
         reference: &ReferenceManifest,
-        required_views: &[crate::world::RequiredView],
+        grant: Option<crate::world::PresentationGrant>,
         view: GrassView,
+        time: f32,
         lod_view: super::lod::LodView,
         enabled: bool,
-        budget_ms: f64,
+        light_outputs: &[crate::lighting::LightOutput],
+        out: &mut WorldCommand,
     ) -> Result<(), ReferenceError> {
-        runtime
-            .stream
-            .apply_renderer_facts(&mut self.allocation.facts)?;
-        self.exchange_credit(&mut runtime.stream);
-        let started = simulation::host::game_now();
-        loop {
-            let before = runtime.stream.metrics();
-            let remaining = (budget_ms - (simulation::host::game_now() - started)).max(0.);
-            let allocation = &mut *self.allocation;
-            runtime.advance_world(
-                reference,
-                required_views,
-                &mut allocation.facts,
-                self.lights.road_lamps.admitted_lights(),
-                remaining,
-            )?;
-            let mut world = self
-                .allocation
-                .world
-                .take()
-                .unwrap_or_else(|| Box::new(RendererWorld::new(&runtime.stream)));
-            runtime.stream.sync_renderer(&mut world);
-            let result = self.prepare(
-                &world,
-                reference,
-                view,
-                runtime.lighting.cycle.output().shader_time_seconds as f32,
-                lod_view,
-                enabled,
-                runtime.lighting.light_outputs(),
-            );
-            self.allocation.world = Some(world);
-            result?;
-            if budget_ms <= 0.
-                || simulation::host::game_now() - started >= budget_ms
-                || before == runtime.stream.metrics()
-            {
-                return Ok(());
-            }
+        if let Some(grant) = grant {
+            self.allocation.ledger.grant(grant);
         }
+        let world = self
+            .allocation
+            .world
+            .take()
+            .expect("renderer world synced before preparation");
+        let result = self.prepare(
+            &world,
+            reference,
+            view,
+            time,
+            lod_view,
+            enabled,
+            light_outputs,
+        );
+        let allocation = &mut *self.allocation;
+        allocation.world = Some(world);
+        out.facts.extend(std::mem::take(&mut allocation.facts));
+        let report = allocation.ledger.report();
+        out.report = Some(out.report.take().map_or(report, |r| r.merge(report)));
+        let lamps = self.lights.road_lamps.admitted_lights();
+        if lamps != allocation.sent_lamps.as_deref() {
+            allocation.sent_lamps = lamps.map(<[_]>::to_vec);
+            out.lamps = match lamps {
+                None => LampAdmission::Pending,
+                Some(lamps) => LampAdmission::Ready(lamps.to_vec()),
+            };
+        }
+        result
     }
     /// One renderer step after the world step of the stream.
     fn prepare(

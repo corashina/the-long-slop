@@ -71,6 +71,8 @@ pub(crate) struct SimFrameResource {
     pub measurements: Option<String>,
     /// A simulation failure that the browser did not show yet.
     pub failure: Option<String>,
+    /// Renderer credit of the last world step, for the next renderer step.
+    pub grant: Option<simulation::world::PresentationGrant>,
 }
 
 impl SimFrameResource {
@@ -135,6 +137,7 @@ impl SimFrameResource {
                 }
                 Change::Measurements(json) => self.measurements = Some(json.clone()),
                 Change::Failure(failure) => self.failure = Some(failure.clone()),
+                Change::Grant(grant) => self.grant = Some(*grant),
             }
         }
         let frame = &self.frame;
