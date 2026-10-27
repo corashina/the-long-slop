@@ -2440,40 +2440,30 @@ impl SourceMaterials {
             && self.world_textures.settled()
     }
     pub fn shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(true)
-    }
-    pub fn fork_shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(false)
-    }
-    fn shared_bytes_if(&self, shared: bool) -> (usize, usize) {
         let pixels: usize = self
             .textures
             .iter()
-            .filter(|t| !shared || Arc::strong_count(&t.owner) > 1)
+            .filter(|t| Arc::strong_count(&t.owner) > 1)
             .map(|t| t.payload_bytes)
             .sum();
         let record_bytes: usize = self
             .records
             .iter()
-            .filter(|r| !shared || Arc::strong_count(r) > 1)
+            .filter(|r| Arc::strong_count(r) > 1)
             .map(|r| primary::record_bytes(r))
             .sum();
         let texture_metadata: usize = self
             .textures
             .iter()
-            .filter(|t| !shared || Arc::strong_count(&t.record) > 1)
+            .filter(|t| Arc::strong_count(&t.record) > 1)
             .map(|t| primary::texture_metadata(&t.record))
             .sum();
-        let (cpu, gpu) = if shared {
-            self.world_textures.shared_bytes()
-        } else {
-            self.world_textures.fork_shared_bytes()
-        };
+        let (cpu, gpu) = self.world_textures.shared_bytes();
         (
             cpu + self
                 .textures
                 .iter()
-                .filter(|t| !shared || Arc::strong_count(&t.owner) > 1)
+                .filter(|t| Arc::strong_count(&t.owner) > 1)
                 .map(primary::pending_texture_cpu)
                 .sum::<usize>()
                 + record_bytes

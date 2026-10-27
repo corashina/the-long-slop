@@ -11,12 +11,11 @@ use super::{lighting, materials, reference::*};
 use crate::{
     reference::{AssetUsage, ReferenceManifest},
     save::SaveError,
-    simulation::FIXED_DT,
-    starting_area::GarageRuntime,
 };
 use bevy::camera::CameraProjection;
 use bevy::{ecs as bevy_ecs, ecs::system::SystemState, prelude::*};
 use materials::grass::writers::GrassWriters;
+use simulation::boundary::{PoseKey, PoseRow, SimFrame, StateBlock};
 
 #[derive(Component)]
 pub struct HiddenWorld;
@@ -41,11 +40,10 @@ pub struct PreparedPresentation {
     screen_height: f32,
     aspect_ratio: f32,
     required_views: Option<Box<crate::world::RequiredViews>>,
-    /// Structure views of the candidate.
-    frame: super::sim_frame::SimFrameResource,
-    /// Renderer input of the next candidate world step.
-    world: simulation::boundary::WorldCommand,
-    world_input: crate::starting_area::WorldInput,
+    /// The candidate frame. The candidate driver fills it before each `advance`.
+    pub(crate) frame: super::sim_frame::SimFrameResource,
+    /// Renderer input of the next candidate step.
+    command: simulation::boundary::CandidateCommand,
 }
 impl PreparedPresentation {
     pub fn can_start(world: &World) -> bool {
@@ -61,25 +59,17 @@ impl PreparedPresentation {
             && world.resource::<GrassJobs>().settled()
             && world.resource::<GrassWriters>().ready().unwrap_or(false)
             && world
-                .resource::<crate::app::Drive>()
-                .sim
-                .runtime
-                .stream
-                .metrics()
-                .generation_jobs
-                == 0
-            && world
-                .resource::<crate::app::Drive>()
-                .sim
-                .runtime
-                .stream
-                .metrics()
-                .pending_work
-                == 0
+                .resource::<super::sim_frame::SimFrameResource>()
+                .frame
+                .state
+                .flags
+                & StateBlock::WORLD_IDLE
+                != 0
     }
+    /// The first candidate command carries the renderer facts and the budget report of the copy.
     pub fn new(
         reference: &ReferenceManifest,
-        candidate: &mut GarageRuntime,
+        stream: &crate::world::WorldStream,
         world: &mut World,
     ) -> Result<Self, SaveError> {
         validate_assets(reference, world)?;
@@ -95,39 +85,15 @@ impl PreparedPresentation {
                 .resource::<SourcePresentationAllocation>()
                 .world
                 .as_ref()
-                .map_or_else(
-                    || crate::world::RendererWorld::new(&candidate.stream),
-                    |w| w.fork(),
-                ),
+                .map_or_else(|| crate::world::RendererWorld::new(stream), |w| w.fork()),
         );
-        candidate.stream.sync_renderer(&mut renderer_world);
+        stream.sync_renderer(&mut renderer_world);
         super::world::preflight::configure_staging(
             &renderer_world,
             &mut ledger,
             &mut facts,
             &reference.file_catalog,
         )?;
-        candidate.stream.apply_renderer_facts(&mut facts)?;
-        let mut overlap = world
-            .resource::<crate::app::Drive>()
-            .sim
-            .runtime
-            .stream
-            .metrics();
-        let prototype = world.resource::<SourcePrototypes>().fork_shared_bytes();
-        let material = world
-            .resource::<materials::SourceMaterials>()
-            .fork_shared_bytes();
-        overlap.prototype_cpu_bytes = overlap
-            .prototype_cpu_bytes
-            .saturating_sub(overlap.shared_input_cpu_bytes + prototype.0 + material.0);
-        overlap.prototype_gpu_bytes = overlap
-            .prototype_gpu_bytes
-            .saturating_sub(prototype.1 + material.1);
-        world
-            .resource::<super::fixed_assets::SourceFixedAssets>()
-            .allocation_for_overlap(&mut overlap)?;
-        candidate.stream.set_overlap(overlap)?;
         let mut fixed_snapshot = crate::ownership::fixed::FixedAllocation::default();
         world
             .resource::<super::fixed_assets::SourceFixedAssets>()
@@ -148,17 +114,12 @@ impl PreparedPresentation {
         let materials = world
             .resource::<materials::SourceMaterials>()
             .fork(&mut ledger)?;
-        candidate.stream.sync_renderer(&mut renderer_world);
         let prototypes =
             world
                 .resource::<SourcePrototypes>()
                 .fork(&renderer_world, &mut ledger, &mut facts)?;
-        candidate.stream.apply_renderer_facts(&mut facts)?;
-        // The stream covers the candidate use now, so a budget failure stops the save here.
-        ledger.exchange(&mut candidate.stream);
-        if let Some(error) = candidate.stream.frame().failure {
-            return Err(crate::reference::ReferenceError(error.to_owned()).into());
-        }
+        // The first candidate step charges the copy. A budget failure stops the save there.
+        let report = ledger.report();
         let lighting = world.resource::<lighting::SourceLighting>().prepare_copy();
         let screen_height = world
             .query::<&Window>()
@@ -170,6 +131,8 @@ impl PreparedPresentation {
             .iter(world)
             .next()
             .map_or(1., |w| w.width() / w.height().max(1.));
+        let shared = shared_bytes(&prototypes, &materials);
+        let fixed = shared_fixed(world);
         Ok(Self {
             required_views: None,
             aspect_ratio,
@@ -184,9 +147,8 @@ impl PreparedPresentation {
             materials,
             lighting,
             allocation: {
-                let mut allocation = SourcePresentationAllocation::for_session(
-                    candidate.stream.frame().request.session,
-                );
+                let mut allocation =
+                    SourcePresentationAllocation::for_session(stream.frame().request.session);
                 allocation.fixed = fixed_snapshot;
                 allocation.ledger = ledger;
                 allocation.lighting_cpu =
@@ -199,8 +161,15 @@ impl PreparedPresentation {
             updates: Vec::with_capacity(reference.nodes.len()),
             roots: Vec::with_capacity(8192),
             frame: default(),
-            world: default(),
-            world_input: default(),
+            command: simulation::boundary::CandidateCommand {
+                world: simulation::boundary::WorldCommand {
+                    facts,
+                    report: Some(report),
+                    ..default()
+                },
+                shared,
+                fixed,
+            },
         })
     }
     fn renderer_world(&self) -> &crate::world::RendererWorld {
@@ -230,70 +199,41 @@ impl PreparedPresentation {
         exchange!(allocation, SourcePresentationAllocation);
         exchange!(poses, CandidateImportedPoses);
     }
-    fn overlap(&self, world: &World) -> crate::world::WorldMetrics {
-        let mut overlap = world
-            .resource::<crate::app::Drive>()
-            .sim
-            .runtime
-            .stream
-            .metrics();
-        let prototype = self.prototypes.shared_bytes();
-        let material = self.materials.shared_bytes();
-        overlap.prototype_cpu_bytes = overlap
-            .prototype_cpu_bytes
-            .saturating_sub(overlap.shared_input_cpu_bytes + prototype.0 + material.0);
-        overlap.prototype_gpu_bytes = overlap
-            .prototype_gpu_bytes
-            .saturating_sub(prototype.1 + material.1);
-        world
-            .resource::<super::fixed_assets::SourceFixedAssets>()
-            .allocation_for_overlap(&mut overlap)
-            .expect("charged fixed overlap");
-        overlap
+    /// Renderer input of the next candidate step.
+    pub fn take_command(&mut self) -> simulation::boundary::CandidateCommand {
+        std::mem::take(&mut self.command)
     }
+    /// One renderer step on the candidate frame. `stream` is the candidate world.
     pub fn advance(
         &mut self,
         reference: &ReferenceManifest,
-        candidate: &mut GarageRuntime,
-        mode: super::camera::CameraMode,
+        stream: &crate::world::WorldStream,
         world: &mut World,
     ) -> Result<bool, SaveError> {
         if let Some(window) = world.query::<&Window>().iter(world).next() {
             self.screen_height = window.physical_height() as f32;
             self.aspect_ratio = window.width() / window.height().max(1.);
         }
-        candidate.stream.advance_generation();
-        candidate.stream.set_overlap(self.overlap(world))?;
-        candidate.initialize_storage_frame(FIXED_DT)?;
-        let player_view = candidate.area.player.view(&candidate.physics);
-        let pose = player_view.camera_pose;
-        let camera = if let Some(sleep) = candidate.sleep_camera() {
-            super::camera::sleep_pose(sleep, &candidate.stream.origin)
-        } else if mode == super::camera::CameraMode::Chase
-            && candidate.area.player.seat_vehicle().is_some()
-        {
-            super::camera::pose(
-                mode,
-                candidate
-                    .physics
-                    .snapshot(candidate.vehicle.as_ref().unwrap())
-                    .pose,
-            )
-        } else {
-            super::transform(pose)
-        };
+        if let Some(failure) = self.frame.failure.take() {
+            return Err(crate::reference::ReferenceError(failure).into());
+        }
+        // Only the active renderer reads these candidate outputs.
+        self.frame.screens.clear();
+        self.frame.screen_set = None;
+        self.frame.feedback = None;
+        self.frame.home_cable = None;
+        self.frame.measurements = None;
+        self.frame.changed_conditions.clear();
+        let state = self.frame.frame.state;
+        let camera = crate::app::frame_camera(&state, state.look.pose(1., [0.; 2]));
         let local = camera.translation;
-        let position = Vec3::from_array(
-            candidate
-                .stream
-                .origin
-                .absolute(local.to_array())
-                .map(|v| v as f32),
-        );
+        let position = Vec3::from_array(std::array::from_fn(|i| {
+            (state.stream_origin[i] + f64::from(local[i])) as f32
+        }));
         let projection = super::camera_projection::player_perspective(
-            player_view.fov_degrees,
+            state.fov_degrees,
             self.aspect_ratio,
-            candidate.distances.cam2_far_plane,
+            state.far_plane,
         );
         let clip = projection.get_clip_from_view()
             * Mat4::from_rotation_translation(camera.rotation, position).inverse();
@@ -311,13 +251,13 @@ impl PreparedPresentation {
         };
         let lod = super::world::lod::LodView {
             position: local,
-            fov_degrees: player_view.fov_degrees,
+            fov_degrees: state.fov_degrees,
             ortho_size: None,
         };
-        imported_updates(candidate, world, &mut self.updates)?;
+        imported_updates(&self.frame, world, &mut self.updates)?;
         candidate_required_views(
             reference,
-            candidate,
+            &self.frame.frame,
             camera.to_matrix(),
             self.aspect_ratio,
             self.screen_height,
@@ -358,38 +298,31 @@ impl PreparedPresentation {
             self.poses.0.insert(entity, matrix);
         }
         self.exchange(world);
-        let mut command = std::mem::take(&mut self.world);
+        let command = &mut self.command.world;
         command.views.clear();
         if let Some(views) = &self.required_views {
             command.views.extend_from_slice(views.as_slice());
         }
-        self.world_input.accept(command);
+        let grant = self.frame.grant.take();
+        let frame = &self.frame.frame;
         let result = match self.system.get_mut(world) {
-            Ok(mut renderer) => candidate
-                .step_world(
+            Ok(mut renderer) => {
+                renderer.sync_mirror(stream);
+                renderer.prepare_frame(
                     reference,
-                    &mut self.world_input,
-                    simulation::driver::LOADING_BUDGET_MS,
+                    grant,
+                    view,
+                    frame.lighting.cycle.shader_time_seconds as f32,
+                    lod,
+                    false,
+                    &frame.lights,
+                    command,
                 )
-                .and_then(|grant| {
-                    renderer.sync_mirror(&candidate.stream);
-                    renderer.prepare_frame(
-                        reference,
-                        grant,
-                        view,
-                        candidate.lighting.cycle.output().shader_time_seconds as f32,
-                        lod,
-                        false,
-                        candidate.lighting.light_outputs(),
-                        &mut self.world,
-                    )
-                }),
+            }
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
         }
         .and_then(|()| {
             // The hidden instances take the structure views of the candidate.
-            candidate.fill_structure_frame(reference, &mut self.frame.frame);
-            self.frame.apply_changes(|_| {});
             self.system
                 .get_mut(world)
                 .map_err(|e| crate::reference::ReferenceError(e.to_string()))?
@@ -430,16 +363,13 @@ impl PreparedPresentation {
                 entity.insert(Visibility::Hidden);
             }
         }
+        self.command.shared = shared_bytes(&self.prototypes, &self.materials);
+        self.command.fixed = shared_fixed(world);
         result?;
-        candidate.align_startup(reference, crate::browser::local_calendar())?;
-        let restored = candidate.advance_saved_restore(reference)?;
-        candidate.sync_world_activity(reference)?;
         let gpu_ready = self.materials.preparation.ready()?;
         let ready = gpu_ready
-            && restored
-            && !candidate.restore_pending()
-            && candidate.stream.required_ready()
-            && candidate.world_supported()
+            && state.flags & StateBlock::RESTORED != 0
+            && state.flags & StateBlock::WORLD_READY != 0
             && self.surfaces.ready(self.renderer_world())
             && self.instances.ready()
             && self.grass.settled()
@@ -447,26 +377,14 @@ impl PreparedPresentation {
             && self.pipelines.settled()?
             && self.lighting.road_lamps.ready();
         if ready && self.conditions.is_none() {
+            let frame = &self.frame;
             self.conditions = Some(world.resource_scope(
                 |world, visuals: Mut<super::conditions::ConditionVisuals>| {
-                    visuals.prepare_candidate(
-                        &candidate.area.conditions,
-                        &candidate.area.interaction.cleaning,
-                        world,
-                    )
+                    visuals.prepare_candidate(frame, world)
                 },
             )?);
         }
         if ready {
-            imported_updates(candidate, world, &mut self.updates)?;
-            candidate_required_views(
-                reference,
-                candidate,
-                camera.to_matrix(),
-                self.aspect_ratio,
-                self.screen_height,
-                &mut self.required_views,
-            )?;
             validate_assets(reference, world)?;
         }
         Ok(ready)
@@ -474,7 +392,6 @@ impl PreparedPresentation {
     pub fn validate_commit(
         &self,
         reference: &ReferenceManifest,
-        candidate: &GarageRuntime,
         world: &World,
     ) -> Result<(), SaveError> {
         validate_assets(reference, world)?;
@@ -490,9 +407,8 @@ impl PreparedPresentation {
         }
         if self.conditions.is_none()
             || !self.materials.preparation.ready()?
-            || candidate.restore_pending()
-            || !candidate.world_supported()
-            || !candidate.stream.required_ready()
+            || self.frame.frame.state.flags & StateBlock::RESTORED == 0
+            || self.frame.frame.state.flags & StateBlock::WORLD_READY == 0
             || !self.pipelines.settled()?
             || !self.writers.ready()?
             || !self.grass.settled()
@@ -534,7 +450,7 @@ impl PreparedPresentation {
                 },
             )
     }
-    pub fn release(mut self, _candidate: &mut GarageRuntime, world: &mut World) {
+    pub fn release(mut self, world: &mut World) {
         *world.resource_mut::<super::world::pipelines::CandidatePipelines>() = default();
 
         self.exchange(world);
@@ -560,7 +476,7 @@ impl PreparedPresentation {
             )
         });
     }
-    pub fn commit(mut self, old: &mut GarageRuntime, world: &mut World) {
+    pub fn commit(mut self, world: &mut World) {
         self.materials.preparation.promote();
         self.lighting.road_lamps.end_overlap();
         for &root in &self.roots {
@@ -586,11 +502,11 @@ impl PreparedPresentation {
             .expect("prepared conditions")
             .commit(world);
         self.exchange(world);
-        self.release(old, world);
+        self.release(world);
     }
 }
 fn imported_updates(
-    candidate: &GarageRuntime,
+    frame: &super::sim_frame::SimFrameResource,
     world: &mut World,
     updates: &mut Vec<(Entity, Transform, Visibility)>,
 ) -> Result<(), SaveError> {
@@ -619,43 +535,26 @@ fn imported_updates(
         let mut pose = *transform;
         let mut visibility = *visible;
         let mut active = true;
-        if let Some(binding) = body {
-            let handle = candidate.area.bodies.get(&binding.body).ok_or_else(|| {
-                SaveError::InvalidLinks(format!("Missing visual body {}", binding.body.0))
-            })?;
-            active = candidate.physics.body_active(*handle);
-            let (_, _, saved) = candidate
-                .area
-                .render_poses
-                .iter()
-                .find(|(id, _, _)| *id == binding.body)
-                .ok_or_else(|| SaveError::InvalidLinks("Missing body render pose".into()))?;
-            pose = super::transform(*saved).with_scale(binding.scale);
-        } else if let Some(binding) = item {
-            let saved = candidate.area.items.get(binding.item).ok_or_else(|| {
-                SaveError::InvalidLinks(format!("Missing visual item {}", binding.item.0))
-            })?;
-            active = saved.inactive_pose.is_none();
-            let (_, _, rendered) = candidate
-                .area
-                .item_render_poses
-                .iter()
-                .find(|(id, _, _)| *id == binding.item)
-                .ok_or_else(|| SaveError::InvalidLinks("Missing item render pose".into()))?;
-            pose = super::transform(*rendered).with_scale(binding.scale);
+        let key = body
+            .map(|b| (PoseKey::Body(b.body), b.scale))
+            .or(item.map(|i| (PoseKey::Item(i.item), i.scale)));
+        if let Some((key, scale)) = key {
+            let (_, row) = frame
+                .pose(key)
+                .ok_or_else(|| SaveError::InvalidLinks(format!("Missing render pose {key:?}")))?;
+            active = row.flags & PoseRow::VISIBLE != 0;
+            pose = super::transform(row.pose()).with_scale(scale);
         }
         if body.is_some() || item.is_some() || valve.is_some() {
-            visibility = if active
-                && valve.is_none_or(|v| {
-                    (candidate.area.interaction.opening_valve(v.opening) > 0.) == v.open
-                }) {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            };
+            visibility =
+                if active && valve.is_none_or(|v| (frame.frame.valve(v.opening) > 0.) == v.open) {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
         }
         if let Some(cap) = cap {
-            let amount = candidate.area.interaction.opening_valve(cap.opening);
+            let amount = frame.frame.valve(cap.opening);
             pose = cap.closed;
             if cap.euler {
                 let a = cap.closed_euler.lerp(cap.open_euler, amount) * std::f32::consts::PI / 180.;
@@ -674,6 +573,20 @@ fn imported_updates(
         updates.push((entity, pose, visibility));
     }
     Ok(())
+}
+/// Prototype bytes that the candidate shares with the active renderer: CPU, GPU.
+fn shared_bytes(
+    prototypes: &SourcePrototypes,
+    materials: &materials::SourceMaterials,
+) -> [usize; 2] {
+    let (prototype, material) = (prototypes.shared_bytes(), materials.shared_bytes());
+    [prototype.0 + material.0, prototype.1 + material.1]
+}
+fn shared_fixed(world: &World) -> [usize; 2] {
+    let (cpu, gpu) = world
+        .resource::<super::fixed_assets::SourceFixedAssets>()
+        .shared_bytes();
+    [cpu, gpu]
 }
 fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), SaveError> {
     world
@@ -813,7 +726,7 @@ fn validate_assets(reference: &ReferenceManifest, world: &World) -> Result<(), S
 
 fn candidate_required_views(
     reference: &ReferenceManifest,
-    candidate: &GarageRuntime,
+    frame: &SimFrame,
     camera: Mat4,
     aspect: f32,
     height: f32,
@@ -822,18 +735,10 @@ fn candidate_required_views(
     use super::view_frame::{camera_snapshot, required_view};
     let lighting = &reference.render_lighting;
     let extent = UVec2::new((height * aspect).max(1.) as u32, height.max(1.) as u32);
-    let [x, y, z] = candidate
-        .lighting
-        .cycle
-        .output()
-        .directional_euler_degrees
-        .map(f32::to_radians);
-    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
-    let forward = [forward.x, forward.y, -forward.z];
-    let first = super::camera::world_camera_settings(
-        candidate.area.player.view(&candidate.physics).fov_degrees,
-        candidate.distances.cam2_far_plane,
-    );
+    let forward = crate::app::light_forward(&frame.lighting.cycle);
+    let origin = frame.state.stream_origin;
+    let first =
+        super::camera::world_camera_settings(frame.state.fov_degrees, frame.state.far_plane);
     let first = required_view(
         &camera_snapshot(
             extent,
@@ -844,7 +749,7 @@ fn candidate_required_views(
             first.mask,
             lighting.shadows.distance,
         ),
-        candidate.stream.origin.offset,
+        origin,
         forward,
         lighting.lights[0].mask,
     )?;
@@ -858,7 +763,7 @@ fn candidate_required_views(
         &lighting.probes,
         &positions,
         &enabled,
-        candidate.stream.origin.offset,
+        origin,
         forward,
         lighting.lights[0].mask,
     )?;

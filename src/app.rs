@@ -634,7 +634,7 @@ fn world_snapshot<'a>(
     })
 }
 /// Direction of the main light, in source space.
-fn light_forward(cycle: &simulation::lighting::CycleOutput) -> [f32; 3] {
+pub(crate) fn light_forward(cycle: &simulation::lighting::CycleOutput) -> [f32; 3] {
     let [x, y, z] = cycle.directional_euler_degrees.map(f32::to_radians);
     let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
     [forward.x, forward.y, -forward.z]
@@ -860,14 +860,15 @@ fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameRe
     frame.apply_changes(|handle| drive.sim.runtime.release_pose(handle));
     frame.index_particles();
 }
-fn active_camera(drive: &Drive, state: &StateBlock) -> Transform {
+/// Camera of `state`: the sleep camera, the chase camera, else the player `view`.
+pub(crate) fn frame_camera(state: &StateBlock, view: VehiclePose) -> Transform {
     let pose = |row: PoseRow| presentation::transform(row.pose());
     if state.sleep_camera.flags & PoseRow::ACTIVE != 0 {
         pose(state.sleep_camera)
     } else if state.flags & StateBlock::CHASE != 0 && state.seat_car.flags & PoseRow::ACTIVE != 0 {
         presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
     } else {
-        presentation::transform(drive.view)
+        presentation::transform(view)
     }
 }
 fn update_camera(
@@ -877,7 +878,7 @@ fn update_camera(
 ) {
     let state = &sim.frame.state;
     for (mut transform, mut projection) in &mut query {
-        *transform = active_camera(&drive, state);
+        *transform = frame_camera(state, drive.view);
         presentation::camera_projection::sync_player_projection(
             &mut projection,
             true,

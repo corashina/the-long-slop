@@ -43,20 +43,6 @@ impl FixedAllocation {
             replace(a.dependency_staging_bytes, old.staging, self.staging)?;
         Ok(a)
     }
-    pub fn exclude_shared(
-        self,
-        metrics: &mut crate::world::WorldMetrics,
-    ) -> Result<(), ReferenceError> {
-        metrics.prototype_cpu_bytes = metrics
-            .prototype_cpu_bytes
-            .checked_sub(self.cpu)
-            .ok_or_else(overflow)?;
-        metrics.prototype_gpu_bytes = metrics
-            .prototype_gpu_bytes
-            .checked_sub(self.gpu)
-            .ok_or_else(overflow)?;
-        Ok(())
-    }
 }
 
 /// Admit shared control bytes before its allocation closure can run.
