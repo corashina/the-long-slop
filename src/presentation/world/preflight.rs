@@ -23,7 +23,7 @@ pub fn checked_input_bytes(path: &str) -> Result<usize, ReferenceError> {
 }
 pub fn configure_staging(
     stream: &mut crate::world::WorldStream,
-    ledger: &mut crate::world::PresentationLedger,
+    ledger: &mut crate::ownership::PresentationLedger,
     catalog: &FileCatalog,
 ) -> Result<(), ReferenceError> {
     if stream.dependency_staging_configured() {

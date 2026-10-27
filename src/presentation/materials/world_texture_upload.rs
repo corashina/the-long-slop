@@ -1,11 +1,11 @@
 //! Ordered CPU batch owners and GPU acknowledgement.
 use crate::{
+    ownership::texture_batch::{BatchIdentity, BatchQueue, BatchState},
     presentation::{
         gpu_prepare::GpuPreparation,
         texture_batches::{SourceTextureBatch, SourceTextureBatchSettings},
     },
     reference::texture_batch::TextureBatchReference,
-    world::texture_batch_ownership::{BatchIdentity, BatchQueue, BatchState},
 };
 use bevy::{
     ecs as bevy_ecs,

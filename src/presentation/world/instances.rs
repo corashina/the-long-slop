@@ -9,12 +9,13 @@ use super::{
     prototype_loader::SourceGltf,
     prototypes::SourcePrototypes,
 };
+use crate::ownership::PresentationLedger;
 use crate::world::stream::content_index::InstanceSelection;
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
     presentation::renderer_visibility::CameraHidden,
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
-    world::{Placement, PresentationLedger, WorldStream},
+    world::{Placement, WorldStream},
 };
 use bevy::math::{Affine3A, DMat4, DVec3};
 use bevy::platform::collections::HashMap;
@@ -106,8 +107,8 @@ impl Renderer {
     }
 }
 struct Instance {
-    retirement: crate::world::renderer_pending::RendererRetirement,
-    continuation: Option<crate::world::renderer_pending::PipelineContinuation>,
+    retirement: crate::ownership::renderer_pending::RendererRetirement,
+    continuation: Option<crate::ownership::renderer_pending::PipelineContinuation>,
     upload: Option<Arc<crate::presentation::fixed_assets::MeshUpload>>,
     caps_bound: bool,
     placement: Placement,

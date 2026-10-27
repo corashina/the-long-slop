@@ -49,6 +49,53 @@ pub struct PresentationAllocation {
     pub dependency_staging_bytes: usize,
     pub objects: usize,
 }
+impl PresentationAllocation {
+    /// Applies `f` to each pair of fields.
+    pub fn zip(self, other: Self, f: impl Fn(usize, usize) -> usize) -> Self {
+        Self {
+            grass_worker_wasm_bytes: f(self.grass_worker_wasm_bytes, other.grass_worker_wasm_bytes),
+            grass_worker_cache_bytes: f(
+                self.grass_worker_cache_bytes,
+                other.grass_worker_cache_bytes,
+            ),
+            grass_worker_reserved_bytes: f(
+                self.grass_worker_reserved_bytes,
+                other.grass_worker_reserved_bytes,
+            ),
+            active_cpu: f(self.active_cpu, other.active_cpu),
+            active_gpu: f(self.active_gpu, other.active_gpu),
+            prototype_cpu: f(self.prototype_cpu, other.prototype_cpu),
+            prototype_gpu: f(self.prototype_gpu, other.prototype_gpu),
+            jobs: f(self.jobs, other.jobs),
+            pending: f(self.pending, other.pending),
+            staging_bytes: f(self.staging_bytes, other.staging_bytes),
+            dependency_staging_bytes: f(
+                self.dependency_staging_bytes,
+                other.dependency_staging_bytes,
+            ),
+            objects: f(self.objects, other.objects),
+        }
+    }
+}
+
+/// The renderer use of one frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PresentationReport {
+    pub used: PresentationAllocation,
+    /// Totals the renderer wanted to reach this frame.
+    pub want: PresentationAllocation,
+    /// Credit the renderer gave back. It no longer spends it.
+    pub release: PresentationAllocation,
+}
+
+/// The stream answer: added credit, and whether the stream waits for room.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PresentationGrant {
+    pub credit: PresentationAllocation,
+    pub reclaim: bool,
+    /// The stream lends its publication slot of this frame.
+    pub publication: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SurfaceKey {
     pub layer: WorldLayer,
@@ -974,10 +1021,7 @@ impl WorldStream {
 
     /// Takes the renderer report and answers with added credit.
     /// Use above the credit must fit the limits, or the stream fails as before.
-    pub fn exchange_presentation(
-        &mut self,
-        report: super::PresentationReport,
-    ) -> super::PresentationGrant {
+    pub fn exchange_presentation(&mut self, report: PresentationReport) -> PresentationGrant {
         let credit = self.presentation.zip(report.release, usize::saturating_sub);
         let covered = credit.zip(report.used, usize::max);
         let reclaim = self
@@ -990,7 +1034,7 @@ impl WorldStream {
         if let Err(error) = self.set_presentation_allocation(covered) {
             self.presentation = credit;
             self.failure.get_or_insert(error.0);
-            return super::PresentationGrant {
+            return PresentationGrant {
                 credit: PresentationAllocation::default(),
                 reclaim,
                 publication: false,
@@ -1013,7 +1057,7 @@ impl WorldStream {
                 self.presentation = covered;
             }
         }
-        super::PresentationGrant {
+        PresentationGrant {
             credit: target.zip(credit, usize::saturating_sub),
             reclaim,
             publication,

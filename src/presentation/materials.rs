@@ -5,7 +5,7 @@ pub mod impostor;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
-use crate::world::upload_receipt;
+use crate::ownership::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use super::primary_image::{SourcePrimaryImage, SourcePrimaryImageSettings};
@@ -2375,7 +2375,7 @@ impl SourceMaterials {
     }
     pub fn fork(
         &self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
     ) -> Result<Self, source::ReferenceError> {
         let world_textures = self.world_textures.fork()?;
         self.reserve_fork(ledger)?;

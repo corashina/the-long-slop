@@ -144,8 +144,8 @@ pub fn run(
     }
     let runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let mut ledger = crate::world::PresentationLedger::default();
-    let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
+    let mut ledger = crate::ownership::PresentationLedger::default();
+    let (fixed, graph) = crate::ownership::fixed::admit_control(
         &mut ledger,
         presentation::readiness::control_bytes(),
         presentation::readiness::RendererStateHandle::default,
