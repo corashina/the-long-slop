@@ -711,6 +711,8 @@ impl ParticleGroupRow {
     pub const COBWEB: u32 = 12;
     /// `mainscript.ParticleShootStart` (0) and `ParticleShootEnd` (1).
     pub const TRACER: u32 = 13;
+    /// `explosionscript.particle`; source is the explosion type.
+    pub const EXPLOSION: u32 = 14;
     /// Car systems in `a`.
     pub const CAR_EXHAUST: u32 = 0;
     /// Wheel effects: source is wheel * 8 + system (0 dust, 1.. grass).

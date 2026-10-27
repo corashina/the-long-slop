@@ -263,6 +263,8 @@ enum Owner {
     Melee,
     /// `mainscript` shot tracers; `Group::source` is start (0) or end (1).
     Tracer,
+    /// `explosionscript.particle`; `Group::source` is the explosion type.
+    Explosion,
     /// The contrail of the sky plane with this id; `Group::source` is the prefab.
     Sky(u32),
     /// The `emberScript` particle of one cigarette.
@@ -634,6 +636,17 @@ fn sync_particles(
                 &mut materials,
             );
         }
+        for (kind, t) in reference.0.explosions.types.iter().enumerate() {
+            add_group(
+                &mut state,
+                Owner::Explosion,
+                kind,
+                &t.particle,
+                &lighting,
+                &mut commands,
+                &mut materials,
+            );
+        }
         add_group(
             &mut state,
             Owner::Exhale,
@@ -799,6 +812,7 @@ fn sync_particles(
             Owner::Melee => &reference.0.melee.particles[g.source],
             Owner::Tracer if g.source == 0 => &reference.0.guns.tracer.start,
             Owner::Tracer => &reference.0.guns.tracer.end,
+            Owner::Explosion => &reference.0.explosions.types[g.source].particle,
             Owner::Sky(_) => reference.0.sky.prefabs[g.source]
                 .contrail
                 .as_ref()
@@ -882,6 +896,7 @@ fn key(owner: Owner, source: usize) -> ParticleGroupKey {
         Owner::Storm(id) => (ParticleGroupRow::STORM, id.0, 0, 0),
         Owner::Melee => (ParticleGroupRow::MELEE, 0, 0, 0),
         Owner::Tracer => (ParticleGroupRow::TRACER, 0, 0, 0),
+        Owner::Explosion => (ParticleGroupRow::EXPLOSION, 0, 0, 0),
         Owner::Sky(id) => (ParticleGroupRow::SKY, id, 0, 0),
         Owner::Ember(id) => (ParticleGroupRow::EMBER, id.0, 0, 0),
         Owner::Exhale => (ParticleGroupRow::EXHALE, 0, 0, 0),

@@ -62,21 +62,34 @@ impl WorldStream {
         storage: &mut StorageLocks,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
-        let Some(body) = items
+        if !items
             .get(item)
-            .filter(|s| !s.removed && s.location == ItemLocation::World)
-            .and_then(|s| s.body)
-        else {
+            .is_some_and(|s| !s.removed && s.location == ItemLocation::World && s.body.is_some())
+        {
             return Ok(());
-        };
+        }
         if reference.breakables[record].source == reference.acquisition.r#box.breakable {
             self.break_box(item, items);
         }
+        self.remove_item(item, items, storage, physics)
+    }
+    /// Destroy of a world content item. Items locked in it unlock at their current pose. The
+    /// removal is saved.
+    pub(super) fn remove_item(
+        &mut self,
+        item: ItemId,
+        items: &mut ItemStore,
+        storage: &mut StorageLocks,
+        physics: &mut PhysicsWorld,
+    ) -> Result<(), ReferenceError> {
+        let Some(body) = items.get(item).and_then(|s| s.body) else {
+            return Ok(());
+        };
         storage.unbind_owner(item, |_, _| false, items, physics)?;
         self.changes.remove(items.object_key(item));
         physics.edit_body(body, |body| body.set_enabled(false));
         physics.refresh_queries();
-        items.get_mut(item).expect("broken item").removed = true;
+        items.get_mut(item).expect("removed item").removed = true;
         items.mark_dirty(item);
         Ok(())
     }

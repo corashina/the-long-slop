@@ -65,6 +65,15 @@ pub struct DecalSpawn {
     pub scale: f32,
 }
 
+/// One shot hit on an item: tanks and explosive props try to explode with the shot power.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Strike {
+    pub item: ItemId,
+    pub force: f32,
+    /// `explodeStuffs && Random.Range(0, 1) < explodeChance`.
+    pub explode: bool,
+}
+
 /// `fpscontroller` weapon crosshair: the `UiReference::sprites` index and the color.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Crosshair {
@@ -419,6 +428,7 @@ pub struct GunState {
     sounds: Vec<ShotSound>,
     decals: Vec<DecalSpawn>,
     foods: Vec<ItemId>,
+    strikes: Vec<Strike>,
     /// Items whose part poses changed since the presentation took them.
     presented: Vec<ItemId>,
     /// Items whose saved state changed since the caller took them.
@@ -463,6 +473,7 @@ impl GunState {
             sounds: Vec::with_capacity(16),
             decals: Vec::with_capacity(HIT_CAPACITY),
             foods: Vec::with_capacity(HIT_CAPACITY),
+            strikes: Vec::with_capacity(HIT_CAPACITY),
             presented: Vec::with_capacity(8),
             changed: Vec::with_capacity(8),
             breaking: None,
@@ -552,6 +563,10 @@ impl GunState {
     /// The next food item that a shot hits. The caller takes every hit after each step.
     pub fn take_food(&mut self) -> Option<ItemId> {
         self.foods.pop()
+    }
+    /// The next item that a shot hits. The caller takes every hit after each step.
+    pub fn take_strike(&mut self) -> Option<Strike> {
+        self.strikes.pop()
     }
     /// `fpscontroller` crosshair of the gun in the hand.
     pub fn crosshair(&self) -> Option<Crosshair> {
@@ -1162,6 +1177,16 @@ impl GunState {
                 && !self.foods.contains(&id)
             {
                 self.foods.push(id);
+            }
+            // The tank and explosivescript hits of weaponscript.Shot.
+            if let Some(id) = item {
+                let r = &gun.record;
+                let explode = r.explode_stuffs && self.random.range(0., 1.) < r.explode_chance;
+                self.strikes.push(Strike {
+                    item: id,
+                    force,
+                    explode,
+                });
             }
             if let Some(body) = parent
                 && !self.pushed.contains(&body)

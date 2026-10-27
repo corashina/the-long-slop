@@ -7,6 +7,7 @@ pub mod consumption;
 pub mod decals;
 pub mod equipment;
 pub mod equipment_input;
+pub mod explosions;
 pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
@@ -210,6 +211,7 @@ pub struct InteractionState {
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
     pub guns: guns::GunState,
+    pub explosions: explosions::ExplosionState,
     pub decals: decals::DecalStore,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
@@ -517,6 +519,7 @@ impl InteractionState {
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,
             guns: guns::GunState::new(reference)?,
+            explosions: explosions::ExplosionState::new(reference)?,
             decals: decals::DecalStore::new(reference),
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
