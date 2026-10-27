@@ -1397,7 +1397,7 @@ impl WorldStream {
         }
         Ok(())
     }
-    pub fn release_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
+    fn release_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         if self
             .surfaces
             .iter()
@@ -3422,9 +3422,39 @@ impl WorldStream {
             })
             .map(|work| (work.request, &work.published))
     }
+    /// Applies the facts of the last renderer step in order.
+    /// Facts of an older session are dropped.
+    pub fn apply_renderer_facts(
+        &mut self,
+        facts: &mut super::RendererFacts,
+    ) -> Result<(), ReferenceError> {
+        use super::RendererFact::*;
+        let session = self.request.session;
+        for fact in facts.drain() {
+            match fact {
+                BindPrototype(source) => self.bind_prototype(&source)?,
+                ReleasePrototype(source) => self.release_prototype(&source)?,
+                BindRecipe(source) => self.bind_structure_recipe(&source)?,
+                ReserveSurface(request, key) if request.session == session => {
+                    self.reserve_surface_renderer(request, key)?
+                }
+                AcceptSurface(request, key) if request.session == session => {
+                    self.accept_surface_renderer(request, key)?
+                }
+                DiscardSurface(request, key) if request.session == session => {
+                    self.discard_surface_renderer(request, key)?
+                }
+                AcceptStructure(request, id) if request.session == session => {
+                    self.accept_structure_renderer(request, &id)?
+                }
+                ReserveSurface(..) | AcceptSurface(..) | DiscardSurface(..)
+                | AcceptStructure(..) => {}
+            }
+        }
+        Ok(())
+    }
     /// The renderer starts the prepared surface. It owns its claim.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_surface_renderer(
+    fn reserve_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
@@ -3458,8 +3488,7 @@ impl WorldStream {
         Ok(())
     }
     /// The renderer dropped the prepared surface after its work drained.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn discard_surface_renderer(
+    fn discard_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
@@ -3479,8 +3508,7 @@ impl WorldStream {
         Ok(())
     }
     /// The renderer finished the prepared surface. Its work drained.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn accept_surface_renderer(
+    fn accept_surface_renderer(
         &mut self,
         request: WorldRequest,
         key: SurfaceKey,
@@ -4051,7 +4079,7 @@ impl WorldStream {
         Ok(Some(pose))
     }
     /// The material cache admits the complete visible prototype before this recipe is bound.
-    pub fn bind_structure_recipe(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
+    fn bind_structure_recipe(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         if self.recipes.contains_key(source) {
             return Ok(());
         }
@@ -4085,14 +4113,12 @@ impl WorldStream {
     }
 
     /// True while the stream still wants the structure.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn structure_wanted(&self, request: WorldRequest, id: &super::GeneratedId) -> bool {
         request.session == self.request.session
             && self.wanted_structures.iter().any(|p| p.id == *id)
     }
     /// The renderer finished the structure. Its drained claim and credit move to the ready queue.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn accept_structure_renderer(
+    fn accept_structure_renderer(
         &mut self,
         request: WorldRequest,
         id: &super::GeneratedId,
