@@ -72,6 +72,8 @@ pub struct Strike {
     pub force: f32,
     /// `explodeStuffs && Random.Range(0, 1) < explodeChance`.
     pub explode: bool,
+    /// `hithole`: the hit point and normal in physics space.
+    pub hole: Option<[Vector; 2]>,
 }
 
 /// `fpscontroller` weapon crosshair: the `UiReference::sprites` index and the color.
@@ -1186,6 +1188,7 @@ impl GunState {
                     item: id,
                     force,
                     explode,
+                    hole: r.hithole.then_some([point, hit.normal]),
                 });
             }
             if let Some(body) = parent
