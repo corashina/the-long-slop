@@ -11,7 +11,7 @@ use crate::{
         impostor::ImpostorMaterial, specular::SpecularMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::{ecs as bevy_ecs, ecs::system::SystemParam, prelude::*};
 use grass_mesh::GrassView;
@@ -43,7 +43,7 @@ pub struct InstanceMaterials<'w> {
 impl InstanceMaterials<'_> {
     pub fn admit(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
@@ -517,7 +517,7 @@ impl InstanceMaterial {
     }
     pub(crate) fn warm(
         &self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut crate::ownership::PresentationLedger,
         pipelines: &mut WorldPipelines,
         parent: &mut crate::ownership::renderer_pending::PipelineContinuation,
@@ -579,7 +579,7 @@ pub fn emissive_renderer(
 }
 
 pub fn selected_material<'a>(
-    stream: &'a WorldStream,
+    stream: &'a RendererWorld,
     reference: &'a ReferenceManifest,
     prototype: &WorldPrototypeReference,
     placement: &crate::world::Placement,
@@ -639,7 +639,7 @@ pub fn selected_material<'a>(
 /// Source `materialChangeScript` swaps the first material slot only: submesh 0.
 /// It compares the material that painting and condition already selected.
 pub fn biome_material<'a>(
-    stream: &'a WorldStream,
+    stream: &'a RendererWorld,
     reference: &ReferenceManifest,
     prototype: &WorldPrototypeReference,
     placement: &crate::world::Placement,

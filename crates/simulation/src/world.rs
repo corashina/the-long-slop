@@ -48,6 +48,9 @@ mod stream_limits;
 pub use stream::content_boxes::BoxRelease;
 pub use stream::content_explosives::{Explosive, TankExplosion};
 pub use stream::content_index::ContentIndex;
+pub use stream::renderer_world::{
+    RendererFrame, RendererStructure, RendererSupply, RendererSurface, RendererWorld,
+};
 pub use stream::{
     PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,
     PublishedSurface, SurfaceKey, WorldFrame, WorldRequest, WorldStream,

@@ -12,7 +12,7 @@ use super::{
     uber::{MainInputs, UberPass},
 };
 use crate::reference::postprocessing::{
-    DeadGrading, DeadProfile, GradingSettings, PostprocessingRecord,
+    DeadGrading, DeadProfile, GlassesProfile, GradingSettings, PostprocessingRecord, Tonemapper,
 };
 use bevy::prelude::*;
 use bevy::render::{
@@ -46,6 +46,8 @@ pub struct PostFrame {
     pub grading_temperature: Option<f32>,
     /// `DeadV` weight over the main grading, 0 to 1.
     pub dead_weight: f32,
+    /// `PPVSunGlasses` lens: index in `clothing.glasses_profiles`. None is no lens grading.
+    pub glasses: Option<u32>,
 }
 struct ColorTarget {
     _texture: Texture,
@@ -83,8 +85,14 @@ struct MainChain {
     /// Main grading with the applied temperature.
     base: GradingSettings,
     dead: DeadGrading,
-    /// Grading in the LUT and Uber.
+    /// `clothing.glasses_profiles`.
+    profiles: Vec<GlassesProfile>,
+    /// Lens and dead weight of the applied grading.
+    glasses: Option<u32>,
+    dead_weight: f32,
+    /// Grading and tonemapper in the LUT and Uber.
     grading: GradingSettings,
+    tonemapper: Tonemapper,
 }
 pub struct SourcePostChain {
     pub extent: [u32; 2],
@@ -111,6 +119,7 @@ impl SourcePostChain {
         extent: [u32; 2],
         record: &PostprocessingRecord,
         dead: &DeadProfile,
+        glasses: &[GlassesProfile],
         stop_nan: bool,
         previous: Option<Self>,
     ) -> Result<Self, String> {
@@ -141,7 +150,15 @@ impl SourcePostChain {
                         Some(old.bloom),
                         Some(old.lut),
                         old.lut_baked,
-                        (old.base, old.dead, old.grading),
+                        (
+                            old.base,
+                            old.dead,
+                            old.profiles,
+                            old.glasses,
+                            old.dead_weight,
+                            old.grading,
+                            old.tonemapper,
+                        ),
                     ),
                     None => {
                         let (dead, ignored) = DeadGrading::new(dead);
@@ -154,11 +171,19 @@ impl SourcePostChain {
                             None,
                             None,
                             false,
-                            (record.grading, dead, record.grading),
+                            (
+                                record.grading,
+                                dead,
+                                glasses.to_vec(),
+                                None,
+                                0.,
+                                record.grading,
+                                Tonemapper::Neutral,
+                            ),
                         )
                     }
                 };
-            let (base, dead, grading) = grading;
+            let (base, dead, profiles, glasses, dead_weight, grading, tonemapper) = grading;
             let histogram = HistogramPasses::new(
                 device,
                 queue,
@@ -214,7 +239,11 @@ impl SourcePostChain {
                 lut_baked,
                 base,
                 dead,
+                profiles,
+                glasses,
+                dead_weight,
                 grading,
+                tonemapper,
             }
         };
         let inputs = MainInputs {
@@ -331,22 +360,41 @@ impl SourcePostChain {
             .output_index()
             .ok_or("Source exposure output is missing")?;
         self.main.bloom.encode(encoder, cache, exposure_index);
+        let mut changed =
+            frame.glasses != self.main.glasses || frame.dead_weight != self.main.dead_weight;
         if let Some(temperature) = frame.grading_temperature {
             if !temperature.is_finite() {
                 return Err("Invalid source grading temperature".into());
             }
+            changed |= temperature != self.main.base.temperature;
             self.main.base.temperature = temperature;
         }
         if !(0. ..=1.).contains(&frame.dead_weight) {
             return Err("Invalid source dead weight".into());
         }
-        let mut grading = self.main.base;
-        self.main.dead.blend(&mut grading, frame.dead_weight);
-        if grading != self.main.grading {
-            self.main.lut.set_grading(device, queue, &grading);
-            self.uber.set_post_exposure(grading.post_exposure);
-            self.main.grading = grading;
-            self.main.lut_baked = false;
+        if changed {
+            // The lens overrides the main grading, then `DeadV` blends on top.
+            let (mut grading, tonemapper) = match frame.glasses {
+                Some(index) => self.main.base.with_glasses(
+                    self.main
+                        .profiles
+                        .get(index as usize)
+                        .ok_or("Invalid source glasses profile")?,
+                ),
+                None => (self.main.base, Tonemapper::Neutral),
+            };
+            self.main.dead.blend(&mut grading, frame.dead_weight);
+            self.main.glasses = frame.glasses;
+            self.main.dead_weight = frame.dead_weight;
+            if grading != self.main.grading || tonemapper != self.main.tonemapper {
+                self.main
+                    .lut
+                    .set_grading(device, queue, &grading, tonemapper);
+                self.uber.set_post_exposure(grading.post_exposure);
+                self.main.grading = grading;
+                self.main.tonemapper = tonemapper;
+                self.main.lut_baked = false;
+            }
         }
         if !self.main.lut_baked {
             self.main.lut.encode(encoder, cache);

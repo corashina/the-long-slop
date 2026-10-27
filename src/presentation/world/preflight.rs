@@ -22,7 +22,7 @@ pub fn checked_input_bytes(path: &str) -> Result<usize, ReferenceError> {
         .map_err(|e| ReferenceError(format!("World input size: {e:?}")))
 }
 pub fn configure_staging(
-    stream: &crate::world::WorldStream,
+    stream: &crate::world::RendererWorld,
     ledger: &mut crate::ownership::PresentationLedger,
     facts: &mut crate::world::RendererFacts,
     catalog: &FileCatalog,

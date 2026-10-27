@@ -87,8 +87,19 @@ impl PreparedPresentation {
         // The candidate renderer spends its own credit from the candidate stream.
         let mut ledger = crate::ownership::PresentationLedger::default();
         let mut facts = crate::world::RendererFacts::default();
+        let mut renderer_world = Box::new(
+            world
+                .resource::<SourcePresentationAllocation>()
+                .world
+                .as_ref()
+                .map_or_else(
+                    || crate::world::RendererWorld::new(&candidate.stream),
+                    |w| w.fork(),
+                ),
+        );
+        candidate.stream.sync_renderer(&mut renderer_world);
         super::world::preflight::configure_staging(
-            &candidate.stream,
+            &renderer_world,
             &mut ledger,
             &mut facts,
             &reference.file_catalog,
@@ -134,11 +145,11 @@ impl PreparedPresentation {
         let materials = world
             .resource::<materials::SourceMaterials>()
             .fork(&mut ledger)?;
-        let prototypes = world.resource::<SourcePrototypes>().fork(
-            &candidate.stream,
-            &mut ledger,
-            &mut facts,
-        )?;
+        candidate.stream.sync_renderer(&mut renderer_world);
+        let prototypes =
+            world
+                .resource::<SourcePrototypes>()
+                .fork(&renderer_world, &mut ledger, &mut facts)?;
         candidate.stream.apply_renderer_facts(&mut facts)?;
         // The stream covers the candidate use now, so a budget failure stops the save here.
         ledger.exchange(&mut candidate.stream);
@@ -177,6 +188,7 @@ impl PreparedPresentation {
                 allocation.ledger = ledger;
                 allocation.lighting_cpu =
                     world.resource::<lighting::SourceLighting>().clone_bytes();
+                allocation.world = Some(renderer_world);
                 allocation
             },
             system: SystemState::new(world),
@@ -185,6 +197,12 @@ impl PreparedPresentation {
             roots: Vec::with_capacity(8192),
             frame: default(),
         })
+    }
+    fn renderer_world(&self) -> &crate::world::RendererWorld {
+        self.allocation
+            .world
+            .as_deref()
+            .expect("candidate renderer world")
     }
     fn exchange(&mut self, world: &mut World) {
         macro_rules! exchange {
@@ -403,7 +421,7 @@ impl PreparedPresentation {
             && !candidate.restore_pending()
             && candidate.stream.required_ready()
             && candidate.world_supported()
-            && self.surfaces.ready(&candidate.stream)
+            && self.surfaces.ready(self.renderer_world())
             && self.instances.ready()
             && self.grass.settled()
             && self.writers.ready()?
@@ -460,7 +478,7 @@ impl PreparedPresentation {
             || !self.writers.ready()?
             || !self.grass.settled()
             || !self.instances.ready()
-            || !self.surfaces.ready(&candidate.stream)
+            || !self.surfaces.ready(self.renderer_world())
             || !self.lighting.road_lamps.ready()
         {
             return Err(SaveError::MissingAssets(

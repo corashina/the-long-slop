@@ -2,7 +2,7 @@
 use super::spawn_contents::SpawnEvaluation;
 use super::spawn_rules::*;
 use crate::reference::{ReferenceError, SourceId};
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NodeAppearance {
     pub node: SourceId,
     pub primary: Option<(crate::reference::AssetId, u32)>,

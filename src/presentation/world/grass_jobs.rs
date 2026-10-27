@@ -8,7 +8,7 @@ use crate::{
         grass::material::{BLADE_ATTRIBUTE, GrassMaterial},
     },
     reference::ReferenceError,
-    world::{PresentationAllocation, WorldStream},
+    world::{PresentationAllocation, RendererWorld},
 };
 use bevy::platform::collections::HashMap;
 use bevy::{
@@ -221,7 +221,7 @@ impl GrassJobs {
     }
     pub fn request(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         entity: Entity,
         parent: Entity,
@@ -350,7 +350,7 @@ impl GrassJobs {
     }
     pub fn prepare(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         writers_ready: bool,
         commands: &mut Commands,
@@ -376,7 +376,7 @@ impl GrassJobs {
     }
     fn prepare_inner(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         writers_ready: bool,
         commands: &mut Commands,

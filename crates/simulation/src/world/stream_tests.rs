@@ -395,6 +395,59 @@ pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     }
     panic!("required publication did not reach readiness");
 }
+/// The renderer copy answers like the stream.
+fn assert_renderer_world(stream: &WorldStream) {
+    let mut world = renderer_world::RendererWorld::new(stream);
+    stream.sync_renderer(&mut world);
+    let frame = world.frame();
+    assert_eq!(frame.surfaces.len(), stream.surfaces.len());
+    assert_eq!(frame.structures.len(), stream.structures.len());
+    assert_eq!(frame.lights.len(), stream.lights.len());
+    assert_eq!(world.required_ready(), stream.required_ready());
+    assert_eq!(world.structure_membership(), stream.structure_membership());
+    assert_eq!(world.pending_structures(), &stream.wanted_structures[..]);
+    for p in stream.wanted_structures.iter() {
+        assert_eq!(
+            world.contents_initialized(&p.id),
+            stream.contents_initialized(&p.id)
+        );
+        assert_eq!(
+            world.structure_required(&p.id),
+            stream.structure_required(&p.id)
+        );
+        assert_eq!(
+            world.structure_replay_required(&p.id),
+            stream.structure_replay_required(&p.id)
+        );
+    }
+    for p in stream
+        .wanted_structures
+        .iter()
+        .chain(stream.structures.iter().map(|s| &s.placement))
+    {
+        assert_eq!(world.appearance(&p.id), stream.appearance(&p.id));
+        assert_eq!(
+            world.prop_material(p),
+            stream.props.material(p),
+            "prop material"
+        );
+    }
+    for source in stream.reference.road.prototypes.iter() {
+        let required = stream.selected_roads.iter().any(|r| {
+            (stream.required.roads.contains(&r.segment.index) || stream.required_ready())
+                && stream.reference.road.prototypes[r.segment.biome as usize] == *source
+        });
+        assert_eq!(world.road_prototype_required(source), required);
+        assert_eq!(
+            world.can_hold_prototype(source),
+            stream.can_hold_prototype(source)
+        );
+    }
+    // A second sync with no stream change keeps the copy.
+    let surfaces = world.frame().surfaces.as_ptr();
+    stream.sync_renderer(&mut world);
+    assert_eq!(world.frame().surfaces.as_ptr(), surfaces);
+}
 fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
     let index = run
         .stream
@@ -442,6 +495,7 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
     prepare_ready(&mut run, &reference);
     assert!(run.stream.required_ready());
     assert!(run.world_supported());
+    assert_renderer_world(&run.stream);
     println!(
         "ready: roads={} tiles={} structures={} lights={}; active bindings={} static={}",
         run.stream.required.roads.len(),

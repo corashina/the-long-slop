@@ -103,7 +103,7 @@ pub struct SurfaceKey {
 }
 pub struct PublishedSurface {
     pub key: SurfaceKey,
-    pub surface: WorldSurface,
+    pub surface: Arc<WorldSurface>,
     pub prototype: Option<SourceId>,
     pub bounds: WorldBounds,
     collider: Option<ColliderHandle>,
@@ -168,8 +168,6 @@ struct RoadWork {
 /// Source world publication and session ownership.
 pub struct WorldStream {
     required: super::required::RequiredSelection,
-    /// Lamp material variants by prototype and node. Renderer reads fill it.
-    lamp_material_choices: std::sync::Mutex<Vec<(SourceId, SourceId, Arc<[SourceId]>)>>,
     static_controls: Vec<super::contents::ContentInstance>,
     // Membership and order only, independent of live control state.
     static_control_revision: u64,
@@ -278,7 +276,6 @@ pub struct WorldStream {
     /// Source breakablescript targets of active content.
     pub breakables: crate::damage::Breakables,
     evaluator: TerrainEvaluator,
-    biome_materials: super::biome_materials::BiomeMaterials,
     color_foundations: Vec<super::FoundationPoint>,
     color_helpers: Vec<TerrainFoundation>,
     tiles: [TerrainTile; 3],
@@ -686,29 +683,11 @@ impl WorldStream {
             self.select_changed_destinations();
         }
     }
-    #[cfg(target_arch = "wasm32")]
-    pub fn lod_owner(&self, source: &SourceId) -> Option<&SourceId> {
-        self.contents
-            .rules
-            .full_record_owner(&self.reference, source)
-    }
     pub fn seed(&self) -> i32 {
         self.seed
     }
     pub fn focus(&self) -> [f64; 3] {
         self.request.player
-    }
-    /// Writes the primary appearance assets of all contents to `assets`.
-    pub fn primary_assets(&self, assets: &mut Vec<crate::reference::AssetId>) {
-        assets.clear();
-        for content in self.contents.instances() {
-            assets.extend(
-                content
-                    .appearance
-                    .iter()
-                    .filter_map(|a| a.primary.map(|p| p.0)),
-            );
-        }
     }
 
     pub fn mode(&self) -> super::GameMode {
@@ -798,12 +777,9 @@ impl WorldStream {
         let seat_prototypes = content_seats::world_seats(world, &contents.rules)?;
         let road_light = super::source_lights::SourceRoadLight::new(reference, seed)?;
         let cables = super::cables::CableRecipes::new(world, seed)?;
-        let biome_materials =
-            super::biome_materials::BiomeMaterials::new(&world.biome_material_sets);
         if shared_cpu_bytes
             .saturating_add(road_light.retained_bytes())
             .saturating_add(cables.retained_bytes())
-            .saturating_add(biome_materials.retained_bytes())
             .saturating_add(contents.rules.retained_bytes())
             .saturating_add(structure_helpers.retained_bytes())
             > PROTOTYPE_CPU
@@ -823,7 +799,6 @@ impl WorldStream {
         }
         Ok(Self {
             required: Default::default(),
-            lamp_material_choices: Default::default(),
             static_controls: Vec::new(),
             static_control_revision: 0,
             binding_baseline: None,
@@ -876,7 +851,6 @@ impl WorldStream {
             date,
             mode,
             start_car,
-            biome_materials,
             structure_helpers,
             building_components: Default::default(),
             presentation: PresentationAllocation::default(),
@@ -1343,18 +1317,13 @@ impl WorldStream {
             .iter()
             .position(|id| id == source)
             .filter(|&index| self.road_prototypes[index].is_none());
-        let road_bytes = road_index.map_or(0, |_| {
-            super::road::road_prototype_bytes(
-                self.reference
-                    .prototypes
-                    .iter()
-                    .find(|p| &p.source == source)
-                    .expect("validated road prototype"),
-            )
-        });
-        let owner_bytes =
-            super::metrics::map_insert_bytes(&self.prototype_holds) + source.file.capacity();
-        (road_index, owner_bytes.saturating_add(road_bytes))
+        let bytes = renderer_world::hold_cost(
+            &self.reference,
+            &self.road_prototypes.each_ref().map(Option::is_some),
+            super::metrics::map_insert_bytes(&self.prototype_holds),
+            source,
+        );
+        (road_index, bytes)
     }
     pub fn holds_prototype(&self, source: &SourceId) -> bool {
         self.prototype_holds.contains_key(source)
@@ -2509,162 +2478,6 @@ impl WorldStream {
         }
         self.contents.appearance(id)
     }
-    /// Source `materialChangeScript.Start` biome for renderer `node`, from the object position, not the surface.
-    /// `None` when no active marked node holds the renderer.
-    pub fn renderer_biome(
-        &self,
-        prototype: &crate::reference::WorldPrototypeReference,
-        placement: &Placement,
-        node: usize,
-    ) -> Option<u8> {
-        if !super::biome_materials::under_mark(prototype, node)
-            || !super::spawn_appearance::node_active(
-                prototype,
-                node,
-                self.appearance(&placement.id),
-            )
-        {
-            return None;
-        }
-        let p = placement.pose.position;
-        let color = self
-            .evaluator
-            .color([p[0] as f32, -p[2] as f32], p[1] as f32);
-        Some(super::biome(color, self.mode.biome_override()))
-    }
-    /// Biome material for a first material. `None` keeps the material.
-    pub fn biome_material(&self, material: &SourceId, biome: u8) -> Option<&SourceId> {
-        self.biome_materials.variant(material, biome)
-    }
-    pub fn lamp_materials(
-        &self,
-        prototype: &SourceId,
-        node: &SourceId,
-    ) -> Result<Arc<[SourceId]>, ReferenceError> {
-        if let Some((_, _, output)) = self
-            .lamp_material_choices
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(p, n, _)| p == prototype && n == node)
-        {
-            return Ok(output.clone());
-        }
-        let mut output = Vec::new();
-        use super::spawn_rules::*;
-        let mut controllers = Vec::new();
-        self.contents.rules.children(
-            &self.reference,
-            prototype,
-            "flashlightscript",
-            true,
-            &mut controllers,
-        )?;
-        for source in controllers {
-            let f = self.contents.rules.get(&self.reference, source)?.fields;
-            for lamp in array(f, "Lamps")? {
-                let lamp = fields(lamp)?;
-                if !array(lamp, "R")?.iter().any(|r| {
-                    value_link(r)
-                        .ok()
-                        .and_then(|r| self.contents.rules.root(&self.reference, r).ok())
-                        == Some(node)
-                }) {
-                    continue;
-                }
-                for field in ["mON", "mOFF"] {
-                    if let Some(material) = optional(lamp, field)?.or(optional(f, field)?) {
-                        if !output.contains(material) {
-                            output.push(material.clone());
-                        }
-                    }
-                }
-            }
-        }
-        let mut radios = Vec::new();
-        self.contents.rules.children(
-            &self.reference,
-            prototype,
-            "radioscript",
-            true,
-            &mut radios,
-        )?;
-        for source in radios {
-            let f = self.contents.rules.get(&self.reference, source)?.fields;
-            for (renderer, on, off) in [("RS", "SOn", "SOff"), ("RMutato", "MutatoOn", "MutatoOff")]
-            {
-                if self
-                    .contents
-                    .rules
-                    .root(&self.reference, link(f, renderer)?)?
-                    != node
-                {
-                    continue;
-                }
-                for material in [link(f, on)?, link(f, off)?] {
-                    if !output.contains(material) {
-                        output.push(material.clone());
-                    }
-                }
-            }
-        }
-        if let Some((record, index)) = self
-            .reference
-            .prototypes
-            .iter()
-            .find(|p| &p.source == prototype)
-            .and_then(|p| {
-                let index = p.nodes.iter().position(|n| &n.source == node)?;
-                Some((p.vehicle.as_ref()?, index))
-            })
-        {
-            for link in record.renderer_materials(index as u32) {
-                if !output.contains(&link.source) {
-                    output.push(link.source.clone());
-                }
-            }
-        }
-        if let Some((gauges, index)) = self
-            .reference
-            .prototypes
-            .iter()
-            .find(|p| &p.source == prototype)
-            .and_then(|p| Some((&p.gauges, p.nodes.iter().position(|n| &n.source == node)?)))
-        {
-            for link in gauges
-                .iter()
-                .flat_map(|g| g.renderer_materials(index as u32))
-            {
-                if !output.contains(&link.source) {
-                    output.push(link.source.clone());
-                }
-            }
-        }
-        let output: Arc<[SourceId]> = output.into();
-        self.lamp_material_choices.lock().unwrap().push((
-            prototype.clone(),
-            node.clone(),
-            output.clone(),
-        ));
-        Ok(output)
-    }
-    fn lamp_material_bytes(&self) -> usize {
-        let choices = self.lamp_material_choices.lock().unwrap();
-        choices.capacity() * std::mem::size_of::<(SourceId, SourceId, Arc<[SourceId]>)>()
-            + choices
-                .iter()
-                .map(|(p, n, v)| {
-                    p.file.capacity()
-                        + n.file.capacity()
-                        + 16
-                        + v.len() * std::mem::size_of::<SourceId>()
-                        + v.iter().map(|s| s.file.capacity()).sum::<usize>()
-                })
-                .sum::<usize>()
-    }
-    pub fn prop_material(&self, placement: &Placement) -> Option<(&SourceId, &SourceId)> {
-        self.props.material(placement)
-    }
     fn plan(&mut self, force_structures: bool) -> Result<(), ReferenceError> {
         let road_changed = self.planned_road_focus != self.road_focus;
         if road_changed {
@@ -3081,7 +2894,7 @@ impl WorldStream {
                         unit: [i64::from(work.segment.index), 0],
                     },
                     bounds: surface_bounds(&surface),
-                    surface,
+                    surface: Arc::new(surface),
                     prototype: Some(
                         self.reference.road.prototypes[work.segment.biome as usize].clone(),
                     ),
@@ -3261,13 +3074,6 @@ impl WorldStream {
             .into_iter()
             .any(|p| (p[0] - x).abs() <= size * 0.5 + 8. && (p[2] - z).abs() <= size * 0.5 + 8.)
     }
-    pub fn road_prototype_required(&self, source: &SourceId) -> bool {
-        let required_ready = self.required_ready();
-        self.selected_roads.iter().any(|r| {
-            (self.required.roads.contains(&r.segment.index) || required_ready)
-                && self.reference.road.prototypes[r.segment.biome as usize] == *source
-        })
-    }
     fn prepare_terrain(&mut self, mut should_yield: impl FnMut() -> bool) {
         let _timer = super::stream_profile::Timer::new(super::stream_profile::Stage::Terrain);
         let had_pending = self.terrain_execution.has_pending();
@@ -3285,7 +3091,7 @@ impl WorldStream {
                     published: PublishedSurface {
                         key: metadata.key,
                         bounds: surface_bounds(&surface),
-                        surface,
+                        surface: Arc::new(surface),
                         prototype: None,
                         collider: None,
                         collision_bytes: 0,
@@ -4919,10 +4725,6 @@ impl WorldStream {
         self.failure = Some(error.0);
     }
 
-    /// Squared source distance from the nearer of the player and vehicle.
-    pub fn focus_distance_squared(&self, position: [f64; 3]) -> f32 {
-        focus_distance_squared(self.request, position)
-    }
     /// Changes when a structure is published or retired.
     pub fn structure_revision(&self) -> u64 {
         self.structure_revision
@@ -5083,7 +4885,6 @@ impl WorldStream {
             active_cpu_bytes: std::mem::size_of::<Self>()
                 + self.road_worker_reserved_bytes
                 + self.road_worker.cache_bytes()
-                + self.lamp_material_bytes()
                 + self.required.roads.capacity() * std::mem::size_of::<u32>()
                 + self.required.terrain.capacity() * std::mem::size_of::<SurfaceKey>()
                 + (self.required.structures.capacity() + self.required.lights.capacity())
@@ -5534,6 +5335,8 @@ mod content_levels;
 
 #[path = "moving_nodes.rs"]
 mod moving_nodes;
+#[path = "renderer_world.rs"]
+pub mod renderer_world;
 
 #[path = "pending_structures.rs"]
 mod pending_structures;
@@ -5554,4 +5357,81 @@ fn cable_entry_bytes(entry: &CableEntry) -> usize {
 }
 fn cable_entry_heap(entry: &CableEntry) -> usize {
     super::contents::identity_heap(&entry.0) + super::contents::appearance_bytes(&entry.1)
+}
+/// Lamp and radio on/off materials of `node` in `prototype`.
+pub(super) fn lamp_materials_of(
+    rules: &super::spawn_rules::SourceRules,
+    world: &WorldReference,
+    prototype: &SourceId,
+    node: &SourceId,
+) -> Result<Vec<SourceId>, ReferenceError> {
+    let mut output = Vec::new();
+    use super::spawn_rules::*;
+    let mut controllers = Vec::new();
+    rules.children(world, prototype, "flashlightscript", true, &mut controllers)?;
+    for source in controllers {
+        let f = rules.get(world, source)?.fields;
+        for lamp in array(f, "Lamps")? {
+            let lamp = fields(lamp)?;
+            if !array(lamp, "R")?
+                .iter()
+                .any(|r| value_link(r).ok().and_then(|r| rules.root(world, r).ok()) == Some(node))
+            {
+                continue;
+            }
+            for field in ["mON", "mOFF"] {
+                if let Some(material) = optional(lamp, field)?.or(optional(f, field)?) {
+                    if !output.contains(material) {
+                        output.push(material.clone());
+                    }
+                }
+            }
+        }
+    }
+    let mut radios = Vec::new();
+    rules.children(world, prototype, "radioscript", true, &mut radios)?;
+    for source in radios {
+        let f = rules.get(world, source)?.fields;
+        for (renderer, on, off) in [("RS", "SOn", "SOff"), ("RMutato", "MutatoOn", "MutatoOff")] {
+            if rules.root(world, link(f, renderer)?)? != node {
+                continue;
+            }
+            for material in [link(f, on)?, link(f, off)?] {
+                if !output.contains(material) {
+                    output.push(material.clone());
+                }
+            }
+        }
+    }
+    if let Some((record, index)) = world
+        .prototypes
+        .iter()
+        .find(|p| &p.source == prototype)
+        .and_then(|p| {
+            let index = p.nodes.iter().position(|n| &n.source == node)?;
+            Some((p.vehicle.as_ref()?, index))
+        })
+    {
+        for link in record.renderer_materials(index as u32) {
+            if !output.contains(&link.source) {
+                output.push(link.source.clone());
+            }
+        }
+    }
+    if let Some((gauges, index)) = world
+        .prototypes
+        .iter()
+        .find(|p| &p.source == prototype)
+        .and_then(|p| Some((&p.gauges, p.nodes.iter().position(|n| &n.source == node)?)))
+    {
+        for link in gauges
+            .iter()
+            .flat_map(|g| g.renderer_materials(index as u32))
+        {
+            if !output.contains(&link.source) {
+                output.push(link.source.clone());
+            }
+        }
+    }
+    Ok(output)
 }

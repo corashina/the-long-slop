@@ -19,7 +19,7 @@ use crate::{
         AssetId, AssetUsage, ReferenceError, ReferenceManifest,
         fixed_reservation::FixedReservation, prototype_plan::PrototypePlan,
     },
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
@@ -427,7 +427,7 @@ impl SourceFixedAssets {
     }
     pub(crate) fn prepare_metadata(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         snapshot: &mut FixedAllocation,
         reference: &ReferenceManifest,
