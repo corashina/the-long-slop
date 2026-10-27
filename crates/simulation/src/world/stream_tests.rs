@@ -236,7 +236,7 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
             })
             .collect()
     });
-    stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+    stream.hold_prototype(source.clone()).unwrap();
     stream.bind_prototype(&source).unwrap();
     stream.bind_structure_recipe(&source).unwrap();
     for index in 0..stream.wanted_structures.len() {
@@ -316,7 +316,7 @@ fn prepare_step_for_views(
         .chain(reference.world.road.prototypes.iter().cloned())
         .collect();
     for source in sources {
-        stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+        stream.hold_prototype(source.clone()).unwrap();
         stream.bind_prototype(&source).unwrap();
     }
     let placement = stream
@@ -337,7 +337,7 @@ fn prepare_step_for_views(
         // The native adapter reserves one instance claim and no grass child job.
         .filter(|_| stream.can_request_independent(1));
     if let Some(p) = placement {
-        stream.reserve_prototype(p.prototype.clone(), 0, 0).unwrap();
+        stream.hold_prototype(p.prototype.clone()).unwrap();
         stream.bind_prototype(&p.prototype).unwrap();
         stream.bind_structure_recipe(&p.prototype).unwrap();
         let mut claim = stream
@@ -712,9 +712,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
     run.stream.select_required(&views());
     assert!(run.stream.structure_required(&id));
     assert!(!run.stream.required_ready());
-    run.stream
-        .reserve_prototype(prototype.source.clone(), 0, 0)
-        .unwrap();
+    run.stream.hold_prototype(prototype.source.clone()).unwrap();
     run.stream.bind_prototype(&prototype.source).unwrap();
     run.stream.bind_structure_recipe(&prototype.source).unwrap();
     let request = run.stream.request;
@@ -1936,9 +1934,7 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
             placement.clone(),
         ));
     stream.wanted_structures.push(placement.clone());
-    stream
-        .reserve_prototype(placement.prototype.clone(), 0, 0)
-        .unwrap();
+    stream.hold_prototype(placement.prototype.clone()).unwrap();
     stream.bind_prototype(&placement.prototype).unwrap();
     stream.bind_structure_recipe(&placement.prototype).unwrap();
     let mut claim = stream
