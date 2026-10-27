@@ -1,17 +1,19 @@
 //! Road and terrain material admission through the shared source cache.
 use super::{SourceWorldVisuals, SurfaceMaterial, prototypes::SourcePrototypes};
+use crate::ownership::PresentationLedger;
 use crate::{
     presentation::materials::{
         SourceMaterial, SourceMaterials, authored_material, terrain::TerrainMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldValue},
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::prelude::*;
 impl SourceWorldVisuals {
     pub fn request_descriptors(
         &self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
     ) -> Result<(), ReferenceError> {
@@ -20,13 +22,15 @@ impl SourceWorldVisuals {
             if !stream.road_prototype_required(source) {
                 continue;
             }
-            prototypes.request(stream, source)?;
+            prototypes.request(stream, ledger, source)?;
         }
         Ok(())
     }
     pub fn prepare_bindings(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut PresentationLedger,
+        facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
         server: &AssetServer,
@@ -65,11 +69,11 @@ impl SourceWorldVisuals {
                         .as_ref()
                         .ok_or_else(|| ReferenceError("Missing road material identity".into()))?;
                     let identity = (material.asset, material.gltf_material);
-                    cache.admit_world_primary(identity, reference, stream)?;
+                    cache.admit_world_primary(identity, reference, ledger)?;
                     ready &= cache.world_primary_ready(identity);
                 }
             }
-            if !ready || !prototypes.admit_payload(stream, reference, server, source)? {
+            if !ready || !prototypes.admit_payload(stream, ledger, reference, server, source)? {
                 continue;
             }
             let Some(loaded) = prototypes.loaded(stream.frame().request.session, source) else {
@@ -81,12 +85,12 @@ impl SourceWorldVisuals {
                 .iter()
                 .map(|skin| skin.triangles.len())
                 .sum::<usize>();
-            let mut allocation = stream.presentation_allocation();
+            let mut allocation = ledger.allocation();
             allocation.prototype_cpu +=
                 count * (8192 + crate::presentation::caster_material::CPU_BYTES);
             allocation.prototype_gpu +=
                 count * (2048 + crate::presentation::caster_material::gpu_bytes());
-            stream.set_presentation_allocation(allocation)?;
+            ledger.set_allocation(allocation)?;
             let mut bindings = Vec::with_capacity(
                 prototype
                     .skins
@@ -154,18 +158,22 @@ impl SourceWorldVisuals {
                 }
             }
             self.bind_road(source.clone(), bindings)?;
-            stream.bind_prototype(source)?;
+            facts.push(crate::world::RendererFact::BindPrototype(source.clone()));
         }
         for (tier, record) in reference.world.terrain.materials.iter().enumerate() {
             if self.terrain[tier].is_some() {
                 continue;
             }
-            stream.reserve_prototype(
-                record.source.clone(),
-                std::mem::size_of::<TerrainMaterial>() + 256 + 8192,
-                2048,
-            )?;
-            cache.admit_world_material(record, reference, stream)?;
+            // The terrain material lives as long as its stream hold.
+            let hold = crate::world::RendererFact::HoldPrototype(record.source.clone());
+            if !stream.holds_prototype(&record.source) && !facts.contains(&hold) {
+                facts.push(hold);
+                let mut allocation = ledger.allocation();
+                allocation.prototype_cpu += std::mem::size_of::<TerrainMaterial>() + 256 + 8192;
+                allocation.prototype_gpu += 2048;
+                ledger.set_allocation(allocation)?;
+            }
+            cache.admit_world_material(record, reference, ledger)?;
             if !cache.world_textures.ready(&record.source) {
                 continue;
             }
@@ -181,7 +189,9 @@ impl SourceWorldVisuals {
             )?);
             terrain.get_mut(&material).unwrap().preparation = cache.preparation.clone();
             self.bind_terrain(tier, material, layer, shadow_mode);
-            stream.bind_prototype(&record.source)?;
+            facts.push(crate::world::RendererFact::BindPrototype(
+                record.source.clone(),
+            ));
         }
         Ok(())
     }

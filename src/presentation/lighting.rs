@@ -1,10 +1,11 @@
 //! Persistent source lighting resources.
+use super::sim_frame::SimFrameResource;
 use super::{
     materials::{MaterialCache, SourceMaterial, bind_materials},
     reference::ReferenceVisuals,
 };
 use crate::{
-    app::{Drive, RuntimeReference},
+    app::RuntimeReference,
     lighting::source_linear,
     reference::{LightId, LightKind, LightingRecord},
 };
@@ -20,6 +21,7 @@ use bevy::render::{
     texture::GpuImage,
 };
 use bevy::shader::Shader;
+use simulation::boundary::{PoseKey, PoseRow};
 use std::sync::{Arc, Mutex};
 
 pub const MAX_LIGHTS: usize = 64;
@@ -509,7 +511,7 @@ pub(crate) fn bind_lighting(
     visuals: Res<ReferenceVisuals>,
     mut source: ResMut<SourceLighting>,
     images: Res<Assets<Image>>,
-    drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
 ) {
     if source.bound
@@ -541,7 +543,7 @@ pub(crate) fn bind_lighting(
         return;
     }
     if !source.materials_prepared {
-        for (output_index, output) in drive.runtime.lighting.material_outputs().iter().enumerate() {
+        for (output_index, output) in sim.frame.lamp_materials.iter().enumerate() {
             let Some(node) = visuals.nodes.get(&output.renderer) else {
                 // Road prototype outputs bind when a streamed instance registers.
                 continue;
@@ -558,7 +560,7 @@ pub(crate) fn bind_lighting(
                 choices: Vec::new(),
             });
         }
-        for (index, pose) in drive.runtime.lighting.control_poses().iter().enumerate() {
+        for (index, pose) in sim.frame.control_poses.iter().enumerate() {
             source.control_poses.push((
                 index,
                 *visuals
@@ -567,13 +569,7 @@ pub(crate) fn bind_lighting(
                     .expect("source control pose node"),
             ));
         }
-        for (index, output) in drive
-            .runtime
-            .lighting
-            .visibility_outputs()
-            .iter()
-            .enumerate()
-        {
+        for (index, output) in sim.frame.node_visibility.iter().enumerate() {
             source.visibility.push((
                 index,
                 *visuals
@@ -733,7 +729,7 @@ pub(crate) fn ember_particle(
         .map(|c| &c.ember.particle)
 }
 pub(crate) fn sync_control_visuals(
-    drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     frame: Res<super::view_frame::SourceViewFrame>,
     source: Res<SourceLighting>,
     mut poses: Query<&mut Transform>,
@@ -745,7 +741,7 @@ pub(crate) fn sync_control_visuals(
     );
     for &(index, entity) in &source.control_poses {
         if let Ok(mut pose) = poses.get_mut(entity) {
-            let output = &drive.runtime.lighting.control_poses()[index].local_pose;
+            let output = &sim.frame.control_poses[index].local_pose;
             let next = Transform {
                 translation: Vec3::from_array(output.translation),
                 rotation: Quat::from_array(output.rotation),
@@ -759,24 +755,22 @@ pub(crate) fn sync_control_visuals(
     }
     for &(index, entity) in &source.visibility {
         if let Ok(mut visibility) = nodes.get_mut(entity) {
-            visibility.set_if_neq(
-                if drive.runtime.lighting.visibility_outputs()[index].visible {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                },
-            );
+            visibility.set_if_neq(if sim.frame.node_visibility[index].visible {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            });
         }
     }
 }
 pub(crate) fn sync_lighting(
     reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     mut source: ResMut<SourceLighting>,
     globals: Query<&GlobalTransform, Without<SourceLight>>,
     mut lights: Query<(&mut Transform, &mut GlobalTransform), With<SourceLight>>,
 ) {
-    let cycle = drive.runtime.lighting.cycle.output();
+    let cycle = &sim.frame.lighting.cycle;
     source.uniform.ambient = Vec4::new(
         source_linear(cycle.ambient),
         source_linear(cycle.ambient),
@@ -784,34 +778,19 @@ pub(crate) fn sync_lighting(
         cycle.fog_density,
     );
     source.uniform.fog = Vec4::from_array(cycle.fog_color.map(source_linear));
-    let road_output = drive
-        .runtime
-        .lighting
-        .road_lamp_output(&reference.0.lighting);
+    let road_output = sim.frame.lighting.road_lamp;
+    let active = |key| {
+        sim.pose(key)
+            .is_some_and(|(_, current)| current.flags & PoseRow::ACTIVE != 0)
+    };
     let source = &mut *source;
     for bound_index in 0..source.lights.len() {
         let bound = &source.lights[bound_index];
         let index = bound.index;
         let active = bound
             .item
-            .map(|id| {
-                drive
-                    .runtime
-                    .area
-                    .items
-                    .get(id)
-                    .is_some_and(|item| item.inactive_pose.is_none())
-            })
-            .unwrap_or_else(|| {
-                bound.body.is_none_or(|id| {
-                    drive
-                        .runtime
-                        .area
-                        .bodies
-                        .get(&id)
-                        .is_some_and(|handle| drive.runtime.physics.body_active(*handle))
-                })
-            });
+            .map(|id| active(PoseKey::Item(id)))
+            .unwrap_or_else(|| bound.body.is_none_or(|id| active(PoseKey::Body(id))));
         let record = bound
             .world
             .as_ref()
@@ -823,7 +802,7 @@ pub(crate) fn sync_lighting(
         } else if bound.road {
             &road_output
         } else {
-            &drive.runtime.lighting.light_outputs()[bound.source_index]
+            &sim.frame.lights[bound.source_index]
         };
         let Ok((mut pose, mut global)) = lights.get_mut(bound.entity) else {
             continue;
@@ -874,7 +853,7 @@ pub(crate) fn sync_lighting(
                     cookie_from_world.row(0).truncate().to_array(),
                     cookie_from_world.row(1).truncate().to_array(),
                 ],
-                drive.runtime.area.origin,
+                sim.frame.state.origin,
                 bound.pose.translation.to_array(),
                 record.cookie_size,
             )

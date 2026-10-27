@@ -1,11 +1,12 @@
 //! Source push force and a reusable steering grip.
 use super::AimTarget;
 use crate::player::PlayerState;
+use crate::player::body::{BodyState, ReachFrame, ReachTarget};
 use crate::reference::{
     BodyId, ColliderId, ItemId, PlayerReference, ReferenceManifest, Transform, WorldPushReference,
 };
 use crate::simulation::{FrameInput, keys};
-use crate::vehicle::{PhysicsWorld, to_rapier};
+use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{GenericJointBuilder, ImpulseJointHandle, JointAxesMask, RigidBodyHandle};
 use std::collections::HashMap;
@@ -25,7 +26,22 @@ struct GripRule {
     colliders: Vec<ColliderId>,
     /// Grip pose in the body frame.
     local_pose: Transform,
+    /// `HT`, else the grip, in the body frame.
+    hand: VehiclePose,
     in_use: bool,
+}
+
+fn pose(t: &Transform) -> Pose {
+    Pose::from_parts(
+        Vector::from_array(t.translation),
+        Rotation::from_array(t.rotation),
+    )
+}
+
+/// `pushgripable.HT` in the body frame. `grip` and `hand` share one root frame.
+pub fn grip_hand(local: &Transform, grip: &Transform, hand: Option<&Transform>) -> VehiclePose {
+    let local = pose(local);
+    from_rapier(&hand.map_or(local, |hand| local * pose(grip).inverse() * pose(hand)))
 }
 struct Grip {
     owner: ItemId,
@@ -55,10 +71,26 @@ impl PushState {
                         only_projected: r.only_projected,
                         both: r.both,
                         push_even_if_same_parent: r.push_even_if_same_parent,
-                        grip: r.grip.as_ref().map(|g| GripRule {
-                            colliders: g.colliders.clone(),
-                            local_pose: g.local_pose,
-                            in_use: g.in_use,
+                        grip: r.grip.as_ref().map(|g| {
+                            let node = |id| {
+                                let p = super::items::node_pose(reference, id)
+                                    .expect("validated push grip node");
+                                Transform {
+                                    translation: p.position,
+                                    rotation: p.rotation,
+                                    scale: [1.; 3],
+                                }
+                            };
+                            GripRule {
+                                colliders: g.colliders.clone(),
+                                local_pose: g.local_pose,
+                                hand: grip_hand(
+                                    &g.local_pose,
+                                    &node(g.node),
+                                    g.hand_node.map(node).as_ref(),
+                                ),
+                                in_use: g.in_use,
+                            }
                         }),
                     };
                     (r.owner, rule)
@@ -77,6 +109,7 @@ impl PushState {
         body: BodyId,
         reference: &WorldPushReference,
         grip: Vec<ColliderId>,
+        hand: Option<VehiclePose>,
     ) {
         self.rules.insert(
             item,
@@ -86,9 +119,10 @@ impl PushState {
                 only_projected: reference.only_projected,
                 both: reference.both,
                 push_even_if_same_parent: reference.push_even_if_same_parent,
-                grip: reference.grip.as_ref().map(|g| GripRule {
+                grip: reference.grip.as_ref().zip(hand).map(|(g, hand)| GripRule {
                     colliders: grip,
                     local_pose: g.local_pose,
+                    hand,
                     in_use: g.in_use,
                 }),
             },
@@ -193,6 +227,7 @@ impl PushState {
         target: Option<AimTarget>,
         bodies: &HashMap<BodyId, RigidBodyHandle>,
         player: &mut PlayerState,
+        body: &mut BodyState,
         physics: &mut PhysicsWorld,
         dt: f32,
     ) -> Option<ItemId> {
@@ -299,6 +334,14 @@ impl PushState {
             }
             let grip = self.grip.as_mut().unwrap();
             debug_assert_eq!(grip.body, body_handle);
+            // Source: `MoveNearestHand(pushgrip.HT)`, else the grip, every gripping frame.
+            body.move_nearest_hand(
+                ReachTarget {
+                    frame: ReachFrame::Body(body_handle),
+                    pose: grip_rule.hand,
+                },
+                None,
+            );
             let before = grip.previous_pose.rotation * -Vector::Z;
             let after = car_pose.rotation * -Vector::Z;
             let turn = before.angle_between(after).to_degrees() * before.cross(after).y.signum();
@@ -335,6 +378,15 @@ impl PushState {
         }
         let view = to_rapier(player.view(physics).camera_pose);
         let forward = view.rotation * -Vector::Z;
+        // Source `MoveNearestLegHand(hit.point)` at the world `nearestHand`/`nearestLeg` Transform.
+        // Their rotation is `CamParent.rotation`.
+        body.move_nearest_leg_hand(ReachTarget {
+            frame: ReachFrame::World,
+            pose: VehiclePose {
+                position: target.point,
+                rotation: view.rotation.to_array(),
+            },
+        });
         let mut direction = forward;
         let projected = Vector::new(direction.x, 0.0, direction.z);
         if (rule.both && projected.angle_between(direction) < 45.0_f32.to_radians())

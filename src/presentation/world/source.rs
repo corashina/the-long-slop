@@ -1,13 +1,13 @@
 //! Source surfaces retain the same vertices and triangle ranges as collision publication.
 use super::super::materials::{SourceMaterial, SourceShadowMode, terrain::TerrainMaterial};
 use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::ownership::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
-use crate::world::renderer_pending::PipelineContinuation;
-use crate::world::{WorldRequest, WorldStream};
+use crate::world::{RendererFact, RendererFacts, RendererWorld, WorldRequest};
 use crate::{
     reference::{ReferenceError, SourceId},
-    world::{SurfaceKey, WorldFrame, WorldLayer, WorldSurface},
+    world::{RendererFrame, SurfaceKey, WorldLayer, WorldSurface},
 };
 use bevy::ecs as bevy_ecs;
 use bevy::{
@@ -70,7 +70,7 @@ impl SourceWorldVisuals {
             .as_ref()
             .is_none_or(|p| p.continuation.drained())
     }
-    pub fn ready(&self, stream: &WorldStream) -> bool {
+    pub fn ready(&self, stream: &RendererWorld) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
@@ -148,7 +148,8 @@ impl SourceWorldVisuals {
     }
     pub(crate) fn retire_stale(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
         let matches = |pending: &SurfacePreparation, request: WorldRequest, key: SurfaceKey| {
@@ -174,8 +175,9 @@ impl SourceWorldVisuals {
             if !self.pending.as_ref().unwrap().continuation.drained() {
                 return Ok(());
             }
-            stream.discard_surface_renderer(&mut self.pending.as_mut().unwrap().continuation)?;
-            let pending = self.pending.take().unwrap();
+            let mut pending = self.pending.take().unwrap();
+            pending.continuation.release()?;
+            facts.push(RendererFact::DiscardSurface(pending.request, pending.key));
             for mesh in pending.meshes {
                 meshes.remove(mesh.id());
             }
@@ -184,12 +186,14 @@ impl SourceWorldVisuals {
     }
     pub fn prepare_surface(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut crate::ownership::PresentationLedger,
+        facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
         pipelines: &mut WorldPipelines,
         fixed: &SourceFixedAssets,
     ) -> Result<(), ReferenceError> {
-        self.retire_stale(stream, meshes)?;
+        self.retire_stale(stream, facts, meshes)?;
         let Some((request, surface)) = stream.prepared_surface() else {
             return Ok(());
         };
@@ -207,7 +211,9 @@ impl SourceWorldVisuals {
             return Ok(());
         }
         if self.pending.is_none() {
-            let mut continuation = stream.reserve_surface_renderer(request, key)?;
+            facts.push(RendererFact::ReserveSurface(request, key));
+            let mut continuation =
+                PipelineContinuation::counted(RendererOwner::Surface(request, key));
             let prepared = stream.prepared_surface().unwrap().1;
             let source = prepared.prototype.as_ref();
             let surface = &prepared.surface;
@@ -246,6 +252,7 @@ impl SourceWorldVisuals {
                 let ticket = if let Some(source) = source {
                     pipelines.request_continuation(
                         stream,
+                        ledger,
                         &mut pending.continuation,
                         &pending.meshes[index],
                         &self.road_materials[source][index].material,
@@ -254,6 +261,7 @@ impl SourceWorldVisuals {
                 } else {
                     pipelines.request_continuation(
                         stream,
+                        ledger,
                         &mut pending.continuation,
                         &pending.meshes[index],
                         self.terrain[tier(key.layer)?].as_ref().unwrap(),
@@ -276,11 +284,12 @@ impl SourceWorldVisuals {
         if !pending.continuation.drained() {
             return Ok(());
         }
-        stream.accept_surface_renderer(request, key, &pending.continuation)
+        facts.push(RendererFact::AcceptSurface(request, key));
+        Ok(())
     }
     pub fn sync(
         &mut self,
-        frame: &WorldFrame<'_>,
+        frame: &RendererFrame<'_>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         roots: &mut super::runtime::WorldRoots,

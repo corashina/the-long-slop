@@ -25,9 +25,153 @@ pub struct ParticleOutput {
     uv_draw: f32,
 }
 
+/// Module fields of one reference, read once. The per-particle loops do no map lookups.
+#[derive(Debug)]
+struct Modules {
+    capacity: usize,
+    rate_over_time: f32,
+    rate_over_distance: f32,
+    duration: f32,
+    local_rotation: Rotation,
+    local_translation: Vector,
+    /// `None` when the game object is inactive.
+    emission: Option<Emission>,
+    /// Trigger module with the Kill inside action: the ball radius scale.
+    kill_inside: Option<f32>,
+}
+#[derive(Debug)]
+struct Emission {
+    hemisphere: bool,
+    cos_angle: f32,
+    radius_thickness: f32,
+    shape_radius: f32,
+    random_position_amount: f32,
+    shape_scale: Vector,
+    shape_rotation: Rotation,
+    start_speed: ParticleCurve,
+    start_lifetime: ParticleCurve,
+    start_size: ParticleCurve,
+    start_color: ParticleColor,
+    start_rotation: ParticleCurve,
+    gravity: ParticleCurve,
+    rotation: Option<ParticleCurve>,
+    force: Option<Force>,
+    velocity: Option<VelocityModule>,
+    inherit: Option<Inherit>,
+    collision: Option<Collision>,
+    uv: bool,
+    size: Option<ParticleCurve>,
+    color: Option<ParticleColor>,
+    burst: Option<usize>,
+    ring: bool,
+}
+#[derive(Debug)]
+struct Force {
+    curves: [ParticleCurve; 3],
+    world: bool,
+}
+#[derive(Debug)]
+struct VelocityModule {
+    curves: [ParticleCurve; 3],
+    speed_modifier: ParticleCurve,
+    world: bool,
+}
+#[derive(Debug)]
+struct Inherit {
+    /// Source `InheritVelocityModule.m_Mode`: 0 initial velocity, 1 current velocity.
+    mode: f32,
+    curve: ParticleCurve,
+}
+#[derive(Debug)]
+struct Collision {
+    mask: u32,
+    dynamic: bool,
+    radius_scale: f32,
+    energy_loss: ParticleCurve,
+    dampen: ParticleCurve,
+    bounce: ParticleCurve,
+    min_kill_speed: f32,
+    max_kill_speed: f32,
+}
+impl Modules {
+    fn new(r: &ParticleReference) -> Self {
+        let on = |module: &str| r.module_flags.get(module) == Some(&true);
+        let curve = |field: &str| r.curves[field].clone();
+        let xyz = |module: &str| {
+            [
+                curve(&format!("{module}.x")),
+                curve(&format!("{module}.y")),
+                curve(&format!("{module}.z")),
+            ]
+        };
+        let emission = (r.flags.get("gameObject.active") == Some(&true)).then(|| Emission {
+            hemisphere: r.scalars["ShapeModule.type"] == 2.,
+            cos_angle: r.scalars["ShapeModule.angle"].to_radians().cos(),
+            radius_thickness: r.scalars["ShapeModule.radiusThickness"],
+            shape_radius: r.scalars["ShapeModule.radius.value"],
+            random_position_amount: r.scalars["ShapeModule.randomPositionAmount"],
+            shape_scale: Vector::from_array(r.vectors["ShapeModule.m_Scale"]),
+            shape_rotation: shape_rotation(r.vectors["ShapeModule.m_Rotation"]),
+            start_speed: curve("InitialModule.startSpeed"),
+            start_lifetime: curve("InitialModule.startLifetime"),
+            start_size: curve("InitialModule.startSize"),
+            start_color: r.colors["InitialModule.startColor"].clone(),
+            start_rotation: curve("InitialModule.startRotation"),
+            gravity: curve("InitialModule.gravityModifier"),
+            rotation: r.curves.get("RotationModule.curve").cloned(),
+            force: on("ForceModule").then(|| Force {
+                curves: xyz("ForceModule"),
+                world: r.flags["ForceModule.inWorldSpace"],
+            }),
+            velocity: on("VelocityModule").then(|| VelocityModule {
+                curves: xyz("VelocityModule"),
+                speed_modifier: curve("VelocityModule.speedModifier"),
+                world: r.flags["VelocityModule.inWorldSpace"],
+            }),
+            inherit: on("InheritVelocityModule").then(|| Inherit {
+                mode: r.scalars["InheritVelocityModule.m_Mode"],
+                curve: curve("InheritVelocityModule.m_Curve"),
+            }),
+            collision: on("CollisionModule").then(|| Collision {
+                mask: r.scalars["CollisionModule.collidesWith.m_Bits"] as u32,
+                dynamic: r.flags["CollisionModule.collidesWithDynamic"],
+                radius_scale: r.scalars["CollisionModule.radiusScale"],
+                energy_loss: curve("CollisionModule.m_EnergyLossOnCollision"),
+                dampen: curve("CollisionModule.m_Dampen"),
+                bounce: curve("CollisionModule.m_Bounce"),
+                min_kill_speed: r.scalars["CollisionModule.minKillSpeed"],
+                max_kill_speed: r.scalars["CollisionModule.maxKillSpeed"],
+            }),
+            uv: on("UVModule"),
+            size: r.curves.get("SizeModule.curve").cloned(),
+            color: r.colors.get("ColorModule.gradient").cloned(),
+            burst: (r.scalars.get("EmissionModule.m_BurstCount") == Some(&1.))
+                .then(|| r.curves["EmissionModule.m_Bursts.0.countCurve"].scalar as usize),
+            ring: r.scalars["ringBufferMode"] == 1.,
+        });
+        Self {
+            capacity: r.capacity as usize,
+            rate_over_time: r.rate_over_time,
+            rate_over_distance: r.rate_over_distance,
+            duration: r.duration,
+            local_rotation: Rotation::from_array(r.local_pose.rotation),
+            local_translation: Vector::from_array(r.local_pose.translation),
+            emission,
+            kill_inside: (on("TriggerModule") && r.scalars["TriggerModule.inside"] == 1.)
+                .then(|| 0.5 * r.scalars["TriggerModule.radiusScale"]),
+        }
+    }
+}
+/// Source `ShapeModule.rotation` in source degrees. Unity's ZXY order, with +Z converted to -Z.
+fn shape_rotation(e: [f32; 3]) -> Rotation {
+    Rotation::from_rotation_y(-e[1].to_radians())
+        * Rotation::from_rotation_x(-e[0].to_radians())
+        * Rotation::from_rotation_z(e[2].to_radians())
+}
+
 #[derive(Debug)]
 pub struct ParticleState {
-    reference: ParticleReference,
+    modules: Modules,
     particles: Vec<ParticleOutput>,
     random: ParticleRandom,
     remainder: f32,
@@ -41,10 +185,15 @@ pub struct ParticleState {
     pub origin: [f64; 3],
     burst_started: bool,
 }
+impl ParticleOutput {
+    pub fn uv_draw(&self) -> f32 {
+        self.uv_draw
+    }
+}
 impl ParticleState {
     pub fn new(reference: &ParticleReference, seed: u64) -> Self {
         Self {
-            reference: reference.clone(),
+            modules: Modules::new(reference),
             particles: Vec::with_capacity(reference.capacity as usize),
             random: ParticleRandom(seed),
             remainder: 0.,
@@ -67,21 +216,17 @@ impl ParticleState {
     }
     /// `mainscript.Particle`: the system moves to the point and runs `Emit(count)`.
     pub fn emit(&mut self, count: usize, emitter_absolute: [f64; 3], rotation: Rotation) {
-        let r = &self.reference;
-        if !r.flags["gameObject.active"] || count == 0 {
+        let m = &self.modules;
+        if m.emission.is_none() || count == 0 {
             return;
         }
-        let local = Rotation::from_xyzw(
-            r.local_pose.rotation[0],
-            r.local_pose.rotation[1],
-            r.local_pose.rotation[2],
-            r.local_pose.rotation[3],
-        );
-        let offset = rotation * Vector::from_array(r.local_pose.translation);
+        let offset = rotation * m.local_translation;
+        let emission = self
+            .emission_rotation
+            .unwrap_or(rotation * m.local_rotation);
         self.rotation = rotation;
         self.reset_emitter();
         let emitter = std::array::from_fn(|i| emitter_absolute[i] + offset[i] as f64);
-        let emission = self.emission_rotation.unwrap_or(rotation * local);
         self.spawn(count, emitter, emission, Vector::ZERO);
     }
     pub fn particles(&self) -> &[ParticleOutput] {
@@ -97,13 +242,13 @@ impl ParticleState {
     }
     /// Base emission rates. `advance` scales them by its strength.
     pub fn set_rates(&mut self, over_time: f32, over_distance: f32) {
-        self.reference.rate_over_time = over_time;
-        self.reference.rate_over_distance = over_distance;
+        self.modules.rate_over_time = over_time;
+        self.modules.rate_over_distance = over_distance;
     }
     /// Source `ShapeModule.rotation`: Euler angles in source degrees.
     pub fn set_shape_rotation(&mut self, degrees: [f32; 3]) {
-        if let Some(rotation) = self.reference.vectors.get_mut("ShapeModule.m_Rotation") {
-            *rotation = degrees;
+        if let Some(e) = &mut self.modules.emission {
+            e.shape_rotation = shape_rotation(degrees);
         }
     }
     /// Source trigger module with the Kill inside action: removes particles that touch an
@@ -113,13 +258,9 @@ impl ParticleState {
         physics: &PhysicsWorld,
         interior: impl Fn(ColliderHandle) -> bool,
     ) {
-        let r = &self.reference;
-        if r.module_flags.get("TriggerModule") != Some(&true)
-            || r.scalars["TriggerModule.inside"] != 1.
-        {
+        let Some(scale) = self.modules.kill_inside else {
             return;
-        }
-        let scale = 0.5 * r.scalars["TriggerModule.radiusScale"];
+        };
         let predicate = |handle: ColliderHandle, _: &rapier3d::prelude::Collider| interior(handle);
         let queries = physics.queries(QueryFilter::default().predicate(&predicate));
         let origin = self.origin;
@@ -157,134 +298,98 @@ impl ParticleState {
         rotation: Rotation,
         emitter_velocity: Vector,
     ) {
-        let r = &self.reference;
-        for _ in 0..count.min(r.capacity as usize - self.particles.len()) {
-            let a = self.random.unit() * std::f32::consts::TAU;
-            let hemisphere = r.scalars["ShapeModule.type"] == 2.;
-            let z = if hemisphere {
-                self.random.unit()
+        let m = &self.modules;
+        let Some(e) = &m.emission else {
+            return;
+        };
+        let random = &mut self.random;
+        let phase = self.elapsed / m.duration;
+        for _ in 0..count.min(m.capacity - self.particles.len()) {
+            let a = random.unit() * std::f32::consts::TAU;
+            let z = if e.hemisphere {
+                random.unit()
             } else {
-                r.scalars["ShapeModule.angle"].to_radians().cos()
-                    + (1. - r.scalars["ShapeModule.angle"].to_radians().cos()) * self.random.unit()
+                e.cos_angle + (1. - e.cos_angle) * random.unit()
             };
             let radial = (1. - z * z).sqrt();
-            // Source +Z is converted to -Z. Shape rotation uses Unity's ZXY order.
+            // Source +Z is converted to -Z.
             let direction = Vector::new(a.cos() * radial, a.sin() * radial, -z);
-            let thickness = r.scalars["ShapeModule.radiusThickness"];
-            let inner = (1. - thickness).powi(3);
-            let shape_radius = r.scalars["ShapeModule.radius.value"] * self.radius_scale;
-            let radius = shape_radius * (inner + (1. - inner) * self.random.unit()).cbrt();
-            let mut position = if hemisphere {
+            let inner = (1. - e.radius_thickness).powi(3);
+            let shape_radius = e.shape_radius * self.radius_scale;
+            let radius = shape_radius * (inner + (1. - inner) * random.unit()).cbrt();
+            let mut position = if e.hemisphere {
                 direction * radius
             } else {
-                Vector::new(a.cos(), a.sin(), 0.) * shape_radius * self.random.unit().sqrt()
+                Vector::new(a.cos(), a.sin(), 0.) * shape_radius * random.unit().sqrt()
             };
             // Native EmitterStoreData adds a random unit vector times randomPositionAmount.
-            let amount = r.scalars["ShapeModule.randomPositionAmount"];
-            if amount > 0. {
-                position +=
-                    Vector::from_array(self.random.inside_sphere()).normalize_or_zero() * amount;
+            if e.random_position_amount > 0. {
+                position += Vector::from_array(random.inside_sphere()).normalize_or_zero()
+                    * e.random_position_amount;
             }
-            position *= Vector::from_array(r.vectors["ShapeModule.m_Scale"]);
-            let e = r.vectors["ShapeModule.m_Rotation"];
-            let shape = Rotation::from_rotation_y(-e[1].to_radians())
-                * Rotation::from_rotation_x(-e[0].to_radians())
-                * Rotation::from_rotation_z(e[2].to_radians());
-            position = rotation * (shape * position);
-            let speed = particle_curve(
-                &r.curves["InitialModule.startSpeed"],
-                self.elapsed / r.duration,
-                self.random.unit(),
-            );
-            let lifetime = particle_curve(
-                &r.curves["InitialModule.startLifetime"],
-                self.elapsed / r.duration,
-                self.random.unit(),
-            );
-            let size = particle_curve(
-                &r.curves["InitialModule.startSize"],
-                self.elapsed / r.duration,
-                self.random.unit(),
-            );
-            let color = self.start_color.unwrap_or_else(|| {
-                particle_color(
-                    &r.colors["InitialModule.startColor"],
-                    0.,
-                    self.random.unit(),
-                )
-            });
+            position *= e.shape_scale;
+            position = rotation * (e.shape_rotation * position);
+            let speed = particle_curve(&e.start_speed, phase, random.unit());
+            let lifetime = particle_curve(&e.start_lifetime, phase, random.unit());
+            let size = particle_curve(&e.start_size, phase, random.unit());
+            let color = self
+                .start_color
+                .unwrap_or_else(|| particle_color(&e.start_color, 0., random.unit()));
             let mut force = Vector::ZERO;
-            if r.module_flags.get("ForceModule") == Some(&true) {
+            if let Some(f) = &e.force {
                 force = Vector::new(
-                    particle_curve(&r.curves["ForceModule.x"], 0., self.random.unit()),
-                    particle_curve(&r.curves["ForceModule.y"], 0., self.random.unit()),
-                    -particle_curve(&r.curves["ForceModule.z"], 0., self.random.unit()),
+                    particle_curve(&f.curves[0], 0., random.unit()),
+                    particle_curve(&f.curves[1], 0., random.unit()),
+                    -particle_curve(&f.curves[2], 0., random.unit()),
                 );
-                if !r.flags["ForceModule.inWorldSpace"] {
+                if !f.world {
                     force = rotation * force;
                 }
             }
-            force.y -= 9.81
-                * particle_curve(
-                    &r.curves["InitialModule.gravityModifier"],
-                    0.,
-                    self.random.unit(),
-                );
-            let velocity_draw = if r.module_flags.get("VelocityModule") == Some(&true) {
-                std::array::from_fn(|_| self.random.unit())
+            force.y -= 9.81 * particle_curve(&e.gravity, 0., random.unit());
+            let velocity_draw = if e.velocity.is_some() {
+                std::array::from_fn(|_| random.unit())
             } else {
                 [0.; 3]
             };
-            let inherit_draw = if r.module_flags.get("InheritVelocityModule") == Some(&true) {
-                self.random.unit()
+            let inherit_draw = if e.inherit.is_some() {
+                random.unit()
             } else {
                 0.
             };
-            let inherited = if r.module_flags.get("InheritVelocityModule") == Some(&true)
-                && r.scalars["InheritVelocityModule.m_Mode"] == 0.
-            {
-                emitter_velocity
-                    * particle_curve(&r.curves["InheritVelocityModule.m_Curve"], 0., inherit_draw)
-            } else {
-                Vector::ZERO
+            let inherited = match &e.inherit {
+                Some(i) if i.mode == 0. => {
+                    emitter_velocity * particle_curve(&i.curve, 0., inherit_draw)
+                }
+                _ => Vector::ZERO,
             };
-            let collision_draw = if r.module_flags.get("CollisionModule") == Some(&true) {
-                self.random.unit()
+            let collision_draw = if e.collision.is_some() {
+                random.unit()
             } else {
                 0.
             };
-            let uv_draw = if r.module_flags.get("UVModule") == Some(&true) {
-                self.random.unit()
-            } else {
-                0.
-            };
+            let uv_draw = if e.uv { random.unit() } else { 0. };
             self.particles.push(ParticleOutput {
                 absolute_position: std::array::from_fn(|i| {
                     emitter_absolute[i] + position[i] as f64
                 }),
                 size,
                 color,
-                rotation: particle_curve(
-                    &r.curves["InitialModule.startRotation"],
-                    0.,
-                    self.random.unit(),
-                ),
+                rotation: particle_curve(&e.start_rotation, 0., random.unit()),
                 age: 0.,
                 lifetime,
                 velocity: rotation
-                    * (shape
-                        * (direction * Vector::from_array(r.vectors["ShapeModule.m_Scale"]))
-                            .normalize_or_zero())
+                    * (e.shape_rotation * (direction * e.shape_scale).normalize_or_zero())
                     * speed
                     + inherited,
                 force,
                 start_size: size,
                 start_color: color,
-                rotation_speed: r
-                    .curves
-                    .get("RotationModule.curve")
-                    .map_or(0., |c| particle_curve(c, 0., self.random.unit())),
-                size_draw: self.random.unit(),
+                rotation_speed: e
+                    .rotation
+                    .as_ref()
+                    .map_or(0., |c| particle_curve(c, 0., random.unit())),
+                size_draw: random.unit(),
                 velocity_draw,
                 inherit_draw,
                 collision_draw,
@@ -299,19 +404,15 @@ impl ParticleState {
         strength: f32,
         physics: &PhysicsWorld,
     ) {
-        if !self.reference.flags["gameObject.active"] || !dt.is_finite() || dt <= 0. {
+        if self.modules.emission.is_none() || !dt.is_finite() || dt <= 0. {
             self.reset_emitter();
             return;
         }
-        let r = &self.reference;
-        let local = Rotation::from_xyzw(
-            r.local_pose.rotation[0],
-            r.local_pose.rotation[1],
-            r.local_pose.rotation[2],
-            r.local_pose.rotation[3],
-        );
-        let rotation = self.emission_rotation.unwrap_or(self.rotation * local);
-        let offset = self.rotation * Vector::from_array(r.local_pose.translation);
+        let m = &self.modules;
+        let rotation = self
+            .emission_rotation
+            .unwrap_or(self.rotation * m.local_rotation);
+        let offset = self.rotation * m.local_translation;
         let emitter_absolute = std::array::from_fn(|i| emitter_absolute[i] + offset[i] as f64);
         let emitter_velocity = self.last_emitter.map_or(Vector::ZERO, |p| {
             Vector::from_array(std::array::from_fn(|i| {
@@ -325,138 +426,110 @@ impl ParticleState {
                 .sqrt() as f32
         });
         self.last_emitter = Some(emitter_absolute);
-        self.elapsed = (self.elapsed + dt) % r.duration;
+        self.elapsed = (self.elapsed + dt) % m.duration;
         self.remainder +=
-            (r.rate_over_time * dt + r.rate_over_distance * distance) * strength.max(0.);
+            (m.rate_over_time * dt + m.rate_over_distance * distance) * strength.max(0.);
         let mut count = self.remainder.floor() as usize;
         self.remainder -= count as f32;
         // Authored splash starts with one burst. No managed collision-to-splash link exists.
-        if !self.burst_started && r.scalars.get("EmissionModule.m_BurstCount") == Some(&1.) {
-            count += r.curves["EmissionModule.m_Bursts.0.countCurve"].scalar as usize;
+        if !self.burst_started {
+            count += m.emission.as_ref().and_then(|e| e.burst).unwrap_or(0);
         }
         self.burst_started = true;
         self.spawn(count, emitter_absolute, rotation, emitter_velocity);
-        let r = &self.reference;
-        let ring = r.scalars["ringBufferMode"] == 1.;
+        let e = self.modules.emission.as_ref().expect("active system");
+        let origin = self.origin;
+        // Disabled modules do not access their payload or issue physics queries.
+        let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
+            e.collision.as_ref().is_some_and(|c| {
+                collider.is_enabled()
+                    && !collider.is_sensor()
+                    && collider.collision_groups().memberships.bits() & c.mask != 0
+                    && (c.dynamic
+                        || collider
+                            .parent()
+                            .is_none_or(|body| !physics.rapier().bodies[body].is_dynamic()))
+            })
+        };
+        let queries = physics.queries(QueryFilter::default().predicate(&surfaces));
+        let size_at = |p: &ParticleOutput, t: f32| {
+            p.start_size
+                * e.size
+                    .as_ref()
+                    .map_or(1., |c| particle_curve(c, t, p.size_draw))
+        };
         self.particles.retain_mut(|p| {
             if p.age >= p.lifetime {
-                return ring;
+                return e.ring;
             }
             p.age = (p.age + dt).min(p.lifetime);
-            if p.age >= p.lifetime && !ring {
+            if p.age >= p.lifetime && !e.ring {
                 return false;
             }
             p.velocity += p.force * dt;
             let t = p.age / p.lifetime;
             let mut module_velocity = Vector::ZERO;
             let mut speed_modifier = 1.;
-            if r.module_flags.get("VelocityModule") == Some(&true) {
+            if let Some(v) = &e.velocity {
                 module_velocity = Vector::new(
-                    particle_curve(&r.curves["VelocityModule.x"], t, p.velocity_draw[0]),
-                    particle_curve(&r.curves["VelocityModule.y"], t, p.velocity_draw[1]),
-                    -particle_curve(&r.curves["VelocityModule.z"], t, p.velocity_draw[2]),
+                    particle_curve(&v.curves[0], t, p.velocity_draw[0]),
+                    particle_curve(&v.curves[1], t, p.velocity_draw[1]),
+                    -particle_curve(&v.curves[2], t, p.velocity_draw[2]),
                 );
-                if !r.flags["VelocityModule.inWorldSpace"] {
+                if !v.world {
                     module_velocity = rotation * module_velocity;
                 }
-                speed_modifier = particle_curve(
-                    &r.curves["VelocityModule.speedModifier"],
-                    t,
-                    p.velocity_draw[0],
-                );
+                speed_modifier = particle_curve(&v.speed_modifier, t, p.velocity_draw[0]);
             }
-            if r.module_flags.get("InheritVelocityModule") == Some(&true)
-                && r.scalars["InheritVelocityModule.m_Mode"] == 1.
-            {
-                module_velocity += emitter_velocity
-                    * particle_curve(
-                        &r.curves["InheritVelocityModule.m_Curve"],
-                        t,
-                        p.inherit_draw,
-                    );
+            if let Some(i) = e.inherit.as_ref().filter(|i| i.mode == 1.) {
+                module_velocity += emitter_velocity * particle_curve(&i.curve, t, p.inherit_draw);
             }
             let velocity = (p.velocity + module_velocity) * speed_modifier;
             let travel = velocity * dt;
             let mut position = Vector::from_array(std::array::from_fn(|i| {
-                (p.absolute_position[i] - self.origin[i]) as f32
+                (p.absolute_position[i] - origin[i]) as f32
             }));
             let mut collided = false;
-            // Disabled modules do not access their payload or issue physics queries.
-            if r.module_flags.get("CollisionModule") == Some(&true) {
-                let mask = r.scalars["CollisionModule.collidesWith.m_Bits"] as u32;
-                let surfaces = |_: ColliderHandle, collider: &rapier3d::prelude::Collider| {
-                    collider.is_enabled()
-                        && !collider.is_sensor()
-                        && collider.collision_groups().memberships.bits() & mask != 0
-                        && (r.flags["CollisionModule.collidesWithDynamic"]
-                            || collider
-                                .parent()
-                                .is_none_or(|body| !physics.rapier().bodies[body].is_dynamic()))
-                };
-                let size = p.start_size
-                    * r.curves
-                        .get("SizeModule.curve")
-                        .map_or(1., |c| particle_curve(c, t, p.size_draw));
-                if let Some((_, hit)) = physics
-                    .queries(QueryFilter::default().predicate(&surfaces))
-                    .cast_shape(
-                        &Pose::from_parts(position, Rotation::IDENTITY),
-                        travel,
-                        &Ball::new(size * 0.5 * r.scalars["CollisionModule.radiusScale"]),
-                        ShapeCastOptions {
-                            max_time_of_impact: 1.,
-                            stop_at_penetration: true,
-                            ..Default::default()
-                        },
-                    )
-                {
-                    // Match the existing fluid swept-sphere route for initial penetration.
-                    if hit.time_of_impact <= 0. {
-                        return false;
-                    }
-                    p.age += p.lifetime
-                        * particle_curve(
-                            &r.curves["CollisionModule.m_EnergyLossOnCollision"],
-                            t,
-                            p.collision_draw,
-                        );
-                    if p.age >= p.lifetime {
-                        return false;
-                    }
-                    let normal = hit.normal1.normalize_or_zero();
-                    let inward = velocity.dot(normal).min(0.);
-                    let bounced = (velocity - normal * inward)
-                        * (1.
-                            - particle_curve(
-                                &r.curves["CollisionModule.m_Dampen"],
-                                t,
-                                p.collision_draw,
-                            ))
-                        - normal
-                            * inward
-                            * particle_curve(
-                                &r.curves["CollisionModule.m_Bounce"],
-                                t,
-                                p.collision_draw,
-                            );
-                    let speed = bounced.length();
-                    if speed < r.scalars["CollisionModule.minKillSpeed"]
-                        || speed > r.scalars["CollisionModule.maxKillSpeed"]
-                    {
-                        return false;
-                    }
-                    position += travel * hit.time_of_impact + normal * 0.0001;
-                    // Preserve the response when lifetime velocity is applied next frame.
-                    p.velocity = if speed_modifier > 0. {
-                        bounced / speed_modifier - module_velocity
-                    } else {
-                        Vector::ZERO
-                    };
-                    collided = true;
+            if let Some(c) = &e.collision
+                && let Some((_, hit)) = queries.cast_shape(
+                    &Pose::from_parts(position, Rotation::IDENTITY),
+                    travel,
+                    &Ball::new(size_at(p, t) * 0.5 * c.radius_scale),
+                    ShapeCastOptions {
+                        max_time_of_impact: 1.,
+                        stop_at_penetration: true,
+                        ..Default::default()
+                    },
+                )
+            {
+                // Match the existing fluid swept-sphere route for initial penetration.
+                if hit.time_of_impact <= 0. {
+                    return false;
                 }
+                p.age += p.lifetime * particle_curve(&c.energy_loss, t, p.collision_draw);
+                if p.age >= p.lifetime {
+                    return false;
+                }
+                let normal = hit.normal1.normalize_or_zero();
+                let inward = velocity.dot(normal).min(0.);
+                let bounced = (velocity - normal * inward)
+                    * (1. - particle_curve(&c.dampen, t, p.collision_draw))
+                    - normal * inward * particle_curve(&c.bounce, t, p.collision_draw);
+                let speed = bounced.length();
+                if speed < c.min_kill_speed || speed > c.max_kill_speed {
+                    return false;
+                }
+                position += travel * hit.time_of_impact + normal * 0.0001;
+                // Preserve the response when lifetime velocity is applied next frame.
+                p.velocity = if speed_modifier > 0. {
+                    bounced / speed_modifier - module_velocity
+                } else {
+                    Vector::ZERO
+                };
+                collided = true;
             }
             if collided {
-                p.absolute_position = std::array::from_fn(|i| self.origin[i] + position[i] as f64);
+                p.absolute_position = std::array::from_fn(|i| origin[i] + position[i] as f64);
             } else {
                 for i in 0..3 {
                     p.absolute_position[i] += travel[i] as f64;
@@ -464,13 +537,10 @@ impl ParticleState {
             }
             p.rotation += p.rotation_speed * dt;
             let t = p.age / p.lifetime;
-            p.size = p.start_size
-                * r.curves
-                    .get("SizeModule.curve")
-                    .map_or(1., |c| particle_curve(c, t, p.size_draw));
-            let c = r
-                .colors
-                .get("ColorModule.gradient")
+            p.size = size_at(p, t);
+            let c = e
+                .color
+                .as_ref()
                 .map_or([1.; 4], |c| particle_color(c, t, p.size_draw));
             p.color = std::array::from_fn(|i| p.start_color[i] * c[i]);
             true
@@ -500,10 +570,14 @@ impl TextureSheet {
         })
     }
     pub fn frame(&self, p: &ParticleOutput) -> u32 {
-        let t = p.age / p.lifetime;
+        self.frame_at(p.age, p.lifetime, p.uv_draw)
+    }
+    /// Sheet frame of a particle with this age, lifetime and UV random draw.
+    pub fn frame_at(&self, age: f32, lifetime: f32, uv_draw: f32) -> u32 {
+        let t = age / lifetime;
         sheet_frame(
-            particle_curve(&self.frame_over_time, t, p.uv_draw),
-            particle_curve(&self.start_frame, t, p.uv_draw),
+            particle_curve(&self.frame_over_time, t, uv_draw),
+            particle_curve(&self.start_frame, t, uv_draw),
             self.cycles,
             self.tiles[0] * self.tiles[1],
         )

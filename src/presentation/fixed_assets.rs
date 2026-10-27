@@ -9,13 +9,17 @@ use super::{
         selected::{Reservation, SelectedMetadata, retained_plan_bytes},
     },
 };
+use crate::ownership::PresentationLedger;
 use crate::{
+    ownership::{
+        fixed::{FixedAllocation, FixedImageOwnership},
+        upload_receipt::UploadReceipt,
+    },
     reference::{
         AssetId, AssetUsage, ReferenceError, ReferenceManifest,
-        fixed_reservation::{FixedAllocation, FixedImageOwnership, FixedReservation},
-        prototype_plan::PrototypePlan,
+        fixed_reservation::FixedReservation, prototype_plan::PrototypePlan,
     },
-    world::{WorldStream, upload_receipt::UploadReceipt},
+    world::RendererWorld,
 };
 use bevy::{
     asset::{LoadState, RenderAssetUsages},
@@ -126,6 +130,7 @@ impl SourceFixedAssets {
                         | AssetUsage::SkyPrototype
                         | AssetUsage::ItemPrototype
                         | AssetUsage::PlayerPrototype
+                        | AssetUsage::RagdollPrototype
                         | AssetUsage::SkyTraffic
                 )
             })
@@ -300,12 +305,6 @@ impl SourceFixedAssets {
         let a = self.allocation().expect("admitted fixed ownership totals");
         (a.cpu, a.gpu)
     }
-    pub(crate) fn allocation_for_overlap(
-        &self,
-        metrics: &mut crate::world::WorldMetrics,
-    ) -> Result<(), ReferenceError> {
-        self.allocation()?.exclude_shared(metrics)
-    }
     fn allocation(&self) -> Result<FixedAllocation, ReferenceError> {
         let mut a = FixedAllocation {
             cpu: self.control,
@@ -412,25 +411,24 @@ impl SourceFixedAssets {
     }
     pub(crate) fn account(
         &self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         snapshot: &mut FixedAllocation,
     ) -> Result<(), ReferenceError> {
         let next = self.allocation()?;
-        stream.set_presentation_allocation(
-            next.replace(*snapshot, stream.presentation_allocation())?,
-        )?;
+        ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
         *snapshot = next;
         Ok(())
     }
     pub(crate) fn prepare_metadata(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut PresentationLedger,
         snapshot: &mut FixedAllocation,
         reference: &ReferenceManifest,
         server: &AssetServer,
         plans: &Assets<SourcePlan>,
     ) -> Result<(), ReferenceError> {
-        self.account(stream, snapshot)?;
+        self.account(ledger, snapshot)?;
         for index in 0..self.roots.len() {
             if let RootState::PlanLoading(handle) = &self.roots[index].state {
                 match preflight::poll_plan(server, plans, handle) {
@@ -448,7 +446,7 @@ impl SourceFixedAssets {
                 }
             }
         }
-        self.account(stream, snapshot)?;
+        self.account(ledger, snapshot)?;
         if self.failure.is_some() || stream.frame().failure.is_some() {
             return Ok(());
         }
@@ -462,13 +460,7 @@ impl SourceFixedAssets {
                 .find(|a| a.id == self.roots[index].asset)
                 .unwrap();
             let bound = Reservation::metadata(&reference.file_catalog, &asset.path)?;
-            if !crate::reference::fixed_reservation::fixed_room(
-                stream,
-                bound.cpu,
-                0,
-                bound.staging,
-                true,
-            )? {
+            if !crate::ownership::fixed::fixed_room(ledger, bound.cpu, 0, bound.staging, true)? {
                 break;
             }
             self.roots[index].cpu = bound.cpu;
@@ -477,9 +469,7 @@ impl SourceFixedAssets {
             next.jobs = checked_sum(&[next.jobs, 1])?;
             next.pending = checked_sum(&[next.pending, 1])?;
             next.staging = checked_sum(&[next.staging, bound.staging])?;
-            stream.set_presentation_allocation(
-                next.replace(*snapshot, stream.presentation_allocation())?,
-            )?;
+            ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
             *snapshot = next;
             self.roots[index].state = RootState::PlanLoading(preflight::load_plan(
                 server,
@@ -493,7 +483,7 @@ impl SourceFixedAssets {
     }
     pub(crate) fn poll(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         snapshot: &mut FixedAllocation,
         reference: &ReferenceManifest,
         server: &AssetServer,
@@ -798,7 +788,7 @@ impl SourceFixedAssets {
             }
             self.dither_done = self.dither_receipt.completed();
         }
-        self.account(stream, snapshot)?;
+        self.account(ledger, snapshot)?;
         if let Some(error) = &self.failure {
             lighting.state = RenderingState::Failed(error.clone());
             return Err(ReferenceError(error.clone()));
@@ -808,7 +798,7 @@ impl SourceFixedAssets {
     /// The caller owns the descriptor-to-payload decision. Task 2B adds its combined check here.
     pub(crate) fn admit_payloads(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         snapshot: &mut FixedAllocation,
         reference: &ReferenceManifest,
         server: &AssetServer,
@@ -830,8 +820,8 @@ impl SourceFixedAssets {
             let root = &self.roots[index];
             let plan = root.state.plan().unwrap();
             let bound = FixedReservation::mesh(plan, retained_plan_bytes(plan))?;
-            if !crate::reference::fixed_reservation::fixed_room(
-                stream,
+            if !crate::ownership::fixed::fixed_room(
+                ledger,
                 bound.cpu.saturating_sub(root.cpu),
                 bound.gpu,
                 bound.staging,
@@ -852,9 +842,7 @@ impl SourceFixedAssets {
             next.jobs = checked_sum(&[next.jobs, 1])?;
             next.pending = checked_sum(&[next.pending, 1])?;
             next.staging = checked_sum(&[next.staging, bound.staging])?;
-            stream.set_presentation_allocation(
-                next.replace(*snapshot, stream.presentation_allocation())?,
-            )?;
+            ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
             *snapshot = next;
             self.roots[index].meshes.reserve_exact(count);
             let handle = server
@@ -870,16 +858,14 @@ impl SourceFixedAssets {
             if self.shaders[index].handle.is_none() {
                 let bound = shader_input(SHADERS[index])?;
                 let (cpu, staging) = (bound.cpu, bound.staging);
-                if crate::reference::fixed_reservation::fixed_room(stream, cpu, 0, staging, true)? {
+                if crate::ownership::fixed::fixed_room(ledger, cpu, 0, staging, true)? {
                     self.shaders[index].cpu = cpu;
                     self.shaders[index].staging = staging;
                     let mut next = self.allocation()?;
                     next.jobs = checked_sum(&[next.jobs, 1])?;
                     next.pending = checked_sum(&[next.pending, 1])?;
                     next.staging = checked_sum(&[next.staging, staging])?;
-                    stream.set_presentation_allocation(
-                        next.replace(*snapshot, stream.presentation_allocation())?,
-                    )?;
+                    ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
                     *snapshot = next;
                     self.shaders[index].handle = Some(server.load(SHADERS[index]));
                 }
@@ -941,8 +927,8 @@ impl SourceFixedAssets {
             }
             let old = row.ownership.bytes();
             let next = ownership.bytes();
-            if !crate::reference::fixed_reservation::fixed_room(
-                stream,
+            if !crate::ownership::fixed::fixed_room(
+                ledger,
                 next.0.saturating_sub(old.0),
                 next.1.saturating_sub(old.1),
                 ROW_SCRATCH,
@@ -951,7 +937,7 @@ impl SourceFixedAssets {
                 continue;
             }
             self.rows[index].ownership = ownership;
-            self.account(stream, snapshot)?;
+            self.account(ledger, snapshot)?;
             if first {
                 self.rows[index].pixels = vec![0; record.validate_chunks()?];
             }
@@ -983,15 +969,15 @@ impl SourceFixedAssets {
                 &reference.render_lighting.sky.cloud_mesh,
                 &reference.file_catalog,
             )?;
-            if crate::reference::fixed_reservation::fixed_room(
-                stream,
+            if crate::ownership::fixed::fixed_room(
+                ledger,
                 bound.cpu,
                 bound.gpu,
                 bound.staging,
                 true,
             )? {
                 self.cloud_bound = Some(bound);
-                self.account(stream, snapshot)?;
+                self.account(ledger, snapshot)?;
                 let handle = server
                     .load_builder()
                     .with_settings(super::reference::source_gltf_settings)
@@ -1011,16 +997,14 @@ impl SourceFixedAssets {
             if reference.file_catalog.file(path)?.bytes != 256 {
                 return Err(ReferenceError("Fixed dither receipt size".into()));
             }
-            if crate::reference::fixed_reservation::fixed_room(stream, 1536, 256, 512, true)? {
+            if crate::ownership::fixed::fixed_room(ledger, 1536, 256, 512, true)? {
                 let mut next = self.allocation()?;
                 next.cpu = checked_sum(&[next.cpu, 1536])?;
                 next.gpu = checked_sum(&[next.gpu, 256])?;
                 next.jobs = checked_sum(&[next.jobs, 1])?;
                 next.pending = checked_sum(&[next.pending, 1])?;
                 next.staging = checked_sum(&[next.staging, 512])?;
-                stream.set_presentation_allocation(
-                    next.replace(*snapshot, stream.presentation_allocation())?,
-                )?;
+                ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
                 *snapshot = next;
                 let handle = server.load(path.clone());
                 assets.dither_bytes = handle.clone();
@@ -1033,14 +1017,12 @@ impl SourceFixedAssets {
             let bytes = (0..10)
                 .map(|m| layers * (512usize >> m).pow(2) * 4)
                 .sum::<usize>();
-            if crate::reference::fixed_reservation::fixed_room(stream, 2 * bytes, bytes, 0, true)? {
+            if crate::ownership::fixed::fixed_room(ledger, 2 * bytes, bytes, 0, true)? {
                 let mut next = self.allocation()?;
                 next.cpu = checked_sum(&[next.cpu, 2 * bytes])?;
                 next.gpu = checked_sum(&[next.gpu, bytes])?;
                 next.pending = checked_sum(&[next.pending, 1])?;
-                stream.set_presentation_allocation(
-                    next.replace(*snapshot, stream.presentation_allocation())?,
-                )?;
+                ledger.set_allocation(next.replace(*snapshot, ledger.allocation())?)?;
                 *snapshot = next;
                 let handle = |id| {
                     lighting
@@ -1065,7 +1047,7 @@ impl SourceFixedAssets {
                 self.cookie_bytes = bytes;
             }
         }
-        self.account(stream, snapshot)?;
+        self.account(ledger, snapshot)?;
         Ok(true)
     }
 }

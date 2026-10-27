@@ -162,6 +162,46 @@ Run the X01a test pass (player body) in the same run:
 5. ShadowsOnly renderers now cast (#138). Compare F3 shadow draw counts and frame time before and after, near the garage and on the road.
 6. Check the F3 cost of the body.
 
+Run the X01b test pass (hand and foot reach) in the same run:
+
+1. Re-export, then rebuild (X01b added car reach targets, gear stick targets, usable hand rules, `doubleHand`, point range and the player brush).
+2. Drive the Lada. Use the horn, lights, ignition (tap and hold), handbrake and gear stick: a hand moves to each. Press gas, brake and clutch: the feet move to the pedals.
+3. Use doors and handles. Push a car on foot and from a seat.
+4. Carry a two-hand item.
+5. Hold Left Alt: the hand points at the aimed surface. Rub dirt off a car and wash a wash trigger. Hold Left Alt at the sky: the hand waves.
+
+Run the X01c test pass (player ragdoll) in the same run:
+
+1. Re-export, then rebuild (X01c added the ragdoll asset and the DeadV profile).
+2. Die on foot and in a moving car. The body falls with joint limits and carries the car speed.
+3. The camera stays in the head. Mouse look fades out.
+4. The death screen effect fades in over 14 s, then the menu opens. Read the console for DeadV parameters the port ignores.
+5. Load a save: no ragdoll is left.
+6. Press F3 during death. Compare with the frame rate rule.
+
+Run the X01d test pass (wearables, outfit, female body, appearance editor) in the same run:
+
+1. Re-export, then rebuild. Old exports and saves do not load (X01d added the worn slot and the `clothing.preview` record). The preview export is written without the assets: if it fails, read its error.
+2. Put on and take off each wearable type (glasses, hat, cap, helmet, mask) and the cigarette with Tab and X. The cigarette comes off first.
+3. Worn items are hidden in first person but cast shadows.
+4. Save and load with worn items: they stay worn. Die: each worn item drops.
+5. Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once. Back and Escape save. Reload the page: the outfit stays.
+6. Set Male and Female with custom colors and disabled parts. Check them in game (female pose follows the male joints by name), in the shadow and on the ragdoll. Check the submesh colors of each segment.
+7. Set the model modes Off, Shadow and Visible. Shadow hides the body but keeps its shadow.
+8. Check the world view and its shadows do not draw the preview figure. Check F3 with the screen open.
+
+Run the X01e test pass (sunglasses) in the same run:
+
+1. Put on glasses with each lens color. Each lens tints the view like the original.
+2. The dark lens (profile 0) dims the view by 2 stops.
+3. Bright highlights look untonemapped, like the original.
+4. Lenses with the flare flag hide the sun flare. Other lenses keep it.
+5. Turn off "Sunglasses effects" in the display controls: the tint goes away. The flare rule stays. Reload the page: the setting stays.
+6. Take the glasses off: the tint clears. Die with them on: the tint clears and the death effect fades in.
+7. Save and load with the glasses worn: the tint comes back.
+8. If possible, compare the NoTonemap LUT kernel with the game DXBC (`KGenLut3D_NoTonemap`). The port follows the open PPv2 `Lut3DBaker.compute`.
+9. The worn lens comes from the item selector choices, matched to lens nodes by source id (X01e PR 1). Check that the tint matches the visible lens color. Read the console for a warning about more than one active lens.
+
 Run the X02 part 1 test pass (damage and breaking) in the same run:
 
 1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
@@ -169,6 +209,38 @@ Run the X02 part 1 test pass (damage and breaking) in the same run:
 3. Drop and throw beer bottles, the vase and a box. Soft drops keep them whole. Hard hits break them with pieces and a break sound. The pieces scatter and fade.
 4. Hit a building lamp with the shovel. It goes dark and stays dark when switched. Save and load: it stays broken.
 5. Check F3 near a box pile and while pieces fall. Compare with the frame rate rule.
+
+Run the X02 part 2 test pass (melee weapons) in the same run:
+
+1. Re-export, then rebuild. The export prints the melee weapon list and the new acquisition hash; paste the hash into `CONTRACT_SHA256`. Old saves do not load (save schema 28).
+2. Run `cargo test --lib melee -- --ignored`. Fix the katana and crowbar prototype names in the tests if they are not found.
+3. Swing the katana, crowbar, fly swatter and leg with each attack key. Each plays its own animation and sounds and breaks a bottle.
+4. Hit a buried item with the crowbar: it does not dig. The shovel still digs.
+5. Hit a sausage with the shovel or a hurtFood weapon: it splits into pieces. Save and load: the pieces keep their bites. A dropped turd also saves and reloads now.
+6. Check the hands follow the weapon grips during attacks.
+
+Run the X02 part 3 test pass (guns) in the same run:
+
+1. Re-export, then rebuild. The export prints the gun list. Old saves do not load (save schema 30).
+2. Run `cargo test --lib guns -- --ignored`. Fix the gun prototype names and the equip helper if guns are not found.
+3. Fire each gun: revolver, BB gun, SMG and the three shotguns. Check the shot sound, muzzle flash, recoil, tracer, sand or spark particles and hit sounds. A shot breaks a bottle. Shotgun pellets push a crowbar.
+4. Check the HUD crosshair per gun, and its empty color.
+5. Reload and unload with R and E from aimed or carried ammo. Round totals stay the same. The left hand moves to the gun.
+6. Shotguns and BB gun: hold R and move the mouse to break the barrel. Closed barrels fire; open barrels reload. The BB gun gains power.
+7. Revolver: hold R and scroll to turn the cylinder. Empty chambers click. Bullets show in full chambers.
+8. SMG: load from a magazine item. No magazine: no fire. Save and load keeps ammo, barrel, chambers, power and magazine.
+9. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
+10. Check F3 while firing the SMG with many holes. Compare with the frame rate rule.
+
+Run the X02 part 4 test pass (explosions) in the same run:
+
+1. Re-export, then rebuild. The export prints the explosion record. Old saves do not load (save schema 31).
+2. Run `cargo test --lib explosion -- --ignored`. Fix the tank picks in the tests if no explosive tank is found.
+3. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
+4. Hit an explosive tank with a melee weapon. It explodes as with a shot.
+5. Shoot a tank that does not explode with a shotgun. Holes leak fluid when they face down. Check the fluid amount falls.
+6. Stand near a blast: sound goes dull, an ear ring plays from the blast side, and both fade. Save and load keeps the ringing. Stand close: the player dies with the ragdoll.
+7. Check F3 during a chain of blasts. Compare with the frame rate rule.
 
 Run the X03a test pass (sky traffic) in the same run:
 
@@ -181,12 +253,12 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Hand and foot reach (car controls, usables, item grips, pointing), ragdoll, wearables, sunglasses, appearance editor, female body. [D02, D03, D05, D06, M10] |
-| X02 | Weapons and damage | XL | Guns, ammo, other melee weapons (katana, crowbar, dumbbell), explosions (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
-| X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
-| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
+| X02 | Weapons and damage | L | Starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, C06] |
+| X03 | Creatures | XL | AI senses and movement, rabbits, monsters (attacks hurt the player), vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
+| X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
+| X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. [B23] |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]

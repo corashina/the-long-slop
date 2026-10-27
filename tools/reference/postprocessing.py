@@ -131,37 +131,80 @@ def recover_camera_stack(source):
     return result
 
 
-def recover_glasses_profiles(source,manifest,output):
+def profile_effects(source,manifest,profile,output,kinds=None):
+    """Effects of one PostProcessProfile with every serialized parameter. `kinds` limits the effect classes."""
+    import re
     from .source import source_id,key
     from .lighting import texture
     from .particles import curve
     source.lighting_textures=getattr(source,'lighting_textures',{(t['source']['file'],t['source']['path_id']):t for t in manifest['lighting']['textures']})
+    effects=[]
+    for pointer in source.read(profile)['settings']:
+        effect=source.resolve(profile,pointer);data=source.read(effect);name=source.class_name(effect)
+        if kinds is not None and name not in kinds:raise ValueError(f'Unknown required profile effect: {name}')
+        parameters={}
+        for field,p in data.items():
+            if not isinstance(p,dict) or 'overrideState' not in p:continue
+            value=p['value'];v={'override_state':bool(p['overrideState'])}
+            if isinstance(value,dict) and 'm_PathID' in value:
+                target=source.resolve(effect,value)
+                v.update(value=source_id(target) if target else None,default_state=p['defaultState'],texture=None)
+                if target:
+                    if output is None:
+                        v['texture']=source.lighting_textures[key(target)]['id']
+                    else:v['texture']=texture(source,target,output)
+            elif isinstance(value,dict) and 'curve' in value:
+                c=curve({'minMaxState':0,'minScalar':0.,'scalar':1.,'minCurve':value['curve'],'maxCurve':value['curve']})['max_curve']
+                v['value']={'curve':c,'cached_data':value['cachedData'],'loop':bool(value['m_Loop']),'range':value['m_Range'],'zero_value':value['m_ZeroValue']}
+            elif isinstance(value,dict):v['value']=[value[c] for c in ('rgba' if 'r' in value else 'xyzw') if c in value]
+            else:v['value']=bool(value) if field=='enabled' else value
+            parameters[field]=v
+        effects.append({'kind':re.sub(r'(?<!^)(?=[A-Z])','_',name).lower(),'source':source_id(effect),'active':bool(data['active']),'parameters':parameters})
+    return effects
+
+
+def recover_glasses_profiles(source,manifest,output):
+    from .source import source_id
     profiles=[]
     for pid in range(130128,130134):
-        reader=source.get('sharedassets1.assets',pid);effects=[]
-        for pointer in source.read(reader)['settings']:
-            effect=source.resolve(reader,pointer);data=source.read(effect)
-            if source.class_name(effect)!='ColorGrading':raise ValueError('Unknown required glasses effect')
-            parameters={}
-            for name,p in data.items():
-                if not isinstance(p,dict) or 'overrideState' not in p:continue
-                value=p['value'];v={'override_state':bool(p['overrideState'])}
-                if isinstance(value,dict) and 'm_PathID' in value:
-                    target=source.resolve(effect,value)
-                    v.update(value=source_id(target) if target else None,default_state=p['defaultState'],texture=None)
-                    if target:
-                        if output is None:
-                            v['texture']=source.lighting_textures[key(target)]['id']
-                        else:v['texture']=texture(source,target,output)
-                elif isinstance(value,dict) and 'curve' in value:
-                    c=curve({'minMaxState':0,'minScalar':0.,'scalar':1.,'minCurve':value['curve'],'maxCurve':value['curve']})['max_curve']
-                    v['value']={'curve':c,'cached_data':value['cachedData'],'loop':bool(value['m_Loop']),'range':value['m_Range'],'zero_value':value['m_ZeroValue']}
-                elif isinstance(value,dict):v['value']=[value[c] for c in ('rgba' if 'r' in value else 'xyzw')]
-                else:v['value']=bool(value) if name=='enabled' else value
-                parameters[name]=v
-            effects.append({'kind':'color_grading','source':source_id(effect),'active':bool(data['active']),'parameters':parameters})
-        profiles.append({'source':source_id(reader),'effects':effects})
+        reader=source.get('sharedassets1.assets',pid)
+        profiles.append({'source':source_id(reader),'effects':profile_effects(source,manifest,reader,output,{'ColorGrading'})})
     return profiles
+
+
+# fpscontroller.DeadV. mainscript.Died enables it; Update sets weight = InverseLerp(0, 14, t - deathTime).
+MAIN_VOLUME_MASK = 2097408
+
+
+def recover_dead_profile(source,manifest,output):
+    from .source import source_id
+    from .survival import managed_evidence
+    player=source.get('level1',80125)
+    volume=source.resolve(player,source.read(player)['DeadV'])
+    if volume is None or volume.type.name!='MonoBehaviour' or source.class_name(volume)!='PostProcessVolume':raise ValueError('Missing DeadV volume')
+    d=source.read(volume)
+    profile=source.resolve(volume,d['sharedProfile'])
+    if profile is None:raise ValueError('Missing DeadV profile')
+    return {'source':source_id(volume),'enabled':bool(d['m_Enabled']),'global':bool(d['isGlobal']),
+        'blend_distance':d['blendDistance'],'weight':d['weight'],'priority':d['priority'],
+        'layer':source.read(source.resolve(volume,d['m_GameObject']))['m_Layer'],
+        'profile':source_id(profile),'effects':profile_effects(source,manifest,profile,output),
+        'evidence':managed_evidence(source,['player.DeadV.enabled = true;','player.DeadV.weight = num;',
+            'float num = Mathf.InverseLerp(0f, 14f, Time.time - deathTime);','player.deathSens = Mathf.Lerp(0.8f, 0f, num);'])}
+
+
+def validate_dead_profile(p,manifest):
+    from .survival import finite_record
+    finite_record(p)
+    if p['source']['file']!='level1' or not p['global'] or not 0<=p['weight']<=1 or not 0<=p['layer']<32 or not MAIN_VOLUME_MASK>>p['layer']&1:
+        raise ValueError('DeadV volume')
+    if not p['effects'] or len({(e['source']['file'],e['source']['path_id']) for e in p['effects']})!=len(p['effects']):raise ValueError('DeadV effects')
+    for e in p['effects']:
+        if not e['kind'] or not e['kind'].replace('_','').isalnum() or 'enabled' not in e['parameters']:raise ValueError('DeadV effect')
+        for v in e['parameters'].values():
+            if type(v['override_state']) is not bool:raise ValueError('DeadV parameter')
+            if 'texture' in v and v['texture'] is not None and not any(t['id']==v['texture'] and t['source']==v['value'] for t in manifest['lighting']['textures']):
+                raise ValueError('DeadV texture dependency')
 
 
 def validate_glasses_profiles(profiles,manifest):

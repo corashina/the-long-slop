@@ -115,7 +115,7 @@ def validate_runtime_paths(manifest):
         raise ValueError('Missing required source world dependency')
     from .item_prototypes import SELECTED
     from .sky import PREFABS
-    expected = {f'reference/{name}.gltf' for name in ('home','items','road_lamp','sky','food','player',*(p[3] for p in SELECTED),*(p[0] for p in PREFABS))}
+    expected = {f'reference/{name}.gltf' for name in ('home','items','road_lamp','sky','food','player','ragdoll',*(p[3] for p in SELECTED),*(p[0] for p in PREFABS))}
     prototype_ids={p['asset'] for p in world['prototypes']}
     material_ids={p['asset'] for p in world['painting_materials']}
     expected.update(a['path'] for a in manifest['assets'] if a['id'] in material_ids and a['usage']=='world_material')
@@ -305,6 +305,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     weather=recover_weather(source,output)
     roots['player']=[source.get('level1',39843)]
     source.lighting_prototype_roots.add(('level1',39843))
+    from .ragdoll import prepare_ragdoll
+    prepare_ragdoll(source, roots)
     from .sky import prepare_sky, recover_sky, recover_flyer, validate_sky
     prepare_sky(source, roots)
     from .world import prepare_home_cable
@@ -360,7 +362,13 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .computer import recover_computer, validate_computer
     manifest['computer'] = recover_computer(source, manifest)
     from .melee import recover_melee, validate_melee
-    manifest['melee'] = recover_melee(source, output)
+    manifest['melee'] = recover_melee(source, manifest, output)
+    from .guns import recover_guns, validate_guns
+    # Before audio and UI: gun clips join source.item_clips, crosshair icons join the UI sprites.
+    manifest['guns'] = recover_guns(source, manifest, output)
+    from .explosions import recover_explosions, validate_explosions
+    # Before audio: explosion and ear ring clips join source.item_clips.
+    manifest['explosions'] = recover_explosions(source, manifest, output)
     from .breakables import recover_breakables, recover_gib_constants
     # Before audio: breakable clips join source.item_clips.
     manifest['breakables'] = recover_breakables(source, manifest)
@@ -373,7 +381,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     resources={entry['file'] for entry in manifest['assets'][0]['dependencies']}
     manifest['assets'][0]['dependencies'].extend({'file':r['path'],'sha256':r['sha256']} for r in runtime_resources(manifest) if r['path'] not in resources)
     manifest['ui']=export_ui(source,output,library)
-    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith(('item_','sky_')) and name!='player'},manifest,library,output)
+    manifest['audio']=recover_audio(source,{name:readers for name,readers in roots.items() if not name.startswith(('item_','sky_')) and name not in ('player','ragdoll')},manifest,library,output)
     bind_condition_audio(manifest['conditions'],manifest['audio'])
     from .acquisition import recover_acquisition, validate_acquisition
     manifest['acquisition'] = recover_acquisition(source, manifest)
@@ -383,6 +391,8 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_small_items(manifest['small_items'], manifest)
     validate_computer(manifest['computer'], manifest)
     validate_melee(manifest['melee'], manifest)
+    validate_guns(manifest['guns'], manifest)
+    validate_explosions(manifest['explosions'], manifest)
     validate_skid(manifest['skid'])
     validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())

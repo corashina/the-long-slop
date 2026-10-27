@@ -267,11 +267,11 @@ class GltfExporter(GltfBuilder):
 
     def export(self, roots):
         gl = self.gl
-        player_asset = len(roots)==1 and key(roots[0])==('level1',39843)
+        from .clothing import player_renderers, character_renderers, character_outfit
+        outfit = character_outfit(self.source, roots[0]) if len(roots)==1 else None
+        player_asset = outfit is not None
         if player_asset:
-            from .clothing import player_renderers
-            selected_player_renderers={key(r) for r in player_renderers(self.source)}
-            outfit=self.source.get('level1',70544)
+            selected_player_renderers={key(r) for r in (player_renderers(self.source) if key(roots[0])==('level1',39843) else character_renderers(self.source,outfit))}
             self.material(self.source.resolve(outfit,self.source.read(outfit)['defInvisible']))
         self.output.parent.mkdir(parents=True, exist_ok=True)
         records = []
@@ -320,7 +320,7 @@ class GltfExporter(GltfBuilder):
                 from .collision import world_pose
                 from .lighting import IDENTITY
                 # Spawn code replaces the root position and rotation of these prefabs.
-                if identity in getattr(self.source, 'item_geometry_nodes', set()) or identity in getattr(self.source, 'sky_roots', set()):
+                if identity in getattr(self.source, 'item_geometry_nodes', set()) or identity in getattr(self.source, 'sky_roots', set()) or identity == getattr(self.source, 'ragdoll_root', None):
                     transform['translation'] = [0., 0., 0.]
                     transform['rotation'] = [0., 0., 0., 1.]
                 elif key(reader)==getattr(self.source,'lighting_pole_root',None) or key(reader) in getattr(self.source,'world_prototype_roots',set()):

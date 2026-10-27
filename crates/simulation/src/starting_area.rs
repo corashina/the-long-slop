@@ -21,15 +21,29 @@ use rapier3d::prelude::{
 };
 use std::collections::{BTreeMap, HashMap};
 
+mod audio_frame;
 mod body;
 pub mod cigarettes;
 mod computers;
+mod explosions;
+mod frame;
+mod frame_particles;
+mod guns;
+mod home_cable;
 pub mod hose;
+mod hud;
+mod ragdoll;
+mod reach;
 pub mod spawned;
+pub mod structure_frame;
 mod survival;
+pub mod wear;
 mod weather;
+mod world_step;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
+pub use survival::saved_food;
+pub use world_step::WorldInput;
 
 pub struct StartingArea {
     pub conditions: crate::conditions::ConditionStore,
@@ -39,6 +53,7 @@ pub struct StartingArea {
     pub inventory: crate::inventory::InventoryState,
     pub pose: crate::player::pose::PlayerPoseState,
     pub body: crate::player::body::BodyState,
+    pub ragdoll: crate::player::ragdoll::Ragdoll,
     inventory_offsets: [Option<(ItemId, VehiclePose)>; 4],
     inventory_clutch_conflict: bool,
     pub player: PlayerState,
@@ -47,9 +62,12 @@ pub struct StartingArea {
     pub render_poses: Vec<(BodyId, VehiclePose, VehiclePose)>,
     pub item_render_poses: Vec<(ItemId, VehiclePose, VehiclePose)>,
     pub spawned: spawned::SpawnedItems,
+    /// Runtime food copies: turds and cut pieces.
+    pub foods: Vec<ItemId>,
     /// gibscript and scaleDestroyScript of spawned gibs.
     pub gibs: crate::damage::gibs::Gibs,
     pub cigarettes: cigarettes::CigaretteRuntime,
+    pub wear: wear::WearRuntime,
     portable_mass: Vec<(RigidBodyHandle, f32, Vec<ItemId>, f32)>,
 }
 
@@ -267,6 +285,7 @@ impl StartingArea {
             }),
             pose: crate::player::pose::PlayerPoseState::new(reference)?,
             body: crate::player::body::BodyState::new(reference)?,
+            ragdoll: crate::player::ragdoll::Ragdoll::new(reference)?,
             bodies,
             items,
             interaction,
@@ -276,8 +295,10 @@ impl StartingArea {
             render_poses,
             item_render_poses,
             spawned: spawned::SpawnedItems::default(),
+            foods: Vec::new(),
             gibs: Default::default(),
             cigarettes: cigarettes::CigaretteRuntime::new(reference)?,
+            wear: wear::WearRuntime::new(reference)?,
             portable_mass,
         })
     }
@@ -285,6 +306,7 @@ impl StartingArea {
     pub fn sync_origin(&mut self, origin: [f64; 3]) {
         let shift = std::array::from_fn(|i| (origin[i] - self.origin[i]) as f32);
         self.player.rebase(shift);
+        self.ragdoll.rebase(shift);
         self.interaction.rebase(shift);
         self.items.rebase(shift);
         self.gibs.rebase(shift);
@@ -337,6 +359,7 @@ impl StartingArea {
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
+        self.interaction.decals.commit(physics, teleport);
         let stored = self.inventory.slots.map(|id| {
             id.and_then(|id| self.items.get(id))
                 .filter(|i| {
@@ -510,6 +533,8 @@ pub struct VehicleRuntime {
     pub pedals: crate::simulation::pedals::PedalState,
     /// Total pedal turn in degrees, modulo 360. The presentation poses the pedal nodes from it.
     pub pedal_angle: f32,
+    /// Source `carscript` drive leg poses of the pedals.
+    pub pedal_reach: crate::simulation::reach::PedalReach,
 }
 
 impl VehicleRuntime {
@@ -561,6 +586,7 @@ impl VehicleRuntime {
             balance: Default::default(),
             pedals: Default::default(),
             pedal_angle: 0.,
+            pedal_reach: Default::default(),
         }
     }
     /// The vehicle record of the car prototype.
@@ -690,6 +716,7 @@ mod save;
 pub struct GarageRuntime {
     pub driving_assists: crate::reference::DrivingAssists,
     pub survival: crate::survival::SurvivalState,
+    pub hearing: crate::hearing::HearingState,
     pub sleep: crate::sleep::SleepState,
     ambient: crate::audio::AmbientState,
     pub weather: crate::weather::WeatherState,
@@ -740,6 +767,24 @@ pub struct GarageRuntime {
     recovery_bodies: Vec<RigidBodyHandle>,
     /// Simulation time of the next under-map check.
     under_map_check: f64,
+    frame_poses: crate::boundary::FramePoses,
+    /// The first frame carries every condition; later frames carry changes.
+    conditions_sent: bool,
+    /// World session whose home cable is done.
+    home_cable_session: Option<u64>,
+    /// The computers whose screens the renderer has. None before the first frame.
+    screens_sent: Option<Vec<ItemId>>,
+    /// The computers of this frame, reused each frame.
+    screens_scratch: Vec<ItemId>,
+    /// World cars whose plate texts the renderer has.
+    plates_sent: Vec<crate::world::GeneratedId>,
+    /// The followed car the renderer last received.
+    followed_car: Option<(crate::world::GeneratedId, u32)>,
+    structure_views: structure_frame::StructureViews,
+    /// The feedback the renderer last received.
+    last_feedback: Option<hud::FeedbackStamp>,
+    /// The last rendered frame input.
+    render_input: crate::boundary::RenderInput,
 }
 
 impl GarageRuntime {
@@ -855,6 +900,7 @@ impl GarageRuntime {
             sky: crate::sky_traffic::SkyTraffic::new(&reference.sky, seed as u64),
             flyers: crate::flyers::Flyers::new(seed as u64),
             survival: crate::survival::SurvivalState::new(&reference.survival),
+            hearing: crate::hearing::HearingState::new(reference)?,
             sleep: crate::sleep::SleepState::new(&reference.sleep),
             sleep_camera: None,
             sleep_camera_allowed: true,
@@ -894,6 +940,16 @@ impl GarageRuntime {
             recovery_bodies: Vec::with_capacity(reference.items.len()),
             recovery_held_bodies: Vec::with_capacity(reference.items.len()),
             under_map_check: 0.,
+            frame_poses: Default::default(),
+            conditions_sent: false,
+            home_cable_session: None,
+            screens_sent: None,
+            screens_scratch: Vec::new(),
+            plates_sent: Vec::new(),
+            followed_car: None,
+            structure_views: Default::default(),
+            last_feedback: None,
+            render_input: Default::default(),
         };
         run.refresh_powertrains();
         Ok(run)
@@ -926,7 +982,7 @@ impl GarageRuntime {
                 .iter()
                 .zip(self.area.interaction.cleaning.signals())
             {
-                if let Some(voice) = b.voice {
+                if let Some(voice) = b.tool.voice {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
             }
@@ -941,6 +997,12 @@ impl GarageRuntime {
                 if let Some(voice) = b.voice {
                     audio.voice(voice, s.playing, s.voice_gain, 1.);
                 }
+            }
+            // The player brush signal comes last.
+            if let Some(voice) = reference.conditions.player_brush.voice
+                && let Some(s) = self.area.interaction.cleaning.signals().last()
+            {
+                audio.voice(voice, s.playing, s.voice_gain, 1.);
             }
         }
     }
@@ -1124,6 +1186,7 @@ impl GarageRuntime {
         self.area
             .interaction
             .finish_cancelled_input(&mut self.area.player, &mut self.physics);
+        self.step_wear(&mut input);
         self.step_cigarettes(reference, &mut input);
         for (key, vehicle) in &mut self.vehicles {
             vehicle.previous = self.persistent_world.absolute_vehicle_position(
@@ -1170,6 +1233,7 @@ impl GarageRuntime {
             input,
             aim,
             &mut self.area.player,
+            &mut self.area.body,
             &mut self.area.items,
             &mut self.physics,
             FIXED_DT,
@@ -1278,11 +1342,22 @@ impl GarageRuntime {
                         .find(|v| v.handbrake_lever == Some(lever))
                     {
                         vehicle.handbrake = !vehicle.handbrake;
+                        if let Some(key) = self.area.player.seat_vehicle().cloned()
+                            && self.area.player.driving()
+                            && self.vehicles[&key].handbrake_lever == Some(lever)
+                        {
+                            self.reach_seated_car(
+                                reference,
+                                &key,
+                                crate::simulation::reach::handbrake,
+                            );
+                        }
                     }
                 }
                 crate::interaction::mechanisms::ControlAction::CycleHeadlights(switch) => {
                     if let Some((key, record)) = use_light_switch(&mut self.vehicles, switch) {
                         self.car_switch_sound(reference, &key, record);
+                        self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
                     }
                 }
                 _ => {}
@@ -1320,9 +1395,13 @@ impl GarageRuntime {
                 .player
                 .scan_triggers(&self.physics, self.stream.trigger_roles());
         }
-        self.area
-            .player
-            .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        if self.area.ragdoll.active() {
+            self.follow_ragdoll();
+        } else {
+            self.area
+                .player
+                .step_movement(walking_input, context, &mut self.physics, FIXED_DT);
+        }
         self.apply_hazards(reference);
         self.area.sync_attachments(&mut self.physics, true);
         self.area
@@ -1375,12 +1454,17 @@ impl GarageRuntime {
             vehicle.cycle_headlights();
             let prototype = vehicle.prototype;
             self.car_switch_sound(reference, &key, prototype);
+            self.reach_seated_car(reference, &key, crate::simulation::reach::lights);
         }
         if (driving || self.area.player.driving2())
             && input.pressed & keys::SPACE != 0
-            && let Some(vehicle) = self.vehicle.as_ref().and_then(|k| self.vehicles.get_mut(k))
+            && let Some(key) = self.vehicle.clone()
+            && let Some(vehicle) = self.vehicles.get_mut(&key)
         {
             vehicle.handbrake = !vehicle.handbrake;
+            if driving {
+                self.reach_seated_car(reference, &key, crate::simulation::reach::handbrake);
+            }
         }
         self.refresh_powertrains();
         // Taking the map lets each car step borrow the runtime without allocation.
@@ -1476,7 +1560,7 @@ impl GarageRuntime {
         self.area.sync_inventory();
         self.area.sync_equipment(reference, &mut self.physics);
         self.step_body(reference);
-        self.sync_mouth();
+        self.area.sync_worn(&mut self.physics);
         self.area.items.sync_poses(&self.physics);
         self.break_targets(reference);
         self.area.commit_poses(&self.physics, false);
@@ -1814,6 +1898,20 @@ impl GarageRuntime {
         }
     }
 
+    /// Per rendered frame work: gauges and gear levers move by render time.
+    /// `fill_frame` advances the audio with the same input.
+    pub fn advance_render_frame(
+        &mut self,
+        reference: &ReferenceManifest,
+        input: crate::boundary::RenderInput,
+    ) {
+        self.render_input = input;
+        if self.started && !self.paused {
+            self.advance_instruments(reference, input.dt, false);
+            // Source `carscript.Update` eases the lever once per frame by scaled frame time.
+            self.advance_levers(reference, input.dt);
+        }
+    }
     /// Source `carscript.Update`: eases each car gear lever by render time `dt`.
     pub fn advance_levers(&mut self, reference: &ReferenceManifest, dt: f32) {
         for vehicle in self.vehicles.values_mut() {
@@ -2093,6 +2191,33 @@ impl GarageRuntime {
             lever.shift(&reference.driving.lever, last_gear, gear);
         }
         let record = world_vehicle(reference, vehicle.prototype);
+        let reach = &record.reach;
+        let frames = self.car_frames(reference, key, vehicle);
+        let body = &mut self.area.body;
+        if gear != last_gear
+            && driving
+            && let Some(m) = crate::simulation::reach::shift(
+                reach,
+                frames.gear_stick(),
+                drivetrain.automatic,
+                reference.driving.lever.seconds,
+            )
+        {
+            frames.send(body, m);
+        }
+        let drive = &record.drive_frames;
+        vehicle.pedal_reach.step(
+            reach,
+            [drive.left_leg.is_some(), drive.right_leg.is_some()],
+            crate::simulation::reach::Pedals {
+                throttle: drivetrain.throttle,
+                brake: drivetrain.brake,
+                clutch: drivetrain.clutch,
+            },
+            driving,
+            FIXED_DT,
+            |m| frames.send(body, m),
+        );
         // Source `carscript.ControlStuff`: pedals are off while the engine runs.
         let pedaling = driving
             && record.pedals.is_some()
@@ -2126,6 +2251,25 @@ impl GarageRuntime {
                 * 4.0)
                 .round() as u8
         });
+        if car_controls {
+            crate::simulation::reach::ignition(
+                reach,
+                frames.gear_stick(),
+                crate::simulation::reach::IgnitionReach {
+                    held: ignition_held,
+                    last_held: vehicle.ignition.held(),
+                    starting: vehicle.ignition.starter,
+                    hold: vehicle.ignition.hold_seconds(),
+                    delay: vehicle.starter_delay_seconds,
+                },
+                |m| frames.send(&mut self.area.body, m),
+            );
+            if input.held & keys::HORN != 0
+                && let Some(m) = crate::simulation::reach::horn(reach)
+            {
+                frames.send(&mut self.area.body, m);
+            }
+        }
         let was_ignition = vehicle.ignition.ignition;
         vehicle.ignition.step(
             IgnitionInput {

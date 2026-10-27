@@ -18,6 +18,10 @@ impl IgnitionState {
     pub fn held(&self) -> bool {
         self.last_held
     }
+    /// Source `startingValue`.
+    pub fn hold_seconds(&self) -> f32 {
+        self.hold_seconds
+    }
 
     pub fn step(
         &mut self,

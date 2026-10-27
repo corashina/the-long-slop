@@ -56,6 +56,10 @@ pub mod computer;
 pub use computer::*;
 pub mod melee;
 pub use melee::*;
+pub mod guns;
+pub use guns::*;
+pub mod explosions;
+pub use explosions::*;
 pub mod breakables;
 pub use breakables::*;
 pub mod wheel_effects;
@@ -95,7 +99,17 @@ pub const BUILD_ID: u32 = 11_140_890;
 macro_rules! id {
     ($name:ident, $inner:ty) => {
         #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Serialize,
+            Deserialize,
         )]
         #[serde(transparent)]
         pub struct $name(pub $inner);
@@ -129,7 +143,7 @@ pub struct SourceHash {
     pub sha256: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Transform {
     pub translation: [f32; 3],
@@ -149,6 +163,7 @@ pub enum AssetUsage {
     ItemPrototype,
     SkyTraffic,
     PlayerPrototype,
+    RagdollPrototype,
     StationPrototype,
 }
 
@@ -327,6 +342,14 @@ pub struct MechanismReference {
     pub reaction: EndpointReactionReference,
     pub slide: Option<SlideReference>,
     pub turn: Option<TurnReference>,
+    /// Source `usablescript.handTarget`: the using hand parent. When null, the slide door or the hit serves.
+    pub hand_target: Option<NodeId>,
+    /// Source `usablescript.rightHand`: the right hand uses it.
+    pub right_hand: bool,
+    /// Source `usablescript.leftHand`: the left hand uses it.
+    pub left_hand: bool,
+    /// Source `usablescript.notNearestHand`: the hand farther from the target uses it.
+    pub not_nearest_hand: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -480,6 +503,8 @@ pub struct PickupReference {
     pub right_hand_rotation: [f32; 4],
     pub right_hand_grip: Option<SourceId>,
     pub left_hand_grip: Option<SourceId>,
+    /// Source `pickupable.doubleHand`: both hands hold it, as when mass exceeds `onehandLimit`.
+    pub double_hand: bool,
     pub disable_when_stored: Option<SourceId>,
     pub keep_when_stored: Option<SourceId>,
     pub inventory_icon: Option<SourceId>,
@@ -529,7 +554,7 @@ pub struct FluidParticleReference {
     pub max_rate: f32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapVisualReference {
     pub open_nodes: Vec<NodeId>,
@@ -704,6 +729,12 @@ pub struct PlayerReference {
     pub look_sensitivity: [f32; 2],
     pub scroll_sensitivity: f32,
     pub camera_culling_mask: u32,
+    /// Source `fpscontroller.pointRange`: pointing ray length.
+    pub point_range: f32,
+    /// Source `fpscontroller.pointRange2`: pointing distance without a hit.
+    pub point_range2: f32,
+    /// Source `fpscontroller.pointingLayer` bits.
+    pub pointing_layer: u32,
 }
 
 /// Source WheelCollider values.
@@ -871,6 +902,8 @@ pub struct ReferenceManifest {
     pub small_items: SmallItemsReference,
     pub computer: ComputerRecord,
     pub melee: MeleeReference,
+    pub guns: GunsReference,
+    pub explosions: ExplosionsReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
     pub skid: SkidReference,
@@ -1522,6 +1555,7 @@ impl ReferenceManifest {
                     })
                     && node_ids.contains(&r.drag.node)
                     && node_ids.contains(&r.drag.node2)
+                    && r.hand_target.is_none_or(|n| node_ids.contains(&n))
                     && finite(&r.drag.axis)
                     && r.drag.axes2.iter().all(|a| finite(a)),
                 "mechanism binding",
@@ -1729,6 +1763,13 @@ impl ReferenceManifest {
                 && p.exit_capsule_radius > 0.0,
             "player parameters",
         )?;
+        require(
+            finite(&[p.point_range, p.point_range2])
+                && p.point_range > 0.0
+                && p.point_range2 >= 0.0
+                && p.pointing_layer != 0,
+            "player pointing",
+        )?;
         let bob = [
             p.walk_bob_speed,
             p.walk_bob_speed_rb,
@@ -1860,6 +1901,8 @@ impl ReferenceManifest {
         self.small_items.validate(self)?;
         self.computer.validate(self)?;
         self.melee.validate(self)?;
+        self.guns.validate(self)?;
+        self.explosions.validate(self)?;
         ids(
             self.breakables.iter().map(|b| &b.source),
             "breakable sources",

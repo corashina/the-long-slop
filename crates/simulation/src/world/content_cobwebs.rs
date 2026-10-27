@@ -279,11 +279,9 @@ impl WorldStream {
         }
     }
     /// Prototype nodes that washtriggerscript deactivated on this structure.
-    #[cfg(target_arch = "wasm32")]
     pub fn cobweb_hidden(&self, parent: &GeneratedId) -> &[usize] {
         self.cobwebs.hidden.get(parent).map_or(&[], Vec::as_slice)
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn cobweb_changes(&self) -> &[GeneratedId] {
         &self.cobwebs.changes
     }

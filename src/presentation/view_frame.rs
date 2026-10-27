@@ -1,4 +1,5 @@
 use super::lighting_scene::PROBE_COUNT;
+use simulation::boundary::StateBlock;
 // One main-world view snapshot for raster, culling, and shadow fitting.
 use super::surface_views::{PROBE_START, VIEW_COUNT, WORLD_VIEWS};
 use super::{
@@ -271,6 +272,7 @@ fn sync_probe_cameras(
 pub(crate) fn snapshot(
     mut commands: Commands,
     drive: Res<crate::app::Drive>,
+    sim: Res<super::sim_frame::SimFrameResource>,
     requests: Res<crate::app::save::SaveRequests>,
     graph: Res<super::readiness::RendererStateHandle>,
     assets: Option<Res<LightingAssets>>,
@@ -288,15 +290,15 @@ pub(crate) fn snapshot(
         super::reflection_preparation::Stage::Snapshot,
         &frame,
     );
-    frame.session = drive.runtime.stream.frame().request.session;
-    frame.selection_revision = drive.runtime.stream.required_content().selection_revision;
+    frame.session = sim.frame.state.session;
+    frame.selection_revision = sim.frame.state.selection_revision;
     frame.scale = scale.0;
     frame.scene = epoch.0;
     frame.probe_job = None;
     frame.views = [None; VIEW_COUNT];
     frame.sky_clip_from_world = None;
     frame.skybox_clip_from_world = None;
-    if drive.runtime.stream.frame().failure.is_some() {
+    if sim.frame.state.flags & StateBlock::WORLD_FAILED != 0 {
         graph
             .lock()
             .proof
@@ -382,27 +384,20 @@ pub(crate) fn snapshot(
             .fold(0, |mask, (index, enabled)| {
                 mask | (u32::from(*enabled) << index)
             }),
-        history_revision: drive.runtime.audio_motion_revision,
+        history_revision: sim.frame.state.motion_revision,
     };
     clock.preparation_ready |= graph.lock().proof.graph_ready(request);
     let warmup = !clock.preparation_ready;
     let job = probe_job;
-    let fov_degrees = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .fov_degrees;
+    let fov_degrees = sim.frame.state.fov_degrees;
     let snapshots = std::array::from_fn(|index| {
         if index >= PROBE_START && !prepare_probe_face(job, index - PROBE_START, warmup) {
             return None;
         }
         let (extent, world_from_view) = input[index]?;
         let (near, far, fov, mask, distance) = if index < WORLD_VIEWS {
-            let world = super::camera::world_camera_settings(
-                fov_degrees,
-                drive.runtime.distances.cam2_far_plane,
-            );
+            let world =
+                super::camera::world_camera_settings(fov_degrees, sim.frame.state.far_plane);
             (
                 world.near,
                 world.far,
@@ -445,12 +440,12 @@ pub(crate) fn snapshot(
         (gpu_projection(projection) * view, skybox_projection * view)
     });
     *frame = SourceViewFrame {
-        session: drive.runtime.stream.frame().request.session,
-        selection_revision: drive.runtime.stream.required_content().selection_revision,
+        session: sim.frame.state.session,
+        selection_revision: sim.frame.state.selection_revision,
         scale: scale.0,
         preparation_warmup: warmup,
         scene: epoch.0,
-        motion_revision: drive.runtime.audio_motion_revision,
+        motion_revision: sim.frame.state.motion_revision,
         probe_enabled: activation.enabled,
         probe_position: scene.probe_position,
         probe_checks: activation.checks,
@@ -469,7 +464,7 @@ pub(crate) fn snapshot(
         state.proof.snapshot_loading(
             frame.readiness_request().unwrap(),
             frame.frame,
-            drive.ready || drive.runtime.started || requests.pending(),
+            drive.ready || sim.frame.state.flags & StateBlock::STARTED != 0 || requests.pending(),
         )
     };
     if !decision.captures_allowed || decision.restart_scene {

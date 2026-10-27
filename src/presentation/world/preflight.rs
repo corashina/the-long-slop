@@ -22,18 +22,25 @@ pub fn checked_input_bytes(path: &str) -> Result<usize, ReferenceError> {
         .map_err(|e| ReferenceError(format!("World input size: {e:?}")))
 }
 pub fn configure_staging(
-    stream: &mut crate::world::WorldStream,
+    stream: &crate::world::RendererWorld,
+    ledger: &mut crate::ownership::PresentationLedger,
+    facts: &mut crate::world::RendererFacts,
     catalog: &FileCatalog,
 ) -> Result<(), ReferenceError> {
-    if stream.dependency_staging_configured() {
+    if stream.dependency_staging_configured() || facts.configures_staging() {
         return Ok(());
     }
     let browser =
         metadata_bytes().map_err(|e| ReferenceError(format!("Input metadata: {e:?}")))? as usize;
-    stream.configure_dependency_staging(
-        catalog.dependency_staging_reserve as usize,
-        browser + catalog.retained_bytes(),
-    )
+    let metadata = browser + catalog.retained_bytes();
+    facts.push(crate::world::RendererFact::ConfigureStaging {
+        reserve: catalog.dependency_staging_reserve as usize,
+        metadata,
+    });
+    // The renderer owns the input metadata.
+    let mut allocation = ledger.allocation();
+    allocation.prototype_cpu += metadata;
+    ledger.set_allocation(allocation)
 }
 #[derive(Asset, TypePath)]
 pub struct SourcePlan(pub std::sync::Arc<PrototypePlan>);

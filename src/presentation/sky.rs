@@ -1,10 +1,7 @@
 //! Source sky geometry and persistent GPU values.
+use super::sim_frame::SimFrameResource;
 use super::{lighting::SourceLighting, reference::ReferenceVisuals};
-use crate::{
-    app::{Drive, RuntimeReference},
-    lighting::source_linear,
-    reference::SourceId,
-};
+use crate::{app::RuntimeReference, lighting::source_linear, reference::SourceId};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::{
     self as bevy_ecs,
@@ -43,6 +40,8 @@ pub struct SkyState {
     pub spawned: bool,
     pub clouds_bound: [bool; 2],
     pub materials: Vec<Handle<SkyMaterial>>,
+    /// Source `mainscript.disableSunFlare`: the worn lens hides `sunFlare`.
+    pub hide_flare: bool,
 }
 impl SkyState {
     pub fn new(lighting: &crate::reference::LightingRecord) -> Self {
@@ -60,6 +59,7 @@ impl SkyState {
             spawned: false,
             clouds_bound: [false; 2],
             materials: Vec::with_capacity(8),
+            hide_flare: false,
         }
     }
     pub fn bound(&self) -> bool {
@@ -324,12 +324,15 @@ fn bind_sky(
                 additive: true,
                 order: 100000.,
             });
-            spawn_mesh(
+            let entity = spawn_mesh(
                 &mut commands,
                 meshes.add(flare_mesh(flare)),
                 material.clone(),
                 Transform::default(),
             );
+            commands
+                .entity(entity)
+                .insert((SunFlare, flare_visibility(source.sky.hide_flare)));
             source.sky.materials.push(material);
         }
         let asset = reference
@@ -438,17 +441,29 @@ fn spawn_mesh(
     mesh: Handle<Mesh>,
     material: Handle<SkyMaterial>,
     transform: Transform,
-) {
-    commands.spawn((
-        SkyMesh,
-        Mesh3d(mesh),
-        MeshMaterial3d(material),
-        transform,
-        bevy::light::NotShadowCaster,
-        bevy::camera::visibility::NoFrustumCulling,
-    ));
+) -> Entity {
+    commands
+        .spawn((
+            SkyMesh,
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            transform,
+            bevy::light::NotShadowCaster,
+            bevy::camera::visibility::NoFrustumCulling,
+        ))
+        .id()
 }
-fn source_pose(p: &crate::reference::Transform) -> Transform {
+/// A source `sunFlare` element.
+#[derive(Component)]
+pub struct SunFlare;
+fn flare_visibility(hide: bool) -> Visibility {
+    if hide {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    }
+}
+pub(super) fn source_pose(p: &crate::reference::Transform) -> Transform {
     Transform {
         translation: Vec3::from_array(p.translation),
         rotation: Quat::from_array(p.rotation),
@@ -543,12 +558,24 @@ fn quad_mesh(
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, c)
     .with_inserted_indices(Indices::U32(i))
 }
-pub(crate) fn sync_sky(drive: Res<Drive>, mut source: ResMut<SourceLighting>) {
-    let output = drive.runtime.lighting.cycle.output();
+pub(crate) fn sync_sky(
+    sim: Res<SimFrameResource>,
+    mut source: ResMut<SourceLighting>,
+    mut flares: Query<&mut Visibility, With<SunFlare>>,
+) {
+    let output = &sim.frame.lighting.cycle;
     let sky = &mut source.sky;
+    // Source `sunFlare.SetActive(!disableSunFlare)`. The sunglasses setting does not change it.
+    let hide_flare = sim.frame.state.glasses().is_some_and(|g| g.hide_flare);
+    if hide_flare != sky.hide_flare {
+        sky.hide_flare = hide_flare;
+        for mut visibility in &mut flares {
+            *visibility = flare_visibility(hide_flare);
+        }
+    }
     let [x, y, z] = output.directional_euler_degrees.map(f32::to_radians);
     let sun = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::Z;
-    let active = drive.runtime.lighting.cycle.elapsed_seconds();
+    let active = sim.frame.state.cycle_elapsed_seconds;
     let u = &mut sky.uniform;
     u.tint = Vec4::from_array(output.sky_tint.map(source_linear));
     u.ground = Vec4::from_array(output.ground_color.map(source_linear));

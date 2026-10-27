@@ -1,58 +1,67 @@
 use super::*;
 use crate::presentation::save::PreparedPresentation;
-use crate::save::fresh_permit::FreshSessionPermit;
-use crate::save::{CameraSave, SaveError, SaveSnapshot, SourceHash, SourceStamp};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::value::RawValue;
+use simulation::boundary::{CandidateCommand, Change, SaveCommand};
 
-#[derive(Resource)]
-pub struct SaveRequests {
-    source: SourceStamp,
-    pending: Option<PendingPreparation>,
-}
-enum PendingPreparation {
-    Fresh(FreshSessionPermit),
-    Replacement(Candidate),
+/// The save request that waits for the simulation or the renderer.
+enum Pending {
+    /// The simulation runs a prepare request.
+    Waiting { id: u32, kind: String },
+    /// A new game in the current runtime waits for the commit.
+    Fresh(u32),
+    /// The renderer prepares the scene of the simulation candidate offscreen.
+    Candidate(Box<Candidate>),
 }
 pub(crate) struct Candidate {
     id: u32,
-    runtime: GarageRuntime,
-    camera: CameraMode,
-    pub(crate) presentation: Option<PreparedPresentation>,
     kind: String,
+    /// The newest candidate frame and its pose index.
+    frame: SimFrameResource,
+    /// The candidate world copy until the hidden scene takes it.
+    mirror: Option<Box<crate::world::RendererWorld>>,
+    pub(crate) presentation: Option<PreparedPresentation>,
     ready: bool,
     canceled: bool,
+    /// The last command carried a candidate step.
+    stepped: bool,
+    /// The simulation has the commit. A Discard comes too late.
+    committing: bool,
+}
+#[derive(Resource, Default)]
+pub struct SaveRequests {
+    pending: Option<Pending>,
+    /// Save input of the next command.
+    commands: Vec<SaveCommand>,
 }
 #[derive(Deserialize)]
 struct Request {
     id: u32,
     kind: String,
     #[serde(default)]
-    payload: serde_json::Value,
+    payload: Option<Box<RawValue>>,
 }
+impl Request {
+    /// The prepared request that a Commit or Discard names.
+    fn prepared(&self) -> Option<u32> {
+        let payload = self.payload.as_ref()?;
+        serde_json::from_str(payload.get()).ok()
+    }
+}
+
 impl SaveRequests {
     fn candidate(&self) -> Option<&Candidate> {
         match self.pending.as_ref()? {
-            PendingPreparation::Replacement(c) => Some(c),
+            Pending::Candidate(c) => Some(c),
             _ => None,
         }
     }
     fn candidate_mut(&mut self) -> Option<&mut Candidate> {
         match self.pending.as_mut()? {
-            PendingPreparation::Replacement(c) => Some(c),
+            Pending::Candidate(c) => Some(c),
             _ => None,
         }
     }
-    fn take_candidate(&mut self) -> Option<Candidate> {
-        if matches!(self.pending, Some(PendingPreparation::Replacement(_))) {
-            let Some(PendingPreparation::Replacement(c)) = self.pending.take() else {
-                unreachable!()
-            };
-            Some(c)
-        } else {
-            None
-        }
-    }
-
     pub(crate) fn hidden(&self) -> Option<&PreparedPresentation> {
         self.candidate().and_then(|c| c.presentation.as_ref())
     }
@@ -62,406 +71,304 @@ impl SaveRequests {
     pub fn pending(&self) -> bool {
         self.pending.is_some()
     }
-    pub fn new(reference: &ReferenceManifest, hash: String) -> Self {
-        Self {
-            source: SourceStamp {
-                app_id: reference.app_id,
-                build_id: reference.build_id,
-                manifest_sha256: hash,
-                source_hashes: reference
-                    .source_hashes
-                    .iter()
-                    .map(|s| SourceHash {
-                        file: s.file.clone(),
-                        sha256: s.sha256.clone(),
-                    })
-                    .collect(),
-            },
-            pending: None,
+    /// Save requests of the next command.
+    pub(crate) fn take_commands(&mut self) -> Vec<SaveCommand> {
+        std::mem::take(&mut self.commands)
+    }
+    /// Renderer input of the next candidate step. `None` while the scene is ready or not started.
+    pub(crate) fn candidate_command(&mut self) -> Option<CandidateCommand> {
+        let candidate = self.candidate_mut()?;
+        candidate.stepped = false;
+        if candidate.ready || candidate.canceled {
+            return None;
         }
+        let command = candidate.presentation.as_mut()?.take_command();
+        candidate.stepped = true;
+        Some(command)
     }
 }
 
-/// Runs after lifecycle input, between fixed-step batches and before binding updates.
+/// Runs after the frame fill: applies the save results, steps the hidden scene, reads the next request.
 pub fn dispatch(world: &mut World) {
-    advance(world);
-    if !game_has_save_request() {
-        return;
-    }
-    let text = game_save_request();
-    let request: Request = match serde_json::from_str(&text) {
-        Ok(request) => request,
-        Err(error) => {
-            game_save_result(0, "Invalid", "", &error.to_string());
+    world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
+        results(world, &mut requests);
+        advance(world, &mut requests);
+        if !game_has_save_request() {
             return;
         }
-    };
-    world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
-        let result = process_request(world, &mut requests, &request);
-        match result {
-            Ok(payload) => {
-                if request.kind != "Prepare" && request.kind != "PrepareNewGame" {
-                    game_save_result(request.id, &request.kind, &payload, "");
-                }
+        let text = game_save_request();
+        let request: Request = match serde_json::from_str(&text) {
+            Ok(request) => request,
+            Err(error) => {
+                game_save_result(0, "Invalid", "", &error.to_string());
+                return;
             }
-            Err(error) => game_save_result(request.id, &request.kind, "", &error.to_string()),
+        };
+        if let Err(error) = request_input(world, &mut requests, &request, text) {
+            game_save_result(request.id, &request.kind, "", &error.to_string());
         }
     });
 }
-#[derive(Serialize)]
-struct CaptureResult<'a> {
-    save: &'a SaveSnapshot,
-    summary: CaptureSummary,
-}
-#[derive(Serialize)]
-struct CaptureSummary {
-    seed: i32,
-    driven_km: f64,
-    build_id: u32,
-}
-fn process_request(
+
+/// Answers Discard and checks the hidden scene for Commit. The simulation runs the rest.
+fn request_input(
     world: &mut World,
     requests: &mut SaveRequests,
     request: &Request,
-) -> Result<String, SaveError> {
-    let reference = world.resource::<RuntimeReference>().0.clone();
-    let invalid = |message: &str| SaveError::ReconstructionFailure(message.into());
+    json: String,
+) -> Result<(), crate::save::SaveError> {
+    let invalid = |message: &str| crate::save::SaveError::ReconstructionFailure(message.into());
+    let prepared = request.prepared();
     match request.kind.as_str() {
         "Discard" => {
-            if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
-                if Some(u64::from(permit.request_id)) == request.payload.as_u64() {
+            match &mut requests.pending {
+                Some(Pending::Fresh(id) | Pending::Waiting { id, .. }) if Some(*id) == prepared => {
+                    requests.commands.push(SaveCommand::Cancel(*id));
                     requests.pending = None;
                 }
-                return Ok(String::new());
-            }
-            if requests
-                .candidate()
-                .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
-            {
-                let candidate = requests.candidate_mut().unwrap();
-                candidate.canceled = true;
-                if let Some(presentation) = &mut candidate.presentation {
-                    presentation.cancel();
+                Some(Pending::Candidate(candidate))
+                    if Some(candidate.id) == prepared && !candidate.committing =>
+                {
+                    requests.commands.push(SaveCommand::Cancel(candidate.id));
+                    candidate.canceled = true;
+                    if let Some(presentation) = &mut candidate.presentation {
+                        presentation.cancel();
+                    }
                 }
+                _ => {}
             }
-            Ok(String::new())
+            game_save_result(request.id, &request.kind, "", "");
+            return Ok(());
         }
         "Commit" => {
-            let _profile = cpu_profile::Timer::new(cpu_profile::Stage::SaveCommit);
-            if let Some(PendingPreparation::Fresh(permit)) = requests.pending.as_ref() {
-                let permit = *permit;
-                let generation = world
-                    .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
-                    .0;
-                let id = request
-                    .payload
-                    .as_u64()
-                    .and_then(|id| u32::try_from(id).ok())
-                    .ok_or_else(|| invalid("Prepared session is stale"))?;
-                let mut drive = world.resource_mut::<Drive>();
-                if !drive.ready {
-                    return Err(invalid("The garage is not ready"));
+            if let Some(candidate) = requests.candidate_mut() {
+                if Some(candidate.id) != prepared {
+                    return Err(invalid("Prepared session is missing"));
                 }
-                permit.commit(id, &mut drive.runtime, generation)?;
-                super::clear_input(&mut drive);
-                drive.frame_steps = 0;
-                drive.render_delta_seconds = 0.;
-                requests.pending = None;
-                return Ok(String::new());
-            }
-            if !requests
-                .candidate()
-                .is_some_and(|candidate| Some(candidate.id as u64) == request.payload.as_u64())
-            {
-                return Err(invalid("Prepared session is missing"));
-            }
-            if !requests.candidate().is_some_and(|c| c.ready && !c.canceled) {
-                return Err(invalid("Prepared renderer is not ready"));
-            }
-            let candidate = requests.candidate().unwrap();
-            candidate.presentation.as_ref().unwrap().validate_commit(
-                &reference,
-                &candidate.runtime,
-                world,
-            )?;
-            let mut candidate = requests.take_candidate().unwrap();
-            // The prepared commands and stable bindings make this boundary infallible.
-            world.resource_scope(
-                |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
-                    food.reset(world)
-                },
-            );
-            world.resource_scope(
-                |world, mut items: Mut<crate::presentation::spawned::SpawnedVisuals>| {
-                    items.reset(world)
-                },
-            );
-            world.resource_scope(
-                |world, mut sky: Mut<crate::presentation::sky_traffic::SkyTrafficVisuals>| {
-                    sky.reset(world)
-                },
-            );
-            world.resource_scope(|world, mut drive: Mut<Drive>| {
-                candidate
-                    .presentation
-                    .take()
-                    .unwrap()
-                    .commit(&mut drive.runtime, world);
-            });
-            let mut drive = world.resource_mut::<Drive>();
-            let session = drive
-                .runtime
-                .audio
-                .as_ref()
-                .map_or(1, |audio| audio.session.wrapping_add(1));
-            // Assignment drops the old stream and terminates its road actor first.
-            let settings = drive.runtime.driving_input.settings;
-            drive.runtime = candidate.runtime;
-            drive.runtime.driving_input.settings = settings;
-            drive
-                .runtime
-                .stream
-                .set_overlap(crate::world::WorldMetrics::default())
-                .expect("retired world overlap only removes charges");
-            let runtime = &mut drive.runtime;
-            if let Some(audio) = &mut runtime.audio {
-                audio.reset(session);
-                audio.sync_lamps(&reference.lighting, &runtime.lighting);
-            }
-            drive.camera = candidate.camera;
-            drive.current = drive
-                .runtime
-                .area
-                .player
-                .view(&drive.runtime.physics)
-                .camera_pose;
-            drive.previous = drive.current;
-            drive.rendered = drive.current;
-            drive.input.clear();
-            drive.frame_input.clear();
-            drive.clock = StepClock::default();
-            drive.frame_steps = 0;
-            drive.render_delta_seconds = 0.;
-            drive.ready = false;
-            drive.runtime.paused = true;
-            drive.skip_elapsed = true;
-            drive.last_feedback = None;
-            drive.runtime.advance_instruments(&reference, 0., true);
-            let camera = super::active_camera(&drive);
-            let far = drive.runtime.distances.cam2_far_plane;
-            let fov = drive
-                .runtime
-                .area
-                .player
-                .view(&drive.runtime.physics)
-                .fov_degrees;
-            drop(drive);
-            let mut cameras = world.query::<(
-                &mut Transform,
-                &mut Projection,
-                Option<&DriveCamera>,
-                Option<&crate::presentation::frame_graph::SourceSkyCamera>,
-            )>();
-            for (mut transform, mut projection, main, sky) in cameras.iter_mut(world) {
-                if main.is_some() {
-                    *transform = camera;
-                    if let Projection::Perspective(perspective) = &mut *projection {
-                        perspective.far = far;
-                    }
-                } else if sky.is_some() {
-                    *transform = Transform::from_rotation(camera.rotation);
+                if !candidate.ready || candidate.canceled {
+                    return Err(invalid("Prepared renderer is not ready"));
                 }
-                crate::presentation::camera_projection::sync_player_projection(
-                    &mut projection,
-                    main.is_some() || sky.is_some(),
-                    fov,
-                );
-            }
-            crate::browser::game_loading();
-            crate::presentation::view_frame::restart_scene(world);
-            Ok(String::new())
-        }
-        "Capture" | "Prepare" | "PrepareNewGame" => {
-            let _profile = cpu_profile::Timer::new(if request.kind == "Prepare" {
-                cpu_profile::Stage::LoadPrepare
-            } else {
-                cpu_profile::Stage::SavePrepare
-            });
-            let drive = world.resource::<Drive>();
-            if !drive.ready {
-                return Err(invalid("The garage is not ready"));
-            }
-            let autosave = request.kind == "Capture"
-                && request
-                    .payload
-                    .get("autosave")
-                    .and_then(serde_json::Value::as_bool)
-                    .ok_or_else(|| invalid("Missing autosave flag"))?;
-            if !autosave && drive.runtime.started && !drive.runtime.paused {
-                return Err(invalid("Pause the game first"));
-            }
-            if request.kind == "Capture" {
-                let mut drive = world.resource_mut::<Drive>();
-                if !autosave {
-                    super::clear_input(&mut drive);
-                }
-                let snapshot = drive.runtime.capture_save(
+                let reference = world.resource::<RuntimeReference>().0.clone();
+                candidate.presentation.as_ref().unwrap().validate_commit(
                     &reference,
-                    &requests.source,
-                    if drive.camera == CameraMode::Chase {
-                        CameraSave::Chase
-                    } else {
-                        CameraSave::FirstPerson
-                    },
-                    request
-                        .payload
-                        .get("date")
-                        .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| invalid("Missing capture date"))?,
+                    &candidate.frame,
+                    world,
                 )?;
-                return serde_json::to_string(&CaptureResult {
-                    save: &snapshot,
-                    summary: CaptureSummary {
-                        seed: snapshot.world.seed,
-                        driven_km: snapshot.progress.driven_km,
-                        build_id: snapshot.source.build_id,
-                    },
-                })
-                .map_err(|error| SaveError::CorruptData(error.to_string()));
+                candidate.committing = true;
             }
+        }
+        "Prepare" | "PrepareNewGame" => {
             if requests.pending.is_some() {
                 return Err(invalid("A prepared session is pending"));
             }
-            let draw_distance = request
-                .payload
-                .get("draw_distance")
-                .and_then(serde_json::Value::as_f64)
-                .ok_or_else(|| invalid("Missing draw distance"))?
-                as f32;
-            let mode = super::game_mode(&reference);
-            if request.kind == "PrepareNewGame"
-                && !drive.runtime.started
-                && drive.runtime.stream.mode() == mode
-                && drive
-                    .runtime
-                    .distances
-                    .matches(&reference.world.draw_distance, draw_distance)
-            {
-                let permit = FreshSessionPermit::prepare(
-                    request.id,
-                    &drive.runtime,
-                    world
-                        .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
-                        .0,
-                )?;
-                requests.pending = Some(PendingPreparation::Fresh(permit));
-                game_save_result(request.id, &request.kind, &request.id.to_string(), "");
-                return Ok(request.id.to_string());
-            }
-            let (mut runtime, camera) = if request.kind == "Prepare" {
-                let saved = request
-                    .payload
-                    .get("save")
-                    .ok_or_else(|| invalid("Missing save"))?;
-                let saved = SaveSnapshot::deserialize(saved)
-                    .map_err(|error| SaveError::CorruptData(error.to_string()))?;
-                let runtime = GarageRuntime::from_save(
-                    &reference,
-                    &requests.source,
-                    &saved,
-                    mode,
-                    draw_distance,
-                )?;
-                (
-                    runtime,
-                    if saved.view.camera == CameraSave::Chase {
-                        CameraMode::Chase
-                    } else {
-                        CameraMode::Cockpit
-                    },
-                )
-            } else {
-                (
-                    GarageRuntime::new(&reference, mode, draw_distance)?,
-                    CameraMode::default(),
-                )
-            };
-            runtime.started = true;
-            runtime.paused = true;
-
-            requests.pending = Some(PendingPreparation::Replacement(Candidate {
+            requests.pending = Some(Pending::Waiting {
                 id: request.id,
-                runtime,
-                camera,
-                presentation: None,
                 kind: request.kind.clone(),
-                ready: false,
-                canceled: false,
-            }));
-            Ok(request.id.to_string())
+            });
         }
-        _ => Err(invalid("Unknown save request")),
+        _ => {}
+    }
+    let reference = &world.resource::<RuntimeReference>().0;
+    requests.commands.push(SaveCommand::Request {
+        json,
+        mode: super::game_mode(reference),
+        epoch: world
+            .resource::<crate::presentation::view_frame::SourceSceneEpoch>()
+            .0,
+    });
+    Ok(())
+}
+
+/// Sends the simulation answers to the browser and follows the prepared session.
+fn results(world: &mut World, requests: &mut SaveRequests) {
+    let mut restarted = false;
+    for change in &world.resource::<SimFrameResource>().frame.changes {
+        match change {
+            Change::SaveResult {
+                id,
+                kind,
+                payload,
+                error,
+            } => {
+                game_save_result(*id, kind, payload, error);
+                match requests.pending {
+                    Some(Pending::Waiting { id: waiting, .. }) if waiting == *id => {
+                        // Only a fresh session answers a prepare request at once.
+                        requests.pending = error.is_empty().then_some(Pending::Fresh(*id));
+                    }
+                    Some(Pending::Fresh(_)) if kind == "Commit" && error.is_empty() => {
+                        requests.pending = None;
+                    }
+                    _ => {}
+                }
+            }
+            Change::Restarted => restarted = true,
+            _ => {}
+        }
+    }
+    let flags = world.resource::<SimFrameResource>().frame.state.flags;
+    if flags & StateBlock::CANDIDATE != 0
+        && let Some(Pending::Waiting { id, kind }) = &requests.pending
+    {
+        // The candidate copy starts empty and shares the fixed lookups.
+        let mirror = world
+            .resource::<crate::presentation::world::runtime::SourcePresentationAllocation>()
+            .world
+            .as_ref()
+            .map_or_else(
+                || {
+                    crate::world::RendererWorld::new(
+                        world.resource::<RuntimeReference>().0.world.clone(),
+                    )
+                },
+                |w| w.fork(),
+            );
+        requests.pending = Some(Pending::Candidate(Box::new(Candidate {
+            id: *id,
+            kind: kind.clone(),
+            frame: SimFrameResource::default(),
+            mirror: Some(Box::new(mirror)),
+            presentation: None,
+            ready: false,
+            canceled: false,
+            stepped: false,
+            committing: false,
+        })));
+    }
+    if restarted {
+        let Some(Pending::Candidate(candidate)) = requests.pending.take() else {
+            unreachable!("the simulation restarts only with a prepared candidate")
+        };
+        commit(world, *candidate);
     }
 }
 
-fn advance(world: &mut World) {
-    world.resource_scope(|world, mut requests: Mut<SaveRequests>| {
-        let Some(mut candidate) = requests.take_candidate() else {
-            return;
-        };
-        if candidate.canceled {
-            if candidate
-                .presentation
-                .as_mut()
-                .is_none_or(|p| p.drained(world))
-            {
-                if let Some(p) = candidate.presentation.take() {
-                    p.release(&mut candidate.runtime, world);
-                }
-                game_save_result(candidate.id, &candidate.kind, "", "Save operation canceled");
-                return;
-            }
-            requests.pending = Some(PendingPreparation::Replacement(candidate));
-            return;
-        }
-        if candidate.ready {
-            requests.pending = Some(PendingPreparation::Replacement(candidate));
-            return;
-        }
-        let reference = world.resource::<RuntimeReference>().0.clone();
-        let _profile = cpu_profile::Timer::new(cpu_profile::Stage::LoadPrepare);
-        let result = (|| -> Result<bool, SaveError> {
-            if candidate.presentation.is_none() {
-                if !PreparedPresentation::can_start(world) {
-                    return Ok(false);
-                }
-                candidate.presentation = Some(PreparedPresentation::new(
-                    &reference,
-                    &mut candidate.runtime,
-                    world,
-                )?);
-            }
-            candidate.presentation.as_mut().unwrap().advance(
-                &reference,
-                &mut candidate.runtime,
-                candidate.camera,
-                world,
-            )
-        })();
-        match result {
-            Ok(true) => {
-                candidate.ready = true;
-                game_save_result(candidate.id, &candidate.kind, &candidate.id.to_string(), "");
-            }
-            Ok(false) => {}
-            Err(error) => {
-                game_save_result(candidate.id, &candidate.kind, "", &error.to_string());
-                candidate.canceled = true;
-                if let Some(p) = &mut candidate.presentation {
-                    p.cancel();
-                }
-            }
-        }
-        requests.pending = Some(PendingPreparation::Replacement(candidate));
+/// Shows the prepared scene. The simulation already runs the candidate runtime.
+fn commit(world: &mut World, mut candidate: Candidate) {
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::SaveCommit);
+    world.resource_scope(
+        |world, mut food: Mut<crate::presentation::consumables::ConsumableVisuals>| {
+            food.reset(world)
+        },
+    );
+    world.resource_scope(
+        |world, mut items: Mut<crate::presentation::spawned::SpawnedVisuals>| items.reset(world),
+    );
+    world.resource_scope(
+        |world, mut sky: Mut<crate::presentation::sky_traffic::SkyTrafficVisuals>| sky.reset(world),
+    );
+    // The prepared commands and stable bindings make this boundary infallible.
+    candidate.presentation.take().unwrap().commit(world);
+    // The active renderer has the candidate copy now. The world changes of this frame follow it.
+    world.resource_scope(|world, sim: Mut<SimFrameResource>| {
+        let reference = world.resource::<RuntimeReference>().0.world.clone();
+        world
+            .resource_mut::<crate::presentation::world::runtime::SourcePresentationAllocation>()
+            .apply_world(&reference, &sim.frame.world);
     });
+    let view = {
+        let mut drive = world.resource_mut::<Drive>();
+        drive.ready = false;
+        drive.view
+    };
+    let state = world.resource::<SimFrameResource>().frame.state;
+    let camera = super::frame_camera(&state, view);
+    let (far, fov) = (state.far_plane, state.fov_degrees);
+    let mut cameras = world.query::<(
+        &mut Transform,
+        &mut Projection,
+        Option<&DriveCamera>,
+        Option<&crate::presentation::frame_graph::SourceSkyCamera>,
+    )>();
+    for (mut transform, mut projection, main, sky) in cameras.iter_mut(world) {
+        if main.is_some() {
+            *transform = camera;
+            if let Projection::Perspective(perspective) = &mut *projection {
+                perspective.far = far;
+            }
+        } else if sky.is_some() {
+            *transform = Transform::from_rotation(camera.rotation);
+        }
+        crate::presentation::camera_projection::sync_player_projection(
+            &mut projection,
+            main.is_some() || sky.is_some(),
+            fov,
+        );
+    }
+    crate::browser::game_loading();
+    crate::presentation::view_frame::restart_scene(world);
+}
+
+/// Takes the candidate frame: the pose index and the world copy follow every frame.
+fn receive(world: &mut World, candidate: &mut Candidate) {
+    let mut sim = world.resource_mut::<SimFrameResource>();
+    let filled = sim.frame.state.flags & StateBlock::CANDIDATE != 0;
+    let Some(frame) = sim.frame.candidate.as_mut().filter(|_| filled) else {
+        return;
+    };
+    std::mem::swap(&mut **frame, &mut candidate.frame.frame);
+    candidate.frame.apply_changes();
+    let delta = &candidate.frame.frame.world;
+    match (&mut candidate.presentation, &mut candidate.mirror) {
+        (Some(presentation), _) => presentation.apply_world(delta),
+        (None, Some(mirror)) => mirror.apply(delta),
+        (None, None) => {}
+    }
+}
+
+/// Prepares the hidden scene from the candidate frame of the last step.
+fn advance(world: &mut World, requests: &mut SaveRequests) {
+    let Some(candidate) = requests.candidate_mut() else {
+        return;
+    };
+    if candidate.canceled {
+        if candidate
+            .presentation
+            .as_mut()
+            .is_none_or(|p| p.drained(world))
+        {
+            if let Some(p) = candidate.presentation.take() {
+                p.release(world);
+            }
+            game_save_result(candidate.id, &candidate.kind, "", "Save operation canceled");
+            requests.pending = None;
+        }
+        return;
+    }
+    receive(world, candidate);
+    if candidate.ready {
+        return;
+    }
+    let reference = world.resource::<RuntimeReference>().0.clone();
+    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::LoadPrepare);
+    let result = (|| -> Result<bool, crate::save::SaveError> {
+        let Some(presentation) = &mut candidate.presentation else {
+            if PreparedPresentation::can_start(world) {
+                let mirror = candidate.mirror.take().expect("candidate world copy");
+                candidate.presentation =
+                    Some(PreparedPresentation::new(&reference, mirror, world)?);
+            }
+            return Ok(false);
+        };
+        if !candidate.stepped {
+            return Ok(false);
+        }
+        presentation.advance(&reference, &mut candidate.frame, world)
+    })();
+    match result {
+        Ok(true) => {
+            candidate.ready = true;
+            game_save_result(candidate.id, &candidate.kind, &candidate.id.to_string(), "");
+        }
+        Ok(false) => {}
+        Err(error) => {
+            game_save_result(candidate.id, &candidate.kind, "", &error.to_string());
+            candidate.canceled = true;
+            if let Some(p) = &mut candidate.presentation {
+                p.cancel();
+            }
+            let id = candidate.id;
+            requests.commands.push(SaveCommand::Cancel(id));
+        }
+    }
 }

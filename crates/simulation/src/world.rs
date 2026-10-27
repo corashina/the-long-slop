@@ -12,7 +12,6 @@ pub use types::*;
 mod draw_distance;
 pub use draw_distance::DrawDistances;
 mod cables;
-#[cfg(target_arch = "wasm32")]
 pub use cables::aim;
 mod lamps;
 mod source_lights;
@@ -23,12 +22,12 @@ mod props;
 pub use props::{PropCandidate, PropGenerator};
 pub mod spawn_state;
 pub mod unity_random;
-pub use placement::place_point;
 pub use placement::{
     BUILDING_CHECKPOINT_INTERVAL, BuildingCheckpoint, BuildingGroupState, BuildingSequence,
     FoundationPoint, PlacementIndex, PlacementIndexSnapshot, SupplyDefinition, SupplyFluid,
     SupplyPoint,
 };
+pub use placement::{node_frame, place_point};
 pub use spawn_state::{SourceSpawnState, SpawnBoundary, SpawnContext, SpawnPhase};
 pub use unity_random::{UnityRandom, UnityRandomState};
 mod road;
@@ -42,21 +41,21 @@ mod instances;
 pub use instances::{StructureInstance, StructureRecipe, TriggerRoles};
 pub mod metrics;
 pub use metrics::WorldMetrics;
-#[cfg(target_arch = "wasm32")]
-pub mod pipeline_ownership;
-#[cfg(any(target_arch = "wasm32", test))]
-pub mod renderer_pending;
+pub mod renderer_facts;
+pub use renderer_facts::{RendererFact, RendererFacts};
 pub mod stream;
 mod stream_limits;
-pub use stream::content_index::ContentIndex;
-pub use stream_limits::StreamLimits;
-#[cfg(any(target_arch = "wasm32", test))]
-pub mod upload_receipt;
 pub use stream::content_boxes::BoxRelease;
-pub use stream::{
-    PresentationAllocation, PublishedSupply, PublishedSurface, SurfaceKey, WorldFrame,
-    WorldRequest, WorldStream,
+pub use stream::content_explosives::{Explosive, TankExplosion};
+pub use stream::content_index::ContentIndex;
+pub use stream::renderer_world::{
+    RendererFrame, RendererStructure, RendererSupply, RendererSurface, RendererWorld, WorldDelta,
 };
+pub use stream::{
+    PresentationAllocation, PresentationGrant, PresentationReport, PublishedSupply,
+    PublishedSurface, SurfaceKey, WorldFrame, WorldRequest, WorldStream,
+};
+pub use stream_limits::StreamLimits;
 mod start_car;
 pub use start_car::{StartCar, StartCarChoice, menu_random, start_fields};
 mod startup;
@@ -69,13 +68,20 @@ pub use ::terrain::{
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
 /// Game mode. Biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GameMode {
     pub biome: u8,
     pub start_car: StartCarChoice,
 }
 
 impl GameMode {
+    /// The mode of the browser menu values. -1 or an unknown car is Random.
+    pub fn from_menu(world: &crate::reference::WorldReference, biome: u32, start_car: i32) -> Self {
+        Self {
+            biome: if biome > 3 { 0 } else { biome as u8 },
+            start_car: StartCarChoice::from_index(world, start_car),
+        }
+    }
     /// Biome index for `biome`: 0 desert, 1 winter, 2 grass. Mixed uses the terrain color.
     pub fn biome_override(self) -> Option<u8> {
         self.biome.checked_sub(1)
@@ -86,7 +92,7 @@ pub const MAX_ABSOLUTE_COORDINATE: f64 = (1_u64 << 45) as f64;
 pub const REBASE_LIMIT: f32 = 2048.0;
 pub const DEFAULT_SEED: u64 = 42;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorldOrigin {
     pub offset: [f64; 3],
 }
@@ -145,6 +151,5 @@ pub fn hash(mut value: u64) -> u64 {
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
 }
-pub mod texture_batch_ownership;
 
 pub mod stream_profile;

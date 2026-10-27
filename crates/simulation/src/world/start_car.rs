@@ -79,7 +79,7 @@ impl<'de> Deserialize<'de> for StartCar {
 }
 
 /// The game mode start car: Random or one field.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StartCarChoice {
     Random,
     Field(StartCar),

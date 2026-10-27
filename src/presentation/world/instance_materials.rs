@@ -11,7 +11,7 @@ use crate::{
         impostor::ImpostorMaterial, specular::SpecularMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::{ecs as bevy_ecs, ecs::system::SystemParam, prelude::*};
 use grass_mesh::GrassView;
@@ -43,7 +43,8 @@ pub struct InstanceMaterials<'w> {
 impl InstanceMaterials<'_> {
     pub fn admit(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
         placement: &crate::world::Placement,
@@ -67,7 +68,7 @@ impl InstanceMaterials<'_> {
                 );
                 let selected = selected.cloned();
                 ready &= self.admit_binding(
-                    stream,
+                    ledger,
                     reference,
                     prototype,
                     primitive,
@@ -88,7 +89,7 @@ impl InstanceMaterials<'_> {
                         .find(|m| m.source == source && m.asset == prototype.asset)
                         .map(|m| (m.asset, m.gltf_material));
                     ready &= self.admit_binding(
-                        stream,
+                        ledger,
                         reference,
                         prototype,
                         primitive,
@@ -102,7 +103,7 @@ impl InstanceMaterials<'_> {
     }
     fn admit_binding(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,
         primitive: &PlanPrimitive,
@@ -118,7 +119,7 @@ impl InstanceMaterials<'_> {
                 .iter()
                 .find(|m| m.source == *source)
                 .ok_or_else(|| ReferenceError("Missing generated material record".into()))?;
-            self.cache.admit_world_material(record, reference, stream)?;
+            self.cache.admit_world_material(record, reference, ledger)?;
             Ok(self.cache.world_textures.ready(source))
         } else {
             let identity = initial
@@ -132,7 +133,7 @@ impl InstanceMaterials<'_> {
                     ReferenceError("Missing generated primary material identity".into())
                 })?;
             self.cache
-                .admit_world_primary(identity, reference, stream)?;
+                .admit_world_primary(identity, reference, ledger)?;
             Ok(self.cache.world_primary_ready(identity))
         }
     }
@@ -516,17 +517,26 @@ impl InstanceMaterial {
     }
     pub(crate) fn warm(
         &self,
-        stream: &mut WorldStream,
+        stream: &RendererWorld,
+        ledger: &mut crate::ownership::PresentationLedger,
         pipelines: &mut WorldPipelines,
-        parent: &mut crate::world::renderer_pending::PipelineContinuation,
+        parent: &mut crate::ownership::renderer_pending::PipelineContinuation,
         mesh: &Handle<Mesh>,
         shadow: bool,
     ) -> Result<Option<PipelineTicket>, ReferenceError> {
         match self {
-            Self::Primary(h) => pipelines.request_continuation(stream, parent, mesh, h, false),
-            Self::Specular(h) => pipelines.request_continuation(stream, parent, mesh, h, false),
-            Self::Impostor(h) => pipelines.request_continuation(stream, parent, mesh, h, shadow),
-            Self::Grass(h) => pipelines.request_continuation(stream, parent, mesh, h, shadow),
+            Self::Primary(h) => {
+                pipelines.request_continuation(stream, ledger, parent, mesh, h, false)
+            }
+            Self::Specular(h) => {
+                pipelines.request_continuation(stream, ledger, parent, mesh, h, false)
+            }
+            Self::Impostor(h) => {
+                pipelines.request_continuation(stream, ledger, parent, mesh, h, shadow)
+            }
+            Self::Grass(h) => {
+                pipelines.request_continuation(stream, ledger, parent, mesh, h, shadow)
+            }
         }
     }
 }
@@ -569,7 +579,7 @@ pub fn emissive_renderer(
 }
 
 pub fn selected_material<'a>(
-    stream: &'a WorldStream,
+    stream: &'a RendererWorld,
     reference: &'a ReferenceManifest,
     prototype: &WorldPrototypeReference,
     placement: &crate::world::Placement,
@@ -629,7 +639,7 @@ pub fn selected_material<'a>(
 /// Source `materialChangeScript` swaps the first material slot only: submesh 0.
 /// It compares the material that painting and condition already selected.
 pub fn biome_material<'a>(
-    stream: &'a WorldStream,
+    stream: &'a RendererWorld,
     reference: &ReferenceManifest,
     prototype: &WorldPrototypeReference,
     placement: &crate::world::Placement,

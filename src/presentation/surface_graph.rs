@@ -287,9 +287,16 @@ pub struct SourcePhaseSetup {
 }
 
 /// Validate active camera ownership before the one-time global depth replacement.
+/// The outfit preview camera is the one Core3d camera. It has its own depth texture.
 fn validate_source_cameras(
     cameras: bevy::render::Extract<
-        Query<(&Camera, &bevy::render::camera::CameraRenderGraph), With<Camera3d>>,
+        Query<
+            (&Camera, &bevy::render::camera::CameraRenderGraph),
+            (
+                With<Camera3d>,
+                Without<super::outfit_preview::PreviewCamera>,
+            ),
+        >,
     >,
     mut setup: ResMut<SourcePhaseSetup>,
     status: Res<RendererStateHandle>,

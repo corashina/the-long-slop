@@ -1,13 +1,13 @@
+use super::sim_frame::SimFrameResource;
 use crate::reference::{
     AssetId, AssetUsage, BodyId, ItemId, ItemKind, NodeId, OpeningId, ReferenceManifest, SourceId,
 };
-use crate::starting_area::StartingArea;
-use crate::vehicle::PhysicsWorld;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::{GltfExtras, GltfLoaderSettings, convert_coordinates::GltfConvertCoordinates};
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use simulation::boundary::{PoseKey, PoseRow, SimFrame};
 use std::collections::HashMap;
 
 #[derive(Component)]
@@ -81,6 +81,7 @@ pub fn load(commands: &mut Commands, _server: &AssetServer, reference: &Referenc
                     | AssetUsage::SkyPrototype
                     | AssetUsage::ItemPrototype
                     | AssetUsage::PlayerPrototype
+                    | AssetUsage::RagdollPrototype
                     | AssetUsage::SkyTraffic
             )
         })
@@ -410,7 +411,7 @@ pub(crate) fn bind_generated_cap(
 }
 
 pub fn sync_caps(
-    area: &StartingArea,
+    frame: &SimFrame,
     dt: f32,
     caps: &mut Query<
         (&mut CapVisual, &mut Transform),
@@ -430,7 +431,7 @@ pub fn sync_caps(
     >,
 ) {
     for (mut cap, mut transform) in caps {
-        let valve = area.interaction.opening_valve(cap.opening);
+        let valve = frame.valve(cap.opening);
         let mut pose = cap.closed;
         if cap.euler {
             let angles =
@@ -451,7 +452,7 @@ pub fn sync_caps(
         transform.set_if_neq(pose);
     }
     for (binding, mut visibility) in visibility {
-        let open = area.interaction.opening_valve(binding.opening) > 0.0;
+        let open = frame.valve(binding.opening) > 0.0;
         visibility.set_if_neq(if open == binding.open {
             Visibility::Inherited
         } else {
@@ -460,9 +461,8 @@ pub fn sync_caps(
     }
 }
 
-pub fn sync_items(
-    area: &StartingArea,
-    alpha: f32,
+pub(crate) fn sync_items(
+    frame: &SimFrameResource,
     query: &mut Query<
         (
             &ItemVisual,
@@ -473,40 +473,51 @@ pub fn sync_items(
         Without<BodyVisual>,
     >,
 ) {
-    for (binding, mut transform, mut visibility, valve) in query {
-        let active = area
-            .items
-            .get(binding.item)
-            .is_some_and(|item| item.inactive_pose.is_none());
-        visibility.set_if_neq(
-            if active
-                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
-            {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
+    for (binding, transform, visibility, valve) in query {
+        sync_pose(
+            frame,
+            PoseKey::Item(binding.item),
+            binding.scale,
+            valve,
+            transform,
+            visibility,
         );
-        if !active {
-            continue;
-        }
-        if let Some((_, previous, current)) = area
-            .item_render_poses
-            .iter()
-            .find(|(id, _, _)| *id == binding.item)
-        {
-            transform.set_if_neq(
-                super::transform(super::interpolate(*previous, *current, alpha))
-                    .with_scale(binding.scale),
-            );
-        }
     }
 }
 
-pub fn sync(
-    area: &StartingArea,
-    physics: &PhysicsWorld,
-    alpha: f32,
+/// Shows a visual at its interpolated frame pose, or hides it.
+fn sync_pose(
+    frame: &SimFrameResource,
+    key: PoseKey,
+    scale: Vec3,
+    valve: Option<&ValveVisibility>,
+    mut transform: Mut<Transform>,
+    mut visibility: Mut<Visibility>,
+) {
+    let pose = frame
+        .pose(key)
+        .filter(|(_, current)| current.flags & PoseRow::VISIBLE != 0);
+    visibility.set_if_neq(
+        if pose.is_some() && valve.is_none_or(|v| (frame.frame.valve(v.opening) > 0.) == v.open) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
+    );
+    if let Some((previous, current)) = pose {
+        transform.set_if_neq(
+            super::transform(super::interpolate(
+                previous.pose(),
+                current.pose(),
+                frame.frame.state.alpha,
+            ))
+            .with_scale(scale),
+        );
+    }
+}
+
+pub(crate) fn sync(
+    frame: &SimFrameResource,
     query: &mut Query<(
         &BodyVisual,
         &mut Transform,
@@ -514,51 +525,24 @@ pub fn sync(
         Option<&ValveVisibility>,
     )>,
 ) {
-    for (binding, mut transform, mut visibility, valve) in query {
-        let active = area.bodies.get(&binding.body).is_some_and(|h| {
-            physics.body_active(*h)
-                || matches!(
-                    area.inventory_body(*h),
-                    Some(crate::interaction::items::ItemLocation::Stored(_))
-                )
-        });
-        visibility.set_if_neq(
-            if active
-                && valve.is_none_or(|v| (area.interaction.opening_valve(v.opening) > 0.) == v.open)
-            {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            },
+    for (binding, transform, visibility, valve) in query {
+        sync_pose(
+            frame,
+            PoseKey::Body(binding.body),
+            binding.scale,
+            valve,
+            transform,
+            visibility,
         );
-        if !active {
-            continue;
-        }
-        if let Some((_, previous, current)) = area
-            .render_poses
-            .iter()
-            .find(|(id, _, _)| *id == binding.body)
-        {
-            transform.set_if_neq(
-                super::transform(super::interpolate(*previous, *current, alpha))
-                    .with_scale(binding.scale),
-            );
-        }
     }
 }
 
 pub(crate) fn sync_inventory(
-    drive: Res<crate::app::Drive>,
+    frame: Res<SimFrameResource>,
     mut query: Query<(&mut InventoryVisibility, &mut Visibility)>,
 ) {
-    use crate::interaction::items::ItemLocation;
     for (mut binding, mut visibility) in &mut query {
-        let stored = drive
-            .runtime
-            .area
-            .items
-            .get(binding.item)
-            .is_some_and(|i| matches!(i.location, ItemLocation::Stored(_)));
+        let stored = frame.frame.item_stored(binding.item);
         if stored || binding.stored {
             visibility.set_if_neq(if stored {
                 if binding.keep {
@@ -574,107 +558,40 @@ pub(crate) fn sync_inventory(
     }
 }
 
-/// Physics-space transform of a starting-area node: its body pose, then the authored chain below the body.
-fn body_node_transform(
-    reference: &ReferenceManifest,
-    area: &StartingArea,
-    physics: &PhysicsWorld,
-    node: NodeId,
-) -> Option<GlobalTransform> {
-    let local = |t: &crate::reference::Transform| {
-        Transform::from_translation(Vec3::from_array(t.translation))
-            .with_rotation(Quat::from_array(t.rotation))
-            .with_scale(Vec3::from_array(t.scale))
-    };
-    let mut below = GlobalTransform::IDENTITY;
-    let mut current = reference.nodes.iter().find(|n| n.id == node)?;
-    let body = loop {
-        if let Some(body) = reference.bodies.iter().find(|b| b.node == current.id) {
-            break body;
-        }
-        below = GlobalTransform::from(local(&current.transform)) * below;
-        let parent = current.parent?;
-        current = reference.nodes.iter().find(|n| n.id == parent)?;
-    };
-    // BodyVisual: the physics pose with the scale of the body node chain.
-    let mut scale = Vec3::ONE;
-    let mut scaled = Some(current);
-    while let Some(n) = scaled {
-        scale *= Vec3::from_array(n.transform.scale);
-        scaled = n
-            .parent
-            .and_then(|p| reference.nodes.iter().find(|n| n.id == p));
-    }
-    let pose = physics.rapier().bodies[*area.bodies.get(&body.id)?].position();
-    let world = Transform::from_translation(Vec3::from_array(pose.translation.to_array()))
-        .with_rotation(Quat::from_array(pose.rotation.to_array()))
-        .with_scale(scale);
-    Some(GlobalTransform::from(world) * below)
-}
-
-/// Source home `buildingscript.FStart`: connect the home cable to the nearest road pole.
-/// Runs once per world session. No pole in range: the root stays hidden.
+/// Source home `buildingscript.FStart`: aims the home cable ropes the simulation picked.
+/// No pole in range: the root stays hidden.
 pub(crate) fn sync_home_cable(
     reference: Res<crate::app::RuntimeReference>,
-    mut drive: ResMut<crate::app::Drive>,
+    mut sim: ResMut<super::sim_frame::SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
-    mut done: Local<Option<u64>>,
     mut nodes: Query<(&mut Transform, &mut Visibility)>,
 ) {
-    let run = &mut drive.runtime;
-    let session = run.stream.frame().request.session;
-    if *done == Some(session)
-        || !visuals.bound
-        || !run.startup_aligned
-        || !run.stream.initial_generation_ready()
-    {
+    if !visuals.bound {
         return;
     }
+    let Some(aims) = sim.home_cable.take() else {
+        return;
+    };
     let reference = &reference.0;
     let cable = &reference.world.home_cable;
-    let pose = |node| body_node_transform(reference, &run.area, &run.physics, node);
-    let Some(rope0) = pose(cable.ropes[0]) else {
-        run.stream.fail(crate::reference::ReferenceError(
-            "Home cable is not below a starting-area body".into(),
-        ));
-        *done = Some(session);
-        return;
-    };
-    let rope0 = run.stream.origin.absolute(rope0.translation().to_array());
-    let (status, target) = run.stream.home_cable_target(rope0);
-    if status == crate::world::QueryStatus::Pending {
-        return;
+    if aims.is_empty()
+        && let Ok((_, mut visibility)) = nodes.get_mut(visuals.nodes[&cable.root])
+    {
+        *visibility = Visibility::Hidden;
     }
-    *done = Some(session);
-    let Some(target) = target else {
-        if let Ok((_, mut visibility)) = nodes.get_mut(visuals.nodes[&cable.root]) {
-            *visibility = Visibility::Hidden;
-        }
-        return;
-    };
-    let target = run.stream.origin.local(target).map(f64::from);
-    for &rope in &cable.ropes {
+    for aim in aims {
         let node = reference
             .nodes
             .iter()
-            .find(|n| n.id == rope)
+            .find(|n| n.id == aim.node)
             .expect("validated home rope");
-        let parent = node.parent.expect("home rope below its root");
-        let (Some(parent_world), Some(rope_world)) = (pose(parent), pose(rope)) else {
-            continue;
-        };
-        let (rotation, scale_z) = crate::world::aim(
-            rope_world.translation().to_array().map(f64::from),
-            rapier3d::math::Rotation::from_array(parent_world.rotation().to_array()),
-            target,
-        );
         let [x, y, _] = node.transform.scale;
-        if let Ok((mut transform, _)) = nodes.get_mut(visuals.nodes[&rope]) {
-            transform.rotation = Quat::from_array(rotation);
-            transform.scale = Vec3::new(x, y, scale_z);
+        if let Ok((mut transform, _)) = nodes.get_mut(visuals.nodes[&aim.node]) {
+            transform.rotation = Quat::from_array(aim.rotation);
+            transform.scale = Vec3::new(x, y, aim.scale_z);
         }
         // Source `SetActive(true)` on the root: show every node from the rope up to the root.
-        let mut current = Some(rope);
+        let mut current = Some(aim.node);
         while let Some(id) = current {
             if let Ok((_, mut visibility)) = nodes.get_mut(visuals.nodes[&id]) {
                 *visibility = Visibility::Inherited;

@@ -125,6 +125,29 @@ def dry_mass(source, components) -> float:
 
 # carscript player body frames while driving.
 DRIVE_FRAMES=(('left_hand','LHDrivePos'),('right_hand','RHDrivePos'),('left_leg','LLDrivePos'),('right_leg','RLDrivePos'))
+# carscript hand and foot targets of the car controls.
+REACH_NODES=(('horn','HornHandPos'),('lights','LightHandPos'),('ignition','IgnitionHandPos'),('handbrake','HandBrakeHandPos'),
+    ('transmission','TransmissionHandPos'),('gas','GasLegPos'),('brake','BrakeLegPos'),('clutch','ClutchLegPos'),
+    ('default_left_leg','DefLLPos'),('default_right_leg','DefRLPos'))
+# carscript limb flags. carscript.Start inverts the first five when Vinv is set.
+REACH_FLAGS=(('leg_shift','VLegShift'),('hand_gas','VHandGas'),('hand_brake','VHandBrake'),('hand_clutch','VHandClutch'),
+    ('leg_handbrake','VLegHandbrake'),('leg_ignition','VLegIgnition'),('no_clutch','VNoClutch'),
+    ('dont_hold_ignition_when_start','VDontHoldIgnitionWhenStart'))
+
+
+def reach_record(proto, car_reader, car) -> dict:
+    """carscript control targets (null when unset) and limb flags after the Start Vinv inversion."""
+    flags={name:bool(car[field])!=(bool(car['Vinv']) and i<5) for i,(name,field) in enumerate(REACH_FLAGS)}
+    return {**{name:proto.link(car_reader,car[field]) for name,field in REACH_NODES},**flags}
+
+
+def gear_stick_record(proto, engine_reader, engine) -> dict | None:
+    """enginescript.gearstick hand targets, or None when the engine has no gear stick."""
+    stick=proto.source.resolve(engine_reader,engine['gearstick'])
+    if stick is None:return None
+    value=proto.source.read(stick)
+    return {'source':source_id(stick),'transmission':proto.link(stick,value['TransmissionHandPos']),
+        'kick_ignition':proto.link(stick,value['KickNitionHandPos'])}
 
 
 def seat_fields(source, reader, value, car_reader) -> dict:
@@ -223,7 +246,8 @@ def part_records(source, hierarchy, asset, material_indices) -> tuple[list, list
     """Engine, radiator and gauge records of the part nodes of one prototype."""
     proto=Prototype(source,hierarchy)
     selector_engines(source,proto)
-    engines=[{'source':source_id(reader),'node':node,'oil_tank':proto.link(reader,value['T']),**engine_fields(value)}
+    engines=[{'source':source_id(reader),'node':node,'oil_tank':proto.link(reader,value['T']),
+        'gear_stick':gear_stick_record(proto,reader,value),**engine_fields(value)}
         for node,reader in proto.scripts('enginescript') for value in (source.read(reader),)]
     radiators=[{'source':source_id(reader),'node':node,'coolant_tank':proto.link(reader,value['coolant']),
         'fan_node':proto.link(reader,value['Fan']),**radiator_fields(value)}
@@ -363,7 +387,8 @@ def vehicle_record(source, hierarchy, bodies, colliders, asset, material_indices
         # Source carscript.ledOilTestTwoStrokeDefault: the oil LED follows the two-stroke mix.
         'oil_led_two_stroke':bool(car['ledOilTestTwoStrokeDefault']),
         'seats':seats,'pedals':pedal_record(source,proto,car_reader,car,wheels,seats),
-        'no_gas_while_pedaling':bool(car['noGasWhilePedaling']),'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},'lights':lights,'light_switch':light_switch,'instruments':instruments,
+        'no_gas_while_pedaling':bool(car['noGasWhilePedaling']),'drive_frames':{n:proto.link(car_reader,car[f]) for n,f in DRIVE_FRAMES},
+        'reach':reach_record(proto,car_reader,car),'lights':lights,'light_switch':light_switch,'instruments':instruments,
         'gauge_limits':gauge_limits(source,car_reader),'kmh_meters':kmh_meters(source,proto,car_reader,car),
         'plates':prototype_plates(source,proto),'probe':probe_record(source,proto),
         'high_beams':[i for i,lamp in enumerate(instruments['lamps']) if lamp['signal']=='headlight2'] if instruments else []}

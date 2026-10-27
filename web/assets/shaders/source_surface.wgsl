@@ -129,8 +129,8 @@ fn fragment(
 #endif
     if !source_lod_keep(in.position.xy, lod_fade) { discard; }
     let player = source.flags.z == 3u;
-    // Source player_model: discard near the camera of a view with `_Dist`.
-    if player && length(in.world_position.xyz - mesh_view_bindings::view.world_position) < lighting.near_far.z { discard; }
+    // Source player_model: discard near the camera of a view with `_Dist`. Flag 12: the ragdoll has `_Dist` 0.
+    if player && !source_flag(12u) && length(in.world_position.xyz - mesh_view_bindings::view.world_position) < lighting.near_far.z { discard; }
 #ifdef SOURCE_GPU_PROPS
     // Same fields as pbr_input_from_vertex_output, without the mesh uniform flags.
     var pbr = pbr_types::pbr_input_new();

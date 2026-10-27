@@ -20,6 +20,8 @@ pub enum ItemLocation {
     Held,
     Stored(u8),
     Equipped,
+    /// Worn by the player in this `wearableType` slot. The body is disabled.
+    Worn(u8),
     Attached(ItemId),
     WheelSlot(WheelSlotId),
     /// Physics lock in a storage volume. `volume` is an index in `StorageLocks`.
@@ -370,7 +372,8 @@ impl ItemStore {
                 (origin.absolute(item.pose.position), item.pose.rotation)
             };
             let location = match item.location {
-                ItemLocation::World => ItemLocationSave::World,
+                // `InventorySnapshot::worn` names the slot.
+                ItemLocation::World | ItemLocation::Worn(_) => ItemLocationSave::World,
                 ItemLocation::Held => ItemLocationSave::Held,
                 ItemLocation::WheelSlot(_) => ItemLocationSave::GeneratedAttachment {
                     attachment: crate::world::changes::capture(
@@ -672,10 +675,11 @@ impl ItemStore {
         id: ItemId,
         prototype_index: usize,
         reference: &FoodReference,
+        bite: u8,
         pose: VehiclePose,
         body: RigidBodyHandle,
     ) -> Result<(), ReferenceError> {
-        if self.indices.contains_key(&id) || reference.index >= reference.bites {
+        if self.indices.contains_key(&id) || bite > reference.bites {
             return Err(ReferenceError("Invalid consumable identity".into()));
         }
         self.indices.insert(id, self.states.len());
@@ -696,7 +700,7 @@ impl ItemStore {
             inactive_pose: None,
             food: Some(FoodState {
                 prototype_index,
-                bite: reference.index,
+                bite,
             }),
             hit_sound: None,
             removed: false,
@@ -797,6 +801,7 @@ impl ItemStore {
             glow: None,
             radio: None,
             detector: None,
+            gun: None,
             linear_velocity: [0.; 3],
             angular_velocity: [0.; 3],
             sleeping: false,

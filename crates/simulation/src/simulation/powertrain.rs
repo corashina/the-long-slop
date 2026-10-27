@@ -17,6 +17,8 @@ pub struct EnginePart {
     pub oil_tank: Option<ItemId>,
     /// Source `enginescript` runtime fields. They move with the part.
     pub state: EngineState,
+    /// Gear stick `TransmissionHandPos`, `KickNitionHandPos` relative to the part item.
+    pub gear_stick: [Option<crate::vehicle::VehiclePose>; 2],
 }
 
 impl EnginePart {
@@ -27,6 +29,7 @@ impl EnginePart {
             record,
             oil_tank,
             state,
+            gear_stick: [None; 2],
         }
     }
 }

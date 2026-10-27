@@ -424,7 +424,11 @@ impl RenderingRecord {
                 }
                 ShaderFamily::PlayerModel => {
                     require(
-                        player_source && asset.usage == AssetUsage::PlayerPrototype,
+                        player_source
+                            && matches!(
+                                asset.usage,
+                                AssetUsage::PlayerPrototype | AssetUsage::RagdollPrototype
+                            ),
                         &format!("{label}: player prototype usage"),
                     )?;
                     let floats = &material.properties.floats;

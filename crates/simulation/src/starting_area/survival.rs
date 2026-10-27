@@ -2,15 +2,17 @@ use super::GarageRuntime;
 use crate::fluids::{contact_drink_transfer, drink_transfer};
 use crate::interaction::items::ItemLocation;
 use crate::reference::{ConsumptionEffect, ItemId, NodeId, ReferenceError, ReferenceManifest};
-use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, to_rapier};
+use crate::vehicle::{PhysicsWorld, VehiclePose, collider_builder, from_rapier, to_rapier};
 use rapier3d::prelude::{Group, InteractionGroups, InteractionTestMode, RigidBodyBuilder};
 
+/// A runtime food copy at `bite`. It saves in the world.
 pub fn spawn_consumable(
     reference: &ReferenceManifest,
     area: &mut super::StartingArea,
     physics: &mut PhysicsWorld,
     id: ItemId,
     prototype_index: usize,
+    bite: u8,
     pose: VehiclePose,
 ) -> Result<(), ReferenceError> {
     let prototype = reference
@@ -35,10 +37,7 @@ pub fn spawn_consumable(
         let node = to_rapier(super::node_pose(reference, record.node)?);
         let mut collider = collider_builder(&record.geometry)?
             .sensor(record.sensor)
-            .enabled(
-                record.enabled
-                    && active_part(reference, record.node, &prototype.parts, prototype.index),
-            )
+            .enabled(record.enabled && active_part(reference, record.node, &prototype.parts, bite))
             .density(0.)
             .collision_groups(InteractionGroups::new(
                 Group::from_bits_truncate(record.membership),
@@ -56,11 +55,73 @@ pub fn spawn_consumable(
         handles.push(physics.insert_collider_with_parent(collider, body));
     }
     area.items
-        .insert_consumable(id, prototype_index, prototype, pose, body)?;
+        .insert_consumable(id, prototype_index, prototype, bite, pose, body)?;
     area.interaction
         .register_consumable(id, prototype, &handles);
     area.item_render_poses.push((id, pose, pose));
+    area.foods.push(id);
     physics.refresh_queries();
+    Ok(())
+}
+
+impl super::StartingArea {
+    /// Spawned items and runtime foods save in the world, not in a hand or slot.
+    pub fn saves_in_world(&self, id: ItemId) -> bool {
+        self.spawned.contains(id) || self.foods.contains(&id)
+    }
+    /// Every runtime food that is not removed, at its current pose.
+    pub fn capture_foods(
+        &self,
+        reference: &ReferenceManifest,
+        origin: &crate::world::WorldOrigin,
+    ) -> Vec<crate::save::FoodItemSnapshot> {
+        self.foods
+            .iter()
+            .filter_map(|id| {
+                let state = self.items.get(*id).filter(|s| !s.removed)?;
+                let food = state.food?;
+                Some(crate::save::FoodItemSnapshot {
+                    source: (&reference.survival.foods[food.prototype_index].source).into(),
+                    bite: food.bite,
+                    pose: state.inactive_pose.unwrap_or(crate::save::AbsolutePose {
+                        position: origin.absolute(state.pose.position),
+                        rotation: state.pose.rotation,
+                    }),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Food prototype index of a saved source.
+pub fn saved_food(
+    reference: &ReferenceManifest,
+    source: &crate::save::SourceKey,
+) -> Result<usize, crate::save::SaveError> {
+    reference
+        .survival
+        .foods
+        .iter()
+        .position(|p| crate::save::SourceKey::from(&p.source) == *source)
+        .ok_or_else(|| crate::save::SaveError::InvalidLinks("Unknown food source".into()))
+}
+
+pub fn restore_foods(
+    reference: &ReferenceManifest,
+    area: &mut super::StartingArea,
+    physics: &mut PhysicsWorld,
+    origin: &crate::world::WorldOrigin,
+    saved: &[crate::save::FoodItemSnapshot],
+) -> Result<(), crate::save::SaveError> {
+    for record in saved {
+        let prototype = saved_food(reference, &record.source)?;
+        let id = area.items.allocate_item_id()?;
+        let pose = VehiclePose {
+            position: origin.local(record.pose.position),
+            rotation: record.pose.rotation,
+        };
+        spawn_consumable(reference, area, physics, id, prototype, record.bite, pose)?;
+    }
     Ok(())
 }
 
@@ -163,9 +224,100 @@ impl GarageRuntime {
             &mut self.physics,
             id,
             prototype_index,
+            reference.survival.foods[prototype_index].index,
             pose,
         )?;
         Ok(id)
+    }
+    /// `ediblescript.Shot`: the item advances `n` bites without nutrition or sound. A new
+    /// piece with `n` bites spawns turned 180 degrees around Y. Without a piece and with
+    /// `only_separate` false, the item loses one bite (`RemoveOne`).
+    pub fn cut_food(
+        &mut self,
+        reference: &ReferenceManifest,
+        item: ItemId,
+        only_separate: bool,
+    ) -> Result<(), ReferenceError> {
+        let Some(state) = self.area.items.get(item) else {
+            return Ok(());
+        };
+        let (Some(food), Some(body)) = (state.food, state.body) else {
+            return Ok(());
+        };
+        let prototype = &reference.survival.foods[food.prototype_index];
+        if state.removed {
+            return Ok(());
+        }
+        let n = prototype
+            .spawn_if_shot
+            .then(|| crate::interaction::melee::cut(prototype.bites.saturating_sub(food.bite)))
+            .flatten();
+        let Some(n) = n else {
+            return if only_separate {
+                Ok(())
+            } else {
+                self.remove_one(reference, item)
+            };
+        };
+        let mut root = *self.physics.rapier().bodies[body].position() * to_rapier(state.local_pose);
+        root.rotation *= rapier3d::math::Rotation::from_rotation_y(std::f32::consts::PI);
+        self.area
+            .items
+            .get_mut(item)
+            .unwrap()
+            .food
+            .as_mut()
+            .unwrap()
+            .bite += n;
+        self.sync_food_colliders(reference, item);
+        let id = self.area.items.allocate_item_id()?;
+        spawn_consumable(
+            reference,
+            &mut self.area,
+            &mut self.physics,
+            id,
+            food.prototype_index,
+            prototype.bites - n,
+            from_rapier(&root),
+        )
+    }
+    /// `ediblescript.RemoveOne`: one bite without nutrition or sound.
+    fn remove_one(
+        &mut self,
+        reference: &ReferenceManifest,
+        item: ItemId,
+    ) -> Result<(), ReferenceError> {
+        let food = self
+            .area
+            .items
+            .get_mut(item)
+            .unwrap()
+            .food
+            .as_mut()
+            .unwrap();
+        let prototype = &reference.survival.foods[food.prototype_index];
+        if food.bite >= prototype.bites {
+            return Ok(());
+        }
+        food.bite += 1;
+        let end = food.bite == prototype.bites && prototype.destroy_on_end;
+        self.sync_food_colliders(reference, item);
+        if end {
+            self.remove_consumable(item)?;
+        }
+        Ok(())
+    }
+    /// Enabled food colliders follow the bite.
+    fn sync_food_colliders(&mut self, reference: &ReferenceManifest, item: ItemId) {
+        if matches!(
+            self.area.items.object_key(item),
+            crate::world::ObjectKey::Generated(_)
+        ) {
+            self.stream
+                .sync_generated_food(reference, &self.area.items, &mut self.physics);
+        } else {
+            sync_consumable_colliders(reference, &self.area, &mut self.physics, item);
+        }
     }
     pub fn consume(
         &mut self,
@@ -207,15 +359,7 @@ impl GarageRuntime {
             state.food.as_mut().unwrap().bite += 1;
             state.food.unwrap().bite
         };
-        if matches!(
-            self.area.items.object_key(item),
-            crate::world::ObjectKey::Generated(_)
-        ) {
-            self.stream
-                .sync_generated_food(reference, &self.area.items, &mut self.physics);
-        } else {
-            sync_consumable_colliders(reference, &self.area, &mut self.physics, item);
-        }
+        self.sync_food_colliders(reference, item);
         if bite == prototype.bites && prototype.destroy_on_end {
             self.remove_consumable(item)?;
         }
@@ -417,6 +561,7 @@ impl GarageRuntime {
         state.location = ItemLocation::World;
         state.removed = true;
         self.area.inventory.forget(item);
+        self.area.foods.retain(|id| *id != item);
         Ok(())
     }
 }
@@ -430,6 +575,7 @@ impl GarageRuntime {
             return;
         }
         self.simulation_seconds += f64::from(dt);
+        self.hearing.advance(dt);
         self.survival.advance(
             &reference.survival,
             dt,
@@ -441,7 +587,7 @@ impl GarageRuntime {
             self.paused = true;
         }
     }
-    fn draw_survival(&mut self) -> f32 {
+    pub(super) fn draw_survival(&mut self) -> f32 {
         self.survival_draw = self.survival_draw.wrapping_add(1);
         super::start_sample(super::DEFAULT_SEED, self.survival_draw)
     }
@@ -513,7 +659,7 @@ impl GarageRuntime {
         let selection = self.select_survival_audio(kind);
         self.emit_selected_audio(kind, selection);
     }
-    fn announce_death(&mut self, reference: &ReferenceManifest) {
+    pub(super) fn announce_death(&mut self, reference: &ReferenceManifest) {
         if self.needs_output().dead && !self.death_announced {
             self.death_announced = true;
             self.interrupt_sleep(reference);
@@ -521,6 +667,8 @@ impl GarageRuntime {
             self.area
                 .interaction
                 .drop_held(&mut self.area.items, &mut self.physics);
+            self.take_all_off();
+            self.spawn_ragdoll();
             self.emit_survival_audio(crate::audio::AudioKind::Death);
         }
     }

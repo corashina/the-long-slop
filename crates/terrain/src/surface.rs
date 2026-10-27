@@ -40,7 +40,7 @@ pub struct TerrainRoadPoint {
     pub range: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TerrainFoundation {
     pub position: [f32; 3],
     pub range_squared: [f32; 2],

@@ -146,7 +146,8 @@ def recover_pickup(source, reader):
         'can_inventory': bool(fields['canInventory']), 'can_hold_right_hand': bool(fields['canHoldRightHand']),
         'disable_rh_fix': bool(fields['disableRHFix']), 'right_hand_position': convert_point(vector(fields['RHP'])),
         'right_hand_rotation': rotation_of('RHR'), 'right_hand_grip': link('RightHandPos', 'Transform'),
-        'left_hand_grip': link('LeftHandPos', 'Transform'), 'disable_when_stored': stored,
+        'left_hand_grip': link('LeftHandPos', 'Transform'), 'double_hand': bool(fields['doubleHand']),
+        'disable_when_stored': stored,
         'keep_when_stored': link('dontDisableWhenStored', 'Transform'), 'inventory_icon': link('invImg', 'Sprite')}
 
 

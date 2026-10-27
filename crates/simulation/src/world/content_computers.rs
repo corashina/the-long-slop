@@ -81,7 +81,6 @@ impl Computers {
         &self.computers
     }
     /// Every computer with its screen change since the last call. Presentation draws them.
-    #[cfg(target_arch = "wasm32")]
     pub fn take_screens(&mut self, mut screen: impl FnMut(ItemId, &Computer, bool)) {
         for b in &mut self.computers {
             let changed = b.computer.take_changed();
@@ -304,7 +303,6 @@ impl WorldStream {
         }
     }
     /// displayscript.R: `on` picks the material, `map` is the computer whose output it shows.
-    #[cfg(target_arch = "wasm32")]
     pub fn display_screen(&self, parent: &GeneratedId) -> Option<(bool, Option<ItemId>)> {
         self.computers
             .displays

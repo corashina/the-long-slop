@@ -5,8 +5,8 @@ use super::{
 use crate::conditions::{ConditionStore, RepairResult};
 use crate::particles::ParticleState;
 use crate::reference::{
-    ColliderId, ConditionColliderBinding, ConditionId, ItemId, ReferenceError, ReferenceManifest,
-    WashId,
+    BrushReference, BrushTool, ColliderId, ConditionColliderBinding, ConditionId, ItemId, NodeId,
+    ReferenceError, ReferenceManifest, WashId,
 };
 use crate::vehicle::{PhysicsWorld, VehiclePose, from_rapier, to_rapier};
 use rapier3d::{
@@ -38,7 +38,8 @@ pub enum ToolOwner {
 }
 #[derive(Clone, Copy, Debug)]
 pub struct ToolSignals {
-    pub item: ItemId,
+    /// None: the player brush.
+    pub item: Option<ItemId>,
     pub pose: VehiclePose,
     pub force: f32,
     pub doing_work: bool,
@@ -167,8 +168,14 @@ pub struct ToolState {
 }
 pub struct CleaningTools {
     pub states: Vec<ToolState>,
+    /// Item brushes in reference order, then the player brush (`fpscontroller.pointKefe`).
     contacts: Vec<Contact>,
+    /// Item brush count: the player brush index.
+    brushes: usize,
+    /// The player pose: the player brush root.
+    player: Pose,
     sprays: Vec<Spray>,
+    /// Item brushes, sprays, then the player brush.
     signals: Vec<ToolSignals>,
     bindings: HashMap<ColliderId, ConditionColliderBinding>,
     item_conditions: HashMap<ItemId, ConditionId>,
@@ -186,17 +193,16 @@ impl CleaningTools {
         reference.conditions.validate(reference)?;
         let mut contacts = Vec::with_capacity(reference.conditions.brushes.len());
         let mut signals = Vec::with_capacity(reference.conditions.brushes.len());
-        for b in &reference.conditions.brushes {
-            let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
-            let root = to_rapier(super::items::node_pose(reference, item.node)?);
+        let contact = |t: &BrushTool, root: NodeId| {
+            let root = to_rapier(super::items::node_pose(reference, root)?);
             let equip =
-                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_equip)?);
+                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_equip)?);
             let default =
-                root.inverse() * to_rapier(super::items::node_pose(reference, b.model_default)?);
-            let model = b.model.map_or(Ok(root), |n| {
+                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_default)?);
+            let model = t.model.map_or(Ok(root), |n| {
                 super::items::node_pose(reference, n).map(to_rapier)
             })?;
-            contacts.push(Contact {
+            Ok::<_, ReferenceError>(Contact {
                 equipped: false,
                 hit: None,
                 target: None,
@@ -209,24 +215,36 @@ impl CleaningTools {
                 sampled: false,
                 equip,
                 default,
-                particles: b
+                particles: t
                     .particles
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| ParticleState::new(p, b.source.path_id as u64 + i as u64))
+                    .map(|(i, p)| ParticleState::new(p, t.source.path_id as u64 + i as u64))
                     .collect(),
-            });
-            signals.push(ToolSignals {
-                item: b.item,
-                pose: from_rapier(&model),
-                force: 0.,
-                doing_work: false,
-                playing: false,
-                voice_gain: 0.,
-                emission: [0.; 2],
-                color: [1.; 4],
-            });
+            })
+        };
+        let signal = |item: Option<ItemId>, model: Pose| ToolSignals {
+            item,
+            pose: from_rapier(&model),
+            force: 0.,
+            doing_work: false,
+            playing: false,
+            voice_gain: 0.,
+            emission: [0.; 2],
+            color: [1.; 4],
+        };
+        for b in &reference.conditions.brushes {
+            let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
+            let c = contact(&b.tool, item.node)?;
+            signals.push(signal(Some(b.item), c.model));
+            contacts.push(c);
         }
+        let player = contact(
+            &reference.conditions.player_brush,
+            reference.clothing.pose.root,
+        )?;
+        let player_signal = signal(None, player.model);
+        contacts.push(player);
         let mut sprays = Vec::with_capacity(reference.conditions.sprays.len());
         for b in &reference.conditions.sprays {
             let item = reference.items.iter().find(|i| i.id == b.item).unwrap();
@@ -254,7 +272,7 @@ impl CleaningTools {
                 particles,
             });
             signals.push(ToolSignals {
-                item: b.item,
+                item: Some(b.item),
                 pose: from_rapier(&(root * nozzle)),
                 force: 0.,
                 doing_work: false,
@@ -264,7 +282,10 @@ impl CleaningTools {
                 color: b.startup_color,
             });
         }
+        signals.push(player_signal);
         Ok(Self {
+            brushes: reference.conditions.brushes.len(),
+            player: Pose::IDENTITY,
             contacts,
             sprays,
             signals,
@@ -313,8 +334,8 @@ impl CleaningTools {
                 .conditions
                 .brushes
                 .iter()
-                .filter(|b| b.show_text)
-                .map(|b| (b.item, b.text))
+                .filter(|b| b.tool.show_text)
+                .map(|b| (b.item, b.tool.text))
                 .collect(),
             bindings: reference
                 .conditions
@@ -336,7 +357,7 @@ impl CleaningTools {
                     item: t.item,
                     quantity: None,
                     color: None,
-                    disabled: t.disabled,
+                    disabled: t.tool.disabled,
                     valve: 0.,
                 })
                 .chain(reference.conditions.sprays.iter().map(|t| ToolState {
@@ -378,9 +399,9 @@ impl CleaningTools {
     pub fn reserves_lmb(&self, equipped: Option<ItemId>, _carried: Option<ItemId>) -> bool {
         equipped.is_some_and(|item| {
             self.lmb_items.contains_key(&item)
-                || self.signals[..self.contacts.len()]
+                || self.signals[..self.brushes]
                     .iter()
-                    .any(|s| s.item == item)
+                    .any(|s| s.item == Some(item))
         })
     }
     pub fn prompt(&self, item: ItemId) -> Option<u32> {
@@ -566,7 +587,10 @@ impl CleaningTools {
         if c.motion_ready {
             self.signals[index].pose
         } else {
-            from_rapier(&(to_rapier(items.get(self.signals[index].item).unwrap().pose) * c.default))
+            from_rapier(
+                &(to_rapier(items.get(self.signals[index].item.unwrap()).unwrap().pose)
+                    * c.default),
+            )
         }
     }
     pub fn particles(&self, tool: usize, particle: usize) -> &[crate::particles::ParticleOutput] {
@@ -697,6 +721,46 @@ impl CleaningTools {
             })
             .or(b.pickup_condition)
     }
+    /// The signal of brush `index`.
+    fn signal_index(&self, index: usize) -> usize {
+        if index < self.brushes {
+            index
+        } else {
+            self.signals.len() - 1
+        }
+    }
+    fn brush_disabled(&self, index: usize, reference: &ReferenceManifest) -> bool {
+        match self.states.get(index).filter(|_| index < self.brushes) {
+            Some(state) => state.disabled,
+            None => reference.conditions.player_brush.disabled,
+        }
+    }
+    /// Source `fpscontroller.pointKefe.Use` while the point input is held. `player` is the
+    /// player pose. The brush has no item: it ignores the item brush checks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_player(
+        &mut self,
+        held: bool,
+        player: VehiclePose,
+        frame: ToolFrame,
+        reference: &ReferenceManifest,
+        conditions: &mut ConditionStore,
+        items: &ItemStore,
+        physics: &PhysicsWorld,
+        parts: &PartAttachments,
+    ) {
+        let index = self.brushes;
+        self.player = to_rapier(player);
+        if !frame.active || !frame.dt.is_finite() || frame.dt <= 0. {
+            return;
+        }
+        let frame = ToolFrame { lmb: held, ..frame };
+        self.contacts[index].equipped = held;
+        self.contacts[index].hit = self.brush_hit(
+            index, true, frame, reference, conditions, items, physics, parts,
+        );
+        self.use_brush(index, frame, reference, conditions);
+    }
     pub fn begin_frame(&mut self, frame: ToolFrame) {
         for contact in &mut self.contacts {
             contact.equipped = false;
@@ -777,8 +841,12 @@ impl CleaningTools {
     )> {
         let view = to_rapier(frame.view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        let b = &reference.conditions.brushes[index];
-        let own_body = items.get(b.item).and_then(|i| i.body);
+        let brushes = &reference.conditions.brushes;
+        let b = brush_tool(brushes, &reference.conditions.player_brush, index);
+        let own_body = brushes
+            .get(index)
+            .and_then(|brush| items.get(brush.item))
+            .and_then(|i| i.body);
         let filter = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
             c.is_enabled()
                 && (own_body.is_none() || c.parent() != own_body)
@@ -804,7 +872,7 @@ impl CleaningTools {
         });
         if let Some((_, hit)) = hit
             && !matches!(selected, Some(Target::Wash(_) | Target::Generated(_)))
-            && !self.states[index].disabled
+            && !self.brush_disabled(index, reference)
             && let Some(wash) = self.nearby_wash(
                 ray.point_at(hit.time_of_impact),
                 b.wash_mask,
@@ -828,40 +896,46 @@ impl CleaningTools {
             return;
         };
         let c = &self.contacts[index];
-        let s = &self.signals[index];
-        let b = &reference.conditions.brushes[index];
+        let si = self.signal_index(index);
+        let s = &self.signals[si];
+        let brushes = &reference.conditions.brushes;
+        let b = brush_tool(brushes, &reference.conditions.player_brush, index);
+        let disabled = self.brush_disabled(index, reference);
         // Use reads the retained force before objSlideOnColliderScript.Update samples this frame.
         if c.origin == frame.origin
             && c.sampled
             && c.target == Some(target)
             && c.collider == Some(handle)
             && s.force > b.min_force
-            && !self.states[index].disabled
+            && !disabled
         {
             let gain = b.repair_modifier * reference.conditions.repair_rate * frame.dt;
             let tool = b.cleaning_type;
             let mut completed = false;
             match target {
                 Target::Surface(id) => {
-                    self.signals[index].doing_work = conditions.can_repair(id, tool);
+                    self.signals[si].doing_work = conditions.can_repair(id, tool);
                     completed = conditions.repair(id, tool, gain) != RepairResult::None;
                 }
                 Target::Wash(id) => {
                     if let Some(clean) = self.wash_fixed(id, tool, gain, reference, conditions) {
-                        self.signals[index].doing_work = true;
+                        self.signals[si].doing_work = true;
                         completed = clean;
                     }
                 }
                 Target::Generated(owner) => {
                     if let Some(clean) = self.wash_generated(owner, tool, gain, reference) {
-                        self.signals[index].doing_work = true;
+                        self.signals[si].doing_work = true;
                         completed = clean;
                     }
                 }
                 Target::Solid(_) => {}
             }
-            if completed && b.can_ruin {
-                self.states[index].disabled = conditions.wear(b.own_condition);
+            if completed
+                && b.can_ruin
+                && let Some(brush) = brushes.get(index)
+            {
+                self.states[index].disabled = conditions.wear(brush.own_condition);
             }
         }
     }
@@ -877,13 +951,21 @@ impl CleaningTools {
         let hit = self.contacts[index].hit;
         let view = to_rapier(frame.view);
         let ray = Ray::new(view.translation, view.rotation * -Vector::Z);
-        let b = &reference.conditions.brushes[index];
-        let root = items
-            .get(b.item)
-            .map(|i| to_rapier(i.pose))
-            .unwrap_or(self.contacts[index].model);
+        let brushes = &reference.conditions.brushes;
+        let b = brush_tool(brushes, &reference.conditions.player_brush, index);
+        let root = match brushes.get(index) {
+            Some(brush) => items
+                .get(brush.item)
+                .map(|i| to_rapier(i.pose))
+                .unwrap_or(self.contacts[index].model),
+            None => self.player,
+        };
+        let disabled = self.brush_disabled(index, reference);
+        // The player brush works while its own input is held.
+        let using = equipped && (frame.lmb || index == self.brushes);
+        let si = self.signal_index(index);
         let c = &mut self.contacts[index];
-        let s = &mut self.signals[index];
+        let s = &mut self.signals[si];
         s.emission = [0.; 2];
         if !c.motion_ready {
             c.model = root * c.default;
@@ -943,14 +1025,14 @@ impl CleaningTools {
             c.ray_relative = ray_relative;
             c.sampled = true;
             s.force = force;
-            s.playing = b.has_sound && (b.sound_when_disabled || !self.states[index].disabled);
+            s.playing = b.has_sound && (b.sound_when_disabled || !disabled);
             if s.playing {
                 s.voice_gain += (force * b.max_volume - s.voice_gain)
                     * (b.volume_lerp * frame.dt).clamp(0., 1.);
             } else {
                 s.voice_gain = 0.;
             }
-            if !self.states[index].disabled {
+            if !disabled {
                 for (pi, p) in b.particles.iter().enumerate() {
                     let first = p.role.ends_with("-particle");
                     s.emission[pi] =
@@ -966,7 +1048,7 @@ impl CleaningTools {
             c.collider = None;
             c.sampled = false;
             s.force = 0.;
-            let desired = if equipped && frame.lmb {
+            let desired = if using {
                 Pose::from_parts(
                     view.translation + view.rotation * Vector::new(0., -0.25, -0.75),
                     root.rotation * c.equip.rotation,
@@ -985,7 +1067,7 @@ impl CleaningTools {
                 .model
                 .rotation
                 .slerp(desired.rotation, (b.rotation_lerp * frame.dt).clamp(0., 1.));
-            if equipped && frame.lmb {
+            if using {
                 s.voice_gain += (0. - s.voice_gain) * (b.volume_lerp * frame.dt).clamp(0., 1.);
             } else {
                 s.playing = false;
@@ -1009,8 +1091,8 @@ impl CleaningTools {
         }
         for index in 0..self.contacts.len() {
             self.finish_brush(index, frame, reference, items, physics);
+            let s = &self.signals[self.signal_index(index)];
             let c = &mut self.contacts[index];
-            let s = &self.signals[index];
             for (pi, p) in c.particles.iter_mut().enumerate() {
                 p.rotation = c.model.rotation;
                 p.set_origin(frame.origin);
@@ -1053,7 +1135,7 @@ impl CleaningTools {
         physics: &PhysicsWorld,
         parts: &PartAttachments,
     ) {
-        let offset = self.contacts.len();
+        let offset = self.brushes;
         let b = &reference.conditions.sprays[index];
         let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
         let nozzle = root * self.sprays[index].nozzle;
@@ -1128,7 +1210,7 @@ impl CleaningTools {
         items: &ItemStore,
         physics: &PhysicsWorld,
     ) {
-        let offset = self.contacts.len();
+        let offset = self.brushes;
         for index in 0..self.sprays.len() {
             let b = &reference.conditions.sprays[index];
             let root = to_rapier(items.get(b.item).expect("checked spray owner").pose);
@@ -1185,7 +1267,7 @@ impl CleaningTools {
                     .brushes
                     .iter()
                     .find(|b| b.item == t.item)
-                    .map(|b| &b.source)
+                    .map(|b| &b.tool.source)
                     .or_else(|| {
                         reference
                             .conditions
@@ -1220,7 +1302,7 @@ impl CleaningTools {
                 .brushes
                 .iter()
                 .find(|b| b.item == t.item)
-                .map(|b| &b.source)
+                .map(|b| &b.tool.source)
                 .or_else(|| {
                     reference
                         .conditions
@@ -1243,7 +1325,7 @@ impl CleaningTools {
             if let Some(color) = self
                 .states
                 .iter()
-                .find(|t| t.item == signal.item)
+                .find(|t| Some(t.item) == signal.item)
                 .and_then(|t| t.color)
             {
                 signal.color = color;
@@ -1251,6 +1333,14 @@ impl CleaningTools {
         }
         Ok(())
     }
+}
+/// The record of brush `index`: an item brush, else the player brush.
+fn brush_tool<'a>(
+    brushes: &'a [BrushReference],
+    player: &'a BrushTool,
+    index: usize,
+) -> &'a BrushTool {
+    brushes.get(index).map_or(player, |b| &b.tool)
 }
 /// The hit trigger wins, then a nearby trigger, then the hit part or condition.
 fn spray_order(hit: Option<Target>, nearby: impl FnOnce() -> Option<Target>) -> Option<Target> {
@@ -1270,7 +1360,7 @@ pub fn validate_tools(
     for r in &reference.conditions.brushes {
         let mut matches = saved
             .iter()
-            .filter(|v| v.source == SourceKey::from(&r.source));
+            .filter(|v| v.source == SourceKey::from(&r.tool.source));
         let v = matches.next().ok_or_else(invalid)?;
         if matches.next().is_some() || v.quantity.is_some() || v.color.is_some() {
             return Err(invalid());
@@ -1296,6 +1386,42 @@ pub fn validate_tools(
 #[cfg(test)]
 mod spray_tests {
     use super::*;
+
+    #[test]
+    fn point_brush_uses_player_brush_record() {
+        let tool = |path_id: i64| -> BrushTool {
+            let id = serde_json::json!({"file": "level1", "path_id": path_id});
+            serde_json::from_value(serde_json::json!({
+                "source": id, "slide": id, "cleaning_type": 3, "can_ruin": false,
+                "repair_modifier": 1.0, "min_force": 0.1, "wash_radius": 0.1, "wash_mask": 1,
+                "text": 0, "show_text": false, "scrub_node": null, "model": null,
+                "model_equip": 1, "model_default": 1, "distance": 2.0, "mask": 1,
+                "position_lerp": 1.0, "rotation_lerp": 1.0, "contact_offset": 0.0,
+                "minimum_displacement": 0.0, "maximum_displacement": 1.0, "disabled": false,
+                "both_work": false, "sound_when_disabled": false, "has_sound": false,
+                "max_volume": 1.0, "volume_lerp": 1.0, "voice_source": null, "voice": null,
+                "particles": []
+            }))
+            .unwrap()
+        };
+        let id = crate::reference::SourceId {
+            file: "level1".into(),
+            path_id: 3,
+        };
+        let item = BrushReference {
+            item: ItemId(1),
+            body: crate::reference::BodyId(1),
+            pickup: id.clone(),
+            save: id,
+            own_condition: ConditionId(1),
+            tool: tool(1),
+        };
+        let player = tool(2);
+        let brushes = [item];
+        assert_eq!(brush_tool(&brushes, &player, 0).source.path_id, 1);
+        // The player brush index follows the item brushes.
+        assert_eq!(brush_tool(&brushes, &player, 1).source.path_id, 2);
+    }
 
     #[test]
     fn spray_target_order() {

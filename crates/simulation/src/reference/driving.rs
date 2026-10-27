@@ -18,6 +18,8 @@ pub enum DrivingAction {
     Gear6,
     /// Source `IN.togglemousedrive`.
     MouseDrive,
+    /// Source `IN.pointrubwave`: a player bit (`player_keys::POINT`).
+    Point,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,10 +211,11 @@ impl DrivingReference {
             "Numpad5",
             "Numpad6",
             "KeyU",
+            "AltLeft",
         ];
         let mut actions = HashSet::new();
         require(
-            self.bindings.len() == 12
+            self.bindings.len() == 13
                 && self.bindings.iter().all(|binding| {
                     actions.insert(binding.action)
                         && !binding.codes.is_empty()

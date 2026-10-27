@@ -3,8 +3,10 @@ pub mod collision;
 mod head_bob;
 mod ladder;
 pub mod normals;
+pub mod point;
 pub mod pose;
 mod posture;
+pub mod ragdoll;
 mod view;
 use collision::PlayerSweepShape;
 use posture::{MovementSpeed, PostureState};
@@ -19,6 +21,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
+use crate::boundary::LookBlock;
 use crate::reference::{ItemId, PlayerPoseReference, PlayerReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
@@ -168,6 +171,8 @@ pub struct PlayerState {
     collisions: Vec<CharacterCollision>,
     yaw: f32,
     pitch: f32,
+    /// Yaw and pitch degrees that the mouse added in the last view step.
+    look_applied: [f32; 2],
     vertical_velocity: f32,
     grounded: bool,
     support_body: Option<RigidBodyHandle>,
@@ -178,6 +183,9 @@ pub struct PlayerState {
     hazard_damage: f32,
     /// Source `GetDir` `forward` and `backward`.
     walk_keys: [bool; 2],
+    point: point::PointState,
+    /// `Death2` turned the colliders off. The ragdoll moves the player.
+    dead: bool,
 }
 
 impl PlayerState {
@@ -284,6 +292,7 @@ impl PlayerState {
             collisions: Vec::with_capacity(20),
             yaw: yaw_from_rotation(pose.rotation),
             pitch: 0.0,
+            look_applied: [0.; 2],
             vertical_velocity: 0.0,
             grounded: false,
             support_body: None,
@@ -293,6 +302,8 @@ impl PlayerState {
             ladder: ladder::LadderState::default(),
             hazard_damage: 0.0,
             walk_keys: [false; 2],
+            point: point::PointState::default(),
+            dead: false,
         }
     }
 
@@ -394,12 +405,11 @@ impl PlayerState {
             dt,
         );
         if let Some(multiplier) = ordinary_look {
-            if input.mouse[0].is_finite() {
-                self.yaw += input.mouse[0] * multiplier;
-            }
-            if input.mouse[1].is_finite() {
-                self.pitch += input.mouse[1] * multiplier;
-            }
+            self.look_applied = input
+                .mouse
+                .map(|v| if v.is_finite() { v * multiplier } else { 0. });
+            self.yaw += self.look_applied[0];
+            self.pitch += self.look_applied[1];
         }
         self.pitch = self.pitch.clamp(-89.0, 89.0);
         if let Some(seat) = &self.occupancy {
@@ -680,7 +690,7 @@ impl PlayerState {
                 .as_capsule_mut()
                 .expect("Owned player capsule") = *self.sweep.capsule();
             collider.set_position_wrt_parent(self.sweep.capsule_pose());
-            crate::vehicle::set_collider_enabled(collider, self.occupancy.is_none());
+            crate::vehicle::set_collider_enabled(collider, self.occupancy.is_none() && !self.dead);
         });
         physics.edit_collider(self.feet, |collider| {
             *collider
@@ -689,7 +699,7 @@ impl PlayerState {
                 .expect("Owned player foot sphere") = self.sweep.feet();
             crate::vehicle::set_collider_enabled(
                 collider,
-                self.occupancy.is_none() && self.sweep.feet_enabled(),
+                self.occupancy.is_none() && !self.dead && self.sweep.feet_enabled(),
             );
         });
         physics.refresh_queries();
@@ -953,6 +963,50 @@ impl PlayerState {
     pub fn walk_add(&self) -> f32 {
         self.view_state.walk_add()
     }
+    /// Source `pointingValue` and `pointAt`.
+    pub fn point(&self) -> &point::PointState {
+        &self.point
+    }
+    /// Source `fpscontroller` pointing: the ray from the camera on `pointingLayer`.
+    pub fn step_point(&mut self, held: bool, physics: &PhysicsWorld, dt: f32) {
+        let r = &self.reference;
+        let body = to_rapier(self.body_pose(physics));
+        let camera = to_rapier(self.view(physics).camera_pose);
+        let ray = Ray::new(camera.translation, camera.rotation * -Vector::Z);
+        let mask = r.pointing_layer;
+        // Unity rays ignore colliders containing the ray origin.
+        let targets = |_: ColliderHandle, c: &rapier3d::prelude::Collider| {
+            c.is_enabled()
+                && c.collision_groups().memberships.bits() & mask != 0
+                && !c.shape().contains_point(c.position(), ray.origin)
+        };
+        let hit = held
+            .then(|| {
+                physics
+                    .queries(
+                        QueryFilter::default()
+                            .exclude_sensors()
+                            .exclude_rigid_body(self.body)
+                            .predicate(&targets),
+                    )
+                    .cast_ray_and_get_normal(&ray, r.point_range, true)
+            })
+            .flatten()
+            .map(|(_, hit)| {
+                (
+                    body.inverse() * ray.point_at(hit.time_of_impact),
+                    body.rotation.inverse() * hit.normal,
+                )
+            });
+        self.point.step(
+            held,
+            body.inverse() * camera,
+            hit,
+            r.point_range,
+            r.point_range2,
+            dt,
+        );
+    }
     /// Source `forward` and `backward` of the last head bob step.
     pub fn walk_keys(&self) -> [bool; 2] {
         self.walk_keys
@@ -1048,6 +1102,46 @@ impl PlayerState {
             None,
         )
     }
+    /// Yaw and pitch degrees that the mouse added since the last call.
+    pub fn take_look_applied(&mut self) -> [f32; 2] {
+        std::mem::take(&mut self.look_applied)
+    }
+    /// The camera rotation as `parent * yaw * pitch * camera`. The position is not set.
+    pub fn look(&self, physics: &PhysicsWorld) -> LookBlock {
+        let (entry, camera) = self.view_state.look_rotations();
+        let mut look = LookBlock {
+            camera: camera.to_array(),
+            yaw: self.yaw,
+            pitch: self.pitch,
+            yaw_limits: [f32::MIN, f32::MAX],
+            pitch_limits: [-89., 89.],
+            ..LookBlock::default()
+        };
+        let parent = match (&self.occupancy, entry) {
+            (Some(seat), None) => {
+                if !seat.values.yaw_unlimited {
+                    look.yaw_limits = seat.values.yaw_limits_degrees;
+                }
+                look.pitch_limits = seat.values.pitch_limits_degrees;
+                Rotation::from_array(self.body_pose(physics).rotation)
+            }
+            // On foot the body carries the yaw.
+            (None, None) => {
+                Rotation::from_array(self.body_pose(physics).rotation)
+                    * Rotation::from_rotation_y(self.yaw.to_radians())
+            }
+            // The seat entry view does not take the look.
+            (_, Some(entry)) => {
+                look.yaw = 0.;
+                look.pitch = 0.;
+                look.yaw_limits = [0.; 2];
+                look.pitch_limits = [0.; 2];
+                Rotation::from_array(self.body_pose(physics).rotation) * entry
+            }
+        };
+        look.parent = [parent.to_array(); 2];
+        look
+    }
     pub fn view_owns_look_input(&self) -> bool {
         self.view_state.looking()
     }
@@ -1073,6 +1167,38 @@ impl PlayerState {
             body.set_next_kinematic_position(self.pose);
         });
         self.update_geometry(physics);
+    }
+    /// `Death2`: colliders off. A seat ends with the world look kept, so the ragdoll can move the player.
+    pub fn die(&mut self, physics: &mut PhysicsWorld) {
+        if let Some(seat) = self.occupancy.take() {
+            let pose = *physics.rapier().bodies[seat.body].position() * seat.local_pose;
+            self.yaw = yaw_from_rotation(
+                pose.rotation * Rotation::from_rotation_y(-self.yaw.to_radians()),
+            );
+            self.pose = Pose::from_parts(
+                pose.translation,
+                Rotation::from_rotation_y(-self.yaw.to_radians()),
+            );
+        }
+        self.dead = true;
+        self.push_gripping = false;
+        self.vertical_velocity = 0.0;
+        self.recoil_velocity = Vector::ZERO;
+        self.grounded = false;
+        self.support_body = None;
+        self.place(physics);
+        self.update_geometry(physics);
+    }
+    /// Dead `Update`: `transform.position += ragdolHeadPos.position - Th.position`.
+    pub fn follow(&mut self, shift: Vector, physics: &mut PhysicsWorld) {
+        self.pose.translation += shift;
+        self.place(physics);
+    }
+    fn place(&self, physics: &mut PhysicsWorld) {
+        physics.edit_body(self.body, |body| {
+            body.set_position(self.pose, false);
+            body.set_next_kinematic_position(self.pose);
+        });
     }
     pub fn focus_position(&self, physics: &PhysicsWorld) -> [f32; 3] {
         self.view(physics).camera_pose.position
@@ -1169,7 +1295,7 @@ mod vehicle_seat_tests {
             "source": src, "capsule_source": src, "camera_source": src,
             "action_masks": {"use_mask": 0, "pickup_mask": 0, "attach_mask": 0, "push_mask": 0},
             "get_out_layer_mask": 0, "exit_steps_vertical": 4, "exit_steps_horizontal": 4,
-            "carry_anchor_offset": [0, 0, 0], "look_sensitivity": [1, 1], "camera_culling_mask": 0,
+            "carry_anchor_offset": [0, 0, 0], "look_sensitivity": [1, 1], "camera_culling_mask": 0, "pointing_layer": 0,
         });
         for name in [
             "prone_multiplier",
@@ -1214,6 +1340,8 @@ mod vehicle_seat_tests {
             "obj_move_sensitivity",
             "obj_rotation_sensitivity",
             "scroll_sensitivity",
+            "point_range",
+            "point_range2",
         ] {
             player[name] = json!(0.5);
         }

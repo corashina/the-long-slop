@@ -6,18 +6,24 @@ pub mod cigarettes;
 pub mod computer;
 pub mod conditions;
 pub mod consumables;
+pub mod decals;
 pub mod fixed_assets;
 pub mod gpu_prepare;
 pub mod lighting;
 pub mod materials;
 pub mod mechanisms;
+pub mod outfit;
+pub mod outfit_preview;
 pub mod player_body;
+pub mod ragdoll;
 pub mod reference;
 pub mod save;
 mod shadow_batch;
 mod shadow_cache;
+pub(crate) mod sim_frame;
 pub mod sky_traffic;
 pub mod spawned;
+pub mod sunglasses;
 pub mod world;
 pub mod world_metrics;
 
@@ -29,16 +35,7 @@ pub fn transform(pose: VehiclePose) -> Transform {
         .with_rotation(Quat::from_array(pose.rotation))
 }
 
-pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
-    VehiclePose {
-        position: Vec3::from_array(a.position)
-            .lerp(Vec3::from_array(b.position), alpha)
-            .to_array(),
-        rotation: Quat::from_array(a.rotation)
-            .slerp(Quat::from_array(b.rotation), alpha)
-            .to_array(),
-    }
-}
+pub use simulation::driver::interpolate;
 pub mod texture_batches;
 pub mod textures;
 

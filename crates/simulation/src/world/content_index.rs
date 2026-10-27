@@ -1,6 +1,5 @@
 //! Cached membership bindings and retained presentation changes.
 use super::WorldStream;
-#[cfg(any(target_arch = "wasm32", test))]
 use crate::reference::{SourceId, Transform};
 use crate::world::{GeneratedCapVisual, GeneratedId, NodeAppearance, contents::ContentInstance};
 use bevy_platform::collections::HashMap;
@@ -85,7 +84,6 @@ impl ContentIndex {
         self.lamps.retain(|_, indices| !indices.is_empty());
         self.lamp_key = Some(key);
     }
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn retained_bytes(&self) -> usize {
         crate::interaction::memory::platform_map(&self.contents)
             + crate::interaction::memory::platform_map(&self.lamps)
@@ -103,11 +101,9 @@ impl ContentIndex {
                 })
                 .sum::<usize>()
     }
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn slot(&self, id: &GeneratedId) -> Option<ContentSlot> {
         self.contents.get(id).copied()
     }
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn lamp_slots(&self, id: &GeneratedId) -> &[usize] {
         self.lamps.get(id).map_or(&[], Vec::as_slice)
     }
@@ -132,7 +128,6 @@ impl ContentIndex {
             .map(|b| (&b.node, b.pose))
     }
 }
-#[cfg(any(target_arch = "wasm32", test))]
 fn content_at<'a>(
     active: &'a [ContentInstance],
     controls: &'a [ContentInstance],
@@ -163,7 +158,6 @@ impl WorldStream {
             &self.lamp_bindings,
         );
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn presentation_membership(&self) -> (u64, u64, u64, u64, u64) {
         (
             self.request.session,
@@ -177,7 +171,6 @@ impl WorldStream {
     pub fn indexed_content(&self, index: &ContentIndex, id: &GeneratedId) -> IndexedContent<'_> {
         index.content(&self.contents.active, &self.static_controls, id)
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn content_at(&self, slot: Option<ContentSlot>) -> IndexedContent<'_> {
         content_at(&self.contents.active, &self.static_controls, slot)
     }
@@ -191,7 +184,6 @@ impl WorldStream {
             _ => self.contents.cursor_appearance(id),
         }
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn lamp_button_at(&self, index: usize) -> Option<(&SourceId, Transform)> {
         self.lamp_bindings
             .get(index)?
@@ -199,15 +191,12 @@ impl WorldStream {
             .as_ref()
             .map(|b| (&b.node, b.pose))
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn presentation_contents(&self) -> impl Iterator<Item = ContentSlot> + '_ {
         self.presentation_changes.iter().copied()
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn presentation_lamps(&self) -> impl Iterator<Item = usize> + '_ {
         self.presentation_lamp_changes.iter().copied()
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn clear_presentation_changes(&mut self) {
         self.presentation_changes.clear();
         self.presentation_lamp_changes.clear();
@@ -215,13 +204,11 @@ impl WorldStream {
     }
 }
 /// Reused dense selection queue. Producers can name the same instance more than once.
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Default)]
 pub struct InstanceSelection {
     queued: Vec<bool>,
     indices: Vec<usize>,
 }
-#[cfg(any(target_arch = "wasm32", test))]
 impl InstanceSelection {
     pub fn retained_bytes(&self) -> usize {
         self.queued.capacity() * std::mem::size_of::<bool>()

@@ -121,16 +121,17 @@ class MouseDriveSourceTests(unittest.TestCase):
         sliders[9]['defValue'] = 5.
         with self.assertRaises(ValueError):slider_range(source, None, settings, 'tabControls', 9)
 
-    def test_toggle_binding_is_key_u(self):
+    def test_player_bindings_are_key_u_and_left_alt(self):
         from tools.reference.driving import ACTIONS, recover_bindings
         names = ['look'] + list(ACTIONS.values())
         text = 'public enum IN\n{\n' + ',\n'.join(names) + '\n}'
-        defaults = '\n'.join(f'defaultInput[{i}].keys[0].Set(KeyCode.{"U" if n=="togglemousedrive" else "R"});'
-            for i,n in enumerate(names))
+        keys = {'togglemousedrive':'U', 'pointrubwave':'LeftAlt'}
+        defaults = '\n'.join(f'defaultInput[{i}].keys[0].Set(KeyCode.{keys.get(n, "R")});' for i,n in enumerate(names))
         bindings, evidence = recover_bindings(text, defaults)
         self.assertIn({'action':'mouse_drive','codes':['KeyU']}, bindings)
-        self.assertEqual(evidence[-1]['source_input'], 'togglemousedrive')
-        with self.assertRaises(ValueError):recover_bindings(text, defaults.replace('KeyCode.U', 'KeyCode.Q').replace(f'defaultInput[{len(names)-1}]', 'x'))
+        self.assertIn({'action':'point','codes':['AltLeft']}, bindings)
+        self.assertEqual(evidence[-1]['source_input'], 'pointrubwave')
+        with self.assertRaises(ValueError):recover_bindings(text, defaults.replace(f'defaultInput[{len(names)-1}]', 'x'))
 
 
 class SteeringWheelSourceTests(unittest.TestCase):

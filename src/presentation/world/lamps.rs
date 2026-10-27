@@ -334,7 +334,7 @@ pub(crate) fn finish_road_lamp_warmup(commands: &mut Commands, source: &mut Sour
 
 /// The source frame owns pole geometry. Receiver influence owns independent light proxies.
 pub(crate) fn sync_source_lamps(
-    frame: &crate::world::WorldFrame<'_>,
+    frame: &crate::world::RendererFrame<'_>,
     reference: &crate::reference::ReferenceManifest,
     enabled: bool,
     source: &mut SourceLighting,
@@ -464,7 +464,7 @@ pub(crate) fn sync_source_lamps(
 }
 
 pub(crate) fn source_lamp_admission(
-    frame: &crate::world::WorldFrame<'_>,
+    frame: &crate::world::RendererFrame<'_>,
     selected: &[crate::world::GeneratedId],
     source: &mut SourceLighting,
     reference: &crate::reference::ReferenceManifest,

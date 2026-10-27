@@ -14,6 +14,7 @@ pub mod music_box;
 pub mod pedals;
 pub mod powertrain;
 pub mod radio;
+pub mod reach;
 pub mod sled;
 const MAX_FRAME_SECONDS: f64 = 0.1;
 const STEP_SECONDS: f64 = FIXED_DT as f64;
@@ -65,9 +66,11 @@ pub mod player_keys {
     pub const TAKE_OFF: u8 = 8;
     /// Source `IN.togglemousedrive` (U).
     pub const MOUSE_DRIVE: u8 = 16;
+    /// Source `input.point` (`IN.pointrubwave`, Left Alt): point, rub and wave.
+    pub const POINT: u8 = 32;
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CarryDeltas {
     pub owner: Option<crate::reference::ItemId>,
     pub mouse: [f32; 2],
@@ -75,9 +78,10 @@ pub struct CarryDeltas {
 }
 
 /// Keyboard input while the player types on a computer (web/input.js typing keys).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TypingInput {
     /// Input.inputString bytes: printable ASCII, 8 (Backspace) and 13 (Enter).
+    #[serde(with = "typing_text")]
     pub text: [u8; TypingInput::CAPACITY],
     pub len: u8,
     /// Held piano keys (bits 0-16), held arrows (17-20), pressed A S X (21-23), any key (24).
@@ -98,6 +102,23 @@ impl TypingInput {
         self.keys = frame.keys | (self.keys & Self::PRESSED);
     }
 }
+mod typing_text {
+    use super::TypingInput;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+    pub fn serialize<S: Serializer>(
+        text: &[u8; TypingInput::CAPACITY],
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        s.serialize_bytes(text)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<[u8; TypingInput::CAPACITY], D::Error> {
+        <&[u8]>::deserialize(d)?
+            .try_into()
+            .map_err(D::Error::custom)
+    }
+}
 impl Default for TypingInput {
     fn default() -> Self {
         Self {
@@ -109,7 +130,7 @@ impl Default for TypingInput {
 }
 
 /// Raw browser gamepad state: 4 pads, 8 axes and 32 button bits per pad.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GamepadFrame {
     /// Pad `p` axis `a` is at `p * GamepadFrame::AXES + a`.
     pub axes: [f32; 32],
@@ -123,7 +144,7 @@ impl GamepadFrame {
     pub const BUTTONS: usize = 32;
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FrameInput {
     pub held: u32,
     pub pressed: u32,
@@ -184,7 +205,6 @@ impl FrameInput {
     }
 
     /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn take_frame(&mut self, skip_elapsed: &mut bool, blocked: bool) -> Option<Self> {
         if std::mem::take(skip_elapsed) {
             if blocked {

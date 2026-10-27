@@ -34,7 +34,8 @@ function renderLines(audit){
   '\nGPU props rows / visible / indirect draws: '+rows+' / '+visible+' / '+draws;
 }
 
-export function createPerformance(readWasmBytes,readRender,readDrawDistance){
+// `readWorker` gives the simulation worker tick average since its last read and its WASM bytes.
+export function createPerformance(readWasmBytes,readRender,readDrawDistance,readWorker=()=>null){
  const root=document.querySelector('#performance'),values=document.querySelector('#performance-values');
  const timings=new FrameTimings();let lastPaint=-Infinity,stopped=false;
  const ms=value=>value.toFixed(1),mib=bytes=>Number.isFinite(bytes)?(bytes/1048576).toFixed(1)+' MiB':'unavailable';
@@ -52,15 +53,16 @@ export function createPerformance(readWasmBytes,readRender,readDrawDistance){
    lastPaint=now;return true;
   },
   counters(steps,wheelContacts,bodies,colliders,roads,terrain,objects,jobs,pending,cpuBytes,gpuBytes,storms,stormInfluence,stormParticles,entities){
-   const sample=timings.summary();
+   const sample=timings.summary(),worker=readWorker();
    values.textContent=(sample?
     'FPS: '+sample.fps.toFixed(0)+'\nFrame avg / worst: '+ms(sample.average)+' / '+ms(sample.worst)+' ms'+
-    '\nPhysics / world CPU avg: '+ms(sample.physics)+' / '+ms(sample.world)+' ms':
-    'FPS: --\nFrame avg / worst: --\nPhysics / world CPU avg: --')+
+    '\nWorker physics / world CPU avg: '+ms(sample.physics)+' / '+ms(sample.world)+' ms':
+    'FPS: --\nFrame avg / worst: --\nWorker physics / world CPU avg: --')+
+    '\nWorker tick avg: '+(Number.isFinite(worker?.tickMs)?ms(worker.tickMs)+' ms':'--')+
     '\nDraw distance: '+readDrawDistance()+' m\nPhysics steps/frame: '+steps+'\nWheel contacts: '+wheelContacts+'\nBodies / colliders: '+bodies+' / '+colliders+
     '\nRoads / terrain tiles: '+roads+' / '+terrain+'\nActive generated objects: '+objects+'\nECS entities: '+entities+'\nJobs / queued work: '+jobs+' / '+pending+
     '\nStorms / strongest influence / particles: '+storms+' / '+stormInfluence.toFixed(2)+' / '+stormParticles+
-    '\nWASM: '+mib(readWasmBytes())+'\nJS heap: '+mib(performance.memory?.usedJSHeapSize)+
+    '\nWASM main / worker: '+mib(readWasmBytes())+' / '+mib(worker?.wasmBytes)+'\nJS heap: '+mib(performance.memory?.usedJSHeapSize)+
     '\nWorld render CPU reserve: '+mib(cpuBytes)+'\nWorld render GPU reserve: '+mib(gpuBytes)+renderLines(readRender());
   },
   stop(){stopped=true;timings.reset();values.textContent='Performance counters stopped.';document.removeEventListener('visibilitychange',reset);},

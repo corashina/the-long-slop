@@ -3,13 +3,11 @@ use super::{
     lighting_assets::LightingAssets, readiness::RendererStateHandle, reference::ReferenceVisuals,
     source_lighting::LightingUniform,
 };
-use crate::{
-    app::{Drive, RuntimeReference},
-    reference::reflections::probe_influence_bounds,
-};
+use crate::{app::RuntimeReference, reference::reflections::probe_influence_bounds};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
+use simulation::boundary::SimFrame;
 
 pub const PROBE_COUNT: usize = crate::render_readiness::PROBE_COUNT;
 
@@ -89,7 +87,7 @@ pub(crate) fn sync_lighting(
     assets: Option<Res<LightingAssets>>,
     visuals: Option<Res<ReferenceVisuals>>,
     master: Option<Res<super::lighting::SourceLighting>>,
-    drive: Option<Res<Drive>>,
+    sim: Option<Res<super::sim_frame::SimFrameResource>>,
     reference: Option<Res<RuntimeReference>>,
     mut origin: ResMut<SourceWorldOrigin>,
     mut activation: ResMut<ProbeActivation>,
@@ -103,35 +101,21 @@ pub(crate) fn sync_lighting(
     if status.failure().is_some() {
         return;
     }
-    let (Some(assets), Some(visuals), Some(master), Some(drive), Some(reference)) =
-        (assets, visuals, master, drive, reference)
+    let (Some(assets), Some(visuals), Some(master), Some(sim), Some(reference)) =
+        (assets, visuals, master, sim, reference)
     else {
         return;
     };
     if !assets.loaded || !visuals.bound || !master.bound {
         return;
     }
-    origin.0 = drive.runtime.area.origin;
     let car = instances
         .as_deref()
-        .and_then(|instances| followed_probe(&drive, &reference, instances));
-    let player = Vec3::from_array(
-        drive
-            .runtime
-            .area
-            .player
-            .body_pose(&drive.runtime.physics)
-            .position,
-    );
-    match scene_value(
-        &assets,
-        &master,
-        &drive,
-        &reference,
-        &transforms,
-        player,
-        car,
-    ) {
+        .and_then(|instances| followed_probe(&sim, &reference, instances));
+    let sim = &sim.frame;
+    origin.0 = sim.state.origin;
+    let player = Vec3::from_array(sim.state.body_pose.position);
+    match scene_value(&assets, &master, sim, &reference, &transforms, player, car) {
         Ok(mut value) => {
             if activation.scene != epoch.0 || activation.followed != car.is_some() {
                 activation.scene = epoch.0;
@@ -141,7 +125,7 @@ pub(crate) fn sync_lighting(
                 activation.last_check = 0.;
                 activation.checks = 0;
             }
-            activation.elapsed += drive.render_delta_seconds;
+            activation.elapsed += sim.state.perf.frame_seconds();
             for index in 0..PROBE_COUNT {
                 activation.distance_squared[index] =
                     player.distance_squared(value.probe_position[index]);
@@ -168,26 +152,12 @@ pub(crate) fn sync_lighting(
 /// The probe node entity and influence box of the world car the player last sat in.
 /// Without one, the start Lada copy.
 fn followed_probe(
-    drive: &Drive,
+    sim: &super::sim_frame::SimFrameResource,
     reference: &RuntimeReference,
     instances: &super::world::instances::SourceInstances,
 ) -> Option<(Entity, [f32; 3], [f32; 3])> {
-    let vehicles = &drive.runtime.vehicles;
-    let (id, vehicle) = match drive.runtime.vehicle.as_ref() {
-        Some(key) => match key {
-            crate::world::ObjectKey::Generated(id) => (id, vehicles.get(key)?),
-            _ => return None,
-        },
-        None => vehicles.iter().find_map(|(key, vehicle)| match key {
-            crate::world::ObjectKey::Generated(id)
-                if id.layer == crate::world::WorldLayer::Startup =>
-            {
-                Some((id, vehicle))
-            }
-            _ => None,
-        })?,
-    };
-    let prototype = &reference.0.world.prototypes[vehicle.prototype];
+    let (id, prototype) = sim.followed_car.as_ref()?;
+    let prototype = &reference.0.world.prototypes[*prototype as usize];
     let probe = prototype.vehicle.as_ref()?.probe.as_ref()?;
     let node = prototype.nodes[probe.node as usize].gltf_node as usize;
     let entity = (*instances.nodes_of(id)?.get(node)?)?;
@@ -196,19 +166,13 @@ fn followed_probe(
 fn scene_value(
     assets: &LightingAssets,
     master: &super::lighting::SourceLighting,
-    drive: &Drive,
+    sim: &SimFrame,
     reference: &RuntimeReference,
     transforms: &Query<&GlobalTransform>,
     player: Vec3,
     car: Option<(Entity, [f32; 3], [f32; 3])>,
 ) -> Result<SceneLighting, String> {
-    if !drive
-        .runtime
-        .area
-        .origin
-        .iter()
-        .all(|value| value.is_finite())
-    {
+    if !sim.state.origin.iter().all(|value| value.is_finite()) {
         return Err("Nonfinite world origin".into());
     }
     if assets.record.probes.len() != PROBE_COUNT {
@@ -261,7 +225,7 @@ fn scene_value(
             0.,
         )) * Mat4::from_scale(Vec3::new(1. / cookie_size, 1. / cookie_size, 0.))
             * sun.cookie_from_world;
-    let time = drive.runtime.lighting.cycle.output().shader_time_seconds as f32;
+    let time = sim.lighting.cycle.shader_time_seconds as f32;
     if !cookie_from_world.is_finite() || !time.is_finite() || !rotation.is_finite() {
         return Err("Nonfinite live lighting transform or time".into());
     }
@@ -276,8 +240,8 @@ fn scene_value(
     Ok(SceneLighting {
         sky: master.sky.uniform,
         cloud_speed: Vec2::new(
-            drive.runtime.lighting.cycle.output().clouds[0].speed,
-            drive.runtime.lighting.cycle.output().clouds[1].speed,
+            sim.lighting.cycle.clouds[0].speed,
+            sim.lighting.cycle.clouds[1].speed,
         ),
         ambient_sh,
         sun_rotation: rotation,

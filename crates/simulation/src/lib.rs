@@ -3,13 +3,17 @@
 
 pub mod animation;
 pub mod audio;
+pub mod boundary;
+pub mod candidate;
 pub mod conditions;
 #[cfg(target_arch = "wasm32")]
 pub mod cpu_profile;
 pub mod damage;
+pub mod driver;
 pub mod exhaust;
 pub mod fluids;
 pub mod flyers;
+pub mod hearing;
 #[cfg(target_arch = "wasm32")]
 pub mod host;
 pub mod interaction;
@@ -22,6 +26,8 @@ pub mod reference;
 pub mod render_readiness;
 pub mod render_scale;
 pub mod save;
+pub mod save_requests;
+pub mod session;
 pub mod simulation;
 pub mod sky_traffic;
 pub mod sleep;

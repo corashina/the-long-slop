@@ -4,13 +4,17 @@ pub mod cigarettes;
 pub mod cleaning;
 pub mod computer;
 pub mod consumption;
+pub mod decals;
 pub mod equipment;
 pub mod equipment_input;
+pub mod explosions;
 pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
+pub mod guns;
 pub mod hitch;
+pub mod holes;
 mod hose;
 mod input;
 pub use input::InteractionOutcome;
@@ -25,6 +29,7 @@ pub mod push;
 pub mod spray;
 pub mod storage;
 pub mod targets;
+pub mod wear;
 mod wheel_actions;
 pub mod wheels;
 use feedback::ActionMask;
@@ -42,7 +47,7 @@ use crate::simulation::{FrameInput, keys};
 use crate::survival::NeedsOutput;
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
 use items::{ItemLocation, ItemStore};
-use rapier3d::math::{Pose, Vector};
+use rapier3d::math::{Pose, Rotation, Vector};
 use rapier3d::prelude::{ColliderHandle, RigidBodyHandle};
 use std::collections::{HashMap, HashSet};
 use wheels::WheelSlotId;
@@ -206,6 +211,10 @@ pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
+    pub guns: guns::GunState,
+    pub explosions: explosions::ExplosionState,
+    pub holes: holes::Holes,
+    pub decals: decals::DecalStore,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -272,6 +281,8 @@ struct TankRules {
     no_fill_this: bool,
     no_fill_from: bool,
     slow_oil: bool,
+    /// Generated tanks only. Imported tanks have no explosion export.
+    explosion: Option<crate::world::TankExplosion>,
 }
 
 impl InteractionState {
@@ -509,6 +520,10 @@ impl InteractionState {
             cleaning: cleaning::CleaningTools::new(reference)?,
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,
+            guns: guns::GunState::new(reference)?,
+            explosions: explosions::ExplosionState::new(reference)?,
+            holes: holes::Holes::new(reference),
+            decals: decals::DecalStore::new(reference),
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -619,6 +634,7 @@ impl InteractionState {
                             no_fill_this: tank.no_fill_this,
                             no_fill_from: tank.no_fill_from,
                             slow_oil: tank.slow_oil,
+                            explosion: None,
                         },
                     )
                 })
@@ -976,6 +992,7 @@ impl InteractionState {
         self.supplies.remove(&id);
         self.source_supply_emission.remove(&id);
         self.tank_rules.remove(&id);
+        self.holes.forget(id);
         self.openings
             .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
         for opening in &mut self.openings {
@@ -1022,6 +1039,7 @@ impl InteractionState {
         body: RigidBodyHandle,
         reference: &crate::reference::WorldPushReference,
         colliders: &[(u32, ColliderHandle)],
+        grip_hand: Option<VehiclePose>,
         physics: &mut PhysicsWorld,
     ) -> Result<(), ReferenceError> {
         let mut grip = Vec::new();
@@ -1055,7 +1073,8 @@ impl InteractionState {
             return Err(ReferenceError("Push grip collider is not published".into()));
         }
         let id = self.insert_generated_body(body)?;
-        self.push.register_generated(item, id, reference, grip);
+        self.push
+            .register_generated(item, id, reference, grip, grip_hand);
         Ok(())
     }
 
@@ -1287,6 +1306,7 @@ impl InteractionState {
             no_fill_this: definition.no_fill_this,
             no_fill_from: definition.no_fill_from,
             slow_oil: number(tank_record, "slowOil")? != 0.0,
+            explosion: Some(definition.explosion),
         };
         // Subtract in f64 before conversion, so distant bindings retain local precision.
         let relative = VehiclePose {
@@ -1338,6 +1358,10 @@ impl InteractionState {
         self.supplies.remove(&tank);
         self.kinds.insert(tank, ItemKind::Container);
         Ok(())
+    }
+    /// tankscript explosion fields of a generated tank.
+    pub fn tank_explosion(&self, tank: ItemId) -> Option<&crate::world::TankExplosion> {
+        self.tank_rules.get(&tank)?.explosion.as_ref()
     }
     pub fn bind_generated_cap(&mut self, handle: ColliderHandle, cap: ItemId) {
         let binding = self
@@ -1417,6 +1441,9 @@ impl InteractionState {
     }
     pub fn opening_is_open(&self, id: OpeningId) -> bool {
         self.opening_valve(id) > 0.0
+    }
+    pub fn opening_valves(&self) -> impl Iterator<Item = (OpeningId, f32)> + '_ {
+        self.openings.iter().map(|o| (o.reference.id, o.valve))
     }
     pub fn opening_valve(&self, id: OpeningId) -> f32 {
         self.openings
@@ -1510,6 +1537,7 @@ impl InteractionState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.cleaning.reset_contact();
         self.melee.rebase(shift);
+        self.decals.rebase(shift);
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         for opening in &mut self.openings {
@@ -1528,6 +1556,7 @@ impl InteractionState {
         mut input: FrameInput,
         mut aim: ResolvedAim,
         player: &mut PlayerState,
+        body: &mut crate::player::body::BodyState,
         items: &mut ItemStore,
         physics: &mut PhysicsWorld,
         dt: f32,
@@ -1872,12 +1901,25 @@ impl InteractionState {
                         mechanism_input.held &= !keys::PRIMARY;
                         mechanism_input.pressed &= !keys::PRIMARY;
                     }
-                    self.mechanisms.step(
-                        target.item,
-                        mechanism_input,
-                        player.view(physics).camera_pose,
-                        dt,
-                    );
+                    let camera = player.view(physics).camera_pose;
+                    // Source: a new use moves the hand. A held usable only refreshes it.
+                    if use_input.pressed & (keys::USE | keys::PRIMARY) != 0
+                        || use_input.wheel != 0.0
+                    {
+                        if let Some((reach, rule)) = self.mechanisms.using_hand(
+                            target.item,
+                            target.point,
+                            Rotation::from_array(camera.rotation),
+                            target.collider,
+                            physics,
+                        ) {
+                            body.move_using_hand(reach, rule);
+                        }
+                    } else {
+                        body.refresh_using_hand();
+                    }
+                    self.mechanisms
+                        .step(target.item, mechanism_input, camera, dt);
                     // A usable can slide and be a switch knob (bus door button): both react.
                     if !matches!(action, Some(InteractionAction::DialTune(..))) {
                         action = Some(InteractionAction::Mechanism(target.item));
@@ -1919,6 +1961,7 @@ impl InteractionState {
                     push_target,
                     &self.bodies,
                     player,
+                    body,
                     physics,
                     dt,
                 )
@@ -2078,6 +2121,7 @@ impl InteractionState {
                 }
             }
         }
+        self.holes.step(items, dt, fluid_scale);
         self.apply_fluid_receipts(items, physics, fluid_scale);
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
@@ -2153,6 +2197,18 @@ fn pour_source<'a>(
     Some((pose, items.get_mut(opening.fluid_owner())?))
 }
 
+/// `tankcapscript.Update` pour factor at `angle` degrees from up. None below the pour angle,
+/// which rises from `tilt_degrees` at full to 100 when empty.
+fn pour_factor(tilt_degrees: f32, angle_disabled: bool, fill: f32, angle: f32) -> Option<f32> {
+    if angle_disabled {
+        return Some(1.0);
+    }
+    let threshold = 100.0 + (tilt_degrees - 100.0) * fill;
+    (angle > threshold).then(|| {
+        inverse_lerp(threshold, tilt_degrees + 90.0, angle).max(inverse_lerp(90.0, 180.0, angle))
+    })
+}
+
 /// Spill from `fluid` through `opening` at `angle` degrees from up.
 /// Returns emission rate, emission speed, poured liters, and fluid fractions.
 fn spill_step(
@@ -2167,20 +2223,15 @@ fn spill_step(
         return result;
     };
     let fill = (fluid.total() / fluid.capacity_liters).clamp(0.0, 1.0);
-    let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
-    let factor = if opening.reference.angle_disabled {
-        1.0
-    } else {
-        inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
-            .max(inverse_lerp(90.0, 180.0, angle))
-    };
+    let rules = &opening.reference;
+    let factor = pour_factor(rules.tilt_degrees, rules.angle_disabled, fill, angle);
     opening.empty_pour = fluid.total() <= 0.;
-    let emitting = opening.valve > 0.
-        && !opening.reference.spill_disabled
-        && !opening.reference.tube_connected
-        && (opening.reference.angle_disabled || angle > threshold)
-        && fluid.total() > 0.;
-    if emitting {
+    if let Some(factor) = factor
+        && opening.valve > 0.
+        && !rules.spill_disabled
+        && !rules.tube_connected
+        && fluid.total() > 0.
+    {
         let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
         let requested_liters = speed * dt * fluid_scale;
         let total = fluid.total();

@@ -37,7 +37,9 @@ RULE_CLASSES = {'roadscript', 'buildingscript', 'newRandomStuffSpawnScript', 'st
     # Power cables (W04): rope segments and their pole targets.
     'ropeScript',
     # Towing (V05): the trailer grip spawns at Start.
-    'attachgripscript'}
+    'attachgripscript',
+    # Explosions (X02 part 4): explosive props.
+    'explosivescript'}
 # ediblescript components of the selected food prototypes (survival.FOOD_FIELDS and GTurd).
 EDIBLE_COMPONENTS = {('sharedassets1.assets',path_id) for path_id in (134641,134643,134644,134645,134646,134647,149631)}
 def selected_actions(source, scripts, actions):

@@ -227,7 +227,6 @@ impl WorldStream {
             }
         }
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn music_box(&self, parent: &GeneratedId) -> Option<&MusicBoxBinding> {
         self.music_box_bindings.iter().find(|b| &b.parent == parent)
     }

@@ -9,7 +9,7 @@ pub enum RadioControl {
     TuneDown,
     Band,
 }
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RadioPlayback {
     pub station: Option<u32>,
     pub clip: Option<u32>,
@@ -17,7 +17,7 @@ pub struct RadioPlayback {
     pub gain: f32,
     pub next_clip: Option<u32>,
 }
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RadioFrame {
     pub power: bool,
     pub am: bool,

@@ -42,6 +42,7 @@ pub struct ContentCollider {
     pub node: usize,
     pub local: rapier3d::math::Pose,
 }
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedCapVisual {
     pub opening: crate::reference::OpeningId,
     pub visual: crate::reference::CapVisualReference,
@@ -1189,6 +1190,12 @@ impl SourceContents {
             .iter()
             .filter_map(|c| c.root.as_ref())
             .chain(self.active.iter().map(|c| &c.content))
+    }
+    /// Parent placement and root content of the cursors with a root.
+    pub fn cursor_roots(&self) -> impl Iterator<Item = (&GeneratedId, &SpawnedContent)> {
+        self.cursors
+            .iter()
+            .filter_map(|c| c.root.as_ref().map(|root| (&c.parent.id, root)))
     }
     pub fn appearance(&self, id: &GeneratedId) -> &[super::NodeAppearance] {
         self.active

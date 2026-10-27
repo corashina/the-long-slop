@@ -9,12 +9,18 @@ mod car_types;
 mod cargo;
 #[path = "stream_tests/drive_out.rs"]
 mod drive_out;
+#[path = "stream_tests/explosions.rs"]
+mod explosions;
 #[path = "stream_tests/garage_controls.rs"]
 mod garage_controls;
+#[path = "stream_tests/guns.rs"]
+mod guns;
 #[path = "stream_tests/item_seats.rs"]
 mod item_seats;
 #[path = "stream_tests/long_trip.rs"]
 mod long_trip;
+#[path = "stream_tests/melee.rs"]
+mod melee;
 #[path = "stream_tests/sled.rs"]
 mod sled;
 #[path = "stream_tests/towing.rs"]
@@ -47,7 +53,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
         layer: WorldLayer::Terrain,
         unit: [0, 0],
     });
-    let mut allocation = stream.presentation_allocation();
+    let mut allocation = stream.presentation_credit();
     allocation.pending = MAX_PENDING;
     stream.set_presentation_allocation(allocation).unwrap();
 
@@ -232,17 +238,12 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
             })
             .collect()
     });
-    stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+    stream.hold_prototype(source.clone()).unwrap();
     stream.bind_prototype(&source).unwrap();
     stream.bind_structure_recipe(&source).unwrap();
     for index in 0..stream.wanted_structures.len() {
         let id = stream.wanted_structures[index].id.clone();
-        let mut claim = stream
-            .reserve_instance_renderer(stream.request, &id, 0, 0, 0)
-            .unwrap();
-        stream
-            .accept_structure_renderer(stream.request, &id, &mut claim)
-            .unwrap();
+        accept_structure(stream, &id);
     }
     assert_ne!(stream.plan_revision, stream.request.revision);
     stream.publish_structure(&mut run.physics, &[]).unwrap();
@@ -259,6 +260,13 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
         );
     }
     assert!(stream.ready_structures.is_empty());
+}
+/// The native adapter charges and hands over one structure claim, as the renderer ledger does.
+fn accept_structure(stream: &mut WorldStream, id: &super::super::GeneratedId) {
+    stream.presentation.pending += 1;
+    stream
+        .accept_structure_renderer(stream.request, id)
+        .unwrap();
 }
 fn views() -> [super::super::RequiredView; 1] {
     let planes = [
@@ -281,14 +289,14 @@ fn views() -> [super::super::RequiredView; 1] {
 fn prepare_step(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    surface_claim: &mut Option<PipelineContinuation>,
+    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
 ) {
     prepare_step_for_views(run, reference, surface_claim, &views());
 }
 fn prepare_step_for_views(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    surface_claim: &mut Option<PipelineContinuation>,
+    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
     required_views: &[super::super::RequiredView],
 ) {
     let stream = &mut run.stream;
@@ -298,8 +306,8 @@ fn prepare_step_for_views(
         .as_ref()
         .is_some_and(|w| !same_request(w.request, stream.request))
     {
-        if let Some(mut claim) = surface_claim.take() {
-            stream.discard_surface_renderer(&mut claim).unwrap();
+        if let Some((request, key)) = surface_claim.take() {
+            stream.discard_surface_renderer(request, key).unwrap();
         }
     }
     stream.select_required(required_views);
@@ -312,7 +320,7 @@ fn prepare_step_for_views(
         .chain(reference.world.road.prototypes.iter().cloned())
         .collect();
     for source in sources {
-        stream.reserve_prototype(source.clone(), 0, 0).unwrap();
+        stream.hold_prototype(source.clone()).unwrap();
         stream.bind_prototype(&source).unwrap();
     }
     let placement = stream
@@ -333,24 +341,17 @@ fn prepare_step_for_views(
         // The native adapter reserves one instance claim and no grass child job.
         .filter(|_| stream.can_request_independent(1));
     if let Some(p) = placement {
-        stream.reserve_prototype(p.prototype.clone(), 0, 0).unwrap();
+        stream.hold_prototype(p.prototype.clone()).unwrap();
         stream.bind_prototype(&p.prototype).unwrap();
         stream.bind_structure_recipe(&p.prototype).unwrap();
-        let mut claim = stream
-            .reserve_instance_renderer(stream.request, &p.id, 0, 0, 0)
-            .unwrap();
-        stream
-            .accept_structure_renderer(stream.request, &p.id, &mut claim)
-            .unwrap();
+        accept_structure(stream, &p.id);
     }
     if let Some((request, surface)) = stream.prepared_surface() {
         let key = surface.key;
         if !stream.ready.as_ref().unwrap().renderer_reserved {
-            let claim = stream.reserve_surface_renderer(request, key).unwrap();
-            stream
-                .accept_surface_renderer(request, key, &claim)
-                .unwrap();
-            *surface_claim = Some(claim);
+            stream.reserve_surface_renderer(request, key).unwrap();
+            stream.accept_surface_renderer(request, key).unwrap();
+            *surface_claim = Some((request, key));
         }
     }
     let lights = stream.required.lights.clone();
@@ -378,14 +379,13 @@ pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);
         if run.stream.required_ready() {
-            if let Some(mut claim) = surface_claim.take() {
-                let key = run.stream.ready.as_ref().unwrap().published.key;
+            if let Some((request, key)) = surface_claim.take() {
                 assert!(!run.stream.required.terrain.contains(&key));
                 assert!(
                     key.layer != WorldLayer::Road
                         || !run.stream.required.roads.contains(&(key.unit[0] as u32))
                 );
-                run.stream.discard_surface_renderer(&mut claim).unwrap();
+                run.stream.discard_surface_renderer(request, key).unwrap();
             }
             return;
         }
@@ -394,6 +394,67 @@ pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
         }
     }
     panic!("required publication did not reach readiness");
+}
+/// The renderer copy answers like the stream after one encoded delta.
+fn assert_renderer_world(stream: &WorldStream) {
+    let reference = stream.world_reference().clone();
+    let mut sent = renderer_world::RendererWorld::new(reference.clone());
+    let mut delta = renderer_world::WorldDelta::default();
+    let encoded = |delta: &renderer_world::WorldDelta| -> renderer_world::WorldDelta {
+        postcard::from_bytes(&postcard::to_allocvec(delta).unwrap()).unwrap()
+    };
+    stream.sync_renderer(&mut sent, &mut delta);
+    let mut world = renderer_world::RendererWorld::new(reference);
+    world.apply(&encoded(&delta));
+    let frame = world.frame();
+    assert_eq!(frame.surfaces.len(), stream.surfaces.len());
+    assert_eq!(frame.structures.len(), stream.structures.len());
+    assert_eq!(frame.lights.len(), stream.lights.len());
+    assert_eq!(world.required_ready(), stream.required_ready());
+    assert_eq!(world.structure_membership(), stream.structure_membership());
+    assert_eq!(world.pending_structures(), &stream.wanted_structures[..]);
+    for p in stream.wanted_structures.iter() {
+        assert_eq!(
+            world.contents_initialized(&p.id),
+            stream.contents_initialized(&p.id)
+        );
+        assert_eq!(
+            world.structure_required(&p.id),
+            stream.structure_required(&p.id)
+        );
+        assert_eq!(
+            world.structure_replay_required(&p.id),
+            stream.structure_replay_required(&p.id)
+        );
+    }
+    for p in stream
+        .wanted_structures
+        .iter()
+        .chain(stream.structures.iter().map(|s| &s.placement))
+    {
+        assert_eq!(world.appearance(&p.id), stream.appearance(&p.id));
+        assert_eq!(
+            world.prop_material(p),
+            stream.props.material(p),
+            "prop material"
+        );
+    }
+    for source in stream.reference.road.prototypes.iter() {
+        let required = stream.selected_roads.iter().any(|r| {
+            (stream.required.roads.contains(&r.segment.index) || stream.required_ready())
+                && stream.reference.road.prototypes[r.segment.biome as usize] == *source
+        });
+        assert_eq!(world.road_prototype_required(source), required);
+        assert_eq!(
+            world.can_hold_prototype(source),
+            stream.can_hold_prototype(source)
+        );
+    }
+    // A second sync with no stream change keeps the copy.
+    let surfaces = world.frame().surfaces.as_ptr();
+    stream.sync_renderer(&mut sent, &mut delta);
+    world.apply(&encoded(&delta));
+    assert_eq!(world.frame().surfaces.as_ptr(), surfaces);
 }
 fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
     let index = run
@@ -420,26 +481,16 @@ fn publish_with_receipts(run: &mut GarageRuntime) {
     let stream = &mut run.stream;
     let (request, surface) = stream.prepared_surface().unwrap();
     let key = surface.key;
-    let mut claim = stream.reserve_surface_renderer(request, key).unwrap();
-    for stage in ["geometry", "caster", "effect"] {
-        let receipt = super::super::upload_receipt::UploadReceipt::default();
-        receipt.register();
-        claim.watch_upload(receipt.clone());
-        assert!(
-            stream
-                .accept_surface_renderer(request, key, &claim)
-                .is_err(),
-            "{stage} must finish before renderer publication"
-        );
-        let lights = stream.required.lights.clone();
-        stream.publication_available = true;
-        stream.publish(&mut run.physics, &lights).unwrap();
-        assert!(!stream.required_ready(), "{stage} must block readiness");
-        receipt.complete();
-    }
-    stream
-        .accept_surface_renderer(request, key, &claim)
-        .unwrap();
+    stream.reserve_surface_renderer(request, key).unwrap();
+    // The renderer accepts only after its uploads finish. Until then publication waits.
+    let lights = stream.required.lights.clone();
+    stream.publication_available = true;
+    stream.publish(&mut run.physics, &lights).unwrap();
+    assert!(
+        !stream.required_ready(),
+        "renderer work must block readiness"
+    );
+    stream.accept_surface_renderer(request, key).unwrap();
     let lights = stream.required.lights.clone();
     stream.publication_available = true;
     stream.publish(&mut run.physics, &lights).unwrap();
@@ -452,6 +503,7 @@ fn required_publication_reaches_ready_and_withholds_dependencies() {
     prepare_ready(&mut run, &reference);
     assert!(run.stream.required_ready());
     assert!(run.world_supported());
+    assert_renderer_world(&run.stream);
     println!(
         "ready: roads={} tiles={} structures={} lights={}; active bindings={} static={}",
         run.stream.required.roads.len(),
@@ -708,19 +760,10 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
     run.stream.select_required(&views());
     assert!(run.stream.structure_required(&id));
     assert!(!run.stream.required_ready());
-    run.stream
-        .reserve_prototype(prototype.source.clone(), 0, 0)
-        .unwrap();
+    run.stream.hold_prototype(prototype.source.clone()).unwrap();
     run.stream.bind_prototype(&prototype.source).unwrap();
     run.stream.bind_structure_recipe(&prototype.source).unwrap();
-    let request = run.stream.request;
-    let mut claim = run
-        .stream
-        .reserve_instance_renderer(request, &id, 0, 0, 0)
-        .unwrap();
-    run.stream
-        .accept_structure_renderer(request, &id, &mut claim)
-        .unwrap();
+    accept_structure(&mut run.stream, &id);
     run.stream.publication_available = true;
     let lights = run.stream.required.lights.clone();
     run.stream
@@ -839,6 +882,16 @@ fn roadside_owner_controls_keep_state_after_owner_retirement() {
         no_pour: false,
         emission_min_rate: 0.,
         emission_max_rate: 0.,
+        explosion: crate::world::TankExplosion {
+            never_explode: true,
+            always_explode: false,
+            always_explode_force: 0.,
+            force_needed: 0.,
+            explosion_type: 0,
+            no_shoot_hole: false,
+            no_shoot_explode: false,
+            parent_dest: None,
+        },
     };
     let mut tank_key = instance.clone();
     tank_key.children.push((definition.tank.clone(), 0));
@@ -1297,6 +1350,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         glow: None,
         radio: None,
         detector: None,
+        gun: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,
@@ -1935,17 +1989,10 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
             placement.clone(),
         ));
     stream.wanted_structures.push(placement.clone());
-    stream
-        .reserve_prototype(placement.prototype.clone(), 0, 0)
-        .unwrap();
+    stream.hold_prototype(placement.prototype.clone()).unwrap();
     stream.bind_prototype(&placement.prototype).unwrap();
     stream.bind_structure_recipe(&placement.prototype).unwrap();
-    let mut claim = stream
-        .reserve_instance_renderer(stream.request, &placement.id, 0, 0, 0)
-        .unwrap();
-    stream
-        .accept_structure_renderer(stream.request, &placement.id, &mut claim)
-        .unwrap();
+    accept_structure(stream, &placement.id);
     stream.plan_revision = stream.request.revision;
     stream.publish_structure(&mut run.physics, &[]).unwrap();
 }

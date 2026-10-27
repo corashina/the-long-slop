@@ -72,6 +72,8 @@ extern "C" {
     pub fn game_audio_survival_emitter(kind: u32, x: f32, y: f32, z: f32);
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioSurvivalMaster)]
     pub fn game_audio_survival_master(gain: f32, revision: u32, seconds: f64);
+    #[wasm_bindgen(js_namespace = window, js_name = gameAudioPlayerEar)]
+    pub fn game_audio_player_ear(db: f32, clip: u32, ring: f32, pan: f32);
 
     #[wasm_bindgen(js_namespace = window, js_name = gameAudioBegin)]
     pub fn game_audio_begin(session: u32, started: bool, paused: bool, time: f64);
@@ -176,6 +178,15 @@ extern "C" {
         cooldown_remaining: f64,
         progress: f32,
     );
+    /// Posts one encoded command to the simulation worker.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimSend)]
+    pub fn game_sim_send(command: &[u8]);
+    /// Byte length of the received frame. -1: no frame.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimFrameLength)]
+    pub fn game_sim_frame_length() -> i32;
+    /// Copies the received frame into `out` and drops it.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSimRead)]
+    pub fn game_sim_read(out: &mut [u8]);
     #[wasm_bindgen(js_namespace = window, js_name = gameCpuSubmitted)]
     pub fn game_cpu_submitted(token: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gamePerformanceFrame)]
@@ -230,6 +241,16 @@ extern "C" {
     /// Pending `DrivingSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
     pub fn game_driving_settings() -> Option<String>;
+    /// Pending `Outfit` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
+    pub fn game_outfit() -> Option<String>;
+    /// Pending "Sunglasses effects" setting, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameSunglassesEffects)]
+    pub fn game_sunglasses_effects() -> Option<bool>;
+    /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
+    /// False while the appearance screen is closed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]
+    pub fn game_appearance_preview(rect: &mut [f32]) -> bool;
     /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
     #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
     pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);
@@ -277,6 +298,8 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace=window,js_name=gameInventory)]
     pub fn game_inventory(selected: u32, a: u32, b: u32, c: u32, d: u32, progress: f32);
+    #[wasm_bindgen(js_namespace = window, js_name = gameWeaponCrosshair)]
+    pub fn game_weapon_crosshair(icon: u32, color: u32);
     #[wasm_bindgen(js_namespace = window, js_name = gameRadioFeedback)]
     pub fn game_radio_feedback(volume: f32, frequency: f32, am: bool);
     #[wasm_bindgen(js_namespace = window, js_name = gameTypingKeys)]

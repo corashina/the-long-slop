@@ -96,6 +96,7 @@ impl GarageRuntime {
                 glow: None,
                 radio: None,
                 detector: None,
+                gun: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
@@ -184,6 +185,24 @@ impl GarageRuntime {
                     &mut self.physics,
                 );
             }
+            let mut worn = [None; 5];
+            for (id, saved) in worn.iter_mut().zip(&inventory.worn) {
+                if let Some(WornSnapshot::Item {
+                    item: instance @ InstanceId::Generated { .. },
+                }) = saved
+                {
+                    let Ok(item) = ids.item(instance) else {
+                        return Ok(false);
+                    };
+                    *id = Some(item);
+                }
+            }
+            for (slot, id) in worn.into_iter().enumerate() {
+                if let Some(id) = id {
+                    self.area.restore_worn(&mut self.physics, slot, id)?;
+                }
+            }
+            self.area.update_glasses(&self.stream);
         }
         if let Some(carry) = &pending.carry {
             let Ok(id) = ids.item(&carry.item) else {
@@ -317,6 +336,17 @@ impl GarageRuntime {
             .iter()
             .flatten()
             .chain(saved.inventory.equipped.iter())
+            .chain(
+                saved
+                    .inventory
+                    .worn
+                    .iter()
+                    .flatten()
+                    .filter_map(|w| match w {
+                        WornSnapshot::Item { item } => Some(item),
+                        WornSnapshot::Spawned { .. } => None,
+                    }),
+            )
             .chain(saved.player.carry.iter().map(|c| &c.item))
             .chain(
                 saved
@@ -356,12 +386,24 @@ impl GarageRuntime {
             candidate.simulation_seconds,
             &saved.weather,
         );
-        super::spawned::restore_save(
+        let spawned = super::spawned::restore_save(
             reference,
             &mut candidate.area,
             &mut candidate.physics,
             &candidate.stream.origin,
             &saved.spawned,
+        )?;
+        for (item, record) in spawned.into_iter().zip(&saved.spawned) {
+            if let Some(gun) = record.gun {
+                candidate.area.interaction.guns.restore(item, gun);
+            }
+        }
+        super::survival::restore_foods(
+            reference,
+            &mut candidate.area,
+            &mut candidate.physics,
+            &candidate.stream.origin,
+            &saved.foods,
         )?;
         super::hose::restore(reference, &mut candidate.area, &mut candidate.physics)?;
         candidate.restore_cigarettes(&saved.cigarettes);
@@ -386,6 +428,7 @@ impl GarageRuntime {
             .sleep
             .restore(saved.player.since_wake, candidate.simulation_seconds);
         candidate.survival.restore_save(&saved.needs);
+        candidate.hearing.restore_save(&saved.hearing);
         if let Some(carry) = saved
             .player
             .carry
@@ -413,6 +456,27 @@ impl GarageRuntime {
                 &mut candidate.physics,
             );
         }
+        for (slot, worn) in saved.inventory.worn.iter().enumerate() {
+            let id = match worn {
+                Some(WornSnapshot::Item {
+                    item: instance @ InstanceId::Initial { .. },
+                }) => ids.item(instance)?,
+                Some(WornSnapshot::Spawned { serial }) => {
+                    candidate
+                        .area
+                        .spawned
+                        .iter()
+                        .find(|s| s.serial == *serial)
+                        .ok_or_else(|| SaveError::InvalidLinks("Unknown worn serial".into()))?
+                        .id
+                }
+                _ => continue,
+            };
+            candidate
+                .area
+                .restore_worn(&mut candidate.physics, slot, id)?;
+        }
+        candidate.area.update_glasses(&candidate.stream);
         let starter = reference.survival.starter_food;
         if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
             candidate.area.items.get_mut(starter).unwrap().removed = false;
@@ -548,7 +612,7 @@ impl GarageRuntime {
                     .area
                     .interaction
                     .held()
-                    .is_some_and(|id| self.area.spawned.contains(id))
+                    .is_some_and(|id| self.area.saves_in_world(id))
                 {
                     None
                 } else {
@@ -556,6 +620,7 @@ impl GarageRuntime {
                 },
             )?,
             needs: self.survival.capture_save(),
+            hearing: self.hearing.capture_save(),
             bodies: self.area.capture_save(
                 reference,
                 &ids,
@@ -581,10 +646,13 @@ impl GarageRuntime {
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },
-            spawned: self
-                .area
-                .spawned
-                .capture_save(reference, &self.area.items, origin),
+            spawned: self.area.spawned.capture_save(
+                reference,
+                &self.area.items,
+                &self.area.interaction.guns,
+                origin,
+            ),
+            foods: self.area.capture_foods(reference, origin),
             cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
             weather: self
                 .weather

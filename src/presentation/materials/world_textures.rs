@@ -1,11 +1,11 @@
 //! Admitted source texture arrays. Each layer retains all authored mip levels.
+use crate::ownership::texture_batch::{Admission, BatchIdentity, BatchState, reservation};
 use crate::presentation::source_images::wrap;
 use crate::presentation::texture_batches::SourceTextureBatch;
 use crate::reference::texture_batch::{
     TextureArrayKey as ArrayKey, TextureBatchReference, texture_bank_groups,
 };
 use crate::reference::{LightingTextureRecord, ReferenceError, SourceId, WorldSourceMaterial};
-use crate::world::texture_batch_ownership::{Admission, BatchIdentity, BatchState, reservation};
 use bevy::asset::AssetId;
 static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 use bevy::{
@@ -188,23 +188,17 @@ impl WorldTextures {
         Ok(copy)
     }
     pub fn shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(true)
-    }
-    pub fn fork_shared_bytes(&self) -> (usize, usize) {
-        self.shared_bytes_if(false)
-    }
-    fn shared_bytes_if(&self, shared: bool) -> (usize, usize) {
         let arrays = self
             .arrays
             .iter()
             .flatten()
-            .filter(|a| !shared || Arc::strong_count(&a.owner) > 1)
+            .filter(|a| Arc::strong_count(&a.owner) > 1)
             .fold((0, 0), |n, a| {
                 (
                     n.0 + a
                         .layers
                         .iter()
-                        .filter(|l| !shared || Arc::strong_count(&l.batches) > 1)
+                        .filter(|l| Arc::strong_count(&l.batches) > 1)
                         .map(|l| {
                             l.batches.len() * std::mem::size_of::<TextureBatchReference>()
                                 + l.batches
@@ -221,7 +215,7 @@ impl WorldTextures {
             });
         (
             arrays.0
-                + if !shared || Arc::strong_count(&self.uploads) > 1 {
+                + if Arc::strong_count(&self.uploads) > 1 {
                     queue_bytes()
                 } else {
                     0
@@ -528,16 +522,14 @@ impl WorldTextures {
         images: &mut Assets<Image>,
         batches: &mut Assets<SourceTextureBatch>,
         preparation: &crate::presentation::gpu_prepare::GpuPreparation,
-        pending_available: usize,
-        staging_available: usize,
-        cpu_available: usize,
-        releasable: bool,
+        ledger: &mut crate::ownership::PresentationLedger,
     ) -> Result<(), ReferenceError> {
         self.reap(server, batches)?;
         if self.cancelled {
             return Ok(());
         }
         let metadata = self.metadata_bytes();
+        let cpu_available = ledger.available_prototype_cpu_bytes() + self.bytes().0;
         let mut queue = self.uploads.lock().unwrap();
         let current = queue.ownership.slots[0].and_then(|owner| {
             queue
@@ -604,7 +596,7 @@ impl WorldTextures {
             if selected.is_empty() {
                 return Ok(());
             }
-            if selected.len() > pending_available {
+            if !ledger.can_request_independent(selected.len()) {
                 return Ok(());
             }
             let shared = if let Some((owner, _, _, _)) = &current {
@@ -639,8 +631,15 @@ impl WorldTextures {
             if let Some((_, _, _, index)) = shared {
                 selected[index].4 = 4096;
             }
-            let available = staging_available
+            let available = ledger
+                .available_staging_bytes()
                 .min(cpu_available.saturating_sub(metadata + queue.ownership.bytes()));
+            let requested = selected.iter().map(|s| s.4).sum::<usize>();
+            if requested > available {
+                // Short credit waits. The report asks the stream for the rest.
+                ledger.request_staging(requested);
+                ledger.request_prototype(requested, 0);
+            }
             let admission = if refill {
                 queue
                     .ownership
@@ -648,7 +647,7 @@ impl WorldTextures {
             } else {
                 queue
                     .ownership
-                    .admit(selected.iter().map(|s| (s.3, s.4)), available, releasable)
+                    .admit(selected.iter().map(|s| (s.3, s.4)), available, true)
             };
             match admission {
                 Ok(()) => (),

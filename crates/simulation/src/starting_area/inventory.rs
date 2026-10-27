@@ -442,6 +442,8 @@ impl GarageRuntime {
                 .expect("checked inventory bindings");
         }
         self.advance_melee(reference, input, dt);
+        let gun_held = self.advance_guns(reference, input, dt, view);
+        self.run_explosions(reference, dt);
         self.area.sync_equipment(reference, &mut self.physics);
         if let Some(id) = self.area.interaction.equipment.item() {
             self.area.interaction.equipment.advance_hand(
@@ -461,10 +463,12 @@ impl GarageRuntime {
             view,
             origin: self.stream.origin.offset,
         };
-        let mut primary_reserved = self.area.interaction.cleaning.reserves_lmb(
-            self.area.interaction.equipment.item(),
-            self.area.interaction.held(),
-        );
+        // fpscontroller: a gun in the hand sets noLMBUse.
+        let mut primary_reserved = gun_held
+            || self.area.interaction.cleaning.reserves_lmb(
+                self.area.interaction.equipment.item(),
+                self.area.interaction.held(),
+            );
         self.area
             .interaction
             .cleaning
@@ -506,6 +510,18 @@ impl GarageRuntime {
                 &mut primary_reserved,
             );
         }
+        let point = input.player_held & crate::simulation::player_keys::POINT != 0;
+        self.area.player.step_point(point, &self.physics, dt);
+        self.area.interaction.cleaning.advance_player(
+            point,
+            self.area.player.body_pose(&self.physics),
+            frame,
+            reference,
+            &mut self.area.conditions,
+            &self.area.items,
+            &self.physics,
+            &self.area.interaction.parts,
+        );
         self.stream.advance_sprays(
             frame,
             reference,
@@ -573,6 +589,11 @@ impl GarageRuntime {
             self.needs_output(),
         );
         let mut look_input = input;
+        if self.area.interaction.guns.reloading {
+            // fpscontroller.reloading: R with a gun moves the gun, not the view or the carry.
+            look_input.mouse = [0.; 2];
+            look_input.wheel = 0.;
+        }
         if self.driving_input.mouse_owned() {
             // Source `inputscript.mouseDrive`: mouse look axes read zero.
             look_input.mouse = [0.; 2];
@@ -642,15 +663,13 @@ impl GarageRuntime {
             },
         );
     }
-    /// `weaponhandlingscript` and `meleeweaponscript` for a shovel in the right hand.
+    /// `weaponhandlingscript` and `meleeweaponscript` for a melee weapon in the right hand.
     fn advance_melee(&mut self, reference: &ReferenceManifest, input: FrameInput, dt: f32) {
         use crate::interaction::melee::MeleeInput;
         let interaction = &mut self.area.interaction;
-        let shovel = interaction.equipment.item().filter(|id| {
-            interaction
-                .carry
-                .rule(*id)
-                .is_some_and(|r| interaction.melee.is_shovel(&r.source))
+        let weapon = interaction.equipment.item().and_then(|id| {
+            let rule = interaction.carry.rule(id)?;
+            Some((id, interaction.melee.weapon_for(&rule.source)?))
         });
         let held = |key| input.held & key != 0;
         let melee = MeleeInput {
@@ -665,7 +684,7 @@ impl GarageRuntime {
         interaction.melee.step(
             melee,
             dt,
-            shovel,
+            weapon,
             &mut self.area.items,
             &mut self.physics,
             &mut interaction.buried,
@@ -688,6 +707,15 @@ impl GarageRuntime {
                     position: sound.position,
                 });
             }
+        }
+        while let Some(item) = self.area.interaction.melee.take_cut() {
+            if self.cut_food(reference, item, true).is_err() {
+                self.notice = "Cannot cut food.";
+            }
+        }
+        while let Some((item, damage)) = self.area.interaction.melee.take_strike() {
+            self.try_explode_tank(item, damage, false);
+            self.try_explode_prop(item, damage);
         }
     }
     /// mainscript.PlayClipAtPoint for spray bottle clips.
@@ -715,8 +743,8 @@ impl StartingArea {
         ids: &crate::save::IdentityMap,
     ) -> Result<crate::save::InventorySnapshot, crate::save::SaveError> {
         let mut slots = [None, None, None, None];
-        // Spawned items save in the world, so their slots save empty.
-        let saved_item = |id: &ItemId| !self.spawned.contains(*id);
+        // Spawned items and runtime foods save in the world, so their slots save empty.
+        let saved_item = |id: &ItemId| !self.saves_in_world(*id);
         for (saved, id) in slots.iter_mut().zip(self.inventory.slots) {
             *saved = id
                 .filter(saved_item)
@@ -733,6 +761,26 @@ impl StartingArea {
                 .filter(saved_item)
                 .map(|id| ids.item_instance(id))
                 .transpose()?,
+            worn: self.capture_worn(ids)?,
         })
+    }
+    fn capture_worn(
+        &self,
+        ids: &crate::save::IdentityMap,
+    ) -> Result<[Option<crate::save::WornSnapshot>; 5], crate::save::SaveError> {
+        use crate::save::WornSnapshot;
+        let mut worn = [const { None }; 5];
+        for (saved, item) in worn.iter_mut().zip(self.wear.worn.slots) {
+            let Some(item) = item else { continue };
+            *saved = Some(match self.spawned.get(item.id) {
+                Some(spawned) => WornSnapshot::Spawned {
+                    serial: spawned.serial,
+                },
+                None => WornSnapshot::Item {
+                    item: ids.item_instance(item.id)?,
+                },
+            });
+        }
+        Ok(worn)
     }
 }

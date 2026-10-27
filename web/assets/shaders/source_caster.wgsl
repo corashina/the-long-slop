@@ -82,7 +82,7 @@ fn fragment(input: CasterOutput) {
     let color_alpha = material.color.a;
 #endif
     // Source player_model SHADOWCASTER: discard near the view camera, as in the surface.
-    if material.flags.z == 3u && length(input.world_position - view.world_position) < caster_view.bias.w { discard; }
+    if material.flags.z == 3u && (material.flags.x & (1u << 12u)) == 0u && length(input.world_position - view.world_position) < caster_view.bias.w { discard; }
     if (material.flags.x & ((1u << 9u) | (1u << 8u))) == 0u { return; }
     var main_alpha = material.defaults[0].a;
     if (material.flags.y & 1u) != 0u {

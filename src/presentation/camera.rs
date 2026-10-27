@@ -2,12 +2,7 @@ use crate::vehicle::VehiclePose;
 use bevy::ecs as bevy_ecs;
 use bevy::prelude::*;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CameraMode {
-    #[default]
-    Cockpit,
-    Chase,
-}
+pub use simulation::driver::CameraMode;
 
 pub struct WorldCameraSettings {
     pub near: f32,

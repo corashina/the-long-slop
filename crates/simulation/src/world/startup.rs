@@ -4,7 +4,7 @@ use crate::reference::{BodyId, ReferenceError, ReferenceManifest, WorldReference
 use rapier3d::math::Vector;
 
 /// Startup offsets retain imported ownership; callers apply them before collider insertion.
-#[derive(Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct StartupTerrain {
     pub root_offsets: Vec<(crate::reference::SourceId, f32)>,
     pub player_offset: f32,

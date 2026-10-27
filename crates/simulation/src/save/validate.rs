@@ -88,6 +88,16 @@ impl SaveSnapshot {
                 "Duplicate spawned item",
             )?;
         }
+        for record in &self.foods {
+            let source = &reference.survival.foods
+                [crate::starting_area::saved_food(reference, &record.source)?];
+            data(
+                record.bite <= source.bites
+                    && !(source.destroy_on_end && record.bite == source.bites),
+                "Food progress",
+            )?;
+            absolute(&record.pose)?;
+        }
         crate::starting_area::cigarettes::validate_save(
             reference,
             &self.spawned,
@@ -98,6 +108,7 @@ impl SaveSnapshot {
         self.validate_player(reference, &ids, &items)?;
         self.validate_needs(reference)?;
         self.validate_inventory(reference, &ids, &items)?;
+        self.validate_worn(reference, &ids, &items)?;
         self.validate_bodies(reference, &ids, &items)?;
         self.validate_mechanisms(reference, &ids)?;
         self.validate_lighting(reference, &ids)?;
@@ -109,7 +120,7 @@ impl SaveSnapshot {
                 .conditions
                 .tools
                 .iter()
-                .find(|t| t.source == SourceKey::from(&brush.source))
+                .find(|t| t.source == SourceKey::from(&brush.tool.source))
                 .unwrap();
             let owner = reference
                 .conditions
@@ -124,7 +135,7 @@ impl SaveSnapshot {
                 .find(|s| s.source == SourceKey::from(&owner.source))
                 .unwrap();
             data(
-                tool.disabled == (surface.state == 5 || brush.disabled),
+                tool.disabled == (surface.state == 5 || brush.tool.disabled),
                 "Tool disabled condition",
             )?;
         }
@@ -309,6 +320,11 @@ impl SaveSnapshot {
             ]),
             "Pending needs",
         )?;
+        let h = &self.hearing;
+        data(
+            finite(&[h.hearing, h.ringing, h.target, h.dir]) && h.hearing <= 1.,
+            "Player hearing",
+        )?;
         let bladder: f32 = n.bladder.as_slice().iter().map(|e| e.amount).sum();
         data(
             bladder <= reference.survival.bladder_capacity_liters + 1e-4,
@@ -444,6 +460,86 @@ impl SaveSnapshot {
                 local(&carry.local_grip)?;
             }
             None => links(held.is_empty(), "Missing carry state")?,
+        }
+        Ok(())
+    }
+
+    /// Each worn item is a wearable of its slot type, lies free in the world, and is worn once.
+    fn validate_worn(
+        &self,
+        reference: &ReferenceManifest,
+        ids: &IdentityMap,
+        items: &HashMap<r::ItemId, &ItemSnapshot>,
+    ) -> Result<(), SaveError> {
+        let inventory = &self.inventory;
+        // The wear slot of a pickup component.
+        let slot_of = |source: &r::SourceId| {
+            reference
+                .clothing
+                .wearables
+                .iter()
+                .find(|w| {
+                    reference.item_prototypes.iter().any(|p| {
+                        p.id == w.prototype && p.pickups.iter().any(|k| k.pickup.source == *source)
+                    })
+                })
+                .map(|w| w.type_index as usize)
+        };
+        for (slot, worn) in inventory.worn.iter().enumerate() {
+            let Some(worn) = worn else { continue };
+            links(
+                !inventory.worn[..slot].contains(&Some(worn.clone())),
+                "Duplicate worn item",
+            )?;
+            match worn {
+                WornSnapshot::Spawned { serial } => {
+                    let record = self
+                        .spawned
+                        .iter()
+                        .find(|s| s.serial == *serial)
+                        .ok_or_else(|| invalid("Unknown worn serial"))?;
+                    let (prototype, pickup) =
+                        crate::starting_area::spawned::saved_prototype(reference, record)?;
+                    let source = &reference.item_prototypes[prototype].pickups[pickup]
+                        .pickup
+                        .source;
+                    links(slot_of(source) == Some(slot), "Worn item slot")?;
+                }
+                WornSnapshot::Item { item } => {
+                    links(
+                        !inventory.slots.contains(&Some(item.clone()))
+                            && inventory.equipped.as_ref() != Some(item)
+                            && self.player.carry.as_ref().is_none_or(|c| &c.item != item),
+                        "Worn item ownership",
+                    )?;
+                    if let InstanceId::Generated { id } = item {
+                        // The pickup rule of a generated item binds later. Its restore checks the slot.
+                        let state = self
+                            .world
+                            .changes
+                            .get(crate::world::ObjectKey::Generated(id.clone()))
+                            .and_then(|c| c.snapshot.as_ref())
+                            .ok_or_else(|| invalid("Missing generated worn item"))?;
+                        links(
+                            !state.held && state.attachment.is_none(),
+                            "Worn item ownership",
+                        )?;
+                        continue;
+                    }
+                    let id = ids.item(item)?;
+                    let rule = reference
+                        .items
+                        .iter()
+                        .find(|i| i.id == id)
+                        .and_then(|i| i.pickup.as_ref());
+                    links(
+                        rule.is_some_and(|p| slot_of(&p.source) == Some(slot))
+                            && !items[&id].removed
+                            && items[&id].location == ItemLocationSave::World,
+                        "Worn item slot",
+                    )?;
+                }
+            }
         }
         Ok(())
     }

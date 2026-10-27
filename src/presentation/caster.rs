@@ -135,7 +135,7 @@ impl CasterPasses {
         base: CachedRenderPipelineId,
         cache: &PipelineCache,
     ) -> bool {
-        crate::world::renderer_pending::pipeline_states_drained(
+        crate::ownership::renderer_pending::pipeline_states_drained(
             self.variants.get(&base).into_iter().flatten().map(|id| {
                 super::world::pipelines::physical_pipeline_state(
                     cache.get_render_pipeline_state(*id),

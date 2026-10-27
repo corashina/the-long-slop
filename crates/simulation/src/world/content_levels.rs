@@ -34,7 +34,6 @@ impl LevelBinding {
         crate::world::contents::identity_heap(&self.parent)
             + self.bubbles.capacity() * std::mem::size_of::<LevelBubble>()
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn bubbles(&self) -> impl Iterator<Item = &LevelBubble> {
         self.bubbles.iter()
     }
@@ -194,7 +193,6 @@ impl WorldStream {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn level(&self, parent: &GeneratedId) -> Option<&LevelBinding> {
         self.level_bindings.iter().find(|b| &b.parent == parent)
     }

@@ -1,0 +1,49 @@
+//! Web Worker entry for the simulation. It owns its own WASM memory and the game runtime.
+use simulation::boundary::{SimInit, encode_startup};
+use simulation::reference::ReferenceManifest;
+use simulation::session::Session;
+use simulation::world::GameMode;
+use std::cell::RefCell;
+use std::sync::Arc;
+use wasm_bindgen::prelude::*;
+
+thread_local! {
+    static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
+}
+
+/// Starts the simulation. Returns the encoded `SimStartup`.
+#[wasm_bindgen]
+pub fn start(
+    manifest: &[u8],
+    manifest_sha256: String,
+    draw_distance: f32,
+    biome: u32,
+    start_car: i32,
+) -> Result<Vec<u8>, JsValue> {
+    console_error_panic_hook::set_once();
+    let error = |e: &dyn std::fmt::Display| JsValue::from_str(&e.to_string());
+    let reference =
+        Arc::new(ReferenceManifest::from_runtime_json(manifest).map_err(|e| error(&e))?);
+    let init = SimInit {
+        mode: GameMode::from_menu(&reference.world, biome, start_car),
+        draw_distance,
+        manifest_sha256,
+    };
+    let (session, startup) = Session::new(reference, init).map_err(|e| error(&e))?;
+    SESSION.with_borrow_mut(|s| *s = Some(session));
+    Ok(encode_startup(&startup))
+}
+
+/// Runs one encoded command. Returns the encoded frame.
+#[wasm_bindgen]
+pub fn tick(command: &[u8]) -> Result<Vec<u8>, JsValue> {
+    SESSION.with_borrow_mut(|session| {
+        let session = session
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("The simulation is not started."))?;
+        session
+            .tick(command)
+            .map(<[u8]>::to_vec)
+            .map_err(|e| JsValue::from_str(&e.0))
+    })
+}

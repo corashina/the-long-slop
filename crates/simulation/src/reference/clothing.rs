@@ -1,7 +1,11 @@
 pub mod pose;
-use super::postprocessing::GlassesProfile;
+pub mod preview;
+pub mod ragdoll;
+use super::postprocessing::{DeadProfile, GlassesProfile};
 use super::*;
 pub use pose::*;
+pub use preview::*;
+pub use ragdoll::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +21,10 @@ pub struct ClothingReference {
     pub anchors: Vec<SourceId>,
     pub wearables: Vec<WearableReference>,
     pub glasses_profiles: Vec<GlassesProfile>,
+    /// `fpscontroller.DeadV`.
+    pub dead_profile: DeadProfile,
+    pub ragdoll: RagdollReference,
+    pub preview: PreviewReference,
     pub evidence: ManagedEvidence,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +211,20 @@ impl ClothingReference {
         for (i, p) in self.glasses_profiles.iter().enumerate() {
             p.validate(i, m)?;
         }
+        self.dead_profile.validate(m)?;
+        self.ragdoll.validate(m, &self.characters)?;
+        let joint_names: Vec<HashSet<&str>> = self
+            .characters
+            .iter()
+            .map(|c| {
+                m.nodes
+                    .iter()
+                    .filter(|n| c.skins.iter().any(|s| s.joints.contains(&n.id)))
+                    .map(|n| n.name.as_str())
+                    .collect()
+            })
+            .collect();
+        self.preview.validate(&joint_names)?;
         require(self.wearables.len() == 6, "selected wearable families")?;
         for (w, (wearable, root, item, type_index)) in self.wearables.iter().zip([
             (146739, 70812, 217, 0),
@@ -972,6 +994,77 @@ const CHARACTER_SEGMENTS: &[&[(&str, u32, i64, bool, [f32; 4], &[(i64, u32)])]] 
 ];
 
 impl CharacterReference {
+    /// Source-independent links: local renderers, material dependencies, skins and segment slots.
+    pub fn validate_structure(
+        &self,
+        m: &ReferenceManifest,
+        local: impl Fn(NodeId) -> bool,
+    ) -> Result<(), ReferenceError> {
+        let c = self;
+        ids(
+            c.renderers.iter().map(|r| r.node),
+            "duplicate character renderer",
+        )?;
+        ids(c.skins.iter().map(|s| s.index), "duplicate character skin")?;
+        require(!c.renderers.is_empty(), "character renderers")?;
+        for r in &c.renderers {
+            require(
+                local(r.node) && r.gltf_mesh < c.gltf_mesh_count && !r.materials.is_empty(),
+                "character renderer links",
+            )?;
+            r.state.validate()?;
+            for material in &r.materials {
+                require(
+                    m.rendering
+                        .materials
+                        .iter()
+                        .any(|v| v.asset == c.asset && &v.source == material),
+                    "character material dependency",
+                )?;
+            }
+        }
+        for s in &c.skins {
+            let r = c
+                .renderers
+                .iter()
+                .find(|r| r.node == s.node)
+                .ok_or_else(|| ReferenceError("skin renderer".into()))?;
+            require(
+                r.skin == Some(s.index)
+                    && local(s.skeleton)
+                    && s.joints.iter().all(|n| local(*n))
+                    && s.inverse_bind.index < c.gltf_accessor_count
+                    && s.inverse_bind.count as usize == s.joints.len()
+                    && s.attributes.len() == r.materials.len(),
+                "character skin links",
+            )?;
+            s.inverse_bind.validate("MAT4", &[5126])?;
+            for a in &s.attributes {
+                require(
+                    a.joints.index < c.gltf_accessor_count
+                        && a.weights.index < c.gltf_accessor_count
+                        && a.joints.count == a.weights.count,
+                    "skin attribute index",
+                )?;
+                a.joints.validate("VEC4", &[5121, 5123])?;
+                a.weights.validate("VEC4", &[5126])?;
+            }
+        }
+        for segment in &c.segments {
+            require(
+                finite(&segment.default_color)
+                    && finite(&segment.color)
+                    && segment.renderers.iter().all(|b| {
+                        c.renderers
+                            .iter()
+                            .any(|r| r.node == b.node && (b.slot as usize) < r.materials.len())
+                    }),
+                "character segment slot",
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, m: &ReferenceManifest) -> Result<(), ReferenceError> {
         let c = self;
         let i = match (c.source.file.as_str(), c.source.path_id) {

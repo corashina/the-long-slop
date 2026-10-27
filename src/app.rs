@@ -1,85 +1,61 @@
 pub(crate) use simulation::cpu_profile;
 mod performance;
 pub(crate) mod save;
+mod sim_link;
 use crate::browser::*;
-use crate::interaction::labels::display_name;
 use crate::presentation::{
     self,
     camera::{CameraMode, DriveCamera},
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
-use crate::reference::{ItemId, OpeningId, ReferenceManifest};
-use crate::simulation::{FrameInput, StepClock, keys};
-use crate::starting_area::GarageRuntime;
+use crate::reference::ReferenceManifest;
+use crate::simulation::FrameInput;
 use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
-use simulation::host::{game_cpu_clear_input, game_now};
+use presentation::sim_frame::SimFrameResource;
+use simulation::boundary::MouseLook;
+use simulation::boundary::{AudioCall, HudBlock, PoseRow, SimCommand, StateBlock};
+use simulation::host::game_now;
+use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
-
-/// World generation time per frame while the loading panel shows.
-pub(crate) const LOADING_BUDGET_MS: f64 = 12.;
 
 #[derive(Resource)]
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
-    pub runtime: GarageRuntime,
-    /// Gauge state per vehicle.
-    input: FrameInput,
-    frame_input: FrameInput,
-    pub(crate) clock: StepClock,
-    previous: VehiclePose,
-    current: VehiclePose,
-    rendered: VehiclePose,
-    camera: CameraMode,
-    frame_steps: u32,
-    physics_ms: f64,
+    link: sim_link::SimLink,
+    /// Renderer setup values of the simulation.
+    startup: simulation::boundary::SimStartup,
+    /// Sequence of the last sent command.
+    seq: u64,
     world_ms: f64,
-    pub render_delta_seconds: f32,
-    skip_elapsed: bool,
+    /// Camera position of the last rendered frame. The simulation assigns radio voices by it.
+    pub listener: Option<[f32; 3]>,
     pub(crate) ready: bool,
-    last_feedback: Option<FeedbackStamp>,
+    /// Mouse of commands that no step consumed yet.
+    look: MouseLook,
+    /// Player camera of this frame, with the look of the latest mouse.
+    view: VehiclePose,
+    /// `view` position minus the current step camera position.
+    view_offset: [f32; 3],
     last_inventory: Option<([u32; 4], u8, u32)>,
+    last_crosshair: Option<(u32, u32)>,
+    /// Renderer input of the next world step.
+    world: simulation::boundary::WorldCommand,
 }
 
 impl Drive {
-    /// Player body pose at the rendered camera. It moves with the camera interpolation.
-    pub(crate) fn rendered_body_pose(&self) -> VehiclePose {
-        let mut pose = self.runtime.area.player.body_pose(&self.runtime.physics);
+    /// Player body `pose` at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self, mut pose: VehiclePose) -> VehiclePose {
         for i in 0..3 {
-            pose.position[i] += self.rendered.position[i] - self.current.position[i];
+            pose.position[i] += self.view_offset[i];
         }
         pose
     }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct FeedbackStamp {
-    actions: u32,
-    context: u32,
-    light_control: u32,
-    lmb_use: bool,
-    prompts: u8,
-    computer: u8,
-    item: Option<ItemId>,
-    opening: Option<OpeningId>,
-    carrying: bool,
-    notice: &'static str,
-    amount: u32,
-    empty: bool,
-    capacity: f32,
-    percents: [u32; 6],
-    order: u32,
-    condition: u32,
-    held: Option<ItemId>,
-    throw_charge: u32,
-    throw_active: bool,
-    rpm: u32,
-    engine_flags: [bool; 5],
 }
 
 /// Manifest fields the browser shell reads. Copies them without parsing the world records.
@@ -109,6 +85,19 @@ struct ManifestShell<'a> {
     items: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     world: WorldShell<'a>,
+    #[serde(borrow)]
+    clothing: ClothingShell<'a>,
+}
+/// The outfit defaults: the segments of each player character.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ClothingShell<'a> {
+    #[serde(borrow)]
+    characters: Vec<CharacterShell<'a>>,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+struct CharacterShell<'a> {
+    #[serde(borrow)]
+    segments: &'a serde_json::value::RawValue,
 }
 #[derive(serde::Deserialize, serde::Serialize)]
 struct WorldShell<'a> {
@@ -143,19 +132,12 @@ pub fn manifest_shell(reference_json: &[u8]) -> Result<String, JsValue> {
 /// The Game mode from the browser. Biome values above 3 read as Mixed.
 /// The start car is -1 (Random) or an index into the manifest start placements.
 fn game_mode(reference: &ReferenceManifest) -> crate::world::GameMode {
-    let biome = game_biome();
-    crate::world::GameMode {
-        biome: if biome > 3 { 0 } else { biome as u8 },
-        start_car: crate::world::StartCarChoice::from_index(&reference.world, game_start_car()),
-    }
+    crate::world::GameMode::from_menu(&reference.world, game_biome(), game_start_car())
 }
 
 #[wasm_bindgen]
-pub fn run(
-    reference_json: &[u8],
-    manifest_sha256: String,
-    draw_distance: f32,
-) -> Result<(), JsValue> {
+/// `startup` is the encoded `SimStartup` of the simulation worker.
+pub fn run(reference_json: &[u8], startup: &[u8]) -> Result<(), JsValue> {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Startup);
     console_error_panic_hook::set_once();
     let reference = Arc::new(
@@ -165,41 +147,38 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let mut runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
-        &mut runtime.stream,
+    let startup =
+        simulation::boundary::decode_startup(startup).map_err(|e| JsValue::from_str(&e.0))?;
+    let mut ledger = crate::ownership::PresentationLedger::default();
+    let (fixed, graph) = crate::ownership::fixed::admit_control(
+        &mut ledger,
         presentation::readiness::control_bytes(),
         presentation::readiness::RendererStateHandle::default,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
-        runtime.stream.frame().request.session,
+        startup.session,
         fixed,
+        ledger,
     );
-    let current = runtime.area.player.view(&runtime.physics).camera_pose;
     App::new()
         .insert_resource(graph)
         .insert_resource(allocation)
         .insert_resource(RuntimeReference(reference.clone()))
-        .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
+        .init_resource::<save::SaveRequests>()
         .insert_resource(Drive {
-            runtime,
-            input: FrameInput::default(),
-            frame_input: FrameInput::default(),
-            clock: StepClock::default(),
-            previous: current,
-            current,
-            rendered: current,
-            camera: CameraMode::default(),
-            frame_steps: 0,
-            physics_ms: 0.,
+            view: startup.view,
+            link: sim_link::SimLink::default(),
+            startup,
+            seq: 0,
             world_ms: 0.,
-            render_delta_seconds: 0.,
-            skip_elapsed: false,
+            listener: None,
             ready: false,
-            last_feedback: None,
+            look: MouseLook::default(),
+            view_offset: [0.; 3],
             last_inventory: None,
+            last_crosshair: None,
+            world: Default::default(),
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
@@ -245,13 +224,16 @@ pub fn run(
             presentation::source_lighting::SourceLightingPlugin,
             presentation::frame_graph::SourceFramePlugin,
             presentation::particles::SourceParticlePlugin,
+            presentation::decals::SourceDecalPlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
+            presentation::outfit_preview::OutfitPreviewPlugin,
         ))
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
         .init_resource::<presentation::world::instances::SourceInstances>()
         .init_resource::<presentation::computer::ComputerScreens>()
+        .init_resource::<SimFrameResource>()
         .init_resource::<presentation::world::grass_jobs::GrassJobs>()
         .init_resource::<crate::presentation::world_metrics::MeshMeasurements>()
         .add_systems(
@@ -267,26 +249,27 @@ pub fn run(
         .add_systems(
             Update,
             (
-                initialize_storage,
                 presentation::readiness::observe_main_readiness.before(check_ready),
                 check_ready,
+                select_world_views,
                 read_input,
-                save::dispatch,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
-                advance_physics,
-                sync_world,
+                (fill_frame, prepare_world, sync_instances).chain(),
+                save::dispatch,
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
                 (
                     presentation::spawned::sync,
                     presentation::cigarettes::sync,
+                    presentation::outfit::poll,
                     presentation::player_body::sync,
+                    presentation::ragdoll::sync,
+                    presentation::outfit_preview::sync,
                     presentation::sky_traffic::sync,
                 )
                     .chain(),
-                sync_instruments,
                 presentation::lighting::sync_control_visuals,
                 presentation::reference::sync_inventory,
                 update_camera,
@@ -326,6 +309,10 @@ fn setup(
     commands.insert_resource(presentation::consumables::ConsumableVisuals::default());
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     commands.insert_resource(presentation::player_body::PlayerBody::default());
+    commands.insert_resource(presentation::ragdoll::RagdollBody::default());
+    commands.insert_resource(presentation::outfit::Outfit::defaults(
+        &reference.0.clothing.characters,
+    ));
     commands.insert_resource(presentation::sky_traffic::SkyTrafficVisuals::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)
@@ -348,29 +335,10 @@ fn setup(
         &mut commands,
         &mut images,
         &reference.0,
-        presentation::transform(drive.current),
-        drive
-            .runtime
-            .area
-            .player
-            .view(&drive.runtime.physics)
-            .fov_degrees,
-        drive.runtime.distances.cam2_far_plane,
+        presentation::transform(drive.startup.view),
+        drive.startup.fov_degrees,
+        drive.startup.far_plane,
     );
-}
-
-fn initialize_storage(
-    time: Res<Time<Real>>,
-    mut drive: ResMut<Drive>,
-    mut visuals: ResMut<ReferenceVisuals>,
-) {
-    if drive.ready || visuals.failed {
-        return;
-    }
-    if let Err(error) = drive.runtime.initialize_storage_frame(time.delta_secs()) {
-        game_failure(&error.to_string());
-        visuals.failed = true;
-    }
 }
 
 fn update_scene_scale(
@@ -395,6 +363,7 @@ fn check_ready(
     gltfs: Res<Assets<bevy::gltf::Gltf>>,
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
     mut visuals: ResMut<ReferenceVisuals>,
     extras: Query<(Entity, &GltfExtras)>,
     primitives: Query<(Entity, &ChildOf), With<Mesh3d>>,
@@ -411,6 +380,11 @@ fn check_ready(
 ) {
     let (lighting, fixed) = lighting;
     let (plates, particles) = plates;
+    if let Some(error) = sim.failure.take() {
+        game_failure(&error);
+        visuals.failed = true;
+    }
+    let state = sim.frame.state;
     let prepared = (|| -> bool {
         if renderer.failure().is_some() {
             return false;
@@ -438,13 +412,7 @@ fn check_ready(
         if !fixed.payloads_ready() || !materials.fixed_textures_ready() {
             return false;
         }
-        if !drive
-            .runtime
-            .area
-            .interaction
-            .storage
-            .initialization_ready()
-        {
+        if state.flags & StateBlock::STORAGE_READY == 0 {
             return false;
         }
         for (path, handle) in &visuals.handles {
@@ -504,10 +472,7 @@ fn check_ready(
                 if materials.state != presentation::materials::RenderingState::Ready {
                     return false;
                 }
-                if !drive.runtime.world_supported()
-                    || !drive.runtime.stream.required_ready()
-                    || !lighting.road_lamps.ready()
-                {
+                if state.flags & StateBlock::WORLD_READY == 0 || !lighting.road_lamps.ready() {
                     return false;
                 }
                 if !plates.ready() || !particles.prepared() {
@@ -524,8 +489,8 @@ fn check_ready(
         }
     })();
     let key = crate::render_readiness::ContentKey {
-        session: drive.runtime.stream.frame().request.session,
-        selection_revision: drive.runtime.stream.required_content().selection_revision,
+        session: state.session,
+        selection_revision: state.selection_revision,
     };
     let preparation = if prepared {
         crate::render_readiness::ContentPreparation::Prepared(key)
@@ -534,7 +499,7 @@ fn check_ready(
     };
     match renderer.check(presentation::readiness::RendererContentCheck {
         preparation,
-        history_revision: drive.runtime.audio_motion_revision,
+        history_revision: state.motion_revision,
     }) {
         crate::render_readiness::RendererStatus::Loading => {}
         crate::render_readiness::RendererStatus::Ready => {
@@ -550,51 +515,30 @@ fn check_ready(
     }
 }
 
-fn clear_input(drive: &mut Drive) {
-    if cpu_profile::enabled() {
-        game_cpu_clear_input();
-    }
-    drive.input.clear();
-    drive.frame_input.clear();
-    drive.runtime.clear_input();
-    drive.current = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .camera_pose;
-    drive.clock.reset();
-    drive.previous = drive.current;
-    drive.rendered = drive.current;
-    drive.runtime.area.begin_step();
-    drive.skip_elapsed = true;
-}
 fn read_input(
     reference: Res<RuntimeReference>,
+    time: Res<Time<Real>>,
+    sim: Res<SimFrameResource>,
     mut drive: ResMut<Drive>,
-    requests: Res<save::SaveRequests>,
+    mut requests: ResMut<save::SaveRequests>,
 ) {
     let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Input);
-    let runtime = &drive.runtime;
-    let assists = runtime.driving_assists;
-    let controls = runtime.driving_input.controls;
+    let hud = &sim.frame.hud;
+    let [steer, throttle, brake, clutch, handbrake] = hud.controls;
     game_driving_state(
-        runtime
-            .vehicle
-            .as_ref()
-            .map_or(0, |key| runtime.vehicles[key].drivetrain.gear() as i32 - 1),
-        assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1),
-        runtime.area.player.driving(),
-        controls.steer,
-        controls.throttle,
-        controls.brake,
-        controls.clutch,
-        controls.handbrake,
+        hud.gear,
+        hud.assists,
+        hud.flags & HudBlock::DRIVING != 0,
+        steer,
+        throttle,
+        brake,
+        clutch,
+        handbrake,
     );
-    let actions = game_actions();
+    let actions = game_actions() & SimCommand::ACTIONS;
     let held = game_keys();
     let player = game_player_keys();
-    let mut frame = FrameInput {
+    let mut input = FrameInput {
         held,
         player_held: player as u8,
         player_pressed: (player >> 8) as u8,
@@ -610,7 +554,7 @@ fn read_input(
         drive_mouse: [game_mouse_x(), -game_mouse_y()],
         wheel: game_wheel(),
         carry: crate::simulation::CarryDeltas::default(),
-        typing: if drive.runtime.stream.computers.typing {
+        typing: if hud.flags & HudBlock::TYPING != 0 {
             let mut typing = crate::simulation::TypingInput {
                 keys: game_typing_keys(),
                 ..Default::default()
@@ -622,181 +566,132 @@ fn read_input(
         },
         gamepad: crate::simulation::GamepadFrame::default(),
     };
-    game_gamepad(&mut frame.gamepad.axes, &mut frame.gamepad.buttons);
-    if requests.pending() {
-        if cpu_profile::enabled() {
-            game_cpu_clear_input();
-        }
-        drive.frame_input.clear();
-        return;
-    }
-    if actions & 2 != 0 {
-        drive.runtime.paused = true;
-        clear_input(&mut drive);
-    }
-    if actions & 4 != 0 && drive.ready && !drive.runtime.needs_output().menu_due {
-        drive.runtime.started = true;
-        drive.runtime.paused = false;
-        clear_input(&mut drive);
-    }
-
-    if actions & 16 != 0 {
-        drive.runtime.recover(&reference.0);
-        drive.current = drive
-            .runtime
-            .area
-            .player
-            .view(&drive.runtime.physics)
-            .camera_pose;
-        clear_input(&mut drive);
-    }
-    let requested = game_driving_assists();
-    if requested & 4 != 0 && !requests.pending() {
-        let _ = drive
-            .runtime
-            .set_driving_assists(crate::reference::DrivingAssists {
+    game_gamepad(&mut input.gamepad.axes, &mut input.gamepad.buttons);
+    let hold = requests.pending();
+    // A pending save keeps the browser assists and settings for a later frame.
+    let (assists, settings) = if hold {
+        (None, None)
+    } else {
+        let requested = game_driving_assists();
+        (
+            (requested & 4 != 0).then_some(crate::reference::DrivingAssists {
                 automatic_clutch: requested & 1 != 0,
                 automatic_gears: requested & 2 != 0,
-            });
-    }
-    // The browser validates stored settings. A refused value keeps the current settings.
-    if let Some(settings) = game_driving_settings()
-        && let Ok(settings) =
-            serde_json::from_str::<crate::simulation::input::DrivingSettings>(&settings)
-        && settings.valid(&reference.0.driving)
-    {
-        drive.runtime.driving_input.settings = settings;
-    }
-    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
-        drive.input.clear();
-        if cpu_profile::enabled() {
-            game_cpu_clear_input();
-        }
-        drive.frame_input.clear();
-        drive.runtime.clear_input();
-        // The Controls screen shows the pad axes while the game is paused.
-        drive.runtime.driving_input.preview(&frame.gamepad);
-        return;
-    }
-    if actions & 22 != 0 {
-        return;
-    }
-    if !drive.runtime.needs_output().dead
-        && !drive.runtime.sleeping()
-        && frame.pressed & keys::CAMERA != 0
-        && drive.runtime.area.player.seat_vehicle().is_some()
-    {
-        drive.runtime.audio_motion_revision = drive.runtime.audio_motion_revision.wrapping_add(1);
-        drive.camera = match drive.camera {
-            CameraMode::Cockpit => CameraMode::Chase,
-            CameraMode::Chase => CameraMode::Cockpit,
-        };
-    }
-    drive.runtime.sleep_camera_allowed = drive.camera == CameraMode::Cockpit;
-    drive.frame_input.merge(frame);
+            }),
+            game_driving_settings().and_then(|settings| serde_json::from_str(&settings).ok()),
+        )
+    };
+    drive.seq += 1;
+    let seq = drive.seq;
+    drive.look.send(seq, input.mouse);
+    let command = SimCommand {
+        seq,
+        delta_seconds: time.delta_secs_f64(),
+        input,
+        actions,
+        ready: drive.ready,
+        hold,
+        assists,
+        settings,
+        calendar: local_calendar(),
+        measure: game_measure_requested(),
+        world: std::mem::take(&mut drive.world),
+        save: requests.take_commands(),
+        candidate: requests.candidate_command(),
+        listener: drive.listener,
+    };
+    drive.link.send(command);
 }
-fn advance_physics(
-    time: Res<Time<Real>>,
+/// World camera of the last complete view snapshot. `None`: startup and load use the root camera.
+fn world_snapshot<'a>(
+    views: &'a presentation::view_frame::SourceViewFrame,
+    epoch: &presentation::view_frame::SourceSceneEpoch,
+    session: u64,
+) -> Option<&'a presentation::view_frame::ViewSnapshot> {
+    // Preparation consumes one completed pose/FOV pair.
+    let coherent = views.session == session
+        && views.scene == epoch.0
+        && views.views[..presentation::surface_views::WORLD_VIEWS]
+            .iter()
+            .all(Option::is_some);
+    coherent.then(|| {
+        views.views[0]
+            .as_ref()
+            .expect("complete world camera snapshot")
+    })
+}
+/// Direction of the main light, in source space.
+pub(crate) fn light_forward(cycle: &simulation::lighting::CycleOutput) -> [f32; 3] {
+    let [x, y, z] = cycle.directional_euler_degrees.map(f32::to_radians);
+    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
+    [forward.x, forward.y, -forward.z]
+}
+/// Writes the required camera views of the next world step into the world command.
+fn select_world_views(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
+    sim: Res<SimFrameResource>,
+    requests: Res<save::SaveRequests>,
+    views: Res<presentation::view_frame::SourceViewFrame>,
+    mut required_views: Local<Option<crate::world::RequiredViews>>,
+    epoch: Res<presentation::view_frame::SourceSceneEpoch>,
 ) {
-    drive.physics_ms = 0.;
-    drive.frame_steps = 0;
-    drive.render_delta_seconds = 0.;
-    if !drive.ready || !drive.runtime.started || drive.runtime.paused {
-        return;
-    }
-    let blocked = drive.skip_elapsed
-        && (drive.runtime.recovering
-            || !drive.runtime.world_supported()
-            || drive.runtime.sleeping()
-            || drive.runtime.needs_output().dead);
-    let Drive {
-        frame_input,
-        skip_elapsed,
-        ..
-    } = &mut *drive;
-    let Some(raw) = frame_input.take_frame(skip_elapsed, blocked) else {
-        if blocked {
-            drive.input.clear();
-            drive.runtime.clear_input();
-        }
+    let drive = &mut *drive;
+    drive.world.freeze = requests.freezes_world();
+    drive.world.views.clear();
+    let state = &sim.frame.state;
+    let Some(first) = world_snapshot(&views, &epoch, state.session) else {
+        *required_views = None;
         return;
     };
-    let started = game_now();
-    let _profile = cpu_profile::Timer::new(cpu_profile::Stage::Physics);
-    if let Some(audio) = &mut drive.runtime.audio {
-        let [month, day] = local_calendar();
-        audio.broadcasts.calendar(month, day);
+    let forward = light_forward(&sim.frame.lighting.cycle);
+    let origin = state.stream_origin;
+    let mask = reference.0.render_lighting.lights[0].mask;
+    let result = (|| -> Result<(), crate::reference::ReferenceError> {
+        let first = presentation::view_frame::required_view(first, origin, forward, mask)?;
+        let required =
+            required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
+        required.reset(first);
+        presentation::view_frame::append_probe_required_views(
+            required,
+            &reference.0.render_lighting.probes,
+            &views.probe_position,
+            &views.probe_enabled,
+            origin,
+            forward,
+            mask,
+        )?;
+        drive.world.views.extend_from_slice(required.as_slice());
+        Ok(())
+    })();
+    if let Err(error) = result {
+        game_failure(&error.to_string());
+        drive.world.failure.get_or_insert(error.to_string());
     }
-    let delta = time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.runtime.area.conditions.update(delta, true);
-    let view = drive.rendered;
-    let frame = drive
-        .runtime
-        .advance_inventory_frame(&reference.0, raw, delta, view);
-    frame.merge_fixed_input(&mut drive.input);
-    drive.clock.accept_frame(time.delta_secs_f64());
-    loop {
-        let scale = drive.runtime.clock_factors(&reference.0).time_scale;
-        if !drive.clock.take_step(scale) {
-            break;
-        }
-        drive.frame_steps += 1;
-        drive.render_delta_seconds += crate::simulation::FIXED_DT;
-        drive.previous = drive.current;
-        let old_origin = drive.runtime.stream.origin.offset;
-        let input = drive.input.take_step();
-        drive.runtime.step(&reference.0, input);
-        let new_origin = drive.runtime.stream.origin.offset;
-        for i in 0..3 {
-            drive.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
-        }
-        drive.current = drive
-            .runtime
-            .area
-            .player
-            .view(&drive.runtime.physics)
-            .camera_pose;
-        if drive.runtime.paused {
-            drive.clock.reset();
-            break;
-        }
-    }
-    let scale = drive.runtime.clock_factors(&reference.0).time_scale;
-    drive.rendered =
-        presentation::interpolate(drive.previous, drive.current, drive.clock.alpha(scale));
-    drive.physics_ms = game_now() - started;
 }
-fn sync_world(
+/// One renderer step on the world copy after the world step of the frame.
+fn prepare_world(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
     mut presentation: presentation::world::runtime::WorldPresentation,
     requests: Res<save::SaveRequests>,
     camera: Query<(&Projection, &Transform), With<DriveCamera>>,
     views: Res<presentation::view_frame::SourceViewFrame>,
-    mut required_views: Local<Option<crate::world::RequiredViews>>,
     epoch: Res<presentation::view_frame::SourceSceneEpoch>,
     windows: Query<&Window>,
 ) {
-    drive.world_ms = 0.;
+    let drive = &mut *drive;
+    drive.world_ms = sim.frame.state.perf.world_ms;
     if requests.freezes_world() {
         return;
     }
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
-    // Preparation consumes one completed pose/FOV pair. Startup and load use the root camera.
-    let coherent = views.session == drive.runtime.stream.frame().request.session
-        && views.scene == epoch.0
-        && views.views[..presentation::surface_views::WORLD_VIEWS]
-            .iter()
-            .all(Option::is_some);
-    let snapshot = coherent.then(|| {
-        views.views[0]
-            .as_ref()
-            .expect("complete world camera snapshot")
-    });
+    let started = game_now();
+    let origin = presentation.origin().expect("synced renderer world");
+    let snapshot = world_snapshot(&views, &epoch, sim.frame.state.session);
     let camera_world = snapshot.map_or_else(
         || camera_transform.to_matrix(),
         |view| view.view_from_world.inverse(),
@@ -812,8 +707,6 @@ fn sync_world(
         },
         |view| view.fov_degrees,
     );
-    let started = game_now();
-    let origin = drive.runtime.stream.origin;
     let position = Vec3::from_array(
         origin
             .absolute(camera_world.w_axis.truncate().to_array())
@@ -847,115 +740,26 @@ fn sync_world(
             _ => None,
         },
     };
-    // The loading panel covers the screen, so generation can use most of each frame.
-    let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
-    let runtime = &mut drive.runtime;
-    runtime.stream.advance_generation();
-    let was_aligned = runtime.startup_aligned;
-    let enabled = runtime
-        .lighting
-        .road_lamp_output(&reference.0.lighting)
-        .enabled;
-    let [x, y, z] = runtime
-        .lighting
-        .cycle
-        .output()
-        .directional_euler_degrees
-        .map(f32::to_radians);
-    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
-    let forward = [forward.x, forward.y, -forward.z];
-    if coherent {
-        let first = views.views[0]
-            .as_ref()
-            .expect("complete world camera snapshot");
-        let result = (|| -> Result<(), crate::reference::ReferenceError> {
-            let first = presentation::view_frame::required_view(
-                first,
-                runtime.stream.origin.offset,
-                forward,
-                reference.0.render_lighting.lights[0].mask,
-            )?;
-            let required =
-                required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
-            required.reset(first);
-            presentation::view_frame::append_probe_required_views(
-                required,
-                &reference.0.render_lighting.probes,
-                &views.probe_position,
-                &views.probe_enabled,
-                runtime.stream.origin.offset,
-                forward,
-                reference.0.render_lighting.lights[0].mask,
-            )
-        })();
-        if let Err(error) = result {
-            runtime.stream.fail(error);
-            return;
-        }
-    } else {
-        *required_views = None;
+    let grant = sim.grant.take();
+    let frame = &sim.frame;
+    if let Err(error) = presentation.prepare_frame(
+        &reference.0,
+        grant,
+        view,
+        frame.lighting.cycle.shader_time_seconds as f32,
+        lod_view,
+        frame.lighting.road_lamp.enabled,
+        &frame.lights,
+        &mut drive.world,
+    ) {
+        game_failure(&error.to_string());
+        drive.world.failure.get_or_insert(error.to_string());
     }
-    let result = presentation
-        .prepare(
-            &mut runtime.stream,
-            &reference.0,
-            &mut runtime.physics,
-            &mut runtime.area,
-            &mut runtime.wheels,
-            &mut runtime.vehicles,
-            &mut runtime.powertrain,
-            &runtime.flyers,
-            runtime.simulation_seconds,
-            view,
-            runtime.lighting.cycle.output().shader_time_seconds as f32,
-            lod_view,
-            enabled,
-            runtime.lighting.light_outputs(),
-            required_views
-                .as_ref()
-                .map_or(&[], crate::world::RequiredViews::as_slice),
-            budget_ms,
-        )
-        .and_then(|_| {
-            runtime
-                .align_startup(&reference.0, local_calendar())
-                .map(|_| ())
-        })
-        .and_then(|_| {
-            if runtime.has_deferred_save_links() {
-                runtime
-                    .advance_saved_restore(&reference.0)
-                    .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
-            }
-            runtime
-                .sync_world_activity(&reference.0)
-                .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
-            runtime.advance_recovery()
-        });
-    match result {
-        Ok(moved) => {
-            if moved || (!was_aligned && drive.runtime.startup_aligned) {
-                drive.current = drive
-                    .runtime
-                    .area
-                    .player
-                    .view(&drive.runtime.physics)
-                    .camera_pose;
-                clear_input(&mut drive);
-            }
-        }
-        Err(error) => {
-            game_failure(&error.to_string());
-            drive.runtime.stream.fail(error);
-            drive.runtime.clear_input();
-        }
-    }
-    drive.world_ms = game_now() - started;
+    drive.world_ms += game_now() - started;
 }
 
 pub(crate) fn sync_imported(
-    reference: Res<RuntimeReference>,
-    drive: Res<Drive>,
+    frame: Res<SimFrameResource>,
     mut query: Query<(
         &BodyVisual,
         &mut Transform,
@@ -989,74 +793,111 @@ pub(crate) fn sync_imported(
         ),
     >,
 ) {
-    presentation::reference::sync(
-        &drive.runtime.area,
-        &drive.runtime.physics,
-        drive
-            .clock
-            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
-        &mut query,
-    );
-    presentation::reference::sync_items(
-        &drive.runtime.area,
-        drive
-            .clock
-            .alpha(drive.runtime.clock_factors(&reference.0).time_scale),
-        &mut items,
-    );
+    presentation::reference::sync(&frame, &mut query);
+    presentation::reference::sync_items(&frame, &mut items);
     // Source DoMove advances by scaled Time.deltaTime.
-    let dt = if drive.runtime.paused {
+    let state = frame.frame.state;
+    let dt = if state.flags & StateBlock::PAUSED != 0 {
         0.
     } else {
-        time.delta_secs() * drive.runtime.clock_factors(&reference.0).time_scale
+        time.delta_secs() * state.time_scale
     };
-    presentation::reference::sync_caps(&drive.runtime.area, dt, &mut caps, &mut visibility);
+    presentation::reference::sync_caps(&frame.frame, dt, &mut caps, &mut visibility);
 }
-fn sync_instruments(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let drive = &mut *drive;
-    if drive.runtime.started && !drive.runtime.paused {
-        let dt = drive.render_delta_seconds;
-        drive.runtime.advance_instruments(&reference.0, dt, false);
-        // Source `carscript.Update` eases the lever once per frame by scaled frame time.
-        drive.runtime.advance_levers(&reference.0, dt);
+
+/// Applies the structure views of the new frame.
+fn sync_instances(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
+    mut presentation: presentation::world::runtime::WorldPresentation,
+    requests: Res<save::SaveRequests>,
+) {
+    if requests.freezes_world() {
+        return;
+    }
+    if let Err(error) = presentation.sync_instances(&reference.0, &mut sim) {
+        game_failure(&error.to_string());
+        drive.world.failure.get_or_insert(error.to_string());
     }
 }
-fn active_camera(drive: &Drive) -> Transform {
-    if let Some(camera) = drive.runtime.sleep_camera() {
-        presentation::camera::sleep_pose(camera, &drive.runtime.stream.origin)
-    } else if drive.camera == CameraMode::Chase
-        && drive.runtime.area.player.seat_vehicle().is_some()
-    {
-        presentation::camera::pose(
-            CameraMode::Chase,
-            drive
-                .runtime
-                .physics
-                .snapshot(drive.runtime.vehicle.as_ref().unwrap())
-                .pose,
-        )
+/// Takes the new simulation frame. Without one, the last state stays and its events go.
+fn fill_frame(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut frame: ResMut<SimFrameResource>,
+    mut allocation: ResMut<presentation::world::runtime::SourcePresentationAllocation>,
+) {
+    let drive = &mut *drive;
+    match drive.link.receive(&mut frame.frame) {
+        Ok(true) => {}
+        Ok(false) => {
+            frame.frame.clear_events();
+            drive.view = drive.look.camera(&frame.frame);
+            return;
+        }
+        Err(error) => {
+            game_failure(&error.0);
+            return;
+        }
+    }
+    fill(drive, &mut frame);
+    // After a restart the world changes belong to the candidate copy. The commit applies them.
+    if !restarted(&frame.frame) {
+        allocation.apply_world(&reference.0.world, &frame.frame.world);
+    }
+}
+/// The prepared candidate replaced the runtime in this frame.
+pub(crate) fn restarted(frame: &simulation::boundary::SimFrame) -> bool {
+    frame
+        .changes
+        .iter()
+        .any(|c| matches!(c, simulation::boundary::Change::Restarted))
+}
+/// Applies the changes of the new frame.
+fn fill(drive: &mut Drive, frame: &mut SimFrameResource) {
+    if restarted(&frame.frame) {
+        // A new frame stream: drop the pose index and the tables of the old runtime.
+        let next = std::mem::take(&mut frame.frame);
+        *frame = SimFrameResource::default();
+        frame.frame = next;
+    }
+    drive.view = drive.look.camera(&frame.frame);
+    let current = frame.frame.state.look.position[1];
+    drive.view_offset = std::array::from_fn(|i| drive.view.position[i] - current[i]);
+    frame.apply_changes();
+    frame.index_particles();
+}
+/// Camera of `state`: the sleep camera, the chase camera, else the player `view`.
+pub(crate) fn frame_camera(state: &StateBlock, view: VehiclePose) -> Transform {
+    let pose = |row: PoseRow| presentation::transform(row.pose());
+    if state.sleep_camera.flags & PoseRow::ACTIVE != 0 {
+        pose(state.sleep_camera)
+    } else if state.flags & StateBlock::CHASE != 0 && state.seat_car.flags & PoseRow::ACTIVE != 0 {
+        presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
     } else {
-        presentation::transform(drive.rendered)
+        presentation::transform(view)
     }
 }
 fn update_camera(
     drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     mut query: Query<(&mut Transform, &mut Projection), With<DriveCamera>>,
 ) {
-    let fov = drive
-        .runtime
-        .area
-        .player
-        .view(&drive.runtime.physics)
-        .fov_degrees;
+    let state = &sim.frame.state;
     for (mut transform, mut projection) in &mut query {
-        *transform = active_camera(&drive);
-        presentation::camera_projection::sync_player_projection(&mut projection, true, fov);
+        *transform = frame_camera(state, drive.view);
+        presentation::camera_projection::sync_player_projection(
+            &mut projection,
+            true,
+            state.fov_degrees,
+        );
     }
 }
 fn publish_loading(
     reference: Res<RuntimeReference>,
     drive: Res<Drive>,
+    sim: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     materials: Res<presentation::materials::SourceMaterials>,
     lighting: Res<presentation::lighting::SourceLighting>,
@@ -1067,21 +908,21 @@ fn publish_loading(
     mut traced: Local<u8>,
 ) {
     let now = time.elapsed_secs_f64();
-    let stream = &drive.runtime.stream;
+    let state = &sim.frame.state;
     let rendering = visuals.bound
         && materials.state == presentation::materials::RenderingState::Ready
         && lighting.state == presentation::lighting::RenderingState::Ready
         && renderer.graph_ready(presentation::readiness::RendererContentCheck {
             preparation: crate::render_readiness::ContentPreparation::Prepared(
                 crate::render_readiness::ContentKey {
-                    session: stream.frame().request.session,
-                    selection_revision: stream.required_content().selection_revision,
+                    session: state.session,
+                    selection_revision: state.selection_revision,
                 },
             ),
-            history_revision: drive.runtime.audio_motion_revision,
+            history_revision: state.motion_revision,
         })
         && plates.ready();
-    if stream.initial_generation_ready() && *traced & 1 == 0 {
+    if state.flags & StateBlock::GENERATION_READY != 0 && *traced & 1 == 0 {
         game_startup_stage("generation", false);
         *traced |= 1;
     }
@@ -1098,508 +939,244 @@ fn publish_loading(
     }
     *last = now;
     game_loading_progress(
-        stream.metrics().prepared_roads,
+        state.prepared_roads,
         reference.0.world.road.gen_at_start,
         rendering,
-        drive.runtime.world_supported() && stream.required_ready(),
+        state.flags & StateBlock::WORLD_READY != 0,
     );
-    for budget in stream.presentation_budgets(stream.presentation_allocation()) {
-        game_loading_budget(
-            budget.name,
-            budget.used as f64,
-            budget.limit as f64,
-            budget.unit,
-        );
+    for (budget, (name, unit)) in sim.frame.budgets.iter().zip(BUDGET_LABELS) {
+        game_loading_budget(name, budget.used, budget.limit, unit);
     }
 }
 
-fn update_hud(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    let state = &drive.runtime.area.inventory;
-    let stamp = (
-        state.slots.map(|id| id.map_or(0, |id| id.0)),
-        state.selected,
-        state.swap_progress.to_bits(),
-    );
+fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
+    let hud = sim.frame.hud;
+    let state = sim.frame.state;
+    let stamp = (hud.slots, hud.selected as u8, hud.swap_progress.to_bits());
     if drive.last_inventory != Some(stamp) {
         game_inventory(
-            stamp.1 as u32,
-            stamp.0[0],
-            stamp.0[1],
-            stamp.0[2],
-            stamp.0[3],
-            f32::from_bits(stamp.2),
+            hud.selected,
+            hud.slots[0],
+            hud.slots[1],
+            hud.slots[2],
+            hud.slots[3],
+            hud.swap_progress,
         );
         drive.last_inventory = Some(stamp);
     }
-    let needs = drive.runtime.needs_output();
+    let crosshair = (hud.weapon_icon, hud.weapon_color);
+    if drive.last_crosshair != Some(crosshair) {
+        game_weapon_crosshair(crosshair.0, crosshair.1);
+        drive.last_crosshair = Some(crosshair);
+    }
     game_survival(
-        needs.needs.hp,
-        needs.needs.food,
-        needs.needs.water,
-        needs.needs.bowel,
-        needs.bladder_liters,
-        needs.opacity,
-        needs.dead,
-        needs.look_scale,
-        needs.menu_due,
+        hud.hp,
+        hud.food,
+        hud.water,
+        hud.bowel,
+        hud.bladder,
+        hud.opacity,
+        hud.flags & HudBlock::DEAD != 0,
+        hud.look_scale,
+        hud.flags & HudBlock::MENU_DUE != 0,
     );
-    let sleep = drive.runtime.sleep.output();
     game_sleep(
-        sleep.phase as u32,
-        sleep.eligible,
-        sleep.show_hint,
-        sleep.charge,
-        sleep.cooldown_remaining,
-        sleep.progress,
+        hud.sleep_phase,
+        hud.flags & HudBlock::SLEEP_ELIGIBLE != 0,
+        hud.flags & HudBlock::SLEEP_HINT != 0,
+        hud.sleep_charge,
+        hud.cooldown_remaining,
+        hud.sleep_progress,
     );
-    let runtime = &drive.runtime;
-    let Some(key) = runtime.vehicle.as_ref() else {
+    if hud.flags & HudBlock::CAR == 0 {
+        return;
+    }
+    let seated = state.flags & StateBlock::SEATED != 0;
+    game_update(
+        hud.speed_kmh,
+        (state.flags & StateBlock::CHASE == 0 || !seated) as u32,
+        hud.focus[0],
+        hud.focus[1],
+        hud.focus[2],
+        hud.contacts,
+        state.perf.frame_steps,
+        hud.surfaces,
+        hud.colliders,
+        hud.absolute[0],
+        hud.absolute[1],
+        hud.absolute[2],
+        hud.origin[0],
+        hud.origin[1],
+        hud.origin[2],
+        hud.rebases,
+        hud.trip_m,
+        f64::from(state.prepared_roads),
+        hud.fuel,
+        state.flags & StateBlock::PAUSED != 0,
+        state.flags & StateBlock::STARTED != 0,
+        hud.flags & HudBlock::AUTOSAVE_SAFE != 0,
+        seated,
+    );
+    if hud.flags & HudBlock::RADIO != 0 {
+        game_radio_feedback(
+            hud.radio_volume,
+            hud.radio_frequency,
+            hud.flags & HudBlock::RADIO_AM != 0,
+        );
+    }
+    let Some(f) = sim.feedback.take() else {
         return;
     };
-    let current = &runtime.vehicles[key];
-    let snapshot = runtime.physics.snapshot(key);
-    let position = runtime.area.player.focus_position(&runtime.physics);
-    let absolute = runtime.stream.origin.absolute(position);
-    let origin = runtime.stream.origin.offset;
-    let contacts = runtime
-        .physics
-        .wheel_contacts(key)
-        .enumerate()
-        .fold(0, |bits, (i, contact)| bits | ((contact as u32) << i));
-    let fuel = current
-        .fuel_tank
-        .and_then(|tank| runtime.area.items.get(tank))
-        .and_then(|item| item.fluid.as_ref())
-        .map_or(0.0, |fluid| fluid.finite_total());
-    game_update(
-        snapshot.speed_mps * 3.6,
-        (drive.camera == CameraMode::Cockpit || !runtime.area.player.seated()) as u32,
-        position[0],
-        position[1],
-        position[2],
-        contacts,
-        drive.frame_steps,
-        runtime.stream.frame().surfaces.len() as u32,
-        runtime.physics.collider_count() as u32,
-        absolute[0],
-        absolute[1],
-        absolute[2],
-        origin[0],
-        origin[1],
-        origin[2],
-        runtime.rebases,
-        current.trip_m,
-        runtime.stream.metrics().prepared_roads as f64,
-        fuel,
-        runtime.paused,
-        runtime.started,
-        runtime.autosave_safe(drive.input.held & keys::GRAB != 0),
-        runtime.area.player.seated(),
+    game_feedback(
+        f.actions,
+        f.context,
+        &f.name,
+        &f.notice,
+        f.carrying,
+        f.amount,
+        f.capacity,
+        f.has_name,
+        f.no_text,
+        &f.fluid_name,
+        f.condition,
+        &f.held_name,
+        f.throw_charge,
+        f.throw_active,
+        f.rpm,
+        f.ignition,
+        f.running,
+        f.starter,
+        f.seated,
+        f.handbrake,
+        f.quantities[0],
+        f.quantities[1],
+        f.quantities[2],
+        f.quantities[3],
+        f.quantities[4],
+        f.quantities[5],
+        f.order,
+        f.light_control,
+        f.lmb_use,
+        f.prompts.into(),
+        f.computer.into(),
     );
-    let available = runtime.area.interaction.available_actions(
-        &runtime.aim,
-        &runtime.area.player,
-        &runtime.area.items,
-        &runtime.physics,
-        runtime.survival.output(),
-    );
-    // The radio knob hint shows the volume or frequency of the aimed radio.
-    if let Some(radio) = runtime
-        .aim
-        .use_target
-        .as_ref()
-        .and_then(|t| runtime.area.interaction.dial_knob(t, &runtime.physics))
-        .and_then(|(knob, _)| runtime.stream.knob_radio(knob))
-    {
-        game_radio_feedback(radio.volume, radio.frequency(), radio.am);
-    }
-    let info = runtime
-        .area
-        .interaction
-        .feedback(&available, &runtime.area.items, &reference.0);
-    let (mut amount, mut capacity, quantities, order, fluid_name, has_name, mut no_text) = info
-        .fluid
-        .as_ref()
-        .map_or((0., 0., [0.; 6], 0, info.name, false, true), |f| {
-            (
-                f.amount,
-                f.capacity,
-                f.quantities,
-                f.order,
-                f.presentation.name.as_str(),
-                f.presentation.has_name,
-                f.presentation.no_text,
-            )
-        });
-    let paint = runtime
-        .area
-        .interaction
-        .paint_feedback(&runtime.aim, &reference.0);
-    if let Some((quantity, maximum)) = paint {
-        amount = quantity;
-        capacity = maximum;
-        no_text = false;
-    }
-    let condition = available
-        .item
-        .and_then(|id| {
-            runtime.area.conditions.item_quality(id).or_else(|| {
-                runtime
-                    .area
-                    .items
-                    .get(id)
-                    .and_then(|i| i.generated_condition)
-            })
-        })
-        .unwrap_or(-1.0);
-    let held = runtime.area.interaction.held();
-    let notice = if !runtime.notice.is_empty() {
-        runtime.notice
-    } else if let Some(block) = runtime.aim.installation_block.or(runtime.aim.grab_block) {
-        block.notice()
-    } else {
-        ""
-    };
-    let engine = runtime.engine_output(key);
-    let rpm = engine.rpm;
-    let stamp = FeedbackStamp {
-        condition: condition.to_bits(),
-        held,
-        throw_charge: runtime.area.interaction.throw_charge().to_bits(),
-        throw_active: runtime.area.interaction.throw_active(),
-        rpm: rpm.to_bits(),
-        engine_flags: [
-            current.ignition.ignition,
-            engine.running,
-            engine.starter,
-            runtime.area.player.seated(),
-            current.handbrake,
-        ],
-        actions: info.actions.0
-            | if runtime.needs_output().dead || runtime.sleeping() {
-                0
-            } else {
-                runtime.area.cigarettes.actions(
-                    runtime
-                        .area
-                        .interaction
-                        .equipment
-                        .item()
-                        .or(runtime.area.interaction.held()),
-                )
-            },
-        context: if paint.is_some() {
-            crate::interaction::feedback::FeedbackContext::Paint as u32
-        } else {
-            info.context as u32
-        },
-        light_control: available.light_control.map_or(0, |id| id.0),
-        lmb_use: available.lmb_use,
-        prompts: available.prompts | runtime.stream.refill_prompt(),
-        computer: runtime.computer_prompt(),
-        item: available.item,
-        opening: available.opening,
-        carrying: info.carrying,
-        notice,
-        amount: if paint.is_some() {
-            amount.round() as u32
-        } else {
-            (amount * 10.).round() as u32
-        },
-        empty: amount <= 0.05,
-        capacity,
-        percents: std::array::from_fn(|i| {
-            let p = if amount > 0. {
-                quantities[i] / amount * 100.
-            } else {
-                0.
-            };
-            if p >= 1. { p.round() as u32 } else { u32::MAX }
-        }),
-        order,
-    };
-    if drive.last_feedback != Some(stamp) {
-        game_feedback(
-            stamp.actions,
-            stamp.context,
-            info.name,
-            stamp.notice,
-            stamp.carrying,
-            amount,
-            capacity,
-            has_name,
-            no_text,
-            fluid_name,
-            condition,
-            held.map(|id| display_name(&reference.0, &runtime.area.items, id))
-                .unwrap_or(""),
-            runtime.area.interaction.throw_charge(),
-            runtime.area.interaction.throw_active(),
-            rpm,
-            current.ignition.ignition,
-            engine.running,
-            engine.starter,
-            runtime.area.player.seated(),
-            current.handbrake,
-            quantities[0],
-            quantities[1],
-            quantities[2],
-            quantities[3],
-            quantities[4],
-            quantities[5],
-            stamp.order,
-            stamp.light_control,
-            stamp.lmb_use,
-            stamp.prompts.into(),
-            stamp.computer.into(),
-        );
-        drive.last_feedback = Some(stamp);
-    }
 }
 
 fn publish_audio(
-    reference: Res<RuntimeReference>,
-    time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
+    sim: Res<SimFrameResource>,
     visuals: Res<ReferenceVisuals>,
     globals: Query<(&GlobalTransform, &InheritedVisibility)>,
     camera: Query<&GlobalTransform, With<DriveCamera>>,
 ) {
-    let alpha = drive
-        .clock
-        .alpha(drive.runtime.clock_factors(&reference.0).time_scale);
-    let runtime = &mut drive.runtime;
-    let Some(audio) = &mut runtime.audio else {
-        return;
-    };
-    game_audio_begin(
-        audio.session,
-        runtime.started,
-        runtime.paused,
-        audio.game_seconds,
-    );
-    let needs = runtime.survival.output();
-    let level = if needs.dead {
-        (1. - needs.death_seconds as f32 / reference.0.survival.death_seconds).clamp(0.001, 1.)
-    } else {
-        1.
-    };
-    game_audio_survival_master(
-        10_f32.powf(level.ln()),
-        runtime.audio_motion_revision,
-        audio.game_seconds + f64::from(alpha) / 60.,
-    );
-    let shift = audio.take_origin_shift();
-    if shift != [0.; 3] {
-        game_audio_origin_shift(shift[0], shift[1], shift[2]);
-    }
-    let mut listener = None;
-    if let Ok(camera) = camera.single() {
-        let (_, q, p) = camera.to_scale_rotation_translation();
-        listener = Some(p.to_array());
-        game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
-    }
-    let body = crate::vehicle::to_rapier(runtime.area.player.body_pose(&runtime.physics));
-    for b in &audio.reference.survival {
-        let p = body * rapier3d::math::Vector::from_array(b.offset);
-        game_audio_survival_emitter(b.kind, p.x, p.y, p.z);
-    }
-    let origin = runtime.stream.origin.offset;
-    for e in &audio.survival_loops {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind as u32,
-            e.emitter,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    for e in &audio.survival_events {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind as u32,
-            e.emitter,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    audio.survival_events.clear();
-    for emitter in &audio.reference.emitters {
-        let alive = audio.owner_alive(emitter.id)
-            && emitter.item.is_none_or(|id| {
-                runtime
-                    .area
-                    .items
-                    .get(id)
-                    .is_some_and(|item| item.inactive_pose.is_none())
-            });
-        if let Some((global, visibility)) = visuals
-            .nodes
-            .get(&emitter.node)
-            .and_then(|&entity| globals.get(entity).ok())
-        {
-            let (_, q, p) = global.to_scale_rotation_translation();
-            game_audio_emitter(
-                emitter.id,
-                p.x,
-                p.y,
-                p.z,
-                q.x,
-                q.y,
-                q.z,
-                q.w,
-                alive && visibility.get(),
-            );
-        }
-    }
-    if runtime.started && !runtime.paused {
-        audio.update_mixers(&runtime.area, &runtime.stream, time.delta_secs());
-    }
-    for (id, db) in audio.mixer_outputs() {
-        game_audio_mixer(id, db);
-    }
-    for (index, route) in audio.reference.routes.iter().enumerate() {
-        for &id in &route.voices {
-            game_audio_route(id, audio.route_mixers[index]);
-        }
-    }
-    for signal in &audio.signals {
-        game_audio_voice(
-            signal.id,
-            signal.playing,
-            signal.gain,
-            signal.pitch,
-            signal.looping,
-            signal.clip,
-        );
-    }
-    // Car voices play through the survival path with one record per car voice template.
-    for &(instance, mixer) in &audio.cars.routes {
-        game_audio_route(crate::audio::cars::CAR_ROUTE + instance, mixer);
-    }
-    for e in audio.cars.loops.iter().chain(&audio.cars.events) {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind,
-            e.instance,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    audio.cars.events.clear();
-    for e in &audio.voice_loops {
-        let p = std::array::from_fn::<_, 3, _>(|i| (e.position[i] - origin[i]) as f32);
-        game_audio_survival(
-            e.kind,
-            e.instance,
-            e.action as u32,
-            e.clip,
-            e.gain,
-            e.pitch,
-            p[0],
-            p[1],
-            p[2],
-        );
-    }
-    while let Some(event) = audio.pop_event() {
-        game_audio_event(
-            event.session,
-            event.sequence,
-            event.binding,
-            event.emitter,
-            event.position[0],
-            event.position[1],
-            event.position[2],
-            event.gain,
-            event.pitch,
-            event.time_seconds,
-        );
-    }
-    let send = |emitter: u32, radio: crate::simulation::radio::RadioFrame| {
-        game_audio_radio(
-            emitter,
-            radio.power,
-            radio.am,
-            radio.frequency,
-            radio.volume,
-            radio.static_gain,
-            radio.primary.clip.unwrap_or(0),
-            radio.primary.offset_seconds,
-            radio.primary.gain,
-            radio.primary.next_clip.unwrap_or(0),
-            radio.secondary.clip.unwrap_or(0),
-            radio.secondary.offset_seconds,
-            radio.secondary.gain,
-            radio.secondary.next_clip.unwrap_or(0),
-        )
-    };
-    let cutoff = audio.reference.radio.electronics_cutoff;
-    let items = &runtime.area.items;
-    let radios = runtime
-        .stream
-        .portable_radios()
-        .filter_map(|(id, script, state, output, _)| {
-            items
-                .get(id)
-                .filter(|item| item.inactive_pose.is_none())
-                .map(|item| (id, script, item.pose.position, state.on && output > cutoff))
-        });
-    if let Some(listener) = listener {
-        audio.assign_portable_radios(listener, radios);
-    }
-    let slots = audio.portable_radio_slots.iter().flatten();
-    for (slot, id) in slots.enumerate() {
-        let Some((item, (_, _, state, output, parent))) = id.and_then(|id| {
-            items
-                .get(id)
-                .zip(runtime.stream.portable_radios().find(|r| r.0 == id))
-        }) else {
-            continue;
-        };
-        let emitter = crate::audio::PORTABLE_RADIO_EMITTER + slot as u32;
-        let [x, y, z] = item.pose.position;
-        let [qx, qy, qz, qw] = item.pose.rotation;
-        game_audio_emitter(emitter, x, y, z, qx, qy, qz, qw, true);
-        send(
-            emitter,
-            audio
-                .broadcasts
-                .frame(state, audio.game_seconds, output, cutoff),
-        );
-        // Source `audioBasedOnInteriorsensscript`: a car radio plays through its car mixer.
-        let car = runtime.vehicles.iter().find_map(|(key, car)| match key {
-            crate::world::ObjectKey::Generated(id) if id == parent => {
-                car.record(&reference.0).audio.as_ref().map(|a| &a.route)
+    let camera = camera
+        .single()
+        .ok()
+        .map(|c| c.to_scale_rotation_translation());
+    drive.listener = camera.map(|(_, _, p)| p.to_array());
+    for call in &sim.frame.audio {
+        match *call {
+            AudioCall::Begin {
+                session,
+                started,
+                paused,
+                seconds,
+            } => game_audio_begin(session, started, paused, seconds),
+            AudioCall::SurvivalMaster {
+                gain,
+                revision,
+                seconds,
+            } => game_audio_survival_master(gain, revision, seconds),
+            AudioCall::PlayerEar {
+                db,
+                clip,
+                ring,
+                pan,
+            } => game_audio_player_ear(db, clip, ring, pan),
+            AudioCall::OriginShift([x, y, z]) => game_audio_origin_shift(x, y, z),
+            AudioCall::Listener => {
+                if let Some((_, q, p)) = camera {
+                    game_audio_listener(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
+                }
             }
-            _ => None,
-        });
-        let group = slot / crate::audio::PORTABLE_RADIO_SLOTS;
-        for (k, voice) in audio.reference.portable_radios[group]
-            .voices
-            .iter()
-            .enumerate()
-        {
-            let mixer = car.map_or(voice.mixer, |route| audio.world_car_mixer(route, parent));
-            game_audio_route(
-                crate::audio::PORTABLE_RADIO_EMITTER + slot as u32 * 4 + k as u32 + 1,
-                mixer,
-            );
+            AudioCall::SurvivalEmitter {
+                kind,
+                position: [x, y, z],
+            } => game_audio_survival_emitter(kind, x, y, z),
+            AudioCall::Survival {
+                kind,
+                emitter,
+                action,
+                clip,
+                gain,
+                pitch,
+                position: [x, y, z],
+            } => game_audio_survival(kind, emitter, action, clip, gain, pitch, x, y, z),
+            AudioCall::NodeEmitter { id, node, alive } => {
+                if let Some((global, visibility)) = visuals
+                    .nodes
+                    .get(&node)
+                    .and_then(|&entity| globals.get(entity).ok())
+                {
+                    let (_, q, p) = global.to_scale_rotation_translation();
+                    game_audio_emitter(
+                        id,
+                        p.x,
+                        p.y,
+                        p.z,
+                        q.x,
+                        q.y,
+                        q.z,
+                        q.w,
+                        alive && visibility.get(),
+                    );
+                }
+            }
+            AudioCall::Emitter {
+                id,
+                position: [x, y, z],
+                rotation: [qx, qy, qz, qw],
+                alive,
+            } => game_audio_emitter(id, x, y, z, qx, qy, qz, qw, alive),
+            AudioCall::Mixer { id, db } => game_audio_mixer(id, db),
+            AudioCall::Route { id, mixer } => game_audio_route(id, mixer),
+            AudioCall::Voice {
+                id,
+                playing,
+                gain,
+                pitch,
+                looping,
+                clip,
+            } => game_audio_voice(id, playing, gain, pitch, looping, clip),
+            AudioCall::Event {
+                session,
+                sequence,
+                binding,
+                emitter,
+                position: [x, y, z],
+                gain,
+                pitch,
+                seconds,
+            } => game_audio_event(
+                session, sequence, binding, emitter, x, y, z, gain, pitch, seconds,
+            ),
+            AudioCall::Radio { emitter, frame } => game_audio_radio(
+                emitter,
+                frame.power,
+                frame.am,
+                frame.frequency,
+                frame.volume,
+                frame.static_gain,
+                frame.primary.clip.unwrap_or(0),
+                frame.primary.offset_seconds,
+                frame.primary.gain,
+                frame.primary.next_clip.unwrap_or(0),
+                frame.secondary.clip.unwrap_or(0),
+                frame.secondary.offset_seconds,
+                frame.secondary.gain,
+                frame.secondary.next_clip.unwrap_or(0),
+            ),
+            AudioCall::End => game_audio_end(),
         }
     }
-    game_audio_end();
 }

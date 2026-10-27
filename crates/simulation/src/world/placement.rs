@@ -32,14 +32,14 @@ pub struct BuildingCheckpoint {
     pub draws: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SupplyFluid {
     pub fluid_type: i32,
     pub amount: f32,
 }
 
 /// Checked physical supply in the structure's converted local frame.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SupplyDefinition {
     pub tank: SourceId,
     pub cap: SourceId,
@@ -52,6 +52,7 @@ pub struct SupplyDefinition {
     pub no_pour: bool,
     pub emission_min_rate: f32,
     pub emission_max_rate: f32,
+    pub explosion: super::TankExplosion,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -818,6 +819,21 @@ pub fn node_pose(prototype: &WorldPrototypeReference, index: usize) -> Transform
     }
     result
 }
+/// Node `index` in the frame of node `frame` of the same prototype. Scale is dropped.
+pub fn node_frame(
+    prototype: &WorldPrototypeReference,
+    frame: usize,
+    index: usize,
+) -> crate::vehicle::VehiclePose {
+    let pose = |i| {
+        let t = node_pose(prototype, i);
+        crate::vehicle::to_rapier(crate::vehicle::VehiclePose {
+            position: t.translation,
+            rotation: t.rotation,
+        })
+    };
+    crate::vehicle::from_rapier(&(pose(frame).inverse() * pose(index)))
+}
 pub fn node_point(
     prototype: &WorldPrototypeReference,
     index: usize,
@@ -938,6 +954,8 @@ fn copy_prototype(
             no_pour,
             emission_min_rate: number(&component.fields["minRate"]),
             emission_max_rate: number(&component.fields["maxRate"]),
+            explosion: super::TankExplosion::read(&tank.fields, prototype)
+                .expect("checked tankscript explosion fields"),
         });
     }
     for collider in &prototype.colliders {

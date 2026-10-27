@@ -19,6 +19,8 @@ mod render_scale;
 #[cfg(target_arch = "wasm32")]
 pub mod presentation;
 
+pub mod ownership;
+
 #[cfg(test)]
 #[path = "presentation/world/preflight/selected.rs"]
 #[allow(dead_code)]
@@ -28,6 +30,11 @@ mod selected_tests;
 #[path = "presentation/world/shared_materials.rs"]
 #[allow(dead_code)]
 mod shared_material_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "presentation/outfit.rs"]
+#[allow(dead_code)]
+mod outfit_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "presentation/world/lod.rs"]

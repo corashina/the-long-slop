@@ -8,7 +8,7 @@ use crate::reference::{
 };
 use rapier3d::math::{Pose, Rotation, Vector};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorldLight {
     pub id: GeneratedId,
     pub pole: AbsolutePose,

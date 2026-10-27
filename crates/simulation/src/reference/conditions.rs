@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 pub struct ConditionRecord {
     pub surfaces: Vec<ConditionSurface>,
     pub brushes: Vec<BrushReference>,
+    /// Source `fpscontroller.pointKefe`: the player hand brush of pointing.
+    /// `fpscontroller.Start` already set its `mask` (`pointingLayer`) and `distance` (`pointRange`).
+    pub player_brush: BrushTool,
     pub sprays: Vec<SprayReference>,
     pub washes: Vec<WashReference>,
     pub collider_bindings: Vec<ConditionColliderBinding>,
@@ -82,14 +85,23 @@ pub struct ConditionSurface {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+/// A `drotkefescript` brush item.
 pub struct BrushReference {
-    pub source: SourceId,
     pub item: ItemId,
     pub body: BodyId,
     pub pickup: SourceId,
     pub save: SourceId,
-    pub slide: SourceId,
+    /// Source `drotkefescript.ownCondition`.
     pub own_condition: ConditionId,
+    pub tool: BrushTool,
+}
+
+/// Source `drotkefescript` and its `objSlideOnColliderScript` slide.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrushTool {
+    pub source: SourceId,
+    pub slide: SourceId,
     pub cleaning_type: u8,
     pub can_ruin: bool,
     pub repair_modifier: f32,
@@ -245,7 +257,7 @@ impl ConditionRecord {
             let tool_disabled = self
                 .brushes
                 .iter()
-                .any(|t| t.own_condition == s.id && t.disabled);
+                .any(|b| b.own_condition == s.id && b.tool.disabled);
             check(
                 &s.source,
                 s.startup.state <= 4 || (s.startup.state == 5 && tool_disabled),
@@ -386,39 +398,14 @@ impl ConditionRecord {
                 "voice",
             )
         };
-        for t in &self.brushes {
-            check(
-                &t.source,
-                sources.insert(&t.source) && tool_items.insert(t.item),
-                "id/source",
-            )?;
-            owner(&t.source, t.item, t.body, &t.pickup)?;
+        let tool = |t: &BrushTool| -> Result<(), ReferenceError> {
             check(&t.source, t.particles.len() <= 2, "particles channels")?;
-            check(
-                &t.source,
-                !t.save.file.is_empty() && t.save.path_id != 0,
-                "save",
-            )?;
             check(
                 &t.source,
                 !t.slide.file.is_empty() && t.slide.path_id != 0,
                 "slide",
             )?;
-            check(
-                &t.source,
-                surfaces.get(&t.own_condition).is_some_and(|s| {
-                    r.items
-                        .iter()
-                        .find(|i| i.id == t.item)
-                        .is_some_and(|i| descendant(s.node, i.node))
-                }),
-                "own_condition",
-            )?;
-            check(
-                &t.source,
-                [1, 2].contains(&t.cleaning_type),
-                "cleaning_type",
-            )?;
+            check(&t.source, t.cleaning_type < 7, "cleaning_type")?;
             check(
                 &t.source,
                 [
@@ -463,7 +450,45 @@ impl ConditionRecord {
             for p in &t.particles {
                 validate_particle(&t.source, p, r)?;
             }
+            Ok(())
+        };
+        for b in &self.brushes {
+            let t = &b.tool;
+            check(
+                &t.source,
+                sources.insert(&t.source) && tool_items.insert(b.item),
+                "id/source",
+            )?;
+            owner(&t.source, b.item, b.body, &b.pickup)?;
+            check(
+                &t.source,
+                !b.save.file.is_empty() && b.save.path_id != 0,
+                "save",
+            )?;
+            check(
+                &t.source,
+                surfaces.get(&b.own_condition).is_some_and(|s| {
+                    r.items
+                        .iter()
+                        .find(|i| i.id == b.item)
+                        .is_some_and(|i| descendant(s.node, i.node))
+                }),
+                "own_condition",
+            )?;
+            check(
+                &t.source,
+                [1, 2].contains(&t.cleaning_type),
+                "cleaning_type",
+            )?;
+            tool(t)?;
         }
+        let t = &self.player_brush;
+        check(
+            &t.source,
+            sources.insert(&t.source),
+            "player brush id/source",
+        )?;
+        tool(t)?;
         for t in &self.sprays {
             check(
                 &t.source,
