@@ -106,6 +106,16 @@ pub struct PresentationGrant {
     /// The stream lends its publication slot of this frame.
     pub publication: bool,
 }
+impl PresentationGrant {
+    /// Adds a later grant: both credits. The later step decides reclaim and the lend.
+    pub fn merge(self, later: Self) -> Self {
+        Self {
+            credit: self.credit.zip(later.credit, usize::saturating_add),
+            reclaim: later.reclaim,
+            publication: later.publication,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SurfaceKey {
     pub layer: WorldLayer,
@@ -1012,9 +1022,12 @@ impl WorldStream {
         let reclaim = self
             .reclaim
             .swap(false, std::sync::atomic::Ordering::Relaxed);
-        // With nothing ready to publish, the renderer takes this frame's publication slot.
-        self.publication_lent =
-            self.failure.is_none() && self.ready.is_none() && self.ready_structures.is_empty();
+        // With no renderer-ready work to publish, the renderer takes this frame's publication slot.
+        // A prepared surface without its renderer receipt cannot publish. The renderer work that
+        // finishes the receipt can itself wait for the slot.
+        self.publication_lent = self.failure.is_none()
+            && self.ready.as_ref().is_none_or(|work| !work.renderer_ready)
+            && self.ready_structures.is_empty();
         let publication = self.publication_lent;
         if let Err(error) = self.set_presentation_allocation(covered) {
             self.presentation = credit;
