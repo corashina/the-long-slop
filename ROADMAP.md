@@ -232,6 +232,16 @@ Run the X02 part 3 test pass (guns) in the same run:
 9. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
 10. Check F3 while firing the SMG with many holes. Compare with the frame rate rule.
 
+Run the X02 part 4 test pass (explosions) in the same run:
+
+1. Re-export, then rebuild. The export prints the explosion record. Old saves do not load (save schema 31).
+2. Run `cargo test --lib explosion -- --ignored`. Fix the tank picks in the tests if no explosive tank is found.
+3. Shoot a world fuel can or tank with gas, oil or diesel over 40%. It explodes with particles and sound, breaks nearby bottles, pushes items and sets off a second tank. Save and load: the exploded items stay gone.
+4. Hit an explosive tank with a melee weapon. It explodes as with a shot.
+5. Shoot a tank that does not explode with a shotgun. Holes leak fluid when they face down. Check the fluid amount falls.
+6. Stand near a blast: sound goes dull, an ear ring plays from the blast side, and both fade. Save and load keeps the ringing. Stand close: the player dies with the ragdoll.
+7. Check F3 during a chain of blasts. Compare with the frame rate rule.
+
 Run the X03a test pass (sky traffic) in the same run:
 
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
@@ -243,11 +253,12 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X02 | Weapons and damage | XL | Explosions (with melee and gun tank and explosive hits) (cacti breaks only here), wounds and shots on the player, explosive fluids, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, G09, E04, C06] |
+| X02 | Weapons and damage | XL | Wounds and shots on the player, starting-area tanks (garage fuel can) explode and leak, cacti breaks, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
 | X06 | Advanced rendering | XL | Live mirrors, lamp shadows, motion blur, TAA, live reflection probes, depth of field, binoculars, heat haze, LUT options, MSAA 8x. Each one must pass the frame rate rule. [K01-K09, K11-K14, F04] |
 | X08 | Custom radio music | M | Add user music to the radio. [L07] |
+| X09 | Car crash damage | L | `carscript.DamageStuff`: parts fall off by crash speed and condition, horn, blood, death on hard crashes; blasts call it with power x 5. [B23] |
 
 Not planned: multiplayer, VR, stereo 3D, mod events, Steam features, developer tools. [N01-N08]
