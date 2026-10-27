@@ -888,7 +888,9 @@ pub struct SimFrame {
     pub hidden_nodes: Vec<u32>,
     pub node_materials: Vec<MaterialRow>,
     pub changes: Vec<Change>,
-    /// The frame of the save candidate, after a candidate step.
+    /// Changes of the renderer world copy.
+    pub world: crate::world::WorldDelta,
+    /// The frame of the save candidate.
     pub candidate: Option<Box<SimFrame>>,
 }
 
@@ -1083,6 +1085,7 @@ fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     put_list(out, &frame.node_visibility);
     put_list(out, &frame.audio);
     put(out, &frame.changes);
+    put(out, &frame.world);
     match &frame.candidate {
         Some(candidate) => {
             out.push(1);
@@ -1133,6 +1136,7 @@ fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_list(rest, &mut frame.node_visibility)?;
     take_list(rest, &mut frame.audio)?;
     frame.changes = take_value(rest)?;
+    frame.world = take_value(rest)?;
     if take(rest, 1)?[0] == 1 {
         read(rest, frame.candidate.get_or_insert_default())
     } else {

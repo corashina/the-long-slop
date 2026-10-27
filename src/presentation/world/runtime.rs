@@ -10,7 +10,7 @@ use crate::{
         materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
-    world::{RendererWorld, WorldStream},
+    world::RendererWorld,
 };
 use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
@@ -41,6 +41,16 @@ pub struct SourcePresentationAllocation {
     sent_lamps: Option<Vec<crate::world::GeneratedId>>,
 }
 impl SourcePresentationAllocation {
+    /// Applies the world changes of a frame to the renderer copy.
+    pub fn apply_world(
+        &mut self,
+        reference: &std::sync::Arc<crate::reference::WorldReference>,
+        delta: &crate::world::WorldDelta,
+    ) {
+        self.world
+            .get_or_insert_with(|| Box::new(RendererWorld::new(reference.clone())))
+            .apply(delta);
+    }
     pub fn bootstrap(
         session: u64,
         fixed: crate::ownership::fixed::FixedAllocation,
@@ -116,18 +126,11 @@ impl WorldPresentation<'_, '_> {
         )
     }
     /// Updates the renderer copy of `stream`.
-    pub fn sync_mirror(&mut self, stream: &WorldStream) {
-        let world = self
-            .allocation
-            .world
-            .get_or_insert_with(|| Box::new(RendererWorld::new(stream)));
-        stream.sync_renderer(world);
-    }
     /// The stream origin of the renderer copy.
     pub fn origin(&self) -> Option<crate::world::WorldOrigin> {
         self.allocation.world.as_ref().map(|world| world.origin)
     }
-    /// One renderer step on the copy after `sync_mirror`.
+    /// One renderer step on the copy.
     /// Adds the facts, the budget report and the admitted lamps of the step to `out`.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_frame(

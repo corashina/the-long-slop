@@ -25,8 +25,6 @@ pub(crate) struct SaveState {
     prepared: Option<Prepared>,
     /// Results that the next frame carries.
     results: Vec<Change>,
-    /// The candidate stepped since the last frame.
-    stepped: bool,
 }
 
 #[derive(Deserialize)]
@@ -54,7 +52,6 @@ impl SaveState {
             source,
             prepared: None,
             results: Vec::new(),
-            stepped: false,
         }
     }
 }
@@ -245,7 +242,7 @@ impl SimDriver {
                 runtime.paused = true;
                 self.save.prepared = Some(Prepared::Candidate {
                     id: request.id,
-                    driver: Box::new(CandidateDriver::new(runtime, camera)),
+                    driver: Box::new(CandidateDriver::new(runtime, camera, self.sent.fork())),
                 });
                 Ok(None)
             }
@@ -264,6 +261,8 @@ impl SimDriver {
         let camera = driver.camera;
         // Assignment drops the old stream and terminates its road actor first.
         self.runtime = driver.runtime;
+        // The renderer takes the candidate copy with the candidate scene.
+        self.sent = driver.sent;
         self.runtime.driving_input.settings = settings;
         self.runtime
             .stream
@@ -294,7 +293,6 @@ impl SimDriver {
         };
         driver.accept(command);
         driver.advance(reference, self.runtime.stream.metrics(), self.calendar);
-        self.save.stepped = true;
     }
 
     /// Writes the save results and the candidate frame into `frame`.
@@ -302,9 +300,7 @@ impl SimDriver {
         frame.changes.append(&mut self.save.results);
         if let Some(Prepared::Candidate { driver, .. }) = &mut self.save.prepared {
             frame.state.flags |= StateBlock::CANDIDATE;
-            if std::mem::take(&mut self.save.stepped) {
-                driver.fill(reference, frame.candidate.get_or_insert_default());
-            }
+            driver.fill(reference, frame.candidate.get_or_insert_default());
         }
     }
 
@@ -312,14 +308,6 @@ impl SimDriver {
     pub fn release_candidate_pose(&mut self, handle: crate::boundary::Handle) {
         if let Some(Prepared::Candidate { driver, .. }) = &mut self.save.prepared {
             driver.release_pose(handle);
-        }
-    }
-
-    /// The candidate world, for the renderer mirror.
-    pub fn candidate_stream(&self) -> Option<&crate::world::WorldStream> {
-        match &self.save.prepared {
-            Some(Prepared::Candidate { driver, .. }) => Some(&driver.runtime.stream),
-            _ => None,
         }
     }
 }

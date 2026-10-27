@@ -32,14 +32,14 @@ pub struct BuildingCheckpoint {
     pub draws: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SupplyFluid {
     pub fluid_type: i32,
     pub amount: f32,
 }
 
 /// Checked physical supply in the structure's converted local frame.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SupplyDefinition {
     pub tank: SourceId,
     pub cap: SourceId,

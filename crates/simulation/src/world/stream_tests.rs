@@ -395,10 +395,17 @@ pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     }
     panic!("required publication did not reach readiness");
 }
-/// The renderer copy answers like the stream.
+/// The renderer copy answers like the stream after one encoded delta.
 fn assert_renderer_world(stream: &WorldStream) {
-    let mut world = renderer_world::RendererWorld::new(stream);
-    stream.sync_renderer(&mut world);
+    let reference = stream.world_reference().clone();
+    let mut sent = renderer_world::RendererWorld::new(reference.clone());
+    let mut delta = renderer_world::WorldDelta::default();
+    let encoded = |delta: &renderer_world::WorldDelta| -> renderer_world::WorldDelta {
+        postcard::from_bytes(&postcard::to_allocvec(delta).unwrap()).unwrap()
+    };
+    stream.sync_renderer(&mut sent, &mut delta);
+    let mut world = renderer_world::RendererWorld::new(reference);
+    world.apply(&encoded(&delta));
     let frame = world.frame();
     assert_eq!(frame.surfaces.len(), stream.surfaces.len());
     assert_eq!(frame.structures.len(), stream.structures.len());
@@ -445,7 +452,8 @@ fn assert_renderer_world(stream: &WorldStream) {
     }
     // A second sync with no stream change keeps the copy.
     let surfaces = world.frame().surfaces.as_ptr();
-    stream.sync_renderer(&mut world);
+    stream.sync_renderer(&mut sent, &mut delta);
+    world.apply(&encoded(&delta));
     assert_eq!(world.frame().surfaces.as_ptr(), surfaces);
 }
 fn withdraw_terrain(run: &mut GarageRuntime, key: SurfaceKey) {
