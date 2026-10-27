@@ -1,5 +1,7 @@
 //! Runs the simulation from renderer commands. It owns the runtime, the input queue and the step clock.
-use crate::boundary::{Change, LookBlock, SimCommand, SimFrame, StateBlock};
+use crate::boundary::{
+    Change, HudBlock, LookBlock, RenderInput, SimCommand, SimFrame, SimStartup, StateBlock,
+};
 use crate::reference::{ReferenceError, ReferenceManifest};
 use crate::simulation::{FIXED_DT, FrameInput, StepClock, keys};
 use crate::starting_area::{GarageRuntime, WorldInput};
@@ -39,9 +41,7 @@ pub struct SimDriver {
     consumed_seq: u64,
     pub camera: CameraMode,
     /// Fixed steps of the last frame.
-    pub frame_steps: u32,
-    /// Simulated seconds of the last frame.
-    pub render_delta_seconds: f32,
+    pub(crate) frame_steps: u32,
     /// Milliseconds of the last frame steps.
     pub physics_ms: f64,
     /// Milliseconds of the last world step.
@@ -64,6 +64,8 @@ pub struct SimDriver {
     candidate: Option<crate::boundary::CandidateCommand>,
     /// The renderer world copy of the last frame.
     pub(crate) sent: crate::world::RendererWorld,
+    /// Camera position of the last rendered frame.
+    listener: Option<[f32; 3]>,
 }
 
 impl SimDriver {
@@ -91,7 +93,6 @@ impl SimDriver {
             consumed_seq: 0,
             camera: CameraMode::default(),
             frame_steps: 0,
-            render_delta_seconds: 0.,
             physics_ms: 0.,
             world_ms: 0.,
             world: WorldInput::default(),
@@ -105,14 +106,22 @@ impl SimDriver {
             failed: false,
             save: crate::save_requests::SaveState::new(source),
             candidate: None,
+            listener: None,
         };
         driver.reset_look();
         driver
     }
 
-    /// Player camera of a new runtime.
-    pub fn new_view(runtime: &GarageRuntime) -> VehiclePose {
-        runtime.area.player.view(&runtime.physics).camera_pose
+    /// Renderer setup values of the runtime.
+    pub fn startup(&self) -> SimStartup {
+        let runtime = &self.runtime;
+        let view = runtime.area.player.view(&runtime.physics);
+        SimStartup {
+            view: view.camera_pose,
+            fov_degrees: view.fov_degrees,
+            far_plane: runtime.distances.cam2_far_plane,
+            session: runtime.stream.frame().request.session,
+        }
     }
 
     /// Applies the menu actions and settings of `command` and queues its input.
@@ -131,6 +140,7 @@ impl SimDriver {
 
     fn accept_input(&mut self, reference: &ReferenceManifest, command: SimCommand) {
         self.delta_seconds = command.delta_seconds;
+        self.listener = command.listener;
         self.calendar = command.calendar;
         self.ready = command.ready;
         self.accepted_seq = command.seq;
@@ -198,7 +208,6 @@ impl SimDriver {
     pub fn advance(&mut self, reference: &ReferenceManifest) {
         self.physics_ms = 0.;
         self.frame_steps = 0;
-        self.render_delta_seconds = 0.;
         if !self.ready && !self.failed {
             // Source storage startup runs once per loading frame.
             if let Err(error) = self
@@ -253,7 +262,6 @@ impl SimDriver {
                 break;
             }
             self.frame_steps += 1;
-            self.render_delta_seconds += FIXED_DT;
             let old_origin = self.runtime.stream.origin.offset;
             let input = self.input.take_step();
             self.runtime.area.player.take_look_applied();
@@ -334,10 +342,19 @@ impl SimDriver {
 
     /// Writes the runtime state into `frame`.
     pub fn fill(&mut self, reference: &ReferenceManifest, frame: &mut SimFrame) {
+        let input = RenderInput {
+            dt: self.frame_steps as f32 * FIXED_DT,
+            real_dt: self.delta_seconds as f32,
+            listener: self.listener,
+        };
+        self.runtime.advance_render_frame(reference, input);
         let alpha = self
             .clock
             .alpha(self.runtime.clock_factors(reference).time_scale);
         self.runtime.fill_frame(reference, alpha, frame);
+        if self.input.held & keys::GRAB != 0 {
+            frame.hud.flags &= !HudBlock::AUTOSAVE_SAFE;
+        }
         self.runtime
             .stream
             .sync_renderer(&mut self.sent, &mut frame.world);
@@ -387,15 +404,9 @@ impl SimDriver {
         self.frame_input.clear();
         self.clock = StepClock::default();
         self.frame_steps = 0;
-        self.render_delta_seconds = 0.;
         self.ready = false;
         self.runtime.paused = true;
         self.skip_elapsed = true;
-    }
-
-    /// Keys held in the next fixed step.
-    pub fn held(&self) -> u32 {
-        self.input.held
     }
 
     /// Drops the frame input. Its mouse is consumed when no step input waits.

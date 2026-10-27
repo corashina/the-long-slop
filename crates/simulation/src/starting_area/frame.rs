@@ -1,7 +1,7 @@
 //! Renderer data of one tick.
 use super::GarageRuntime;
 use crate::boundary::{
-    BudgetRow, Change, CigaretteRow, ConditionRow, Handle, PlaneRow, PoseRow, SimFrame, StateBlock,
+    BudgetRow, Change, CigaretteRow, ConditionRow, PlaneRow, PoseRow, SimFrame, StateBlock,
     ValveRow,
 };
 use crate::interaction::cigarettes::EmberPhase;
@@ -259,10 +259,6 @@ impl GarageRuntime {
                 .changes
                 .push(Change::FollowedCar(self.followed_car.clone()));
         }
-    }
-    /// The renderer dropped a retired pose handle.
-    pub fn release_pose(&mut self, handle: Handle) {
-        self.frame_poses.release(handle);
     }
 }
 

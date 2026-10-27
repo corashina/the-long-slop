@@ -35,7 +35,6 @@ struct EffectInput {
 fn snapshot_input(
     frame: Res<SourceViewFrame>,
     assets: Option<Res<LightingAssets>>,
-    drive: Res<crate::app::Drive>,
     sim: Res<super::sim_frame::SimFrameResource>,
     effects: Res<super::sunglasses::SunglassesEffects>,
     mut input: ResMut<EffectInput>,
@@ -51,7 +50,7 @@ fn snapshot_input(
     if !assets.loaded || frame.views[0].is_none() {
         return;
     }
-    input.delta_seconds = drive.sim.render_delta_seconds;
+    input.delta_seconds = sim.frame.state.perf.frame_seconds();
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.dead_weight = sim.frame.state.dead_weight;
     input.glasses = (effects.0)
