@@ -503,6 +503,7 @@ impl SourcePrototypes {
         &mut self,
         stream: &mut WorldStream,
         ledger: &mut PresentationLedger,
+        facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,
         server: &AssetServer,
         assets: &mut Assets<SourceGltf>,
@@ -627,7 +628,9 @@ impl SourcePrototypes {
         if let Some(index) = completed {
             let entry = &self.entries[index];
             // Active geometry must release its owners before prototype resources retire.
-            stream.release_prototype(&entry.source)?;
+            facts.push(crate::world::RendererFact::ReleasePrototype(
+                entry.source.clone(),
+            ));
             let entry = self.entries.remove(index);
             self.retired_sources.push(entry.source);
             let asset = match entry.state {

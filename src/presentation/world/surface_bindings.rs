@@ -30,6 +30,7 @@ impl SourceWorldVisuals {
         &mut self,
         stream: &mut WorldStream,
         ledger: &mut PresentationLedger,
+        facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
         server: &AssetServer,
@@ -157,7 +158,7 @@ impl SourceWorldVisuals {
                 }
             }
             self.bind_road(source.clone(), bindings)?;
-            stream.bind_prototype(source)?;
+            facts.push(crate::world::RendererFact::BindPrototype(source.clone()));
         }
         for (tier, record) in reference.world.terrain.materials.iter().enumerate() {
             if self.terrain[tier].is_some() {
@@ -186,7 +187,9 @@ impl SourceWorldVisuals {
             )?);
             terrain.get_mut(&material).unwrap().preparation = cache.preparation.clone();
             self.bind_terrain(tier, material, layer, shadow_mode);
-            stream.bind_prototype(&record.source)?;
+            facts.push(crate::world::RendererFact::BindPrototype(
+                record.source.clone(),
+            ));
         }
         Ok(())
     }
