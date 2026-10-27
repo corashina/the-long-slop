@@ -32,15 +32,19 @@ pub struct SourcePresentationAllocation {
     retired_materials: Vec<usize>,
     /// Primary appearance assets of the contents, reused each frame.
     primary_assets: Vec<crate::reference::AssetId>,
+    /// Renderer share of the world budgets.
+    pub(crate) ledger: simulation::world::PresentationLedger,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
         session: u64,
         fixed: crate::reference::fixed_reservation::FixedAllocation,
+        ledger: simulation::world::PresentationLedger,
     ) -> Self {
         Self {
             session,
             fixed,
+            ledger,
             ..default()
         }
     }
@@ -124,6 +128,7 @@ impl WorldPresentation<'_, '_> {
         required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        self.allocation.ledger.exchange(stream);
         let started = simulation::host::game_now();
         loop {
             let before = stream.metrics();
@@ -177,12 +182,17 @@ impl WorldPresentation<'_, '_> {
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         self.grass.set_view(view);
-        super::preflight::configure_staging(stream, &reference.file_catalog)?;
+        super::preflight::configure_staging(
+            stream,
+            &mut self.allocation.ledger,
+            &reference.file_catalog,
+        )?;
+        let allocation = &mut *self.allocation;
         let mut failure = self
             .fixed
             .poll(
-                stream,
-                &mut self.allocation.fixed,
+                &mut allocation.ledger,
+                &mut allocation.fixed,
                 reference,
                 &self.server,
                 &self.gltfs,
@@ -202,13 +212,14 @@ impl WorldPresentation<'_, '_> {
             self.allocation.imported_writers.clear();
             self.instances.retire(
                 stream,
+                &mut self.allocation.ledger,
                 &mut self.commands,
                 &mut self.meshes,
                 &mut self.materials,
                 &mut self.grass,
                 &mut self.writers,
             )?;
-            self.grass.release_domains(stream)?;
+            self.grass.release_domains(&mut self.allocation.ledger)?;
             self.materials.cache.begin_world_session();
             self.surfaces
                 .retire_session(&mut self.commands, &mut self.meshes);
@@ -217,6 +228,7 @@ impl WorldPresentation<'_, '_> {
         // Cancellation and cleanup run before any material or stream failure can return.
         self.instances.retire(
             stream,
+            &mut self.allocation.ledger,
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,
@@ -227,18 +239,20 @@ impl WorldPresentation<'_, '_> {
         self.prototypes
             .retire_unused(stream, reference, &self.instances);
         let lighting_cpu = self.lights.clone_bytes();
-        let mut controls = stream.presentation_allocation();
+        let mut controls = self.allocation.ledger.allocation();
         controls.active_cpu = controls
             .active_cpu
             .checked_sub(self.allocation.lighting_cpu)
             .and_then(|n| n.checked_add(lighting_cpu))
             .ok_or_else(|| ReferenceError("Fixed lighting control accounting".into()))?;
-        stream.set_presentation_allocation(controls)?;
+        self.allocation.ledger.set_allocation(controls)?;
         self.allocation.lighting_cpu = lighting_cpu;
         timer.next(crate::world::stream_profile::Stage::FixedInputs);
+        let allocation = &mut *self.allocation;
         if let Err(error) = self.fixed.prepare_metadata(
             stream,
-            &mut self.allocation.fixed,
+            &mut allocation.ledger,
+            &mut allocation.fixed,
             reference,
             &self.server,
             &self.plans,
@@ -249,9 +263,10 @@ impl WorldPresentation<'_, '_> {
             self.materials.cache.cancel_fixed();
         }
         if failure.is_none() && stream.frame().failure.is_none() && self.fixed.descriptors_ready() {
+            let allocation = &mut *self.allocation;
             if let Err(error) = self.fixed.admit_payloads(
-                stream,
-                &mut self.allocation.fixed,
+                &mut allocation.ledger,
+                &mut allocation.fixed,
                 reference,
                 &self.server,
                 &mut self.imported,
@@ -264,10 +279,11 @@ impl WorldPresentation<'_, '_> {
             }
         }
         timer.next(crate::world::stream_profile::Stage::Pipelines);
-        if let Err(error) = self.pipelines.prepare(stream) {
+        if let Err(error) = self.pipelines.prepare(stream, &mut self.allocation.ledger) {
             failure.get_or_insert(error);
         }
-        self.writers.configure(stream, &reference.world)?;
+        self.writers
+            .configure(stream, &mut self.allocation.ledger, &reference.world)?;
         self.writers.update_frame(
             view.position,
             Vec3::from_array(stream.origin.offset.map(|v| v as f32)),
@@ -276,6 +292,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::PrimaryTextures);
         if let Err(error) = self.materials.cache.prepare_world_primary(
             stream,
+            &mut self.allocation.ledger,
             &self.server,
             &mut self.images,
             &mut self.chains,
@@ -286,6 +303,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::DeferredTextures);
         if let Err(error) = self.materials.cache.prepare_world_deferred(
             stream,
+            &mut self.allocation.ledger,
             &self.server,
             &mut self.images,
             &mut self.batches,
@@ -295,6 +313,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Prototypes);
         if let Err(error) = self.prototypes.prepare(
             stream,
+            &mut self.allocation.ledger,
             reference,
             &self.server,
             &mut self.assets,
@@ -418,10 +437,11 @@ impl WorldPresentation<'_, '_> {
             return Err(ReferenceError(error.to_owned()));
         }
         timer.next(crate::world::stream_profile::Stage::Descriptors);
+        let ledger = &mut self.allocation.ledger;
         self.surfaces
-            .request_descriptors(stream, reference, &mut self.prototypes)?;
+            .request_descriptors(stream, ledger, reference, &mut self.prototypes)?;
         self.instances
-            .request_descriptors(stream, reference, &mut self.prototypes)?;
+            .request_descriptors(stream, ledger, reference, &mut self.prototypes)?;
         // MaterialProperties resolves ShaderRef::Path during preparation.
         // Descriptor discovery stays available while fixed shader inputs wait.
         if !self.fixed.pipeline_inputs_ready() {
@@ -430,6 +450,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Bindings);
         self.surfaces.prepare_bindings(
             stream,
+            &mut self.allocation.ledger,
             reference,
             &mut self.prototypes,
             &self.server,
@@ -440,6 +461,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Instances);
         self.instances.prepare(
             stream,
+            &mut self.allocation.ledger,
             reference,
             &mut self.prototypes,
             &self.server,
@@ -463,6 +485,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Surface);
         self.surfaces.prepare_surface(
             stream,
+            &mut self.allocation.ledger,
             &mut self.meshes,
             &mut self.pipelines,
             &self.fixed,
@@ -477,11 +500,11 @@ impl WorldPresentation<'_, '_> {
             enabled,
         )?;
         let old = self.allocation.lamps;
-        let mut a = stream.presentation_allocation();
+        let mut a = self.allocation.ledger.allocation();
         a.active_cpu = a.active_cpu.saturating_sub(old.0) + lamps.0;
         a.active_gpu = a.active_gpu.saturating_sub(old.1) + lamps.1;
         a.objects = a.objects.saturating_sub(old.2) + lamps.2;
-        stream.set_presentation_allocation(a)?;
+        self.allocation.ledger.set_allocation(a)?;
         self.allocation.lamps = lamps;
         timer.next(crate::world::stream_profile::Stage::Publication);
         // Light admission and complete renderer preparation precede collision mutation.
@@ -513,13 +536,13 @@ impl WorldPresentation<'_, '_> {
         );
         let instance_cache_cpu = self.instances.cache_bytes();
         if self.allocation.instance_cache_cpu != instance_cache_cpu {
-            let mut allocation = stream.presentation_allocation();
+            let mut allocation = self.allocation.ledger.allocation();
             allocation.active_cpu = allocation
                 .active_cpu
                 .checked_sub(self.allocation.instance_cache_cpu)
                 .and_then(|bytes| bytes.checked_add(instance_cache_cpu))
                 .ok_or_else(|| ReferenceError("Generated presentation cache accounting".into()))?;
-            stream.set_presentation_allocation(allocation)?;
+            self.allocation.ledger.set_allocation(allocation)?;
             self.allocation.instance_cache_cpu = instance_cache_cpu;
         }
         timer.next(crate::world::stream_profile::Stage::LampSync);
@@ -532,8 +555,12 @@ impl WorldPresentation<'_, '_> {
             &mut self.roots,
         )?;
         timer.next(crate::world::stream_profile::Stage::Writers);
-        self.instances
-            .request_writers(stream, reference, &mut self.writers, &self.meshes)?;
+        self.instances.request_writers(
+            &mut self.allocation.ledger,
+            reference,
+            &mut self.writers,
+            &self.meshes,
+        )?;
         if !self.allocation.writers_bound && self.imported.bound {
             for writer in &reference.world.grass_displacement.writers {
                 if !writer.enabled {
@@ -557,28 +584,36 @@ impl WorldPresentation<'_, '_> {
                     }
                 }
             }
-            let mut a = stream.presentation_allocation();
+            let mut a = self.allocation.ledger.allocation();
             a.active_cpu += self.allocation.imported_writers.capacity()
                 * std::mem::size_of::<(Entity, Handle<Mesh>)>();
-            stream.set_presentation_allocation(a)?;
+            self.allocation.ledger.set_allocation(a)?;
             self.allocation.writers_bound = true;
         }
-        for (entity, mesh) in &self.allocation.imported_writers {
+        let allocation = &mut *self.allocation;
+        for (entity, mesh) in &allocation.imported_writers {
             if let Some(pose) = self.saved_poses.0.get(entity).copied().or_else(|| {
                 self.world_poses
                     .get(*entity)
                     .ok()
                     .map(GlobalTransform::to_matrix)
             }) {
-                self.writers
-                    .request(stream, *entity, mesh.clone(), pose, &self.meshes)?;
+                self.writers.request(
+                    &mut allocation.ledger,
+                    *entity,
+                    mesh.clone(),
+                    pose,
+                    &self.meshes,
+                )?;
             }
         }
-        self.writers.prepare(stream, &self.meshes)?;
+        self.writers
+            .prepare(stream, &mut self.allocation.ledger, &self.meshes)?;
         // Existing expansions must release their slots even when a new writer is pending.
         timer.next(crate::world::stream_profile::Stage::Grass);
         self.grass.prepare(
             stream,
+            &mut self.allocation.ledger,
             self.writers.ready()?,
             &mut self.commands,
             &mut self.meshes,
@@ -599,6 +634,7 @@ impl WorldPresentation<'_, '_> {
         )?;
         self.instances.retire(
             stream,
+            &mut self.allocation.ledger,
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,

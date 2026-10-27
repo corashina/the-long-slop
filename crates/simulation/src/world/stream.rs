@@ -37,7 +37,7 @@ pub struct WorldRequest {
     pub vehicle: [f64; 3],
 }
 /// Renderer-owned allocations, including accepted/pending overlap and loader staging.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PresentationAllocation {
     pub grass_worker_wasm_bytes: usize,
     pub grass_worker_cache_bytes: usize,
@@ -201,6 +201,8 @@ pub struct WorldStream {
     overlap: WorldMetrics,
     dependency_staging_reserve: usize,
     dependency_metadata: usize,
+    /// Own work waited for room this frame: the renderer gives back unused credit.
+    reclaim: std::sync::atomic::AtomicBool,
     changes: super::ChangeRecords,
     replay_roots: Vec<Placement>,
     replay_indices: Vec<super::changes::ChangeRecordIndex>,
@@ -839,6 +841,7 @@ impl WorldStream {
             overlap: WorldMetrics::default(),
             dependency_staging_reserve: 0,
             dependency_metadata: 0,
+            reclaim: std::sync::atomic::AtomicBool::new(false),
             terrain_layer: *terrain_layer as u8,
             road_layers,
             reference: Arc::clone(world),
@@ -958,7 +961,7 @@ impl WorldStream {
         }
         Ok(())
     }
-    pub fn set_presentation_allocation(
+    pub(crate) fn set_presentation_allocation(
         &mut self,
         next: PresentationAllocation,
     ) -> Result<(), ReferenceError> {
@@ -974,6 +977,74 @@ impl WorldStream {
         Ok(())
     }
 
+    /// Takes the renderer report and answers with added credit.
+    /// Use above the credit must fit the limits, or the stream fails as before.
+    pub fn exchange_presentation(
+        &mut self,
+        report: super::PresentationReport,
+    ) -> super::PresentationGrant {
+        let credit = self.presentation.zip(report.release, usize::saturating_sub);
+        let covered = credit.zip(report.used, usize::max);
+        let reclaim = self
+            .reclaim
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        if let Err(error) = self.set_presentation_allocation(covered) {
+            self.presentation = credit;
+            self.failure.get_or_insert(error.0);
+            return super::PresentationGrant {
+                credit: PresentationAllocation::default(),
+                reclaim,
+            };
+        }
+        let mut target = covered;
+        // Own work waits for room: it gets the given-back credit first.
+        if !reclaim {
+            let want = report.want.zip(covered, usize::saturating_sub);
+            target = covered.zip(want.zip(self.presentation_room(), usize::min), |a, b| {
+                a.saturating_add(b)
+            });
+            // Dependency staging is part of the staging credit.
+            target.dependency_staging_bytes = target
+                .dependency_staging_bytes
+                .min(target.staging_bytes)
+                .max(covered.dependency_staging_bytes);
+            if self.set_presentation_allocation(target).is_err() {
+                target = covered;
+                self.presentation = covered;
+            }
+        }
+        super::PresentationGrant {
+            credit: target.zip(credit, usize::saturating_sub),
+            reclaim,
+        }
+    }
+    /// Free room of each renderer field next to the current credit.
+    fn presentation_room(&self) -> PresentationAllocation {
+        let budgets = self.presentation_budgets(self.presentation);
+        let free = |i: usize| (budgets[i].limit as usize).saturating_sub(budgets[i].used as usize);
+        let pending = MAX_PENDING
+            .saturating_sub(self.pending_work() + self.overlap.pending_work)
+            .min(free(5));
+        let jobs = if self.initial_generation_ready {
+            free(9)
+        } else {
+            0
+        };
+        PresentationAllocation {
+            grass_worker_wasm_bytes: usize::MAX,
+            grass_worker_cache_bytes: usize::MAX,
+            grass_worker_reserved_bytes: usize::MAX,
+            active_cpu: free(0),
+            active_gpu: free(1),
+            prototype_cpu: free(2),
+            prototype_gpu: free(3),
+            objects: free(4),
+            pending,
+            staging_bytes: free(6).min(self.available_dependency_staging_bytes()),
+            dependency_staging_bytes: usize::MAX,
+            jobs,
+        }
+    }
     pub fn presentation_budgets(
         &self,
         next: PresentationAllocation,
@@ -1102,17 +1173,17 @@ impl WorldStream {
             ));
             return false;
         }
-        bytes <= self.available_staging_bytes()
+        self.wait_for_room(bytes <= self.available_staging_bytes())
     }
     // Retained generation may wait for resources. Keep one checked input window free.
     // Grass and synchronous published bindings drain without further resource loads.
-    pub fn available_staging_bytes(&self) -> usize {
+    pub(crate) fn available_staging_bytes(&self) -> usize {
         self.available_dependency_staging_bytes().min(
             (STAGING - self.dependency_staging_reserve)
                 .saturating_sub(self.generation_pending_bytes() - self.binding_reserved),
         )
     }
-    pub fn available_dependency_staging_bytes(&self) -> usize {
+    pub(crate) fn available_dependency_staging_bytes(&self) -> usize {
         STAGING.saturating_sub(
             self.presentation.staging_bytes
                 + self.generation_pending_bytes()
@@ -1136,9 +1207,6 @@ impl WorldStream {
             return Ok(());
         }
         self.dependency_staging_reserve = reserve;
-        let mut allocation = self.presentation;
-        allocation.prototype_cpu += metadata;
-        self.set_presentation_allocation(allocation)?;
         self.dependency_metadata = metadata;
         Ok(())
     }
@@ -1154,23 +1222,35 @@ impl WorldStream {
             + usize::from(self.road_work.is_some())
             + self.presentation.pending
     }
-    pub fn can_request_independent(&self, claims: usize) -> bool {
-        self.pending_work()
+    pub(crate) fn can_request_independent(&self, claims: usize) -> bool {
+        let fits = self
+            .pending_work()
             .checked_add(self.overlap.pending_work)
             .and_then(|count| count.checked_add(claims))
-            .is_some_and(|count| count <= MAX_PENDING)
+            .is_some_and(|count| count <= MAX_PENDING);
+        self.wait_for_room(fits)
     }
-    pub fn available_external_jobs(&self) -> usize {
+    /// Asks the renderer for unused credit when own work does not fit.
+    fn wait_for_room(&self, fits: bool) -> bool {
+        if !fits {
+            self.reclaim
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        fits
+    }
+    pub(crate) fn available_external_jobs(&self) -> usize {
         if !self.initial_generation_ready {
             return 0;
         }
-        2usize.saturating_sub(
+        let free = 2usize.saturating_sub(
             self.presentation.jobs
                 + self.overlap.generation_jobs
                 + usize::from(self.terrain_execution.has_pending())
                 + usize::from(self.road_work.is_some())
                 + usize::from(self.contents.has_replay()),
-        )
+        );
+        self.wait_for_room(free > 0);
+        free
     }
     pub fn startup_job_audit(&self) -> serde_json::Value {
         serde_json::json!({
@@ -1226,12 +1306,8 @@ impl WorldStream {
         self.available_prototype_cpu_bytes().saturating_sub(owner)
     }
     #[cfg(target_arch = "wasm32")]
-    pub fn available_prototype_cpu_bytes(&self) -> usize {
+    pub(crate) fn available_prototype_cpu_bytes(&self) -> usize {
         PROTOTYPE_CPU.saturating_sub(self.metrics().prototype_cpu_bytes)
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub fn available_prototype_gpu_bytes(&self) -> usize {
-        PROTOTYPE_GPU.saturating_sub(self.metrics().prototype_gpu_bytes)
     }
     /// Reserve decoded bytes before loading an admitted prototype or terrain material.
     pub fn reserve_prototype(
@@ -1327,7 +1403,8 @@ impl WorldStream {
         };
         Ok(())
     }
-    pub fn presentation_allocation(&self) -> PresentationAllocation {
+    /// Renderer credit: the renderer share of the budgets.
+    pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
     }
     pub fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
@@ -4047,40 +4124,20 @@ impl WorldStream {
         &mut self,
         request: WorldRequest,
         id: &super::GeneratedId,
-        cpu: usize,
-        gpu: usize,
-        objects: usize,
     ) -> Result<PipelineContinuation, ReferenceError> {
         if request.session != self.request.session
             || !self.wanted_structures.iter().any(|p| p.id == *id)
         {
             return Err(ReferenceError("Stale instance renderer admission".into()));
         }
-        let mut next = self.presentation;
-        next.active_cpu += cpu;
-        next.active_gpu += gpu;
-        next.objects += objects;
-        next.pending += 1;
-        self.set_presentation_allocation(next)?;
         Ok(PipelineContinuation::counted(RendererOwner::Structure(
             request,
             id.clone(),
         )))
     }
     #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_grass_renderer(
-        &mut self,
-        entity: u64,
-        cpu: usize,
-    ) -> Result<PipelineContinuation, ReferenceError> {
-        let mut next = self.presentation;
-        next.active_cpu += cpu;
-        next.pending += 1;
-        self.set_presentation_allocation(next)?;
-        Ok(PipelineContinuation::counted(RendererOwner::Grass(
-            self.request,
-            entity,
-        )))
+    pub fn reserve_grass_renderer(&self, entity: u64) -> PipelineContinuation {
+        PipelineContinuation::counted(RendererOwner::Grass(self.request, entity))
     }
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn release_renderer_pending(
@@ -4095,20 +4152,7 @@ impl WorldStream {
         if !claim.drained() {
             return Err(ReferenceError("Renderer physical work remains live".into()));
         }
-        let mut next = self.presentation;
-        next.pending = next
-            .pending
-            .checked_sub(1)
-            .ok_or_else(|| ReferenceError("Missing renderer pending claim".into()))?;
-        // Validate before changing the single-use proof.
-        for budget in self.presentation_budgets(next) {
-            if budget.used > budget.limit {
-                return Err(ReferenceError("Renderer release exceeds budget".into()));
-            }
-        }
-        claim.release()?;
-        self.presentation = next;
-        Ok(())
+        claim.release()
     }
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_structure_renderer(
@@ -4128,6 +4172,7 @@ impl WorldStream {
                 "Stale or live structure renderer claim".into(),
             ));
         }
+        // The claim and its credit move to the ready queue in one step.
         let pending = self
             .presentation
             .pending

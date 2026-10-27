@@ -49,7 +49,7 @@ fn terrain_admission_respects_pending_capacity_and_continues_at_capacity() {
         layer: WorldLayer::Terrain,
         unit: [0, 0],
     });
-    let mut allocation = stream.presentation_allocation();
+    let mut allocation = stream.presentation_credit();
     allocation.pending = MAX_PENDING;
     stream.set_presentation_allocation(allocation).unwrap();
 
@@ -240,7 +240,7 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
     for index in 0..stream.wanted_structures.len() {
         let id = stream.wanted_structures[index].id.clone();
         let mut claim = stream
-            .reserve_instance_renderer(stream.request, &id, 0, 0, 0)
+            .reserve_instance_renderer(stream.request, &id)
             .unwrap();
         stream
             .accept_structure_renderer(stream.request, &id, &mut claim)
@@ -339,7 +339,7 @@ fn prepare_step_for_views(
         stream.bind_prototype(&p.prototype).unwrap();
         stream.bind_structure_recipe(&p.prototype).unwrap();
         let mut claim = stream
-            .reserve_instance_renderer(stream.request, &p.id, 0, 0, 0)
+            .reserve_instance_renderer(stream.request, &p.id)
             .unwrap();
         stream
             .accept_structure_renderer(stream.request, &p.id, &mut claim)
@@ -716,10 +716,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
     run.stream.bind_prototype(&prototype.source).unwrap();
     run.stream.bind_structure_recipe(&prototype.source).unwrap();
     let request = run.stream.request;
-    let mut claim = run
-        .stream
-        .reserve_instance_renderer(request, &id, 0, 0, 0)
-        .unwrap();
+    let mut claim = run.stream.reserve_instance_renderer(request, &id).unwrap();
     run.stream
         .accept_structure_renderer(request, &id, &mut claim)
         .unwrap();
@@ -1943,7 +1940,7 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
     stream.bind_prototype(&placement.prototype).unwrap();
     stream.bind_structure_recipe(&placement.prototype).unwrap();
     let mut claim = stream
-        .reserve_instance_renderer(stream.request, &placement.id, 0, 0, 0)
+        .reserve_instance_renderer(stream.request, &placement.id)
         .unwrap();
     stream
         .accept_structure_renderer(stream.request, &placement.id, &mut claim)

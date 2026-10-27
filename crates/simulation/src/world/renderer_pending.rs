@@ -68,7 +68,8 @@ impl PipelineContinuation {
     }
     pub fn start(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut super::PresentationLedger,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<PipelineOperation>, ReferenceError> {
@@ -76,7 +77,7 @@ impl PipelineContinuation {
         if self.flight.as_ref().is_some_and(|f| !f.completed()) {
             return Ok(None);
         }
-        let operation = PipelineOperation::admit(stream, false, cpu, staging)?;
+        let operation = PipelineOperation::admit(ledger, false, cpu, staging)?;
         if let Some(operation) = &operation {
             self.flight = Some(operation.physical.clone());
         }
@@ -90,38 +91,42 @@ pub struct PipelineOperation {
     pub physical: UploadReceipt,
 }
 impl PipelineOperation {
-    pub fn reserve_pair(&self, stream: &mut WorldStream, cpu: usize) -> Result<(), ReferenceError> {
+    pub fn reserve_pair(
+        &self,
+        ledger: &mut super::PresentationLedger,
+        cpu: usize,
+    ) -> Result<(), ReferenceError> {
         if self.physical.completed() || self.physical.stopped() {
             return Err(ReferenceError("Stale source pipeline batch".into()));
         }
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu += cpu;
-        stream.set_presentation_allocation(allocation)
+        ledger.set_allocation(allocation)
     }
     pub fn independent(
-        stream: &mut WorldStream,
+        ledger: &mut super::PresentationLedger,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<Self>, ReferenceError> {
-        Self::admit(stream, true, cpu, staging)
+        Self::admit(ledger, true, cpu, staging)
     }
     fn admit(
-        stream: &mut WorldStream,
+        ledger: &mut super::PresentationLedger,
         owns_pending: bool,
         cpu: usize,
         staging: usize,
     ) -> Result<Option<Self>, ReferenceError> {
-        if stream.available_external_jobs() == 0
-            || (owns_pending && !stream.can_request_independent(1))
+        if ledger.available_external_jobs() == 0
+            || (owns_pending && !ledger.can_request_independent(1))
         {
             return Ok(None);
         }
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.jobs += 1;
         allocation.pending += usize::from(owns_pending);
         allocation.prototype_cpu += cpu;
         allocation.staging_bytes += staging;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         Ok(Some(Self {
             owns_pending,
             physical: UploadReceipt::default(),
@@ -353,7 +358,7 @@ impl PipelineAccounting {
     }
     pub fn reconcile(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut super::PresentationLedger,
         operations: impl Iterator<Item = PipelineOperation>,
         cpu: usize,
         staging: usize,
@@ -368,7 +373,7 @@ impl PipelineAccounting {
                 next.pending += usize::from(operation.owns_pending);
             }
         }
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.jobs = allocation.jobs.checked_sub(self.jobs).unwrap() + next.jobs;
         allocation.pending = allocation.pending.checked_sub(self.pending).unwrap() + next.pending;
         allocation.staging_bytes = allocation
@@ -378,7 +383,7 @@ impl PipelineAccounting {
             + next.jobs * staging;
         allocation.prototype_cpu =
             allocation.prototype_cpu.checked_sub(self.cpu).unwrap() + next.cpu;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         *self = next;
         Ok(())
     }
@@ -750,189 +755,53 @@ mod batch_tests {
         assert_eq!((same.capacity, same.admitted, same.released), (16, 0, 0));
     }
     #[test]
-    #[ignore = "requires the installed source export"]
-    fn batch_admission_and_reconciliation_keep_global_limits_and_parent_claims() {
-        let reference = crate::reference::ReferenceManifest::from_runtime_json(
-            &std::fs::read(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../web/assets/reference/manifest.json"
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-        let mut stream = WorldStream::new_default(&reference, 42).unwrap();
-        for _ in 0..2000 {
-            if stream.available_external_jobs() > 0 {
-                break;
-            }
-            stream.prepare(100.);
-        }
-        assert!(
-            stream.available_external_jobs() > 0,
-            "source frontiers precede external work"
-        );
-        let base = stream.presentation_allocation();
-        let mut one_busy = base;
-        one_busy.jobs += stream.available_external_jobs().saturating_sub(1);
-        stream.set_presentation_allocation(one_busy).unwrap();
+    fn batch_admission_and_reconciliation_spend_credit() {
+        use crate::world::{PresentationAllocation, PresentationGrant, PresentationLedger};
+        let mut ledger = PresentationLedger::default();
         let staging = 64 * 1024;
+        // No credit: admission waits and asks for a job, a claim and staging.
+        assert!(
+            PipelineOperation::independent(&mut ledger, 0, staging)
+                .unwrap()
+                .is_none()
+        );
+        ledger.report();
+        let credit = PresentationAllocation {
+            jobs: 1,
+            pending: 1,
+            staging_bytes: staging,
+            ..Default::default()
+        };
+        ledger.grant(PresentationGrant {
+            credit,
+            reclaim: false,
+        });
         let receipt_bytes = UploadReceipt::allocation_bytes();
-        let pair_cpu = 1024 + PIPELINE_DIAGNOSTIC_BYTES;
-        let mut parent = stream.reserve_grass_renderer(9, 0).unwrap();
-        let operation = parent
-            .start(&mut stream, receipt_bytes + pair_cpu, staging)
+        let operation = PipelineOperation::independent(&mut ledger, receipt_bytes, staging)
             .unwrap()
             .unwrap();
         let mut accounting = PipelineAccounting::default();
         accounting.admitted(&operation);
-        accounting.pair_admitted(pair_cpu);
-        operation.reserve_pair(&mut stream, pair_cpu).unwrap();
-        accounting.pair_admitted(pair_cpu);
-        assert_eq!(stream.available_external_jobs(), 0);
-        assert_eq!(stream.presentation_allocation().pending, base.pending + 1);
-        assert!(parent.shares(&operation.physical));
-        assert!(parent.start(&mut stream, 0, staging).unwrap().is_none());
+        assert_eq!(ledger.available_external_jobs(), 0);
         assert!(
-            PipelineOperation::independent(&mut stream, 0, staging)
+            PipelineOperation::independent(&mut ledger, 0, staging)
                 .unwrap()
                 .is_none()
         );
-        accounting
-            .reconcile(
-                &mut stream,
-                std::iter::once(operation.clone()),
-                receipt_bytes + 2 * pair_cpu,
-                staging,
-            )
-            .unwrap();
-        assert_eq!(stream.presentation_allocation().jobs, 2);
-        assert_eq!(
-            stream.presentation_allocation().staging_bytes,
-            base.staging_bytes + staging
-        );
-        assert!(parent.release().is_err());
         operation.physical.complete();
         accounting
             .reconcile(
-                &mut stream,
+                &mut ledger,
                 std::iter::once(operation.clone()),
-                receipt_bytes + 2 * pair_cpu,
+                receipt_bytes,
                 staging,
             )
             .unwrap();
-        assert_eq!(stream.available_external_jobs(), 1);
-        assert_eq!(
-            stream.presentation_allocation().staging_bytes,
-            base.staging_bytes
-        );
-        assert_eq!(
-            stream.presentation_allocation().prototype_cpu,
-            base.prototype_cpu + receipt_bytes + 2 * pair_cpu
-        );
-        stream.release_grass_renderer(9, &mut parent).unwrap();
-        assert!(parent.validate(&stream).is_err());
-        drop(parent);
-        drop(operation);
-        accounting
-            .reconcile(&mut stream, std::iter::empty(), 0, staging)
-            .unwrap();
-        assert_eq!(
-            stream.presentation_allocation().prototype_cpu,
-            base.prototype_cpu
-        );
-        stream.set_presentation_allocation(base).unwrap();
-        let mut full = base;
-        full.pending = 32;
-        stream.set_presentation_allocation(full).unwrap();
-        assert!(
-            PipelineOperation::independent(&mut stream, 0, staging)
-                .unwrap()
-                .is_none()
-        );
-        let mut counted =
-            PipelineContinuation::counted(RendererOwner::Grass(stream.frame().request, 10));
-        let counted_op = counted.start(&mut stream, 0, staging).unwrap().unwrap();
-        assert_eq!(stream.presentation_allocation().pending, 32);
-        counted_op.physical.complete();
-        stream.set_presentation_allocation(base).unwrap();
-        let mut stale_request = stream.frame().request;
-        stale_request.session += 1;
-        let stale = PipelineContinuation::counted(RendererOwner::Grass(stale_request, 11));
-        assert!(stale.validate(&stream).is_err());
-        let before = stream.presentation_allocation();
-        assert!(PipelineOperation::independent(&mut stream, usize::MAX / 2, staging).is_err());
-        assert_eq!(
-            stream.presentation_allocation().prototype_cpu,
-            before.prototype_cpu
-        );
-        assert_eq!(stream.presentation_allocation().jobs, before.jobs);
-        assert!(PipelineOperation::independent(&mut stream, 0, 32 * 1024 * 1024 + 1).is_err());
-        assert_eq!(
-            stream.presentation_allocation().staging_bytes,
-            before.staging_bytes
-        );
-        let diagnostic_budget = stream
-            .presentation_budgets(before)
-            .into_iter()
-            .find(|b| b.name == "Asset CPU")
-            .unwrap();
-        let mut diagnostic_tight = before;
-        diagnostic_tight.prototype_cpu +=
-            diagnostic_budget.limit - diagnostic_budget.used - PIPELINE_DIAGNOSTIC_BYTES + 1;
-        stream
-            .set_presentation_allocation(diagnostic_tight)
-            .unwrap();
-        let mut formatted = false;
-        let rejected = PipelineOperation::independent(
-            &mut stream,
-            PIPELINE_DIAGNOSTIC_BYTES,
-            staging,
-        )
-        .map(|operation| {
-            operation.map(|_| {
-                formatted = true;
-                pipeline_diagnostic(format_args!("must not allocate after rejected admission"))
-            })
-        });
-        assert!(rejected.is_err());
-        assert!(!formatted);
-        assert_eq!(
-            stream.presentation_allocation().prototype_cpu,
-            diagnostic_tight.prototype_cpu
-        );
-        stream.set_presentation_allocation(before).unwrap();
-        let growth = PipelineBufferGrowth::new(8, 9, 24);
-        let budget = stream
-            .presentation_budgets(before)
-            .into_iter()
-            .find(|b| b.name == "Asset CPU")
-            .unwrap();
-        let mut tight = before;
-        tight.prototype_cpu += budget.limit - budget.used - growth.admitted + 1;
-        stream.set_presentation_allocation(tight).unwrap();
-        assert!(PipelineOperation::independent(&mut stream, growth.admitted, staging).is_err());
-        assert_eq!(
-            stream.presentation_allocation().prototype_cpu,
-            tight.prototype_cpu
-        );
-        // The net size would fit. The full new buffer must fail while the old buffer exists.
-        let mut net = tight;
-        net.prototype_cpu += growth.admitted - growth.released;
-        stream.set_presentation_allocation(net).unwrap();
-        stream.set_presentation_allocation(before).unwrap();
-        // A candidate cannot subtract active charges when it checks overlap.
-        let mut active = before;
-        let staging_budget = stream
-            .presentation_budgets(before)
-            .into_iter()
-            .find(|b| b.name == "Staging")
-            .unwrap();
-        active.staging_bytes += staging_budget.limit - staging_budget.used - staging + 1;
-        stream.set_presentation_allocation(active).unwrap();
-        assert!(PipelineOperation::independent(&mut stream, 0, staging).is_err());
-        assert_eq!(
-            stream.presentation_allocation().staging_bytes,
-            active.staging_bytes
-        );
+        let used = ledger.allocation();
+        assert_eq!((used.jobs, used.pending, used.staging_bytes), (0, 0, 0));
+        assert_eq!(used.prototype_cpu, receipt_bytes);
+        // This frame still asked for more. The next idle report gives the credit back.
+        assert_eq!(ledger.report().release, PresentationAllocation::default());
+        assert_eq!(ledger.report().release.jobs, 1);
     }
 }

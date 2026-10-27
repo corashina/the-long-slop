@@ -3,7 +3,10 @@ use super::*;
 pub(super) use crate::reference::fixed_reservation::{png_chain_staging, primary_staging};
 use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
-    world::WorldStream,
+    world::{
+        PresentationLedger, WorldStream,
+        stream::{PROTOTYPE_CPU, PROTOTYPE_GPU},
+    },
 };
 #[derive(Default, Clone)]
 pub struct PrimaryOwnership {
@@ -87,15 +90,18 @@ impl SourceMaterials {
             + self.world_primary.borrowed_records.capacity() * (size_of::<SourceAssetId>() + 1)
             + self.world_primary.materials.capacity() * (size_of::<(SourceAssetId, u32)>() + 1)
     }
-    pub(super) fn reserve_fork(&self, stream: &mut WorldStream) -> Result<(), ReferenceError> {
+    pub(super) fn reserve_fork(
+        &self,
+        ledger: &mut PresentationLedger,
+    ) -> Result<(), ReferenceError> {
         let (cpu, gpu) = self.primary_bytes();
         let (deferred_cpu, deferred_gpu) = self.world_textures.bytes();
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu += cpu + deferred_cpu;
         allocation.prototype_gpu += gpu + deferred_gpu;
-        stream.set_presentation_allocation(allocation)
+        ledger.set_allocation(allocation)
     }
-    pub(super) fn account_fork(&mut self, _stream: &mut WorldStream) -> Result<(), ReferenceError> {
+    pub(super) fn account_fork(&mut self) -> Result<(), ReferenceError> {
         let (cpu, gpu) = self.primary_bytes();
         self.world_primary.cpu = cpu;
         self.world_primary.gpu = gpu;
@@ -125,14 +131,14 @@ impl SourceMaterials {
     }
     fn account_primary(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         cpu: usize,
         gpu: usize,
         jobs: usize,
         pending: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
             .saturating_sub(self.world_primary.cpu)
@@ -154,7 +160,7 @@ impl SourceMaterials {
             .dependency_staging_bytes
             .saturating_sub(self.world_primary.staging)
             + staging;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         self.world_primary.cpu = cpu;
         self.world_primary.gpu = gpu;
         self.world_primary.jobs = jobs;
@@ -166,7 +172,7 @@ impl SourceMaterials {
         &mut self,
         identity: (SourceAssetId, u32),
         reference: &ReferenceManifest,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
     ) -> Result<(), ReferenceError> {
         let asset = identity.0;
         if self.world_primary.materials.contains(&identity) {
@@ -226,7 +232,7 @@ impl SourceMaterials {
             }
         }
         self.account_primary(
-            stream,
+            ledger,
             self.world_primary.cpu + added_cpu,
             self.world_primary.gpu + added_gpu,
             self.world_primary.jobs,
@@ -297,7 +303,8 @@ impl SourceMaterials {
     }
     pub fn prepare_world_primary(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         server: &AssetServer,
         images: &mut Assets<Image>,
         chains: &mut Assets<SourcePrimaryImage>,
@@ -341,12 +348,9 @@ impl SourceMaterials {
         }
         let (jobs, staging) = self.primary_loading(chains, server);
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu, gpu, jobs, self.pending_primary(), staging)?;
+        self.account_primary(ledger, cpu, gpu, jobs, self.pending_primary(), staging)?;
         if !self.preparation.cancelled() && failure.is_none() && stream.frame().failure.is_none() {
             for index in 0..self.textures.len() {
-                if stream.available_external_jobs() == 0 {
-                    break;
-                }
                 let texture = &self.textures[index];
                 if texture.failed
                     || (texture.persistent && !self.fixed_admitted)
@@ -355,7 +359,10 @@ impl SourceMaterials {
                 {
                     continue;
                 }
-                if stream.metrics().pending_work >= 32 {
+                if ledger.available_external_jobs() == 0 {
+                    break;
+                }
+                if !ledger.can_request_independent(1) {
                     continue;
                 }
                 let staging = texture.input_staging;
@@ -364,19 +371,19 @@ impl SourceMaterials {
                         "Primary input overlap exceeds staging cap".into(),
                     ));
                 }
-                if staging > stream.available_dependency_staging_bytes() {
+                if !ledger.request_staging(staging) {
                     continue;
                 }
                 let decoded = texture_cpu_reservation(texture);
-                if decoded > stream.available_prototype_cpu_bytes()
+                if !ledger.request_prototype(decoded, 0)
                     && (self.textures.iter().any(|t| pending_texture_cpu(t) != 0)
-                        || self.world_primary.jobs < stream.presentation_allocation().jobs)
+                        || self.world_primary.jobs < ledger.allocation().jobs)
                 {
                     continue;
                 }
                 // All reads belong to this one job. Reserve the largest sequential input.
                 self.account_primary(
-                    stream,
+                    ledger,
                     self.world_primary.cpu + decoded,
                     gpu,
                     self.world_primary.jobs + 1,
@@ -410,7 +417,7 @@ impl SourceMaterials {
         }
         let (jobs, staging) = self.primary_loading(chains, server);
         let (cpu, gpu) = self.primary_bytes();
-        self.account_primary(stream, cpu, gpu, jobs, self.pending_primary(), staging)?;
+        self.account_primary(ledger, cpu, gpu, jobs, self.pending_primary(), staging)?;
         if let Some(error) = failure {
             return Err(error);
         }
@@ -535,12 +542,12 @@ pub struct DeferredAllocation {
 impl SourceMaterials {
     fn account_deferred(
         &mut self,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
         jobs: usize,
         staging: usize,
     ) -> Result<(), ReferenceError> {
         let (cpu, gpu) = self.world_textures.bytes();
-        let mut allocation = stream.presentation_allocation();
+        let mut allocation = ledger.allocation();
         allocation.prototype_cpu = allocation
             .prototype_cpu
             .saturating_sub(self.world_deferred.cpu)
@@ -563,7 +570,7 @@ impl SourceMaterials {
             .dependency_staging_bytes
             .saturating_sub(self.world_deferred.staging)
             + staging;
-        stream.set_presentation_allocation(allocation)?;
+        ledger.set_allocation(allocation)?;
         self.world_deferred = DeferredAllocation {
             pending,
             cpu,
@@ -577,7 +584,7 @@ impl SourceMaterials {
         &mut self,
         material: &source::WorldSourceMaterial,
         reference: &ReferenceManifest,
-        stream: &mut WorldStream,
+        ledger: &mut PresentationLedger,
     ) -> Result<(), ReferenceError> {
         if self.world_textures.admitted(&material.source) {
             return Ok(());
@@ -607,18 +614,20 @@ impl SourceMaterials {
             } else {
                 std::slice::from_ref(material)
             },
-            stream.available_prototype_cpu_bytes() + cpu,
-            stream.available_prototype_gpu_bytes() + gpu,
+            // A charge, not a request: the stream checks the shared total.
+            PROTOTYPE_CPU.saturating_sub(ledger.allocation().prototype_cpu) + cpu,
+            PROTOTYPE_GPU.saturating_sub(ledger.allocation().prototype_gpu) + gpu,
         )?;
         self.account_deferred(
-            stream,
+            ledger,
             self.world_deferred.jobs,
             self.world_deferred.staging,
         )
     }
     pub fn prepare_world_deferred(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        ledger: &mut PresentationLedger,
         server: &AssetServer,
         images: &mut Assets<Image>,
         batches: &mut Assets<crate::presentation::texture_batches::SourceTextureBatch>,
@@ -627,43 +636,32 @@ impl SourceMaterials {
             self.world_textures.cancel();
         }
         self.account_deferred(
-            stream,
+            ledger,
             self.world_textures.jobs(),
             self.world_textures.staging_bytes(),
         )?;
-        let pending = 32usize.saturating_sub(stream.metrics().pending_work);
-        let staging_available = stream.available_dependency_staging_bytes();
-        let available_cpu = stream.available_prototype_cpu_bytes() + self.world_textures.bytes().0;
-        let releasable = stream.metrics().generation_jobs > 0
-            || stream.presentation_allocation().staging_bytes > 0;
-        let result = self.world_textures.prepare(
-            server,
-            images,
-            batches,
-            &self.preparation,
-            pending,
-            staging_available,
-            available_cpu,
-            releasable,
-        );
+        let result =
+            self.world_textures
+                .prepare(server, images, batches, &self.preparation, ledger);
         self.account_deferred(
-            stream,
+            ledger,
             self.world_textures.jobs(),
             self.world_textures.staging_bytes(),
         )?;
         result?;
         // CPU and pair staging are committed before either AssetServer request.
-        let launch = stream
-            .available_external_jobs()
-            .min(self.world_textures.queued_jobs());
+        let launch = match self.world_textures.queued_jobs() {
+            0 => 0,
+            queued => ledger.available_external_jobs().min(queued),
+        };
         self.account_deferred(
-            stream,
+            ledger,
             self.world_textures.jobs() + launch,
             self.world_textures.staging_bytes(),
         )?;
         self.world_textures.start_jobs(server, launch);
         self.account_deferred(
-            stream,
+            ledger,
             self.world_textures.jobs(),
             self.world_textures.staging_bytes(),
         )
