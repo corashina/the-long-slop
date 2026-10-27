@@ -490,6 +490,16 @@ pub struct PlaneRow {
     pub heading: [f32; 4],
 }
 
+/// One bullet hole in stream space. `kind` indexes `GunsReference::decals`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct DecalRow {
+    pub previous: PoseRow,
+    pub current: PoseRow,
+    pub kind: u32,
+    pub scale: f32,
+}
+
 /// One live particle. Positions are relative to the stream origin (contrails: the sky anchor).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
@@ -655,6 +665,8 @@ pub struct SimFrame {
     pub cigarettes: Vec<CigaretteRow>,
     pub particle_groups: Vec<ParticleGroupRow>,
     pub particles: Vec<ParticleRow>,
+    /// Live bullet holes, oldest first.
+    pub decals: Vec<DecalRow>,
     pub planes: Vec<PlaneRow>,
     pub conditions: Vec<ConditionRow>,
     /// 1 when the wash shows, in `ConditionRecord::washes` order.
@@ -720,6 +732,7 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_rows(out, &frame.cigarettes);
     put_rows(out, &frame.particle_groups);
     put_rows(out, &frame.particles);
+    put_rows(out, &frame.decals);
     put_rows(out, &frame.planes);
     put_rows(out, &frame.conditions);
     put_rows(out, &frame.washes);
@@ -754,6 +767,7 @@ pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     take_rows(&mut rest, &mut frame.cigarettes)?;
     take_rows(&mut rest, &mut frame.particle_groups)?;
     take_rows(&mut rest, &mut frame.particles)?;
+    take_rows(&mut rest, &mut frame.decals)?;
     take_rows(&mut rest, &mut frame.planes)?;
     take_rows(&mut rest, &mut frame.conditions)?;
     take_rows(&mut rest, &mut frame.washes)?;

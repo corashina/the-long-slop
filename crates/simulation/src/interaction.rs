@@ -4,6 +4,7 @@ pub mod cigarettes;
 pub mod cleaning;
 pub mod computer;
 pub mod consumption;
+pub mod decals;
 pub mod equipment;
 pub mod equipment_input;
 pub mod feedback;
@@ -209,6 +210,7 @@ pub struct InteractionState {
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
     pub guns: guns::GunState,
+    pub decals: decals::DecalStore,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -513,6 +515,7 @@ impl InteractionState {
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,
             guns: guns::GunState::new(reference)?,
+            decals: decals::DecalStore::new(reference),
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,
@@ -1519,6 +1522,7 @@ impl InteractionState {
     pub fn rebase(&mut self, shift: [f32; 3]) {
         self.cleaning.reset_contact();
         self.melee.rebase(shift);
+        self.decals.rebase(shift);
         self.mechanisms.rebase(shift);
         self.parts.rebase(shift);
         for opening in &mut self.openings {

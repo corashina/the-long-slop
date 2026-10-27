@@ -78,8 +78,6 @@ impl GarageRuntime {
         interaction
             .guns
             .step(dt, input.held & keys::PRIMARY != 0, held, &mut world);
-        // PR 4 stores and renders the bullet holes.
-        interaction.guns.take_decals().for_each(drop);
         for item in interaction.guns.take_changed() {
             self.area.items.mark_dirty(item);
         }
@@ -108,7 +106,28 @@ impl GarageRuntime {
                 self.notice = "Cannot shoot food.";
             }
         }
+        self.store_decals(dt);
         held.is_some()
+    }
+    /// Moves the shot bullet holes into the decal store and ages the store.
+    fn store_decals(&mut self, dt: f32) {
+        let area = &mut self.area;
+        let interaction = &mut area.interaction;
+        for spawn in interaction.guns.take_decals() {
+            // The renderer interpolates area bodies and items. World structures show the step pose.
+            let body = self
+                .physics
+                .rapier()
+                .colliders
+                .get(spawn.collider)
+                .and_then(|c| c.parent());
+            let smooth = body.is_some_and(|b| {
+                area.bodies.values().any(|h| *h == b)
+                    || area.items.iter().any(|i| i.body == Some(b))
+            });
+            interaction.decals.spawn(spawn, &self.physics, smooth);
+        }
+        interaction.decals.advance(dt);
     }
     /// Gives every gun item its runtime when the items change: the saved state, or the
     /// `RandomSpawned` count of a generated gun.

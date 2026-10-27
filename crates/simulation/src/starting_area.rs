@@ -356,6 +356,7 @@ impl StartingArea {
         }
     }
     pub fn commit_poses(&mut self, physics: &PhysicsWorld, teleport: bool) {
+        self.interaction.decals.commit(physics, teleport);
         let stored = self.inventory.slots.map(|id| {
             id.and_then(|id| self.items.get(id))
                 .filter(|i| {

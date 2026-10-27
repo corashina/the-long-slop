@@ -76,6 +76,12 @@ fn frame_round_trips() {
             lifetime: 2.,
             ..Default::default()
         }],
+        decals: vec![DecalRow {
+            previous: row(4.),
+            current: row(5.),
+            kind: 3,
+            scale: 0.25,
+        }],
         planes: vec![PlaneRow {
             id: 3,
             prefab: 1,
