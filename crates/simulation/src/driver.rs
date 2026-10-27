@@ -1,5 +1,5 @@
 //! Runs the simulation from renderer commands. It owns the runtime, the input queue and the step clock.
-use crate::boundary::{SimCommand, SimFrame, StateBlock};
+use crate::boundary::{LookBlock, SimCommand, SimFrame, StateBlock};
 use crate::reference::ReferenceManifest;
 use crate::simulation::{FIXED_DT, FrameInput, StepClock, keys};
 use crate::starting_area::GarageRuntime;
@@ -20,10 +20,20 @@ pub struct SimDriver {
     /// Accepted frame input that no frame consumed yet.
     frame_input: FrameInput,
     clock: StepClock,
-    previous: VehiclePose,
-    current: VehiclePose,
+    /// Player camera of the last two steps.
+    look: LookBlock,
     /// Player camera at the interpolation of the last frame.
-    pub rendered: VehiclePose,
+    rendered: VehiclePose,
+    /// Command mouse in `input` that no step consumed yet.
+    raw_mouse: [f32; 2],
+    /// Sequence of the last accepted command.
+    accepted_seq: u64,
+    /// Sequence of the last command in `frame_input`.
+    frame_seq: u64,
+    /// Sequence of the last command in `input`.
+    input_seq: u64,
+    /// Sequence of the last command whose input a step consumed or the simulation dropped.
+    consumed_seq: u64,
     pub camera: CameraMode,
     /// Fixed steps of the last frame.
     pub frame_steps: u32,
@@ -40,15 +50,24 @@ pub struct SimDriver {
 
 impl SimDriver {
     pub fn new(runtime: GarageRuntime) -> Self {
-        let current = runtime.area.player.view(&runtime.physics).camera_pose;
-        Self {
+        let mut driver = Self {
             runtime,
             input: FrameInput::default(),
             frame_input: FrameInput::default(),
             clock: StepClock::default(),
-            previous: current,
-            current,
-            rendered: current,
+            look: LookBlock {
+                gain: 1.,
+                ..LookBlock::default()
+            },
+            rendered: VehiclePose {
+                position: [0.; 3],
+                rotation: [0., 0., 0., 1.],
+            },
+            raw_mouse: [0.; 2],
+            accepted_seq: 0,
+            frame_seq: 0,
+            input_seq: 0,
+            consumed_seq: 0,
             camera: CameraMode::default(),
             frame_steps: 0,
             render_delta_seconds: 0.,
@@ -57,7 +76,14 @@ impl SimDriver {
             ready: false,
             delta_seconds: 0.,
             calendar: [1, 1],
-        }
+        };
+        driver.reset_look();
+        driver
+    }
+
+    /// Player camera of a new runtime.
+    pub fn new_view(runtime: &GarageRuntime) -> VehiclePose {
+        runtime.area.player.view(&runtime.physics).camera_pose
     }
 
     /// Applies the menu actions and settings of `command` and queues its input.
@@ -65,9 +91,10 @@ impl SimDriver {
         self.delta_seconds = command.delta_seconds;
         self.calendar = command.calendar;
         self.ready = command.ready;
+        self.accepted_seq = command.seq;
         if command.hold {
             clear_profile_input();
-            self.frame_input.clear();
+            self.drop_frame_input();
             return;
         }
         let actions = command.actions;
@@ -96,8 +123,9 @@ impl SimDriver {
         let frame = command.input;
         if !self.ready || !self.runtime.started || self.runtime.paused {
             self.input.clear();
+            self.raw_mouse = [0.; 2];
             clear_profile_input();
-            self.frame_input.clear();
+            self.drop_frame_input();
             self.runtime.clear_input();
             // The Controls screen shows the pad axes while the game is paused.
             self.runtime.driving_input.preview(&frame.gamepad);
@@ -119,6 +147,7 @@ impl SimDriver {
         }
         self.runtime.sleep_camera_allowed = self.camera == CameraMode::Cockpit;
         self.frame_input.merge(frame);
+        self.frame_seq = command.seq;
     }
 
     /// Runs the fixed steps of the accepted frame time.
@@ -137,10 +166,18 @@ impl SimDriver {
         let Some(raw) = self.frame_input.take_frame(&mut self.skip_elapsed, blocked) else {
             if blocked {
                 self.input.clear();
+                self.raw_mouse = [0.; 2];
+                self.consumed_seq = self.accepted_seq;
                 self.runtime.clear_input();
             }
             return;
         };
+        for (pending, delta) in self.raw_mouse.iter_mut().zip(raw.mouse) {
+            if delta.is_finite() {
+                *pending += delta;
+            }
+        }
+        self.input_seq = self.frame_seq;
         let started = now();
         #[cfg(target_arch = "wasm32")]
         let _profile = crate::cpu_profile::Timer::new(crate::cpu_profile::Stage::Physics);
@@ -163,22 +200,34 @@ impl SimDriver {
             }
             self.frame_steps += 1;
             self.render_delta_seconds += FIXED_DT;
-            self.previous = self.current;
             let old_origin = self.runtime.stream.origin.offset;
             let input = self.input.take_step();
+            self.runtime.area.player.take_look_applied();
             self.runtime.step(reference, input);
-            let new_origin = self.runtime.stream.origin.offset;
-            for i in 0..3 {
-                self.previous.position[i] -= (new_origin[i] - old_origin[i]) as f32;
+            let applied = self.runtime.area.player.take_look_applied();
+            let raw = std::mem::take(&mut self.raw_mouse);
+            // The gain covers look scale, zoom and every rule that keeps the mouse from the look.
+            let axis = usize::from(raw[1].abs() > raw[0].abs());
+            if raw[axis] != 0. {
+                self.look.gain = applied[axis] / raw[axis];
             }
-            self.current = self.view();
+            self.consumed_seq = self.input_seq;
+            let new_origin = self.runtime.stream.origin.offset;
+            let mut previous = self.look.position[1];
+            for i in 0..3 {
+                previous[i] -= (new_origin[i] - old_origin[i]) as f32;
+            }
+            let parent = self.look.parent[1];
+            self.capture_look();
+            self.look.position[0] = previous;
+            self.look.parent[0] = parent;
             if self.runtime.paused {
                 self.clock.reset();
                 break;
             }
         }
         let scale = self.runtime.clock_factors(reference).time_scale;
-        self.rendered = interpolate(self.previous, self.current, self.clock.alpha(scale));
+        self.rendered = self.look.pose(self.clock.alpha(scale), [0.; 2]);
         self.physics_ms = now() - started;
     }
 
@@ -188,6 +237,8 @@ impl SimDriver {
             .clock
             .alpha(self.runtime.clock_factors(reference).time_scale);
         self.runtime.fill_frame(reference, alpha, frame);
+        frame.seq_consumed = self.consumed_seq;
+        frame.state.look = self.look;
         if self.camera == CameraMode::Chase {
             frame.state.flags |= StateBlock::CHASE;
         }
@@ -199,10 +250,10 @@ impl SimDriver {
         self.input.clear();
         self.frame_input.clear();
         self.runtime.clear_input();
-        self.current = self.view();
+        self.raw_mouse = [0.; 2];
+        self.consumed_seq = self.accepted_seq;
+        self.reset_look();
         self.clock.reset();
-        self.previous = self.current;
-        self.rendered = self.current;
         self.runtime.area.begin_step();
         self.skip_elapsed = true;
     }
@@ -210,9 +261,9 @@ impl SimDriver {
     /// Starts a loaded runtime: paused, with no queued input.
     pub fn restart(&mut self, camera: CameraMode) {
         self.camera = camera;
-        self.current = self.view();
-        self.previous = self.current;
-        self.rendered = self.current;
+        self.reset_look();
+        self.raw_mouse = [0.; 2];
+        self.consumed_seq = self.accepted_seq;
         self.input.clear();
         self.frame_input.clear();
         self.clock = StepClock::default();
@@ -228,20 +279,29 @@ impl SimDriver {
         self.input.held
     }
 
-    /// Player body `pose` at the rendered camera. It moves with the camera interpolation.
-    pub fn rendered_body_pose(&self, mut pose: VehiclePose) -> VehiclePose {
-        for i in 0..3 {
-            pose.position[i] += self.rendered.position[i] - self.current.position[i];
+    /// Drops the frame input. Its mouse is consumed when no step input waits.
+    fn drop_frame_input(&mut self) {
+        self.frame_input.clear();
+        if self.raw_mouse == [0.; 2] {
+            self.consumed_seq = self.accepted_seq;
         }
-        pose
     }
 
-    fn view(&self) -> VehiclePose {
-        self.runtime
-            .area
-            .player
-            .view(&self.runtime.physics)
-            .camera_pose
+    /// Sets the current step look from the player. Keeps the gain.
+    fn capture_look(&mut self) {
+        let player = &self.runtime.area.player;
+        let gain = self.look.gain;
+        self.look = player.look(&self.runtime.physics);
+        self.look.gain = gain;
+        self.look.position[1] = player.view(&self.runtime.physics).camera_pose.position;
+    }
+
+    /// Both steps of the look at the player view.
+    fn reset_look(&mut self) {
+        self.capture_look();
+        self.look.position[0] = self.look.position[1];
+        self.look.parent[0] = self.look.parent[1];
+        self.rendered = self.look.pose(1., [0.; 2]);
     }
 }
 

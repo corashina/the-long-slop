@@ -10,11 +10,13 @@ use crate::presentation::{
 use crate::reference::ReferenceManifest;
 use crate::simulation::{FrameInput, keys};
 use crate::starting_area::GarageRuntime;
+use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
 use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
+use simulation::boundary::MouseLook;
 use simulation::boundary::{AudioCall, HudBlock, PoseRow, RenderInput, SimCommand, StateBlock};
 use simulation::driver::SimDriver;
 use simulation::host::game_now;
@@ -36,8 +38,24 @@ pub(crate) struct Drive {
     /// Camera position of the last rendered frame. The simulation assigns radio voices by it.
     pub listener: Option<[f32; 3]>,
     pub(crate) ready: bool,
+    /// Mouse of commands that no step consumed yet.
+    look: MouseLook,
+    /// Player camera of this frame, with the look of the latest mouse.
+    view: VehiclePose,
+    /// `view` position minus the current step camera position.
+    view_offset: [f32; 3],
     last_inventory: Option<([u32; 4], u8, u32)>,
     last_crosshair: Option<(u32, u32)>,
+}
+
+impl Drive {
+    /// Player body `pose` at the rendered camera. It moves with the camera interpolation.
+    pub(crate) fn rendered_body_pose(&self, mut pose: VehiclePose) -> VehiclePose {
+        for i in 0..3 {
+            pose.position[i] += self.view_offset[i];
+        }
+        pose
+    }
 }
 
 /// Manifest fields the browser shell reads. Copies them without parsing the world records.
@@ -156,11 +174,14 @@ pub fn run(
         .insert_resource(RuntimeReference(reference.clone()))
         .insert_resource(save::SaveRequests::new(&reference, manifest_sha256))
         .insert_resource(Drive {
+            view: SimDriver::new_view(&runtime),
             sim: SimDriver::new(runtime),
             seq: 0,
             world_ms: 0.,
             listener: None,
             ready: false,
+            look: MouseLook::default(),
+            view_offset: [0.; 3],
             last_inventory: None,
             last_crosshair: None,
         })
@@ -320,7 +341,7 @@ fn setup(
         &mut commands,
         &mut images,
         &reference.0,
-        presentation::transform(drive.sim.rendered),
+        presentation::transform(drive.view),
         drive
             .sim
             .runtime
@@ -600,8 +621,10 @@ fn read_input(
         )
     };
     drive.seq += 1;
+    let seq = drive.seq;
+    drive.look.send(seq, input.mouse);
     let command = SimCommand {
-        seq: drive.seq,
+        seq,
         delta_seconds: time.delta_secs_f64(),
         input,
         actions,
@@ -869,6 +892,9 @@ fn fill_frame(
 /// Writes the runtime state into `frame` and applies its changes.
 fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
     drive.sim.fill(reference, &mut frame.frame);
+    drive.view = drive.look.camera(&frame.frame);
+    let current = frame.frame.state.look.position[1];
+    drive.view_offset = std::array::from_fn(|i| drive.view.position[i] - current[i]);
     frame.apply_changes(|handle| drive.sim.runtime.release_pose(handle));
     frame.index_particles();
 }
@@ -879,7 +905,7 @@ fn active_camera(drive: &Drive, state: &StateBlock) -> Transform {
     } else if state.flags & StateBlock::CHASE != 0 && state.seat_car.flags & PoseRow::ACTIVE != 0 {
         presentation::camera::pose(CameraMode::Chase, state.seat_car.pose())
     } else {
-        presentation::transform(drive.sim.rendered)
+        presentation::transform(drive.view)
     }
 }
 fn update_camera(

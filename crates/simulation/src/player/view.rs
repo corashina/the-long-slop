@@ -258,6 +258,10 @@ impl ViewState {
         self.head = head_in_seat.translation;
         self.seat_entry_rotation = Some(head_in_seat.rotation);
     }
+    /// Seat entry head rotation, and the camera rotation after the head.
+    pub(super) fn look_rotations(&self) -> (Option<Rotation>, Rotation) {
+        (self.seat_entry_rotation, self.camera_rotation)
+    }
     pub(super) fn looking(&self) -> bool {
         self.looking
     }

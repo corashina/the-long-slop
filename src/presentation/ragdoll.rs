@@ -224,7 +224,7 @@ pub(crate) fn sync(
         return;
     }
     // The ragdoll moves with the camera interpolation, as the player body does.
-    let world = |row: &PoseRow| super::transform(drive.sim.rendered_body_pose(row.pose()));
+    let world = |row: &PoseRow| super::transform(drive.rendered_body_pose(row.pose()));
     // The root keeps the root body at its rest pose in root space.
     let rest = &record.bodies[ragdoll.root_body].pose;
     let body = world(&rows[ragdoll.root_body]);
