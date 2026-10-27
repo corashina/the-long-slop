@@ -102,7 +102,8 @@ def recover_prototype_storage(source, manifest, output):
         usables=[source_id(source.resolve(r,p)) for p in f['susable'] if p['m_PathID']]
         if len(usables)!=len(f['susable']):raise ValueError(f'{name} has an empty usable')
         slots=[source.resolve(r,p) for p in f['slot'] if p['m_PathID']]
-        if len(slots)!=len(f['slot']) or any(source.class_name(slot)!='partslotscript' for slot in slots):
+        # CanStore skips an empty gate slot.
+        if any(source.class_name(slot)!='partslotscript' for slot in slots):
             raise ValueError(f'{name} gate slot is not a partslotscript')
         homes=containing(prototypes,source_id(node))
         # Upd needs activeInHierarchy below each prototype root. The stored root is inactive; the spawn activates it.

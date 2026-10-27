@@ -90,15 +90,22 @@ class GibTests(unittest.TestCase):
                'colsOff': 0, 'childs': [pointer(2), pointer(3)]}
         source, r = self.source(gib)
         nodes = {('a', 1): 1, ('a', 2): 2, ('a', 3): 3}
-        records = [{'reader': r[1], 'components': [r[1], r[11]]}, {'reader': r[2], 'components': [r[12]]},
-                   {'reader': r[3], 'components': [r[12]]}]
+        records = [{'reader': r[1], 'parent': None, 'components': [r[1], r[11]]},
+                   {'reader': r[2], 'parent': r[1], 'components': [r[12]]},
+                   {'reader': r[3], 'parent': r[2], 'components': [r[12]]}]
         self.assertEqual(recover_gib(source, records, nodes), (
             {'source': {'file': 'a', 'path_id': 11}, 'gib_main': True, 'dont_rot': False, 'add_small_pos': True,
-             'distance': False, 'life': 30., 'children': [2, 3]}, [2, 3]))
+             'distance': False, 'life': 30., 'children': [2, 3]}, [], [2, 3]))
         # A gib without gibscript keeps only its scaleDestroyScript nodes.
-        self.assertEqual(recover_gib(source, records[1:], nodes), (None, [2, 3]))
-        with self.assertRaisesRegex(ValueError, 'not the only one'):
-            recover_gib(source, [records[1], records[0]], nodes)
+        self.assertEqual(recover_gib(source, records[1:], nodes), (None, [], [2, 3]))
+        # A gib piece keeps its own life over its subtree. A main gibscript on a piece is not audited.
+        gib['gibMain'] = 0
+        piece = dict(records[1], components=[r[11]])
+        self.assertEqual(recover_gib(source, [records[0], piece, records[2]], nodes)[1], [
+            {'source': {'file': 'a', 'path_id': 11}, 'node': 2, 'distance': False, 'life': 30., 'nodes': [2, 3]}])
+        gib['gibMain'] = 1
+        with self.assertRaisesRegex(ValueError, 'piece gibscript start state'):
+            recover_gib(source, [records[0], piece, records[2]], nodes)
         with self.assertRaisesRegex(ValueError, 'outside the gib'):
             recover_gib(source, records, {('a', 1): 1, ('a', 2): 2})
         gib['colsOff'] = 1
