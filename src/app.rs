@@ -87,6 +87,19 @@ struct ManifestShell<'a> {
     items: &'a serde_json::value::RawValue,
     #[serde(borrow)]
     world: WorldShell<'a>,
+    #[serde(borrow)]
+    clothing: ClothingShell<'a>,
+}
+/// The outfit defaults: the segments of each player character.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ClothingShell<'a> {
+    #[serde(borrow)]
+    characters: Vec<CharacterShell<'a>>,
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+struct CharacterShell<'a> {
+    #[serde(borrow)]
+    segments: &'a serde_json::value::RawValue,
 }
 #[derive(serde::Deserialize, serde::Serialize)]
 struct WorldShell<'a> {
@@ -145,8 +158,8 @@ pub fn run(
     }
     let runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let mut ledger = crate::world::PresentationLedger::default();
-    let (fixed, graph) = crate::reference::fixed_reservation::admit_control(
+    let mut ledger = crate::ownership::PresentationLedger::default();
+    let (fixed, graph) = crate::ownership::fixed::admit_control(
         &mut ledger,
         presentation::readiness::control_bytes(),
         presentation::readiness::RendererStateHandle::default,
@@ -228,6 +241,7 @@ pub fn run(
             presentation::particles::SourceParticlePlugin,
             presentation::world::prototypes::SourcePrototypePlugin,
             presentation::world::pipelines::WorldPipelinePlugin,
+            presentation::outfit_preview::OutfitPreviewPlugin,
         ))
         .init_resource::<presentation::save::CandidateImportedPoses>()
         .init_resource::<presentation::world::SourceWorldVisuals>()
@@ -264,8 +278,10 @@ pub fn run(
                 (
                     presentation::spawned::sync,
                     presentation::cigarettes::sync,
+                    presentation::outfit::poll,
                     presentation::player_body::sync,
                     presentation::ragdoll::sync,
+                    presentation::outfit_preview::sync,
                     presentation::sky_traffic::sync,
                 )
                     .chain(),
@@ -309,6 +325,9 @@ fn setup(
     commands.insert_resource(presentation::spawned::SpawnedVisuals::default());
     commands.insert_resource(presentation::player_body::PlayerBody::default());
     commands.insert_resource(presentation::ragdoll::RagdollBody::default());
+    commands.insert_resource(presentation::outfit::Outfit::defaults(
+        &reference.0.clothing.characters,
+    ));
     commands.insert_resource(presentation::sky_traffic::SkyTrafficVisuals::default());
     if let Err(error) =
         presentation::materials::load_materials(&mut commands, &server, &reference.0)

@@ -5,7 +5,7 @@ pub mod impostor;
 pub mod primary;
 pub mod specular;
 pub mod terrain;
-use crate::world::upload_receipt;
+use crate::ownership::upload_receipt;
 mod world_texture_upload;
 pub mod world_textures;
 use super::primary_image::{SourcePrimaryImage, SourcePrimaryImageSettings};
@@ -460,10 +460,15 @@ pub fn load_materials(
         })
         .map(|asset| asset.id)
         .collect();
-    // The player and ragdoll assets draw only character 0. Their other materials stay unloaded.
-    let characters = [
-        &reference.clothing.characters[0],
-        &reference.clothing.ragdoll.characters[0],
+    // The player and ragdoll assets draw their characters with the renderer, segment and invisible materials.
+    // Their other materials stay unloaded.
+    let clothing = &reference.clothing;
+    let outfits = [
+        (&clothing.characters, &clothing.invisible_material),
+        (
+            &clothing.ragdoll.characters,
+            &clothing.ragdoll.invisible_material,
+        ),
     ];
     let records: Vec<_> = reference
         .rendering
@@ -471,11 +476,17 @@ pub fn load_materials(
         .iter()
         .filter(|record| {
             fixed_assets.contains(&record.asset)
-                && characters.iter().all(|c| {
-                    record.asset != c.asset
-                        || c.renderers
-                            .iter()
-                            .any(|renderer| renderer.materials.contains(&record.source))
+                && outfits.iter().all(|(characters, invisible)| {
+                    record.asset != characters[0].asset
+                        || record.source == **invisible
+                        || characters.iter().any(|c| {
+                            c.renderers
+                                .iter()
+                                .any(|renderer| renderer.materials.contains(&record.source))
+                                || c.segments
+                                    .iter()
+                                    .any(|s| s.default_material == record.source)
+                        })
                 })
         })
         .map(|record| Arc::new(record.clone()))
@@ -619,10 +630,12 @@ pub(crate) fn bind_authored_materials(
             Option<&bevy::camera::visibility::RenderLayers>,
             &GltfExtras,
             &super::renderer_visibility::SourceRenderer,
+            Option<&OutfitSlot>,
         ),
         (Without<super::sky::SkyMesh>, Without<SourceMaterialWarmup>),
     >,
     loading: Res<MaterialLoading>,
+    retained: Res<RetainedColors>,
 ) {
     if source.bound
         || source.state != RenderingState::Loading
@@ -637,10 +650,12 @@ pub(crate) fn bind_authored_materials(
         return;
     }
     let mut shared = HashMap::<String, Handle<SourceMaterial>>::new();
+    let mut segments =
+        HashMap::<(source::AssetId, u8, u8, bool, u32), Handle<SourceMaterial>>::new();
     let mut requests = Vec::new();
     let mut variants = HashSet::new();
     let mut transparent_pass_capacity = 0;
-    for (entity, extras, mesh, transform, layers, primitive, renderer) in &primitives {
+    for (entity, extras, mesh, transform, layers, primitive, renderer, slot) in &primitives {
         let mask = layers.map_or(1, |layers| {
             layers.iter().fold(0u32, |bits, layer| {
                 bits | 1u32.checked_shl(layer as u32).unwrap_or(0)
@@ -653,17 +668,22 @@ pub(crate) fn bind_authored_materials(
                 return;
             }
         };
-        let Some(record) = source.records.iter().find(|record| {
-            record.asset == identity.asset && record.gltf_material == identity.gltf_material
-        }) else {
+        let find = |index: u32| {
+            source
+                .records
+                .iter()
+                .find(|record| record.asset == identity.asset && record.gltf_material == index)
+                .cloned()
+        };
+        let Some(record) = find(identity.gltf_material) else {
             source.state = RenderingState::Failed(format!(
                 "Missing material {}:{}",
                 identity.asset.0, identity.gltf_material
             ));
             return;
         };
+        let record = &*record;
         let reflected = transform.affine().matrix3.determinant() < 0.;
-        let key = (identity.asset, identity.gltf_material, reflected, mask);
         let label = format!(
             "material {}:{} (asset {}, index {})",
             record.source.file, record.source.path_id, identity.asset.0, identity.gltf_material
@@ -701,21 +721,68 @@ pub(crate) fn bind_authored_materials(
                 .entity(entity)
                 .insert((bevy::render::batching::NoAutomaticBatching, sort));
         }
-        let handle = if let Some(handle) = source.handles.get(&key) {
-            handle.clone()
-        } else {
-            let mut identity = serde_json::to_value(record).expect("validated record");
-            identity.as_object_mut().unwrap().remove("asset");
-            identity.as_object_mut().unwrap().remove("gltf_material");
-            identity["reflected"] = serde_json::json!(reflected);
-            identity["receiver_mask"] = serde_json::json!(mask);
-            let identity = identity.to_string();
-            let handle = shared
-                .entry(identity)
-                .or_insert_with(|| materials.add(make_material(record, reflected, mask, &source)))
+        let handle = if let Some(slot) = slot {
+            // `playermodeloutfitscript.Refresh`: one copy of the segment material with its own color.
+            let (Some(segment), invisible) = (find(slot.material), slot.invisible.map(find)) else {
+                source.state = RenderingState::Failed(format!(
+                    "Missing outfit material {}:{}",
+                    identity.asset.0, slot.material
+                ));
+                return;
+            };
+            let handle = segments
+                .entry((
+                    identity.asset,
+                    slot.character,
+                    slot.segment,
+                    reflected,
+                    mask,
+                ))
+                .or_insert_with(|| {
+                    let mut material = make_material(&segment, reflected, mask, &source);
+                    retain(&mut material, &retained);
+                    materials.add(material)
+                })
                 .clone();
-            source.handles.insert(key, handle.clone());
+            let invisible = match invisible {
+                Some(Some(record)) => Some(shared_handle(
+                    &mut source,
+                    &mut shared,
+                    &mut materials,
+                    &record,
+                    reflected,
+                    mask,
+                )),
+                Some(None) => {
+                    source.state =
+                        RenderingState::Failed("Missing outfit invisible material".into());
+                    return;
+                }
+                None => None,
+            };
+            if let Some(invisible) = &invisible
+                && variants.insert((mesh.0.id(), invisible.id()))
+            {
+                requests.push(PipelineRequest {
+                    mesh: mesh.0.id(),
+                    material: invisible.id().untyped(),
+                    label: format!("{label} invisible"),
+                });
+            }
+            commands.entity(entity).insert(OutfitMaterials {
+                segment: handle.clone(),
+                invisible,
+            });
             handle
+        } else {
+            shared_handle(
+                &mut source,
+                &mut shared,
+                &mut materials,
+                record,
+                reflected,
+                mask,
+            )
         };
         commands
             .entity(entity)
@@ -748,6 +815,49 @@ pub(crate) fn bind_authored_materials(
     // The checked plate contract owns exactly two retained glyph meshes.
     pending.transparent_pass_capacity = transparent_pass_capacity + 2;
     pending.sealed = false;
+}
+
+/// Material handle of a record. Records with the same identity share one handle.
+fn shared_handle(
+    source: &mut SourceMaterials,
+    shared: &mut HashMap<String, Handle<SourceMaterial>>,
+    materials: &mut Assets<SourceMaterial>,
+    record: &MaterialRecord,
+    reflected: bool,
+    mask: u32,
+) -> Handle<SourceMaterial> {
+    let key = (record.asset, record.gltf_material, reflected, mask);
+    if let Some(handle) = source.handles.get(&key) {
+        return handle.clone();
+    }
+    let mut identity = serde_json::to_value(record).expect("validated record");
+    identity.as_object_mut().unwrap().remove("asset");
+    identity.as_object_mut().unwrap().remove("gltf_material");
+    identity["reflected"] = serde_json::json!(reflected);
+    identity["receiver_mask"] = serde_json::json!(mask);
+    let handle = shared
+        .entry(identity.to_string())
+        .or_insert_with(|| materials.add(make_material(record, reflected, mask, source)))
+        .clone();
+    source.handles.insert(key, handle.clone());
+    handle
+}
+
+/// Outfit segment slot of a player or ragdoll primitive.
+#[derive(Component)]
+pub struct OutfitSlot {
+    pub character: u8,
+    pub segment: u8,
+    /// glTF material index of the segment `default_material`.
+    pub material: u32,
+    /// glTF material index of the invisible material. Only for a segment with `disable_able`.
+    pub invisible: Option<u32>,
+}
+/// Materials of an outfit slot. The segment copy has a retained color.
+#[derive(Component)]
+pub struct OutfitMaterials {
+    pub segment: Handle<SourceMaterial>,
+    pub invisible: Option<Handle<SourceMaterial>>,
 }
 
 fn make_material(
@@ -2216,7 +2326,7 @@ struct RetainedColorData {
     buffer: Option<Buffer>,
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
-struct RetainedColors(Arc<Mutex<Vec<RetainedColor>>>);
+pub(crate) struct RetainedColors(Arc<Mutex<Vec<RetainedColor>>>);
 impl RetainedColor {
     pub(crate) fn revision_color(&self) -> (u64, Vec4) {
         let value = self.0.lock().unwrap();
@@ -2230,18 +2340,16 @@ impl SourceUniform {
     }
 }
 pub(crate) fn retain_color(material: &mut SourceMaterial, world: &World) {
+    retain(material, world.resource::<RetainedColors>());
+}
+fn retain(material: &mut SourceMaterial, colors: &RetainedColors) {
     let color = RetainedColor(Arc::new(Mutex::new(RetainedColorData {
         linear: material.extension.surface.data.color,
         revision: 0,
         dirty: true,
         buffer: None,
     })));
-    world
-        .resource::<RetainedColors>()
-        .0
-        .lock()
-        .unwrap()
-        .push(color.clone());
+    colors.0.lock().unwrap().push(color.clone());
     material.retained_color = Some(color);
 }
 pub(crate) fn update_retained_color(material: &SourceMaterial, color: [f32; 4]) {
@@ -2375,7 +2483,7 @@ impl SourceMaterials {
     }
     pub fn fork(
         &self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
     ) -> Result<Self, source::ReferenceError> {
         let world_textures = self.world_textures.fork()?;
         self.reserve_fork(ledger)?;

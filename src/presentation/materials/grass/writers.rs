@@ -526,7 +526,7 @@ impl GrassWriters {
     pub fn configure(
         &mut self,
         stream: &crate::world::WorldStream,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         reference: &crate::reference::WorldReference,
     ) -> Result<(), crate::reference::ReferenceError> {
         let session = stream.frame().request.session;
@@ -568,7 +568,7 @@ impl GrassWriters {
 impl GrassWriters {
     pub fn request(
         &mut self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         entity: Entity,
         mesh: Handle<Mesh>,
         pose: Mat4,
@@ -635,7 +635,7 @@ impl GrassWriters {
     }
     pub fn prepare(
         &mut self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         meshes: &Assets<Mesh>,
     ) -> Result<(), crate::reference::ReferenceError> {
         use crate::reference::ReferenceError;
@@ -709,7 +709,7 @@ impl GrassWriters {
     }
     pub fn retire(
         &mut self,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         entity: Entity,
     ) -> Result<(), crate::reference::ReferenceError> {
         let Some(index) = self.allocations.iter().position(|a| a.0 == entity) else {

@@ -1,11 +1,12 @@
 //! Road and terrain material admission through the shared source cache.
 use super::{SourceWorldVisuals, SurfaceMaterial, prototypes::SourcePrototypes};
+use crate::ownership::PresentationLedger;
 use crate::{
     presentation::materials::{
         SourceMaterial, SourceMaterials, authored_material, terrain::TerrainMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldValue},
-    world::{PresentationLedger, WorldStream},
+    world::WorldStream,
 };
 use bevy::prelude::*;
 impl SourceWorldVisuals {

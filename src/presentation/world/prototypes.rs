@@ -6,9 +6,10 @@ use super::{
     },
     prototype_loader::{SourceGltf, SourceGltfLoader, SourceGltfSettings},
 };
+use crate::ownership::PresentationLedger;
 use crate::{
     reference::{ReferenceError, ReferenceManifest, SourceId, prototype_plan::PrototypePlan},
-    world::{PresentationLedger, WorldStream},
+    world::WorldStream,
 };
 use bevy::{
     asset::LoadState, ecs as bevy_ecs, mesh::skinning::SkinnedMeshInverseBindposes, prelude::*,

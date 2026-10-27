@@ -1,14 +1,13 @@
 //! Compile admitted material variants before collision and visual publication.
-use crate::world::renderer_pending::{
+use crate::ownership::PresentationLedger;
+use crate::ownership::renderer_pending::{
     PIPELINE_BATCH_KEYS, PIPELINE_DIAGNOSTIC_BYTES, PipelineAccounting, PipelineBufferGrowth,
     PipelineContinuation, PipelineOperation, pipeline_diagnostic, pipeline_pair_ready,
     write_pipeline_diagnostic,
 };
-use crate::world::upload_receipt::UploadReceipt;
+use crate::ownership::upload_receipt::UploadReceipt;
 use crate::{
-    presentation::materials::RenderingState,
-    reference::ReferenceError,
-    world::{PresentationLedger, WorldStream},
+    presentation::materials::RenderingState, reference::ReferenceError, world::WorldStream,
 };
 use bevy::render::renderer::RenderQueue;
 use bevy::{
@@ -73,7 +72,7 @@ impl PipelineTicket {
         }
     }
 }
-type PipelineBatch = crate::world::renderer_pending::PipelineBatch<Mutex<PipelineJob>>;
+type PipelineBatch = crate::ownership::renderer_pending::PipelineBatch<Mutex<PipelineJob>>;
 #[derive(Default)]
 struct PipelineBank {
     pairs: Vec<PipelineTicket>,
@@ -395,7 +394,7 @@ fn ticket_bytes() -> usize {
 }
 
 // The keys live only on the render stack, then freeze into the dispatched IDs.
-type PairKeys = crate::world::renderer_pending::PipelineKeys<(MeshPipelineKey, bool)>;
+type PairKeys = crate::ownership::renderer_pending::PipelineKeys<(MeshPipelineKey, bool)>;
 fn pair_keys(world: &World, job: &mut PipelineJob) -> Result<Option<PairKeys>, ReferenceError> {
     if job.material.type_id()
         == std::any::TypeId::of::<crate::presentation::materials::SourceMaterial>()
@@ -758,8 +757,8 @@ fn physical_pipelines_settled(world: &World, job: &PipelineJob) -> bool {
 }
 pub(crate) fn physical_pipeline_state(
     state: &CachedPipelineState,
-) -> crate::world::renderer_pending::PhysicalPipelineState {
-    use crate::world::renderer_pending::PhysicalPipelineState;
+) -> crate::ownership::renderer_pending::PhysicalPipelineState {
+    use crate::ownership::renderer_pending::PhysicalPipelineState;
     match state {
         CachedPipelineState::Queued => PhysicalPipelineState::Queued,
         CachedPipelineState::Creating(_) => PhysicalPipelineState::Compiling,

@@ -230,6 +230,13 @@ extern "C" {
     /// Pending `DrivingSettings` JSON, or none.
     #[wasm_bindgen(js_namespace = window, js_name = gameDrivingSettings)]
     pub fn game_driving_settings() -> Option<String>;
+    /// Pending `Outfit` JSON, or none.
+    #[wasm_bindgen(js_namespace = window, js_name = gameOutfit)]
+    pub fn game_outfit() -> Option<String>;
+    /// Fills the appearance preview rect: x, y, width and height in canvas fractions.
+    /// False while the appearance screen is closed.
+    #[wasm_bindgen(js_namespace = window, js_name = gameAppearancePreview)]
+    pub fn game_appearance_preview(rect: &mut [f32]) -> bool;
     /// Fills 4 pads × 8 axes and 4 pads × 32 button bits (`GamepadFrame`).
     #[wasm_bindgen(js_namespace = window, js_name = gameGamepad)]
     pub fn game_gamepad(axes: &mut [f32], buttons: &mut [u32]);

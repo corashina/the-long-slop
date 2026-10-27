@@ -1,7 +1,8 @@
 //! Selected descriptor ownership and shared IO accounting, independent of the asset backend.
+use crate::ownership::PresentationLedger;
 use crate::{
     reference::{FileCatalog, ReferenceError, prototype_plan::PrototypePlan},
-    world::{PresentationAllocation, PresentationLedger},
+    world::PresentationAllocation,
 };
 use std::sync::Arc;
 
@@ -211,7 +212,7 @@ mod tests {
             staging: 1024,
         };
         // Credit for one job, its staging and its prototype bytes, but no pending claim.
-        let mut ledger = crate::world::PresentationLedger::default();
+        let mut ledger = crate::ownership::PresentationLedger::default();
         let mut credit = crate::world::PresentationAllocation::default();
         credit.jobs = 1;
         credit.staging_bytes = 1024;

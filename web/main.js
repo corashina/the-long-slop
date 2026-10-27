@@ -13,6 +13,8 @@ import {readAutosaveToggles} from './save-screen.js';
 export const saveRuntime=createSaveBridge();
 import {installDrawDistance} from './draw-distance.js';
 import {installDrivingSettings} from './driving-settings.js';
+import {installOutfit} from './outfit.js';
+import {createAppearance} from './appearance.js';
 import {createGamepad} from './gamepad.js';
 import {installSteeringWheel} from './steering-wheel.js';
 const gamepad=createGamepad(()=>navigator.getGamepads?.());
@@ -202,6 +204,7 @@ async function load(){
  const text=manifest_shell(bytes),manifest=JSON.parse(text);
  const {manifest_sha256:manifestHash}=await manifestStamp(bytes,manifest);
  installStartCar(window,document.querySelector('#start-car'),manifest.world.start_cars);
+ const outfit=installOutfit(window,()=>localStorage,manifest.clothing.characters);
  const range=manifest.world.draw_distance;
  slider=installDrawDistance(()=>localStorage,document.querySelector('#draw-distance'),document.querySelector('#draw-distance-value'),{minimum:range.minimum.drawDistance,maximum:range.maximum.drawDistance,fallback:range.default});
  fetched({path:'assets/reference/manifest.json',requiredBytes:bytes.byteLength,receivedBytes:bytes.byteLength});
@@ -218,7 +221,8 @@ async function load(){
  survival=createSurvival(manifest.ui,manifest.sleep.cooldown_seconds);
  audio=createAudio(manifest.audio);installAudioBridge(window,audio);
  window.addEventListener('pagehide',()=>audio.dispose());
- menu=createMenu({canvas,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
+ const appearance=createAppearance({target:window,document,canvas,edit:outfit,characters:manifest.clothing.characters});
+ menu=createMenu({canvas,appearance,ui:manifest.ui,drivingBindings:manifest.driving.bindings,saveSession,buildId:manifest.build_id,thumbnail:()=>lastThumbnail,sleeping:()=>sleeping,seated:()=>window.gameState.seated,slider,audio,onPause:()=>thumbnail.capture().then(blob=>{lastThumbnail=blob;}),clearInput:()=>input.clear(),queueAction:a=>{actions=a;}});
  const switchIconBytes=await readPackageAsset(manifest.lighting.switch_icon.path);
  const switchIconUrl=URL.createObjectURL(new Blob([switchIconBytes],{type:'image/png'}));
  const switchIcon=new Image();switchIcon.src=switchIconUrl;await switchIcon.decode();

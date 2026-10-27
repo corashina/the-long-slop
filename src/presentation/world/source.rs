@@ -1,9 +1,9 @@
 //! Source surfaces retain the same vertices and triangle ranges as collision publication.
 use super::super::materials::{SourceMaterial, SourceShadowMode, terrain::TerrainMaterial};
 use super::pipelines::{PipelineTicket, WorldPipelines};
+use crate::ownership::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
-use crate::world::renderer_pending::PipelineContinuation;
 use crate::world::{WorldRequest, WorldStream};
 use crate::{
     reference::{ReferenceError, SourceId},
@@ -174,8 +174,9 @@ impl SourceWorldVisuals {
             if !self.pending.as_ref().unwrap().continuation.drained() {
                 return Ok(());
             }
-            stream.discard_surface_renderer(&mut self.pending.as_mut().unwrap().continuation)?;
-            let pending = self.pending.take().unwrap();
+            let mut pending = self.pending.take().unwrap();
+            pending.continuation.release()?;
+            stream.discard_surface_renderer(pending.request, pending.key)?;
             for mesh in pending.meshes {
                 meshes.remove(mesh.id());
             }
@@ -185,7 +186,7 @@ impl SourceWorldVisuals {
     pub fn prepare_surface(
         &mut self,
         stream: &mut WorldStream,
-        ledger: &mut crate::world::PresentationLedger,
+        ledger: &mut crate::ownership::PresentationLedger,
         meshes: &mut Assets<Mesh>,
         pipelines: &mut WorldPipelines,
         fixed: &SourceFixedAssets,
@@ -208,7 +209,9 @@ impl SourceWorldVisuals {
             return Ok(());
         }
         if self.pending.is_none() {
-            let mut continuation = stream.reserve_surface_renderer(request, key)?;
+            stream.reserve_surface_renderer(request, key)?;
+            let mut continuation =
+                PipelineContinuation::counted(RendererOwner::Surface(request, key));
             let prepared = stream.prepared_surface().unwrap().1;
             let source = prepared.prototype.as_ref();
             let surface = &prepared.surface;
@@ -279,7 +282,7 @@ impl SourceWorldVisuals {
         if !pending.continuation.drained() {
             return Ok(());
         }
-        stream.accept_surface_renderer(request, key, &pending.continuation)
+        stream.accept_surface_renderer(request, key)
     }
     pub fn sync(
         &mut self,

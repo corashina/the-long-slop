@@ -22,7 +22,7 @@ use grass_mesh::GrassView;
 #[derive(Resource, Default)]
 pub struct SourcePresentationAllocation {
     session: u64,
-    pub(crate) fixed: crate::reference::fixed_reservation::FixedAllocation,
+    pub(crate) fixed: crate::ownership::fixed::FixedAllocation,
     pub(crate) lighting_cpu: usize,
     instance_cache_cpu: usize,
     lamps: (usize, usize, usize),
@@ -33,13 +33,13 @@ pub struct SourcePresentationAllocation {
     /// Primary appearance assets of the contents, reused each frame.
     primary_assets: Vec<crate::reference::AssetId>,
     /// Renderer share of the world budgets.
-    pub(crate) ledger: simulation::world::PresentationLedger,
+    pub(crate) ledger: crate::ownership::PresentationLedger,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
         session: u64,
-        fixed: crate::reference::fixed_reservation::FixedAllocation,
-        ledger: simulation::world::PresentationLedger,
+        fixed: crate::ownership::fixed::FixedAllocation,
+        ledger: crate::ownership::PresentationLedger,
     ) -> Self {
         Self {
             session,

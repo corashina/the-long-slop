@@ -83,7 +83,7 @@ impl PreparedPresentation {
                 .reserve_cache(&mut world.resource_mut::<SourcePresentationAllocation>().ledger)
         })?;
         // The candidate renderer spends its own credit from the candidate stream.
-        let mut ledger = crate::world::PresentationLedger::default();
+        let mut ledger = crate::ownership::PresentationLedger::default();
         super::world::preflight::configure_staging(
             &mut candidate.stream,
             &mut ledger,
@@ -108,7 +108,7 @@ impl PreparedPresentation {
             .resource::<super::fixed_assets::SourceFixedAssets>()
             .allocation_for_overlap(&mut overlap)?;
         candidate.stream.set_overlap(overlap)?;
-        let mut fixed_snapshot = crate::reference::fixed_reservation::FixedAllocation::default();
+        let mut fixed_snapshot = crate::ownership::fixed::FixedAllocation::default();
         world
             .resource::<super::fixed_assets::SourceFixedAssets>()
             .account(&mut ledger, &mut fixed_snapshot)?;

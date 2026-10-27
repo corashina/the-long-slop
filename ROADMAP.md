@@ -179,6 +179,17 @@ Run the X01c test pass (player ragdoll) in the same run:
 5. Load a save: no ragdoll is left.
 6. Press F3 during death. Compare with the frame rate rule.
 
+Run the X01d test pass (wearables, outfit, female body, appearance editor) in the same run:
+
+1. Re-export, then rebuild. Old exports and saves do not load (X01d added the worn slot and the `clothing.preview` record). The preview export is written without the assets: if it fails, read its error.
+2. Put on and take off each wearable type (glasses, hat, cap, helmet, mask) and the cigarette with Tab and X. The cigarette comes off first.
+3. Worn items are hidden in first person but cast shadows.
+4. Save and load with worn items: they stay worn. Die: each worn item drops.
+5. Open Appearance from the start menu and the pause menu. The preview figure shows next to the panel with the export camera and lights. Check the figure pose, the lights and the colors. Changes show at once. Back and Escape save. Reload the page: the outfit stays.
+6. Set Male and Female with custom colors and disabled parts. Check them in game (female pose follows the male joints by name), in the shadow and on the ragdoll. Check the submesh colors of each segment.
+7. Set the model modes Off, Shadow and Visible. Shadow hides the body but keeps its shadow.
+8. Check the world view and its shadows do not draw the preview figure. Check F3 with the screen open.
+
 Run the X02 part 1 test pass (damage and breaking) in the same run:
 
 1. Re-export, then rebuild. Old exports and saves do not load (breakables, gibs, break audio; save schema 26).
@@ -207,7 +218,7 @@ Run the X03a test pass (sky traffic) in the same run:
 
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
-| X01 | Player body and appearance | XL | Wearables, sunglasses, appearance editor, female body. [D05, D06, M10] |
+| X01 | Player body and appearance | XL | Sunglasses. [D06] |
 | X02 | Weapons and damage | XL | Guns, ammo, explosions (with melee tank and explosive hits) (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |

@@ -445,7 +445,7 @@ fn spawn_mesh(
         bevy::camera::visibility::NoFrustumCulling,
     ));
 }
-fn source_pose(p: &crate::reference::Transform) -> Transform {
+pub(super) fn source_pose(p: &crate::reference::Transform) -> Transform {
     Transform {
         translation: Vec3::from_array(p.translation),
         rotation: Quat::from_array(p.rotation),

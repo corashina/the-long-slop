@@ -96,6 +96,8 @@ def recover_clothing(source,manifest,output):
     result['outfit_source']=source_id(outfit)
     result['invisible_material']=source_id(source.resolve(outfit,source.read(outfit)['defInvisible']))
     result['ragdoll']=recover_ragdoll(source,manifest,output)
+    from .appearance_preview import recover_preview
+    result['preview']=recover_preview(source)
     return result
 
 
@@ -119,6 +121,8 @@ def validate_clothing(clothing,manifest):
     validate_glasses_profiles(clothing['glasses_profiles'],manifest)
     validate_dead_profile(clothing['dead_profile'],manifest)
     validate_ragdoll(clothing['ragdoll'],manifest,clothing)
+    from .appearance_preview import validate_preview
+    validate_preview(clothing['preview'],clothing,manifest)
     if len(clothing['wearables'])!=6:raise ValueError('Selected wearable count')
     nodes={n['id']:n for n in manifest['nodes']}
     for w,(pid,root,item,type_index) in zip(clothing['wearables'],FAMILIES,strict=True):
