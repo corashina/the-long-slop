@@ -124,6 +124,19 @@ impl SimDriver {
         }
     }
 
+    /// One simulation frame: accepts `command`, steps and fills `frame`.
+    pub fn tick(
+        &mut self,
+        reference: &ReferenceManifest,
+        command: SimCommand,
+        frame: &mut SimFrame,
+    ) {
+        self.accept(reference, command);
+        self.advance(reference);
+        self.advance_world(reference);
+        self.fill(reference, frame);
+    }
+
     /// Applies the menu actions and settings of `command` and queues its input.
     /// Save requests run after the input, so a pause in the same command counts.
     pub fn accept(&mut self, reference: &ReferenceManifest, mut command: SimCommand) {

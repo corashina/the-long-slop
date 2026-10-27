@@ -199,6 +199,15 @@ impl PerfBlock {
     }
 }
 
+/// Values that start a simulation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SimInit {
+    pub mode: crate::world::GameMode,
+    pub draw_distance: f32,
+    /// SHA-256 of the manifest bytes. The saves carry it.
+    pub manifest_sha256: String,
+}
+
 /// Renderer setup values of a new simulation.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SimStartup {
@@ -914,6 +923,15 @@ pub struct SimFrame {
 }
 
 impl SimFrame {
+    /// Removes the events: the renderer applies each frame once. The state stays.
+    pub fn clear_events(&mut self) {
+        self.conditions.clear();
+        self.audio.clear();
+        self.structures.clear();
+        self.changes.clear();
+        self.world = Default::default();
+        self.candidate = None;
+    }
     pub fn valve(&self, opening: OpeningId) -> f32 {
         self.valves
             .iter()

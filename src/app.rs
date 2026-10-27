@@ -1,6 +1,7 @@
 pub(crate) use simulation::cpu_profile;
 mod performance;
 pub(crate) mod save;
+mod sim_link;
 use crate::browser::*;
 use crate::presentation::{
     self,
@@ -9,7 +10,6 @@ use crate::presentation::{
 };
 use crate::reference::ReferenceManifest;
 use crate::simulation::FrameInput;
-use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
 use bevy::ecs as bevy_ecs;
@@ -18,7 +18,6 @@ use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
 use simulation::boundary::MouseLook;
 use simulation::boundary::{AudioCall, HudBlock, PoseRow, SimCommand, StateBlock};
-use simulation::driver::SimDriver;
 use simulation::host::game_now;
 use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
@@ -28,7 +27,7 @@ use wasm_bindgen::prelude::*;
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
-    pub sim: SimDriver,
+    link: sim_link::SimLink,
     /// Renderer setup values of the simulation.
     startup: simulation::boundary::SimStartup,
     /// Sequence of the last sent command.
@@ -155,7 +154,12 @@ pub fn run(
     if let Err(error) = crate::reference::AudioReference::from_value(&reference.audio, &reference) {
         game_audio_error(&error.to_string());
     }
-    let runtime = GarageRuntime::new(&reference, game_mode(&reference), draw_distance)
+    let init = simulation::boundary::SimInit {
+        mode: game_mode(&reference),
+        draw_distance,
+        manifest_sha256,
+    };
+    let (session, startup) = simulation::session::Session::new(Arc::clone(&reference), init)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let mut ledger = crate::ownership::PresentationLedger::default();
     let (fixed, graph) = crate::ownership::fixed::admit_control(
@@ -164,8 +168,6 @@ pub fn run(
         presentation::readiness::RendererStateHandle::default,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let sim = SimDriver::new(runtime, save::source_stamp(&reference, manifest_sha256));
-    let startup = sim.startup();
     let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
         startup.session,
         fixed,
@@ -178,7 +180,7 @@ pub fn run(
         .init_resource::<save::SaveRequests>()
         .insert_resource(Drive {
             view: startup.view,
-            sim,
+            link: sim_link::SimLink::new(session),
             startup,
             seq: 0,
             world_ms: 0.,
@@ -265,7 +267,6 @@ pub fn run(
                 read_input,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
-                advance_physics,
                 (fill_frame, prepare_world, sync_instances).chain(),
                 save::dispatch,
                 sync_imported,
@@ -611,11 +612,9 @@ fn read_input(
         candidate: requests.candidate_command(),
         listener: drive.listener,
     };
-    drive.sim.accept(&reference.0, command);
-}
-fn advance_physics(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
-    drive.sim.advance(&reference.0);
-    drive.sim.advance_world(&reference.0);
+    if let Err(error) = drive.link.send(command) {
+        game_failure(&error.0);
+    }
 }
 /// World camera of the last complete view snapshot. `None`: startup and load use the root camera.
 fn world_snapshot<'a>(
@@ -836,7 +835,7 @@ fn sync_instances(
         drive.world.failure.get_or_insert(error.to_string());
     }
 }
-/// Fills the frame after the simulation and world work of this Bevy frame.
+/// Takes the new simulation frame. Without one, the last state stays and its events go.
 fn fill_frame(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
@@ -844,7 +843,19 @@ fn fill_frame(
     mut allocation: ResMut<presentation::world::runtime::SourcePresentationAllocation>,
 ) {
     let drive = &mut *drive;
-    fill(drive, &reference.0, &mut frame);
+    match drive.link.receive(&mut frame.frame) {
+        Ok(true) => {}
+        Ok(false) => {
+            frame.frame.clear_events();
+            drive.view = drive.look.camera(&frame.frame);
+            return;
+        }
+        Err(error) => {
+            game_failure(&error.0);
+            return;
+        }
+    }
+    fill(drive, &mut frame);
     // After a restart the world changes belong to the candidate copy. The commit applies them.
     if !restarted(&frame.frame) {
         allocation.apply_world(&reference.0.world, &frame.frame.world);
@@ -857,9 +868,8 @@ pub(crate) fn restarted(frame: &simulation::boundary::SimFrame) -> bool {
         .iter()
         .any(|c| matches!(c, simulation::boundary::Change::Restarted))
 }
-/// Writes the runtime state into `frame` and applies its changes.
-fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameResource) {
-    drive.sim.fill(reference, &mut frame.frame);
+/// Applies the changes of the new frame.
+fn fill(drive: &mut Drive, frame: &mut SimFrameResource) {
     if restarted(&frame.frame) {
         // A new frame stream: drop the pose index and the tables of the old runtime.
         let next = std::mem::take(&mut frame.frame);
