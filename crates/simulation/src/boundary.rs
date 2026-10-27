@@ -320,6 +320,8 @@ impl StateBlock {
     pub const CHASE: u32 = 1 << 9;
     /// The storage startup frames are done.
     pub const STORAGE_READY: u32 = 1 << 10;
+    /// The simulation has a save candidate.
+    pub const CANDIDATE: u32 = 1 << 13;
     /// A save candidate restored its saved links.
     pub const RESTORED: u32 = 1 << 11;
     /// The world has no generation jobs and no pending work.
@@ -813,6 +815,15 @@ pub enum Change {
     Failure(String),
     /// Renderer credit of the world step for the renderer report of the command.
     Grant(crate::world::PresentationGrant),
+    /// The answer to a browser save request.
+    SaveResult {
+        id: u32,
+        kind: String,
+        payload: String,
+        error: String,
+    },
+    /// The prepared candidate replaced the runtime. A new frame stream starts with this frame.
+    Restarted,
 }
 
 /// Local rotation and z scale of one home cable rope.
@@ -869,6 +880,8 @@ pub struct SimFrame {
     pub hidden_nodes: Vec<u32>,
     pub node_materials: Vec<MaterialRow>,
     pub changes: Vec<Change>,
+    /// The frame of the save candidate, after a candidate step.
+    pub candidate: Option<Box<SimFrame>>,
 }
 
 impl SimFrame {
@@ -904,6 +917,25 @@ pub struct SimCommand {
     /// The browser asks for a world measurement.
     pub measure: bool,
     pub world: WorldCommand,
+    /// Save requests, in order.
+    pub save: Vec<SaveCommand>,
+    /// Renderer input of the next candidate step. `None`: the candidate waits.
+    pub candidate: Option<CandidateCommand>,
+}
+
+/// One save input of the renderer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SaveCommand {
+    /// A browser request: JSON with id, kind and payload.
+    Request {
+        json: String,
+        /// Game mode of a new world, from the browser menu.
+        mode: crate::world::GameMode,
+        /// Renderer scene epoch. A fresh session commits only in its epoch.
+        epoch: u32,
+    },
+    /// Drops the prepared session of request `id`.
+    Cancel(u32),
 }
 
 /// Renderer input of the world step.
@@ -930,6 +962,15 @@ pub struct CandidateCommand {
     pub shared: [usize; 2],
     /// Fixed asset bytes that both renderers share: CPU, GPU.
     pub fixed: [usize; 2],
+}
+
+impl CandidateCommand {
+    /// Adds a later command.
+    pub fn merge(&mut self, next: Self) {
+        self.world.merge(next.world);
+        self.shared = next.shared;
+        self.fixed = next.fixed;
+    }
 }
 
 /// Lamps the renderer admitted in its last step.
@@ -983,6 +1024,14 @@ impl SimCommand {
         self.calendar = next.calendar;
         self.measure |= next.measure;
         self.world.merge(next.world);
+        self.save.extend(next.save);
+        self.candidate = match (self.candidate.take(), next.candidate) {
+            (Some(mut candidate), Some(next)) => {
+                candidate.merge(next);
+                Some(candidate)
+            }
+            (candidate, next) => next.or(candidate),
+        };
     }
 }
 
@@ -992,6 +1041,10 @@ pub struct DecodeError(pub String);
 /// Writes the frame into `out`. `out` keeps its capacity between frames.
 pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     out.clear();
+    write(frame, out);
+}
+
+fn write(frame: &SimFrame, out: &mut Vec<u8>) {
     out.extend_from_slice(&frame.seq_consumed.to_le_bytes());
     out.extend_from_slice(bytemuck::bytes_of(&frame.state));
     out.extend_from_slice(bytemuck::bytes_of(&frame.hud));
@@ -1021,43 +1074,63 @@ pub fn encode(frame: &SimFrame, out: &mut Vec<u8>) {
     put_list(out, &frame.control_poses);
     put_list(out, &frame.node_visibility);
     put_list(out, &frame.audio);
-    *out = postcard::to_extend(&frame.changes, std::mem::take(out)).expect("frame changes encode");
+    put(out, &frame.changes);
+    match &frame.candidate {
+        Some(candidate) => {
+            out.push(1);
+            write(candidate, out);
+        }
+        None => out.push(0),
+    }
 }
 
 /// Reads `bytes` into `frame`, reusing its arrays.
 pub fn decode(bytes: &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
     let mut rest = bytes;
-    frame.seq_consumed = u64::from_le_bytes(take(&mut rest, 8)?.try_into().expect("8 bytes"));
-    frame.state = bytemuck::pod_read_unaligned(take(&mut rest, size_of::<StateBlock>())?);
-    frame.hud = bytemuck::pod_read_unaligned(take(&mut rest, size_of::<HudBlock>())?);
-    take_rows(&mut rest, &mut frame.previous)?;
-    take_rows(&mut rest, &mut frame.current)?;
-    take_rows(&mut rest, &mut frame.items)?;
-    take_rows(&mut rest, &mut frame.valves)?;
-    take_rows(&mut rest, &mut frame.joints)?;
-    take_rows(&mut rest, &mut frame.ragdoll)?;
-    take_rows(&mut rest, &mut frame.cigarettes)?;
-    take_rows(&mut rest, &mut frame.particle_groups)?;
-    take_rows(&mut rest, &mut frame.particles)?;
-    take_rows(&mut rest, &mut frame.decals)?;
-    take_rows(&mut rest, &mut frame.planes)?;
-    take_rows(&mut rest, &mut frame.conditions)?;
-    take_rows(&mut rest, &mut frame.washes)?;
-    take_rows(&mut rest, &mut frame.brush_poses)?;
-    take_rows(&mut rest, &mut frame.spray_colors)?;
-    take_rows(&mut rest, &mut frame.budgets)?;
-    take_rows(&mut rest, &mut frame.structures)?;
-    take_rows(&mut rest, &mut frame.structure_poses)?;
-    take_rows(&mut rest, &mut frame.hidden_nodes)?;
-    take_rows(&mut rest, &mut frame.node_materials)?;
-    frame.lighting = take_value(&mut rest)?;
-    take_list(&mut rest, &mut frame.lights)?;
-    take_list(&mut rest, &mut frame.lamp_materials)?;
-    take_list(&mut rest, &mut frame.control_poses)?;
-    take_list(&mut rest, &mut frame.node_visibility)?;
-    take_list(&mut rest, &mut frame.audio)?;
-    frame.changes = postcard::from_bytes(rest).map_err(|e| DecodeError(e.to_string()))?;
+    read(&mut rest, frame)?;
+    if !rest.is_empty() {
+        return Err(DecodeError("long frame".into()));
+    }
     Ok(())
+}
+
+fn read(rest: &mut &[u8], frame: &mut SimFrame) -> Result<(), DecodeError> {
+    frame.seq_consumed = u64::from_le_bytes(take(rest, 8)?.try_into().expect("8 bytes"));
+    frame.state = bytemuck::pod_read_unaligned(take(rest, size_of::<StateBlock>())?);
+    frame.hud = bytemuck::pod_read_unaligned(take(rest, size_of::<HudBlock>())?);
+    take_rows(rest, &mut frame.previous)?;
+    take_rows(rest, &mut frame.current)?;
+    take_rows(rest, &mut frame.items)?;
+    take_rows(rest, &mut frame.valves)?;
+    take_rows(rest, &mut frame.joints)?;
+    take_rows(rest, &mut frame.ragdoll)?;
+    take_rows(rest, &mut frame.cigarettes)?;
+    take_rows(rest, &mut frame.particle_groups)?;
+    take_rows(rest, &mut frame.particles)?;
+    take_rows(rest, &mut frame.decals)?;
+    take_rows(rest, &mut frame.planes)?;
+    take_rows(rest, &mut frame.conditions)?;
+    take_rows(rest, &mut frame.washes)?;
+    take_rows(rest, &mut frame.brush_poses)?;
+    take_rows(rest, &mut frame.spray_colors)?;
+    take_rows(rest, &mut frame.budgets)?;
+    take_rows(rest, &mut frame.structures)?;
+    take_rows(rest, &mut frame.structure_poses)?;
+    take_rows(rest, &mut frame.hidden_nodes)?;
+    take_rows(rest, &mut frame.node_materials)?;
+    frame.lighting = take_value(rest)?;
+    take_list(rest, &mut frame.lights)?;
+    take_list(rest, &mut frame.lamp_materials)?;
+    take_list(rest, &mut frame.control_poses)?;
+    take_list(rest, &mut frame.node_visibility)?;
+    take_list(rest, &mut frame.audio)?;
+    frame.changes = take_value(rest)?;
+    if take(rest, 1)?[0] == 1 {
+        read(rest, frame.candidate.get_or_insert_default())
+    } else {
+        frame.candidate = None;
+        Ok(())
+    }
 }
 
 fn put_rows<T: Pod>(out: &mut Vec<u8>, rows: &[T]) {

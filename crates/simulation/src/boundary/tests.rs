@@ -232,7 +232,19 @@ fn frame_round_trips() {
                 texts: vec!["ABC 123".into()],
             },
             Change::Failure("stream".into()),
+            Change::SaveResult {
+                id: 4,
+                kind: "Capture".into(),
+                payload: "{}".into(),
+                error: String::new(),
+            },
+            Change::Restarted,
         ],
+        candidate: Some(Box::new(SimFrame {
+            seq_consumed: 2,
+            changes: vec![Change::Failure("candidate".into())],
+            ..Default::default()
+        })),
     };
     let mut bytes = Vec::new();
     encode(&frame, &mut bytes);
@@ -276,6 +288,19 @@ fn command_round_trips() {
         });
     command.world.report = Some(crate::world::PresentationReport::default());
     command.world.lamps = LampAdmission::Pending;
+    command.save = vec![
+        SaveCommand::Request {
+            json: r#"{"id":1,"kind":"Prepare"}"#.into(),
+            mode: crate::world::GameMode::default(),
+            epoch: 3,
+        },
+        SaveCommand::Cancel(1),
+    ];
+    command.candidate = Some(CandidateCommand {
+        shared: [1, 2],
+        fixed: [3, 4],
+        ..Default::default()
+    });
     let mut bytes = Vec::new();
     encode_command(&command, &mut bytes);
     assert_eq!(decode_command(&bytes).unwrap(), command);

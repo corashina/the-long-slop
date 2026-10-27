@@ -68,7 +68,7 @@ pub use ::terrain::{
 pub use terrain::{terrain_evaluator, terrain_output_bound, terrain_settings, terrain_tile};
 
 /// Game mode. Biome: 0 Mixed, 1 Desert, 2 Winter, 3 Grass.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GameMode {
     pub biome: u8,
     pub start_car: StartCarChoice,

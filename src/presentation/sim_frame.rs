@@ -138,6 +138,8 @@ impl SimFrameResource {
                 Change::Measurements(json) => self.measurements = Some(json.clone()),
                 Change::Failure(failure) => self.failure = Some(failure.clone()),
                 Change::Grant(grant) => self.grant = Some(*grant),
+                // The save requests read these from the frame.
+                Change::SaveResult { .. } | Change::Restarted => {}
             }
         }
         let frame = &self.frame;
