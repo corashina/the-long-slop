@@ -775,6 +775,7 @@ mod batch_tests {
         ledger.grant(PresentationGrant {
             credit,
             reclaim: false,
+            ..Default::default()
         });
         let receipt_bytes = UploadReceipt::allocation_bytes();
         let operation = PipelineOperation::independent(&mut ledger, receipt_bytes, staging)

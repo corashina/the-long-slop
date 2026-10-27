@@ -221,6 +221,7 @@ mod tests {
         ledger.grant(crate::world::PresentationGrant {
             credit,
             reclaim: false,
+            ..Default::default()
         });
         assert!(request.fits(&mut ledger, 0, 0, true));
         assert!(!request.fits(&mut ledger, 0, 0, false));

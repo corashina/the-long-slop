@@ -282,6 +282,8 @@ pub struct WorldStream {
     terrain_ready: [bool; 3],
     shared_cpu_bytes: Option<usize>,
     publication_available: bool,
+    /// The renderer holds the publication slot of this frame.
+    publication_lent: bool,
     failure: Option<String>,
     last_road_work: usize,
 }
@@ -943,6 +945,7 @@ impl WorldStream {
             terrain_ready: [false; 3],
             shared_cpu_bytes: Some(shared_cpu_bytes),
             publication_available: false,
+            publication_lent: false,
             failure: None,
             last_road_work: 0,
         })
@@ -983,12 +986,17 @@ impl WorldStream {
         let reclaim = self
             .reclaim
             .swap(false, std::sync::atomic::Ordering::Relaxed);
+        // With nothing ready to publish, the renderer takes this frame's publication slot.
+        self.publication_lent =
+            self.failure.is_none() && self.ready.is_none() && self.ready_structures.is_empty();
+        let publication = self.publication_lent;
         if let Err(error) = self.set_presentation_allocation(covered) {
             self.presentation = credit;
             self.failure.get_or_insert(error.0);
             return super::PresentationGrant {
                 credit: PresentationAllocation::default(),
                 reclaim,
+                publication: false,
             };
         }
         let mut target = covered;
@@ -1011,6 +1019,7 @@ impl WorldStream {
         super::PresentationGrant {
             credit: target.zip(credit, usize::saturating_sub),
             reclaim,
+            publication,
         }
     }
     /// Free room of each renderer field next to the current credit.
@@ -1283,13 +1292,6 @@ impl WorldStream {
             "available": self.available_external_jobs(),
         })
     }
-    /// A completed renderer job uses the same frame publication slot as collision work.
-    pub fn take_presentation_publication(&mut self) -> bool {
-        if self.failure.is_some() {
-            return false;
-        }
-        std::mem::take(&mut self.publication_available)
-    }
     /// Holds a prototype for the renderer. True when the hold is new.
     /// The stream charges only its own table entry and the road prototype data.
     pub fn hold_prototype(&mut self, source: SourceId) -> Result<bool, ReferenceError> {
@@ -1543,7 +1545,7 @@ impl WorldStream {
         let started = crate::host::game_now();
         #[cfg(not(target_arch = "wasm32"))]
         let started = std::time::Instant::now();
-        self.publication_available = true;
+        self.publication_available = !self.publication_lent;
         self.last_road_work = 0;
         // Request and source-input changes force structures. Captured item motion only
         // revises replay selection; it must not restart the one-metre baseline.
@@ -4064,25 +4066,6 @@ impl WorldStream {
         )))
     }
     #[cfg(any(target_arch = "wasm32", test))]
-    pub fn reserve_grass_renderer(&self, entity: u64) -> PipelineContinuation {
-        PipelineContinuation::counted(RendererOwner::Grass(self.request, entity))
-    }
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn release_renderer_pending(
-        &mut self,
-        claim: &mut PipelineContinuation,
-    ) -> Result<(), ReferenceError> {
-        if matches!(claim.owner, RendererOwner::Surface(..)) {
-            return Err(ReferenceError(
-                "Surface claim belongs to its ready owner".into(),
-            ));
-        }
-        if !claim.drained() {
-            return Err(ReferenceError("Renderer physical work remains live".into()));
-        }
-        claim.release()
-    }
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn accept_structure_renderer(
         &mut self,
         request: WorldRequest,
@@ -4117,17 +4100,6 @@ impl WorldStream {
         let count = self.ready_structures.len();
         self.ready_structures.retain(|entry| entry != id);
         self.ready_structures.len() != count
-    }
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub fn release_grass_renderer(
-        &mut self,
-        entity: u64,
-        claim: &mut PipelineContinuation,
-    ) -> Result<(), ReferenceError> {
-        if !matches!(claim.owner, RendererOwner::Grass(_, owner) if owner == entity) {
-            return Err(ReferenceError("Wrong Grass renderer claim".into()));
-        }
-        self.release_renderer_pending(claim)
     }
     fn publish_structure(
         &mut self,

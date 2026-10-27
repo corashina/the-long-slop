@@ -1,6 +1,10 @@
 //! Renderer budget credit. The stream ledger checks the limits. The renderer spends the
 //! credit the stream gives it and reports its use once per frame.
 use super::PresentationAllocation;
+#[cfg(any(target_arch = "wasm32", test))]
+use super::WorldRequest;
+#[cfg(any(target_arch = "wasm32", test))]
+use super::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::reference::ReferenceError;
 
 impl PresentationAllocation {
@@ -47,6 +51,8 @@ pub struct PresentationReport {
 pub struct PresentationGrant {
     pub credit: PresentationAllocation,
     pub reclaim: bool,
+    /// The stream lends its publication slot of this frame.
+    pub publication: bool,
 }
 
 /// Renderer side of the budget. Admission checks spend credit; charges always apply.
@@ -56,6 +62,7 @@ pub struct PresentationLedger {
     used: PresentationAllocation,
     want: PresentationAllocation,
     reclaim: bool,
+    publication: bool,
 }
 
 impl PresentationLedger {
@@ -137,6 +144,30 @@ impl PresentationLedger {
         self.credit.pending -= 1;
         Ok(())
     }
+    /// Takes one pending claim for a Grass renderer.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn claim_grass(&mut self, request: WorldRequest, entity: u64) -> PipelineContinuation {
+        self.used.pending += 1;
+        PipelineContinuation::counted(RendererOwner::Grass(request, entity))
+    }
+    /// Gives back a drained Grass or structure claim.
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn release_claim(
+        &mut self,
+        claim: &mut PipelineContinuation,
+    ) -> Result<(), ReferenceError> {
+        if matches!(claim.owner, RendererOwner::Surface(..)) {
+            return Err(ReferenceError(
+                "Surface claim belongs to its ready owner".into(),
+            ));
+        }
+        claim.release()?;
+        self.release_pending()
+    }
+    /// True once per frame when the stream lends its publication slot.
+    pub fn take_publication(&mut self) -> bool {
+        std::mem::take(&mut self.publication)
+    }
     /// Frees one pending claim. Its credit stays until the report.
     pub fn release_pending(&mut self) -> Result<(), ReferenceError> {
         self.used.pending = self
@@ -170,6 +201,7 @@ impl PresentationLedger {
     pub fn grant(&mut self, grant: PresentationGrant) {
         self.credit = self.credit.zip(grant.credit, usize::saturating_add);
         self.reclaim = grant.reclaim;
+        self.publication = grant.publication;
     }
     /// Reports and takes the answer of `stream` in one call.
     pub fn exchange(&mut self, stream: &mut super::WorldStream) {
@@ -196,6 +228,7 @@ mod tests {
         ledger.grant(PresentationGrant {
             credit,
             reclaim: false,
+            ..Default::default()
         });
         assert!(ledger.can_request_independent(1));
         let mut used = ledger.allocation();
@@ -208,5 +241,29 @@ mod tests {
         ledger.release_pending().unwrap();
         let report = ledger.report();
         assert_eq!((report.release.jobs, report.release.pending), (1, 1));
+    }
+
+    #[test]
+    fn grass_claims_count_pending_and_publication_is_lent_once() {
+        let mut ledger = PresentationLedger::default();
+        let mut claim = ledger.claim_grass(
+            WorldRequest {
+                session: 1,
+                revision: 0,
+                player: [0.; 3],
+                vehicle: [0.; 3],
+            },
+            7,
+        );
+        assert_eq!(ledger.allocation().pending, 1);
+        ledger.release_claim(&mut claim).unwrap();
+        assert_eq!(ledger.allocation().pending, 0);
+        assert!(ledger.release_claim(&mut claim).is_err());
+        ledger.grant(PresentationGrant {
+            publication: true,
+            ..Default::default()
+        });
+        assert!(ledger.take_publication());
+        assert!(!ledger.take_publication());
     }
 }
