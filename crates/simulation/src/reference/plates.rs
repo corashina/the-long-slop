@@ -56,8 +56,8 @@ impl PlateLayoutReference {
             && finite(&l.margin)
             && finite(&l.color)
             && transform(&l.transform)
-            && l.horizontal_alignment == 2
-            && l.vertical_alignment == 512
+            && matches!(l.horizontal_alignment, 1 | 2)
+            && matches!(l.vertical_alignment, 256 | 512)
             && l.font_style == 1
             && l.font_weight == 400
     }

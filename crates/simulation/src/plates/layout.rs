@@ -70,8 +70,8 @@ pub fn layout_text(
     if layout.auto_sizing
         || layout.word_wrapping
         || layout.font_style & !1 != 0
-        || layout.horizontal_alignment != 2
-        || layout.vertical_alignment != 512
+        || !matches!(layout.horizontal_alignment, 1 | 2)
+        || !matches!(layout.vertical_alignment, 256 | 512)
         || layout.spacing[2] != 0.0
         || layout.spacing[3] != 0.0
         || text.contains(['\n', '\r', '<', '>'])
@@ -234,10 +234,19 @@ pub fn layout_text(
     }
     if !mesh.vertices.is_empty() {
         let max_advance = advance - last_spacing;
-        let dx = (0.5 - layout.pivot[0]) * layout.bounds[0]
-            + (layout.margin[0] - layout.margin[2] - max_advance) * 0.5;
-        let dy = (0.5 - layout.pivot[1]) * layout.bounds[1]
-            - (ascender + descender + layout.margin[1] - layout.margin[3]) * 0.5;
+        // TMP alignment: 1 left, 2 center; 256 top, 512 middle. Margins are left, top, right, bottom.
+        let [w, h] = layout.bounds;
+        let [left, top, right, bottom] = layout.margin;
+        let dx = if layout.horizontal_alignment == 1 {
+            -layout.pivot[0] * w + left
+        } else {
+            (0.5 - layout.pivot[0]) * w + (left - right - max_advance) * 0.5
+        };
+        let dy = if layout.vertical_alignment == 256 {
+            (1.0 - layout.pivot[1]) * h - top - ascender
+        } else {
+            (0.5 - layout.pivot[1]) * h - (ascender + descender + top - bottom) * 0.5
+        };
         for v in &mut mesh.vertices {
             v.position[0] += dx;
             v.position[1] += dy;
