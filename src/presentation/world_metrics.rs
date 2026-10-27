@@ -161,14 +161,9 @@ fn image_bytes(image: &Image) -> Option<usize> {
 }
 #[derive(Serialize)]
 struct Snapshot {
-    session: u64,
-    revision: u64,
-    world: crate::world::metrics::WorldMetrics,
+    simulation: serde_json::Value,
     startup: serde_json::Value,
     assets: AssetGroups,
-    physics_bodies: usize,
-    physics_colliders: usize,
-    active_items: usize,
     measurement_cache_cpu_bytes: usize,
     process_bytes: Option<usize>,
     driver_bytes: Option<usize>,
@@ -176,7 +171,7 @@ struct Snapshot {
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn publish(
-    drive: Res<crate::app::Drive>,
+    mut sim: ResMut<crate::presentation::sim_frame::SimFrameResource>,
     measured: Res<MeshMeasurements>,
     meshes: Res<Assets<Mesh>>,
     images: Res<Assets<Image>>,
@@ -191,15 +186,11 @@ pub(crate) fn publish(
     materials: Res<SourceMaterials>,
     server: Res<AssetServer>,
     pipelines: Res<crate::presentation::world::pipelines::WorldPipelines>,
-    fixed: (
-        Res<crate::presentation::fixed_assets::SourceFixedAssets>,
-        Res<crate::app::RuntimeReference>,
-    ),
+    fixed: Res<crate::presentation::fixed_assets::SourceFixedAssets>,
 ) {
-    if !crate::browser::game_measure_requested() {
+    let Some(simulation) = sim.measurements.take() else {
         return;
-    }
-    let (fixed, reference) = fixed;
+    };
     let mut mesh_owners = HashMap::new();
     for (_, handle) in &imported.gltfs {
         if let Some(gltf) = gltfs.get(handle) {
@@ -264,62 +255,19 @@ pub(crate) fn publish(
             group.unknown_gpu_handles += 1;
         }
     }
-    let runtime = &drive.sim.runtime;
-    let frame = runtime.stream.frame();
-    let Some(car_key) = runtime.vehicle.as_ref() else {
-        return;
-    };
-    let car = runtime.physics.snapshot(car_key);
     let snapshot = Snapshot {
-        session: frame.request.session,
-        revision: frame.request.revision,
-        world: runtime.stream.metrics(),
+        simulation: serde_json::from_str(&simulation).unwrap_or_default(),
         startup: serde_json::json!({
             "fixed": fixed.startup_audit(),
-            "simulation_seconds": runtime.simulation_seconds,
-            "vehicles": runtime.vehicles.keys().map(|key| serde_json::json!({
-                "key": key,
-                "active": runtime.physics.body_active(runtime.physics.chassis_handle(key)),
-                "absolute_position": runtime.persistent_world.absolute_vehicle_position(
-                    &runtime.physics, &frame.origin, key),
-            })).collect::<Vec<_>>(),
-            "retained_source_bodies": runtime.area.bodies.iter().filter_map(|(id, handle)| {
-                let record = reference.0.bodies.iter().find(|body| body.id == *id)?;
-                runtime.persistent_world.body_snapshot(*handle, crate::save::BodyIdentity::Source {
-                    source: crate::save::SourceKey::from(&record.source),
-                })
-            }).collect::<Vec<_>>(),
-            "player": {
-                "absolute_position": frame.origin.absolute(runtime.area.player.body_pose(&runtime.physics).position),
-                "controller": runtime.area.player.body_pose(&runtime.physics).position,
-                "body": runtime.physics.rapier().bodies[runtime.area.player.body_handle()].translation().to_array(),
-                "grounded": runtime.area.player.grounded(),
-            },
-            "vehicle": {
-                "position": car.pose.position, "rotation": car.pose.rotation,
-                "velocity": car.linear_velocity, "angular_velocity": car.angular_velocity,
-                "wheel_contacts": runtime.physics.wheel_contacts(car_key).collect::<Vec<_>>(),
-            },
-            "supported": runtime.world_supported(),
-            "required_ready": runtime.stream.required_ready(),
-            "failure": frame.failure,
             "surfaces": surfaces.startup_audit(),
             "textures": materials.world_textures.startup_audit(&images, &server),
             "primary": materials.primary_startup_audit(&server),
-            "gpu_ledger": {
-                "prototype_gpu": runtime.stream.presentation_credit().prototype_gpu,
-                "active_gpu": runtime.stream.presentation_credit().active_gpu,
-            },
-            "jobs": runtime.stream.startup_job_audit(),
             "instances": instances.startup_audit(&grass),
             "grass": grass.startup_audit(),
             "writers": writers.startup_audit(),
             "pipelines": pipelines.startup_audit(),
         }),
         assets: groups,
-        physics_bodies: runtime.physics.rapier().bodies.len(),
-        physics_colliders: runtime.physics.collider_count(),
-        active_items: runtime.area.items.len(),
         measurement_cache_cpu_bytes: crate::world::metrics::map_bytes(
             measured.bytes.capacity(),
             std::mem::size_of::<(AssetId<Mesh>, usize)>(),

@@ -164,6 +164,30 @@ pub struct StateBlock {
     pub pad: u32,
     /// Player camera. The renderer adds the mouse of commands after `SimFrame::seq_consumed`.
     pub look: LookBlock,
+    pub perf: PerfBlock,
+}
+
+/// F3 counters of the last frame.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct PerfBlock {
+    /// Milliseconds of the fixed steps.
+    pub physics_ms: f64,
+    pub render_cpu_bytes: f64,
+    pub render_gpu_bytes: f64,
+    pub frame_steps: u32,
+    /// Wheels of the current car that touch the ground.
+    pub contacts: u32,
+    pub bodies: u32,
+    pub colliders: u32,
+    pub roads: u32,
+    pub terrain: u32,
+    pub objects: u32,
+    pub jobs: u32,
+    pub pending: u32,
+    pub storms: u32,
+    pub storm_strength: f32,
+    pub weather_particles: u32,
 }
 
 /// Player camera of the last two steps: `parent * yaw * pitch * camera`.
@@ -262,6 +286,8 @@ impl StateBlock {
     pub const WORLD_READY: u32 = 1 << 8;
     /// The chase camera shows the seated car.
     pub const CHASE: u32 = 1 << 9;
+    /// The storage startup frames are done.
+    pub const STORAGE_READY: u32 = 1 << 10;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -739,6 +765,13 @@ pub enum Change {
     Screen(Box<crate::interaction::computer::screen::ScreenView>),
     /// The computers that have a screen. Screens of other items drop.
     Screens(Vec<ItemId>),
+    /// Plate texts of a world car, in `WorldVehicleReference::plates` order.
+    Plates {
+        id: GeneratedId,
+        texts: Vec<String>,
+    },
+    /// The simulation part of a world measurement, as JSON.
+    Measurements(String),
     Failure(String),
 }
 
@@ -828,6 +861,8 @@ pub struct SimCommand {
     pub settings: Option<DrivingSettings>,
     /// Local month and day.
     pub calendar: [u8; 2],
+    /// The browser asks for a world measurement.
+    pub measure: bool,
 }
 
 impl SimCommand {
@@ -851,6 +886,7 @@ impl SimCommand {
         self.assists = next.assists.or(self.assists);
         self.settings = next.settings.or(self.settings);
         self.calendar = next.calendar;
+        self.measure |= next.measure;
     }
 }
 
