@@ -5,7 +5,7 @@ pub(super) use crate::reference::fixed_reservation::{png_chain_staging, primary_
 use crate::{
     reference::{AssetId as SourceAssetId, ReferenceError},
     world::{
-        WorldStream,
+        RendererWorld,
         stream::{PROTOTYPE_CPU, PROTOTYPE_GPU},
     },
 };
@@ -304,7 +304,7 @@ impl SourceMaterials {
     }
     pub fn prepare_world_primary(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         server: &AssetServer,
         images: &mut Assets<Image>,
@@ -627,7 +627,7 @@ impl SourceMaterials {
     }
     pub fn prepare_world_deferred(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         server: &AssetServer,
         images: &mut Assets<Image>,

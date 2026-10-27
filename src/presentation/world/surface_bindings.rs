@@ -6,13 +6,13 @@ use crate::{
         SourceMaterial, SourceMaterials, authored_material, terrain::TerrainMaterial,
     },
     reference::{ReferenceError, ReferenceManifest, WorldValue},
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::prelude::*;
 impl SourceWorldVisuals {
     pub fn request_descriptors(
         &self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
@@ -28,7 +28,7 @@ impl SourceWorldVisuals {
     }
     pub fn prepare_bindings(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,

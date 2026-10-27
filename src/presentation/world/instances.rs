@@ -16,7 +16,7 @@ use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
     presentation::renderer_visibility::CameraHidden,
     reference::{ReferenceError, ReferenceManifest, WorldPrototypeReference},
-    world::{Placement, WorldStream},
+    world::{Placement, RendererWorld},
 };
 use bevy::math::{Affine3A, DMat4, DVec3};
 use bevy::platform::collections::HashMap;
@@ -204,7 +204,7 @@ pub struct SourceInstances {
     props: GpuProps,
     /// Changes when an instance is added or removed.
     revision: u64,
-    /// `WorldStream::structure_membership` of the last full retirement pass.
+    /// `RendererWorld::structure_membership` of the last full retirement pass.
     retire_key: Option<(u64, u64, u64)>,
     /// Indices of instances whose retirement started.
     retiring: Vec<usize>,
@@ -366,7 +366,7 @@ impl SourceInstances {
 
     pub fn request_descriptors(
         &self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
@@ -395,7 +395,7 @@ impl SourceInstances {
     }
     pub fn prepare(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         facts: &mut RendererFacts,
         reference: &ReferenceManifest,
@@ -1575,7 +1575,7 @@ impl SourceInstances {
     }
     pub fn retire(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,

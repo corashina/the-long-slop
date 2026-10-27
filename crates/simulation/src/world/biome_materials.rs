@@ -12,16 +12,6 @@ impl BiomeMaterials {
         table.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         Self(table)
     }
-    pub fn retained_bytes(&self) -> usize {
-        self.0.capacity() * std::mem::size_of::<(SourceId, [Option<SourceId>; 2])>()
-            + self
-                .0
-                .iter()
-                .map(|(d, v)| {
-                    d.file.capacity() + v.iter().flatten().map(|s| s.file.capacity()).sum::<usize>()
-                })
-                .sum::<usize>()
-    }
     /// Biome material for `material`. Desert (0), a null entry and an unknown material give `None`.
     pub fn variant(&self, material: &SourceId, biome: u8) -> Option<&SourceId> {
         let slot = (biome as usize).checked_sub(1)?;

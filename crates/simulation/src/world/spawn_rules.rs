@@ -140,7 +140,6 @@ impl SourceRules {
             .map(|i| self.nodes[i] as usize)
     }
     /// Preserve full-record LOD ownership when compact and full sources share an identity.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn full_record_owner<'a>(
         &self,
         reference: &'a WorldReference,

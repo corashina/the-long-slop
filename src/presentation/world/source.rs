@@ -4,10 +4,10 @@ use super::pipelines::{PipelineTicket, WorldPipelines};
 use crate::ownership::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
-use crate::world::{RendererFact, RendererFacts, WorldRequest, WorldStream};
+use crate::world::{RendererFact, RendererFacts, RendererWorld, WorldRequest};
 use crate::{
     reference::{ReferenceError, SourceId},
-    world::{SurfaceKey, WorldFrame, WorldLayer, WorldSurface},
+    world::{RendererFrame, SurfaceKey, WorldLayer, WorldSurface},
 };
 use bevy::ecs as bevy_ecs;
 use bevy::{
@@ -70,7 +70,7 @@ impl SourceWorldVisuals {
             .as_ref()
             .is_none_or(|p| p.continuation.drained())
     }
-    pub fn ready(&self, stream: &WorldStream) -> bool {
+    pub fn ready(&self, stream: &RendererWorld) -> bool {
         self.pending.is_none() && self.surfaces.len() == stream.frame().surfaces.len()
     }
     pub fn roots(&self) -> impl Iterator<Item = Entity> + '_ {
@@ -148,7 +148,7 @@ impl SourceWorldVisuals {
     }
     pub(crate) fn retire_stale(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
@@ -186,7 +186,7 @@ impl SourceWorldVisuals {
     }
     pub fn prepare_surface(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut crate::ownership::PresentationLedger,
         facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
@@ -289,7 +289,7 @@ impl SourceWorldVisuals {
     }
     pub fn sync(
         &mut self,
-        frame: &WorldFrame<'_>,
+        frame: &RendererFrame<'_>,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         roots: &mut super::runtime::WorldRoots,
