@@ -898,22 +898,15 @@ fn sync_world(
         *required_views = None;
     }
     let result = presentation
-        .prepare(
-            &mut runtime.stream,
+        .step_world(
+            runtime,
             &reference.0,
-            &mut runtime.physics,
-            &mut runtime.area,
-            &mut runtime.wheels,
-            &mut runtime.vehicles,
-            &mut runtime.powertrain,
-            view,
-            runtime.lighting.cycle.output().shader_time_seconds as f32,
-            lod_view,
-            enabled,
-            runtime.lighting.light_outputs(),
             required_views
                 .as_ref()
                 .map_or(&[], crate::world::RequiredViews::as_slice),
+            view,
+            lod_view,
+            enabled,
             budget_ms,
         )
         .and_then(|_| {

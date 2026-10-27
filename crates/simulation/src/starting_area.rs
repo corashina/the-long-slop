@@ -38,6 +38,7 @@ pub mod structure_frame;
 mod survival;
 pub mod wear;
 mod weather;
+mod world_step;
 pub use survival::DrinkResult;
 pub use survival::active_part as active_food_part;
 pub use survival::saved_food;

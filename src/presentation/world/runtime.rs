@@ -10,8 +10,6 @@ use crate::{
         materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
-    starting_area::StartingArea,
-    vehicle::PhysicsWorld,
     world::WorldStream,
 };
 use bevy::{
@@ -108,74 +106,59 @@ impl WorldPresentation<'_, '_> {
             &self.screens,
         )
     }
-    pub fn prepare(
+    /// Gives the renderer use to the stream and takes its grant. Once per frame.
+    fn exchange_credit(&mut self, stream: &mut WorldStream) {
+        self.allocation.ledger.exchange(stream);
+    }
+    /// The lamps the renderer admitted. The stream publishes only with them.
+    fn admitted_lights(&self) -> Option<&[crate::world::GeneratedId]> {
+        self.lights.road_lamps.admitted_lights()
+    }
+    /// Alternates world steps and renderer steps until `budget_ms` ends or nothing moves.
+    /// A budget of 0 runs one pair.
+    pub fn step_world(
         &mut self,
-        stream: &mut WorldStream,
+        runtime: &mut crate::starting_area::GarageRuntime,
         reference: &ReferenceManifest,
-        physics: &mut PhysicsWorld,
-        area: &mut StartingArea,
-        wheels: &mut crate::interaction::wheels::WheelAssemblies,
-        vehicles: &mut std::collections::BTreeMap<
-            crate::world::ObjectKey,
-            crate::starting_area::VehicleRuntime,
-        >,
-        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
+        required_views: &[crate::world::RequiredView],
         view: GrassView,
-        time: f32,
         lod_view: super::lod::LodView,
         enabled: bool,
-        light_outputs: &[crate::lighting::LightOutput],
-        required_views: &[crate::world::RequiredView],
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
-        self.allocation.ledger.exchange(stream);
+        self.exchange_credit(&mut runtime.stream);
         let started = simulation::host::game_now();
         loop {
-            let before = stream.metrics();
+            let before = runtime.stream.metrics();
             let remaining = (budget_ms - (simulation::host::game_now() - started)).max(0.);
-            self.prepare_step(
-                stream,
+            runtime.advance_world(reference, required_views, self.admitted_lights(), remaining)?;
+            self.prepare(
+                &mut runtime.stream,
                 reference,
-                physics,
-                area,
-                wheels,
-                vehicles,
-                powertrain,
                 view,
-                time,
+                runtime.lighting.cycle.output().shader_time_seconds as f32,
                 lod_view,
                 enabled,
-                light_outputs,
-                required_views,
-                remaining,
+                runtime.lighting.light_outputs(),
             )?;
             if budget_ms <= 0.
                 || simulation::host::game_now() - started >= budget_ms
-                || before == stream.metrics()
+                || before == runtime.stream.metrics()
             {
                 return Ok(());
             }
         }
     }
-    fn prepare_step(
+    /// One renderer step after the world step of the stream.
+    fn prepare(
         &mut self,
         stream: &mut WorldStream,
         reference: &ReferenceManifest,
-        physics: &mut PhysicsWorld,
-        area: &mut StartingArea,
-        wheels: &mut crate::interaction::wheels::WheelAssemblies,
-        vehicles: &mut std::collections::BTreeMap<
-            crate::world::ObjectKey,
-            crate::starting_area::VehicleRuntime,
-        >,
-        powertrain: &mut crate::simulation::powertrain::PowertrainParts,
         view: GrassView,
         time: f32,
         lod_view: super::lod::LodView,
         enabled: bool,
         light_outputs: &[crate::lighting::LightOutput],
-        required_views: &[crate::world::RequiredView],
-        budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         let _profile =
             crate::app::cpu_profile::Timer::new(crate::app::cpu_profile::Stage::RenderPreparation);
@@ -323,9 +306,6 @@ impl WorldPresentation<'_, '_> {
         ) {
             failure.get_or_insert(error);
         }
-        timer.next(crate::world::stream_profile::Stage::Stream);
-        stream.prepare(budget_ms);
-        stream.select_required(required_views);
         timer.next(crate::world::stream_profile::Stage::MaterialRetirement);
         while let Some(source) = self.prototypes.take_retired() {
             let prototype = reference
@@ -506,21 +486,6 @@ impl WorldPresentation<'_, '_> {
         a.objects = a.objects.saturating_sub(old.2) + lamps.2;
         self.allocation.ledger.set_allocation(a)?;
         self.allocation.lamps = lamps;
-        timer.next(crate::world::stream_profile::Stage::Publication);
-        // Light admission and complete renderer preparation precede collision mutation.
-        if let Some(required) = self.lights.road_lamps.admitted_lights() {
-            stream.publish(physics, required)?;
-        }
-        timer.next(crate::world::stream_profile::Stage::Supplies);
-        stream.sync_supplies(
-            reference,
-            &mut area.items,
-            &mut area.interaction,
-            physics,
-            wheels,
-            vehicles,
-            powertrain,
-        )?;
         timer.next(crate::world::stream_profile::Stage::SurfaceSync);
         self.surfaces.sync(
             &stream.frame(),
@@ -621,17 +586,7 @@ impl WorldPresentation<'_, '_> {
             &mut self.pipelines,
             &self.fixed,
         )?;
-        timer.next(crate::world::stream_profile::Stage::Capture);
-        stream.capture_changes(reference, &mut area.items, &area.interaction, physics);
         timer.next(crate::world::stream_profile::Stage::FinalCleanup);
-        stream.retire_structures(
-            physics,
-            &mut area.items,
-            &mut area.interaction,
-            wheels,
-            vehicles,
-            powertrain,
-        )?;
         self.instances.retire(
             stream,
             &mut self.allocation.ledger,
