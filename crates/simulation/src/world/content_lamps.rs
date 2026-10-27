@@ -135,6 +135,7 @@ impl WorldStream {
                 glow: None,
                 radio: None,
                 detector: None,
+                gun: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
@@ -577,6 +578,36 @@ impl WorldStream {
             }
         }
     }
+    /// A light on prototype node `node` of the generated item `parent`: the gun flash.
+    pub fn set_node_light(
+        &mut self,
+        parent: &GeneratedId,
+        node: u32,
+        enabled: bool,
+        intensity: f32,
+    ) {
+        let Some(content) = self
+            .contents
+            .active
+            .iter_mut()
+            .find(|c| c.content.placement.id == *parent)
+        else {
+            return;
+        };
+        for light in content
+            .content
+            .lights
+            .iter_mut()
+            .filter(|l| l.node == Some(node))
+        {
+            light.enabled = enabled;
+            light.intensity = intensity;
+            if let Some(current) = self.lights.iter_mut().find(|l| l.id == light.id) {
+                current.enabled = enabled;
+                current.intensity = intensity;
+            }
+        }
+    }
     fn refresh_lamp_outputs(&mut self) {
         for content in self.contents.instances() {
             for light in &content.lights {
@@ -646,6 +677,7 @@ mod tests {
                 glow: None,
                 radio: None,
                 detector: None,
+                gun: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,

@@ -80,6 +80,7 @@ button:focus-visible {outline:2px solid #fff;outline-offset:3px;}
 }
 #hud {position:absolute;inset:0;pointer-events:none;font-family:Arial,sans-serif;text-shadow:2px 2px 2px #000;}
 #crosshair {position:absolute;transform:translate(-50%,-50%);}
+#weapon-crosshair {position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);mask-size:contain;mask-repeat:no-repeat;mask-position:center;-webkit-mask-size:contain;-webkit-mask-repeat:no-repeat;-webkit-mask-position:center;pointer-events:none;}
 .action-row {position:absolute;margin:0;white-space:nowrap;text-shadow:2px 2px 2px #000;}
 #fluid-text {position:absolute;margin:0;white-space:pre;transform:translate(-50%,-50%);text-align:center;text-shadow:3px 3px 2px #000;}
 #carry-help {position:absolute;margin:0;white-space:pre;text-align:right;text-shadow:2px 2px 2px #000;}

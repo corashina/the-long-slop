@@ -62,6 +62,15 @@ impl GarageRuntime {
                 hud.flags |= flag;
             }
         }
+        if let Some(c) = self.area.interaction.guns.crosshair() {
+            hud.weapon_icon = c.sprite.map_or(0, |s| s + 1);
+            hud.weapon_color = c
+                .color
+                .iter()
+                .enumerate()
+                .map(|(i, v)| ((v.clamp(0., 1.) * 255.).round() as u32) << (8 * i))
+                .sum();
+        }
         let Some(key) = self.vehicle.as_ref() else {
             frame.hud = hud;
             return;
@@ -185,7 +194,9 @@ impl GarageRuntime {
             },
             light_control: available.light_control.map_or(0, |id| id.0),
             lmb_use: available.lmb_use,
-            prompts: available.prompts | self.stream.refill_prompt(),
+            prompts: available.prompts
+                | self.stream.refill_prompt()
+                | self.area.interaction.guns.prompt,
             computer: self.computer_prompt(),
             item: available.item,
             opening: available.opening,

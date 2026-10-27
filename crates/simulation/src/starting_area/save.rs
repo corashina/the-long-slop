@@ -96,6 +96,7 @@ impl GarageRuntime {
                 glow: None,
                 radio: None,
                 detector: None,
+                gun: None,
                 linear_velocity: [0.; 3],
                 angular_velocity: [0.; 3],
                 sleeping: false,
@@ -356,13 +357,18 @@ impl GarageRuntime {
             candidate.simulation_seconds,
             &saved.weather,
         );
-        super::spawned::restore_save(
+        let spawned = super::spawned::restore_save(
             reference,
             &mut candidate.area,
             &mut candidate.physics,
             &candidate.stream.origin,
             &saved.spawned,
         )?;
+        for (item, record) in spawned.into_iter().zip(&saved.spawned) {
+            if let Some(gun) = record.gun {
+                candidate.area.interaction.guns.restore(item, gun);
+            }
+        }
         super::survival::restore_foods(
             reference,
             &mut candidate.area,
@@ -588,10 +594,12 @@ impl GarageRuntime {
             },
             lighting: self.lighting.capture_save(&reference.lighting, &ids)?,
             view: ViewSnapshot { camera: view },
-            spawned: self
-                .area
-                .spawned
-                .capture_save(reference, &self.area.items, origin),
+            spawned: self.area.spawned.capture_save(
+                reference,
+                &self.area.items,
+                &self.area.interaction.guns,
+                origin,
+            ),
             foods: self.area.capture_foods(reference, origin),
             cigarettes: self.area.cigarettes.capture_save(&self.area.spawned),
             weather: self

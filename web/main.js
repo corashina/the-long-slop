@@ -106,6 +106,7 @@ window.gameInventory=(selected,a,b,c,d,progress)=>{
  inventory.selected=selected;inventory.slots[0]=a;inventory.slots[1]=b;inventory.slots[2]=c;inventory.slots[3]=d;inventory.progress=progress;
  window.gameState.inventory=inventory;feedback?.inventory(inventory);
 };
+window.gameWeaponCrosshair=(icon,color)=>feedback?.weapon(icon,color);
 const record={actions:0,context:0,name:'',notice:'',carrying:false,amount:0,capacity:0,hasName:false,noText:true,fluidName:'',condition:-1,held:'',throwCharge:0,throwActive:false,radioVolume:undefined,radioFrequency:undefined,radioAm:false,quantities:[0,0,0,0,0,0],fluidOrder:0,hose:0,computer:0};
 const settleSave=window.gameSaveResult;
 window.gameSaveResult=(id,kind,payload,error)=>{

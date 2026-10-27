@@ -27,6 +27,7 @@ pub mod cigarettes;
 mod computers;
 mod frame;
 mod frame_particles;
+mod guns;
 mod home_cable;
 pub mod hose;
 mod hud;

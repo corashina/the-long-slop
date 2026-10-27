@@ -113,7 +113,7 @@ export function createFeedback(ui,switchIconUrl,manifest) {
  function resize(){
   for(const row of rows){const role=destinations[row.role],box=applyLayout(row.n,ui.layouts[role]);row.family=families[role];row.top=box.y;row.line=box.fontSize*1.4;row.offset=-1;}
   placeRows();
-  const reticle=applyLayout(icon,ui.layouts.reticle),scale=reticle.scale;
+  const reticle=applyLayout(icon,ui.layouts.reticle),scale=reticle.scale;weaponScale=scale;weapon.style.width=weapon.style.height=40*scale+'px';
   const active=lastIcon||'default';icon.style.width=((active==='pickup'||active==='dismount'||active==='carrying')?75:active==='default'?35:40)*scale+'px';
   icon.style.height=(active==='default'?35:40)*scale+'px';icon.style.left='50%';icon.style.top='50%';
   icon.style.opacity=active==='default'?ui.layouts.reticle.image_color[3]:1;
@@ -153,6 +153,14 @@ export function createFeedback(ui,switchIconUrl,manifest) {
   const message=state.context===6?'Unlimited Gas':state.notice;
   if(message!==lastNotice){notice.textContent=message;lastNotice=message;}notice.hidden=!message;
  }
+ // fpscontroller GCWeapon: the gun crosshair sprite tinted by its color. It replaces the default crosshair.
+ const weapon=document.createElement('div');weapon.id='weapon-crosshair';weapon.hidden=true;root.append(weapon);let weaponIcon=0,weaponScale=1;
+ function setWeapon(sprite,color){
+  if(sprite!==weaponIcon){weaponIcon=sprite;const url=sprite?ui.urls[sprite-1]:'';weapon.style.maskImage=weapon.style.webkitMaskImage=url?`url("${url}")`:'none';}
+  weapon.style.backgroundColor=`rgba(${color&255},${color>>>8&255},${color>>>16&255},${(color>>>24&255)/255})`;
+  weapon.style.width=weapon.style.height=40*weaponScale+'px';
+  weapon.hidden=!sprite;icon.style.visibility=sprite?'hidden':'';
+ }
  const inventory=document.createElement('div');inventory.id='inventory';inventory.setAttribute('aria-label','Inventory');root.append(inventory);
  const slotNodes=Array.from({length:4},(_,i)=>{const tile=document.createElement('div'),number=document.createElement('span'),icon=document.createElement('img');number.textContent=String(i+1);icon.hidden=true;tile.append(number,icon);inventory.append(tile);return {tile,icon,id:0};});
  const itemIcons=new Map(manifest.items.filter(i=>i.pickup?.can_inventory).map(i=>[i.id,{name:i.name,url:ui.urls[ui.sprites.findIndex(s=>s.source.file===i.pickup.inventory_icon?.file&&s.source.path_id===i.pickup.inventory_icon?.path_id)]}]));
@@ -163,5 +171,5 @@ export function createFeedback(ui,switchIconUrl,manifest) {
  }
  const key=event=>{if(event.code==='Backspace'&&!event.repeat&&state.active){event.preventDefault();state.toggle();paint();}};
  window.addEventListener('keydown',key);window.addEventListener('resize',resize);resize();paint();
- return {state,inventory:updateInventory,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
+ return {state,inventory:updateInventory,weapon:setWeapon,drivingState(value,seated){if(value!==lastGear){gear.textContent='Gear: '+formatGear(value);lastGear=value;}if(seated!==wasSeated){gear.hidden=!seated;wasSeated=seated;}},update(record){if(state.update(record))paint();},setVisible(value){const before=state.visible;state.setVisible(value);if(before!==state.visible)paint();},dispose(){window.removeEventListener('keydown',key);window.removeEventListener('resize',resize);}};
 }

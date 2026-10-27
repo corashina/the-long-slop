@@ -1301,6 +1301,7 @@ fn replay_snapshot(position: [f64; 3]) -> super::super::ObjectSnapshot {
         glow: None,
         radio: None,
         detector: None,
+        gun: None,
         linear_velocity: [0.; 3],
         angular_velocity: [0.; 3],
         sleeping: false,
