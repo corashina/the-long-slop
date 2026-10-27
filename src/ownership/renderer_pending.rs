@@ -1,7 +1,7 @@
 //! Counted renderer owners serialize pipeline work through their existing pending claim.
 use super::{PresentationLedger, upload_receipt::UploadReceipt};
 use crate::reference::ReferenceError;
-use crate::world::{GeneratedId, SurfaceKey, WorldRequest, WorldStream};
+use crate::world::{GeneratedId, RendererWorld, SurfaceKey, WorldRequest};
 
 pub enum RendererOwner {
     Surface(WorldRequest, SurfaceKey),
@@ -48,7 +48,7 @@ impl PipelineContinuation {
         self.held = false;
         Ok(())
     }
-    pub fn validate(&self, stream: &WorldStream) -> Result<(), ReferenceError> {
+    pub fn validate(&self, stream: &RendererWorld) -> Result<(), ReferenceError> {
         if !self.held
             || self.request().session != stream.frame().request.session
             || self.flight.as_ref().is_some_and(UploadReceipt::stopped)
@@ -69,7 +69,7 @@ impl PipelineContinuation {
     }
     pub fn start(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         cpu: usize,
         staging: usize,

@@ -10,7 +10,7 @@ use crate::{
         materials::{grass::writers::GrassWriters, terrain::TerrainMaterial},
     },
     reference::{ReferenceError, ReferenceManifest},
-    world::WorldStream,
+    world::{RendererWorld, WorldStream},
 };
 use bevy::{
     ecs as bevy_ecs, ecs::system::SystemParam, mesh::skinning::SkinnedMeshInverseBindposes,
@@ -34,6 +34,8 @@ pub struct SourcePresentationAllocation {
     pub(crate) ledger: crate::ownership::PresentationLedger,
     /// Facts of the last renderer step. The world step applies them.
     facts: crate::world::RendererFacts,
+    /// Renderer view of the stream. The world step updates it.
+    pub(crate) world: Option<Box<RendererWorld>>,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
@@ -142,15 +144,23 @@ impl WorldPresentation<'_, '_> {
                 self.lights.road_lamps.admitted_lights(),
                 remaining,
             )?;
-            self.prepare(
-                &runtime.stream,
+            let mut world = self
+                .allocation
+                .world
+                .take()
+                .unwrap_or_else(|| Box::new(RendererWorld::new(&runtime.stream)));
+            runtime.stream.sync_renderer(&mut world);
+            let result = self.prepare(
+                &world,
                 reference,
                 view,
                 runtime.lighting.cycle.output().shader_time_seconds as f32,
                 lod_view,
                 enabled,
                 runtime.lighting.light_outputs(),
-            )?;
+            );
+            self.allocation.world = Some(world);
+            result?;
             if budget_ms <= 0.
                 || simulation::host::game_now() - started >= budget_ms
                 || before == runtime.stream.metrics()
@@ -162,7 +172,7 @@ impl WorldPresentation<'_, '_> {
     /// One renderer step after the world step of the stream.
     fn prepare(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         reference: &ReferenceManifest,
         view: GrassView,
         time: f32,
@@ -501,7 +511,7 @@ impl WorldPresentation<'_, '_> {
         timer.next(crate::world::stream_profile::Stage::Lamps);
         let lamps = super::lamps::source_lamp_admission(
             &stream.frame(),
-            stream.required_content().lights,
+            stream.required_lights(),
             &mut self.lights,
             reference,
             light_outputs,

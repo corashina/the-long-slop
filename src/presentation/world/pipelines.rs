@@ -7,7 +7,7 @@ use crate::ownership::renderer_pending::{
 };
 use crate::ownership::upload_receipt::UploadReceipt;
 use crate::{
-    presentation::materials::RenderingState, reference::ReferenceError, world::WorldStream,
+    presentation::materials::RenderingState, reference::ReferenceError, world::RendererWorld,
 };
 use bevy::render::renderer::RenderQueue;
 use bevy::{
@@ -176,7 +176,7 @@ impl WorldPipelines {
 
     pub fn request<M: Material>(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         mesh: &Handle<Mesh>,
         material: &Handle<M>,
@@ -186,7 +186,7 @@ impl WorldPipelines {
     }
     pub(crate) fn request_continuation<M: Material>(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         parent: &mut PipelineContinuation,
         mesh: &Handle<Mesh>,
@@ -197,7 +197,7 @@ impl WorldPipelines {
     }
     fn request_owned<M: Material>(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         mut parent: Option<&mut PipelineContinuation>,
         mesh: &Handle<Mesh>,
@@ -345,7 +345,7 @@ impl WorldPipelines {
     }
     pub fn prepare(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
     ) -> Result<(), ReferenceError> {
         self.session = stream.frame().request.session;

@@ -9,7 +9,7 @@ use super::{
 use crate::ownership::PresentationLedger;
 use crate::{
     reference::{ReferenceError, ReferenceManifest, SourceId, prototype_plan::PrototypePlan},
-    world::WorldStream,
+    world::RendererWorld,
 };
 use bevy::{
     asset::LoadState, ecs as bevy_ecs, mesh::skinning::SkinnedMeshInverseBindposes, prelude::*,
@@ -144,7 +144,7 @@ impl SourcePrototypes {
     }
     pub fn fork(
         &self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         facts: &mut crate::world::RendererFacts,
     ) -> Result<Self, ReferenceError> {
@@ -193,7 +193,7 @@ impl SourcePrototypes {
 
     pub fn request(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         source: &SourceId,
     ) -> Result<(), ReferenceError> {
@@ -249,7 +249,7 @@ impl SourcePrototypes {
     }
     pub fn admit_payload(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         server: &AssetServer,
@@ -403,7 +403,7 @@ impl SourcePrototypes {
     }
     pub fn retire_unused(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         reference: &ReferenceManifest,
         instances: &super::instances::SourceInstances,
     ) {
@@ -461,7 +461,7 @@ impl SourcePrototypes {
     }
     fn account(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
     ) -> Result<(), ReferenceError> {
         let session = stream.frame().request.session;
@@ -502,7 +502,7 @@ impl SourcePrototypes {
     }
     pub fn prepare(
         &mut self,
-        stream: &WorldStream,
+        stream: &RendererWorld,
         ledger: &mut PresentationLedger,
         facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,

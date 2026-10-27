@@ -525,7 +525,7 @@ impl GrassWriters {
     }
     pub fn configure(
         &mut self,
-        stream: &crate::world::WorldStream,
+        stream: &crate::world::RendererWorld,
         ledger: &mut crate::ownership::PresentationLedger,
         reference: &crate::reference::WorldReference,
     ) -> Result<(), crate::reference::ReferenceError> {
