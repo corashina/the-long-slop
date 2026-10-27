@@ -202,6 +202,7 @@ impl GarageRuntime {
                     self.area.restore_worn(&mut self.physics, slot, id)?;
                 }
             }
+            self.area.update_glasses(&self.stream);
         }
         if let Some(carry) = &pending.carry {
             let Ok(id) = ids.item(&carry.item) else {
@@ -474,6 +475,7 @@ impl GarageRuntime {
                 .area
                 .restore_worn(&mut candidate.physics, slot, id)?;
         }
+        candidate.area.update_glasses(&candidate.stream);
         let starter = reference.survival.starter_food;
         if candidate.area.items.get(starter).is_some_and(|i| i.removed) {
             candidate.area.items.get_mut(starter).unwrap().removed = false;

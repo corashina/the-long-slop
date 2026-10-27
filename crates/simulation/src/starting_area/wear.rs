@@ -1,5 +1,6 @@
 //! Worn items. Source `fpscontroller.Wear`, `TakeOff`, and the `puton` Tab path.
 use super::{GarageRuntime, StartingArea};
+use crate::boundary::GlassesState;
 use crate::interaction::InteractionState;
 use crate::interaction::feedback::ActionMask;
 use crate::interaction::items::{ItemLocation, node_pose};
@@ -7,6 +8,7 @@ use crate::interaction::wear::{WEAR_SLOTS, WornItems};
 use crate::reference::{ItemId, NodeId, ReferenceError, ReferenceManifest, SourceId};
 use crate::simulation::{FIXED_DT, FrameInput, keys, player_keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose, to_rapier};
+use crate::world::{NodeAppearance, ObjectKey, WorldStream};
 use rapier3d::math::Pose;
 use rapier3d::prelude::RigidBodyType;
 
@@ -18,6 +20,69 @@ struct WearRule {
     consumable: bool,
     /// Body pose in the anchor frame.
     worn_offset: Pose,
+    /// Source `szbglasscript` lenses. Empty for a wearable that is not glasses.
+    lenses: Vec<LensRule>,
+}
+
+/// One `GlassesLens`.
+#[derive(Clone)]
+struct LensRule {
+    /// The lens node and its parents below the item root, with the authored active state.
+    path: Vec<(SourceId, bool)>,
+    state: GlassesState,
+}
+
+impl LensRule {
+    fn new(
+        reference: &ReferenceManifest,
+        root: NodeId,
+        lens: &crate::reference::GlassesLens,
+    ) -> Result<Self, ReferenceError> {
+        let missing = || ReferenceError("Missing glasses lens node".into());
+        let mut path = Vec::new();
+        let mut id = lens.node;
+        while id != root {
+            let node = reference
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .ok_or_else(missing)?;
+            if path.len() > reference.nodes.len() {
+                return Err(missing());
+            }
+            path.push((node.source.clone(), node.active));
+            id = node.parent.ok_or_else(missing)?;
+        }
+        Ok(Self {
+            path,
+            state: GlassesState {
+                profile: lens
+                    .profile
+                    .ok_or_else(|| ReferenceError("Missing glasses lens profile".into()))?,
+                hide_flare: lens.disable_lens_flare,
+            },
+        })
+    }
+    /// The selector choices in `appearance` override the authored active state.
+    fn active(&self, appearance: &[NodeAppearance]) -> bool {
+        self.path.iter().all(|(source, authored)| {
+            appearance
+                .iter()
+                .rev()
+                .find_map(|a| a.active.filter(|_| a.node == *source))
+                .unwrap_or(*authored)
+        })
+    }
+}
+
+/// Source `szbglasscript.Start` registers the active lens. Returns the first one and the active count.
+fn active_lens(
+    lenses: &[LensRule],
+    appearance: &[NodeAppearance],
+) -> (Option<GlassesState>, usize) {
+    let mut active = lenses.iter().filter(|l| l.active(appearance));
+    let first = active.next().map(|l| l.state);
+    (first, first.map_or(0, |_| 1 + active.count()))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +97,10 @@ pub struct WearRuntime {
     anchors: [NodeId; WEAR_SLOTS],
     hold_seconds: f32,
     tab_elapsed: Option<f32>,
+    /// Source `PPVSunGlasses.profile` and `disableSunFlare` of the worn glasses.
+    pub glasses: Option<GlassesState>,
+    /// A glasses item had more than one active lens.
+    lens_warned: bool,
 }
 
 impl WearRuntime {
@@ -60,6 +129,11 @@ impl WearRuntime {
             } else {
                 Pose::IDENTITY
             };
+            let lenses = w
+                .lenses
+                .iter()
+                .map(|l| LensRule::new(reference, record.root, l))
+                .collect::<Result<Vec<_>, _>>()?;
             for pickup in &record.pickups {
                 let body = record
                     .bodies
@@ -75,6 +149,7 @@ impl WearRuntime {
                     slot,
                     consumable: record.consumable.is_some(),
                     worn_offset: root_in_anchor * body_local,
+                    lenses: lenses.clone(),
                 });
             }
         }
@@ -84,6 +159,8 @@ impl WearRuntime {
             anchors,
             hold_seconds: reference.inventory.equip_hold_seconds,
             tab_elapsed: None,
+            glasses: None,
+            lens_warned: false,
         })
     }
     /// The rule of a wearable item, by its pickup component.
@@ -166,6 +243,34 @@ impl StartingArea {
         }
         Ok(())
     }
+
+    /// Source `szbglasscript.Puton`: the active lens of the worn glasses, or none.
+    /// Run after each put on, take off and save restore.
+    pub(super) fn update_glasses(&mut self, stream: &WorldStream) {
+        let wear = &mut self.wear;
+        let rules = &wear.rules;
+        let Some(item) = wear
+            .worn
+            .slots
+            .iter()
+            .flatten()
+            .find(|w| !rules[w.rule].lenses.is_empty())
+        else {
+            wear.glasses = None;
+            return;
+        };
+        // Generated items keep their selector choices in the stream. Other items use the authored state.
+        let appearance = match self.items.object_key(item.id) {
+            ObjectKey::Generated(key) => stream.appearance(&key),
+            ObjectKey::Imported(_) => &[],
+        };
+        let (glasses, count) = active_lens(&rules[item.rule].lenses, appearance);
+        if count > 1 && !wear.lens_warned {
+            wear.lens_warned = true;
+            log::warn!("Glasses item {} has {count} active lenses", item.id.0);
+        }
+        wear.glasses = glasses;
+    }
 }
 
 impl GarageRuntime {
@@ -207,6 +312,7 @@ impl GarageRuntime {
         for item in self.area.wear.worn.take_all().into_iter().flatten() {
             self.take_off(item.id, false);
         }
+        self.area.update_glasses(&self.stream);
     }
 
     /// Short Tab release puts the held item on. `removeSunglasses` release takes one off.
@@ -227,6 +333,7 @@ impl GarageRuntime {
                 && wear.can_put_on(&self.area.interaction, id)
             {
                 self.area.put_on(&mut self.physics, id);
+                self.area.update_glasses(&self.stream);
                 input.held &= !keys::RECENTER;
                 input.pressed &= !keys::RECENTER;
                 input.released &= !keys::RECENTER;
@@ -244,7 +351,57 @@ impl GarageRuntime {
                 .take_off_next(|w| rules[w.rule].consumable)
             {
                 self.take_off(item.id, true);
+                self.area.update_glasses(&self.stream);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(path_id: i64) -> SourceId {
+        SourceId {
+            file: "test".into(),
+            path_id,
+        }
+    }
+
+    fn choice(path_id: i64, active: bool) -> NodeAppearance {
+        NodeAppearance {
+            node: source(path_id),
+            primary: None,
+            scale: None,
+            rotation: None,
+            active: Some(active),
+            material: None,
+            color: None,
+            color_material: None,
+        }
+    }
+
+    #[test]
+    fn selector_choices_pick_the_lens() {
+        // Lens 1 is inactive under branch 10. Lens 2 is active under branch 20.
+        let lens = |path: Vec<(SourceId, bool)>, profile| LensRule {
+            path,
+            state: GlassesState {
+                profile,
+                hide_flare: profile == 4,
+            },
+        };
+        let lenses = [
+            lens(vec![(source(1), false), (source(10), true)], 4),
+            lens(vec![(source(2), true), (source(20), true)], 2),
+        ];
+        let one = [choice(20, false), choice(1, true)];
+        let lens_4 = GlassesState {
+            profile: 4,
+            hide_flare: true,
+        };
+        assert_eq!(active_lens(&lenses, &one), (Some(lens_4), 1));
+        let none = [choice(10, false), choice(20, false)];
+        assert_eq!(active_lens(&lenses, &none), (None, 0));
     }
 }

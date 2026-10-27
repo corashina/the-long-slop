@@ -4254,6 +4254,7 @@ dependencies = [
  "glam 0.32.1",
  "grass-mesh",
  "js-sys",
+ "log",
  "postcard",
  "rapier3d",
  "road-mesh",
