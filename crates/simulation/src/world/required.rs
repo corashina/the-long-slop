@@ -2,7 +2,7 @@
 use super::{GeneratedId, GenerationCoverage, SurfaceKey, WorldBounds, WorldRequest};
 use crate::reference::shadow_candidates::{Bounds, DirectionalHull, intersects_camera};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RequiredView {
     pub camera: [[f32; 4]; 6],
     pub shadow: DirectionalHull,

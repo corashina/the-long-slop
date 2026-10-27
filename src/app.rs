@@ -24,9 +24,6 @@ use simulation::world::metrics::BUDGET_LABELS;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
-/// World generation time per frame while the loading panel shows.
-pub(crate) const LOADING_BUDGET_MS: f64 = 12.;
-
 #[derive(Resource)]
 pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
@@ -46,6 +43,8 @@ pub(crate) struct Drive {
     view_offset: [f32; 3],
     last_inventory: Option<([u32; 4], u8, u32)>,
     last_crosshair: Option<(u32, u32)>,
+    /// Renderer input of the next world step.
+    world: simulation::boundary::WorldCommand,
 }
 
 impl Drive {
@@ -184,6 +183,7 @@ pub fn run(
             view_offset: [0.; 3],
             last_inventory: None,
             last_crosshair: None,
+            world: Default::default(),
         })
         .insert_resource(ClearColor(Color::BLACK))
         .init_resource::<crate::render_scale::SceneScaleSetting>()
@@ -256,12 +256,13 @@ pub fn run(
             (
                 presentation::readiness::observe_main_readiness.before(check_ready),
                 check_ready,
+                select_world_views,
                 read_input,
                 save::dispatch,
                 presentation::lighting::bind_lighting,
                 presentation::lighting::lighting_readiness,
                 advance_physics,
-                (sync_world, fill_frame, sync_instances).chain(),
+                (fill_frame, prepare_world, sync_instances).chain(),
                 sync_imported,
                 presentation::reference::sync_home_cable,
                 presentation::consumables::sync,
@@ -606,41 +607,105 @@ fn read_input(
         settings,
         calendar: local_calendar(),
         measure: game_measure_requested(),
+        world: std::mem::take(&mut drive.world),
     };
     drive.sim.accept(&reference.0, command);
 }
 fn advance_physics(reference: Res<RuntimeReference>, mut drive: ResMut<Drive>) {
     drive.sim.advance(&reference.0);
+    drive.sim.advance_world(&reference.0);
 }
-fn sync_world(
+/// World camera of the last complete view snapshot. `None`: startup and load use the root camera.
+fn world_snapshot<'a>(
+    views: &'a presentation::view_frame::SourceViewFrame,
+    epoch: &presentation::view_frame::SourceSceneEpoch,
+    session: u64,
+) -> Option<&'a presentation::view_frame::ViewSnapshot> {
+    // Preparation consumes one completed pose/FOV pair.
+    let coherent = views.session == session
+        && views.scene == epoch.0
+        && views.views[..presentation::surface_views::WORLD_VIEWS]
+            .iter()
+            .all(Option::is_some);
+    coherent.then(|| {
+        views.views[0]
+            .as_ref()
+            .expect("complete world camera snapshot")
+    })
+}
+/// Direction of the main light, in source space.
+fn light_forward(cycle: &simulation::lighting::CycleOutput) -> [f32; 3] {
+    let [x, y, z] = cycle.directional_euler_degrees.map(f32::to_radians);
+    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
+    [forward.x, forward.y, -forward.z]
+}
+/// Writes the required camera views of the next world step into the world command.
+fn select_world_views(
     reference: Res<RuntimeReference>,
     mut drive: ResMut<Drive>,
+    sim: Res<SimFrameResource>,
+    requests: Res<save::SaveRequests>,
+    views: Res<presentation::view_frame::SourceViewFrame>,
+    mut required_views: Local<Option<crate::world::RequiredViews>>,
+    epoch: Res<presentation::view_frame::SourceSceneEpoch>,
+) {
+    let drive = &mut *drive;
+    drive.world.freeze = requests.freezes_world();
+    drive.world.views.clear();
+    let state = &sim.frame.state;
+    let Some(first) = world_snapshot(&views, &epoch, state.session) else {
+        *required_views = None;
+        return;
+    };
+    let forward = light_forward(&sim.frame.lighting.cycle);
+    let origin = state.stream_origin;
+    let mask = reference.0.render_lighting.lights[0].mask;
+    let result = (|| -> Result<(), crate::reference::ReferenceError> {
+        let first = presentation::view_frame::required_view(first, origin, forward, mask)?;
+        let required =
+            required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
+        required.reset(first);
+        presentation::view_frame::append_probe_required_views(
+            required,
+            &reference.0.render_lighting.probes,
+            &views.probe_position,
+            &views.probe_enabled,
+            origin,
+            forward,
+            mask,
+        )?;
+        drive.world.views.extend_from_slice(required.as_slice());
+        Ok(())
+    })();
+    if let Err(error) = result {
+        game_failure(&error.to_string());
+        drive.world.failure.get_or_insert(error.to_string());
+    }
+}
+/// One renderer step on the world copy after the world step of the frame.
+fn prepare_world(
+    reference: Res<RuntimeReference>,
+    mut drive: ResMut<Drive>,
+    mut sim: ResMut<SimFrameResource>,
     mut presentation: presentation::world::runtime::WorldPresentation,
     requests: Res<save::SaveRequests>,
     camera: Query<(&Projection, &Transform), With<DriveCamera>>,
     views: Res<presentation::view_frame::SourceViewFrame>,
-    mut required_views: Local<Option<crate::world::RequiredViews>>,
     epoch: Res<presentation::view_frame::SourceSceneEpoch>,
     windows: Query<&Window>,
 ) {
-    drive.world_ms = 0.;
+    let drive = &mut *drive;
+    drive.world_ms = sim.frame.state.perf.world_ms;
     if requests.freezes_world() {
         return;
     }
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
-    // Preparation consumes one completed pose/FOV pair. Startup and load use the root camera.
-    let coherent = views.session == drive.sim.runtime.stream.frame().request.session
-        && views.scene == epoch.0
-        && views.views[..presentation::surface_views::WORLD_VIEWS]
-            .iter()
-            .all(Option::is_some);
-    let snapshot = coherent.then(|| {
-        views.views[0]
-            .as_ref()
-            .expect("complete world camera snapshot")
-    });
+    let started = game_now();
+    presentation.sync_mirror(&drive.sim.runtime.stream);
+    let origin = presentation.origin().expect("synced renderer world");
+    let snapshot = world_snapshot(&views, &epoch, sim.frame.state.session);
     let camera_world = snapshot.map_or_else(
         || camera_transform.to_matrix(),
         |view| view.view_from_world.inverse(),
@@ -656,8 +721,6 @@ fn sync_world(
         },
         |view| view.fov_degrees,
     );
-    let started = game_now();
-    let origin = drive.sim.runtime.stream.origin;
     let position = Vec3::from_array(
         origin
             .absolute(camera_world.w_axis.truncate().to_array())
@@ -691,95 +754,22 @@ fn sync_world(
             _ => None,
         },
     };
-    // The loading panel covers the screen, so generation can use most of each frame.
-    let budget_ms = if drive.ready { 0. } else { LOADING_BUDGET_MS };
-    let runtime = &mut drive.sim.runtime;
-    runtime.stream.advance_generation();
-    let was_aligned = runtime.startup_aligned;
-    let enabled = runtime
-        .lighting
-        .road_lamp_output(&reference.0.lighting)
-        .enabled;
-    let [x, y, z] = runtime
-        .lighting
-        .cycle
-        .output()
-        .directional_euler_degrees
-        .map(f32::to_radians);
-    let forward = Quat::from_euler(EulerRot::YXZ, -y, -x, z) * Vec3::NEG_Z;
-    let forward = [forward.x, forward.y, -forward.z];
-    if coherent {
-        let first = views.views[0]
-            .as_ref()
-            .expect("complete world camera snapshot");
-        let result = (|| -> Result<(), crate::reference::ReferenceError> {
-            let first = presentation::view_frame::required_view(
-                first,
-                runtime.stream.origin.offset,
-                forward,
-                reference.0.render_lighting.lights[0].mask,
-            )?;
-            let required =
-                required_views.get_or_insert_with(|| crate::world::RequiredViews::new(first));
-            required.reset(first);
-            presentation::view_frame::append_probe_required_views(
-                required,
-                &reference.0.render_lighting.probes,
-                &views.probe_position,
-                &views.probe_enabled,
-                runtime.stream.origin.offset,
-                forward,
-                reference.0.render_lighting.lights[0].mask,
-            )
-        })();
-        if let Err(error) = result {
-            runtime.stream.fail(error);
-            return;
-        }
-    } else {
-        *required_views = None;
+    let grant = sim.grant.take();
+    let frame = &sim.frame;
+    if let Err(error) = presentation.prepare_frame(
+        &reference.0,
+        grant,
+        view,
+        frame.lighting.cycle.shader_time_seconds as f32,
+        lod_view,
+        frame.lighting.road_lamp.enabled,
+        &frame.lights,
+        &mut drive.world,
+    ) {
+        game_failure(&error.to_string());
+        drive.world.failure.get_or_insert(error.to_string());
     }
-    let result = presentation
-        .step_world(
-            runtime,
-            &reference.0,
-            required_views
-                .as_ref()
-                .map_or(&[], crate::world::RequiredViews::as_slice),
-            view,
-            lod_view,
-            enabled,
-            budget_ms,
-        )
-        .and_then(|_| {
-            runtime
-                .align_startup(&reference.0, local_calendar())
-                .map(|_| ())
-        })
-        .and_then(|_| {
-            if runtime.has_deferred_save_links() {
-                runtime
-                    .advance_saved_restore(&reference.0)
-                    .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
-            }
-            runtime
-                .sync_world_activity(&reference.0)
-                .map_err(|e| crate::reference::ReferenceError(e.to_string()))?;
-            runtime.advance_recovery()
-        });
-    match result {
-        Ok(moved) => {
-            if moved || (!was_aligned && drive.sim.runtime.startup_aligned) {
-                drive.sim.clear_input();
-            }
-        }
-        Err(error) => {
-            game_failure(&error.to_string());
-            drive.sim.runtime.stream.fail(error);
-            drive.sim.runtime.clear_input();
-        }
-    }
-    drive.world_ms = game_now() - started;
+    drive.world_ms += game_now() - started;
 }
 
 pub(crate) fn sync_imported(
@@ -842,8 +832,7 @@ fn sync_instances(
     }
     if let Err(error) = presentation.sync_instances(&reference.0, &mut sim) {
         game_failure(&error.to_string());
-        drive.sim.runtime.stream.fail(error);
-        drive.sim.runtime.clear_input();
+        drive.world.failure.get_or_insert(error.to_string());
     }
 }
 /// Fills the frame after the simulation and world work of this Bevy frame.

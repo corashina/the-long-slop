@@ -50,7 +50,7 @@ fn intersect(a: Plane, b: Plane, c: Plane) -> [f32; 3] {
     std::array::from_fn(|i| ((b[3] * ac[i] + a[3] * cb[i]) - c[3] * ab[i]) * reciprocal)
 }
 /// Fixed capacity matches CalculateShadowCasterCull2d5300. No heap storage or padding changes the result.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DirectionalHull {
     planes: [Plane; 10],
     len: usize,
