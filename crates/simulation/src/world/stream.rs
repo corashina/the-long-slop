@@ -5318,6 +5318,9 @@ pub mod content_small_items;
 #[path = "content_ammo.rs"]
 mod content_ammo;
 
+#[path = "content_explosives.rs"]
+pub mod content_explosives;
+
 #[path = "content_computers.rs"]
 pub mod content_computers;
 

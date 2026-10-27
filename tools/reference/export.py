@@ -366,6 +366,9 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     from .guns import recover_guns, validate_guns
     # Before audio and UI: gun clips join source.item_clips, crosshair icons join the UI sprites.
     manifest['guns'] = recover_guns(source, manifest, output)
+    from .explosions import recover_explosions, validate_explosions
+    # Before audio: explosion and ear ring clips join source.item_clips.
+    manifest['explosions'] = recover_explosions(source, manifest, output)
     from .breakables import recover_breakables, recover_gib_constants
     # Before audio: breakable clips join source.item_clips.
     manifest['breakables'] = recover_breakables(source, manifest)
@@ -389,6 +392,7 @@ def _export_selected(source, output: Path, library, snapshot) -> None:
     validate_computer(manifest['computer'], manifest)
     validate_melee(manifest['melee'], manifest)
     validate_guns(manifest['guns'], manifest)
+    validate_explosions(manifest['explosions'], manifest)
     validate_skid(manifest['skid'])
     validate_clothing(manifest['clothing'],manifest)
     evidence=json.loads((output/'conditions-evidence.json').read_bytes())

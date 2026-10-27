@@ -277,6 +277,8 @@ struct TankRules {
     no_fill_this: bool,
     no_fill_from: bool,
     slow_oil: bool,
+    /// Generated tanks only. Imported tanks have no explosion export.
+    explosion: Option<crate::world::TankExplosion>,
 }
 
 impl InteractionState {
@@ -626,6 +628,7 @@ impl InteractionState {
                             no_fill_this: tank.no_fill_this,
                             no_fill_from: tank.no_fill_from,
                             slow_oil: tank.slow_oil,
+                            explosion: None,
                         },
                     )
                 })
@@ -1296,6 +1299,7 @@ impl InteractionState {
             no_fill_this: definition.no_fill_this,
             no_fill_from: definition.no_fill_from,
             slow_oil: number(tank_record, "slowOil")? != 0.0,
+            explosion: Some(definition.explosion),
         };
         // Subtract in f64 before conversion, so distant bindings retain local precision.
         let relative = VehiclePose {
@@ -1347,6 +1351,10 @@ impl InteractionState {
         self.supplies.remove(&tank);
         self.kinds.insert(tank, ItemKind::Container);
         Ok(())
+    }
+    /// tankscript explosion fields of a generated tank.
+    pub fn tank_explosion(&self, tank: ItemId) -> Option<&crate::world::TankExplosion> {
+        self.tank_rules.get(&tank)?.explosion.as_ref()
     }
     pub fn bind_generated_cap(&mut self, handle: ColliderHandle, cap: ItemId) {
         let binding = self
