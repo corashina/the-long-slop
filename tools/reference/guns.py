@@ -142,17 +142,13 @@ def _decal(source, prefab, output) -> dict:
     meshes=[(n,f) for n in hierarchy for f in kind(n,'MeshFilter')]
     destroyers=[c for n in hierarchy for c in kind(n,'DecalDestroyer')]
     if not meshes or len(destroyers)>1:raise ValueError(f'{key(root)} decal needs a mesh and at most one DecalDestroyer')
-    # Decals are two back-to-back quads. The decal pipeline does not cull, so the first quad draws both sides.
+    # Decals are a front quad and a back quad that faces into the hit surface. The decal pipeline does not
+    # cull, so the first quad draws both sides. The quads share mesh, material and scale.
     def quad(entry):
-        n,f=entry;t=source.read(n['reader'])
-        r=kind(n,'MeshRenderer');materials=[m['m_PathID'] for m in source.read(r[0])['m_Materials']] if len(r)==1 else None
-        return source.read(f)['m_Mesh']['m_PathID'],materials,vector(t['m_LocalPosition']),vector(t['m_LocalScale']),vector(t['m_LocalRotation'],4)
-    first=quad(meshes[0])
-    for entry in meshes[1:]:
-        other=quad(entry);x,y,z,w=other[4];a,b,c,e=first[4]
-        # q * (0,1,0,0): a half turn about local Y, with either quaternion sign.
-        flipped=(x,y,z,w) in {(-c,e,a,-b),(c,-e,-a,b)}
-        if other[:4]!=first[:4] or not flipped:raise ValueError(f'{key(root)} decal quads are not one back-to-back pair')
+        n,f=entry;r=kind(n,'MeshRenderer')
+        materials=[m['m_PathID'] for m in source.read(r[0])['m_Materials']] if len(r)==1 else None
+        return source.read(f)['m_Mesh']['m_PathID'],materials,vector(source.read(n['reader'])['m_LocalScale'])
+    if any(quad(entry)!=quad(meshes[0]) for entry in meshes[1:]):raise ValueError(f'{key(root)} decal quads differ')
     n,f=meshes[0]
     mesh=source.resolve(f,source.read(f)['m_Mesh'])
     renderers=kind(n,'MeshRenderer')

@@ -408,7 +408,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
     # fpscontroller.pointKefe slide voice. The player root is not an audio root.
     point = manifest['conditions']['player_brush']['voice_source']
-    if point: voice(source.get(point['file'], point['path_id']))
+    if point: voice(source.get(point['file'], point['path_id']),
+        [method('objSlideOnColliderScript', 'Update'), method('objSlideOnColliderScript', 'Disable')])
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
     for prefab in manifest['sky']['prefabs']:
         prefab['voices'] = [voice(source.get(v['file'], v['path_id']), [method('AirPlaneSpawnScript', 'Update')]) for v in prefab['voices']]
