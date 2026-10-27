@@ -59,6 +59,10 @@ pub(crate) struct SimFrameResource {
     pub material_sources: Vec<SourceId>,
     /// Slots whose view changed since the instances last read them.
     pub changed_structures: Vec<u32>,
+    /// Screens to draw, oldest first. The computer screens take them.
+    pub screens: Vec<simulation::interaction::computer::screen::ScreenView>,
+    /// The new computer set, if it changed.
+    pub screen_set: Option<Vec<ItemId>>,
     /// A structure took or left a slot since the instances last read them.
     pub structures_moved: bool,
 }
@@ -118,6 +122,8 @@ impl SimFrameResource {
                     self.structure_views[*slot as usize].caps.clone_from(caps);
                 }
                 Change::MaterialSource(source) => self.material_sources.push(source.clone()),
+                Change::Screen(view) => self.screens.push((**view).clone()),
+                Change::Screens(items) => self.screen_set = Some(items.clone()),
                 Change::Failure(_) => {}
             }
         }

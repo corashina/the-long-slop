@@ -99,6 +99,8 @@ impl WorldPresentation<'_, '_> {
         reference: &ReferenceManifest,
         sim: &mut crate::presentation::sim_frame::SimFrameResource,
     ) -> Result<(), ReferenceError> {
+        self.screens
+            .sync(&reference.computer.computer, sim, &mut self.images);
         self.instances.sync(
             sim,
             reference,
@@ -141,7 +143,7 @@ impl WorldPresentation<'_, '_> {
                 remaining,
             )?;
             self.prepare(
-                &mut runtime.stream,
+                &runtime.stream,
                 reference,
                 view,
                 runtime.lighting.cycle.output().shader_time_seconds as f32,
@@ -160,7 +162,7 @@ impl WorldPresentation<'_, '_> {
     /// One renderer step after the world step of the stream.
     fn prepare(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         reference: &ReferenceManifest,
         view: GrassView,
         time: f32,
@@ -173,9 +175,11 @@ impl WorldPresentation<'_, '_> {
         let mut timer =
             crate::world::stream_profile::Timer::new(crate::world::stream_profile::Stage::Cleanup);
         self.grass.set_view(view);
+        let allocation = &mut *self.allocation;
         super::preflight::configure_staging(
             stream,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            &mut allocation.facts,
             &reference.file_catalog,
         )?;
         let allocation = &mut *self.allocation;
@@ -511,11 +515,6 @@ impl WorldPresentation<'_, '_> {
         self.allocation.ledger.set_allocation(a)?;
         self.allocation.lamps = lamps;
         timer.next(crate::world::stream_profile::Stage::InstanceSync);
-        self.screens.sync(
-            &reference.computer.computer,
-            &mut stream.computers,
-            &mut self.images,
-        );
         let instance_cache_cpu = self.instances.cache_bytes();
         if self.allocation.instance_cache_cpu != instance_cache_cpu {
             let mut allocation = self.allocation.ledger.allocation();

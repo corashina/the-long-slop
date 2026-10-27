@@ -81,7 +81,6 @@ impl Computers {
         &self.computers
     }
     /// Every computer with its screen change since the last call. Presentation draws them.
-    #[cfg(target_arch = "wasm32")]
     pub fn take_screens(&mut self, mut screen: impl FnMut(ItemId, &Computer, bool)) {
         for b in &mut self.computers {
             let changed = b.computer.take_changed();

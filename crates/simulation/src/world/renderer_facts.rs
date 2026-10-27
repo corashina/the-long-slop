@@ -4,6 +4,10 @@ use crate::reference::SourceId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RendererFact {
+    /// The renderer needs the prototype. The renderer checked `can_hold_prototype`.
+    HoldPrototype(SourceId),
+    /// The input staging reserve and metadata bytes. Once per stream.
+    ConfigureStaging { reserve: usize, metadata: usize },
     /// The prototype materials are ready.
     BindPrototype(SourceId),
     /// The renderer dropped the prototype.
@@ -30,6 +34,14 @@ impl RendererFacts {
     }
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+    pub fn contains(&self, fact: &RendererFact) -> bool {
+        self.0.contains(fact)
+    }
+    pub fn configures_staging(&self) -> bool {
+        self.0
+            .iter()
+            .any(|f| matches!(f, RendererFact::ConfigureStaging { .. }))
     }
     pub(super) fn drain(&mut self) -> std::vec::Drain<'_, RendererFact> {
         self.0.drain(..)

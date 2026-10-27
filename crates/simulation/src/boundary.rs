@@ -635,6 +635,10 @@ pub enum Change {
     },
     /// The next material source index names this source.
     MaterialSource(SourceId),
+    /// A computer screen changed or is new.
+    Screen(Box<crate::interaction::computer::screen::ScreenView>),
+    /// The computers that have a screen. Screens of other items drop.
+    Screens(Vec<ItemId>),
     Failure(String),
 }
 

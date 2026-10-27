@@ -168,7 +168,8 @@ struct RoadWork {
 /// Source world publication and session ownership.
 pub struct WorldStream {
     required: super::required::RequiredSelection,
-    lamp_material_choices: Vec<(SourceId, SourceId, Vec<SourceId>)>,
+    /// Lamp material variants by prototype and node. Renderer reads fill it.
+    lamp_material_choices: std::sync::Mutex<Vec<(SourceId, SourceId, Arc<[SourceId]>)>>,
     static_controls: Vec<super::contents::ContentInstance>,
     // Membership and order only, independent of live control state.
     static_control_revision: u64,
@@ -822,7 +823,7 @@ impl WorldStream {
         }
         Ok(Self {
             required: Default::default(),
-            lamp_material_choices: Vec::new(),
+            lamp_material_choices: Default::default(),
             static_controls: Vec::new(),
             static_control_revision: 0,
             binding_baseline: None,
@@ -1238,7 +1239,7 @@ impl WorldStream {
     pub fn dependency_staging_configured(&self) -> bool {
         self.dependency_staging_reserve != 0
     }
-    pub fn configure_dependency_staging(
+    fn configure_dependency_staging(
         &mut self,
         reserve: usize,
         metadata: usize,
@@ -1333,43 +1334,59 @@ impl WorldStream {
             "available": self.available_external_jobs(),
         })
     }
-    /// Holds a prototype for the renderer. True when the hold is new.
-    /// The stream charges only its own table entry and the road prototype data.
-    pub fn hold_prototype(&mut self, source: SourceId) -> Result<bool, ReferenceError> {
-        if self.prototype_holds.contains_key(&source) {
-            return Ok(false);
-        }
+    /// The road prototype index to fill and the stream bytes of a new hold.
+    fn hold_cost(&self, source: &SourceId) -> (Option<usize>, usize) {
         let road_index = self
             .reference
             .road
             .prototypes
             .iter()
-            .position(|id| id == &source);
-        let road_input = road_index
-            .filter(|&index| self.road_prototypes[index].is_none())
-            .map(|_| {
+            .position(|id| id == source)
+            .filter(|&index| self.road_prototypes[index].is_none());
+        let road_bytes = road_index.map_or(0, |_| {
+            super::road::road_prototype_bytes(
                 self.reference
                     .prototypes
                     .iter()
-                    .find(|p| p.source == source)
-                    .expect("validated road prototype")
-            });
-        let road_bytes = road_input.map_or(0, super::road::road_prototype_bytes);
+                    .find(|p| &p.source == source)
+                    .expect("validated road prototype"),
+            )
+        });
         let owner_bytes =
             super::metrics::map_insert_bytes(&self.prototype_holds) + source.file.capacity();
-        if self
-            .metrics()
-            .prototype_cpu_bytes
-            .checked_add(owner_bytes.saturating_add(road_bytes))
-            .is_none_or(|v| v > PROTOTYPE_CPU)
-        {
+        (road_index, owner_bytes.saturating_add(road_bytes))
+    }
+    pub fn holds_prototype(&self, source: &SourceId) -> bool {
+        self.prototype_holds.contains_key(source)
+    }
+    /// True if the stream holds the prototype or has room for the hold.
+    pub fn can_hold_prototype(&self, source: &SourceId) -> bool {
+        self.holds_prototype(source)
+            || self
+                .metrics()
+                .prototype_cpu_bytes
+                .checked_add(self.hold_cost(source).1)
+                .is_some_and(|v| v <= PROTOTYPE_CPU)
+    }
+    /// Holds a prototype for the renderer. True when the hold is new.
+    /// The stream charges only its own table entry and the road prototype data.
+    fn hold_prototype(&mut self, source: SourceId) -> Result<bool, ReferenceError> {
+        if self.holds_prototype(&source) {
+            return Ok(false);
+        }
+        if !self.can_hold_prototype(&source) {
             return Err(ReferenceError(format!(
                 "Source prototype budget {}:{}",
                 source.file, source.path_id
             )));
         }
-        if let Some(prototype) = road_input {
-            let index = road_index.unwrap();
+        if let Some(index) = self.hold_cost(&source).0 {
+            let prototype = self
+                .reference
+                .prototypes
+                .iter()
+                .find(|p| p.source == source)
+                .expect("validated road prototype");
             self.road_source_revisions[index] = self.road_source_revisions[index]
                 .checked_add(1)
                 .ok_or_else(|| ReferenceError("Road source revision exhausted".into()))?;
@@ -1382,7 +1399,7 @@ impl WorldStream {
     pub fn presentation_credit(&self) -> PresentationAllocation {
         self.presentation
     }
-    pub fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
+    fn bind_prototype(&mut self, source: &SourceId) -> Result<(), ReferenceError> {
         let bound = self.prototype_holds.get_mut(source).ok_or_else(|| {
             ReferenceError(format!(
                 "Unheld source binding {}:{}",
@@ -2520,16 +2537,18 @@ impl WorldStream {
         self.biome_materials.variant(material, biome)
     }
     pub fn lamp_materials(
-        &mut self,
+        &self,
         prototype: &SourceId,
         node: &SourceId,
-    ) -> Result<&[SourceId], ReferenceError> {
-        if let Some(index) = self
+    ) -> Result<Arc<[SourceId]>, ReferenceError> {
+        if let Some((_, _, output)) = self
             .lamp_material_choices
+            .lock()
+            .unwrap()
             .iter()
-            .position(|(p, n, _)| p == prototype && n == node)
+            .find(|(p, n, _)| p == prototype && n == node)
         {
-            return Ok(&self.lamp_material_choices[index].2);
+            return Ok(output.clone());
         }
         let mut output = Vec::new();
         use super::spawn_rules::*;
@@ -2621,9 +2640,27 @@ impl WorldStream {
                 }
             }
         }
-        self.lamp_material_choices
-            .push((prototype.clone(), node.clone(), output));
-        Ok(&self.lamp_material_choices.last().unwrap().2)
+        let output: Arc<[SourceId]> = output.into();
+        self.lamp_material_choices.lock().unwrap().push((
+            prototype.clone(),
+            node.clone(),
+            output.clone(),
+        ));
+        Ok(output)
+    }
+    fn lamp_material_bytes(&self) -> usize {
+        let choices = self.lamp_material_choices.lock().unwrap();
+        choices.capacity() * std::mem::size_of::<(SourceId, SourceId, Arc<[SourceId]>)>()
+            + choices
+                .iter()
+                .map(|(p, n, v)| {
+                    p.file.capacity()
+                        + n.file.capacity()
+                        + 16
+                        + v.len() * std::mem::size_of::<SourceId>()
+                        + v.iter().map(|s| s.file.capacity()).sum::<usize>()
+                })
+                .sum::<usize>()
     }
     pub fn prop_material(&self, placement: &Placement) -> Option<(&SourceId, &SourceId)> {
         self.props.material(placement)
@@ -3432,7 +3469,13 @@ impl WorldStream {
         let session = self.request.session;
         for fact in facts.drain() {
             match fact {
+                HoldPrototype(source) => {
+                    self.hold_prototype(source)?;
+                }
                 BindPrototype(source) => self.bind_prototype(&source)?,
+                ConfigureStaging { reserve, metadata } => {
+                    self.configure_dependency_staging(reserve, metadata)?
+                }
                 ReleasePrototype(source) => self.release_prototype(&source)?,
                 BindRecipe(source) => self.bind_structure_recipe(&source)?,
                 ReserveSurface(request, key) if request.session == session => {
@@ -5041,18 +5084,7 @@ impl WorldStream {
             active_cpu_bytes: std::mem::size_of::<Self>()
                 + self.road_worker_reserved_bytes
                 + self.road_worker.cache_bytes()
-                + self.lamp_material_choices.capacity()
-                    * std::mem::size_of::<(SourceId, SourceId, Vec<SourceId>)>()
-                + self
-                    .lamp_material_choices
-                    .iter()
-                    .map(|(p, n, v)| {
-                        p.file.capacity()
-                            + n.file.capacity()
-                            + v.capacity() * std::mem::size_of::<SourceId>()
-                            + v.iter().map(|s| s.file.capacity()).sum::<usize>()
-                    })
-                    .sum::<usize>()
+                + self.lamp_material_bytes()
                 + self.required.roads.capacity() * std::mem::size_of::<u32>()
                 + self.required.terrain.capacity() * std::mem::size_of::<SurfaceKey>()
                 + (self.required.structures.capacity() + self.required.lights.capacity())

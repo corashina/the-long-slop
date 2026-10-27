@@ -144,8 +144,9 @@ impl SourcePrototypes {
     }
     pub fn fork(
         &self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
+        facts: &mut crate::world::RendererFacts,
     ) -> Result<Self, ReferenceError> {
         if !self.settled() {
             return Err(ReferenceError("Source prototype loads are pending".into()));
@@ -171,8 +172,8 @@ impl SourcePrototypes {
             let State::Ready(_) = &e.state else {
                 unreachable!()
             };
-            stream.hold_prototype(e.source.clone())?;
-            stream.bind_prototype(&e.source)?;
+            facts.push(crate::world::RendererFact::HoldPrototype(e.source.clone()));
+            facts.push(crate::world::RendererFact::BindPrototype(e.source.clone()));
             copy.entries.push(Entry {
                 source: e.source.clone(),
                 session,
@@ -248,7 +249,7 @@ impl SourcePrototypes {
     }
     pub fn admit_payload(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
         reference: &ReferenceManifest,
         server: &AssetServer,
@@ -501,7 +502,7 @@ impl SourcePrototypes {
     }
     pub fn prepare(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
         facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,
@@ -677,10 +678,13 @@ impl SourcePrototypes {
             let reservation = Reservation::metadata(&reference.file_catalog, &record.path)?;
             // A full stream table waits like a full credit.
             if !reservation.fits(ledger, entry.cpu, entry.gpu, true)
-                || stream.hold_prototype(entry.source.clone()).is_err()
+                || !stream.can_hold_prototype(&entry.source)
             {
                 return Ok(());
             }
+            facts.push(crate::world::RendererFact::HoldPrototype(
+                entry.source.clone(),
+            ));
             let handle = load_plan(
                 server,
                 &reference.file_catalog,

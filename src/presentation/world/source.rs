@@ -186,7 +186,7 @@ impl SourceWorldVisuals {
     }
     pub fn prepare_surface(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut crate::ownership::PresentationLedger,
         facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
