@@ -241,12 +241,7 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
     stream.bind_structure_recipe(&source).unwrap();
     for index in 0..stream.wanted_structures.len() {
         let id = stream.wanted_structures[index].id.clone();
-        let mut claim = stream
-            .reserve_instance_renderer(stream.request, &id)
-            .unwrap();
-        stream
-            .accept_structure_renderer(stream.request, &id, &mut claim)
-            .unwrap();
+        accept_structure(stream, &id);
     }
     assert_ne!(stream.plan_revision, stream.request.revision);
     stream.publish_structure(&mut run.physics, &[]).unwrap();
@@ -263,6 +258,13 @@ fn structure_publication_uses_nearest_focus_stable_ties_and_revision_guard() {
         );
     }
     assert!(stream.ready_structures.is_empty());
+}
+/// The native adapter charges and hands over one structure claim, as the renderer ledger does.
+fn accept_structure(stream: &mut WorldStream, id: &super::super::GeneratedId) {
+    stream.presentation.pending += 1;
+    stream
+        .accept_structure_renderer(stream.request, id)
+        .unwrap();
 }
 fn views() -> [super::super::RequiredView; 1] {
     let planes = [
@@ -285,14 +287,14 @@ fn views() -> [super::super::RequiredView; 1] {
 fn prepare_step(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    surface_claim: &mut Option<PipelineContinuation>,
+    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
 ) {
     prepare_step_for_views(run, reference, surface_claim, &views());
 }
 fn prepare_step_for_views(
     run: &mut GarageRuntime,
     reference: &ReferenceManifest,
-    surface_claim: &mut Option<PipelineContinuation>,
+    surface_claim: &mut Option<(WorldRequest, SurfaceKey)>,
     required_views: &[super::super::RequiredView],
 ) {
     let stream = &mut run.stream;
@@ -302,8 +304,8 @@ fn prepare_step_for_views(
         .as_ref()
         .is_some_and(|w| !same_request(w.request, stream.request))
     {
-        if let Some(mut claim) = surface_claim.take() {
-            stream.discard_surface_renderer(&mut claim).unwrap();
+        if let Some((request, key)) = surface_claim.take() {
+            stream.discard_surface_renderer(request, key).unwrap();
         }
     }
     stream.select_required(required_views);
@@ -340,21 +342,14 @@ fn prepare_step_for_views(
         stream.hold_prototype(p.prototype.clone()).unwrap();
         stream.bind_prototype(&p.prototype).unwrap();
         stream.bind_structure_recipe(&p.prototype).unwrap();
-        let mut claim = stream
-            .reserve_instance_renderer(stream.request, &p.id)
-            .unwrap();
-        stream
-            .accept_structure_renderer(stream.request, &p.id, &mut claim)
-            .unwrap();
+        accept_structure(stream, &p.id);
     }
     if let Some((request, surface)) = stream.prepared_surface() {
         let key = surface.key;
         if !stream.ready.as_ref().unwrap().renderer_reserved {
-            let claim = stream.reserve_surface_renderer(request, key).unwrap();
-            stream
-                .accept_surface_renderer(request, key, &claim)
-                .unwrap();
-            *surface_claim = Some(claim);
+            stream.reserve_surface_renderer(request, key).unwrap();
+            stream.accept_surface_renderer(request, key).unwrap();
+            *surface_claim = Some((request, key));
         }
     }
     let lights = stream.required.lights.clone();
@@ -382,14 +377,13 @@ pub fn prepare_ready(run: &mut GarageRuntime, reference: &ReferenceManifest) {
     for step in 0..2000 {
         prepare_step(run, reference, &mut surface_claim);
         if run.stream.required_ready() {
-            if let Some(mut claim) = surface_claim.take() {
-                let key = run.stream.ready.as_ref().unwrap().published.key;
+            if let Some((request, key)) = surface_claim.take() {
                 assert!(!run.stream.required.terrain.contains(&key));
                 assert!(
                     key.layer != WorldLayer::Road
                         || !run.stream.required.roads.contains(&(key.unit[0] as u32))
                 );
-                run.stream.discard_surface_renderer(&mut claim).unwrap();
+                run.stream.discard_surface_renderer(request, key).unwrap();
             }
             return;
         }
@@ -424,26 +418,16 @@ fn publish_with_receipts(run: &mut GarageRuntime) {
     let stream = &mut run.stream;
     let (request, surface) = stream.prepared_surface().unwrap();
     let key = surface.key;
-    let mut claim = stream.reserve_surface_renderer(request, key).unwrap();
-    for stage in ["geometry", "caster", "effect"] {
-        let receipt = super::super::upload_receipt::UploadReceipt::default();
-        receipt.register();
-        claim.watch_upload(receipt.clone());
-        assert!(
-            stream
-                .accept_surface_renderer(request, key, &claim)
-                .is_err(),
-            "{stage} must finish before renderer publication"
-        );
-        let lights = stream.required.lights.clone();
-        stream.publication_available = true;
-        stream.publish(&mut run.physics, &lights).unwrap();
-        assert!(!stream.required_ready(), "{stage} must block readiness");
-        receipt.complete();
-    }
-    stream
-        .accept_surface_renderer(request, key, &claim)
-        .unwrap();
+    stream.reserve_surface_renderer(request, key).unwrap();
+    // The renderer accepts only after its uploads finish. Until then publication waits.
+    let lights = stream.required.lights.clone();
+    stream.publication_available = true;
+    stream.publish(&mut run.physics, &lights).unwrap();
+    assert!(
+        !stream.required_ready(),
+        "renderer work must block readiness"
+    );
+    stream.accept_surface_renderer(request, key).unwrap();
     let lights = stream.required.lights.clone();
     stream.publication_available = true;
     stream.publish(&mut run.physics, &lights).unwrap();
@@ -715,11 +699,7 @@ fn mechanism_binding_gate(run: &mut GarageRuntime, reference: &ReferenceManifest
     run.stream.hold_prototype(prototype.source.clone()).unwrap();
     run.stream.bind_prototype(&prototype.source).unwrap();
     run.stream.bind_structure_recipe(&prototype.source).unwrap();
-    let request = run.stream.request;
-    let mut claim = run.stream.reserve_instance_renderer(request, &id).unwrap();
-    run.stream
-        .accept_structure_renderer(request, &id, &mut claim)
-        .unwrap();
+    accept_structure(&mut run.stream, &id);
     run.stream.publication_available = true;
     let lights = run.stream.required.lights.clone();
     run.stream
@@ -1937,12 +1917,7 @@ fn publish_decoration_fixture(run: &mut GarageRuntime, placement: Placement) {
     stream.hold_prototype(placement.prototype.clone()).unwrap();
     stream.bind_prototype(&placement.prototype).unwrap();
     stream.bind_structure_recipe(&placement.prototype).unwrap();
-    let mut claim = stream
-        .reserve_instance_renderer(stream.request, &placement.id)
-        .unwrap();
-    stream
-        .accept_structure_renderer(stream.request, &placement.id, &mut claim)
-        .unwrap();
+    accept_structure(stream, &placement.id);
     stream.plan_revision = stream.request.revision;
     stream.publish_structure(&mut run.physics, &[]).unwrap();
 }
