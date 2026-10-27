@@ -150,6 +150,8 @@ def export_ui(source, output, library):
     if not pairs:raise ValueError('Missing source menu frames')
     for identity in sorted(getattr(source, 'pickup_icons', set())):
         sprite(source.get(*identity), 'inventory-item')
+    for identity in sorted(getattr(source, 'crosshair_icons', set())):
+        sprite(source.get(*identity), 'crosshair')
     from .hose import hose_prompts
     from .caps import word
     from .computer import computer_prompts

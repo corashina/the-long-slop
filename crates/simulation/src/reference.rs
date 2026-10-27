@@ -56,6 +56,8 @@ pub mod computer;
 pub use computer::*;
 pub mod melee;
 pub use melee::*;
+pub mod guns;
+pub use guns::*;
 pub mod breakables;
 pub use breakables::*;
 pub mod wheel_effects;
@@ -897,6 +899,7 @@ pub struct ReferenceManifest {
     pub small_items: SmallItemsReference,
     pub computer: ComputerRecord,
     pub melee: MeleeReference,
+    pub guns: GunsReference,
     pub breakables: Vec<BreakableReference>,
     pub gib_constants: GibConstants,
     pub skid: SkidReference,
@@ -1894,6 +1897,7 @@ impl ReferenceManifest {
         self.small_items.validate(self)?;
         self.computer.validate(self)?;
         self.melee.validate(self)?;
+        self.guns.validate(self)?;
         ids(
             self.breakables.iter().map(|b| &b.source),
             "breakable sources",
