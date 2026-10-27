@@ -12,7 +12,7 @@ SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_
             (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'))
 # Checked Gib and reducedGib GameObjects of selected breakablescripts: beer, box, cacti, vase, wc,
 # then box, vase and wc reduced gibs. Box gib Transforms are 81642 and 81645.
-GIBS = (14653,39185,24388,39184,39189,39188,39187,39186)
+GIBS = (14653,39185,24388,39184,39189,39188,39187,39186,23303,39984)
 # Box gib root Transforms: pickup count, collider count, renderer count.
 BOX_GIBS = {81642:(56,58,56),81645:(14,15,14)}
 

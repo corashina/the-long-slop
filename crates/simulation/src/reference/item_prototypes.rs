@@ -263,8 +263,9 @@ pub struct GibReference {
 const SELECTED: [i64; 11] = [
     75443, 51722, 61587, 70812, 53838, 53837, 63605, 63259, 54495, 83430, 51557,
 ];
-/// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs.
-const GIB_COUNT: usize = 8;
+/// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs, then the
+/// tumbleweed gib and the Attachable07 gib.
+const GIB_COUNT: usize = 10;
 /// Box gib and reduced gib roots.
 pub(super) const BOX_GIBS: [i64; 2] = [81642, 81645];
 

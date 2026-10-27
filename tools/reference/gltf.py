@@ -449,8 +449,10 @@ class GltfExporter(GltfBuilder):
             self.world_variants(records)
         self.document.scenes.append(gl.Scene(nodes=root_nodes))
         self.document.scene = 0
-        self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
-        self.output.with_suffix('.bin').write_bytes(self.binary)
+        # A root without geometry (a particle-only gib) has no buffer.
+        if self.binary:
+            self.document.buffers.append(gl.Buffer(uri=self.output.with_suffix('.bin').name,byteLength=len(self.binary)))
+            self.output.with_suffix('.bin').write_bytes(self.binary)
         self.document.save_json(str(self.output))
         validate_gltf(self.output)
         paths={buffer.uri for buffer in self.document.buffers}|{image.uri for image in self.document.images}

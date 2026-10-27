@@ -152,8 +152,14 @@ def world_interiors(source, prototype, readers, mechanisms, evidence):
     result = []
     for r in readers:
         d = source.read(r)
-        if d['removableDoor'] or d['doorSlots'] or d['parentDoorSlot']['m_PathID']:
-            raise ValueError(f'World interior door slots need a source route: {key(r)}')
+        # GetValue reads doorSlots and parentDoorSlot only on a removableDoor interior.
+        removable = bool(d['removableDoor'])
+        slots = [source.resolve(r, p) for p in d['doorSlots']] if removable else []
+        if any(s is None or source.class_name(s) != 'partslotscript' for s in slots):
+            raise ValueError(f'World interior door slot is not a partslotscript: {key(r)}')
+        parent_slot = source.resolve(r, d['parentDoorSlot']) if removable else None
+        invert_slots = [bool(x) for x in d['invertindividual']][:len(slots)] if removable else []
+        invert_slots += [False] * (len(slots) - len(invert_slots))
         collider = interior_collider(source, r, d)
         if collider is None or source_id(collider) not in colliders:
             raise ValueError(f'World interior collider outside prototype: {key(r)}')
@@ -167,7 +173,10 @@ def world_interiors(source, prototype, readers, mechanisms, evidence):
             'invert': bool(d['invert']), 'minimum_doors_to_max': d['minDoorToMax'],
             'maximum_transmission': d['maxAtengedes'], 'use_value': bool(d['useValue']), 'value': d['value'],
             'doors': door_ids, 'invert_doors': invert,
-            'parent_door': door(r, d['parentDoor']) if d['parentDoor']['m_PathID'] else None, 'method': evidence})
+            'door_slots': [source_id(s) for s in slots], 'invert_slots': invert_slots,
+            'parent_slot': source_id(parent_slot) if parent_slot is not None else None,
+            'parent_door': door(r, d['parentDoor']) if d['parentDoor']['m_PathID'] and not removable else None,
+            'method': evidence})
     return result
 
 

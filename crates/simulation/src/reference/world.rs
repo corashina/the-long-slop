@@ -257,6 +257,12 @@ pub struct WorldInteriorReference {
     pub value: f32,
     pub doors: Vec<SourceId>,
     pub invert_doors: Vec<bool>,
+    /// `partslotscript` door slots of a `removableDoor` interior. The runtime has no part slot
+    /// binding for world interiors yet, so each slot counts as open, as an empty slot does.
+    pub door_slots: Vec<SourceId>,
+    pub invert_slots: Vec<bool>,
+    /// `parentDoorSlot` of a `removableDoor` interior. It also counts as open.
+    pub parent_slot: Option<SourceId>,
     pub parent_door: Option<SourceId>,
     pub method: super::AudioMethod,
 }
@@ -1915,6 +1921,7 @@ fn interiors_valid(p: &WorldPrototypeReference, doors: &[&SourceId]) -> Result<(
                 && interior.doors.iter().all(door)
                 && interior.parent_door.as_ref().is_none_or(door)
                 && interior.invert_doors.len() == interior.doors.len()
+                && interior.invert_slots.len() == interior.door_slots.len()
                 && finite(&[interior.maximum_transmission, interior.value])
                 && super::audio::method(&interior.method)
                 && interior.method.class == "interiorscript"
@@ -2237,7 +2244,7 @@ mod tests {
         );
         let interior = |parent: &str, door: u32| {
             format!(
-                r#"{{"collider":{},"parent":{parent},"invert":false,"minimum_doors_to_max":1,"maximum_transmission":1.0,"use_value":false,"value":0.0,"doors":[{}],"invert_doors":[false],"parent_door":null,"method":{method}}}"#,
+                r#"{{"collider":{},"parent":{parent},"invert":false,"minimum_doors_to_max":1,"maximum_transmission":1.0,"use_value":false,"value":0.0,"doors":[{}],"invert_doors":[false],"door_slots":[],"invert_slots":[],"parent_slot":null,"parent_door":null,"method":{method}}}"#,
                 s(1),
                 s(door)
             )
