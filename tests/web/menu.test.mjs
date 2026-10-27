@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createMenu,ACTIONS} from '../../web/menu.js';
 import {createInput} from '../../web/input.js';
+import {installOutfit} from '../../web/outfit.js';
+import {createAppearance} from '../../web/appearance.js';
 
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function event(type,properties={}){return Object.assign(new Event(type,{cancelable:true}),properties);}
@@ -9,12 +11,14 @@ function setup(t,session={}){
  const originals=new Map(['window','document','innerWidth','innerHeight'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
  const window=new EventTarget(),document=new EventTarget(),nodes=new Map(),actions=[];
  class Element extends EventTarget {
-  style={};classList={toggle(){}};hidden=false;disabled=false;checked=false;
+  style={};classList={toggle(){}};hidden=false;disabled=false;checked=false;value='';
   querySelectorAll(){return [];}
+  replaceChildren(...children){this.children=children;}append(...children){(this.children??=[]).push(...children);}setAttribute(){}
+  getBoundingClientRect(){return this.rect??{left:0,top:0,width:1280,height:720};}
   focus(){document.activeElement=this;}
  }
  document.querySelector=selector=>{if(!nodes.has(selector))nodes.set(selector,new Element());return nodes.get(selector);};
- document.pointerLockElement=null;document.hidden=false;document.fullscreenEnabled=false;
+ document.createElement=()=>new Element();document.pointerLockElement=null;document.hidden=false;document.fullscreenEnabled=false;
  Object.assign(globalThis,{window,document,innerWidth:1280,innerHeight:720});
  const canvas=document.querySelector('#game');let captures=0;
  canvas.requestPointerLock=async()=>{captures++;document.pointerLockElement=canvas;document.dispatchEvent(event('pointerlockchange'));};
@@ -22,13 +26,19 @@ function setup(t,session={}){
  const layout={canvas:{resolution:[1280,720],mode:0},ancestry:[],font_size:16,font:'sans-serif',color:[1,1,1,1],sprite:null};
  const roles=['start','start-controls','continue','restart','recover','controls','back'];
  const ui={layouts:Object.fromEntries(roles.map(role=>[role,layout])),urls:[],layoutUrls:{},pairUrls:[{background:'background',frame:'frame'}]};
+ const stored=new Map(),storage=()=>({getItem:key=>stored.get(key)??null,setItem:(key,value)=>stored.set(key,value)});
+ const segment=(name,disable_able)=>({name,default_enabled:true,disable_able,default_hsv:[0.1,0.2,0.3]});
+ const characters=[{segments:[segment('Hair',true),segment('Skin',false),segment('Shirt',false)]},{segments:[segment('Hair',true)]}];
+ const edit=installOutfit(window,storage,characters);
+ document.querySelector('#appearance-view').rect={left:440,top:0,width:840,height:720};
+ const appearance=createAppearance({target:window,document,canvas,edit,characters});
  let menu,locked=null,newGame=async()=>{};
  const input=createInput(canvas,()=>menu.model.state==='playing'&&document.pointerLockElement===canvas,[]);
- menu=createMenu({canvas,ui,drivingBindings:[],clearInput:input.clear,queueAction:action=>actions.push(action),slider:{lock(value){locked=value;}},saveSession:{newGame:()=>newGame(),cancel:()=>false,list:async()=>({saves:[],autosave:null,last:null}),...session},buildId:'b',thumbnail:()=>'thumb'});
+ menu=createMenu({canvas,appearance,ui,drivingBindings:[],clearInput:input.clear,queueAction:action=>actions.push(action),slider:{lock(value){locked=value;}},saveSession:{newGame:()=>newGame(),cancel:()=>false,list:async()=>({saves:[],autosave:null,last:null}),...session},buildId:'b',thumbnail:()=>'thumb'});
  const key=(code,repeat=false)=>window.dispatchEvent(event('keydown',{code,repeat}));
  const start=async()=>{menu.ready();document.querySelector('#new-game').dispatchEvent(event('click'));await settle();assert.equal(menu.model.state,'pause-menu');actions.length=0;};
  t.after(()=>{input.dispose();menu.dispose();for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}});
- return {menu,input,canvas,document,actions,key,start,get captures(){return captures;},get locked(){return locked;},set newGame(work){newGame=work;}};
+ return {menu,input,canvas,document,actions,key,start,window,edit,stored,get captures(){return captures;},get locked(){return locked;},set newGame(work){newGame=work;}};
 }
 
 test('escape_resumes_pauses_and_recaptures_without_stale_input',async t=>{
@@ -124,4 +134,33 @@ test('save_screen_opens_from_both_menus_and_escape_clears_selection_then_returns
  assert.deepEqual(calls,[['save','one','thumb']]);assert.equal(app.menu.model.status,'Save complete.');
  app.key('Escape');await settle();assert.equal(app.menu.model.state,'saves');assert.equal(app.menu.model.status,'Save complete.');
  app.key('Escape');await settle();assert.equal(app.menu.model.state,'pause-menu');
+});
+
+test('appearance_opens_from_both_menus_previews_and_saves_on_close',async t=>{
+ const app=setup(t),click=id=>app.document.querySelector(id).dispatchEvent(event('click')),rect=new Float32Array(4);
+ app.menu.ready();
+ assert.equal(app.window.gameAppearancePreview(rect),false);
+ click('#start-appearance');
+ assert.equal(app.menu.model.state,'appearance');assert.equal(app.document.querySelector('#appearance-screen').hidden,false);
+ assert.equal(app.window.gameAppearancePreview(rect),true);
+ assert.deepEqual([...rect],[440/1280,0,840/1280,1]);
+ // The parts list: Hair has a toggle, Skin does not.
+ const parts=app.document.querySelector('#appearance-parts').children;
+ assert.equal(parts.length,3);assert.equal(parts[0].children.length,2);assert.equal(parts[1].children.length,1);
+ app.window.gameOutfit();
+ parts[1].children[0].dispatchEvent(event('click'));
+ const hue=app.document.querySelector('#appearance-hue');hue.value='50';hue.dispatchEvent(event('input'));
+ assert.equal(app.edit.outfit.characters[0].segments[1].hue,.5);assert.equal(app.edit.outfit.characters[0].edited,true);
+ assert.match(app.window.gameOutfit(),/"hue":0.5/);
+ assert.equal(app.stored.size,0);
+ click('#appearance-back');
+ assert.equal(app.menu.model.state,'start-menu');assert.equal(app.window.gameAppearancePreview(rect),false);
+ assert.equal(JSON.parse(app.stored.get('the-long-slop.outfit')).characters[0].segments[1].hue,.5);
+ click('#appearance-reset');
+ assert.equal(app.edit.outfit.characters[0].edited,false);assert.equal(app.edit.outfit.characters[0].segments[1].hue,.1);
+ await app.start();
+ click('#appearance');assert.equal(app.menu.model.state,'appearance');
+ app.key('Escape');await settle();
+ assert.equal(app.menu.model.state,'pause-menu');
+ assert.equal(JSON.parse(app.stored.get('the-long-slop.outfit')).characters[0].edited,false);
 });

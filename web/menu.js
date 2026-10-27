@@ -4,7 +4,7 @@ import {canLoadLast} from './save-session.js';
 export const ACTIONS={PAUSE:2,CONTINUE:4,RECOVER:16};
 const pendingText={save:'Saving...',load:'Loading...',loadLast:'Loading...',remove:'Deleting...',newGame:'Starting a new game...'};
 const resultText={save:'Save complete.',load:'Game loaded.',loadLast:'Game loaded.',remove:'Save deleted.',newGame:'New game ready.'};
-const SUBSCREENS=['controls','game-mode','saves'];
+const SUBSCREENS=['controls','game-mode','saves','appearance'];
 function operationError(error){
  const message=error?.message??String(error);
  if(message==='No saved game.')return 'No saved game is available.';
@@ -21,6 +21,7 @@ export class MenuState {
  controls(){if(this.pending)return;if(this.state!=='start-menu' && this.state!=='pause-menu')return;this.origin=this.state;this.state='controls';}
  gameMode(){if(this.pending||this.state!=='start-menu')return;this.origin=this.state;this.state='game-mode';}
  saves(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='saves';}
+ appearance(){if(this.pending||!['start-menu','pause-menu'].includes(this.state))return;this.origin=this.state;this.state='appearance';}
  back(){if(SUBSCREENS.includes(this.state))this.state=this.origin;}
  recover(){if(this.state==='pause-menu'&&!this.pending&&!this.dead)this.actions=ACTIONS.RECOVER;}
  takeActions(){const a=this.actions;this.actions=0;return a;}
@@ -43,13 +44,13 @@ export class MenuState {
  }
 }
 export async function captureWithAudio(model,action,request,audio){const success=await model.capture(action,request,()=>audio?.unlock());if(!success)audio?.pause();return success;}
-export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,onPause}) {
- const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),startLast=document.querySelector('#start-load-last');
+export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId,thumbnail=()=>null,sleeping=()=>false,seated=()=>false,slider,audio,drivingBindings,onPause,appearance}) {
+ const model=new MenuState(),menu=document.querySelector('#menu'),controls=document.querySelector('#controls-screen'),gameMode=document.querySelector('#game-mode-screen'),savesNode=document.querySelector('#save-screen'),appearanceNode=document.querySelector('#appearance-screen'),startLast=document.querySelector('#start-load-last');
  const initial=document.querySelector('#start-actions'),paused=document.querySelector('#pause-actions'),error=document.querySelector('#capture-error'),status=document.querySelector('#status');
  const art=document.querySelector('#menu-art'),frame=document.querySelector('#menu-frame'),hud=document.querySelector('#hud');
- const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-load-last','start-controls'],['#start-controls','start-controls'],['#start-game-mode','start-controls']];
- const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#controls','controls']];
- const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back','#save-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
+ const initialNodes=[['#new-game','start'],['#start-load','start'],['#start-load-last','start-controls'],['#start-controls','start-controls'],['#start-game-mode','start-controls'],['#start-appearance','start-controls']];
+ const pauseNodes=[['#resume','continue'],['#save','continue'],['#load','continue'],['#pause-new-game','restart'],['#recover','recover'],['#controls','controls'],['#appearance','controls']];
+ const actionNodes=[...initialNodes,...pauseNodes],backNodes=['#back','#game-mode-back','#save-back','#appearance-back'],nodes=[...actionNodes,...backNodes.map(selector=>[selector,'back'])];
  let lastState='',lastError='',lastStatus='',lastTravel=-1,pendingDriving=0,canLast=false,autoLoad=true;
  let storage=null;try{storage=window.localStorage;}catch{}
  const screen=createSaveScreen({storage,paint:()=>paint(),run:(operation,name)=>operate(operation,...(operation==='save'?[name,thumbnail()]:operation==='loadLast'?[buildId]:[name]))});
@@ -76,6 +77,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
    const load=document.querySelector('#start-load'),start=layoutBox(ui.layouts.start,innerWidth,innerHeight);load.style.left=((innerWidth-start.width)/2)+'px';
    const mode=document.querySelector('#start-game-mode'),modeBox=layoutBox(ui.layouts['start-controls'],innerWidth,innerHeight),modeGap=Math.min(16,modeBox.height*.25),modeTop=start.y-modeBox.height-modeGap;Object.assign(mode.style,{left:((innerWidth-modeBox.width)/2)+'px',top:modeTop+'px'});
    Object.assign(startLast.style,{left:((innerWidth-modeBox.width)/2)+'px',top:(modeTop-modeBox.height-modeGap)+'px'});
+   Object.assign(document.querySelector('#start-appearance').style,{left:((innerWidth-modeBox.width)/2)+'px',top:(modeTop-2*(modeBox.height+modeGap))+'px'});
   }
   for(let i=0;i<columns.length;i++){
    const role=i===0?'foot':'driving',column=columns[i],layout=ui.layouts[role],box=layoutBox(layout,innerWidth,innerHeight);
@@ -85,7 +87,7 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
   }
  }
  function paint(){
-  const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';gameMode.hidden=state!=='game-mode';savesNode.hidden=state!=='saves';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
+  const state=model.state;menu.hidden=state==='playing';controls.hidden=state!=='controls';gameMode.hidden=state!=='game-mode';savesNode.hidden=state!=='saves';appearanceNode.hidden=state!=='appearance';initial.hidden=!['loading','start-menu','error'].includes(state);paused.hidden=state!=='pause-menu';
   if(hud&&state!=='playing')hud.hidden=true;
   clutch.disabled=model.pending;gears.disabled=model.pending||!clutch.checked;
   slider.lock(model.pending||model.started||!(state==='start-menu'||state==='controls'&&model.origin==='start-menu'));
@@ -97,10 +99,13 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
   error.hidden=!model.error;if(lastError!==model.error){error.textContent=model.error;lastError=model.error;}
   if(lastStatus!==model.status){status.textContent=model.status;lastStatus=model.status;}
   if(state!==lastState){
+   // The preview and the save follow the screen, whatever closes it.
+   if(lastState==='appearance')appearance?.close();
+   if(state==='appearance')appearance?.open();
    if(state==='start-menu'||state==='pause-menu'){
     const pair=ui.pairUrls[Math.floor(Math.random()*ui.pairUrls.length)];art.style.backgroundImage='url("'+pair.background+'")';frame.style.backgroundImage='url("'+pair.frame+'")';
     queueMicrotask(()=>document.querySelector(state==='pause-menu'?'#resume':'#new-game').focus({preventScroll:true}));
-   } else if(SUBSCREENS.includes(state))queueMicrotask(()=>document.querySelector({controls:'#back','game-mode':'#game-mode-back',saves:'#save-back'}[state]).focus({preventScroll:true}));
+   } else if(SUBSCREENS.includes(state))queueMicrotask(()=>document.querySelector({controls:'#back','game-mode':'#game-mode-back',saves:'#save-back',appearance:'#appearance-back'}[state]).focus({preventScroll:true}));
    lastState=state;
   }
  }
@@ -121,12 +126,13 @@ export function createMenu({canvas,ui,clearInput,queueAction,saveSession,buildId
  document.querySelector('#resume').addEventListener('click',capture);
  for(const id of ['#controls','#start-controls'])document.querySelector(id).addEventListener('click',()=>{model.controls();paint();});
  document.querySelector('#start-game-mode').addEventListener('click',()=>{model.gameMode();paint();});
+ for(const id of ['#appearance','#start-appearance'])document.querySelector(id).addEventListener('click',()=>{model.appearance();paint();});
  for(const id of backNodes)document.querySelector(id).addEventListener('click',()=>{model.back();paint();});
  document.querySelector('#recover').addEventListener('click',()=>{clearInput();model.recover();flush();paint();});
  const fullscreen=document.querySelector('#fullscreen');fullscreen.disabled=!document.fullscreenEnabled;
  fullscreen.addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.querySelector('main').requestFullscreen();}catch{model.error='Fullscreen is unavailable.';paint();}});
  document.addEventListener('fullscreenchange',()=>{fullscreen.textContent=document.fullscreenElement?'Exit fullscreen':'Fullscreen';resize();});
- window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='saves'&&!model.pending){if(screen.state.escape()==='back')model.back();paint();}else if(model.state==='controls'||model.state==='game-mode'){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
+ window.addEventListener('keydown',event=>{if(event.code!=='Escape'||event.repeat)return;event.preventDefault();if(model.state==='saves'&&!model.pending){if(screen.state.escape()==='back')model.back();paint();}else if(['controls','game-mode','appearance'].includes(model.state)){model.back();paint();}else if(model.state==='playing'||model.pending)pause(true);else if(model.state==='pause-menu')capture();});
  document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==canvas && model.state==='playing')pause();});
  window.addEventListener('blur',pause);document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
  window.addEventListener('resize',resize);resize();paint();

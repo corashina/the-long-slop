@@ -1,8 +1,10 @@
 pub mod pose;
+pub mod preview;
 pub mod ragdoll;
 use super::postprocessing::{DeadProfile, GlassesProfile};
 use super::*;
 pub use pose::*;
+pub use preview::*;
 pub use ragdoll::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,6 +24,7 @@ pub struct ClothingReference {
     /// `fpscontroller.DeadV`.
     pub dead_profile: DeadProfile,
     pub ragdoll: RagdollReference,
+    pub preview: PreviewReference,
     pub evidence: ManagedEvidence,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -210,6 +213,18 @@ impl ClothingReference {
         }
         self.dead_profile.validate(m)?;
         self.ragdoll.validate(m, &self.characters)?;
+        let joint_names: Vec<HashSet<&str>> = self
+            .characters
+            .iter()
+            .map(|c| {
+                m.nodes
+                    .iter()
+                    .filter(|n| c.skins.iter().any(|s| s.joints.contains(&n.id)))
+                    .map(|n| n.name.as_str())
+                    .collect()
+            })
+            .collect();
+        self.preview.validate(&joint_names)?;
         require(self.wearables.len() == 6, "selected wearable families")?;
         for (w, (wearable, root, item, type_index)) in self.wearables.iter().zip([
             (146739, 70812, 217, 0),

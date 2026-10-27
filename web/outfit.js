@@ -36,6 +36,6 @@ export function installOutfit(target,storage,characters){
  const outfit=readOutfit(storage,characters);
  let pending=true;
  target.gameOutfit=()=>{if(!pending)return undefined;pending=false;return JSON.stringify(outfit);};
- // Call after each change to `outfit`.
- return {outfit,changed(){pending=true;writeOutfit(storage,outfit);}};
+ // Call `changed` after each change to `outfit`. `save` stores it (`SaveSettings`).
+ return {outfit,changed(){pending=true;},save(){writeOutfit(storage,outfit);}};
 }
