@@ -95,6 +95,8 @@ impl GarageRuntime {
             },
             prepared_roads: self.stream.metrics().prepared_roads as u32,
             pad: 0,
+            // The driver sets the look.
+            look: crate::boundary::LookBlock::default(),
         };
         frame.valves.clear();
         frame.valves.extend(

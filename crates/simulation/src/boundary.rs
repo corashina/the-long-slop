@@ -17,6 +17,7 @@ use crate::vehicle::{PhysicsWorld, VehiclePose};
 use crate::world::{GeneratedCapVisual, GeneratedId};
 use bevy_platform::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
+use glam::{Quat, Vec3};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
@@ -161,6 +162,89 @@ pub struct StateBlock {
     pub prepared_roads: u32,
     /// Keeps the block free of padding.
     pub pad: u32,
+    /// Player camera. The renderer adds the mouse of commands after `SimFrame::seq_consumed`.
+    pub look: LookBlock,
+}
+
+/// Player camera of the last two steps: `parent * yaw * pitch * camera`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct LookBlock {
+    /// Camera position at the previous and the current step, in stream space.
+    pub position: [[f32; 3]; 2],
+    /// Rotation that carries the look at the previous and the current step. On foot it is near identity.
+    pub parent: [[f32; 4]; 2],
+    /// Lean and look around after the look.
+    pub camera: [f32; 4],
+    /// Degrees after the current step.
+    pub yaw: f32,
+    pub pitch: f32,
+    /// Degrees per command mouse unit at the last step with mouse. 0 while the mouse does not look.
+    pub gain: f32,
+    pub yaw_limits: [f32; 2],
+    pub pitch_limits: [f32; 2],
+    /// Keeps the block free of padding.
+    pub pad: u32,
+}
+
+impl LookBlock {
+    /// Yaw and pitch after the command `mouse` that no step consumed yet.
+    pub fn predict(&self, mouse: [f32; 2]) -> [f32; 2] {
+        let [yaw_min, yaw_max] = self.yaw_limits;
+        let [pitch_min, pitch_max] = self.pitch_limits;
+        [
+            (self.yaw + mouse[0] * self.gain).clamp(yaw_min, yaw_max),
+            (self.pitch + mouse[1] * self.gain)
+                .clamp(-89., 89.)
+                .clamp(pitch_min, pitch_max),
+        ]
+    }
+
+    /// Camera at `alpha` between the steps, with the look after `mouse`.
+    pub fn pose(&self, alpha: f32, mouse: [f32; 2]) -> VehiclePose {
+        let [yaw, pitch] = self.predict(mouse);
+        let [previous, current] = self.parent.map(Quat::from_array);
+        VehiclePose {
+            position: Vec3::from_array(self.position[0])
+                .lerp(Vec3::from_array(self.position[1]), alpha)
+                .to_array(),
+            rotation: (previous.slerp(current, alpha)
+                * Quat::from_rotation_y(-yaw.to_radians())
+                * Quat::from_rotation_x(-pitch.to_radians())
+                * Quat::from_array(self.camera))
+            .to_array(),
+        }
+    }
+}
+
+/// Mouse of sent commands that no step consumed yet. The renderer keeps it.
+#[derive(Debug, Default)]
+pub struct MouseLook {
+    sent: std::collections::VecDeque<(u64, [f32; 2])>,
+}
+
+impl MouseLook {
+    pub fn send(&mut self, seq: u64, mouse: [f32; 2]) {
+        if mouse != [0.; 2] && mouse.iter().all(|v| v.is_finite()) {
+            self.sent.push_back((seq, mouse));
+        }
+    }
+
+    /// Drops the consumed mouse and returns the camera of `frame`.
+    pub fn camera(&mut self, frame: &SimFrame) -> VehiclePose {
+        while self
+            .sent
+            .front()
+            .is_some_and(|&(seq, _)| seq <= frame.seq_consumed)
+        {
+            self.sent.pop_front();
+        }
+        let mouse = self
+            .sent
+            .iter()
+            .fold([0.; 2], |sum, (_, m)| [sum[0] + m[0], sum[1] + m[1]]);
+        frame.state.look.pose(frame.state.alpha, mouse)
+    }
 }
 
 impl StateBlock {

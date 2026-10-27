@@ -21,6 +21,7 @@ use rapier3d::prelude::{
     Ray, RigidBodyBuilder, RigidBodyHandle, SharedShape,
 };
 
+use crate::boundary::LookBlock;
 use crate::reference::{ItemId, PlayerPoseReference, PlayerReference};
 use crate::simulation::{FrameInput, keys};
 use crate::vehicle::{PhysicsWorld, VehiclePose};
@@ -170,6 +171,8 @@ pub struct PlayerState {
     collisions: Vec<CharacterCollision>,
     yaw: f32,
     pitch: f32,
+    /// Yaw and pitch degrees that the mouse added in the last view step.
+    look_applied: [f32; 2],
     vertical_velocity: f32,
     grounded: bool,
     support_body: Option<RigidBodyHandle>,
@@ -289,6 +292,7 @@ impl PlayerState {
             collisions: Vec::with_capacity(20),
             yaw: yaw_from_rotation(pose.rotation),
             pitch: 0.0,
+            look_applied: [0.; 2],
             vertical_velocity: 0.0,
             grounded: false,
             support_body: None,
@@ -401,12 +405,11 @@ impl PlayerState {
             dt,
         );
         if let Some(multiplier) = ordinary_look {
-            if input.mouse[0].is_finite() {
-                self.yaw += input.mouse[0] * multiplier;
-            }
-            if input.mouse[1].is_finite() {
-                self.pitch += input.mouse[1] * multiplier;
-            }
+            self.look_applied = input
+                .mouse
+                .map(|v| if v.is_finite() { v * multiplier } else { 0. });
+            self.yaw += self.look_applied[0];
+            self.pitch += self.look_applied[1];
         }
         self.pitch = self.pitch.clamp(-89.0, 89.0);
         if let Some(seat) = &self.occupancy {
@@ -1098,6 +1101,46 @@ impl PlayerState {
             self.occupancy.is_some(),
             None,
         )
+    }
+    /// Yaw and pitch degrees that the mouse added since the last call.
+    pub fn take_look_applied(&mut self) -> [f32; 2] {
+        std::mem::take(&mut self.look_applied)
+    }
+    /// The camera rotation as `parent * yaw * pitch * camera`. The position is not set.
+    pub fn look(&self, physics: &PhysicsWorld) -> LookBlock {
+        let (entry, camera) = self.view_state.look_rotations();
+        let mut look = LookBlock {
+            camera: camera.to_array(),
+            yaw: self.yaw,
+            pitch: self.pitch,
+            yaw_limits: [f32::MIN, f32::MAX],
+            pitch_limits: [-89., 89.],
+            ..LookBlock::default()
+        };
+        let parent = match (&self.occupancy, entry) {
+            (Some(seat), None) => {
+                if !seat.values.yaw_unlimited {
+                    look.yaw_limits = seat.values.yaw_limits_degrees;
+                }
+                look.pitch_limits = seat.values.pitch_limits_degrees;
+                Rotation::from_array(self.body_pose(physics).rotation)
+            }
+            // On foot the body carries the yaw.
+            (None, None) => {
+                Rotation::from_array(self.body_pose(physics).rotation)
+                    * Rotation::from_rotation_y(self.yaw.to_radians())
+            }
+            // The seat entry view does not take the look.
+            (_, Some(entry)) => {
+                look.yaw = 0.;
+                look.pitch = 0.;
+                look.yaw_limits = [0.; 2];
+                look.pitch_limits = [0.; 2];
+                Rotation::from_array(self.body_pose(physics).rotation) * entry
+            }
+        };
+        look.parent = [parent.to_array(); 2];
+        look
     }
     pub fn view_owns_look_input(&self) -> bool {
         self.view_state.looking()

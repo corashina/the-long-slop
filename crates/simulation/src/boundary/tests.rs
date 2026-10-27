@@ -1,5 +1,6 @@
 use super::*;
 use crate::reference::ItemId;
+use glam::Quat;
 
 #[test]
 fn frame_round_trips() {
@@ -34,6 +35,11 @@ fn frame_round_trips() {
             seat_car: PoseRow::default(),
             prepared_roads: 12,
             pad: 0,
+            look: LookBlock {
+                yaw: 30.,
+                gain: 1.,
+                ..Default::default()
+            },
         },
         hud: HudBlock {
             hp: 80.,
@@ -288,4 +294,48 @@ fn handle_is_reused_only_after_release() {
     let (c, _) = handles.assign(PoseKey::Item(ItemId(3)));
     assert_eq!(c, a);
     assert_eq!(handles.len(), 2);
+}
+
+fn look_frame(yaw: f32, pitch: f32, seq_consumed: u64) -> SimFrame {
+    let mut frame = SimFrame {
+        seq_consumed,
+        ..Default::default()
+    };
+    frame.state.alpha = 1.;
+    frame.state.look = LookBlock {
+        position: [[0., 1., 0.], [1., 2., 3.]],
+        parent: [[0., 0., 0., 1.], Quat::from_rotation_y(0.5).to_array()],
+        camera: [0., 0., 0., 1.],
+        yaw,
+        pitch,
+        gain: 2.,
+        yaw_limits: [-90., 90.],
+        pitch_limits: [-60., 60.],
+        pad: 0,
+    };
+    frame
+}
+
+#[test]
+fn mouse_look_adds_unconsumed_mouse_within_limits() {
+    let mut look = MouseLook::default();
+    look.send(1, [5., 0.]);
+    look.send(2, [1., 40.]);
+    let pose = look.camera(&look_frame(10., 0., 1));
+    let expected = Quat::from_rotation_y(0.5)
+        * Quat::from_rotation_y(-12f32.to_radians())
+        * Quat::from_rotation_x(-60f32.to_radians());
+    assert!(Quat::from_array(pose.rotation).abs_diff_eq(expected, 1e-5));
+    assert_eq!(pose.position, [1., 2., 3.]);
+}
+
+#[test]
+fn mouse_look_matches_the_frame_after_consume() {
+    let mut look = MouseLook::default();
+    look.send(1, [3., -2.]);
+    let before = look.camera(&look_frame(10., 5., 0));
+    // The step applies the mouse with the same gain.
+    let after = look.camera(&look_frame(16., 1., 1));
+    assert!(Quat::from_array(before.rotation).abs_diff_eq(Quat::from_array(after.rotation), 1e-5));
+    assert_eq!(look.camera(&look_frame(16., 1., 1)), after);
 }
