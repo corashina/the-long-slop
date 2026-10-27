@@ -20,6 +20,8 @@ pub enum ItemLocation {
     Held,
     Stored(u8),
     Equipped,
+    /// Worn by the player in this `wearableType` slot. The body is disabled.
+    Worn(u8),
     Attached(ItemId),
     WheelSlot(WheelSlotId),
     /// Physics lock in a storage volume. `volume` is an index in `StorageLocks`.
@@ -370,7 +372,8 @@ impl ItemStore {
                 (origin.absolute(item.pose.position), item.pose.rotation)
             };
             let location = match item.location {
-                ItemLocation::World => ItemLocationSave::World,
+                // `InventorySnapshot::worn` names the slot.
+                ItemLocation::World | ItemLocation::Worn(_) => ItemLocationSave::World,
                 ItemLocation::Held => ItemLocationSave::Held,
                 ItemLocation::WheelSlot(_) => ItemLocationSave::GeneratedAttachment {
                     attachment: crate::world::changes::capture(

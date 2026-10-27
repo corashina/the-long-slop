@@ -14,6 +14,10 @@ pub struct SourceRenderer(pub RendererRecord);
 #[derive(Component)]
 pub struct SourceMaterialWarmup;
 
+/// Source `makeinvisible`: the camera does not draw a worn item renderer. Its shadow stays.
+#[derive(Component)]
+pub struct CameraHidden;
+
 #[derive(Component, Clone, Copy)]
 pub struct SourceSortData {
     pub material_key: u32,
@@ -40,6 +44,7 @@ type CameraMesh = (
     Option<&'static super::materials::SourceShadowMode>,
     Option<&'static SourceSortData>,
     Has<SourceMaterialWarmup>,
+    Has<CameraHidden>,
 );
 
 /// Keep the Mesh3d class even when empty so Bevy can remove retained phase items.
@@ -59,9 +64,12 @@ pub fn filter_camera_visibility(
             continue;
         }
         entities.retain(|entity| {
-            let Ok((renderer, mode, sort, warmup)) = meshes.get(*entity) else {
+            let Ok((renderer, mode, sort, warmup, hidden)) = meshes.get(*entity) else {
                 return false;
             };
+            if hidden {
+                return false;
+            }
             // ShadowsOnly: the shadow scene draws it, the camera does not.
             // The glTF mode arrives before the renderer record.
             if !warmup

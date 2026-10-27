@@ -390,6 +390,8 @@ impl StructureRow {
     pub const DISPLAY: u32 = 1 << 2;
     /// The display is on.
     pub const DISPLAY_ON: u32 = 1 << 3;
+    /// The player wears the item. The camera does not draw its wearable renderers.
+    pub const WORN: u32 = 1 << 4;
 }
 
 /// One node write of a structure view. `node` indexes the prototype nodes,

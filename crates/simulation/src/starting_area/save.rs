@@ -185,6 +185,23 @@ impl GarageRuntime {
                     &mut self.physics,
                 );
             }
+            let mut worn = [None; 5];
+            for (id, saved) in worn.iter_mut().zip(&inventory.worn) {
+                if let Some(WornSnapshot::Item {
+                    item: instance @ InstanceId::Generated { .. },
+                }) = saved
+                {
+                    let Ok(item) = ids.item(instance) else {
+                        return Ok(false);
+                    };
+                    *id = Some(item);
+                }
+            }
+            for (slot, id) in worn.into_iter().enumerate() {
+                if let Some(id) = id {
+                    self.area.restore_worn(&mut self.physics, slot, id)?;
+                }
+            }
         }
         if let Some(carry) = &pending.carry {
             let Ok(id) = ids.item(&carry.item) else {
@@ -318,6 +335,17 @@ impl GarageRuntime {
             .iter()
             .flatten()
             .chain(saved.inventory.equipped.iter())
+            .chain(
+                saved
+                    .inventory
+                    .worn
+                    .iter()
+                    .flatten()
+                    .filter_map(|w| match w {
+                        WornSnapshot::Item { item } => Some(item),
+                        WornSnapshot::Spawned { .. } => None,
+                    }),
+            )
             .chain(saved.player.carry.iter().map(|c| &c.item))
             .chain(
                 saved
@@ -425,6 +453,26 @@ impl GarageRuntime {
                 &mut candidate.area.items,
                 &mut candidate.physics,
             );
+        }
+        for (slot, worn) in saved.inventory.worn.iter().enumerate() {
+            let id = match worn {
+                Some(WornSnapshot::Item {
+                    item: instance @ InstanceId::Initial { .. },
+                }) => ids.item(instance)?,
+                Some(WornSnapshot::Spawned { serial }) => {
+                    candidate
+                        .area
+                        .spawned
+                        .iter()
+                        .find(|s| s.serial == *serial)
+                        .ok_or_else(|| SaveError::InvalidLinks("Unknown worn serial".into()))?
+                        .id
+                }
+                _ => continue,
+            };
+            candidate
+                .area
+                .restore_worn(&mut candidate.physics, slot, id)?;
         }
         let starter = reference.survival.starter_food;
         if candidate.area.items.get(starter).is_some_and(|i| i.removed) {

@@ -44,7 +44,7 @@ pub struct SaveSnapshot {
     pub spawned: Vec<SpawnedItemSnapshot>,
     /// Runtime food copies.
     pub foods: Vec<FoodItemSnapshot>,
-    /// Pack counts, cigarette burn state, and the mouth slot.
+    /// Pack counts and cigarette burn state.
     pub cigarettes: CigarettesSnapshot,
     /// Source save_sandstorm and the storm spawner timer.
     pub weather: WeatherSnapshot,
@@ -77,7 +77,6 @@ pub struct StormSnapshot {
 pub struct CigarettesSnapshot {
     pub packs: Vec<PackSnapshot>,
     pub cigarettes: Vec<CigaretteSnapshot>,
-    pub mouth: Option<u32>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,6 +228,17 @@ pub struct InventorySnapshot {
     pub slots: [Option<InstanceId>; 4],
     pub selected: u8,
     pub equipped: Option<InstanceId>,
+    /// Worn items, indexed by `wearableType`.
+    pub worn: [Option<WornSnapshot>; 5],
+}
+/// One worn item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WornSnapshot {
+    /// A source or generated item.
+    Item { item: InstanceId },
+    /// A spawned item, named by its spawn serial.
+    Spawned { serial: u32 },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -446,6 +456,39 @@ mod g04_ordered_state {
             SaveSnapshot::from_json(br#"{"schema_version":29}"#),
             Err(SaveError::CorruptData(_))
         ));
+    }
+
+    #[test]
+    fn worn_hat_and_cigarette_round_trip() {
+        let hat = InstanceId::Generated {
+            id: crate::world::GeneratedId {
+                layer: crate::world::WorldLayer::Building,
+                generator: crate::reference::SourceId {
+                    file: "level0".into(),
+                    path_id: i64::MIN + 1,
+                },
+                unit: [3, -4],
+                ordinal: 5,
+                children: vec![],
+            },
+        };
+        let inventory = InventorySnapshot {
+            slots: [None, None, None, None],
+            selected: 0,
+            equipped: None,
+            worn: [
+                None,
+                Some(WornSnapshot::Item { item: hat }),
+                None,
+                None,
+                Some(WornSnapshot::Spawned { serial: 3 }),
+            ],
+        };
+        let json = serde_json::to_string(&inventory).unwrap();
+        assert_eq!(
+            serde_json::from_str::<InventorySnapshot>(&json).unwrap(),
+            inventory
+        );
     }
 
     #[test]

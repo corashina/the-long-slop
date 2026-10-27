@@ -185,6 +185,7 @@ impl SourceWorldVisuals {
     pub fn prepare_surface(
         &mut self,
         stream: &mut WorldStream,
+        ledger: &mut crate::world::PresentationLedger,
         meshes: &mut Assets<Mesh>,
         pipelines: &mut WorldPipelines,
         fixed: &SourceFixedAssets,
@@ -246,6 +247,7 @@ impl SourceWorldVisuals {
                 let ticket = if let Some(source) = source {
                     pipelines.request_continuation(
                         stream,
+                        ledger,
                         &mut pending.continuation,
                         &pending.meshes[index],
                         &self.road_materials[source][index].material,
@@ -254,6 +256,7 @@ impl SourceWorldVisuals {
                 } else {
                     pipelines.request_continuation(
                         stream,
+                        ledger,
                         &mut pending.continuation,
                         &pending.meshes[index],
                         self.terrain[tier(key.layer)?].as_ref().unwrap(),

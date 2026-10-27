@@ -185,7 +185,7 @@ impl GarageRuntime {
                             .equipment
                             .item()
                             .or(self.area.interaction.held()),
-                    )
+                    ) | self.area.wear.actions(&self.area.interaction)
                 },
             context: if paint.is_some() {
                 FeedbackContext::Paint as u32
