@@ -953,7 +953,7 @@ impl AudioGameplayReference {
                 "required source audio duration",
             )?;
         }
-        for (kind, role) in [
+        let required = [
             (0, "eat"),
             (1, "burp"),
             (2, "fart"),
@@ -975,7 +975,8 @@ impl AudioGameplayReference {
             (21, "radio_click"),
             (22, "break"),
             (23, "computer_note"),
-        ] {
+        ];
+        for (kind, role) in required {
             require(
                 r.bindings
                     .iter()
@@ -1004,7 +1005,7 @@ impl AudioGameplayReference {
         };
         let (zones, sleds) = (optional(19, "ambience_zone"), optional(20, "sled"));
         require(
-            zones <= 1 && sleds <= 1 && r.bindings.len() == 20 + zones + sleds,
+            zones <= 1 && sleds <= 1 && r.bindings.len() == required.len() + zones + sleds,
             "required audio roles",
         )?;
         Ok(r)
