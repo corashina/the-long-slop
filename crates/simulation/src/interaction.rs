@@ -10,6 +10,7 @@ pub mod feedback;
 pub mod fluid_contact;
 mod fluid_receipts;
 pub mod genie_lamp;
+pub mod guns;
 pub mod hitch;
 mod hose;
 mod input;
@@ -206,6 +207,7 @@ pub struct InteractionState {
     pub cleaning: cleaning::CleaningTools,
     pub buried: buried::BuriedItems,
     pub melee: melee::MeleeState,
+    pub guns: guns::GunState,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
     next_generated_collider: u32,
@@ -509,6 +511,7 @@ impl InteractionState {
             cleaning: cleaning::CleaningTools::new(reference)?,
             buried: buried::BuriedItems::default(),
             melee: melee::MeleeState::new(reference)?,
+            guns: guns::GunState::new(reference)?,
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
             light_controls,

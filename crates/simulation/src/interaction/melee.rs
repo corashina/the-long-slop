@@ -226,6 +226,10 @@ impl MeleeState {
     pub fn particles(&self, index: usize) -> &[crate::particles::ParticleOutput] {
         self.particles[index].particles()
     }
+    /// `mainscript.Particles`, shared with the gun hits.
+    pub fn particles_mut(&mut self) -> &mut [ParticleState; 5] {
+        &mut self.particles
+    }
     pub fn take_sounds(&mut self) -> impl Iterator<Item = MeleeSound> + '_ {
         self.sounds.drain(..)
     }
@@ -611,7 +615,7 @@ fn absolute(origin: [f64; 3], local: Vector) -> [f64; 3] {
 }
 
 /// Exported audio clips: source, id and source length.
-fn clip_table(r: &ReferenceManifest) -> Vec<(SourceId, u32, f32)> {
+pub(super) fn clip_table(r: &ReferenceManifest) -> Vec<(SourceId, u32, f32)> {
     r.audio["clips"]
         .as_array()
         .into_iter()
