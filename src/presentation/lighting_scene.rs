@@ -3,10 +3,7 @@ use super::{
     lighting_assets::LightingAssets, readiness::RendererStateHandle, reference::ReferenceVisuals,
     source_lighting::LightingUniform,
 };
-use crate::{
-    app::{Drive, RuntimeReference},
-    reference::reflections::probe_influence_bounds,
-};
+use crate::{app::RuntimeReference, reference::reflections::probe_influence_bounds};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::{ecs as bevy_ecs, render as bevy_render};
@@ -90,7 +87,6 @@ pub(crate) fn sync_lighting(
     assets: Option<Res<LightingAssets>>,
     visuals: Option<Res<ReferenceVisuals>>,
     master: Option<Res<super::lighting::SourceLighting>>,
-    drive: Option<Res<Drive>>,
     sim: Option<Res<super::sim_frame::SimFrameResource>>,
     reference: Option<Res<RuntimeReference>>,
     mut origin: ResMut<SourceWorldOrigin>,
@@ -105,8 +101,8 @@ pub(crate) fn sync_lighting(
     if status.failure().is_some() {
         return;
     }
-    let (Some(assets), Some(visuals), Some(master), Some(drive), Some(sim), Some(reference)) =
-        (assets, visuals, master, drive, sim, reference)
+    let (Some(assets), Some(visuals), Some(master), Some(sim), Some(reference)) =
+        (assets, visuals, master, sim, reference)
     else {
         return;
     };
@@ -129,7 +125,7 @@ pub(crate) fn sync_lighting(
                 activation.last_check = 0.;
                 activation.checks = 0;
             }
-            activation.elapsed += drive.sim.render_delta_seconds;
+            activation.elapsed += sim.state.perf.frame_seconds();
             for index in 0..PROBE_COUNT {
                 activation.distance_squared[index] =
                     player.distance_squared(value.probe_position[index]);

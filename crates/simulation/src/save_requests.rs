@@ -132,7 +132,6 @@ impl SimDriver {
                         }
                         self.clear_input();
                         self.frame_steps = 0;
-                        self.render_delta_seconds = 0.;
                         Ok(Some(String::new()))
                     }
                     Some(Prepared::Candidate {
@@ -301,13 +300,6 @@ impl SimDriver {
         if let Some(Prepared::Candidate { driver, .. }) = &mut self.save.prepared {
             frame.state.flags |= StateBlock::CANDIDATE;
             driver.fill(reference, frame.candidate.get_or_insert_default());
-        }
-    }
-
-    /// The renderer dropped a retired candidate pose handle.
-    pub fn release_candidate_pose(&mut self, handle: crate::boundary::Handle) {
-        if let Some(Prepared::Candidate { driver, .. }) = &mut self.save.prepared {
-            driver.release_pose(handle);
         }
     }
 }
