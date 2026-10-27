@@ -8,7 +8,7 @@ use crate::presentation::{
     reference::{BodyVisual, CapVisual, ItemVisual, ReferenceVisuals, ValveVisibility},
 };
 use crate::reference::ReferenceManifest;
-use crate::simulation::{FrameInput, keys};
+use crate::simulation::FrameInput;
 use crate::starting_area::GarageRuntime;
 use crate::vehicle::VehiclePose;
 use bevy::asset::{AssetMetaCheck, LoadState, RecursiveDependencyLoadState};
@@ -17,7 +17,7 @@ use bevy::gltf::GltfExtras;
 use bevy::prelude::*;
 use presentation::sim_frame::SimFrameResource;
 use simulation::boundary::MouseLook;
-use simulation::boundary::{AudioCall, HudBlock, PoseRow, RenderInput, SimCommand, StateBlock};
+use simulation::boundary::{AudioCall, HudBlock, PoseRow, SimCommand, StateBlock};
 use simulation::driver::SimDriver;
 use simulation::host::game_now;
 use simulation::world::metrics::BUDGET_LABELS;
@@ -29,6 +29,8 @@ pub(crate) struct RuntimeReference(pub Arc<ReferenceManifest>);
 #[derive(Resource)]
 pub(crate) struct Drive {
     pub sim: SimDriver,
+    /// Renderer setup values of the simulation.
+    startup: simulation::boundary::SimStartup,
     /// Sequence of the last sent command.
     seq: u64,
     world_ms: f64,
@@ -162,8 +164,10 @@ pub fn run(
         presentation::readiness::RendererStateHandle::default,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let sim = SimDriver::new(runtime, save::source_stamp(&reference, manifest_sha256));
+    let startup = sim.startup();
     let allocation = presentation::world::runtime::SourcePresentationAllocation::bootstrap(
-        runtime.stream.frame().request.session,
+        startup.session,
         fixed,
         ledger,
     );
@@ -173,8 +177,9 @@ pub fn run(
         .insert_resource(RuntimeReference(reference.clone()))
         .init_resource::<save::SaveRequests>()
         .insert_resource(Drive {
-            view: SimDriver::new_view(&runtime),
-            sim: SimDriver::new(runtime, save::source_stamp(&reference, manifest_sha256)),
+            view: startup.view,
+            sim,
+            startup,
             seq: 0,
             world_ms: 0.,
             listener: None,
@@ -341,15 +346,9 @@ fn setup(
         &mut commands,
         &mut images,
         &reference.0,
-        presentation::transform(drive.view),
-        drive
-            .sim
-            .runtime
-            .area
-            .player
-            .view(&drive.sim.runtime.physics)
-            .fov_degrees,
-        drive.sim.runtime.distances.cam2_far_plane,
+        presentation::transform(drive.startup.view),
+        drive.startup.fov_degrees,
+        drive.startup.far_plane,
     );
 }
 
@@ -610,6 +609,7 @@ fn read_input(
         world: std::mem::take(&mut drive.world),
         save: requests.take_commands(),
         candidate: requests.candidate_command(),
+        listener: drive.listener,
     };
     drive.sim.accept(&reference.0, command);
 }
@@ -839,18 +839,11 @@ fn sync_instances(
 /// Fills the frame after the simulation and world work of this Bevy frame.
 fn fill_frame(
     reference: Res<RuntimeReference>,
-    time: Res<Time<Real>>,
     mut drive: ResMut<Drive>,
     mut frame: ResMut<SimFrameResource>,
     mut allocation: ResMut<presentation::world::runtime::SourcePresentationAllocation>,
 ) {
     let drive = &mut *drive;
-    let input = RenderInput {
-        dt: drive.sim.render_delta_seconds,
-        real_dt: time.delta_secs(),
-        listener: drive.listener,
-    };
-    drive.sim.runtime.advance_render_frame(&reference.0, input);
     fill(drive, &reference.0, &mut frame);
     // After a restart the world changes belong to the candidate copy. The commit applies them.
     if !restarted(&frame.frame) {
@@ -876,7 +869,7 @@ fn fill(drive: &mut Drive, reference: &ReferenceManifest, frame: &mut SimFrameRe
     drive.view = drive.look.camera(&frame.frame);
     let current = frame.frame.state.look.position[1];
     drive.view_offset = std::array::from_fn(|i| drive.view.position[i] - current[i]);
-    frame.apply_changes(|handle| drive.sim.runtime.release_pose(handle));
+    frame.apply_changes();
     frame.index_particles();
 }
 /// Camera of `state`: the sleep camera, the chase camera, else the player `view`.
@@ -1010,7 +1003,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         hud.focus[1],
         hud.focus[2],
         hud.contacts,
-        drive.sim.frame_steps,
+        state.perf.frame_steps,
         hud.surfaces,
         hud.colliders,
         hud.absolute[0],
@@ -1025,7 +1018,7 @@ fn update_hud(mut drive: ResMut<Drive>, mut sim: ResMut<SimFrameResource>) {
         hud.fuel,
         state.flags & StateBlock::PAUSED != 0,
         state.flags & StateBlock::STARTED != 0,
-        hud.flags & HudBlock::AUTOSAVE_SAFE != 0 && drive.sim.held() & keys::GRAB == 0,
+        hud.flags & HudBlock::AUTOSAVE_SAFE != 0,
         seated,
     );
     if hud.flags & HudBlock::RADIO != 0 {

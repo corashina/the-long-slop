@@ -158,7 +158,7 @@ impl EventHandler for HitCollector {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VehiclePose {
     pub position: [f32; 3],
     pub rotation: [f32; 4],

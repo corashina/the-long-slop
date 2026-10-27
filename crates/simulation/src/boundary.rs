@@ -58,13 +58,13 @@ impl<K: Copy + Eq + Hash> Handles<K> {
         self.by_key.insert(key, handle);
         (handle, true)
     }
-    /// Removes the key. Its handle stays taken until `release`.
+    /// Removes the key. Its handle stays taken until `release`, after the renderer saw the retire.
     pub fn retire(&mut self, handle: Handle) {
         if let Some(key) = self.keys[handle.0 as usize].take() {
             self.by_key.remove(&key);
         }
     }
-    /// The renderer dropped the handle. It can go to a new key.
+    /// The handle can go to a new key.
     pub fn release(&mut self, handle: Handle) {
         debug_assert!(
             self.keys[handle.0 as usize].is_none(),
@@ -190,6 +190,25 @@ pub struct PerfBlock {
     pub storms: u32,
     pub storm_strength: f32,
     pub weather_particles: u32,
+}
+
+impl PerfBlock {
+    /// Simulated seconds of the frame.
+    pub fn frame_seconds(&self) -> f32 {
+        self.frame_steps as f32 * crate::simulation::FIXED_DT
+    }
+}
+
+/// Renderer setup values of a new simulation.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SimStartup {
+    /// Player camera.
+    pub view: VehiclePose,
+    pub fov_degrees: f32,
+    /// Source `Cam2FarPlane` of the draw distance.
+    pub far_plane: f32,
+    /// World stream session.
+    pub session: u64,
 }
 
 /// Player camera of the last two steps: `parent * yaw * pitch * camera`.
@@ -931,6 +950,8 @@ pub struct SimCommand {
     pub save: Vec<SaveCommand>,
     /// Renderer input of the next candidate step. `None`: the candidate waits.
     pub candidate: Option<CandidateCommand>,
+    /// Camera position of the last rendered frame.
+    pub listener: Option<[f32; 3]>,
 }
 
 /// One save input of the renderer.
@@ -1042,6 +1063,7 @@ impl SimCommand {
             }
             (candidate, next) => next.or(candidate),
         };
+        self.listener = next.listener.or(self.listener);
     }
 }
 
@@ -1216,6 +1238,9 @@ pub struct FramePoses {
     stamp: u32,
     /// Joint count of the last `PlayerRig` change.
     rig_joints: Option<usize>,
+    /// Handles that the last frame retired. The renderer applies every frame in order,
+    /// so the next frame can give them to new keys.
+    retired: Vec<Handle>,
 }
 
 impl FramePoses {
@@ -1228,6 +1253,9 @@ impl FramePoses {
         frame: &mut SimFrame,
     ) {
         self.stamp = self.stamp.wrapping_add(1);
+        for handle in self.retired.drain(..) {
+            self.handles.release(handle);
+        }
         let rows = self.seen.len();
         frame.previous.resize(rows, PoseRow::default());
         frame.current.resize(rows, PoseRow::default());
@@ -1294,6 +1322,7 @@ impl FramePoses {
                 frame.current[slot] = PoseRow::default();
                 frame.items[slot] = ItemRow::default();
                 frame.changes.push(Change::Retire(handle));
+                self.retired.push(handle);
             }
         }
         let body = &area.body;
@@ -1309,10 +1338,6 @@ impl FramePoses {
         frame
             .joints
             .extend((0..body.joint_count()).map(|i| PoseRow::new(body.joint_local(i), 0)));
-    }
-    /// The renderer dropped `handle`.
-    pub fn release(&mut self, handle: Handle) {
-        self.handles.release(handle);
     }
     /// The row of `key`, with a `Spawn` change when the key is new.
     fn write(

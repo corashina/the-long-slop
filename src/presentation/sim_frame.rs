@@ -76,8 +76,8 @@ pub(crate) struct SimFrameResource {
 }
 
 impl SimFrameResource {
-    /// Applies the frame changes to the pose index. Calls `retired` for each dropped handle.
-    pub fn apply_changes(&mut self, mut retired: impl FnMut(Handle)) {
+    /// Applies the frame changes to the pose index.
+    pub fn apply_changes(&mut self) {
         for row in &self.frame.conditions {
             let id = ConditionId(row.id);
             self.conditions.insert(id, row.startup());
@@ -100,7 +100,6 @@ impl SimFrameResource {
                         }
                         keep
                     });
-                    retired(*handle);
                 }
                 Change::PlayerRig(joints) => self.rig.clone_from(joints),
                 Change::HomeCable(aims) => self.home_cable = Some(aims.clone()),

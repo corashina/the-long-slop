@@ -1,5 +1,5 @@
 //! Prepares a loaded or new runtime offscreen while the active runtime runs.
-use crate::boundary::{CandidateCommand, Change, Handle, SimFrame, StateBlock};
+use crate::boundary::{CandidateCommand, Change, SimFrame, StateBlock};
 use crate::driver::{CameraMode, LOADING_BUDGET_MS};
 use crate::reference::ReferenceManifest;
 use crate::simulation::FIXED_DT;
@@ -121,11 +121,6 @@ impl CandidateDriver {
         if let Some(failure) = self.failure.take() {
             frame.changes.push(Change::Failure(failure));
         }
-    }
-
-    /// The renderer dropped a retired pose handle.
-    pub fn release_pose(&mut self, handle: Handle) {
-        self.runtime.release_pose(handle);
     }
 }
 

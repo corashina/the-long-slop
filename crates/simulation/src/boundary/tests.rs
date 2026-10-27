@@ -302,6 +302,7 @@ fn command_round_trips() {
         fixed: [3, 4],
         ..Default::default()
     });
+    command.listener = Some([1., 2., 3.]);
     let mut bytes = Vec::new();
     encode_command(&command, &mut bytes);
     assert_eq!(decode_command(&bytes).unwrap(), command);

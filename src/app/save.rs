@@ -319,23 +319,19 @@ fn commit(world: &mut World, mut candidate: Candidate) {
 
 /// Takes the candidate frame: the pose index and the world copy follow every frame.
 fn receive(world: &mut World, candidate: &mut Candidate) {
-    world.resource_scope(|world, mut sim: Mut<SimFrameResource>| {
-        let filled = sim.frame.state.flags & StateBlock::CANDIDATE != 0;
-        let Some(frame) = sim.frame.candidate.as_mut().filter(|_| filled) else {
-            return;
-        };
-        std::mem::swap(&mut **frame, &mut candidate.frame.frame);
-        let mut drive = world.resource_mut::<Drive>();
-        candidate
-            .frame
-            .apply_changes(|handle| drive.sim.release_candidate_pose(handle));
-        let delta = &candidate.frame.frame.world;
-        match (&mut candidate.presentation, &mut candidate.mirror) {
-            (Some(presentation), _) => presentation.apply_world(delta),
-            (None, Some(mirror)) => mirror.apply(delta),
-            (None, None) => {}
-        }
-    });
+    let mut sim = world.resource_mut::<SimFrameResource>();
+    let filled = sim.frame.state.flags & StateBlock::CANDIDATE != 0;
+    let Some(frame) = sim.frame.candidate.as_mut().filter(|_| filled) else {
+        return;
+    };
+    std::mem::swap(&mut **frame, &mut candidate.frame.frame);
+    candidate.frame.apply_changes();
+    let delta = &candidate.frame.frame.world;
+    match (&mut candidate.presentation, &mut candidate.mirror) {
+        (Some(presentation), _) => presentation.apply_world(delta),
+        (None, Some(mirror)) => mirror.apply(delta),
+        (None, None) => {}
+    }
 }
 
 /// Prepares the hidden scene from the candidate frame of the last step.
