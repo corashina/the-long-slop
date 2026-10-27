@@ -608,7 +608,7 @@ impl WorldPresentation<'_, '_> {
             }
         }
         self.writers
-            .prepare(stream, &mut self.allocation.ledger, &self.meshes)?;
+            .prepare(&mut self.allocation.ledger, &self.meshes)?;
         // Existing expansions must release their slots even when a new writer is pending.
         timer.next(crate::world::stream_profile::Stage::Grass);
         self.grass.prepare(

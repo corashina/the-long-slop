@@ -635,7 +635,6 @@ impl GrassWriters {
     }
     pub fn prepare(
         &mut self,
-        stream: &mut crate::world::WorldStream,
         ledger: &mut crate::world::PresentationLedger,
         meshes: &Assets<Mesh>,
     ) -> Result<(), crate::reference::ReferenceError> {
@@ -689,7 +688,7 @@ impl GrassWriters {
             if job.vertex != positions.len() || job.index != indices.len() {
                 continue;
             }
-            if !stream.take_presentation_publication() {
+            if !ledger.take_publication() {
                 continue;
             }
             let job = self.pending.remove(index);

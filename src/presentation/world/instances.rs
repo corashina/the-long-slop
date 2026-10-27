@@ -1086,7 +1086,6 @@ impl SourceInstances {
                                 for (entity, binding) in owned_bindings {
                                     if let Some(entity) = entity {
                                         grass.retire(
-                                            stream,
                                             ledger,
                                             entity,
                                             meshes,
@@ -1100,8 +1099,7 @@ impl SourceInstances {
                                 a.active_gpu = a.active_gpu.saturating_sub(gpu);
                                 a.objects = a.objects.saturating_sub(objects);
                                 ledger.set_allocation(a)?;
-                                stream.release_renderer_pending(&mut continuation)?;
-                                ledger.release_pending()?;
+                                ledger.release_claim(&mut continuation)?;
                                 return Err(error);
                             }
                         }
@@ -1569,8 +1567,7 @@ impl SourceInstances {
                 .iter()
                 .filter_map(Renderer::entity)
             {
-                grass_drained &=
-                    grass.retire(stream, ledger, entity, meshes, &mut materials.grass)?;
+                grass_drained &= grass.retire(ledger, entity, meshes, &mut materials.grass)?;
             }
             let parent_drained = self.instances[index]
                 .continuation
@@ -1603,7 +1600,7 @@ impl SourceInstances {
                 match renderer.target {
                     Target::Entity(entity) => {
                         writers.retire(ledger, entity)?;
-                        grass.retire(stream, ledger, entity, meshes, &mut materials.grass)?;
+                        grass.retire(ledger, entity, meshes, &mut materials.grass)?;
                     }
                     Target::Row { slot, .. } => self.props.free(slot),
                 }
@@ -1618,8 +1615,7 @@ impl SourceInstances {
             a.objects = a.objects.saturating_sub(instance.objects);
             ledger.set_allocation(a)?;
             if let Some(claim) = instance.continuation.as_mut() {
-                stream.release_renderer_pending(claim)?;
-                ledger.release_pending()?;
+                ledger.release_claim(claim)?;
             }
         }
         Ok(())
