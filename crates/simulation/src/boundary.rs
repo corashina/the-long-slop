@@ -5,10 +5,12 @@ use crate::interaction::items::ItemLocation;
 use crate::lighting::{
     ControlPoseOutput, CycleOutput, LampMaterialOutput, LightOutput, NodeVisibilityOutput,
 };
+use crate::reference::DrivingAssists;
 use crate::reference::{
     BodyId, ConditionId, ConditionStartup, ItemId, NodeId, OpeningId, ReferenceManifest, SourceId,
 };
 use crate::simulation::FrameInput;
+use crate::simulation::input::DrivingSettings;
 use crate::starting_area::StartingArea;
 use crate::starting_area::spawned::SpawnedItem;
 use crate::vehicle::{PhysicsWorld, VehiclePose};
@@ -174,6 +176,8 @@ impl StateBlock {
     pub const GENERATION_READY: u32 = 1 << 7;
     /// The world supports the player and the required content is ready.
     pub const WORLD_READY: u32 = 1 << 8;
+    /// The chase camera shows the seated car.
+    pub const CHASE: u32 = 1 << 9;
 }
 
 /// Valve of one opening: 0 closed, 1 open.
@@ -310,6 +314,14 @@ pub struct HudBlock {
     pub weapon_icon: u32,
     /// `weaponCrossHairColor` or `weaponCrossHairColorEmpty` as RGBA8, R in the low byte.
     pub weapon_color: u32,
+    /// Gear of the current car: -1 reverse, 0 neutral. 0 without a car.
+    pub gear: i32,
+    /// Driving assists: bit 0 automatic clutch, bit 1 automatic gears.
+    pub assists: u32,
+    /// Steer, throttle, brake, clutch, handbrake.
+    pub controls: [f32; 5],
+    /// Keeps the block free of padding.
+    pub pad: u32,
 }
 
 impl HudBlock {
@@ -324,6 +336,10 @@ impl HudBlock {
     /// The player aims at a radio knob.
     pub const RADIO: u32 = 1 << 6;
     pub const RADIO_AM: u32 = 1 << 7;
+    /// The player drives a car.
+    pub const DRIVING: u32 = 1 << 8;
+    /// A computer takes the typed text.
+    pub const TYPING: u32 = 1 << 9;
 }
 
 /// Interaction feedback text and values. Sent when they change.
@@ -714,8 +730,44 @@ impl SimFrame {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SimCommand {
     pub seq: u64,
+    /// Real seconds of the frame.
     pub delta_seconds: f64,
     pub input: FrameInput,
+    /// Menu actions: `PAUSE`, `START`, `RECOVER`.
+    pub actions: u32,
+    /// The renderer shows the garage.
+    pub ready: bool,
+    /// A save request is pending. The simulation drops the input and the actions.
+    pub hold: bool,
+    pub assists: Option<DrivingAssists>,
+    /// Stored settings from the browser. The simulation validates them.
+    pub settings: Option<DrivingSettings>,
+    /// Local month and day.
+    pub calendar: [u8; 2],
+}
+
+impl SimCommand {
+    pub const PAUSE: u32 = 1 << 1;
+    pub const START: u32 = 1 << 2;
+    pub const RECOVER: u32 = 1 << 4;
+    pub const ACTIONS: u32 = Self::PAUSE | Self::START | Self::RECOVER;
+
+    /// Adds a later command. A held command drops the input before it.
+    pub fn merge(&mut self, next: Self) {
+        self.seq = next.seq;
+        self.delta_seconds += next.delta_seconds;
+        if next.hold {
+            self.input.clear();
+        } else {
+            self.input.merge(next.input);
+        }
+        self.actions |= next.actions;
+        self.ready = next.ready;
+        self.hold = next.hold;
+        self.assists = next.assists.or(self.assists);
+        self.settings = next.settings.or(self.settings);
+        self.calendar = next.calendar;
+    }
 }
 
 #[derive(Debug, PartialEq)]

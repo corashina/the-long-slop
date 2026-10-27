@@ -264,7 +264,7 @@ pub(crate) fn publish(
             group.unknown_gpu_handles += 1;
         }
     }
-    let runtime = &drive.runtime;
+    let runtime = &drive.sim.runtime;
     let frame = runtime.stream.frame();
     let Some(car_key) = runtime.vehicle.as_ref() else {
         return;

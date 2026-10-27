@@ -34,16 +34,7 @@ pub fn transform(pose: VehiclePose) -> Transform {
         .with_rotation(Quat::from_array(pose.rotation))
 }
 
-pub fn interpolate(a: VehiclePose, b: VehiclePose, alpha: f32) -> VehiclePose {
-    VehiclePose {
-        position: Vec3::from_array(a.position)
-            .lerp(Vec3::from_array(b.position), alpha)
-            .to_array(),
-        rotation: Quat::from_array(a.rotation)
-            .slerp(Quat::from_array(b.rotation), alpha)
-            .to_array(),
-    }
-}
+pub use simulation::driver::interpolate;
 pub mod texture_batches;
 pub mod textures;
 

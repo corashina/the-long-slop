@@ -49,7 +49,7 @@ fn snapshot_input(
     if !assets.loaded || frame.views[0].is_none() {
         return;
     }
-    input.delta_seconds = drive.render_delta_seconds;
+    input.delta_seconds = drive.sim.render_delta_seconds;
     input.grading_temperature = sim.frame.lighting.cycle.grading_temperature;
     input.dead_weight = sim.frame.state.dead_weight;
     input.frame = frame.frame;

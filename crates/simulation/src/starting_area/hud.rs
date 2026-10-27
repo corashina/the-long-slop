@@ -57,11 +57,27 @@ impl GarageRuntime {
             (sleep.eligible, HudBlock::SLEEP_ELIGIBLE),
             (sleep.show_hint, HudBlock::SLEEP_HINT),
             (self.autosave_safe(false), HudBlock::AUTOSAVE_SAFE),
+            (self.area.player.driving(), HudBlock::DRIVING),
+            (self.stream.computers.typing, HudBlock::TYPING),
         ] {
             if on {
                 hud.flags |= flag;
             }
         }
+        let assists = self.driving_assists;
+        hud.assists = assists.automatic_clutch as u32 | ((assists.automatic_gears as u32) << 1);
+        let controls = self.driving_input.controls;
+        hud.controls = [
+            controls.steer,
+            controls.throttle,
+            controls.brake,
+            controls.clutch,
+            controls.handbrake,
+        ];
+        hud.gear = self
+            .vehicle
+            .as_ref()
+            .map_or(0, |key| self.vehicles[key].drivetrain.gear() as i32 - 1);
         if let Some(c) = self.area.interaction.guns.crosshair() {
             hud.weapon_icon = c.sprite.map_or(0, |s| s + 1);
             hud.weapon_color = c

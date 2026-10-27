@@ -205,7 +205,6 @@ impl FrameInput {
     }
 
     /// Retain active skipped input, cancel blocked skipped input, or consume a frame.
-    #[cfg(any(target_arch = "wasm32", test))]
     pub fn take_frame(&mut self, skip_elapsed: &mut bool, blocked: bool) -> Option<Self> {
         if std::mem::take(skip_elapsed) {
             if blocked {

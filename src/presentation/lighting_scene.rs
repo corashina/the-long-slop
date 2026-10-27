@@ -129,7 +129,7 @@ pub(crate) fn sync_lighting(
                 activation.last_check = 0.;
                 activation.checks = 0;
             }
-            activation.elapsed += drive.render_delta_seconds;
+            activation.elapsed += drive.sim.render_delta_seconds;
             for index in 0..PROBE_COUNT {
                 activation.distance_squared[index] =
                     player.distance_squared(value.probe_position[index]);
