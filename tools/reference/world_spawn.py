@@ -242,19 +242,19 @@ def project_runtime_receipts(world, output):
     if sidecar.exists():
         if sidecar.read_bytes()!=original:raise ValueError("Immutable world provenance differs")
     else:sidecar.write_bytes(original)
-    required=set()
-    def visit(value):
+    required={}
+    def visit(value,path):
         if isinstance(value,dict):
-            if set(value)=={"file","path_id"}:required.add((value["file"],value["path_id"]))
+            if set(value)=={"file","path_id"}:required.setdefault((value["file"],value["path_id"]),path)
             else:
                 for name,child in value.items():
-                    if name!="receipts":visit(child)
+                    if name!="receipts":visit(child,f"{path}.{name}")
         elif isinstance(value,list):
-            for child in value:visit(child)
-    visit(world)
+            for index,child in enumerate(value):visit(child,f"{path}[{index}]")
+    visit(world,"world")
     receipts={(r["source"]["file"],r["source"]["path_id"]):r for r in world["receipts"]}
-    missing=required-receipts.keys()
-    if missing:raise ValueError(f"Runtime identities have no checked receipts: {sorted(missing)[:20]}")
+    missing=sorted(required.keys()-receipts.keys())
+    if missing:raise ValueError(f"Runtime identities have no checked receipts: {[(i,required[i]) for i in missing[:20]]}")
     world["receipts"]=[r for identity,r in receipts.items() if identity in required]
     print(f"World provenance: {sidecar} SHA256 {digest}; runtime receipts {len(world['receipts'])}",flush=True)
 

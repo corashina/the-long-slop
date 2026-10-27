@@ -834,6 +834,9 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         from .vehicles import vehicle_record, part_records
         vehicle=vehicle_record(source,hierarchy,bodies,colliders,index,report['material_indices'],output)
         if vehicle:prototype['vehicle']=vehicle
+        # Vehicle and sled records link source assets outside the hierarchy: particle materials,
+        # shaders, plate fonts and clips. Each linked record needs its receipt.
+        receipt_links(source,selected,[vehicle,sled])
         engines,radiators,gauges=part_records(source,hierarchy,index,report['material_indices'])
         if engines:prototype['engines']=engines
         if radiators:prototype['radiators']=radiators
@@ -841,6 +844,15 @@ def export_world_prototypes(source,reader,selected,output,roots,roles,scope_cach
         prototypes.append(prototype)
         print(f'Exported {name}: {len(nodes)} nodes, {len(colliders)} colliders',flush=True)
     return prototypes
+
+def receipt_links(source, selected, value):
+    """Receipt every source identity ({file, path_id}) in `value`."""
+    if isinstance(value,dict):
+        if set(value)=={'file','path_id'}:selected.receipt(source.get(value['file'],value['path_id']))
+        else:
+            for child in value.values():receipt_links(source,selected,child)
+    elif isinstance(value,list):
+        for child in value:receipt_links(source,selected,child)
 
 def generation_counts(road):
     result = {name: road[name] for name in ('genAtStart', 'genInOneFrame')}
