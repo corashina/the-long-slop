@@ -111,6 +111,7 @@ fn a_shot_tank_explodes_and_breaks_a_nearby_bottle() {
         item: tank,
         force: 1e6,
         explode: true,
+        hole: None,
     });
     run.run_explosions(&reference, FIXED_DT);
     settle(&mut run, &reference, 0.1);
@@ -138,8 +139,59 @@ fn a_blast_sets_off_a_second_tank() {
         item: first,
         force: 1e6,
         explode: true,
+        hole: None,
     });
     run.run_explosions(&reference, FIXED_DT);
     assert!(removed(&run, root));
     assert!(removed(&run, second), "the blast sets off the second tank");
+}
+
+#[test]
+#[ignore = "requires the installed source export"]
+fn a_shot_hole_facing_down_leaks_a_tank() {
+    let (reference, mut run) = super::garage_controls::load_garage();
+    settle(&mut run, &reference, 1.);
+    assert!(
+        reference.guns.weapons.iter().any(|w| w.hithole),
+        "a hithole gun"
+    );
+    let interaction = &run.area.interaction;
+    let fluids = interaction.explosions.explosive_fluids();
+    let tank = run
+        .area
+        .items
+        .iter()
+        .find(|s| {
+            !s.removed
+                && s.location == ItemLocation::World
+                && s.body.is_some()
+                && s.fluid.as_ref().is_some_and(|f| {
+                    f.total() > 0.5 && !crate::interaction::explosions::is_explosive(f, fluids)
+                })
+                && interaction
+                    .tank_explosion(s.id)
+                    .is_some_and(|e| !e.no_shoot_hole && !e.always_explode)
+        })
+        .expect("a non-explosive tank with fluid near the start")
+        .id;
+    let amount = |run: &crate::starting_area::GarageRuntime| {
+        run.area
+            .items
+            .get(tank)
+            .unwrap()
+            .fluid
+            .as_ref()
+            .unwrap()
+            .total()
+    };
+    let before = amount(&run);
+    run.shot_explosive(Strike {
+        item: tank,
+        force: 1.,
+        explode: false,
+        hole: Some([position(&run, tank), -Vector::Y]),
+    });
+    assert_eq!(run.area.interaction.holes.count(tank), 1);
+    settle(&mut run, &reference, 3.);
+    assert!(amount(&run) < before, "the fluid leaks through the hole");
 }

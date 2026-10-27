@@ -30,6 +30,19 @@ impl GarageRuntime {
         {
             self.try_explode_tank(s.item, s.force, false);
         }
+        if let Some([point, normal]) = s.hole
+            && let Some(tank) = self.tank_of(s.item)
+            && self
+                .area
+                .interaction
+                .tank_explosion(tank)
+                .is_some_and(|e| !e.no_shoot_hole)
+            && let Some(state) = self.area.items.get(tank)
+        {
+            let pose = to_rapier(state.pose);
+            let holes = &mut self.area.interaction.holes;
+            holes.add(tank, pose, point, normal);
+        }
         self.try_explode_prop(s.item, s.force);
     }
     /// `tankscript.TryExplode(force, add)` of the tank of a hit item.

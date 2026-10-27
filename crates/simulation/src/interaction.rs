@@ -14,6 +14,7 @@ mod fluid_receipts;
 pub mod genie_lamp;
 pub mod guns;
 pub mod hitch;
+pub mod holes;
 mod hose;
 mod input;
 pub use input::InteractionOutcome;
@@ -212,6 +213,7 @@ pub struct InteractionState {
     pub melee: melee::MeleeState,
     pub guns: guns::GunState,
     pub explosions: explosions::ExplosionState,
+    pub holes: holes::Holes,
     pub decals: decals::DecalStore,
     sounds: [Option<InteractionSound>; 64],
     sound_count: usize,
@@ -520,6 +522,7 @@ impl InteractionState {
             melee: melee::MeleeState::new(reference)?,
             guns: guns::GunState::new(reference)?,
             explosions: explosions::ExplosionState::new(reference)?,
+            holes: holes::Holes::new(reference),
             decals: decals::DecalStore::new(reference),
             source_supply_emission: HashMap::new(),
             light_nodes: reference.colliders.iter().map(|c| (c.id, c.node)).collect(),
@@ -989,6 +992,7 @@ impl InteractionState {
         self.supplies.remove(&id);
         self.source_supply_emission.remove(&id);
         self.tank_rules.remove(&id);
+        self.holes.forget(id);
         self.openings
             .retain(|opening| opening.reference.tank != id && opening.reference.cap != id);
         for opening in &mut self.openings {
@@ -2117,6 +2121,7 @@ impl InteractionState {
                 }
             }
         }
+        self.holes.step(items, dt, fluid_scale);
         self.apply_fluid_receipts(items, physics, fluid_scale);
         if input.released & keys::GRAB != 0 {
             self.f_gesture_consumed = false;
@@ -2192,6 +2197,18 @@ fn pour_source<'a>(
     Some((pose, items.get_mut(opening.fluid_owner())?))
 }
 
+/// `tankcapscript.Update` pour factor at `angle` degrees from up. None below the pour angle,
+/// which rises from `tilt_degrees` at full to 100 when empty.
+fn pour_factor(tilt_degrees: f32, angle_disabled: bool, fill: f32, angle: f32) -> Option<f32> {
+    if angle_disabled {
+        return Some(1.0);
+    }
+    let threshold = 100.0 + (tilt_degrees - 100.0) * fill;
+    (angle > threshold).then(|| {
+        inverse_lerp(threshold, tilt_degrees + 90.0, angle).max(inverse_lerp(90.0, 180.0, angle))
+    })
+}
+
 /// Spill from `fluid` through `opening` at `angle` degrees from up.
 /// Returns emission rate, emission speed, poured liters, and fluid fractions.
 fn spill_step(
@@ -2206,20 +2223,15 @@ fn spill_step(
         return result;
     };
     let fill = (fluid.total() / fluid.capacity_liters).clamp(0.0, 1.0);
-    let threshold = 100.0 + (opening.reference.tilt_degrees - 100.0) * fill;
-    let factor = if opening.reference.angle_disabled {
-        1.0
-    } else {
-        inverse_lerp(threshold, opening.reference.tilt_degrees + 90.0, angle)
-            .max(inverse_lerp(90.0, 180.0, angle))
-    };
+    let rules = &opening.reference;
+    let factor = pour_factor(rules.tilt_degrees, rules.angle_disabled, fill, angle);
     opening.empty_pour = fluid.total() <= 0.;
-    let emitting = opening.valve > 0.
-        && !opening.reference.spill_disabled
-        && !opening.reference.tube_connected
-        && (opening.reference.angle_disabled || angle > threshold)
-        && fluid.total() > 0.;
-    if emitting {
+    if let Some(factor) = factor
+        && opening.valve > 0.
+        && !rules.spill_disabled
+        && !rules.tube_connected
+        && fluid.total() > 0.
+    {
         let speed = factor * opening.valve * opening.reference.flow_liters_per_second;
         let requested_liters = speed * dt * fluid_scale;
         let total = fluid.total();
