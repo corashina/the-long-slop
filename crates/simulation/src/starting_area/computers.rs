@@ -8,6 +8,30 @@ use crate::reference::{ComputerReference, ItemId};
 use crate::simulation::{FIXED_DT, FrameInput, keys};
 
 impl GarageRuntime {
+    /// Changed and new computer screens, and the computer set when it changed.
+    pub(super) fn screen_changes(&mut self, frame: &mut crate::boundary::SimFrame) {
+        use crate::boundary::Change;
+        use crate::interaction::computer::screen::ScreenView;
+        let sent = self.screens_sent.as_deref().unwrap_or(&[]);
+        let items = &mut self.screens_scratch;
+        items.clear();
+        self.stream
+            .computers
+            .take_screens(|item, computer, changed| {
+                items.push(item);
+                if changed || !sent.contains(&item) {
+                    frame
+                        .changes
+                        .push(Change::Screen(Box::new(ScreenView::of(item, computer))));
+                }
+            });
+        if self.screens_sent.as_ref() != Some(&self.screens_scratch) {
+            frame
+                .changes
+                .push(Change::Screens(self.screens_scratch.clone()));
+            self.screens_sent = Some(self.screens_scratch.clone());
+        }
+    }
     /// inputscript while usingComputer: the game reads no other input, and LMB ends typing.
     pub(super) fn step_typing(&mut self, input: &mut FrameInput) {
         let blocked = self.needs_output().dead || self.sleeping();

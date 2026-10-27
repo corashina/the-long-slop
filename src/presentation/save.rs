@@ -84,11 +84,14 @@ impl PreparedPresentation {
         })?;
         // The candidate renderer spends its own credit from the candidate stream.
         let mut ledger = crate::ownership::PresentationLedger::default();
+        let mut facts = crate::world::RendererFacts::default();
         super::world::preflight::configure_staging(
-            &mut candidate.stream,
+            &candidate.stream,
             &mut ledger,
+            &mut facts,
             &reference.file_catalog,
         )?;
+        candidate.stream.apply_renderer_facts(&mut facts)?;
         let mut overlap = world
             .resource::<crate::app::Drive>()
             .runtime
@@ -128,9 +131,12 @@ impl PreparedPresentation {
         let materials = world
             .resource::<materials::SourceMaterials>()
             .fork(&mut ledger)?;
-        let prototypes = world
-            .resource::<SourcePrototypes>()
-            .fork(&mut candidate.stream, &mut ledger)?;
+        let prototypes = world.resource::<SourcePrototypes>().fork(
+            &candidate.stream,
+            &mut ledger,
+            &mut facts,
+        )?;
+        candidate.stream.apply_renderer_facts(&mut facts)?;
         // The stream covers the candidate use now, so a budget failure stops the save here.
         ledger.exchange(&mut candidate.stream);
         if let Some(error) = candidate.stream.frame().failure {

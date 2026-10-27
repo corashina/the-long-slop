@@ -395,7 +395,7 @@ impl SourceInstances {
     }
     pub fn prepare(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
         facts: &mut RendererFacts,
         reference: &ReferenceManifest,
@@ -1575,7 +1575,7 @@ impl SourceInstances {
     }
     pub fn retire(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,

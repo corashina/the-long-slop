@@ -43,7 +43,7 @@ pub struct InstanceMaterials<'w> {
 impl InstanceMaterials<'_> {
     pub fn admit(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut crate::ownership::PresentationLedger,
         reference: &ReferenceManifest,
         prototype: &WorldPrototypeReference,

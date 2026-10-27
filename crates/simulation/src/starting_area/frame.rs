@@ -138,6 +138,7 @@ impl GarageRuntime {
         if let Some(aims) = self.home_cable(reference) {
             frame.changes.push(Change::HomeCable(aims));
         }
+        self.screen_changes(frame);
         frame.planes.clear();
         frame
             .planes

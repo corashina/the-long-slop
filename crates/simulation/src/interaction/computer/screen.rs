@@ -2,7 +2,27 @@
 //! that the computer camera draws. Pixels are Rgba8Unorm with linear colors. Rows run
 //! bottom-up, as source texture rows do.
 use super::Computer;
-use crate::reference::{ComputerReference, ComputerScreenReference};
+use crate::reference::{ComputerReference, ComputerScreenReference, ItemId};
+use serde::{Deserialize, Serialize};
+
+/// The screen state of one computer, as the renderer draws it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScreenView {
+    pub item: ItemId,
+    pub grid: Vec<u8>,
+    pub cursor: [i32; 2],
+    pub cursor_visible: bool,
+}
+impl ScreenView {
+    pub fn of(item: ItemId, computer: &Computer) -> Self {
+        Self {
+            item,
+            grid: computer.grid().to_vec(),
+            cursor: computer.cursor(),
+            cursor_visible: computer.cursor_visible(),
+        }
+    }
+}
 
 /// A linear color in 0..1.
 fn linear(srgba: [f32; 4]) -> [f32; 4] {
@@ -51,7 +71,7 @@ impl Canvas<'_> {
 }
 
 /// Draw the whole screen of `computer` into `pixels` (size.x * size.y * 4 bytes).
-pub fn draw(reference: &ComputerReference, computer: &Computer, pixels: &mut [u8]) {
+pub fn draw(reference: &ComputerReference, computer: &ScreenView, pixels: &mut [u8]) {
     let s: &ComputerScreenReference = &reference.screen;
     let mut canvas = Canvas {
         pixels,
@@ -61,8 +81,8 @@ pub fn draw(reference: &ComputerReference, computer: &Computer, pixels: &mut [u8
     canvas.fill([0., 0., w, h], quantize(linear(s.back)));
     let [fx, fy, fw, fh] = s.front_rect;
     canvas.fill([fx, fy, fx + fw, fy + fh], quantize(linear(s.front)));
-    if computer.cursor_visible() {
-        let [cx, cy] = computer.cursor().map(|v| v as f32);
+    if computer.cursor_visible {
+        let [cx, cy] = computer.cursor.map(|v| v as f32);
         let x = fx + cx * reference.cursor_step[0];
         let y = fy + cy * reference.cursor_step[1];
         let [cw, ch] = s.cursor_size;
@@ -73,7 +93,7 @@ pub fn draw(reference: &ComputerReference, computer: &Computer, pixels: &mut [u8
     let g = &s.glyphs;
     let cell_width = usize::from(g.cell[0]);
     let columns = usize::from(reference.x_size);
-    for (row, line) in computer.grid().chunks_exact(columns).enumerate() {
+    for (row, line) in computer.grid.chunks_exact(columns).enumerate() {
         let top = (fy.round() + row as f32 * s.line_height).round() as i32 + i32::from(g.offset[1]);
         let mut pen = fx.round() as i32 + i32::from(g.offset[0]);
         for &character in line {
@@ -148,7 +168,7 @@ mod tests {
         let mut c = Computer::new(3, 2);
         c.grid.copy_from_slice(b"\x08#   #");
         let mut pixels = vec![0; 10 * 10 * 4];
-        draw(&r, &c, &mut pixels);
+        draw(&r, &ScreenView::of(ItemId(0), &c), &mut pixels);
         let at = |x: usize, y: usize| {
             let i = ((9 - y) * 10 + x) * 4;
             [pixels[i], pixels[i + 1], pixels[i + 2]]

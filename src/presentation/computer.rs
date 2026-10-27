@@ -1,7 +1,7 @@
 //! Computer screens: one CPU-drawn C64output image per computer, shown by connected TVs.
 use crate::interaction::computer::screen;
+use crate::presentation::sim_frame::SimFrameResource;
 use crate::reference::{ComputerReference, ItemId};
-use crate::world::stream::content_computers::Computers;
 use bevy::{
     asset::RenderAssetUsages,
     ecs as bevy_ecs,
@@ -22,32 +22,31 @@ impl ComputerScreens {
             .find(|(i, _)| *i == item)
             .map(|(_, h)| h)
     }
-    /// Make one image per bound computer and redraw the changed screens. The images of
-    /// removed computers drop.
+    /// Drops the images of removed computers and draws the changed screens of `sim`.
     pub(crate) fn sync(
         &mut self,
         reference: &ComputerReference,
-        computers: &mut Computers,
+        sim: &mut SimFrameResource,
         images: &mut Assets<Image>,
     ) {
-        self.screens
-            .retain(|(item, _)| computers.computer(*item).is_some());
-        computers.take_screens(|item, computer, changed| {
-            let handle = match self.screens.iter().find(|(i, _)| *i == item) {
-                Some(_) if !changed => return,
+        if let Some(items) = sim.screen_set.take() {
+            self.screens.retain(|(item, _)| items.contains(item));
+        }
+        for view in sim.screens.drain(..) {
+            let handle = match self.screens.iter().find(|(i, _)| *i == view.item) {
                 Some((_, handle)) => handle.clone(),
                 None => {
                     let handle = images.add(blank(reference));
-                    self.screens.push((item, handle.clone()));
+                    self.screens.push((view.item, handle.clone()));
                     handle
                 }
             };
             if let Some(mut image) = images.get_mut(&handle)
                 && let Some(pixels) = image.data.as_mut()
             {
-                screen::draw(reference, computer, pixels);
+                screen::draw(reference, &view, pixels);
             }
-        });
+        }
     }
 }
 

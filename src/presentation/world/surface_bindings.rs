@@ -28,7 +28,7 @@ impl SourceWorldVisuals {
     }
     pub fn prepare_bindings(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
         ledger: &mut PresentationLedger,
         facts: &mut crate::world::RendererFacts,
         reference: &ReferenceManifest,
@@ -165,7 +165,9 @@ impl SourceWorldVisuals {
                 continue;
             }
             // The terrain material lives as long as its stream hold.
-            if stream.hold_prototype(record.source.clone())? {
+            let hold = crate::world::RendererFact::HoldPrototype(record.source.clone());
+            if !stream.holds_prototype(&record.source) && !facts.contains(&hold) {
+                facts.push(hold);
                 let mut allocation = ledger.allocation();
                 allocation.prototype_cpu += std::mem::size_of::<TerrainMaterial>() + 256 + 8192;
                 allocation.prototype_gpu += 2048;
