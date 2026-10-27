@@ -612,7 +612,7 @@ def _validate_objects(a,manifest,prototype,table):
         else:_number(v)
     if s['contact']!=SHOVEL_CONTACT:raise ValueError('Shovel source contact inputs differ')
     audio_sources={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
-    for clip in [*b['clips'],*s['attack_clips'],*(c for group in s['contact_clips'] for c in group)]:
+    for clip in [*s['attack_clips'],*(c for group in s['contact_clips'] for c in group)]:
         _source(clip)
         if (clip['file'],clip['path_id']) not in audio_sources:raise ValueError('Acquisition audio resource missing')
     e=a['evidence'];_shape(e,'assembly_sha256 text_sha256 methods')

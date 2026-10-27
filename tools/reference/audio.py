@@ -559,8 +559,11 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if prototype.get('vehicle'):
             vehicle=prototype['vehicle'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
             group=source.resolve(car,source.read(car)['groupScript'])
-            if car_group is not None and key(group)!=key(car_group):raise ValueError(f'Car hit audio routes differ: {key(car)}')
-            car_group=group
+            # Cars may have their own groupScript, or none. The car hit row needs one GCarSounds mixer group.
+            if group is not None:
+                hits=source.resolve(group,source.read(group)['GCarSounds'])
+                if car_group is not None and key(hits)!=key(car_hits):raise ValueError(f'Car hit audio routes differ: {key(car)}')
+                car_group,car_hits=group,hits
             wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
             vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
             vehicle['audio']['doors']=door_audio(source,root,car,lambda r,p:car_shot(r,p,1.,None,None,PRIORITIES[4]))
@@ -633,7 +636,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'radio_click':default_route,'break':default_route,'rock_heat':default_route,'footstep':default_route,
-        'car_hit':source.resolve(car_group,source.read(car_group)['GCarSounds'])}
+        'car_hit':car_hits}
 
     audio['survival']=[]
     for role,kind,owner,clip_readers,reader,gain,pitch in survival_groups:
