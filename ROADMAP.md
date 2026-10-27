@@ -207,6 +207,19 @@ Run the X02 part 2 test pass (melee weapons) in the same run:
 5. Hit a sausage with the shovel or a hurtFood weapon: it splits into pieces. Save and load: the pieces keep their bites. A dropped turd also saves and reloads now.
 6. Check the hands follow the weapon grips during attacks.
 
+Run the X02 part 3 test pass (guns) in the same run:
+
+1. Re-export, then rebuild. The export prints the gun list. Old saves do not load (save schema 30).
+2. Run `cargo test --lib guns -- --ignored`. Fix the gun prototype names and the equip helper if guns are not found.
+3. Fire each gun: revolver, BB gun, SMG and the three shotguns. Check the shot sound, muzzle flash, recoil, tracer, sand or spark particles and hit sounds. A shot breaks a bottle. Shotgun pellets push a crowbar.
+4. Check the HUD crosshair per gun, and its empty color.
+5. Reload and unload with R and E from aimed or carried ammo. Round totals stay the same. The left hand moves to the gun.
+6. Shotguns and BB gun: hold R and move the mouse to break the barrel. Closed barrels fire; open barrels reload. The BB gun gains power.
+7. Revolver: hold R and scroll to turn the cylinder. Empty chambers click. Bullets show in full chambers.
+8. SMG: load from a magazine item. No magazine: no fire. Save and load keeps ammo, barrel, chambers, power and magazine.
+9. Shoot metal, wood, sand, glass and flesh: bullet holes show with the right texture, face out, move with items and fade per lifetime. Check the first hole for a hitch.
+10. Check F3 while firing the SMG with many holes. Compare with the frame rate rule.
+
 Run the X03a test pass (sky traffic) in the same run:
 
 1. Re-export, then rebuild. Old exports do not load (X03a added the sky record and the sky plane scenes).
@@ -219,7 +232,7 @@ Run the X03a test pass (sky traffic) in the same run:
 | ID | Task | Size | Remaining work |
 | --- | --- | --- | --- |
 | X01 | Player body and appearance | XL | Sunglasses. [D06] |
-| X02 | Weapons and damage | XL | Guns, ammo, explosions (with melee tank and explosive hits) (cacti breaks only here), hit effects, wounds, explosive fluids, AI parts of the damage model (X03). [G01-G10, E04, C06] |
+| X02 | Weapons and damage | XL | Explosions (with melee and gun tank and explosive hits) (cacti breaks only here), wounds and shots on the player, explosive fluids, SMG magazine drop on unload, AI parts of the damage model (X03). [G01, G03, G06, G09, E04, C06] |
 | X03 | Creatures | XL | AI senses and movement, rabbits, monsters, vultures, sandworm, UFO, EMP. [H01-H06, H09-H11, B17, F21] |
 | X04 | Menus, settings, and saves | L | New game options, game modes, homesick mode, menu player figure with IK, settings, rebinding, languages, help text. [M01-M03, M06-M12, M14, M16, I10, L05] |
 | X05 | Save every remaining state | XL | World-part wear and colors (`save_partcondition` on generated items) after section 4. Other fields grow with their features. [M13] |
