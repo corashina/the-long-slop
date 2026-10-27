@@ -839,7 +839,8 @@ pub struct LibraryProvenance {
     pub source_manifest_sha256: String,
 }
 
-pub const MAX_MANIFEST_BYTES: usize = 256 * 1024 * 1024;
+/// The manifest with all world vehicle prototypes is about 295 MB.
+pub const MAX_MANIFEST_BYTES: usize = 384 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
