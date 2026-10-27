@@ -32,6 +32,8 @@ pub struct SourcePresentationAllocation {
     primary_assets: Vec<crate::reference::AssetId>,
     /// Renderer share of the world budgets.
     pub(crate) ledger: crate::ownership::PresentationLedger,
+    /// Facts of the last renderer step. The world step applies them.
+    facts: crate::world::RendererFacts,
 }
 impl SourcePresentationAllocation {
     pub fn bootstrap(
@@ -110,10 +112,6 @@ impl WorldPresentation<'_, '_> {
     fn exchange_credit(&mut self, stream: &mut WorldStream) {
         self.allocation.ledger.exchange(stream);
     }
-    /// The lamps the renderer admitted. The stream publishes only with them.
-    fn admitted_lights(&self) -> Option<&[crate::world::GeneratedId]> {
-        self.lights.road_lamps.admitted_lights()
-    }
     /// Alternates world steps and renderer steps until `budget_ms` ends or nothing moves.
     /// A budget of 0 runs one pair.
     pub fn step_world(
@@ -126,12 +124,22 @@ impl WorldPresentation<'_, '_> {
         enabled: bool,
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
+        runtime
+            .stream
+            .apply_renderer_facts(&mut self.allocation.facts)?;
         self.exchange_credit(&mut runtime.stream);
         let started = simulation::host::game_now();
         loop {
             let before = runtime.stream.metrics();
             let remaining = (budget_ms - (simulation::host::game_now() - started)).max(0.);
-            runtime.advance_world(reference, required_views, self.admitted_lights(), remaining)?;
+            let allocation = &mut *self.allocation;
+            runtime.advance_world(
+                reference,
+                required_views,
+                &mut allocation.facts,
+                self.lights.road_lamps.admitted_lights(),
+                remaining,
+            )?;
             self.prepare(
                 &mut runtime.stream,
                 reference,
@@ -208,6 +216,13 @@ impl WorldPresentation<'_, '_> {
                 .retire_session(&mut self.commands, &mut self.meshes);
             self.surfaces.reset_bindings(&mut self.terrain);
         }
+        // The world step published before this step. Published surfaces take their prepared renderer.
+        self.surfaces.sync(
+            &stream.frame(),
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.roots,
+        )?;
         // Cancellation and cleanup run before any material or stream failure can return.
         self.instances.retire(
             stream,
@@ -218,7 +233,8 @@ impl WorldPresentation<'_, '_> {
             &mut self.grass,
             &mut self.writers,
         )?;
-        self.surfaces.retire_stale(stream, &mut self.meshes)?;
+        self.surfaces
+            .retire_stale(stream, &mut self.allocation.facts, &mut self.meshes)?;
         self.prototypes
             .retire_unused(stream, reference, &self.instances);
         let lighting_cpu = self.lights.clone_bytes();
@@ -294,9 +310,11 @@ impl WorldPresentation<'_, '_> {
             failure.get_or_insert(error);
         }
         timer.next(crate::world::stream_profile::Stage::Prototypes);
+        let allocation = &mut *self.allocation;
         if let Err(error) = self.prototypes.prepare(
             stream,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            &mut allocation.facts,
             reference,
             &self.server,
             &mut self.assets,
@@ -428,9 +446,11 @@ impl WorldPresentation<'_, '_> {
             return Ok(());
         }
         timer.next(crate::world::stream_profile::Stage::Bindings);
+        let allocation = &mut *self.allocation;
         self.surfaces.prepare_bindings(
             stream,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            &mut allocation.facts,
             reference,
             &mut self.prototypes,
             &self.server,
@@ -439,9 +459,11 @@ impl WorldPresentation<'_, '_> {
             &mut self.terrain,
         )?;
         timer.next(crate::world::stream_profile::Stage::Instances);
+        let allocation = &mut *self.allocation;
         self.instances.prepare(
             stream,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            &mut allocation.facts,
             reference,
             &mut self.prototypes,
             &self.server,
@@ -463,9 +485,11 @@ impl WorldPresentation<'_, '_> {
             &mut self.grass,
         );
         timer.next(crate::world::stream_profile::Stage::Surface);
+        let allocation = &mut *self.allocation;
         self.surfaces.prepare_surface(
             stream,
-            &mut self.allocation.ledger,
+            &mut allocation.ledger,
+            &mut allocation.facts,
             &mut self.meshes,
             &mut self.pipelines,
             &self.fixed,
@@ -486,13 +510,6 @@ impl WorldPresentation<'_, '_> {
         a.objects = a.objects.saturating_sub(old.2) + lamps.2;
         self.allocation.ledger.set_allocation(a)?;
         self.allocation.lamps = lamps;
-        timer.next(crate::world::stream_profile::Stage::SurfaceSync);
-        self.surfaces.sync(
-            &stream.frame(),
-            &mut self.commands,
-            &mut self.meshes,
-            &mut self.roots,
-        )?;
         timer.next(crate::world::stream_profile::Stage::InstanceSync);
         self.screens.sync(
             &reference.computer.computer,

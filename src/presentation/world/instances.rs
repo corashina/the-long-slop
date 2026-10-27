@@ -11,6 +11,7 @@ use super::{
 };
 use crate::ownership::PresentationLedger;
 use crate::world::stream::content_index::InstanceSelection;
+use crate::world::{RendererFact, RendererFacts};
 use crate::{
     presentation::materials::{SourceShadowMode, grass::settings::settings_from_source},
     presentation::renderer_visibility::CameraHidden,
@@ -396,6 +397,7 @@ impl SourceInstances {
         &mut self,
         stream: &mut WorldStream,
         ledger: &mut PresentationLedger,
+        facts: &mut RendererFacts,
         reference: &ReferenceManifest,
         prototypes: &mut SourcePrototypes,
         server: &AssetServer,
@@ -1191,10 +1193,14 @@ impl SourceInstances {
                 }
             }
             if complete && instance.continuation.as_ref().unwrap().drained() {
-                stream.bind_prototype(&instance.placement.prototype)?;
-                stream.bind_structure_recipe(&instance.placement.prototype)?;
+                let source = &instance.placement.prototype;
+                facts.push(RendererFact::BindPrototype(source.clone()));
+                facts.push(RendererFact::BindRecipe(source.clone()));
                 let claim = instance.continuation.as_mut().unwrap();
-                stream.accept_structure_renderer(claim.request(), &instance.placement.id)?;
+                facts.push(RendererFact::AcceptStructure(
+                    claim.request(),
+                    instance.placement.id.clone(),
+                ));
                 ledger.hand_over_claim(claim)?;
                 instance.ready = true;
                 instance.continuation = None;

@@ -4,7 +4,7 @@ use super::pipelines::{PipelineTicket, WorldPipelines};
 use crate::ownership::renderer_pending::{PipelineContinuation, RendererOwner};
 use crate::presentation::fixed_assets::{MeshUpload, SourceFixedAssets};
 use crate::presentation::materials::RenderingState;
-use crate::world::{WorldRequest, WorldStream};
+use crate::world::{RendererFact, RendererFacts, WorldRequest, WorldStream};
 use crate::{
     reference::{ReferenceError, SourceId},
     world::{SurfaceKey, WorldFrame, WorldLayer, WorldSurface},
@@ -148,7 +148,8 @@ impl SourceWorldVisuals {
     }
     pub(crate) fn retire_stale(
         &mut self,
-        stream: &mut WorldStream,
+        stream: &WorldStream,
+        facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
     ) -> Result<(), ReferenceError> {
         let matches = |pending: &SurfacePreparation, request: WorldRequest, key: SurfaceKey| {
@@ -176,7 +177,7 @@ impl SourceWorldVisuals {
             }
             let mut pending = self.pending.take().unwrap();
             pending.continuation.release()?;
-            stream.discard_surface_renderer(pending.request, pending.key)?;
+            facts.push(RendererFact::DiscardSurface(pending.request, pending.key));
             for mesh in pending.meshes {
                 meshes.remove(mesh.id());
             }
@@ -187,11 +188,12 @@ impl SourceWorldVisuals {
         &mut self,
         stream: &mut WorldStream,
         ledger: &mut crate::ownership::PresentationLedger,
+        facts: &mut RendererFacts,
         meshes: &mut Assets<Mesh>,
         pipelines: &mut WorldPipelines,
         fixed: &SourceFixedAssets,
     ) -> Result<(), ReferenceError> {
-        self.retire_stale(stream, meshes)?;
+        self.retire_stale(stream, facts, meshes)?;
         let Some((request, surface)) = stream.prepared_surface() else {
             return Ok(());
         };
@@ -209,7 +211,7 @@ impl SourceWorldVisuals {
             return Ok(());
         }
         if self.pending.is_none() {
-            stream.reserve_surface_renderer(request, key)?;
+            facts.push(RendererFact::ReserveSurface(request, key));
             let mut continuation =
                 PipelineContinuation::counted(RendererOwner::Surface(request, key));
             let prepared = stream.prepared_surface().unwrap().1;
@@ -282,7 +284,8 @@ impl SourceWorldVisuals {
         if !pending.continuation.drained() {
             return Ok(());
         }
-        stream.accept_surface_renderer(request, key)
+        facts.push(RendererFact::AcceptSurface(request, key));
+        Ok(())
     }
     pub fn sync(
         &mut self,

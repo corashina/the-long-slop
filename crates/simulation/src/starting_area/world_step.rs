@@ -2,20 +2,22 @@
 use super::GarageRuntime;
 use crate::{
     reference::{ReferenceError, ReferenceManifest},
-    world::{GeneratedId, RequiredView, stream_profile},
+    world::{GeneratedId, RendererFacts, RequiredView, stream_profile},
 };
 
 impl GarageRuntime {
-    /// Publishes the renderer-ready work, then prepares the next work.
+    /// Applies the renderer facts, publishes the renderer-ready work, then prepares the next work.
     /// `admitted_lights` are the lamps the renderer admitted in its last step.
     pub fn advance_world(
         &mut self,
         reference: &ReferenceManifest,
         required_views: &[RequiredView],
+        facts: &mut RendererFacts,
         admitted_lights: Option<&[GeneratedId]>,
         budget_ms: f64,
     ) -> Result<(), ReferenceError> {
         let mut timer = stream_profile::Timer::new(stream_profile::Stage::Publication);
+        self.stream.apply_renderer_facts(facts)?;
         // Light admission and complete renderer preparation precede collision mutation.
         if let Some(required) = admitted_lights {
             self.stream.publish(&mut self.physics, required)?;

@@ -41,6 +41,8 @@ mod instances;
 pub use instances::{StructureInstance, StructureRecipe, TriggerRoles};
 pub mod metrics;
 pub use metrics::WorldMetrics;
+pub mod renderer_facts;
+pub use renderer_facts::{RendererFact, RendererFacts};
 pub mod stream;
 mod stream_limits;
 pub use stream::content_boxes::BoxRelease;
