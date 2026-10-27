@@ -221,11 +221,26 @@ pub struct PrototypeBehavior {
     pub attack_trigger: Option<SourceId>,
     /// gibscript of a gib root. Gibs only.
     pub gib: Option<GibReference>,
+    /// gibscripts of gib pieces below the root. Gibs only.
+    pub gib_pieces: Vec<GibPieceReference>,
     /// Gib nodes with scaleDestroyScript. Gibs only.
     pub scale_destroy: Vec<NodeId>,
     pub clips: Vec<SourceId>,
     pub contact_sound_source: Option<SourceId>,
     pub contact_clips: Vec<Vec<SourceId>>,
+}
+
+/// gibscript of a gib piece. It keeps its own life after the main gib detaches it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GibPieceReference {
+    pub source: SourceId,
+    pub node: NodeId,
+    /// True: `life` is a distance from the player in metres. False: seconds.
+    pub distance: bool,
+    pub life: f32,
+    /// The piece node and every node below it.
+    pub nodes: Vec<NodeId>,
 }
 
 /// gibscript on a gib root.
@@ -248,8 +263,9 @@ pub struct GibReference {
 const SELECTED: [i64; 11] = [
     75443, 51722, 61587, 70812, 53838, 53837, 63605, 63259, 54495, 83430, 51557,
 ];
-/// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs.
-const GIB_COUNT: usize = 8;
+/// Gib prototypes: beer, box, cacti, vase, wc, then box, vase and wc reduced gibs, then the
+/// tumbleweed gib and the Attachable07 gib.
+const GIB_COUNT: usize = 10;
 /// Box gib and reduced gib roots.
 pub(super) const BOX_GIBS: [i64; 2] = [81642, 81645];
 
@@ -396,6 +412,18 @@ impl ItemPrototype {
             b.scale_destroy.iter().all(|n| self.within(m, *n)),
             "gib scaleDestroyScript owner",
         )?;
+        require(
+            b.gib_pieces.iter().all(|g| {
+                checked(&g.source, g.source.path_id)
+                    && g.life.is_finite()
+                    && g.life >= 0.
+                    && g.nodes.contains(&g.node)
+                    && g.nodes
+                        .iter()
+                        .all(|n| *n != self.root && self.within(m, *n))
+            }),
+            "gib pieces",
+        )?;
         let Some(gib) = &b.gib else {
             return require(generic, "box gib without gibscript");
         };
@@ -508,8 +536,12 @@ impl ItemPrototype {
         )?;
         require(
             (generic || self.bodies.len() == count && self.pickups.len() == count)
-                && !self.bodies.is_empty()
-                && !self.colliders.is_empty(),
+                && (!self.bodies.is_empty() && !self.colliders.is_empty()
+                    // A particle-only gib has no physics.
+                    || self.item_id.is_none()
+                        && self.bodies.is_empty()
+                        && self.colliders.is_empty()
+                        && self.pickups.is_empty()),
             "complete prototype physics",
         )?;
         for b in &self.bodies {
@@ -725,7 +757,8 @@ impl ItemPrototype {
                 && b.melee.is_some() == (item_id == Some(216))
                 && b.attack_target.is_some() == (item_id == Some(216))
                 && b.attack_trigger.is_some() == (item_id == Some(216))
-                && (item_id.is_none() || b.gib.is_none() && b.scale_destroy.is_empty()),
+                && (item_id.is_none()
+                    || b.gib.is_none() && b.gib_pieces.is_empty() && b.scale_destroy.is_empty()),
             "prototype behavior kinds",
         )?;
         match item_id {

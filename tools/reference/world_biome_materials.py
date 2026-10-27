@@ -7,11 +7,12 @@ SWAP_CLASS = 'materialChangeScript'
 RENDERERS = {'MeshRenderer', 'SkinnedMeshRenderer', 'ParticleSystemRenderer', 'LineRenderer', 'TrailRenderer', 'BillboardRenderer', 'SpriteRenderer'}
 
 
-def scene_component(source, reader, class_name):
-    """Find the one scene MonoBehaviour of a class. The catalog dependencies name its MonoScript."""
+def scene_component(source, reader, class_name, scene='level'):
+    """Find the one MonoBehaviour of a class in the scenes whose name starts with `scene`.
+    The catalog dependencies name its MonoScript."""
     scripts = {key(o) for o in source.objects.values() if o.type.name == 'MonoScript' and source.read(o)['m_ClassName'] == class_name}
     found = [o for o in source.objects.values()
-             if o.type.name == 'MonoBehaviour' and o.assets_file.source_container_path.startswith('level')
+             if o.type.name == 'MonoBehaviour' and o.assets_file.source_container_path.startswith(scene)
              and any((d['file'], d['path_id']) in scripts for d in reader.source_objects[ObjectId(*key(o))]['dependencies'])
              and source.class_name(o) == class_name]
     if len(found) != 1:

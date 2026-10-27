@@ -363,7 +363,7 @@ def recover_conditions(source, nodes, components, pointer_node, item_nodes, coll
             'text':d['text'],'show_text':not bool(d['dontshowtext']),
             'scrub_node':pointer_node(reader,d['drot']) if d['drot']['m_PathID'] else None,
             'model':pointer_node(slide,sd['model']) if sd['model']['m_PathID'] else None,
-            'model_equip':pointer_node(slide,sd['modelEquipPos']),'model_default':pointer_node(slide,sd['modelDefPos']),
+            'model_equip':pointer_node(slide,sd['modelEquipPos']) if sd['modelEquipPos']['m_PathID'] else None,'model_default':pointer_node(slide,sd['modelDefPos']) if sd['modelDefPos']['m_PathID'] else None,
             'distance':sd['distance'],'mask':sd['LM']['m_Bits'],'position_lerp':sd['posLerp'],'rotation_lerp':sd['rotLerp'],
             'contact_offset':sd['modelDistfromCollider'],'minimum_displacement':sd['minSpeed'],'maximum_displacement':sd['maxSpeed'],
             'disabled':bool(sd['disabled']),'both_work':bool(sd['bothWork']),'sound_when_disabled':bool(sd['soundWhenDisabled']),'has_sound':bool(sd['hasSound']),

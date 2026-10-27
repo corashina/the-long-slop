@@ -195,10 +195,14 @@ impl CleaningTools {
         let mut signals = Vec::with_capacity(reference.conditions.brushes.len());
         let contact = |t: &BrushTool, root: NodeId| {
             let root = to_rapier(super::items::node_pose(reference, root)?);
-            let equip =
-                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_equip)?);
-            let default =
-                root.inverse() * to_rapier(super::items::node_pose(reference, t.model_default)?);
+            // A missing position keeps the model at the tool root.
+            let relative = |node: Option<NodeId>| {
+                node.map_or(Ok(Pose::IDENTITY), |n| {
+                    super::items::node_pose(reference, n).map(|p| root.inverse() * to_rapier(p))
+                })
+            };
+            let equip = relative(t.model_equip)?;
+            let default = relative(t.model_default)?;
             let model = t.model.map_or(Ok(root), |n| {
                 super::items::node_pose(reference, n).map(to_rapier)
             })?;

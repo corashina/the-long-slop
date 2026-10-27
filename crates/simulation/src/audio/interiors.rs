@@ -137,7 +137,8 @@ impl WorldInteriors {
         let r = &prototype.interiors[e.interior];
         // A door that is not bound yet counts as open.
         let value = |d| door(&e.placement, prototype, d).unwrap_or(1.);
-        let mut total = 0.;
+        // Door slots have no part binding yet: each counts as an empty, open slot.
+        let mut total = r.door_slots.len() as f32;
         for (d, &invert) in r.doors.iter().zip(&r.invert_doors) {
             let v = value(d);
             total += (2. * if invert { 1. - v } else { v }).clamp(0., 1.);
@@ -151,7 +152,7 @@ impl WorldInteriors {
         }
         super::interior_transmission(
             total,
-            r.doors.len(),
+            r.doors.len() + r.door_slots.len(),
             r.minimum_doors_to_max,
             r.maximum_transmission,
         )
@@ -180,6 +181,9 @@ mod tests {
             value: 0.,
             doors: doors.iter().map(|&d| source(d)).collect(),
             invert_doors: vec![false; doors.len()],
+            door_slots: Vec::new(),
+            invert_slots: Vec::new(),
+            parent_slot: None,
             parent_door: parent.map(|_| source(50)),
             method: serde_json::from_str(
                 r#"{"class":"c","method":"m","file":"f","line_start":1,"line_end":2,"sha256":""}"#,

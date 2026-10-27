@@ -10,7 +10,7 @@ STATION_PREFABS = (26573, 27344, 41123)
 ASSEMBLY_SHA256 = '9919a9eeddcce23bb4ff86e890437f32b4a3ef3c10af2efe3b8d889d894dd62e'
 TEXT_SHA256 = '22ddc62b91954205d90ff513232f39becebbc58a71b718685075f91f64b1f3ee'
 # Selected Lada contract, recovered from the checked build 11140890 source receipt.
-CONTRACT_SHA256 = 'fc132e727084ae72fb23038691ee0a7f1451a16b7b7d8f0092f19eb6259a614d'
+CONTRACT_SHA256 = '718186787e12c043e673f317df84f8f772ed78a2c98bcb41760771389ac63b89'
 
 
 def start_car(manifest, group):
@@ -581,10 +581,6 @@ def _validate_objects(a,manifest,prototype,table):
         for x in h[f]:_integer(x)
     if h['source']!=a['holiday_pumpkin'] or h['wearable']!={'file':'level1','path_id':79857} or h['terrain']!={'file':'level1','path_id':64898} or h['start']!=[10,15] or h['end']!=[11,15] or not h['inclusive'] or not h['local_calendar'] or not h['new_game_only'] or h['multiplayer']:
         raise ValueError('Holiday startup predicate differs')
-    audio_sources={(c['source']['file'],c['source']['path_id']) for c in manifest['audio']['clips']}
-    for clip in b['clips']:
-        _source(clip)
-        if (clip['file'],clip['path_id']) not in audio_sources:raise ValueError('Acquisition audio resource missing')
     e=a['evidence'];_shape(e,'assembly_sha256 text_sha256 methods')
     for method in _list(e['methods']):_shape(method,'owner signature sha256')
     if e['assembly_sha256'] != ASSEMBLY_SHA256 or e['text_sha256'] != TEXT_SHA256:

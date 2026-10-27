@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 
 use crate::presentation::lighting::{
-    RenderingState, SourceLighting, cookie_ids, cookie_slot, register_road_light,
+    RenderingState, SourceLighting, cookie_ids, cookie_rect, register_road_light,
     register_world_light, remove_road_light,
 };
 use crate::presentation::materials::SourceMaterial;
@@ -436,9 +436,12 @@ pub(crate) fn sync_source_lamps(
             let slot = source.road_lamps.allocation[index].ok_or_else(|| {
                 crate::reference::ReferenceError("Source lamp has no proxy admission".into())
             })?;
-            let cookie = cookie_slot(&cookie_ids(reference), &light.record).ok_or_else(|| {
-                crate::reference::ReferenceError("Source lamp cookie has no bound texture".into())
-            })?;
+            let cookie =
+                cookie_rect(reference, &cookie_ids(reference), &light.record).ok_or_else(|| {
+                    crate::reference::ReferenceError(
+                        "Source lamp cookie has no bound texture".into(),
+                    )
+                })?;
             let node = commands.spawn((pose, Visibility::Inherited)).id();
             let entity = register_world_light(
                 source,

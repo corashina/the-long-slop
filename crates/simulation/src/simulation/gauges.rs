@@ -213,7 +213,7 @@ impl GaugeState {
             .flat_map(|c| &c.digits)
             .find(|d| d.node.0 == node)
         {
-            return Some(pick(self.lit, &d.on, &d.off));
+            return d.material(self.lit);
         }
         std::iter::once(&r.backlight)
             .chain(r.needles.iter().map(|n| &n.backlight))

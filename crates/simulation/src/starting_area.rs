@@ -648,7 +648,7 @@ impl VehicleRuntime {
             return Some(pick(state.lamp_bits & (1 << i) != 0, &lamp.on, &lamp.off));
         }
         if let Some(digit) = r.digits().iter().find(|d| d.node.0 == node) {
-            return Some(pick(state.digits_lit, &digit.on, &digit.off));
+            return digit.material(state.digits_lit);
         }
         r.all_backlights().find_map(|b| match b {
             crate::reference::MaterialSwitchReference::Renderer { node: n, on, off }
@@ -1431,8 +1431,10 @@ impl GarageRuntime {
         let car = driving
             .then(|| self.area.player.seat_vehicle())
             .flatten()
-            .and_then(|key| self.vehicles.get(key))
-            .map(|vehicle| vehicle.record(reference).key_steer_multiplier);
+            .and_then(|key| {
+                let record = self.vehicles.get(key)?.record(reference);
+                Some(record.key_steer(self.physics.snapshot(key).speed_mps * 3.6))
+            });
         let driving_output = self.driving_input.step(
             if driving {
                 self.area.player.seat_body()
