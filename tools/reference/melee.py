@@ -70,6 +70,8 @@ def recover_melee(source, manifest, output) -> dict:
         for n in p['nodes']:
             for c in source.components(source.get(n['source']['file'],n['source']['path_id']))[1]:
                 if c.type.name!='MonoBehaviour' or source.class_name(c)!='meleeweaponscript':continue
+                # A body-part weapon (the leg kick) has no pickupable. Melee items are pickups only.
+                if not source.read(c)['p']['m_PathID']:continue
                 try:weapons.append(_weapon(source,p['source'],c))
                 except (ValueError,KeyError) as error:raise ValueError(f'Melee weapon {key(c)}: {error}') from error
     weapons.sort(key=lambda w:(_order(w['prototype']),_order(w['source'])))

@@ -159,6 +159,9 @@ def recover_washes(source, manifest, output, lamp):
         root=source.transform_for(source.resolve(reader,d['m_GameObject']))
         if key(root) not in nodes:continue
         p,index=nodes[key(root)]
+        # WashTriggers with CleanProperty 1 clean dirt objects. They are not building cobwebs, and
+        # the runtime has no dirt wash yet, so they are not exported here.
+        if d['CleanProperty']!=2:continue
         def below(i):
             while i is not None:
                 if i==index:return True

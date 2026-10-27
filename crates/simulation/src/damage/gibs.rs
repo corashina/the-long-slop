@@ -170,6 +170,23 @@ impl Gibs {
                     });
                 }
             }
+            for piece in &prototype.behavior.gib_pieces {
+                let mut piece_items = Vec::with_capacity(piece.nodes.len());
+                for item in piece.nodes.iter().filter_map(|n| item_at(*n)) {
+                    if !piece_items.contains(&item) {
+                        piece_items.push(item);
+                    }
+                }
+                self.lives.push(Life {
+                    items: piece_items,
+                    distance: piece.distance,
+                    life: piece.life,
+                    age: 0.,
+                    colliders_off: false,
+                    root: item_at(piece.node),
+                    position: pending.root.position,
+                });
+            }
             if let Some(gib) = gib.filter(|g| !g.gib_main) {
                 self.lives.push(Life {
                     items: pending.items,

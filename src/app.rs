@@ -689,8 +689,11 @@ fn prepare_world(
     let Ok((projection, camera_transform)) = camera.single() else {
         return;
     };
+    // The renderer world exists after the first frame from the simulation worker.
+    let Some(origin) = presentation.origin() else {
+        return;
+    };
     let started = game_now();
-    let origin = presentation.origin().expect("synced renderer world");
     let snapshot = world_snapshot(&views, &epoch, sim.frame.state.session);
     let camera_world = snapshot.map_or_else(
         || camera_transform.to_matrix(),

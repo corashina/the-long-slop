@@ -141,7 +141,14 @@ def _decal(source, prefab, output) -> dict:
     def kind(n,name):return [c for c in n['components'] if (source.class_name(c) if c.type.name=='MonoBehaviour' else c.type.name)==name]
     meshes=[(n,f) for n in hierarchy for f in kind(n,'MeshFilter')]
     destroyers=[c for n in hierarchy for c in kind(n,'DecalDestroyer')]
-    if len(meshes)!=1 or len(destroyers)>1:raise ValueError(f'{key(root)} decal needs one mesh and at most one DecalDestroyer')
+    if not meshes or len(destroyers)>1:raise ValueError(f'{key(root)} decal needs a mesh and at most one DecalDestroyer')
+    # Decals are a front quad and a back quad that faces into the hit surface. The decal pipeline does not
+    # cull, so the first quad draws both sides. The quads share mesh, material and scale.
+    def quad(entry):
+        n,f=entry;r=kind(n,'MeshRenderer')
+        materials=[m['m_PathID'] for m in source.read(r[0])['m_Materials']] if len(r)==1 else None
+        return source.read(f)['m_Mesh']['m_PathID'],materials,vector(source.read(n['reader'])['m_LocalScale'])
+    if any(quad(entry)!=quad(meshes[0]) for entry in meshes[1:]):raise ValueError(f'{key(root)} decal quads differ')
     n,f=meshes[0]
     mesh=source.resolve(f,source.read(f)['m_Mesh'])
     renderers=kind(n,'MeshRenderer')

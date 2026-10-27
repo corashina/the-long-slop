@@ -1,5 +1,6 @@
 """Melee weapon controllers and checked normalized source tracks."""
 import json
+from .library.reader import checked
 from .source import key, source_id
 from .survival import finite_record
 

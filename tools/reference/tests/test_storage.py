@@ -47,9 +47,8 @@ class StorageTests(unittest.TestCase):
         prototypes = [{'source': home, 'nodes': [{'source': {'file': 'f', 'path_id': 1}}, {'source': {'file': 'f', 'path_id': 2}}]}]
         homes = storage.containing(prototypes, {'file': 'f', 'path_id': 2})
         self.assertEqual(homes, [(home, 1)])
-        storage.check_prototype_volume('v', fields, True, homes, [usable], {('f', 7, 'f', 9)})
-        for args in (('v', fields, True, [], [], set()), ('v', fields, False, homes, [], set()),
-                     ('v', dict(fields, noPhysicsLock=1), True, homes, [], set()), ('v', fields, True, homes, [usable], set())):
+        storage.check_prototype_volume('v', fields, homes, [usable], {('f', 7, 'f', 9)})
+        for args in (('v', fields, [], [], set()), ('v', fields, homes, [usable], set())):
             with self.assertRaises(ValueError):
                 storage.check_prototype_volume(*args)
 

@@ -112,8 +112,9 @@ pub struct BrushTool {
     pub show_text: bool,
     pub scrub_node: Option<NodeId>,
     pub model: Option<NodeId>,
-    pub model_equip: NodeId,
-    pub model_default: NodeId,
+    /// None: the slide has no equip or default position (the player point slide).
+    pub model_equip: Option<NodeId>,
+    pub model_default: Option<NodeId>,
     pub distance: f32,
     pub mask: u32,
     pub position_lerp: f32,
@@ -408,15 +409,10 @@ impl ConditionRecord {
             check(&t.source, t.cleaning_type < 7, "cleaning_type")?;
             check(
                 &t.source,
-                [
-                    Some(t.model_equip),
-                    Some(t.model_default),
-                    t.model,
-                    t.scrub_node,
-                ]
-                .iter()
-                .flatten()
-                .all(|n| nodes.contains(n)),
+                [t.model_equip, t.model_default, t.model, t.scrub_node]
+                    .iter()
+                    .flatten()
+                    .all(|n| nodes.contains(n)),
                 "model",
             )?;
             check(

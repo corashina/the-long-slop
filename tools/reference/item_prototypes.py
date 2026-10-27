@@ -12,7 +12,7 @@ SELECTED = ((75443,74,1,'item_pack'),(51722,62,1,'item_box'),(61587,216,1,'item_
             (83430,61,6,'item_siphon_hose'),(51557,312,1,'item_tumbleweed'))
 # Checked Gib and reducedGib GameObjects of selected breakablescripts: beer, box, cacti, vase, wc,
 # then box, vase and wc reduced gibs. Box gib Transforms are 81642 and 81645.
-GIBS = (14653,39185,24388,39184,39189,39188,39187,39186)
+GIBS = (14653,39185,24388,39184,39189,39188,39187,39186,23303,39984)
 # Box gib root Transforms: pickup count, collider count, renderer count.
 BOX_GIBS = {81642:(56,58,56),81645:(14,15,14)}
 
@@ -26,8 +26,16 @@ def selected(source):
 
 
 def recover_gib(source, records, node_ids) -> tuple:
-    """gibscript of the gib root (or None) and the nodes with scaleDestroyScript."""
-    gib = None; scale_destroy = []
+    """gibscript of the gib root (or None), gibscripts of gib pieces and the nodes with scaleDestroyScript."""
+    gib = None; scale_destroy = []; pieces = []
+    parents = {key(r['reader']): key(r['parent']) if r['parent'] is not None else None for r in records}
+    def subtree(top):
+        result = []
+        for identity in parents:
+            node = identity
+            while node is not None and node != top:node = parents[node]
+            if node == top:result.append(node_ids[identity])
+        return result
     for index, record in enumerate(records):
         for c in record['components']:
             if c.type.name != 'MonoBehaviour':
@@ -37,8 +45,16 @@ def recover_gib(source, records, node_ids) -> tuple:
                 if node_ids[key(record['reader'])] in scale_destroy:
                     raise ValueError(f'Duplicate scaleDestroyScript: {key(c)}')
                 scale_destroy.append(node_ids[key(record['reader'])])
+            elif name == 'gibscript' and index:
+                # A gib piece keeps its own life after the main gib detaches it.
+                d = source.read(c)
+                if d['gibMain'] or d['colsOff']:
+                    raise ValueError(f'gib piece gibscript start state is not audited: {key(c)}')
+                identity = key(record['reader'])
+                pieces.append({'source': source_id(c), 'node': node_ids[identity], 'distance': bool(d['distance']),
+                               'life': d['life'], 'nodes': subtree(identity)})
             elif name == 'gibscript':
-                if index or gib is not None:
+                if gib is not None:
                     raise ValueError(f'gibscript is not the only one on the gib root: {key(c)}')
                 d = source.read(c)
                 # gibscript.Start sets startTime and life2. An authored colsOff is not audited.
@@ -53,7 +69,7 @@ def recover_gib(source, records, node_ids) -> tuple:
                 gib = {'source': source_id(c), 'gib_main': bool(d['gibMain']), 'dont_rot': bool(d['gibMainDontRot']),
                        'add_small_pos': bool(d['gibMainAddSmallPos']), 'distance': bool(d['distance']),
                        'life': d['life'], 'children': children}
-    return gib, scale_destroy
+    return gib, pieces, scale_destroy
 
 
 def prepare_item_prototypes(source, roots):
@@ -140,7 +156,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             if target is None or target.type.name!=kind:raise ValueError(f'Invalid prototype {field}: {key(c)}')
             return target
         behavior={'pack':None,'ammo':None,'cigarette_prefab':None,'spawn':None,'breakable':None,'mount':None,
-            'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
+            'melee':None,'attack_target':None,'attack_trigger':None,'gib':None,'gib_pieces':[],'scale_destroy':[],'clips':[],'contact_sound_source':None,'contact_clips':[]}
         if item_id==74:
             c=component(source,root,'cigiscript');behavior.update(pack=source_id(c),ammo=source_id(component(source,root,'ammoscript')),
                 cigarette_prefab=source_id(link(c,'prefab','GameObject')))
@@ -156,7 +172,7 @@ def recover_item_prototypes(source, manifest, output) -> list[dict]:
             behavior['contact_clips']=[[source_id(source.resolve(main,p)) for p in group['a']] for group in source.read(main)['meleeHitSounds']]
             managed_evidence(source,['mainscript.PlayClipAtPoint(mainscript.M.meleeHitSounds[(int)hitType].a[num], V, mainscript.hitVolume[(int)hitType], mainscript.AudioPriorities[7]);'])
         elif item_id is None:
-            behavior['gib'],behavior['scale_destroy']=recover_gib(source,records,{key(r['reader']):nodes[key(r['reader'])]['id'] for r in records})
+            behavior['gib'],behavior['gib_pieces'],behavior['scale_destroy']=recover_gib(source,records,{key(r['reader']):nodes[key(r['reader'])]['id'] for r in records})
         for identity in [*behavior['clips'],*(c for group in behavior['contact_clips'] for c in group)]:
             c=source.get(identity['file'],identity['path_id'])
             if c.type.name!='AudioClip':raise ValueError('Invalid behavior clip')
@@ -188,9 +204,10 @@ def validate_gib(p, within) -> None:
     """gibscript and scaleDestroyScript links of a gib prototype. Other prototypes have none."""
     b=p['behavior'];gib=b['gib']
     if p['item_id'] is not None:
-        if gib is not None or b['scale_destroy']:raise ValueError('Gib behavior outside gibs')
+        if gib is not None or b['gib_pieces'] or b['scale_destroy']:raise ValueError('Gib behavior outside gibs')
         return
     if len(set(b['scale_destroy']))!=len(b['scale_destroy']) or not all(within(n) for n in b['scale_destroy']):raise ValueError('Gib scaleDestroyScript owner')
+    if any(g['life']<0 or not g['nodes'] or not all(within(n) and n!=p['root'] for n in [g['node'],*g['nodes']]) for g in b['gib_pieces']):raise ValueError('Gib piece owner or life')
     if gib is None:
         if p['id']['path_id'] in BOX_GIBS:raise ValueError('Box gib without gibscript')
         return
@@ -245,7 +262,8 @@ def validate_item_prototypes(prototypes, manifest) -> None:
         for c in p['colliders']:
             if not within(c['node']) or c['body'] not in bodies or c['body']!=owner(c['node']):raise ValueError('Wrong collider owner')
         if count is not None and (len(p['pickups'])!=count or len(p['bodies'])!=count):raise ValueError('Missing selected pickup bodies')
-        if not p['bodies']:raise ValueError('Prototype without bodies')
+        # A particle-only gib has no physics.
+        if not p['bodies'] and (p['item_id'] is not None or p['colliders'] or p['pickups']):raise ValueError('Prototype without bodies')
         for x in p['pickups']:
             pickup=x['pickup'];source=pickup['source']
             exceptions={(81642,135313):77169,(81642,140775):82214,(81645,135314):77170}

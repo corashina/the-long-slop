@@ -171,6 +171,7 @@ class VehicleRecordTests(unittest.TestCase):
         # A car without carscript.Transmission has no lever.
         self.assertIsNone(vehicle['lever'])
         self.assertEqual(vehicle['key_steer_multiplier'], 0)
+        self.assertIsNone(vehicle['key_steer_speed'])
         self.assertIs(vehicle['oil_led_two_stroke'], True)
         self.assertIsNone(vehicle['instruments'])
         self.assertEqual(vehicle['kmh_meters'], [])

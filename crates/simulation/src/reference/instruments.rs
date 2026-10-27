@@ -59,8 +59,26 @@ pub struct DigitReference {
     pub continuous: bool,
     pub initial_value: f32,
     pub initial_angle: f32,
-    pub on: MaterialLink,
-    pub off: MaterialLink,
+    /// Source `forgoszamlap.szam.MOn` and `MOff`. None: the source keeps the current material.
+    pub on: Option<MaterialLink>,
+    pub off: Option<MaterialLink>,
+}
+
+impl DigitReference {
+    /// The material the digit shows. A missing material keeps the other one.
+    /// None: the digit never changes its renderer material.
+    pub fn material(&self, lit: bool) -> Option<&MaterialLink> {
+        let (a, b) = if lit {
+            (&self.on, &self.off)
+        } else {
+            (&self.off, &self.on)
+        };
+        a.as_ref().or(b.as_ref())
+    }
+
+    pub fn materials(&self) -> impl Iterator<Item = &MaterialLink> {
+        self.on.iter().chain(&self.off)
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,7 +155,7 @@ impl GaugePartReference {
             .iter()
             .flat_map(|c| &c.digits)
             .filter(move |d| d.node.0 == node)
-            .flat_map(|d| [&d.on, &d.off]);
+            .flat_map(DigitReference::materials);
         let backlights = std::iter::once(&self.backlight)
             .chain(self.needles.iter().map(|n| &n.backlight))
             .filter_map(move |b| match b {

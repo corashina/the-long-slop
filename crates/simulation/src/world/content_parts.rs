@@ -31,8 +31,6 @@ pub(super) fn bind(
     }) {
         return Ok(());
     }
-    let pickup =
-        pickup.ok_or_else(|| ReferenceError("Generated part owner has no pickupable".into()))?;
     if content.nodes.is_empty() {
         let state = items.get(owner).unwrap();
         content.nodes = interaction.mechanisms.register_generated(
@@ -85,8 +83,11 @@ pub(super) fn bind(
         }
 
         let pickup_record = rules.get(&reference.world, link(part.fields, "p")?)?;
+        // Car roots have no pickupable. Only a root that is itself a part needs one.
         let pickup = if part_node == 0 {
-            pickup.clone()
+            pickup.clone().ok_or_else(|| {
+                ReferenceError("Generated part owner has no pickupable".into())
+            })?
         } else {
             super::stream::content_bindings::pickup_rule(pickup_record)?
         };

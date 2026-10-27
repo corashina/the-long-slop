@@ -77,7 +77,9 @@ def recover_trailer(source, hierarchy, mapping, bodies, root_point, lights):
     attachable = source.read(attachables[0])
     if not attachable['onlyToPoint']:raise ValueError(f'{key(attachables[0])}: unsupported grip without onlyToPoint')
     def point(field):
-        return root_point(source.transform_for(required(script, data[field], field)))
+        # Trailer prefabs link a GameObject or its Transform.
+        target = required(script, data[field], field)
+        return root_point(target if target.type.name == 'Transform' else source.transform_for(target))
     controllers = lights()
     rear = [record for record in controllers if record['kind'] == 'rear']
     if len(rear) != len(controllers):raise ValueError(f'{identity}: a trailer has only rearlights controllers')

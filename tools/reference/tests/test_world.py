@@ -61,24 +61,23 @@ class WorldTests(unittest.TestCase):
 
 
 class LightCookieTests(unittest.TestCase):
-    def test_world_light_cookie_binds_to_lighting_spot_cookie(self):
+    def test_world_light_cookie_binds_to_lighting_texture(self):
+        from unittest import mock
         from tools.reference.world import bind_light_cookies
         cookie = {'file': 'sharedassets1.assets', 'path_id': 990}
-        other = {'file': 'sharedassets1.assets', 'path_id': 735}
-        source = NS(lighting_textures={('sharedassets1.assets', 990): {'id': 4, 'source': cookie},
-                                       ('sharedassets1.assets', 735): {'id': 1, 'source': other}},
-                    lighting_lights=[{'kind': 'directional', 'cookie': 1}, {'kind': 'spot', 'cookie': 4}])
+        source = NS(get=lambda file, path_id: (file, path_id))
         def light(link, kind=0):
             return {'source': {'file': 'sharedassets1.assets', 'path_id': 123692}, 'class_name': 'Light',
                     'fields': {'m_Cookie': {'kind': 'link', 'value': link} if link else {'kind': 'empty'},
                                'm_Type': {'kind': 'integer', 'value': kind}}}
         world = {'records': [light(cookie), light(cookie), light(None)]}
-        bind_light_cookies(source, world)
-        self.assertEqual(world['light_cookies'], [{'source': cookie, 'texture': 4}])
-        # A point cookie or a cookie without a lighting spot cookie texture has no renderer binding.
-        for record in (light(other), light({'file': 'sharedassets1.assets', 'path_id': 1}), light(cookie, 2)):
-            with self.assertRaisesRegex(ValueError, 'lighting spot cookie'):
-                bind_light_cookies(source, {'records': [record]})
+        with mock.patch('tools.reference.lighting.texture', return_value=4) as texture:
+            bind_light_cookies(source, world, 'out')
+            texture.assert_called_with(source, ('sharedassets1.assets', 990), 'out')
+            self.assertEqual(world['light_cookies'], [{'source': cookie, 'texture': 4}])
+            # A point light cookie has no renderer binding.
+            with self.assertRaisesRegex(ValueError, 'not on a spot light'):
+                bind_light_cookies(source, {'records': [light(cookie, 2)]}, 'out')
 
 def _reader(path_id, kind='MonoBehaviour', name=None):
     return NS(assets_file=NS(source_container_path='level1'), path_id=path_id, type=NS(name=kind), name=name)

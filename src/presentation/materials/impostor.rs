@@ -215,14 +215,10 @@ impl Material for ImpostorMaterial {
         ];
         if gpu_props {
             descriptor.layout[2] = crate::presentation::prop_draws::draw_layout();
-            for definitions in [
-                &mut descriptor.vertex.shader_defs,
-                &mut descriptor
-                    .fragment
-                    .as_mut()
-                    .expect("source world fragment")
-                    .shader_defs,
-            ] {
+            // Depth-only passes have no fragment stage.
+            let fragment = descriptor.fragment.as_mut().map(|f| &mut f.shader_defs);
+            let vertex = &mut descriptor.vertex.shader_defs;
+            for definitions in std::iter::once(vertex).chain(fragment) {
                 definitions.push(bevy::shader::ShaderDefVal::Bool(
                     "SOURCE_GPU_PROPS".into(),
                     true,

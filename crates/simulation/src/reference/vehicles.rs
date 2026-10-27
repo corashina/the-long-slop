@@ -57,6 +57,8 @@ pub struct WorldVehicleReference {
     pub lever: Option<LeverReference>,
     /// Source `carscript.keySteerSensMultiplier`. Zero means no multiplier.
     pub key_steer_multiplier: f32,
+    /// Source `carscript.speedBasedKeyboardSens`. Some: it replaces `key_steer_multiplier`.
+    pub key_steer_speed: Option<KeySteerSpeed>,
     /// Source `carscript.ledOilTestTwoStrokeDefault`: the oil LED follows the two-stroke mix.
     pub oil_led_two_stroke: bool,
     pub seats: Vec<WorldSeatReference>,
@@ -186,6 +188,33 @@ impl PedalsReference {
     }
 }
 
+/// Source `carscript.keySensMinSpeed`, `keySensMaxSpeed`, `keySensMinSens` and `keySensMaxSens`.
+/// Speeds are km/h.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeySteerSpeed {
+    pub min_speed: f32,
+    pub max_speed: f32,
+    pub min_multiplier: f32,
+    pub max_multiplier: f32,
+}
+
+impl WorldVehicleReference {
+    /// Source `carscript.GetPlayerInput`: the keyboard steer multiplier at source `speed`.
+    pub fn key_steer(&self, speed_kmh: f32) -> f32 {
+        let Some(s) = self.key_steer_speed else {
+            return self.key_steer_multiplier;
+        };
+        // Unity `Mathf.InverseLerp` is zero when the ends are equal.
+        let t = if s.max_speed == s.min_speed {
+            0.
+        } else {
+            ((speed_kmh.abs() - s.min_speed) / (s.max_speed - s.min_speed)).clamp(0., 1.)
+        };
+        s.min_multiplier + (s.max_multiplier - s.min_multiplier) * t
+    }
+}
+
 /// Source `kmhslottype`: the meter of the part in each slot reads `types`, times `modifier`.
 /// With `force`, every needle of that meter reads the speed (source behavior).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -223,11 +252,9 @@ pub struct WorldProbeReference {
     pub mip_extents: Vec<u32>,
 }
 impl WorldProbeReference {
-    /// The capture and influence values equal those of `shared`.
+    /// The capture values equal those of `shared`. Influence bounds are per car.
     pub fn matches(&self, shared: &ProbeRecord) -> bool {
         self.enabled == shared.enabled
-            && self.bounds_size == shared.bounds_size
-            && self.bounds_offset == shared.bounds_offset
             && self.box_projection == shared.box_projection
             && self.blend_distance == shared.blend_distance
             && self.intensity == shared.intensity
@@ -658,7 +685,7 @@ impl WorldVehicleReference {
                 .digits()
                 .iter()
                 .filter(move |d| d.node.0 == node)
-                .flat_map(|d| [&d.on, &d.off]);
+                .flat_map(DigitReference::materials);
             let backlights = r
                 .all_backlights()
                 .filter_map(move |b| match b {
@@ -723,6 +750,15 @@ impl WorldVehicleReference {
             "vehicle key steer multiplier",
             self.key_steer_multiplier.is_finite() && self.key_steer_multiplier >= 0.,
         )?;
+        if let Some(k) = self.key_steer_speed {
+            check(
+                s,
+                "vehicle key steer speed",
+                finite(&[k.min_speed, k.max_speed, k.min_multiplier, k.max_multiplier])
+                    && k.min_multiplier >= 0.
+                    && k.max_multiplier >= 0.,
+            )?;
+        }
         if let Some(lever) = &self.lever {
             check(
                 s,
@@ -887,8 +923,7 @@ fn instruments_valid(r: &InstrumentReference, b: PrototypeBounds) -> bool {
         && r.digits().iter().all(|d| {
             b.node(d.node.0)
                 && d.axis < 3
-                && b.material(&d.on)
-                && b.material(&d.off)
+                && d.materials().all(|m| b.material(m))
                 && finite(&[d.initial_value, d.initial_angle])
         })
         && r.odometer
@@ -929,10 +964,7 @@ impl GaugePartReference {
                 && self.counters.iter().all(|c| {
                     finite(&[c.initial_value, c.multiplier])
                         && c.digits.iter().all(|d| {
-                            b.node(d.node.0)
-                                && d.axis < 3
-                                && b.material(&d.on)
-                                && b.material(&d.off)
+                            b.node(d.node.0) && d.axis < 3 && d.materials().all(|m| b.material(m))
                         })
                 }),
         )

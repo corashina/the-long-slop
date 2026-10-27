@@ -152,8 +152,14 @@ def world_interiors(source, prototype, readers, mechanisms, evidence):
     result = []
     for r in readers:
         d = source.read(r)
-        if d['removableDoor'] or d['doorSlots'] or d['parentDoorSlot']['m_PathID']:
-            raise ValueError(f'World interior door slots need a source route: {key(r)}')
+        # GetValue reads doorSlots and parentDoorSlot only on a removableDoor interior.
+        removable = bool(d['removableDoor'])
+        slots = [source.resolve(r, p) for p in d['doorSlots']] if removable else []
+        if any(s is None or source.class_name(s) != 'partslotscript' for s in slots):
+            raise ValueError(f'World interior door slot is not a partslotscript: {key(r)}')
+        parent_slot = source.resolve(r, d['parentDoorSlot']) if removable else None
+        invert_slots = [bool(x) for x in d['invertindividual']][:len(slots)] if removable else []
+        invert_slots += [False] * (len(slots) - len(invert_slots))
         collider = interior_collider(source, r, d)
         if collider is None or source_id(collider) not in colliders:
             raise ValueError(f'World interior collider outside prototype: {key(r)}')
@@ -167,7 +173,10 @@ def world_interiors(source, prototype, readers, mechanisms, evidence):
             'invert': bool(d['invert']), 'minimum_doors_to_max': d['minDoorToMax'],
             'maximum_transmission': d['maxAtengedes'], 'use_value': bool(d['useValue']), 'value': d['value'],
             'doors': door_ids, 'invert_doors': invert,
-            'parent_door': door(r, d['parentDoor']) if d['parentDoor']['m_PathID'] else None, 'method': evidence})
+            'door_slots': [source_id(s) for s in slots], 'invert_slots': invert_slots,
+            'parent_slot': source_id(parent_slot) if parent_slot is not None else None,
+            'parent_door': door(r, d['parentDoor']) if d['parentDoor']['m_PathID'] and not removable else None,
+            'method': evidence})
     return result
 
 
@@ -399,7 +408,8 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if c.type.name == 'AudioSource' and key(c) not in car_sources: voice(c)
     # fpscontroller.pointKefe slide voice. The player root is not an audio root.
     point = manifest['conditions']['player_brush']['voice_source']
-    if point: voice(source.get(point['file'], point['path_id']))
+    if point: voice(source.get(point['file'], point['path_id']),
+        [method('objSlideOnColliderScript', 'Update'), method('objSlideOnColliderScript', 'Disable')])
     # AirPlaneSpawnScript.Update spawns the sky prefabs. Their loop sources play on awake.
     for prefab in manifest['sky']['prefabs']:
         prefab['voices'] = [voice(source.get(v['file'], v['path_id']), [method('AirPlaneSpawnScript', 'Update')]) for v in prefab['voices']]
@@ -553,8 +563,11 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
         if prototype.get('vehicle'):
             vehicle=prototype['vehicle'];car=source.get(vehicle['source']['file'],vehicle['source']['path_id'])
             group=source.resolve(car,source.read(car)['groupScript'])
-            if car_group is not None and key(group)!=key(car_group):raise ValueError(f'Car hit audio routes differ: {key(car)}')
-            car_group=group
+            # Cars may have their own groupScript, or none. The car hit row needs one GCarSounds mixer group.
+            if group is not None:
+                hits=source.resolve(group,source.read(group)['GCarSounds'])
+                if car_group is not None and key(hits)!=key(car_hits):raise ValueError(f'Car hit audio routes differ: {key(car)}')
+                car_group,car_hits=group,hits
             wheels=recover_wheel_voices(source,root,[source.get(w['source']['file'],w['source']['path_id']) for w in vehicle['wheels']])
             vehicle['audio']=car_audio(source,car,[{f:source.get(v['file'],v['path_id']) for f,v in w.items()} for w in wheels],cd,car_sound,car_shot)
             vehicle['audio']['doors']=door_audio(source,root,car,lambda r,p:car_shot(r,p,1.,None,None,PRIORITIES[4]))
@@ -626,7 +639,7 @@ def recover_audio(source, roots: dict, manifest: dict, library, output: Path) ->
     survival_groups.append(('footstep',15,step,unique(r for group in walk for r in group),prefab,[1.,1.],list(audio['shared']['random_pitch'])))
     default_route=source.resolve(main,md['defGroup'])
     routes={'death':source.resolve(player,pd['deathbellGroup']),'item_hit':default_route,'melee_hit':default_route,'radio_click':default_route,'break':default_route,'rock_heat':default_route,'footstep':default_route,
-        'car_hit':source.resolve(car_group,source.read(car_group)['GCarSounds'])}
+        'car_hit':car_hits}
 
     audio['survival']=[]
     for role,kind,owner,clip_readers,reader,gain,pitch in survival_groups:

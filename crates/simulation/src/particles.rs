@@ -104,14 +104,18 @@ impl Modules {
                 curve(&format!("{module}.z")),
             ]
         };
+        // A disabled shape emits from one point along +Z: a cone with zero angle and radius.
+        let shape = on("ShapeModule");
+        let shape_scalar = |field: &str, off: f32| if shape { r.scalars[field] } else { off };
+        let shape_vector = |field: &str, off: [f32; 3]| if shape { r.vectors[field] } else { off };
         let emission = (r.flags.get("gameObject.active") == Some(&true)).then(|| Emission {
-            hemisphere: r.scalars["ShapeModule.type"] == 2.,
-            cos_angle: r.scalars["ShapeModule.angle"].to_radians().cos(),
-            radius_thickness: r.scalars["ShapeModule.radiusThickness"],
-            shape_radius: r.scalars["ShapeModule.radius.value"],
-            random_position_amount: r.scalars["ShapeModule.randomPositionAmount"],
-            shape_scale: Vector::from_array(r.vectors["ShapeModule.m_Scale"]),
-            shape_rotation: shape_rotation(r.vectors["ShapeModule.m_Rotation"]),
+            hemisphere: shape_scalar("ShapeModule.type", 4.) == 2.,
+            cos_angle: shape_scalar("ShapeModule.angle", 0.).to_radians().cos(),
+            radius_thickness: shape_scalar("ShapeModule.radiusThickness", 1.),
+            shape_radius: shape_scalar("ShapeModule.radius.value", 0.),
+            random_position_amount: shape_scalar("ShapeModule.randomPositionAmount", 0.),
+            shape_scale: Vector::from_array(shape_vector("ShapeModule.m_Scale", [1.; 3])),
+            shape_rotation: shape_rotation(shape_vector("ShapeModule.m_Rotation", [0.; 3])),
             start_speed: curve("InitialModule.startSpeed"),
             start_lifetime: curve("InitialModule.startLifetime"),
             start_size: curve("InitialModule.startSize"),

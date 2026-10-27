@@ -13,10 +13,8 @@ LIGHT_KINDS = {0: 'spot', 1: 'directional', 2: 'point'}
 def preview_script(source):
     """The one `settingsplayercustomscript` in level1."""
     from .world_biome_materials import scene_component
-    script = scene_component(source, source.library, SCRIPT)
-    if script.assets_file.source_container_path != 'level1':
-        raise ValueError(f'{SCRIPT} is not in level1')
-    return script
+    # The main menu scene has its own copy.
+    return scene_component(source, source.library, SCRIPT, 'level1')
 
 
 def stage_pose(source, reader, stage):

@@ -7,7 +7,6 @@ from .collision import quaternion_product
 from .managed_code import managed_code, class_code, method, require
 
 # Car mountStuff types 3 (trunk) and 4 (hood room) wait for a closed part in their one gate slot.
-GATED_TYPES=(3,4)
 # World prototype mountStuff: Box, Fridge, Raklap (pallet), Coffin (4). Car volumes come from each car prefab.
 PROTOTYPE_FILE='sharedassets1.assets'
 PROTOTYPE_VOLUMES=(146589,146111,133282,144518,150537,134531,153699)
@@ -55,12 +54,10 @@ def containing(prototypes, node):
     """Return (prototype source, node index) for each prototype that holds this node source."""
     return [(p['source'],i) for p in prototypes for i,n in enumerate(p['nodes']) if n['source']==node]
 
-def check_prototype_volume(name, fields, active, homes, usables, mechanisms):
-    """Require an active volume inside a prototype whose usables are mechanisms.
+def check_prototype_volume(name, fields, homes, usables, mechanisms):
+    """Require a volume inside a prototype whose usables are mechanisms.
     An onlyManual volume is kept: it skips the periodic Upd scan."""
     if not homes:raise ValueError(f'{name} storage volume is outside the world prototypes')
-    if fields['noPhysicsLock'] or not active:
-        raise ValueError(f'{name} storage policy differs')
     for prototype,_ in homes:
         for usable in usables:
             if (prototype['file'],prototype['path_id'],usable['file'],usable['path_id']) not in mechanisms:
@@ -94,23 +91,30 @@ def recover_prototype_storage(source, manifest, output):
     for r in [*(source.get(PROTOTYPE_FILE,i) for i in PROTOTYPE_VOLUMES),*cars]:
         name=f'{r.assets_file.name}:{r.path_id}'
         if r.type.name!='MonoBehaviour' or source.class_name(r)!='mountStuff':raise ValueError(f'{name} is not mountStuff')
-        f=source.read(r);node=transform(r,f['m_GameObject'])
+        f=source.read(r)
+        # mountStuff.Upd skips the item lock of a noPhysicsLock volume. Such a volume only locks
+        # carried cars (FreezeUpdVehicle), which the runtime does not have yet.
+        if f['noPhysicsLock']:continue
+        node=transform(r,f['m_GameObject'])
         col=source.resolve(r,f['col']) if f['col']['m_PathID'] else None
         if col is None or col.type.name!='BoxCollider':raise ValueError(f'{name} storage collider is not a BoxCollider')
         cf=source.read(col);col_node=transform(col,cf['m_GameObject'])
         usables=[source_id(source.resolve(r,p)) for p in f['susable'] if p['m_PathID']]
         if len(usables)!=len(f['susable']):raise ValueError(f'{name} has an empty usable')
         slots=[source.resolve(r,p) for p in f['slot'] if p['m_PathID']]
-        if len(slots)!=len(f['slot']) or any(source.class_name(slot)!='partslotscript' for slot in slots):
+        # CanStore skips an empty gate slot.
+        if any(source.class_name(slot)!='partslotscript' for slot in slots):
             raise ValueError(f'{name} gate slot is not a partslotscript')
-        if f['sType'] in GATED_TYPES and key(r) in {key(c) for c in cars} and len(slots)!=1:raise ValueError(f'{name} car gate slot differs')
         homes=containing(prototypes,source_id(node))
         # Upd needs activeInHierarchy below each prototype root. The stored root is inactive; the spawn activates it.
         # Scan reads only the collider box, so a disabled collider or inactive collider object still counts.
         roots=[source.get(p['file'],p['path_id']) for p,_ in homes]
         active=bool(f['m_Enabled']) and all(source.read(source.resolve(node,data['m_GameObject']))['m_IsActive']
                                             for root in roots for data in source.chain(node)[:-len(source.chain(root))])
-        check_prototype_volume(name,f,active,homes,usables,mechanisms)
+        # An inactive volume never starts, so it never joins the physics lock lists. The runtime
+        # does not follow later activation of prototype nodes, so it skips the volume.
+        if not active:continue
+        check_prototype_volume(name,f,homes,usables,mechanisms)
         for (prototype,index),root in zip(homes,roots):
             if not any(p==prototype for p,_ in containing(prototypes,source_id(col_node))):raise ValueError(f'{name} collider is outside {prototype}')
             for slot in slots:

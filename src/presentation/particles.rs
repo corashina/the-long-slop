@@ -416,11 +416,8 @@ fn add_group(
     let start = state.uniforms.len();
     let count = (r.capacity as usize).div_ceil(BATCH);
     let m = &r.materials[0];
-    let t = m
-        .textures
-        .iter()
-        .find(|t| t.property == "_MainTex")
-        .unwrap();
+    // Without `_MainTex` (the gun tracers) Unity samples its white default texture.
+    let t = m.textures.iter().find(|t| t.property == "_MainTex");
     let image = |id: u32| {
         lighting
             .textures
@@ -430,7 +427,7 @@ fn add_group(
             .2
             .clone()
     };
-    let texture = image(t.texture);
+    let texture = t.map_or_else(Handle::default, |t| image(t.texture));
     let shader = ParticleShader::new(&m.shader.name);
     let legacy = shader.legacy();
     let float = |name: &str| m.floats.get(name).copied().unwrap_or(0.);
@@ -448,10 +445,12 @@ fn add_group(
     let tile = sheet.as_ref().map_or(Vec2::ONE, |s| {
         Vec2::ONE / UVec2::from_array(s.tiles).as_vec2()
     });
-    let tiling = Vec2::from_array(t.scale);
+    let (tiling, offset) = t.map_or((Vec2::ONE, Vec2::ZERO), |t| {
+        (Vec2::from_array(t.scale), Vec2::from_array(t.offset))
+    });
     let mut uniform = ParticleUniform::default();
     uniform.tint = Vec4::from_array(linear(tint));
-    uniform.st = (tiling * tile).extend(t.offset[0]).extend(t.offset[1]);
+    uniform.st = (tiling * tile).extend(offset.x).extend(offset.y);
     uniform.settings = Vec4::new(
         if legacy { 2. } else { 1. },
         r.scalars["renderer.m_MinParticleSize"],
