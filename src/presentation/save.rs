@@ -326,22 +326,15 @@ impl PreparedPresentation {
         }
         self.exchange(world);
         let result = match self.system.get_mut(world) {
-            Ok(mut renderer) => renderer.prepare(
-                &mut candidate.stream,
+            Ok(mut renderer) => renderer.step_world(
+                candidate,
                 reference,
-                &mut candidate.physics,
-                &mut candidate.area,
-                &mut candidate.wheels,
-                &mut candidate.vehicles,
-                &mut candidate.powertrain,
-                view,
-                candidate.lighting.cycle.output().shader_time_seconds as f32,
-                lod,
-                false,
-                candidate.lighting.light_outputs(),
                 self.required_views
                     .as_deref()
                     .map_or(&[], crate::world::RequiredViews::as_slice),
+                view,
+                lod,
+                false,
                 crate::app::LOADING_BUDGET_MS,
             ),
             Err(e) => Err(crate::reference::ReferenceError(e.to_string())),
